@@ -1,0 +1,9 @@
+[package]
+name = "jet-proto"
+version = "0.1.0"
+authors = ["Francois Dubois <fdubois@devolutions.net>"]
+
+[dependencies]
+log = "0.3"
+byteorder = "1.2.7"
+uuid = {version = "0.7.1", features = ["v4"]}

@@ -1,0 +1,21 @@
+[package]
+name = "devolutions-jet"
+version = "0.1.0"
+readme = "README.md"
+license = "MIT/Apache-2.0"
+authors = ["François Dubois <fdubois@devolutions.net>",
+           "Marc-André Moreau <mamoreau@devolutions.net>"]
+
+[dependencies]
+log = "0.3"
+clap = "2.31.1"
+url = "1.7.1"
+lazy_static = "1.2.0"
+futures = "0.1"
+tokio = "0.1.11"
+tokio-tcp = "0.1.2"
+tokio-io = "0.1"
+env_logger = "0.5.13"
+byteorder = "1.2.7"
+uuid = {version = "0.7.1", features = ["v4"]}
+jet-proto = { path = "./jet-proto"}
