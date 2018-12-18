@@ -1,15 +1,9 @@
-use std::collections::HashMap;
-use std::env;
 use std::io;
 use std::net::SocketAddr;
-use std::str;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::time::Instant;
 
-use futures::future::{self, err, ok};
-use futures::stream::Forward;
-use futures::{Async, AsyncSink, Future, Sink, Stream};
+use futures::future::ok;
+use futures::{Future, Stream};
 use tokio::runtime::TaskExecutor;
 use tokio_tcp::TcpStream;
 

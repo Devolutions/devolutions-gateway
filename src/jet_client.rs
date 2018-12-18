@@ -6,19 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
-use futures::future::{self, err, ok};
+use futures::future::{err, ok};
 use futures::stream::Forward;
-use futures::{Async, AsyncSink, Future, Sink, Stream};
-use tokio::runtime::{Runtime, TaskExecutor};
+use futures::{Async, Future, Stream};
+use tokio::runtime::{TaskExecutor};
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_tcp::{TcpListener, TcpStream};
+use tokio_tcp::{TcpStream};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
 
-use config::Config;
-use std::net::Shutdown;
 use jet_proto::{JetPacket, ResponseStatusCode};
 use ::{JetStream, JetSink};
 
