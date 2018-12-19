@@ -1,14 +1,15 @@
 [package]
 name = "devolutions-jet"
 version = "0.1.0"
+edition = "2018"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 authors = ["François Dubois <fdubois@devolutions.net>",
            "Marc-André Moreau <mamoreau@devolutions.net>"]
 
 [dependencies]
-log = "0.3"
-clap = "2.31.1"
+log = "0.4.6"
+clap = "2.32"
 url = "1.7.1"
 lazy_static = "1.2.0"
 futures = "0.1"

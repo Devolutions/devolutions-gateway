@@ -1,32 +1,16 @@
-#[macro_use]
-extern crate log;
-extern crate env_logger;
-#[macro_use]
-extern crate clap;
-extern crate url;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate futures;
-extern crate byteorder;
-extern crate tokio;
-extern crate tokio_io;
-extern crate tokio_tcp;
-extern crate uuid;
-extern crate jet_proto;
-
 mod config;
 
 use std::collections::HashMap;
 use std::env;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, Shutdown};
 use std::str;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
-use futures::future::{self, err, ok};
+use futures::{future, try_ready};
+use futures::future::{err, ok};
 use futures::stream::Forward;
 use futures::{Async, AsyncSink, Future, Sink, Stream};
 use tokio::runtime::{Runtime, TaskExecutor};
@@ -35,11 +19,12 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::{TcpListener, TcpStream};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use lazy_static::lazy_static;
+use log::{debug, error, info};
+use url::Url;
 use uuid::Uuid;
 
-use config::Config;
-use std::net::Shutdown;
-use url::Url;
+use crate::config::Config;
 use jet_proto::{JetPacket, ResponseStatusCode};
 
 const ACCEPT_REQUEST_TIMEOUT_SEC: u64 = 5 * 60;

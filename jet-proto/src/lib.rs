@@ -253,7 +253,7 @@ fn error_other(desc: &str) -> io::Error {
 }
 
 fn apply_mask(mask: u8, payload: &mut [u8]) {
-    for mut byte in payload {
+    for byte in payload {
         *byte ^= mask;
     }
 }
