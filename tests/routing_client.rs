@@ -61,7 +61,8 @@ fn smoke() {
                             Ok(n) => {
                                 let mut v = buffer.to_vec();
                                 v.truncate(n);
-                                let _request = String::from_utf8(v).unwrap();
+                                let request = String::from_utf8(v).unwrap();
+                                println!("Received from client: {}", request);
                                 break;
                             }
                             Err(_) => {
@@ -99,6 +100,7 @@ fn smoke() {
                                 v.truncate(n);
                                 let response = String::from_utf8(v).unwrap();
                                 assert_eq!(response, SERVER_DATA.to_string());
+                                println!("Received from server: {}", response);
                                 break;
                             }
                             Err(_) => {

@@ -18,7 +18,6 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
 
 use jet_proto::{JetPacket, ResponseStatusCode};
-use ::{JetStream, JetSink};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Arc<Mutex<TcpStream>>>>>;
 
@@ -324,6 +323,7 @@ impl Future for HandleConnectJetMsg {
 
         // If server stream found, start the proxy
         if self.server_stream.is_some() {
+            let server_transport = TcpTransport::new(self.server_stream)
             // Build future to forward all bytes
             let server_stream = self.server_stream.take().unwrap();
             let jet_stream_server = JetStream::new(server_stream.clone());
