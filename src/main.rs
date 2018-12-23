@@ -51,7 +51,7 @@ fn main() {
     let config = Config::init();
     let url = Url::parse(&config.listener_url()).unwrap();
     let host = url.host_str().unwrap_or("0.0.0.0").to_string();
-    let port = url.port().map(|port| port.to_string()).unwrap_or("8080".to_string());
+    let port = url.port().map(|port| port.to_string()).unwrap_or_else(|| "8080".to_string());
 
     let mut listener_addr = String::new();
     listener_addr.push_str(&host);

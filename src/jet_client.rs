@@ -157,7 +157,7 @@ impl Future for JetMsgReader {
                     self.data_received.len(),
                     msg_len
                 );
-                return Ok(Async::NotReady);
+                Ok(Async::NotReady)
             }
         } else {
             debug!(
@@ -210,7 +210,7 @@ impl Future for HandleAcceptJetMsg {
                     ResponseStatusCode::StatusCode200,
                 );
                 response_msg.set_timeout(Some(ACCEPT_REQUEST_TIMEOUT_SEC as u32));
-                response_msg.set_association(Some(uuid.clone()));
+                response_msg.set_association(Some(uuid));
                 response_msg.set_jet_instance(JET_INSTANCE.clone());
                 self.response_msg = Some(response_msg);
 
@@ -231,7 +231,7 @@ impl Future for HandleAcceptJetMsg {
         let jet_associations = self.jet_associations.clone();
         let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC));
         self.executor_handle.spawn(timeout.then(move |_| {
-            RemoveAssociation::new(jet_associations, association.clone()).then(move |res| {
+            RemoveAssociation::new(jet_associations, association).then(move |res| {
                 if let Ok(true) = res {
                     info!(
                         "No connect request received with association {}. Association removed!",

@@ -214,7 +214,7 @@ impl Stream for TcpJetStream {
 
     fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
         if let Ok(ref mut stream) = self.stream.try_lock() {
-            let mut buffer = [0u8; 102400];
+            let mut buffer = [0u8; 1024];
             match stream.poll_read(&mut buffer) {
                 Ok(Async::Ready(0)) => Ok(Async::Ready(None)),
                 Ok(Async::Ready(len)) => {
@@ -278,7 +278,7 @@ impl Sink for TcpJetSink {
                     } else {
                         debug!("0 bytes written on {}", stream.peer_addr().unwrap())
                     }
-                    if item.len() == 0 {
+                    if item.is_empty() {
                         Ok(AsyncSink::Ready)
                     } else {
                         Ok(AsyncSink::NotReady(item))
