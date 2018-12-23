@@ -63,6 +63,14 @@ pub struct TcpTransport{
     stream: Arc<Mutex<TcpStreamWrapper>>,
 }
 
+impl Clone for TcpTransport {
+    fn clone(&self) -> Self {
+        TcpTransport {
+            stream: self.stream.clone(),
+        }
+    }
+}
+
 impl TcpTransport {
     pub fn new(stream: TcpStream) -> Self {
         TcpTransport {
@@ -73,6 +81,40 @@ impl TcpTransport {
     pub fn new_tls(stream: TlsStream<TcpStream>) -> Self {
         TcpTransport {
             stream: Arc::new(Mutex::new(TcpStreamWrapper::Tls(stream)))
+        }
+    }
+}
+
+impl Read for TcpTransport{
+    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
+        match self.stream.try_lock() {
+            Ok(mut stream) => stream.read(&mut buf),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+        }
+    }
+}
+impl AsyncRead for TcpTransport {}
+
+impl Write for TcpTransport {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.stream.try_lock() {
+            Ok(mut stream) => stream.write(&buf),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self.stream.try_lock() {
+            Ok(mut stream) => stream.flush(),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+        }
+    }
+}
+
+impl AsyncWrite for TcpTransport {
+    fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
+        match self.stream.try_lock() {
+            Ok(mut stream) => stream.shutdown(),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
         }
     }
 }

@@ -19,7 +19,7 @@ const JET_HEADER_ASSOCIATION: &'static str = "Jet-Association";
 const JET_HEADER_TIMEOUT: &'static str = "Jet-Timeout";
 const JET_HEADER_INSTANCE: &'static str = "Jet-Instance";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum JetMethod {
     ACCEPT,
     CONNECT,
@@ -49,13 +49,13 @@ impl ToString for JetMethod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResponseStatusCode {
     StatusCode200,
     StatusCode400,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JetPacket {
     flags: u8,
     mask: u8,

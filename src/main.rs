@@ -38,6 +38,10 @@ use routing_client::Client;
 use transport::tcp::TcpTransport;
 use native_tls::Identity;
 use std::io::ErrorKind;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use transport::JetTransport;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -64,22 +68,21 @@ fn main() {
 
     // Initialize the various data structures we're going to use in our server.
     let listener = TcpListener::bind(&socket_addr).unwrap();
-    //let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
+    let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
+
     let mut runtime =
         Runtime::new().expect("This should never fails, a runtime is needed by the entire implementation");
     let executor_handle = runtime.executor();
 
     // Create the TLS acceptor.
-    let der = include_bytes!("identity.p12");
-    let cert = Identity::from_pkcs12(der, "mypass").unwrap();
+    let der = include_bytes!("cert/certificate.p12");
+    let cert = Identity::from_pkcs12(der, "").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(
         native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
     info!("Listening for wayk-jet proxy connections on {}", socket_addr);
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);
-
-        println!("NEW CONNECTION");
 
         let client_fut =
             if let Some(ref routing_url) = routing_url_opt {
@@ -104,7 +107,7 @@ fn main() {
                     }
             }
             else {
-                JetClient::new(jet_associations.clone(), executor_handle.clone()).serve(Arc::new(Mutex::new(conn)))
+                JetClient::new(jet_associations.clone(), executor_handle.clone()).serve(JetTransport::new_tcp(conn))
             };
 
         executor_handle.spawn(client_fut.then(move |res| {

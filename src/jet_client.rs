@@ -7,19 +7,19 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures::future::{err, ok};
-use futures::stream::Forward;
 use futures::{Async, Future, Stream};
 use tokio::runtime::{TaskExecutor};
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_tcp::{TcpStream};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
 
 use jet_proto::{JetPacket, ResponseStatusCode};
+use transport::Transport;
+use transport::JetTransport;
 
-pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Arc<Mutex<TcpStream>>>>>;
+pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 
 lazy_static! {
     static ref JET_INSTANCE: Option<String> = { env::var("JET_INSTANCE").ok() };
@@ -40,29 +40,39 @@ impl JetClient {
         }
     }
 
-    pub fn serve(self, conn: Arc<Mutex<TcpStream>>) -> Box<Future<Item = (), Error = io::Error> + Send> {
-        let msg_reader = JetMsgReader::new(conn.clone());
+    pub fn serve(self, transport: JetTransport) -> Box<Future<Item = (), Error = io::Error> + Send> {
+        let msg_reader = JetMsgReader::new(transport.clone());
         let jet_associations = self.jet_associations.clone();
         let executor_handle = self._executor_handle.clone();
 
         Box::new(msg_reader.and_then(move |msg| {
             if msg.is_accept() {
-                let handle_msg = HandleAcceptJetMsg::new(conn.clone(), msg, jet_associations, executor_handle);
+                let handle_msg = HandleAcceptJetMsg::new(transport.clone(), msg, jet_associations, executor_handle);
                 Box::new(handle_msg) as Box<Future<Item = (), Error = io::Error> + Send>
             } else if msg.is_connect() {
-                let handle_msg = HandleConnectJetMsg::new(conn.clone(), msg, jet_associations);
-                Box::new(handle_msg.and_then(|(f1, f2)| {
+                let handle_msg = HandleConnectJetMsg::new(transport.clone(), msg, jet_associations);
+                Box::new(handle_msg.and_then(|(t1, t2)| {
+                    let t1_stream = t1.message_stream();
+                    let t1_sink = t1.message_sink();
+
+                    let t2_stream = t2.message_stream();
+                    let t2_sink = t2.message_sink();
+
+                    let f1 = t1_stream.forward(t2_sink);
+                    let f2 = t2_stream.forward(t1_sink);
+
                     f1.and_then(|(jet_stream, jet_sink)| {
                         // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        jet_stream.shutdown();
-                        jet_sink.shutdown();
+                        //jet_stream.shutdown();
+                        //jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
                     }).join(f2.and_then(|(jet_stream, jet_sink)| {
                         // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        jet_stream.shutdown();
-                        jet_sink.shutdown();
+                        //jet_stream.shutdown();
+                        //jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
-                    })).and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
+                    })).and_then(|((_jet_stream_1, _jet_sink_1), (_jet_stream_2, _jet_sink_2))| {
+                        /*
                         let server_addr = jet_stream_1
                             .get_addr()
                             .map(|addr| addr.to_string())
@@ -85,6 +95,7 @@ impl JetClient {
                             server_addr,
                             client_addr
                         );
+                        */
                         ok(())
                     })
                 })) as Box<Future<Item = (), Error = io::Error> + Send>
@@ -100,14 +111,14 @@ fn error_other(desc: &str) -> io::Error {
 }
 
 struct JetMsgReader {
-    stream: Arc<Mutex<TcpStream>>,
+    transport: JetTransport,
     data_received: Vec<u8>,
 }
 
 impl JetMsgReader {
-    fn new(stream: Arc<Mutex<TcpStream>>) -> Self {
+    fn new(transport: JetTransport) -> Self {
         JetMsgReader {
-            stream,
+            transport,
             data_received: Vec::new(),
         }
     }
@@ -118,51 +129,47 @@ impl Future for JetMsgReader {
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
-        if let Ok(mut stream) = self.stream.try_lock() {
-            let mut buff = [0u8; 1024];
-            let len = try_ready!(stream.poll_read(&mut buff));
-            let mut buf = buff.to_vec();
-            buf.truncate(len);
-            self.data_received.append(&mut buf);
+        let mut buff = [0u8; 1024];
+        let len = try_ready!(self.transport.poll_read(&mut buff));
+        let mut buf = buff.to_vec();
+        buf.truncate(len);
+        self.data_received.append(&mut buf);
 
-            if self.data_received.len() >= jet_proto::JET_MSG_HEADER_SIZE as usize {
+        if self.data_received.len() >= jet_proto::JET_MSG_HEADER_SIZE as usize {
+            let mut slice = self.data_received.as_slice();
+            let signature = slice.read_u32::<LittleEndian>()?; // signature
+            if signature != jet_proto::JET_MSG_SIGNATURE {
+                return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
+            }
+
+            let msg_len = slice.read_u16::<BigEndian>()?;
+
+            if self.data_received.len() >= msg_len as usize {
                 let mut slice = self.data_received.as_slice();
-                let signature = slice.read_u32::<LittleEndian>()?; // signature
-                if signature != jet_proto::JET_MSG_SIGNATURE {
-                    return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
-                }
-
-                let msg_len = slice.read_u16::<BigEndian>()?;
-
-                if self.data_received.len() >= msg_len as usize {
-                    let mut slice = self.data_received.as_slice();
-                    let jet_packet = jet_proto::JetPacket::read_from(&mut slice)?;
-                    debug!("jet_packet received: {:?}", jet_packet);
-                    Ok(Async::Ready(jet_packet))
-                } else {
-                    debug!(
-                        "Waiting more data: received:{} - needed:{}",
-                        self.data_received.len(),
-                        msg_len
-                    );
-                    return Ok(Async::NotReady);
-                }
+                let jet_packet = jet_proto::JetPacket::read_from(&mut slice)?;
+                debug!("jet_packet received: {:?}", jet_packet);
+                Ok(Async::Ready(jet_packet))
             } else {
                 debug!(
-                    "Waiting more data: received:{} - needed: at least header length ({})",
+                    "Waiting more data: received:{} - needed:{}",
                     self.data_received.len(),
-                    jet_proto::JET_MSG_HEADER_SIZE
+                    msg_len
                 );
-                Ok(Async::NotReady)
+                return Ok(Async::NotReady);
             }
         } else {
+            debug!(
+                "Waiting more data: received:{} - needed: at least header length ({})",
+                self.data_received.len(),
+                jet_proto::JET_MSG_HEADER_SIZE
+            );
             Ok(Async::NotReady)
         }
     }
 }
 
 struct HandleAcceptJetMsg {
-    stream: Arc<Mutex<TcpStream>>,
+    transport: JetTransport,
     request_msg: JetPacket,
     response_msg: Option<JetPacket>,
     jet_associations: JetAssociationsMap,
@@ -171,14 +178,14 @@ struct HandleAcceptJetMsg {
 
 impl HandleAcceptJetMsg {
     fn new(
-        stream: Arc<Mutex<TcpStream>>,
+        transport: JetTransport,
         msg: JetPacket,
         jet_associations: JetAssociationsMap,
         executor_handle: TaskExecutor,
     ) -> Self {
         assert!(msg.is_accept());
         HandleAcceptJetMsg {
-            stream,
+            transport,
             request_msg: msg,
             response_msg: None,
             jet_associations,
@@ -205,77 +212,69 @@ impl Future for HandleAcceptJetMsg {
                 response_msg.set_jet_instance(JET_INSTANCE.clone());
                 self.response_msg = Some(response_msg);
 
-                jet_associations.insert(uuid, self.stream.clone());
+                jet_associations.insert(uuid, self.transport.clone());
             } else {
                 return Ok(Async::NotReady);
             }
         }
 
         // We have a response ==> Send response + timeout to remove the server if not used
-        if let Ok(mut stream) = self.stream.try_lock() {
-            let response_msg = self.response_msg.as_ref().unwrap();
-            let mut v = Vec::new();
-            response_msg.write_to(&mut v)?;
-            try_ready!(stream.poll_write(&v));
+        let response_msg = self.response_msg.as_ref().unwrap();
+        let mut v = Vec::new();
+        response_msg.write_to(&mut v)?;
+        try_ready!(self.transport.poll_write(&v));
 
-            // Start timeout to remove the server if no connect request is received with that UUID
-            let association = response_msg.association().unwrap();
-            let jet_associations = self.jet_associations.clone();
-            let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC));
-            self.executor_handle.spawn(timeout.then(move |_| {
-                RemoveAssociation::new(jet_associations, association.clone()).then(move |res| {
-                    if let Ok(true) = res {
-                        info!(
-                            "No connect request received with association {}. Association removed!",
-                            association
-                        );
-                    }
-                    ok(())
-                })
-            }));
+        // Start timeout to remove the server if no connect request is received with that UUID
+        let association = response_msg.association().unwrap();
+        let jet_associations = self.jet_associations.clone();
+        let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC));
+        self.executor_handle.spawn(timeout.then(move |_| {
+            RemoveAssociation::new(jet_associations, association.clone()).then(move |res| {
+                if let Ok(true) = res {
+                    info!(
+                        "No connect request received with association {}. Association removed!",
+                        association
+                    );
+                }
+                ok(())
+            })
+        }));
 
-            Ok(Async::Ready(()))
-        } else {
-            Ok(Async::NotReady)
-        }
+        Ok(Async::Ready(()))
     }
 }
 
 struct HandleConnectJetMsg {
-    stream: Arc<Mutex<TcpStream>>,
-    server_stream: Option<Arc<Mutex<TcpStream>>>,
+    transport: JetTransport,
+    server_transport: Option<JetTransport>,
     request_msg: JetPacket,
     response_msg: Option<JetPacket>,
     jet_associations: JetAssociationsMap,
 }
 
 impl HandleConnectJetMsg {
-    fn new(stream: Arc<Mutex<TcpStream>>, msg: JetPacket, jet_associations: JetAssociationsMap) -> Self {
+    fn new(transport: JetTransport, msg: JetPacket, jet_associations: JetAssociationsMap) -> Self {
         assert!(msg.is_connect());
 
         HandleConnectJetMsg {
-            stream,
-            server_stream: None,
+            transport,
+            server_transport: None,
             request_msg: msg,
             response_msg: None,
             jet_associations,
         }
     }
 
-    fn send_response(&self, response: &JetPacket) -> Result<Async<usize>, io::Error> {
-        if let Ok(mut stream) = self.stream.try_lock() {
-            let mut v = Vec::new();
-            response.write_to(&mut v)?;
-            let len = try_ready!(stream.poll_write(&v));
-            Ok(Async::Ready(len))
-        } else {
-            Ok(Async::NotReady)
-        }
+    fn send_response(&mut self, response: &JetPacket) -> Result<Async<usize>, io::Error> {
+        let mut v = Vec::new();
+        response.write_to(&mut v)?;
+        let len = try_ready!(self.transport.poll_write(&v));
+        Ok(Async::Ready(len))
     }
 }
 
-impl Future for HandleConnectJetMsg {
-    type Item = (Forward<JetStream, JetSink>, Forward<JetStream, JetSink>);
+impl Future for HandleConnectJetMsg{
+    type Item = (JetTransport, JetTransport);
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
@@ -290,13 +289,13 @@ impl Future for HandleConnectJetMsg {
             return Err(error_other("Invalid connect request: No association provided."));
         }
 
-        // Find the server stream
-        if self.server_stream.is_none() {
+        // Find the server transport
+        if self.server_transport.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                 let server_stream_opt = jet_associations.remove(&self.request_msg.association().unwrap());
 
-                if let Some(server_stream) = server_stream_opt {
-                    self.server_stream = Some(server_stream);
+                if let Some(server_transport) = server_stream_opt {
+                    self.server_transport = Some(server_transport);
                     self.response_msg = Some(JetPacket::new_response(
                         self.request_msg.flags(),
                         self.request_msg.mask(),
@@ -319,23 +318,16 @@ impl Future for HandleConnectJetMsg {
         }
 
         // Send response
-        try_ready!(self.send_response(self.response_msg.as_ref().unwrap()));
+        let msg = self.response_msg.clone().unwrap();
+        try_ready!(self.send_response(&msg));
 
         // If server stream found, start the proxy
-        if self.server_stream.is_some() {
-            let server_transport = TcpTransport::new(self.server_stream)
-            // Build future to forward all bytes
-            let server_stream = self.server_stream.take().unwrap();
-            let jet_stream_server = JetStream::new(server_stream.clone());
-            let jet_sink_server = JetSink::new(server_stream.clone());
-
-            let jet_stream_client = JetStream::new(self.stream.clone());
-            let jet_sink_client = JetSink::new(self.stream.clone());
-
+        if self.server_transport.is_some() {
             Ok(Async::Ready((
-                jet_stream_server.forward(jet_sink_client),
-                jet_stream_client.forward(jet_sink_server),
+                self.server_transport.take().unwrap().clone(),
+                self.transport.clone()
             )))
+
         } else {
             Err(error_other(&format!(
                 "Invalid association ID received: {}",
@@ -343,6 +335,7 @@ impl Future for HandleConnectJetMsg {
             )))
         }
     }
+
 }
 
 struct RemoveAssociation {
