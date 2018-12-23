@@ -1,7 +1,8 @@
 extern crate byteorder;
-extern crate uuid;
 extern crate jet_proto;
+extern crate uuid;
 
+use jet_proto::{JetMethod, JetPacket};
 use std::env;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -10,7 +11,6 @@ use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
-use jet_proto::{JetMethod, JetPacket};
 
 const SERVER_DATA: &'static str = "Server Response";
 const CLIENT_DATA: &'static str = "Client Request";

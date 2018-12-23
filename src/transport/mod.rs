@@ -1,14 +1,14 @@
-use futures::Future;
-use tokio::io;
-use futures::{Stream, Sink};
-use url::Url;
-use tokio_io::AsyncRead;
-use transport::tcp::TcpTransport;
-use tokio_tcp::TcpStream;
-use std::io::Read;
-use tokio_io::AsyncWrite;
 use futures::Async;
+use futures::Future;
+use futures::{Sink, Stream};
+use std::io::Read;
 use std::io::Write;
+use tokio::io;
+use tokio_io::AsyncRead;
+use tokio_io::AsyncWrite;
+use tokio_tcp::TcpStream;
+use transport::tcp::TcpTransport;
+use url::Url;
 
 pub mod tcp;
 
@@ -16,7 +16,7 @@ pub type JetFuture<T> = Box<Future<Item = T, Error = io::Error> + Send>;
 pub type JetStream<T> = Box<Stream<Item = T, Error = io::Error> + Send>;
 pub type JetSink<T> = Box<Sink<SinkItem = T, SinkError = io::Error> + Send>;
 
-pub trait Transport{
+pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
     where
         Self: Sized;
@@ -25,7 +25,7 @@ pub trait Transport{
 }
 
 pub enum JetTransport {
-    Tcp(TcpTransport)
+    Tcp(TcpTransport),
 }
 
 impl JetTransport {
@@ -37,27 +37,29 @@ impl JetTransport {
 impl Clone for JetTransport {
     fn clone(&self) -> Self {
         match self {
-            JetTransport::Tcp(tcp_transport) => JetTransport::Tcp(tcp_transport.clone())
+            JetTransport::Tcp(tcp_transport) => JetTransport::Tcp(tcp_transport.clone()),
         }
     }
 }
 
 impl Transport for JetTransport {
-    fn connect(_addr: &Url) -> JetFuture<Self> where
-        Self: Sized {
+    fn connect(_addr: &Url) -> JetFuture<Self>
+    where
+        Self: Sized,
+    {
         //TODO
         unimplemented!()
     }
 
     fn message_sink(&self) -> JetSink<Vec<u8>> {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.message_sink()
+            JetTransport::Tcp(tcp_transport) => tcp_transport.message_sink(),
         }
     }
 
     fn message_stream(&self) -> JetStream<Vec<u8>> {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.message_stream()
+            JetTransport::Tcp(tcp_transport) => tcp_transport.message_stream(),
         }
     }
 }
@@ -71,7 +73,7 @@ impl Read for JetTransport {
 }
 impl AsyncRead for JetTransport {}
 
-impl Write for JetTransport{
+impl Write for JetTransport {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.write(&buf),

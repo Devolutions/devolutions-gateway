@@ -1,17 +1,17 @@
 extern crate byteorder;
-extern crate uuid;
 extern crate jet_proto;
+extern crate uuid;
 
+use jet_proto::{JetMethod, JetPacket};
 use std::env;
 use std::io::{Read, Write};
-use std::net::{TcpStream, TcpListener};
+use std::net::SocketAddr;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
-use jet_proto::{JetMethod, JetPacket};
-use std::net::SocketAddr;
 
 const SERVER_DATA: &'static str = "Server Response";
 const CLIENT_DATA: &'static str = "Client Request";
@@ -42,7 +42,12 @@ fn smoke() {
     let cmd_line_arg = "-urltcp://127.0.0.1:8080";
 
     //Spawn our proxy and wait for it to come online
-    let proxy = Command::new(bin()).arg(cmd_line_arg).arg("--routing_url").arg("tcp://127.0.0.1:8081").spawn().unwrap();
+    let proxy = Command::new(bin())
+        .arg(cmd_line_arg)
+        .arg("--routing_url")
+        .arg("tcp://127.0.0.1:8081")
+        .spawn()
+        .unwrap();
     let _proxy = KillOnDrop(proxy);
 
     let (sender_end, receiver_end) = channel();

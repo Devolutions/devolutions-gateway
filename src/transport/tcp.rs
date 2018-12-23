@@ -1,14 +1,14 @@
+use futures::{Async, AsyncSink, Future, Sink, Stream};
+use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use transport::{Transport, JetFuture, JetStream, JetSink};
-use futures::{Sink, Stream, Future, Async, AsyncSink};
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_tls::TlsStream;
 use tokio_tcp::TcpStream;
+use tokio_tls::TlsStream;
+use transport::{JetFuture, JetSink, JetStream, Transport};
 use url::Url;
-use native_tls::{TlsConnector};
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -31,7 +31,6 @@ impl Read for TcpStreamWrapper {
             TcpStreamWrapper::Tls(ref mut stream) => stream.read(&mut buf),
         }
     }
-
 }
 
 impl Write for TcpStreamWrapper {
@@ -59,7 +58,7 @@ impl AsyncWrite for TcpStreamWrapper {
     }
 }
 
-pub struct TcpTransport{
+pub struct TcpTransport {
     stream: Arc<Mutex<TcpStreamWrapper>>,
 }
 
@@ -80,12 +79,12 @@ impl TcpTransport {
 
     pub fn new_tls(stream: TlsStream<TcpStream>) -> Self {
         TcpTransport {
-            stream: Arc::new(Mutex::new(TcpStreamWrapper::Tls(stream)))
+            stream: Arc::new(Mutex::new(TcpStreamWrapper::Tls(stream))),
         }
     }
 }
 
-impl Read for TcpTransport{
+impl Read for TcpTransport {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.read(&mut buf),
@@ -128,7 +127,10 @@ impl Transport for TcpTransport {
         Box::new(TcpJetSink::new(self.stream.clone()))
     }
 
-    fn connect(url: &Url) -> JetFuture<Self> where Self: Sized {
+    fn connect(url: &Url) -> JetFuture<Self>
+    where
+        Self: Sized,
+    {
         match url.scheme() {
             "tcp" => {
                 let mut addr = String::new();
@@ -140,7 +142,7 @@ impl Transport for TcpTransport {
                 let socket_addr = addr.parse::<SocketAddr>().unwrap();
 
                 Box::new(TcpStream::connect(&socket_addr).map(|stream| TcpTransport::new(stream))) as JetFuture<Self>
-            },
+            }
             "tls" => {
                 let mut addr = String::new();
                 let host = url.host_str().unwrap().to_string();
@@ -151,31 +153,27 @@ impl Transport for TcpTransport {
                 let socket_addr = addr.parse::<SocketAddr>().unwrap();
 
                 let socket = TcpStream::connect(&socket_addr);
-                let cx =
-                    TlsConnector::builder()
+                let cx = TlsConnector::builder()
                     .danger_accept_invalid_certs(true)
                     .danger_accept_invalid_hostnames(true)
-                    .build().unwrap();
+                    .build()
+                    .unwrap();
                 let cx = tokio_tls::TlsConnector::from(cx);
 
                 info!("Try to connect to socket_addr: {}", socket_addr);
                 let url_clone = url.clone();
                 let tls_handshake = socket.and_then(move |socket| {
                     info!("before cx.connect");
-                    cx.connect(url_clone.host_str().unwrap_or(""), socket).map_err(|e| {
-                        io::Error::new(io::ErrorKind::Other, e)
-                    })
+                    cx.connect(url_clone.host_str().unwrap_or(""), socket)
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
-                let request = tls_handshake.map(|tls_stream| {
-                    TcpTransport::new_tls(tls_stream)
-                });
+                let request = tls_handshake.map(|tls_stream| TcpTransport::new_tls(tls_stream));
                 Box::new(request) as JetFuture<Self>
-                },
+            }
 
             scheme => {
                 panic!("Unsuported scheme: {}", scheme);
             }
-
         }
     }
 }
@@ -226,9 +224,7 @@ impl Stream for TcpJetStream {
                     debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
                     Ok(Async::Ready(Some(v)))
                 }
-                Ok(Async::NotReady) => {
-                    Ok(Async::NotReady)
-                },
+                Ok(Async::NotReady) => Ok(Async::NotReady),
                 Err(e) => {
                     error!("Can't read on socket: {}", e);
                     Ok(Async::Ready(None))
@@ -279,8 +275,7 @@ impl Sink for TcpJetSink {
                         self.nb_bytes_written += len as u64;
                         item.drain(0..len);
                         debug!("{} bytes written on {}", len, stream.peer_addr().unwrap())
-                    }
-                    else {
+                    } else {
                         debug!("0 bytes written on {}", stream.peer_addr().unwrap())
                     }
                     if item.len() == 0 {
@@ -312,4 +307,3 @@ impl Sink for TcpJetSink {
         Ok(Async::Ready(()))
     }
 }
-

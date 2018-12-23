@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use futures::future::{err, ok};
 use futures::{Async, Future, Stream};
-use tokio::runtime::{TaskExecutor};
+use tokio::runtime::TaskExecutor;
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -16,8 +16,8 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
 
 use jet_proto::{JetPacket, ResponseStatusCode};
-use transport::Transport;
 use transport::JetTransport;
+use transport::Transport;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 
@@ -66,12 +66,14 @@ impl JetClient {
                         //jet_stream.shutdown();
                         //jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
-                    }).join(f2.and_then(|(jet_stream, jet_sink)| {
+                    })
+                    .join(f2.and_then(|(jet_stream, jet_sink)| {
                         // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
                         //jet_stream.shutdown();
                         //jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
-                    })).and_then(|((_jet_stream_1, _jet_sink_1), (_jet_stream_2, _jet_sink_2))| {
+                    }))
+                    .and_then(|((_jet_stream_1, _jet_sink_1), (_jet_stream_2, _jet_sink_2))| {
                         /*
                         let server_addr = jet_stream_1
                             .get_addr()
@@ -273,7 +275,7 @@ impl HandleConnectJetMsg {
     }
 }
 
-impl Future for HandleConnectJetMsg{
+impl Future for HandleConnectJetMsg {
     type Item = (JetTransport, JetTransport);
     type Error = io::Error;
 
@@ -325,9 +327,8 @@ impl Future for HandleConnectJetMsg{
         if self.server_transport.is_some() {
             Ok(Async::Ready((
                 self.server_transport.take().unwrap().clone(),
-                self.transport.clone()
+                self.transport.clone(),
             )))
-
         } else {
             Err(error_other(&format!(
                 "Invalid association ID received: {}",
@@ -335,7 +336,6 @@ impl Future for HandleConnectJetMsg{
             )))
         }
     }
-
 }
 
 struct RemoveAssociation {

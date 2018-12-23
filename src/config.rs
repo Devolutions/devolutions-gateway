@@ -3,7 +3,7 @@ use clap::Arg;
 
 pub struct Config {
     listener_url: String,
-    routing_url: Option<String>
+    routing_url: Option<String>,
 }
 
 impl Config {
@@ -40,7 +40,7 @@ impl Config {
                     .help("An address on which the server will route all packet. Format: tcp://<ip>:<port>")
                     .long_help("An address on which the server will route all packet. Format: tcp://<ip>:<port>")
                     .takes_value(true)
-                    .empty_values(false)
+                    .empty_values(false),
             );
 
         let matches = cli_app.get_matches();
