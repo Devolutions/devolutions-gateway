@@ -1,4 +1,4 @@
-use clap::{App, Arg, crate_name, crate_version};
+use clap::{crate_name, crate_version, App, Arg};
 
 pub struct Config {
     listener_url: String,

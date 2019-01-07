@@ -1,5 +1,5 @@
-use std::io::{Read, Write};
 use futures::{Async, Future, Sink, Stream};
+use std::io::{Read, Write};
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;

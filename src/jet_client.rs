@@ -1,17 +1,17 @@
 use std::collections::HashMap;
-use std::{env, io, str};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::{env, io, str};
 
 use futures::future::{err, ok};
-use futures::{Async, Future, Stream, try_ready};
+use futures::{try_ready, Async, Future, Stream};
 use tokio::runtime::TaskExecutor;
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use uuid::Uuid;
 use lazy_static::lazy_static;
+use uuid::Uuid;
 
 use jet_proto::{JetPacket, ResponseStatusCode};
 use log::{debug, error, info};

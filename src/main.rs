@@ -3,26 +3,26 @@ mod jet_client;
 mod routing_client;
 mod transport;
 
+use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use std::time::Duration;
 
 use futures::{future, future::ok, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
+use log::{error, info};
 use native_tls::Identity;
 use url::Url;
-use log::{error, info};
 
 use crate::config::Config;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::JetTransport;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::JetTransport;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -32,7 +32,10 @@ fn main() {
     let config = Config::init();
     let url = Url::parse(&config.listener_url()).unwrap();
     let host = url.host_str().unwrap_or("0.0.0.0").to_string();
-    let port = url.port().map(|port| port.to_string()).unwrap_or_else(|| "8080".to_string());
+    let port = url
+        .port()
+        .map(|port| port.to_string())
+        .unwrap_or_else(|| "8080".to_string());
 
     let mut listener_addr = String::new();
     listener_addr.push_str(&host);
