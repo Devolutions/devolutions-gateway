@@ -1,5 +1,4 @@
-use clap::App;
-use clap::Arg;
+use clap::{App, Arg, crate_name, crate_version};
 
 pub struct Config {
     listener_url: String,

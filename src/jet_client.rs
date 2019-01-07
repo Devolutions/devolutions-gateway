@@ -1,23 +1,23 @@
 use std::collections::HashMap;
-use std::env;
-use std::io;
-use std::str;
+use std::{env, io, str};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::future::{err, ok};
-use futures::{Async, Future, Stream};
+use futures::{Async, Future, Stream, try_ready};
 use tokio::runtime::TaskExecutor;
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
+use lazy_static::lazy_static;
 
 use jet_proto::{JetPacket, ResponseStatusCode};
-use transport::JetTransport;
-use transport::Transport;
+use log::{debug, error, info};
+
+use crate::transport::JetTransport;
+use crate::transport::Transport;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 

@@ -1,14 +1,16 @@
-use futures::{Async, AsyncSink, Future, Sink, Stream};
-use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use futures::{Async, AsyncSink, Future, Sink, Stream};
+use native_tls::TlsConnector;
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
-use transport::{JetFuture, JetSink, JetStream, Transport};
 use url::Url;
+use log::{debug, error, info};
+
+use crate::transport::{JetFuture, JetSink, JetStream, Transport};
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),

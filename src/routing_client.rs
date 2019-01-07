@@ -4,8 +4,8 @@ use futures::future::ok;
 use futures::{Future, Stream};
 use tokio::runtime::TaskExecutor;
 
-use transport::tcp::TcpTransport;
-use transport::Transport;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::Transport;
 use url::Url;
 
 pub struct Client {

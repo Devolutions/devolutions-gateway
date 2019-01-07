@@ -1,14 +1,11 @@
-use futures::Async;
-use futures::Future;
-use futures::{Sink, Stream};
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write};
+use futures::{Async, Future, Sink, Stream};
 use tokio::io;
-use tokio_io::AsyncRead;
-use tokio_io::AsyncWrite;
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
-use transport::tcp::TcpTransport;
 use url::Url;
+
+use crate::transport::tcp::TcpTransport;
 
 pub mod tcp;
 

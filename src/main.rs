@@ -1,47 +1,28 @@
-#[macro_use]
-extern crate log;
-extern crate env_logger;
-#[macro_use]
-extern crate clap;
-extern crate url;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate futures;
-extern crate byteorder;
-extern crate jet_proto;
-extern crate native_tls;
-extern crate tokio;
-extern crate tokio_io;
-extern crate tokio_tcp;
-extern crate tokio_tls;
-extern crate uuid;
-
 mod config;
 mod jet_client;
 mod routing_client;
 mod transport;
 
 use std::io;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use std::time::Duration;
 
-use futures::future::{self, ok};
-use futures::{Future, Stream};
+use futures::{future, future::ok, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
-use config::Config;
-use jet_client::{JetAssociationsMap, JetClient};
 use native_tls::Identity;
-use routing_client::Client;
-use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::sync::Arc;
-use std::sync::Mutex;
-use transport::tcp::TcpTransport;
-use transport::JetTransport;
 use url::Url;
+use log::{error, info};
+
+use crate::config::Config;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::JetTransport;
+use crate::jet_client::{JetAssociationsMap, JetClient};
+use crate::routing_client::Client;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -85,7 +66,7 @@ fn main() {
         let client_fut = if let Some(ref routing_url) = routing_url_opt {
             match routing_url.scheme() {
                 "tcp" => {
-                    let mut transport = TcpTransport::new(conn);
+                    let transport = TcpTransport::new(conn);
                     Client::new(routing_url.clone(), executor_handle.clone()).serve(transport)
                 }
                 "tls" => {
