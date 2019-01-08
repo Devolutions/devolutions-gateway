@@ -17,7 +17,6 @@ use jet_proto::{JetPacket, ResponseStatusCode};
 use log::{debug, error, info};
 
 use crate::transport::JetTransport;
-use crate::transport::Transport;
 use crate::build_proxy;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;

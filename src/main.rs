@@ -62,7 +62,7 @@ fn main() {
     let cert = Identity::from_pkcs12(der, "").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
-    info!("Listening for wayk-jet proxy connections on {}", socket_addr);
+    info!("Listening for devolutions-jet proxy connections on {}", socket_addr);
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);
 

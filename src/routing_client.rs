@@ -1,6 +1,5 @@
 use std::io;
 
-use futures::future::ok;
 use futures::{Future};
 use tokio::runtime::TaskExecutor;
 use url::Url;

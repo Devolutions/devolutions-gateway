@@ -19,14 +19,14 @@ impl Config {
             .author("Devolutions")
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
-            .about("Wayk-Jet proxy")
+            .about("Devolutions-Jet proxy")
             .arg(
                 Arg::with_name("listener-url")
                     .short("u")
                     .long("url")
                     .value_name("LISTENER_URL")
-                    .help("An address on which the server will listen on. Format: tcp://<local_iface_ip>:<port>")
-                    .long_help("An address on which the server will listen on. Format: tcp://<local_iface_ip>:<port>")
+                    .help("An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>")
+                    .long_help("An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>")
                     .takes_value(true)
                     .default_value("tcp://0.0.0.0:8080")
                     .empty_values(false),
@@ -36,8 +36,8 @@ impl Config {
                     .short("r")
                     .long("routing_url")
                     .value_name("ROUTING_URL")
-                    .help("An address on which the server will route all packet. Format: tcp://<ip>:<port>")
-                    .long_help("An address on which the server will route all packet. Format: tcp://<ip>:<port>")
+                    .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
+                    .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
                     .takes_value(true)
                     .empty_values(false),
             );
