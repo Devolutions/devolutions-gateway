@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
-use crate::transport::JetTransport;
+use crate::transport::{Transport, JetTransport};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -120,4 +120,50 @@ fn set_socket_option(stream: &TcpStream) {
     if let Err(e) = stream.set_recv_buffer_size(SOCKET_RECV_BUFFER_SIZE) {
         error!("set_recv_buffer_size on TcpStream failed: {}", e);
     }
+}
+
+fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport: U) -> Box<Future<Item = (), Error = io::Error> + Send> {
+    let jet_sink_server = server_transport.message_sink();
+    let jet_stream_server = server_transport.message_stream();
+
+    let jet_sink_client = client_transport.message_sink();
+    let jet_stream_client = client_transport.message_stream();
+
+    // Build future to forward all bytes
+    let f1 = jet_stream_server.forward(jet_sink_client);
+    let f2 = jet_stream_client.forward(jet_sink_server);
+
+    Box::new(f1.and_then(|(jet_stream, jet_sink)| {
+        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
+        let _ = jet_stream.shutdown();
+        let _ = jet_sink.shutdown();
+        ok((jet_stream, jet_sink))
+    })
+    .join(f2.and_then(|(jet_stream, jet_sink)| {
+        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
+        let _ = jet_stream.shutdown();
+        let _ = jet_sink.shutdown();
+        ok((jet_stream, jet_sink))
+    }))
+    .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
+        let server_addr = jet_stream_1
+            .peer_addr()
+            .map(|addr| addr.to_string())
+            .unwrap_or("unknown".to_string());
+        let client_addr = jet_stream_2
+            .peer_addr()
+            .map(|addr| addr.to_string())
+            .unwrap_or("unknown".to_string());
+        info!(
+            "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+            jet_stream_1.nb_bytes_read(),
+            jet_sink_1.nb_bytes_written(),
+            jet_stream_2.nb_bytes_read(),
+            jet_sink_2.nb_bytes_written(),
+            server = server_addr,
+            client = client_addr
+        );
+
+        ok(())
+    }))
 }

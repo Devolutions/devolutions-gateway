@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use std::{env, io, str};
 
 use futures::future::{err, ok};
-use futures::{try_ready, Async, Future, Stream};
+use futures::{try_ready, Async, Future};
 use tokio::runtime::TaskExecutor;
 use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -18,6 +18,7 @@ use log::{debug, error, info};
 
 use crate::transport::JetTransport;
 use crate::transport::Transport;
+use crate::build_proxy;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 
@@ -52,53 +53,7 @@ impl JetClient {
             } else if msg.is_connect() {
                 let handle_msg = HandleConnectJetMsg::new(transport.clone(), msg, jet_associations);
                 Box::new(handle_msg.and_then(|(t1, t2)| {
-                    let t1_stream = t1.message_stream();
-                    let t1_sink = t1.message_sink();
-
-                    let t2_stream = t2.message_stream();
-                    let t2_sink = t2.message_sink();
-
-                    let f1 = t1_stream.forward(t2_sink);
-                    let f2 = t2_stream.forward(t1_sink);
-
-                    f1.and_then(|(jet_stream, jet_sink)| {
-                        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        let _ = jet_stream.shutdown();
-                        let _ = jet_sink.shutdown();
-                        ok((jet_stream, jet_sink))
-                    })
-                    .join(f2.and_then(|(jet_stream, jet_sink)| {
-                        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        let _ = jet_stream.shutdown();
-                        let _ = jet_sink.shutdown();
-                        ok((jet_stream, jet_sink))
-                    }))
-                    .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
-
-                        let server_addr = jet_stream_1
-                            .peer_addr()
-                            .map(|addr| addr.to_string())
-                            .unwrap_or("unknown".to_string());
-                        let client_addr = jet_stream_2
-                            .peer_addr()
-                            .map(|addr| addr.to_string())
-                            .unwrap_or("unknown".to_string());
-                        println!(
-                            "Proxied {}/{} bytes between {}/{}.",
-                            jet_sink_1.nb_bytes_written(),
-                            jet_sink_2.nb_bytes_written(),
-                            server_addr,
-                            client_addr
-                        );
-                        info!(
-                            "Proxied {}/{} bytes between {}/{}.",
-                            jet_sink_1.nb_bytes_written(),
-                            jet_sink_2.nb_bytes_written(),
-                            server_addr,
-                            client_addr
-                        );
-                        ok(())
-                    })
+                    build_proxy(t1, t2)
                 })) as Box<Future<Item = (), Error = io::Error> + Send>
             } else {
                 Box::new(err(error_other("Invalid method"))) as Box<Future<Item = (), Error = io::Error> + Send>
