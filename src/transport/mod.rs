@@ -1,24 +1,24 @@
 use futures::{Async, Future, Sink, Stream};
 use std::io::{Read, Write};
+use std::net::SocketAddr;
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
-
 use crate::transport::tcp::TcpTransport;
 
 pub mod tcp;
 
 pub type JetFuture<T> = Box<Future<Item = T, Error = io::Error> + Send>;
-pub type JetStream<T> = Box<Stream<Item = T, Error = io::Error> + Send>;
-pub type JetSink<T> = Box<Sink<SinkItem = T, SinkError = io::Error> + Send>;
+pub type JetStreamType<T> = Box<JetStream<Item = T, Error = io::Error> + Send>;
+pub type JetSinkType<T> = Box<JetSink<SinkItem = T, SinkError = io::Error> + Send>;
 
 pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
     where
         Self: Sized;
-    fn message_sink(&self) -> JetSink<Vec<u8>>;
-    fn message_stream(&self) -> JetStream<Vec<u8>>;
+    fn message_sink(&self) -> JetSinkType<Vec<u8>>;
+    fn message_stream(&self) -> JetStreamType<Vec<u8>>;
 }
 
 pub enum JetTransport {
@@ -40,21 +40,21 @@ impl Clone for JetTransport {
 }
 
 impl Transport for JetTransport {
-    fn connect(_addr: &Url) -> JetFuture<Self>
+    fn connect(_url: &Url) -> JetFuture<Self>
     where
         Self: Sized,
     {
-        //TODO
+        // TODO
         unimplemented!()
     }
 
-    fn message_sink(&self) -> JetSink<Vec<u8>> {
+    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
         match self {
             JetTransport::Tcp(tcp_transport) => tcp_transport.message_sink(),
         }
     }
 
-    fn message_stream(&self) -> JetStream<Vec<u8>> {
+    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
         match self {
             JetTransport::Tcp(tcp_transport) => tcp_transport.message_stream(),
         }
@@ -89,4 +89,15 @@ impl AsyncWrite for JetTransport {
             JetTransport::Tcp(ref mut tcp_transport) => AsyncWrite::shutdown(tcp_transport),
         }
     }
+}
+
+pub trait JetStream : Stream {
+    fn shutdown(&self) -> std::io::Result<()>;
+    fn peer_addr(&self) -> std::io::Result<SocketAddr>;
+    fn nb_bytes_read(&self) -> u64;
+}
+
+pub trait JetSink : Sink {
+    fn shutdown(&self) -> std::io::Result<()>;
+    fn nb_bytes_written(&self) -> u64;
 }

@@ -1,5 +1,5 @@
 use futures::{Async, AsyncSink, Future, Sink, Stream};
-use log::{debug, error, info};
+use log::{debug, error};
 use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
@@ -10,7 +10,7 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 use url::Url;
 
-use crate::transport::{JetFuture, JetSink, JetStream, Transport};
+use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -18,10 +18,24 @@ pub enum TcpStreamWrapper {
 }
 
 impl TcpStreamWrapper {
-    fn peer_addr(&self) -> Option<SocketAddr> {
+    fn peer_addr(&self) -> std::io::Result<SocketAddr> {
         match self {
-            TcpStreamWrapper::Plain(stream) => stream.peer_addr().ok(),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr().ok(),
+            TcpStreamWrapper::Plain(stream) => stream.peer_addr(),
+            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr(),
+        }
+    }
+
+    pub fn shutdown(&self) -> std::io::Result<()>  {
+        match self {
+            TcpStreamWrapper::Plain(stream) => TcpStream::shutdown(stream, std::net::Shutdown::Both),
+            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().shutdown(std::net::Shutdown::Both),
+        }
+    }
+
+    pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
+        match self {
+            TcpStreamWrapper::Plain(stream) => AsyncWrite::shutdown(stream),
+            TcpStreamWrapper::Tls(stream) => AsyncWrite::shutdown(stream),
         }
     }
 }
@@ -114,18 +128,18 @@ impl Write for TcpTransport {
 impl AsyncWrite for TcpTransport {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self.stream.try_lock() {
-            Ok(mut stream) => stream.shutdown(),
+            Ok(mut stream) => stream.async_shutdown(),
             Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
         }
     }
 }
 
 impl Transport for TcpTransport {
-    fn message_stream(&self) -> JetStream<Vec<u8>> {
+    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
         Box::new(TcpJetStream::new(self.stream.clone()))
     }
 
-    fn message_sink(&self) -> JetSink<Vec<u8>> {
+    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
         Box::new(TcpJetSink::new(self.stream.clone()))
     }
 
@@ -162,10 +176,8 @@ impl Transport for TcpTransport {
                     .unwrap();
                 let cx = tokio_tls::TlsConnector::from(cx);
 
-                info!("Try to connect to socket_addr: {}", socket_addr);
                 let url_clone = url.clone();
                 let tls_handshake = socket.and_then(move |socket| {
-                    info!("before cx.connect");
                     cx.connect(url_clone.host_str().unwrap_or(""), socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
@@ -191,22 +203,6 @@ impl TcpJetStream {
             stream,
             nb_bytes_read: 0,
         }
-    }
-
-    fn _get_addr(&self) -> io::Result<SocketAddr> {
-        let _stream = self.stream.lock().unwrap();
-        //todo
-        unimplemented!()
-        //stream.peer_addr()
-    }
-
-    fn _nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read
-    }
-
-    fn _shutdown(&mut self) {
-        let mut stream = self.stream.lock().unwrap();
-        let _ = stream.shutdown();
     }
 }
 
@@ -238,6 +234,22 @@ impl Stream for TcpJetStream {
     }
 }
 
+impl JetStream for TcpJetStream {
+    fn shutdown(&self) -> std::io::Result<()> {
+        let stream = self.stream.lock().unwrap();
+        stream.shutdown()
+    }
+
+    fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+        let stream = self.stream.lock().unwrap();
+        stream.peer_addr()
+    }
+
+    fn nb_bytes_read(&self) -> u64 {
+        self.nb_bytes_read
+    }
+}
+
 struct TcpJetSink {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_written: u64,
@@ -253,11 +265,6 @@ impl TcpJetSink {
 
     fn _nb_bytes_written(&self) -> u64 {
         self.nb_bytes_written
-    }
-
-    fn _shutdown(&mut self) {
-        let mut stream = self.stream.lock().unwrap();
-        let _ = stream.shutdown();
     }
 }
 
@@ -307,5 +314,16 @@ impl Sink for TcpJetSink {
 
     fn close(&mut self) -> Result<Async<()>, <Self as Sink>::SinkError> {
         Ok(Async::Ready(()))
+    }
+}
+
+impl JetSink for TcpJetSink {
+    fn shutdown(&self) -> std::io::Result<()>{
+        let stream = self.stream.lock().unwrap();
+        stream.shutdown()
+    }
+
+    fn nb_bytes_written(&self) -> u64 {
+        self.nb_bytes_written
     }
 }

@@ -63,24 +63,24 @@ impl JetClient {
 
                     f1.and_then(|(jet_stream, jet_sink)| {
                         // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        //jet_stream.shutdown();
-                        //jet_sink.shutdown();
+                        let _ = jet_stream.shutdown();
+                        let _ = jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
                     })
                     .join(f2.and_then(|(jet_stream, jet_sink)| {
                         // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                        //jet_stream.shutdown();
-                        //jet_sink.shutdown();
+                        let _ = jet_stream.shutdown();
+                        let _ = jet_sink.shutdown();
                         ok((jet_stream, jet_sink))
                     }))
-                    .and_then(|((_jet_stream_1, _jet_sink_1), (_jet_stream_2, _jet_sink_2))| {
-                        /*
+                    .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
+
                         let server_addr = jet_stream_1
-                            .get_addr()
+                            .peer_addr()
                             .map(|addr| addr.to_string())
                             .unwrap_or("unknown".to_string());
                         let client_addr = jet_stream_2
-                            .get_addr()
+                            .peer_addr()
                             .map(|addr| addr.to_string())
                             .unwrap_or("unknown".to_string());
                         println!(
@@ -97,7 +97,6 @@ impl JetClient {
                             server_addr,
                             client_addr
                         );
-                        */
                         ok(())
                     })
                 })) as Box<Future<Item = (), Error = io::Error> + Send>
