@@ -1,0 +1,7 @@
+[package]
+name = "rdp-proto"
+version = "0.1.0"
+authors = ["Vlad Aleksashyn <vlad.al.dp@gmail.com>"]
+edition = "2018"
+
+[dependencies]
