@@ -95,9 +95,14 @@ pub trait JetStream : Stream {
     fn shutdown(&self) -> std::io::Result<()>;
     fn peer_addr(&self) -> std::io::Result<SocketAddr>;
     fn nb_bytes_read(&self) -> u64;
+    fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>);
 }
 
 pub trait JetSink : Sink {
     fn shutdown(&self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
+}
+
+pub trait PacketInterceptor: Send + Sync {
+    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>);
 }

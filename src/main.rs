@@ -1,3 +1,6 @@
+extern crate pcap_file;
+extern crate packet;
+
 mod config;
 mod jet_client;
 mod routing_client;
@@ -23,6 +26,7 @@ use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{Transport, JetTransport};
+
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -124,10 +128,14 @@ fn set_socket_option(stream: &TcpStream) {
 
 fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport: U) -> Box<Future<Item = (), Error = io::Error> + Send> {
     let jet_sink_server = server_transport.message_sink();
-    let jet_stream_server = server_transport.message_stream();
+    let mut jet_stream_server = server_transport.message_stream();
 
     let jet_sink_client = client_transport.message_sink();
-    let jet_stream_client = client_transport.message_stream();
+    let mut jet_stream_client = client_transport.message_stream();
+
+    let interceptor = interceptor::PacketInterceptor::new(jet_stream_server.peer_addr().unwrap(), jet_stream_client.peer_addr().unwrap(), "out.pcap");
+    jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
+    jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
 
     // Build future to forward all bytes
     let f1 = jet_stream_server.forward(jet_sink_client);
@@ -163,7 +171,117 @@ fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport
             server = server_addr,
             client = client_addr
         );
+        interceptor.close();
 
         ok(())
     }))
 }
+
+mod interceptor {
+    use super::*;
+    use std::fs::File;
+    use pcap_file::{DataLink, PcapHeader, PcapWriter};
+    use packet::ether::Builder as BuildEthernet;
+    use packet::ip::v6::Builder as BuildV6;
+    use packet::builder::Builder;
+    use packet::tcp::flag::Flags;
+    use crate::transport::PacketInterceptor as Interceptor;
+    use packet::ether::Protocol;
+
+    #[derive(Clone)]
+    pub struct PacketInterceptor {
+        pcap_writer: Arc<Mutex<PcapWriter<File>>>,
+        server_addr: SocketAddr,
+        client_addr: SocketAddr,
+        server_seq: Arc<Mutex<u32>>,
+        client_seq: Arc<Mutex<u32>>,
+    }
+
+    impl PacketInterceptor {
+        pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, pcap_filename: &str) -> Self {
+            let header = PcapHeader {
+                magic_number: 0xa1b2c3d4,
+                version_major: 2,
+                version_minor: 4,
+                ts_correction: 0,
+                ts_accuracy: 0,
+                snaplen: 65535,
+                datalink: DataLink::ETHERNET,
+            };
+            let file = File::create(pcap_filename).expect("Error creating file");
+            let pcap_writer: PcapWriter<File> = PcapWriter::with_header(header, file).expect("Error creating pcap writer");
+
+            PacketInterceptor {
+                server_addr,
+                client_addr,
+                pcap_writer: Arc::new(Mutex::new(pcap_writer)),
+                server_seq: Arc::new(Mutex::new(0)),
+                client_seq: Arc::new(Mutex::new(0)),
+            }
+        }
+
+        pub fn close(self) {}
+    }
+
+    impl Interceptor for PacketInterceptor {
+        fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>) {
+
+            let mut server_seq = self.server_seq.lock().unwrap();
+            let mut client_seq = self.client_seq.lock().unwrap();
+
+
+            // Calculate source/dest address, sequence and acknowledge number
+            let (source_addr, dest_addr, seq_number, ack_number) =
+                if source_addr.unwrap() == self.client_addr {
+                    let result = (self.client_addr, self.server_addr, *server_seq, *client_seq);
+                    *server_seq += data.len() as u32;
+                    result
+                }
+                else {
+                    let result = (self.server_addr, self.client_addr, *client_seq, *server_seq);
+                    *client_seq += data.len() as u32;
+                    result
+                };
+
+            // Build tcpip packet
+            let tcpip_packet =
+                match (source_addr, dest_addr) {
+                    (SocketAddr::V4(source), SocketAddr::V4(dest)) => {
+                        BuildEthernet::default()
+                            .destination([0x00, 0x15, 0x5D, 0x01, 0x64, 0x04].into()).unwrap()  // 00:15:5D:01:64:04
+                            .source([0x00, 0x15, 0x5D, 0x01, 0x64, 0x01].into()).unwrap()   // 00:15:5D:01:64:01
+                            .protocol(Protocol::Ipv4).unwrap()
+                            .ip().unwrap()
+                            .v4().unwrap()
+                                .source(*source.ip()).unwrap()
+                                .destination(*dest.ip()).unwrap()
+                                .ttl(128).unwrap()
+                                .tcp().unwrap()
+                                    .window(0x7fff).unwrap()
+                                    .source(source_addr.port()).unwrap()
+                                    .destination(dest_addr.port()).unwrap()
+                                    .acknowledgment(ack_number).unwrap()
+                                    .sequence(seq_number).unwrap()
+                                    .flags(Flags::from_bits_truncate(0x0018)).unwrap()
+                                    .payload(data).unwrap()
+                                    .build().unwrap()
+                    },
+                    (SocketAddr::V6(_source), SocketAddr::V6(_dest)) => {
+                        BuildV6::default()
+                            .build().unwrap()
+                    },
+                    (_, _) => unreachable!(),
+                };
+
+
+            // Write packet in pcap file
+            let since_epoch= std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards");
+            let mut pcap_writer = self.pcap_writer.lock().unwrap();
+            if let Err(e) = pcap_writer.write(since_epoch.as_secs() as u32, since_epoch.subsec_micros(), tcpip_packet.as_ref()) {
+                error!("Error writting pcap file: {}", e);
+            }
+        }
+    }
+}
+
+
