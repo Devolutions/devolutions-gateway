@@ -1,5 +1,6 @@
 extern crate pcap_file;
 extern crate packet;
+extern crate byteorder;
 
 mod config;
 mod jet_client;
@@ -17,7 +18,7 @@ use futures::{future, future::ok, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
-use log::{error, info};
+use log::{debug, error, info};
 use native_tls::Identity;
 use url::Url;
 
@@ -187,7 +188,9 @@ mod interceptor {
     use packet::tcp::flag::Flags;
     use crate::transport::PacketInterceptor as Interceptor;
     use packet::ether::Protocol;
+    use byteorder::{LittleEndian, ReadBytesExt};
 
+    const TCP_IP_PACKET_MAX_SIZE: usize = 16384;
     #[derive(Clone)]
     pub struct PacketInterceptor {
         pcap_writer: Arc<Mutex<PcapWriter<File>>>,
@@ -195,6 +198,8 @@ mod interceptor {
         client_addr: SocketAddr,
         server_seq: Arc<Mutex<u32>>,
         client_seq: Arc<Mutex<u32>>,
+        server_data: Vec<u8>,
+        client_data: Vec<u8>,
     }
 
     impl PacketInterceptor {
@@ -217,69 +222,122 @@ mod interceptor {
                 pcap_writer: Arc::new(Mutex::new(pcap_writer)),
                 server_seq: Arc::new(Mutex::new(0)),
                 client_seq: Arc::new(Mutex::new(0)),
+                server_data: Vec::new(),
+                client_data: Vec::new(),
             }
         }
 
         pub fn close(self) {}
+
+        fn get_wayk_msg(&mut self, data: &Vec<u8>, is_from_server: bool) -> Vec<Vec<u8>> {
+            let mut messages = Vec::new();
+
+            let data_to_parse =
+                if is_from_server {
+                    self.server_data.append(&mut data.clone());
+                    &mut self.server_data
+                }
+                else {
+                    self.client_data.append(&mut data.clone());
+                    &mut self.client_data
+                };
+
+            loop {
+                let msg_size = {
+                    let mut cursor = std::io::Cursor::new(&data_to_parse);
+                    if let Ok(header) = cursor.read_u32::<LittleEndian>() {
+                        if header & 0x8000_0000 != 0 {
+                            (header & 0x0000_FFFF) as usize + 4
+                        } else {
+                            (header & 0x7FFF_FFF) as usize + 6
+                        }
+                    }
+                    else {
+                        break;
+                    }
+                };
+
+                if data_to_parse.len() >= msg_size {
+
+                    let drain = data_to_parse.drain(..msg_size);
+                    let mut new_message = Vec::new();
+                    for x in drain {
+                        new_message.push(x);
+                    }
+                    messages.push(new_message);
+                } else {
+                    break;
+                }
+            }
+
+            messages
+        }
     }
 
     impl Interceptor for PacketInterceptor {
         fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>) {
+            debug!("New packet intercepted. Packet size = {}", data.len());
+
+            let is_from_server = source_addr.unwrap() == self.server_addr;
+            let messages = self.get_wayk_msg(data, is_from_server);
 
             let mut server_seq = self.server_seq.lock().unwrap();
             let mut client_seq = self.client_seq.lock().unwrap();
 
+            for data in messages {
+                for data_chunk in data.chunks(TCP_IP_PACKET_MAX_SIZE) {
+                    // Calculate source/dest address, sequence and acknowledge number
+                    let (source_addr, dest_addr, seq_number, ack_number) =
+                        if is_from_server {
+                            let result = (self.server_addr, self.client_addr, *client_seq, *server_seq);
+                            *client_seq += data_chunk.len() as u32;
+                            result
+                        } else {
+                            let result = (self.client_addr, self.server_addr, *server_seq, *client_seq);
+                            *server_seq += data_chunk.len() as u32;
+                            result
+                        };
 
-            // Calculate source/dest address, sequence and acknowledge number
-            let (source_addr, dest_addr, seq_number, ack_number) =
-                if source_addr.unwrap() == self.client_addr {
-                    let result = (self.client_addr, self.server_addr, *server_seq, *client_seq);
-                    *server_seq += data.len() as u32;
-                    result
-                }
-                else {
-                    let result = (self.server_addr, self.client_addr, *client_seq, *server_seq);
-                    *client_seq += data.len() as u32;
-                    result
-                };
-
-            // Build tcpip packet
-            let tcpip_packet =
-                match (source_addr, dest_addr) {
-                    (SocketAddr::V4(source), SocketAddr::V4(dest)) => {
-                        BuildEthernet::default()
-                            .destination([0x00, 0x15, 0x5D, 0x01, 0x64, 0x04].into()).unwrap()  // 00:15:5D:01:64:04
-                            .source([0x00, 0x15, 0x5D, 0x01, 0x64, 0x01].into()).unwrap()   // 00:15:5D:01:64:01
-                            .protocol(Protocol::Ipv4).unwrap()
-                            .ip().unwrap()
-                            .v4().unwrap()
-                                .source(*source.ip()).unwrap()
-                                .destination(*dest.ip()).unwrap()
-                                .ttl(128).unwrap()
-                                .tcp().unwrap()
+                    // Build tcpip packet
+                    let tcpip_packet =
+                        match (source_addr, dest_addr) {
+                            (SocketAddr::V4(source), SocketAddr::V4(dest)) => {
+                                BuildEthernet::default()
+                                    .destination([0x00, 0x15, 0x5D, 0x01, 0x64, 0x04].into()).unwrap()  // 00:15:5D:01:64:04
+                                    .source([0x00, 0x15, 0x5D, 0x01, 0x64, 0x01].into()).unwrap()   // 00:15:5D:01:64:01
+                                    .protocol(Protocol::Ipv4).unwrap()
+                                    .ip().unwrap()
+                                    .v4().unwrap()
+                                    .source(*source.ip()).unwrap()
+                                    .destination(*dest.ip()).unwrap()
+                                    .ttl(128).unwrap()
+                                    .tcp().unwrap()
                                     .window(0x7fff).unwrap()
                                     .source(source_addr.port()).unwrap()
                                     .destination(dest_addr.port()).unwrap()
                                     .acknowledgment(ack_number).unwrap()
                                     .sequence(seq_number).unwrap()
                                     .flags(Flags::from_bits_truncate(0x0018)).unwrap()
-                                    .payload(data).unwrap()
+                                    .payload(data_chunk).unwrap()
                                     .build().unwrap()
-                    },
-                    (SocketAddr::V6(_source), SocketAddr::V6(_dest)) => {
-                        BuildV6::default()
-                            .build().unwrap()
-                    },
-                    (_, _) => unreachable!(),
+                            },
+                            (SocketAddr::V6(_source), SocketAddr::V6(_dest)) => {
+                                BuildV6::default()
+                                    .build().unwrap()
+                            },
+                            (_, _) => unreachable!(),
+                        };
+
+
+                    // Write packet in pcap file
+                    let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards");
+                    let mut pcap_writer = self.pcap_writer.lock().unwrap();
+                    if let Err(e) = pcap_writer.write(since_epoch.as_secs() as u32, since_epoch.subsec_micros(), tcpip_packet.as_ref()) {
+                        error!("Error writting pcap file: {}", e);
+                    }
                 };
+            };
 
-
-            // Write packet in pcap file
-            let since_epoch= std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards");
-            let mut pcap_writer = self.pcap_writer.lock().unwrap();
-            if let Err(e) = pcap_writer.write(since_epoch.as_secs() as u32, since_epoch.subsec_micros(), tcpip_packet.as_ref()) {
-                error!("Error writting pcap file: {}", e);
-            }
         }
     }
 }
