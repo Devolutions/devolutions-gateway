@@ -1,16 +1,17 @@
 extern crate byteorder;
-extern crate uuid;
 extern crate jet_proto;
+extern crate uuid;
 
+use jet_proto::{JetMethod, JetPacket};
 use std::env;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::SocketAddr;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
-use jet_proto::{JetMethod, JetPacket};
 
 const SERVER_DATA: &'static str = "Server Response";
 const CLIENT_DATA: &'static str = "Client Request";
@@ -37,46 +38,27 @@ impl Drop for KillOnDrop {
 #[test]
 fn smoke() {
     let proxy_addr = "127.0.0.1:8080";
+    let routing_url = "127.0.0.1:8081";
     let cmd_line_arg = "-urltcp://127.0.0.1:8080";
 
     //Spawn our proxy and wait for it to come online
-    let proxy = Command::new(bin()).arg(cmd_line_arg).spawn().unwrap();
+    let proxy = Command::new(bin())
+        .arg(cmd_line_arg)
+        .arg("--routing_url")
+        .arg("tcp://127.0.0.1:8081")
+        .spawn()
+        .unwrap();
     let _proxy = KillOnDrop(proxy);
 
-    let (sender_uuid, receiver_uuid) = channel();
     let (sender_end, receiver_end) = channel();
 
-    // Server (method = Accept)
+    // Start server listening on forward_url
     thread::spawn(move || {
         loop {
-            match TcpStream::connect(proxy_addr) {
-                Ok(mut stream) => {
-                    // Send request
-                    let mut jet_packet = JetPacket::new(0, 0);
-                    jet_packet.set_method(Some(JetMethod::ACCEPT));
-                    jet_packet.set_version(Some(0));
-                    let mut v: Vec<u8> = Vec::new();
-                    jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
-                    stream.flush().unwrap();
-
-                    // Receive response and get the UUID
-                    loop {
-                        let mut buffer = [0u8; 1024];
-                        match stream.read(&mut buffer) {
-                            Ok(_n) => {
-                                let mut slice: &[u8] = &buffer;
-                                let response = JetPacket::read_from(&mut slice).unwrap();
-                                assert!(response.association().is_some());
-                                sender_uuid.send(response.association().unwrap()).unwrap();
-                                break;
-                            }
-                            Err(_) => {
-                                thread::sleep(Duration::from_millis(10));
-                            }
-                        }
-                    }
-
+            let listener_addr = routing_url.parse::<SocketAddr>().unwrap();
+            let listener = TcpListener::bind(&listener_addr).unwrap();
+            match listener.accept() {
+                Ok((mut stream, _addr)) => {
                     // Read data sent by client
                     loop {
                         let mut buffer = [0u8; 1024];
@@ -84,7 +66,8 @@ fn smoke() {
                             Ok(n) => {
                                 let mut v = buffer.to_vec();
                                 v.truncate(n);
-                                let _request = String::from_utf8(v).unwrap();
+                                let request = String::from_utf8(v).unwrap();
+                                println!("Received from client: {}", request);
                                 break;
                             }
                             Err(_) => {
@@ -93,7 +76,7 @@ fn smoke() {
                         }
                     }
 
-                    // Send data to server
+                    // Send data to client
                     let data = SERVER_DATA;
                     stream.write(&data.as_bytes()).unwrap();
                     thread::sleep(Duration::from_millis(10));
@@ -109,33 +92,6 @@ fn smoke() {
         loop {
             match TcpStream::connect(proxy_addr) {
                 Ok(mut stream) => {
-                    let uuid = receiver_uuid.recv().unwrap();
-
-                    // Send request
-                    let mut jet_packet = JetPacket::new(0, 0);
-                    jet_packet.set_method(Some(JetMethod::CONNECT));
-                    jet_packet.set_version(Some(0));
-                    jet_packet.set_association(Some(uuid));
-                    let mut v: Vec<u8> = Vec::new();
-                    jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
-                    stream.flush().unwrap();
-
-                    // Receive response
-                    loop {
-                        let mut buffer = [0u8; 1024];
-                        match stream.read(&mut buffer) {
-                            Ok(_n) => {
-                                let mut slice: &[u8] = &buffer;
-                                let _response = JetPacket::read_from(&mut slice).unwrap();
-                                break;
-                            }
-                            Err(_) => {
-                                thread::sleep(Duration::from_millis(10));
-                            }
-                        }
-                    }
-
                     // Send data to server
                     let data = CLIENT_DATA;
                     stream.write(&data.as_bytes()).unwrap();
@@ -149,6 +105,7 @@ fn smoke() {
                                 v.truncate(n);
                                 let response = String::from_utf8(v).unwrap();
                                 assert_eq!(response, SERVER_DATA.to_string());
+                                println!("Received from server: {}", response);
                                 break;
                             }
                             Err(_) => {

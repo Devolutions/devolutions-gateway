@@ -1,11 +1,12 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 extern crate byteorder;
-extern crate uuid;
 extern crate jet_proto;
+extern crate uuid;
 
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
+use jet_proto::{JetMethod, JetPacket};
 use std::env;
 use std::io::{self, Error, Read, Write};
 use std::net::TcpListener;
@@ -14,7 +15,6 @@ use std::process;
 use std::str::FromStr;
 use std::thread;
 use uuid::Uuid;
-use jet_proto::{JetMethod, JetPacket};
 
 type Port = u16;
 
@@ -62,7 +62,8 @@ fn main() {
         .unwrap_or_else(|| {
             program.usage();
             program.fail();
-        }).parse::<Port>()
+        })
+        .parse::<Port>()
         .unwrap_or_else(|error| {
             program.print_error(format!("invalid port number: {}", error));
             program.usage();
@@ -77,7 +78,8 @@ fn main() {
                 program.usage();
                 program.fail();
             })
-        }).unwrap_or_else(|| None);
+        })
+        .unwrap_or_else(|| None);
 
     let mut stream =
         TcpStream::connect((host.as_str(), port)).unwrap_or_else(|error| program.print_fail(error.to_string()));

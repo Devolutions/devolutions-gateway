@@ -13,13 +13,13 @@ pub const JET_MSG_SIGNATURE: u32 = 0x0054454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
 pub const JET_VERSION: u8 = 1;
 
-const JET_HEADER_VERSION: &'static str = "Jet-Version";
-const JET_HEADER_METHOD: &'static str = "Jet-Method";
-const JET_HEADER_ASSOCIATION: &'static str = "Jet-Association";
-const JET_HEADER_TIMEOUT: &'static str = "Jet-Timeout";
-const JET_HEADER_INSTANCE: &'static str = "Jet-Instance";
+const JET_HEADER_VERSION: &str = "Jet-Version";
+const JET_HEADER_METHOD: &str = "Jet-Method";
+const JET_HEADER_ASSOCIATION: &str = "Jet-Association";
+const JET_HEADER_TIMEOUT: &str = "Jet-Timeout";
+const JET_HEADER_INSTANCE: &str = "Jet-Instance";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum JetMethod {
     ACCEPT,
     CONNECT,
@@ -49,13 +49,13 @@ impl ToString for JetMethod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResponseStatusCode {
     StatusCode200,
     StatusCode400,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JetPacket {
     flags: u8,
     mask: u8,
@@ -242,7 +242,7 @@ impl JetPacket {
         writer.write_u8(self.flags)?;
         writer.write_u8(self.mask)?;
 
-        writer.write(payload_bytes)?;
+        writer.write_all(payload_bytes)?;
 
         Ok(())
     }
