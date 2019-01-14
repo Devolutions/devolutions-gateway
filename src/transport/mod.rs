@@ -6,6 +6,7 @@ use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
+use crate::interceptor::PacketInterceptor;
 
 pub mod tcp;
 
@@ -103,6 +104,3 @@ pub trait JetSink: Sink {
     fn nb_bytes_written(&self) -> u64;
 }
 
-pub trait PacketInterceptor: Send + Sync {
-    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>);
-}

@@ -15,12 +15,13 @@ use futures::{future, future::ok, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
-use log::{error, info};
+use log::{error, info, warn};
 use native_tls::Identity;
 use url::Url;
 
-use crate::config::Config;
+use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
+use crate::interceptor::{UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
@@ -147,11 +148,23 @@ impl Proxy {
         let mut jet_stream_client = client_transport.message_stream();
 
         if let Some(pcap_filename) = self.config.pcap_filename() {
-            let interceptor = PcapInterceptor::new(
+            let mut interceptor = PcapInterceptor::new(
                 jet_stream_server.peer_addr().unwrap(),
                 jet_stream_client.peer_addr().unwrap(),
                 &pcap_filename,
             );
+
+            match self.config.protocol() {
+                Protocol::WAYK => {
+                    info!("WaykMessageReader will be used to interpret application protocol.");
+                    interceptor.set_message_reader(WaykMessageReader::get_messages);
+                },
+                Protocol::UNKNOWN => {
+                    warn!("Protocol is unknown. Data received will not be split to get application message.");
+                    interceptor.set_message_reader(UnknownMessageReader::get_messages)
+                },
+            }
+
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
             jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
         }

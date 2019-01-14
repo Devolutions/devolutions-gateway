@@ -3,45 +3,45 @@ use std::net::SocketAddr;
 
 pub mod pcap;
 
+pub trait PacketInterceptor: Send + Sync {
+    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>);
+}
+
+type MessageReader = Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
 pub struct PeerInfo {
     pub addr: SocketAddr,
     pub sequence_number: u32,
-    pub message_reader: Box<MessageReader>,
+    pub data: Vec<u8>,
 }
 
 impl PeerInfo {
-    pub fn new<T: 'static + MessageReader>(addr: SocketAddr, msg_reader: T) -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         PeerInfo {
             addr,
             sequence_number: 0,
-            message_reader: Box::new(msg_reader),
+            data: Vec::new(),
         }
     }
 }
 
-pub trait MessageReader: Send + Sync {
-    fn get_next_messages(&mut self, new_data: &Vec<u8>) -> Vec<Vec<u8>>;
-}
-
-struct WaykMessageReader {
-    data: Vec<u8>,
-}
-
-impl WaykMessageReader {
-    pub fn new() -> Self {
-        WaykMessageReader { data: Vec::new() }
+pub struct UnknownMessageReader;
+impl UnknownMessageReader {
+    pub fn get_messages(data: &mut Vec<u8>) -> Vec<Vec<u8>> {
+        let mut result = Vec::new();
+        result.push(data.clone());
+        data.clear();
+        result
     }
 }
 
-impl MessageReader for WaykMessageReader {
-    fn get_next_messages(&mut self, new_data: &Vec<u8>) -> Vec<Vec<u8>> {
+pub struct WaykMessageReader;
+impl WaykMessageReader {
+    pub fn get_messages(data: &mut Vec<u8>) -> Vec<Vec<u8>> {
         let mut messages = Vec::new();
-
-        self.data.append(&mut new_data.clone());
 
         loop {
             let msg_size = {
-                let mut cursor = std::io::Cursor::new(&self.data);
+                let mut cursor = std::io::Cursor::new(&data);
                 if let Ok(header) = cursor.read_u32::<LittleEndian>() {
                     if header & 0x8000_0000 != 0 {
                         (header & 0x0000_FFFF) as usize + 4
@@ -53,8 +53,8 @@ impl MessageReader for WaykMessageReader {
                 }
             };
 
-            if self.data.len() >= msg_size {
-                let drain = self.data.drain(..msg_size);
+            if data.len() >= msg_size {
+                let drain = data.drain(..msg_size);
                 let mut new_message = Vec::new();
                 for x in drain {
                     new_message.push(x);
@@ -68,3 +68,4 @@ impl MessageReader for WaykMessageReader {
         messages
     }
 }
+

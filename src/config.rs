@@ -1,10 +1,17 @@
 use clap::{crate_name, crate_version, App, Arg};
 
 #[derive(Clone)]
+pub enum Protocol {
+    WAYK,
+    UNKNOWN
+}
+
+#[derive(Clone)]
 pub struct Config {
     listener_url: String,
     routing_url: Option<String>,
     pcap_filename: Option<String>,
+    protocol: Protocol
 }
 
 impl Config {
@@ -18,6 +25,10 @@ impl Config {
 
     pub fn pcap_filename(&self) -> Option<String> {
         self.pcap_filename.clone()
+    }
+
+    pub fn protocol(&self) -> &Protocol {
+        &self.protocol
     }
 
     pub fn init() -> Self {
@@ -49,13 +60,24 @@ impl Config {
             )
             .arg(
                 Arg::with_name("pcap-filename")
-                    .short("p")
-                    .long("pcap")
+                    .short("f")
+                    .long("pcap_file")
                     .value_name("PCAP_FILENAME")
                     .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
                     .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
                     .takes_value(true)
                     .empty_values(false),
+            )
+            .arg(
+                Arg::with_name("protocol")
+                    .short("p")
+                    .long("protocol")
+                    .value_name("PROTOCOL_NAME")
+                    .help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet.")
+                    .long_help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not split between 2 tcp packets.")
+                    .takes_value(true)
+                    .possible_values(&["wayk"])
+                    .empty_values(false)
             );
 
         let matches = cli_app.get_matches();
@@ -68,10 +90,17 @@ impl Config {
             .value_of("pcap-filename")
             .map(|pcap_filename| pcap_filename.to_string());
 
+        let protocol = match matches.value_of("protocol") {
+            Some("wayk") => Protocol::WAYK,
+            _ => Protocol::UNKNOWN,
+        };
+
+
         Config {
             listener_url,
             routing_url,
             pcap_filename,
+            protocol,
         }
     }
 }

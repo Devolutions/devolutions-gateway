@@ -1,6 +1,4 @@
-use crate::interceptor::PeerInfo;
-use crate::interceptor::WaykMessageReader;
-use crate::transport::PacketInterceptor as Interceptor;
+use crate::interceptor::{PacketInterceptor, PeerInfo};
 use log::{debug, error};
 use packet::builder::Builder;
 use packet::ether::Builder as BuildEthernet;
@@ -11,13 +9,17 @@ use pcap_file::PcapWriter;
 use std::fs::File;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use crate::interceptor::MessageReader;
+use crate::interceptor::UnknownMessageReader;
 
 const TCP_IP_PACKET_MAX_SIZE: usize = 16384;
+
 #[derive(Clone)]
 pub struct PcapInterceptor {
     pcap_writer: Arc<Mutex<PcapWriter<File>>>,
     server_info: Arc<Mutex<PeerInfo>>,
     client_info: Arc<Mutex<PeerInfo>>,
+    message_reader: Arc<Box<MessageReader>>,
 }
 
 impl PcapInterceptor {
@@ -26,14 +28,19 @@ impl PcapInterceptor {
         let pcap_writer: PcapWriter<File> = PcapWriter::new(file).expect("Error creating pcap writer");
 
         PcapInterceptor {
-            server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr, WaykMessageReader::new()))),
-            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr, WaykMessageReader::new()))),
+            server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
+            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
             pcap_writer: Arc::new(Mutex::new(pcap_writer)),
+            message_reader: Arc::new(Box::new(UnknownMessageReader::get_messages)),
         }
+    }
+
+    pub fn set_message_reader<F: 'static + Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync>(&mut self, message_reader: F) {
+        self.message_reader = Arc::new(Box::new(message_reader));
     }
 }
 
-impl Interceptor for PcapInterceptor {
+impl PacketInterceptor for PcapInterceptor {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>) {
         debug!("New packet intercepted. Packet size = {}", data.len());
 
@@ -42,16 +49,18 @@ impl Interceptor for PcapInterceptor {
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         let (messages, source_addr, dest_addr, seq_number, ack_number) = if is_from_server {
+            server_info.data.append(&mut data.clone());
             (
-                server_info.message_reader.get_next_messages(&data),
+                (self.message_reader)(&mut server_info.data),
                 server_info.addr,
                 client_info.addr,
                 &mut client_info.sequence_number,
                 server_info.sequence_number,
             )
         } else {
+            client_info.data.append(&mut data.clone());
             (
-                client_info.message_reader.get_next_messages(&data),
+                (self.message_reader)(&mut client_info.data),
                 client_info.addr,
                 server_info.addr,
                 &mut server_info.sequence_number,

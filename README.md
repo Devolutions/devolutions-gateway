@@ -22,11 +22,17 @@ OPTIONS:
     -u, --url <LISTENER_URL>
             An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port> [default:
             tcp://0.0.0.0:8080]
-    -p, --pcap <PCAP_FILENAME>
-            Path of the file where the pcap file will be saved. If not set, no pcap file will be created.
+    -f, --pcap_file <PCAP_FILENAME>
+            Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow
+            protocol can be saved.
+    -p, --protocol <PROTOCOL_NAME>
+            Specify the application protocol used. Useful when pcap file is saved and you want to avoid application
+            message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not
+            split between 2 tcp packets. [possible values: wayk]
     -r, --routing_url <ROUTING_URL>
             An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported :
             tcp and tls. If it is not specified, the JET protocol will be used.
+
 ```
 
 ## Sample Usage
@@ -43,7 +49,7 @@ OPTIONS:
 
     1. If you want to save the network trafic in a pcap file, you can add the pcap_filename parameter. The command will look to something like this:
         ```
-        $ cargo run -- -r tls://x.x.x.x:4489 -p c:\waykTraffic.pcap
+        $ cargo run -- -r tls://x.x.x.x:4489 -f c:\waykTraffic.pcap -p wayk
         ```
 
 3. On the same host where devolutions-jet is running, open wayk and connect to 127.0.0.1:8080 
