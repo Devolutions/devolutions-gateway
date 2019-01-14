@@ -25,7 +25,7 @@ impl TcpStreamWrapper {
         }
     }
 
-    pub fn shutdown(&self) -> std::io::Result<()>  {
+    pub fn shutdown(&self) -> std::io::Result<()> {
         match self {
             TcpStreamWrapper::Plain(stream) => TcpStream::shutdown(stream, std::net::Shutdown::Both),
             TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().shutdown(std::net::Shutdown::Both),
@@ -192,7 +192,6 @@ impl Transport for TcpTransport {
     }
 }
 
-
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: u64,
@@ -330,7 +329,7 @@ impl Sink for TcpJetSink {
 }
 
 impl JetSink for TcpJetSink {
-    fn shutdown(&self) -> std::io::Result<()>{
+    fn shutdown(&self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
         stream.shutdown()
     }

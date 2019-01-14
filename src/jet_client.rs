@@ -16,9 +16,9 @@ use uuid::Uuid;
 use jet_proto::{JetPacket, ResponseStatusCode};
 use log::{debug, error, info};
 
+use crate::config::Config;
 use crate::transport::JetTransport;
 use crate::Proxy;
-use crate::config::Config;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 
@@ -55,9 +55,8 @@ impl JetClient {
                 Box::new(handle_msg) as Box<Future<Item = (), Error = io::Error> + Send>
             } else if msg.is_connect() {
                 let handle_msg = HandleConnectJetMsg::new(transport.clone(), msg, jet_associations);
-                Box::new(handle_msg.and_then(|(t1, t2)| {
-                    Proxy::new(config).build(t1, t2)
-                })) as Box<Future<Item = (), Error = io::Error> + Send>
+                Box::new(handle_msg.and_then(|(t1, t2)| Proxy::new(config).build(t1, t2)))
+                    as Box<Future<Item = (), Error = io::Error> + Send>
             } else {
                 Box::new(err(error_other("Invalid method"))) as Box<Future<Item = (), Error = io::Error> + Send>
             }

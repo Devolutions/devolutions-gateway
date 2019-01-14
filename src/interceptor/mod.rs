@@ -1,6 +1,5 @@
+use byteorder::{LittleEndian, ReadBytesExt};
 use std::net::SocketAddr;
-use byteorder::LittleEndian;
-use byteorder::ReadBytesExt;
 
 pub mod pcap;
 
@@ -30,9 +29,7 @@ struct WaykMessageReader {
 
 impl WaykMessageReader {
     pub fn new() -> Self {
-        WaykMessageReader {
-            data: Vec::new()
-        }
+        WaykMessageReader { data: Vec::new() }
     }
 }
 
@@ -51,14 +48,12 @@ impl MessageReader for WaykMessageReader {
                     } else {
                         (header & 0x7FFF_FFF) as usize + 6
                     }
+                } else {
+                    break;
                 }
-                    else {
-                        break;
-                    }
             };
 
             if self.data.len() >= msg_size {
-
                 let drain = self.data.drain(..msg_size);
                 let mut new_message = Vec::new();
                 for x in drain {
@@ -73,4 +68,3 @@ impl MessageReader for WaykMessageReader {
         messages
     }
 }
-

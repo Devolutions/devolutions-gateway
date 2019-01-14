@@ -1,3 +1,4 @@
+use crate::transport::tcp::TcpTransport;
 use futures::{Async, Future, Sink, Stream};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
@@ -5,7 +6,6 @@ use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
-use crate::transport::tcp::TcpTransport;
 
 pub mod tcp;
 
@@ -91,14 +91,14 @@ impl AsyncWrite for JetTransport {
     }
 }
 
-pub trait JetStream : Stream {
+pub trait JetStream: Stream {
     fn shutdown(&self) -> std::io::Result<()>;
     fn peer_addr(&self) -> std::io::Result<SocketAddr>;
     fn nb_bytes_read(&self) -> u64;
     fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>);
 }
 
-pub trait JetSink : Sink {
+pub trait JetSink: Sink {
     fn shutdown(&self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
 }

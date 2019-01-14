@@ -1,12 +1,12 @@
 use std::io;
 
-use futures::{Future};
+use futures::Future;
 use tokio::runtime::TaskExecutor;
 use url::Url;
 
+use crate::config::Config;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::Transport;
-use crate::config::Config;
 use crate::Proxy;
 
 pub struct Client {

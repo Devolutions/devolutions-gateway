@@ -1,12 +1,8 @@
-extern crate pcap_file;
-extern crate packet;
-extern crate byteorder;
-
 mod config;
+mod interceptor;
 mod jet_client;
 mod routing_client;
 mod transport;
-mod interceptor;
 
 use std::collections::HashMap;
 use std::io;
@@ -24,11 +20,11 @@ use native_tls::Identity;
 use url::Url;
 
 use crate::config::Config;
+use crate::interceptor::pcap::PcapInterceptor;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
-use crate::transport::{Transport, JetTransport};
-use crate::interceptor::pcap::PcapInterceptor;
+use crate::transport::{JetTransport, Transport};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -95,7 +91,8 @@ fn main() {
                 _ => unreachable!(),
             }
         } else {
-            JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone()).serve(JetTransport::new_tcp(conn))
+            JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone())
+                .serve(JetTransport::new_tcp(conn))
         };
 
         executor_handle.spawn(client_fut.then(move |res| {
@@ -130,17 +127,19 @@ fn set_socket_option(stream: &TcpStream) {
 }
 
 struct Proxy {
-    config: Config
+    config: Config,
 }
 
 impl Proxy {
     pub fn new(config: Config) -> Self {
-        Proxy {
-            config
-        }
+        Proxy { config }
     }
 
-    pub fn build<T: Transport, U: Transport>(&self, server_transport: T, client_transport: U) -> Box<Future<Item = (), Error = io::Error> + Send> {
+    pub fn build<T: Transport, U: Transport>(
+        &self,
+        server_transport: T,
+        client_transport: U,
+    ) -> Box<Future<Item = (), Error = io::Error> + Send> {
         let jet_sink_server = server_transport.message_sink();
         let mut jet_stream_server = server_transport.message_stream();
 
@@ -148,7 +147,11 @@ impl Proxy {
         let mut jet_stream_client = client_transport.message_stream();
 
         if let Some(pcap_filename) = self.config.pcap_filename() {
-            let interceptor = PcapInterceptor::new(jet_stream_server.peer_addr().unwrap(), jet_stream_client.peer_addr().unwrap(), &pcap_filename);
+            let interceptor = PcapInterceptor::new(
+                jet_stream_server.peer_addr().unwrap(),
+                jet_stream_client.peer_addr().unwrap(),
+                &pcap_filename,
+            );
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
             jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
         }
@@ -191,8 +194,3 @@ impl Proxy {
         }))
     }
 }
-
-
-
-
-

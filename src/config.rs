@@ -52,8 +52,8 @@ impl Config {
                     .short("p")
                     .long("pcap")
                     .value_name("PCAP_FILENAME")
-                    .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created.")
-                    .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created.")
+                    .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
+                    .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
                     .takes_value(true)
                     .empty_values(false),
             );
@@ -64,7 +64,9 @@ impl Config {
 
         let routing_url = matches.value_of("routing-url").map(|url| url.to_string());
 
-        let pcap_filename = matches.value_of("pcap-filename").map(|pcap_filename| pcap_filename.to_string());
+        let pcap_filename = matches
+            .value_of("pcap-filename")
+            .map(|pcap_filename| pcap_filename.to_string());
 
         Config {
             listener_url,
