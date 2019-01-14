@@ -172,8 +172,6 @@ fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport
             server = server_addr,
             client = client_addr
         );
-        interceptor.close();
-
         ok(())
     }))
 }
@@ -181,7 +179,7 @@ fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport
 mod interceptor {
     use super::*;
     use std::fs::File;
-    use pcap_file::{DataLink, PcapHeader, PcapWriter};
+    use pcap_file::PcapWriter;
     use packet::ether::Builder as BuildEthernet;
     use packet::ip::v6::Builder as BuildV6;
     use packet::builder::Builder;
@@ -194,83 +192,36 @@ mod interceptor {
     #[derive(Clone)]
     pub struct PacketInterceptor {
         pcap_writer: Arc<Mutex<PcapWriter<File>>>,
-        server_addr: SocketAddr,
-        client_addr: SocketAddr,
-        server_seq: Arc<Mutex<u32>>,
-        client_seq: Arc<Mutex<u32>>,
-        server_data: Vec<u8>,
-        client_data: Vec<u8>,
+        server_info: Arc<Mutex<PeerInfo>>,
+        client_info: Arc<Mutex<PeerInfo>>,
+    }
+
+    struct PeerInfo {
+        pub addr: SocketAddr,
+        pub sequence_number: u32,
+        pub message_reader: Box<MessageReader>,
+    }
+
+    impl PeerInfo {
+        fn new<T: 'static + MessageReader>(addr: SocketAddr, msg_reader: T) -> Self {
+            PeerInfo {
+                addr,
+                sequence_number: 0,
+                message_reader: Box::new(msg_reader),
+            }
+        }
     }
 
     impl PacketInterceptor {
         pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, pcap_filename: &str) -> Self {
-            let header = PcapHeader {
-                magic_number: 0xa1b2c3d4,
-                version_major: 2,
-                version_minor: 4,
-                ts_correction: 0,
-                ts_accuracy: 0,
-                snaplen: 65535,
-                datalink: DataLink::ETHERNET,
-            };
             let file = File::create(pcap_filename).expect("Error creating file");
-            let pcap_writer: PcapWriter<File> = PcapWriter::with_header(header, file).expect("Error creating pcap writer");
+            let pcap_writer: PcapWriter<File> = PcapWriter::new(file).expect("Error creating pcap writer");
 
             PacketInterceptor {
-                server_addr,
-                client_addr,
+                server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr, WaykMessageReader::new()))),
+                client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr, WaykMessageReader::new()))),
                 pcap_writer: Arc::new(Mutex::new(pcap_writer)),
-                server_seq: Arc::new(Mutex::new(0)),
-                client_seq: Arc::new(Mutex::new(0)),
-                server_data: Vec::new(),
-                client_data: Vec::new(),
             }
-        }
-
-        pub fn close(self) {}
-
-        fn get_wayk_msg(&mut self, data: &Vec<u8>, is_from_server: bool) -> Vec<Vec<u8>> {
-            let mut messages = Vec::new();
-
-            let data_to_parse =
-                if is_from_server {
-                    self.server_data.append(&mut data.clone());
-                    &mut self.server_data
-                }
-                else {
-                    self.client_data.append(&mut data.clone());
-                    &mut self.client_data
-                };
-
-            loop {
-                let msg_size = {
-                    let mut cursor = std::io::Cursor::new(&data_to_parse);
-                    if let Ok(header) = cursor.read_u32::<LittleEndian>() {
-                        if header & 0x8000_0000 != 0 {
-                            (header & 0x0000_FFFF) as usize + 4
-                        } else {
-                            (header & 0x7FFF_FFF) as usize + 6
-                        }
-                    }
-                    else {
-                        break;
-                    }
-                };
-
-                if data_to_parse.len() >= msg_size {
-
-                    let drain = data_to_parse.drain(..msg_size);
-                    let mut new_message = Vec::new();
-                    for x in drain {
-                        new_message.push(x);
-                    }
-                    messages.push(new_message);
-                } else {
-                    break;
-                }
-            }
-
-            messages
         }
     }
 
@@ -278,25 +229,20 @@ mod interceptor {
         fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>) {
             debug!("New packet intercepted. Packet size = {}", data.len());
 
-            let is_from_server = source_addr.unwrap() == self.server_addr;
-            let messages = self.get_wayk_msg(data, is_from_server);
+            let mut server_info = self.server_info.lock().unwrap();
+            let mut client_info = self.client_info.lock().unwrap();
+            let is_from_server = source_addr.unwrap() == server_info.addr;
 
-            let mut server_seq = self.server_seq.lock().unwrap();
-            let mut client_seq = self.client_seq.lock().unwrap();
+            let (messages, source_addr, dest_addr, seq_number, ack_number) =
+                if is_from_server {
+                    (server_info.message_reader.get_next_messages(&data), server_info.addr, client_info.addr, &mut client_info.sequence_number, server_info.sequence_number)
+                }
+                else {
+                    (client_info.message_reader.get_next_messages(&data), client_info.addr, server_info.addr, &mut server_info.sequence_number, client_info.sequence_number)
+                };
 
             for data in messages {
                 for data_chunk in data.chunks(TCP_IP_PACKET_MAX_SIZE) {
-                    // Calculate source/dest address, sequence and acknowledge number
-                    let (source_addr, dest_addr, seq_number, ack_number) =
-                        if is_from_server {
-                            let result = (self.server_addr, self.client_addr, *client_seq, *server_seq);
-                            *client_seq += data_chunk.len() as u32;
-                            result
-                        } else {
-                            let result = (self.client_addr, self.server_addr, *server_seq, *client_seq);
-                            *server_seq += data_chunk.len() as u32;
-                            result
-                        };
 
                     // Build tcpip packet
                     let tcpip_packet =
@@ -316,7 +262,7 @@ mod interceptor {
                                     .source(source_addr.port()).unwrap()
                                     .destination(dest_addr.port()).unwrap()
                                     .acknowledgment(ack_number).unwrap()
-                                    .sequence(seq_number).unwrap()
+                                    .sequence(*seq_number).unwrap()
                                     .flags(Flags::from_bits_truncate(0x0018)).unwrap()
                                     .payload(data_chunk).unwrap()
                                     .build().unwrap()
@@ -328,18 +274,77 @@ mod interceptor {
                             (_, _) => unreachable!(),
                         };
 
-
                     // Write packet in pcap file
                     let since_epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("Time went backwards");
                     let mut pcap_writer = self.pcap_writer.lock().unwrap();
                     if let Err(e) = pcap_writer.write(since_epoch.as_secs() as u32, since_epoch.subsec_micros(), tcpip_packet.as_ref()) {
                         error!("Error writting pcap file: {}", e);
                     }
+
+                    // Update the seq_number
+                    *seq_number += data_chunk.len() as u32;
                 };
             };
 
         }
     }
+
+    trait MessageReader: Send + Sync{
+        fn get_next_messages(&mut self, new_data: &Vec<u8>) -> Vec<Vec<u8>>;
+    }
+
+    #[derive(Clone)]
+    struct WaykMessageReader {
+        data: Vec<u8>,
+    }
+
+    impl WaykMessageReader {
+        pub fn new() -> Self {
+            WaykMessageReader {
+                data: Vec::new()
+            }
+        }
+    }
+
+    impl MessageReader for WaykMessageReader {
+        fn get_next_messages(&mut self, new_data: &Vec<u8>) -> Vec<Vec<u8>> {
+            let mut messages = Vec::new();
+
+            self.data.append(&mut new_data.clone());
+
+            loop {
+                let msg_size = {
+                    let mut cursor = std::io::Cursor::new(&self.data);
+                    if let Ok(header) = cursor.read_u32::<LittleEndian>() {
+                        if header & 0x8000_0000 != 0 {
+                            (header & 0x0000_FFFF) as usize + 4
+                        } else {
+                            (header & 0x7FFF_FFF) as usize + 6
+                        }
+                    }
+                        else {
+                            break;
+                        }
+                };
+
+                if self.data.len() >= msg_size {
+
+                    let drain = self.data.drain(..msg_size);
+                    let mut new_message = Vec::new();
+                    for x in drain {
+                        new_message.push(x);
+                    }
+                    messages.push(new_message);
+                } else {
+                    break;
+                }
+            }
+
+            messages
+        }
+    }
 }
+
+
 
 
