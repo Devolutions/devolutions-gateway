@@ -17,7 +17,8 @@ use jet_proto::{JetPacket, ResponseStatusCode};
 use log::{debug, error, info};
 
 use crate::transport::JetTransport;
-use crate::build_proxy;
+use crate::Proxy;
+use crate::config::Config;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
 
@@ -28,13 +29,15 @@ lazy_static! {
 const ACCEPT_REQUEST_TIMEOUT_SEC: u64 = 5 * 60;
 
 pub struct JetClient {
+    config: Config,
     jet_associations: JetAssociationsMap,
     _executor_handle: TaskExecutor,
 }
 
 impl JetClient {
-    pub fn new(jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
+    pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         JetClient {
+            config,
             jet_associations,
             _executor_handle: executor_handle,
         }
@@ -44,6 +47,7 @@ impl JetClient {
         let msg_reader = JetMsgReader::new(transport.clone());
         let jet_associations = self.jet_associations.clone();
         let executor_handle = self._executor_handle.clone();
+        let config = self.config.clone();
 
         Box::new(msg_reader.and_then(move |msg| {
             if msg.is_accept() {
@@ -52,7 +56,7 @@ impl JetClient {
             } else if msg.is_connect() {
                 let handle_msg = HandleConnectJetMsg::new(transport.clone(), msg, jet_associations);
                 Box::new(handle_msg.and_then(|(t1, t2)| {
-                    build_proxy(t1, t2)
+                    Proxy::new(config).build(t1, t2)
                 })) as Box<Future<Item = (), Error = io::Error> + Send>
             } else {
                 Box::new(err(error_other("Invalid method"))) as Box<Future<Item = (), Error = io::Error> + Send>

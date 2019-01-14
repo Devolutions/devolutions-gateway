@@ -22,6 +22,9 @@ OPTIONS:
     -u, --url <LISTENER_URL>
             An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port> [default:
             tcp://0.0.0.0:8080]
+    -p, --pcap <PCAP_FILENAME>
+            Path of the file where the pcap file will be saved. If not set, no pcap file will be created.
+
     -r, --routing_url <ROUTING_URL>
             An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported :
             tcp and tls. If it is not specified, the JET protocol will be used.
@@ -38,6 +41,11 @@ OPTIONS:
     ```
     $ cargo run -- -r tls://x.x.x.x:4489
     ```
+
+    1. If you want to save the network trafic in a pcap file, you can add the pcap_filename parameter. The command will look to something like this:
+        ```
+        $ cargo run -- -r tls://x.x.x.x:4489 -p c:\waykTraffic.pcap
+        ```
 
 3. On the same host where devolutions-jet is running, open wayk and connect to 127.0.0.1:8080 
     * The connection should start. A dummy certificate will be shown. You can accept it and the wayk connection should start. 
