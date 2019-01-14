@@ -1,4 +1,5 @@
 mod config;
+mod interceptor;
 mod jet_client;
 mod routing_client;
 mod transport;
@@ -14,15 +15,17 @@ use futures::{future, future::ok, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
-use log::{error, info};
+use log::{error, info, warn};
 use native_tls::Identity;
 use url::Url;
 
-use crate::config::Config;
+use crate::config::{Config, Protocol};
+use crate::interceptor::pcap::PcapInterceptor;
+use crate::interceptor::{UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
-use crate::transport::{Transport, JetTransport};
+use crate::transport::{JetTransport, Transport};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -66,11 +69,12 @@ fn main() {
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);
 
+        let config_clone = config.clone();
         let client_fut = if let Some(ref routing_url) = routing_url_opt {
             match routing_url.scheme() {
                 "tcp" => {
                     let transport = TcpTransport::new(conn);
-                    Client::new(routing_url.clone(), executor_handle.clone()).serve(transport)
+                    Client::new(routing_url.clone(), config_clone, executor_handle.clone()).serve(transport)
                 }
                 "tls" => {
                     let routing_url_clone = routing_url.clone();
@@ -81,14 +85,15 @@ fn main() {
                             .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
                             .and_then(move |tls_stream| {
                                 let transport = TcpTransport::new_tls(tls_stream);
-                                Client::new(routing_url_clone, executor_handle_clone).serve(transport)
+                                Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
                     ) as Box<Future<Item = (), Error = io::Error> + Send>
                 }
                 _ => unreachable!(),
             }
         } else {
-            JetClient::new(jet_associations.clone(), executor_handle.clone()).serve(JetTransport::new_tcp(conn))
+            JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone())
+                .serve(JetTransport::new_tcp(conn))
         };
 
         executor_handle.spawn(client_fut.then(move |res| {
@@ -122,48 +127,83 @@ fn set_socket_option(stream: &TcpStream) {
     }
 }
 
-fn build_proxy<T: Transport, U: Transport>(server_transport: T, client_transport: U) -> Box<Future<Item = (), Error = io::Error> + Send> {
-    let jet_sink_server = server_transport.message_sink();
-    let jet_stream_server = server_transport.message_stream();
+struct Proxy {
+    config: Config,
+}
 
-    let jet_sink_client = client_transport.message_sink();
-    let jet_stream_client = client_transport.message_stream();
+impl Proxy {
+    pub fn new(config: Config) -> Self {
+        Proxy { config }
+    }
 
-    // Build future to forward all bytes
-    let f1 = jet_stream_server.forward(jet_sink_client);
-    let f2 = jet_stream_client.forward(jet_sink_server);
+    pub fn build<T: Transport, U: Transport>(
+        &self,
+        server_transport: T,
+        client_transport: U,
+    ) -> Box<Future<Item = (), Error = io::Error> + Send> {
+        let jet_sink_server = server_transport.message_sink();
+        let mut jet_stream_server = server_transport.message_stream();
 
-    Box::new(f1.and_then(|(jet_stream, jet_sink)| {
-        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-        let _ = jet_stream.shutdown();
-        let _ = jet_sink.shutdown();
-        ok((jet_stream, jet_sink))
-    })
-    .join(f2.and_then(|(jet_stream, jet_sink)| {
-        // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-        let _ = jet_stream.shutdown();
-        let _ = jet_sink.shutdown();
-        ok((jet_stream, jet_sink))
-    }))
-    .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
-        let server_addr = jet_stream_1
-            .peer_addr()
-            .map(|addr| addr.to_string())
-            .unwrap_or("unknown".to_string());
-        let client_addr = jet_stream_2
-            .peer_addr()
-            .map(|addr| addr.to_string())
-            .unwrap_or("unknown".to_string());
-        info!(
-            "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-            jet_stream_1.nb_bytes_read(),
-            jet_sink_1.nb_bytes_written(),
-            jet_stream_2.nb_bytes_read(),
-            jet_sink_2.nb_bytes_written(),
-            server = server_addr,
-            client = client_addr
-        );
+        let jet_sink_client = client_transport.message_sink();
+        let mut jet_stream_client = client_transport.message_stream();
 
-        ok(())
-    }))
+        if let Some(pcap_filename) = self.config.pcap_filename() {
+            let mut interceptor = PcapInterceptor::new(
+                jet_stream_server.peer_addr().unwrap(),
+                jet_stream_client.peer_addr().unwrap(),
+                &pcap_filename,
+            );
+
+            match self.config.protocol() {
+                Protocol::WAYK => {
+                    info!("WaykMessageReader will be used to interpret application protocol.");
+                    interceptor.set_message_reader(WaykMessageReader::get_messages);
+                },
+                Protocol::UNKNOWN => {
+                    warn!("Protocol is unknown. Data received will not be split to get application message.");
+                    interceptor.set_message_reader(UnknownMessageReader::get_messages)
+                },
+            }
+
+            jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
+            jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
+        }
+
+        // Build future to forward all bytes
+        let f1 = jet_stream_server.forward(jet_sink_client);
+        let f2 = jet_stream_client.forward(jet_sink_server);
+
+        Box::new(f1.and_then(|(jet_stream, jet_sink)| {
+            // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
+            let _ = jet_stream.shutdown();
+            let _ = jet_sink.shutdown();
+            ok((jet_stream, jet_sink))
+        })
+        .join(f2.and_then(|(jet_stream, jet_sink)| {
+            // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
+            let _ = jet_stream.shutdown();
+            let _ = jet_sink.shutdown();
+            ok((jet_stream, jet_sink))
+        }))
+        .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
+            let server_addr = jet_stream_1
+                .peer_addr()
+                .map(|addr| addr.to_string())
+                .unwrap_or("unknown".to_string());
+            let client_addr = jet_stream_2
+                .peer_addr()
+                .map(|addr| addr.to_string())
+                .unwrap_or("unknown".to_string());
+            info!(
+                "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+                jet_stream_1.nb_bytes_read(),
+                jet_sink_1.nb_bytes_written(),
+                jet_stream_2.nb_bytes_read(),
+                jet_sink_2.nb_bytes_written(),
+                server = server_addr,
+                client = client_addr
+            );
+            ok(())
+        }))
+    }
 }

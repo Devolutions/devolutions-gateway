@@ -11,6 +11,7 @@ use tokio_tls::TlsStream;
 use url::Url;
 
 use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
+use crate::interceptor::PacketInterceptor;
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -25,7 +26,7 @@ impl TcpStreamWrapper {
         }
     }
 
-    pub fn shutdown(&self) -> std::io::Result<()>  {
+    pub fn shutdown(&self) -> std::io::Result<()> {
         match self {
             TcpStreamWrapper::Plain(stream) => TcpStream::shutdown(stream, std::net::Shutdown::Both),
             TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().shutdown(std::net::Shutdown::Both),
@@ -195,6 +196,7 @@ impl Transport for TcpTransport {
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: u64,
+    packet_interceptor: Option<Box<PacketInterceptor>>,
 }
 
 impl TcpJetStream {
@@ -202,6 +204,7 @@ impl TcpJetStream {
         TcpJetStream {
             stream,
             nb_bytes_read: 0,
+            packet_interceptor: None,
         }
     }
 }
@@ -212,7 +215,7 @@ impl Stream for TcpJetStream {
 
     fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
         if let Ok(ref mut stream) = self.stream.try_lock() {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = [0u8; 65535];
             match stream.poll_read(&mut buffer) {
                 Ok(Async::Ready(0)) => Ok(Async::Ready(None)),
                 Ok(Async::Ready(len)) => {
@@ -220,6 +223,11 @@ impl Stream for TcpJetStream {
                     v.truncate(len);
                     self.nb_bytes_read += len as u64;
                     debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+
+                    if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                        interceptor.on_new_packet(stream.peer_addr().ok(), &v);
+                    }
+
                     Ok(Async::Ready(Some(v)))
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
@@ -247,6 +255,10 @@ impl JetStream for TcpJetStream {
 
     fn nb_bytes_read(&self) -> u64 {
         self.nb_bytes_read
+    }
+
+    fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>) {
+        self.packet_interceptor = Some(interceptor);
     }
 }
 
@@ -318,7 +330,7 @@ impl Sink for TcpJetSink {
 }
 
 impl JetSink for TcpJetSink {
-    fn shutdown(&self) -> std::io::Result<()>{
+    fn shutdown(&self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
         stream.shutdown()
     }
