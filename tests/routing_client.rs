@@ -2,7 +2,6 @@ extern crate byteorder;
 extern crate jet_proto;
 extern crate uuid;
 
-use jet_proto::{JetMethod, JetPacket};
 use std::env;
 use std::io::{Read, Write};
 use std::net::SocketAddr;

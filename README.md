@@ -24,7 +24,6 @@ OPTIONS:
             tcp://0.0.0.0:8080]
     -p, --pcap <PCAP_FILENAME>
             Path of the file where the pcap file will be saved. If not set, no pcap file will be created.
-
     -r, --routing_url <ROUTING_URL>
             An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported :
             tcp and tls. If it is not specified, the JET protocol will be used.
