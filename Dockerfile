@@ -20,6 +20,7 @@ LABEL maintainer "Devolutions Inc."
 WORKDIR /opt/devolutions-jet
 
 RUN apt-get update
+RUN apt-get install -y --no-install-recommends libssl1.1
 RUN rm -rf /var/lib/apt/lists/*
 
 COPY --from=rust-build /opt/devolutions-jet/target/release/devolutions-jet .
