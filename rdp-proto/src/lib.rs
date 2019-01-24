@@ -14,6 +14,5 @@ bitflags! {
         const Hybrid = 0x00000002;
         const RDSTLS = 0x00000004;
         const HybridEx = 0x00000008;
-        const NLA = Self::Hybrid.bits | Self::SSL.bits;
     }
 }

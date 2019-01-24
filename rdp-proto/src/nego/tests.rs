@@ -7,7 +7,7 @@ fn cookie_is_written_to_request() {
     let mut buff = Vec::new();
     let settings = Settings {
         username: "a".to_string(),
-        security_protocol: SecurityProtocol::NLA,
+        security_protocol: SecurityProtocol::Hybrid | SecurityProtocol::SSL,
     };
     let expected = [
         0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x61,
@@ -23,11 +23,11 @@ fn cookie_is_written_to_request() {
 }
 
 #[test]
-fn rdp_negotiation_data_is_written_to_request() {
+fn rdp_negotiation_data_is_written_to_request_if_nla_security() {
     let mut buff = Vec::new();
     let settings = Settings {
         username: "a".to_string(),
-        security_protocol: SecurityProtocol::NLA,
+        security_protocol: SecurityProtocol::Hybrid | SecurityProtocol::SSL,
     };
     let expected = [0x01, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00];
 
@@ -55,7 +55,7 @@ fn tpkt_and_tpdu_headers_are_written_to_request() {
     let mut buff = Vec::new();
     let settings = Settings {
         username: "User".to_string(),
-        security_protocol: SecurityProtocol::NLA,
+        security_protocol: SecurityProtocol::Hybrid | SecurityProtocol::SSL,
     };
     let expected = [0x03, 0x00, 0x00, 0x2A, 0x25, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00];
 
@@ -74,7 +74,7 @@ fn negotiation_request_is_written_correclty() {
     let mut buff = Vec::new();
     let settings = Settings {
         username: "User".to_string(),
-        security_protocol: SecurityProtocol::NLA,
+        security_protocol: SecurityProtocol::Hybrid | SecurityProtocol::SSL,
     };
 
     send_negotiation_request(&mut buff, &settings).unwrap();
@@ -150,7 +150,7 @@ fn tpdu_header_non_data_is_written_correctly() {
     ];
     let mut buff = Vec::new();
 
-    write_tpdu_header(&mut buff, length, code).unwrap();
+    write_tpdu_header(&mut buff, length, code, 0).unwrap();
 
     assert_eq!(buff, expected);
 }
@@ -166,7 +166,7 @@ fn tpdu_header_data_is_written_correctly() {
     ];
     let mut buff = Vec::new();
 
-    write_tpdu_header(&mut buff, length, code).unwrap();
+    write_tpdu_header(&mut buff, length, code, 0).unwrap();
 
     assert_eq!(buff, expected);
 }
@@ -233,18 +233,21 @@ fn parse_tdpu_data_header_advance_stream_position() {
 
 #[test]
 fn negotiation_response_is_processed_correctly() {
+    let expected_flags = NegotiationResponseFlags::all();
+    #[rustfmt::skip]
     let stream = [
         0x03, 0x00, 0x00, 0x13, // tpkt header
         0x0E, 0xD0, 0x00, 0x00, 0x12, 0x34, 0x00, // tpdu header
         0x02, // negotiation message
-        0x1F, // flags
+        expected_flags.bits(),
         0x08, 0x00, // length
         0x02, 0x00, 0x00, 0x00, // selected protocol
     ];
 
-    let selected_protocol = receive_nego_response(&mut stream.as_ref()).unwrap();
+    let (selected_protocol, flags) = receive_nego_response(&mut stream.as_ref()).unwrap();
 
     assert_eq!(selected_protocol, SecurityProtocol::Hybrid);
+    assert_eq!(flags, expected_flags);
 }
 
 #[test]
@@ -313,4 +316,158 @@ fn negotiation_failure_in_repsonse_results_in_error() {
         Err(_) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
+}
+
+#[test]
+fn cookie_in_request_is_parsed_correctly() {
+    let request = [
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72, 0x0D, 0x0A, 0xFF, 0xFF,
+    ];
+
+    let cookie = parse_request_cookie(&mut request.as_ref()).unwrap();
+
+    assert_eq!(cookie, "User");
+}
+
+#[test]
+fn parse_request_cookie_on_non_cookie_results_in_error() {
+    let request = [
+        0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x63, 0x6f, 0x6f, 0x6b, 0x69, 0x65, 0x0F, 0x42, 0x73, 0x65, 0x72, 0x0D,
+        0x0A, 0xFF, 0xFF,
+    ];
+
+    match parse_request_cookie(&mut request.as_ref()) {
+        Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
+        Err(_) => panic!("wrong error type"),
+        _ => panic!("error expected"),
+    }
+}
+
+#[test]
+fn parse_request_cookie_on_unterminated_cookie_results_in_error() {
+    let request = [
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72,
+    ];
+
+    match parse_request_cookie(&mut request.as_ref()) {
+        Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => (),
+        Err(_) => panic!("wrong error type"),
+        _ => panic!("error expected"),
+    }
+}
+
+#[test]
+fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
+    let expected_flags = NegotiationRequestFlags::RestrictedAdminModeRequied
+        | NegotiationRequestFlags::RedirectedAuthenticationModeRequied;
+    #[rustfmt::skip]
+    let request = [
+        0x03, 0x00, 0x00, 0x2A, // tpkt header
+        0x25, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, // tpdu header
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
+        0x01, // request code
+        expected_flags.bits(),
+        0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
+    ];
+
+    let (cookie, flags, protocol) = parse_negotiation_request(&mut request.as_ref()).unwrap();
+
+    assert_eq!(cookie, "User");
+    assert_eq!(flags, expected_flags);
+    assert_eq!(protocol, SecurityProtocol::Hybrid | SecurityProtocol::SSL);
+}
+
+#[test]
+fn negotiation_request_without_negotiation_data_is_parsed_correctly() {
+    let request = [
+        0x03, 0x00, 0x00, 0x22, // tpkt header
+        0x1D, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, // tpdu header
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
+    ];
+
+    let (cookie, flags, protocol) = parse_negotiation_request(&mut request.as_ref()).unwrap();
+
+    assert_eq!(cookie, "User");
+    assert_eq!(flags, NegotiationRequestFlags::default());
+    assert_eq!(protocol, SecurityProtocol::RDP);
+}
+
+#[test]
+fn negotiation_request_with_invalid_x224_code_results_in_error() {
+    let request = [
+        0x03, 0x00, 0x00, 0x2A, // tpkt header
+        0x25, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, // tpdu header
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
+        0x01, // request code
+        0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
+    ];
+
+    match parse_negotiation_request(&mut request.as_ref()) {
+        Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
+        Err(_) => panic!("wrong error type"),
+        _ => panic!("error expected"),
+    }
+}
+
+#[test]
+fn negotiation_request_with_invalid_negotiation_code_results_in_error() {
+    let request = [
+        0x03, 0x00, 0x00, 0x2A, // tpkt header
+        0x25, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, // tpdu header
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
+        0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
+        0x03, // request code
+        0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
+    ];
+
+    match parse_negotiation_request(&mut request.as_ref()) {
+        Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
+        Err(_) => panic!("wrong error type"),
+        _ => panic!("error expected"),
+    }
+}
+
+#[test]
+fn negotiation_response_is_written_correctly() {
+    let flags = NegotiationResponseFlags::all();
+    #[rustfmt::skip]
+    let expected = [
+        0x03, 0x00, 0x00, 0x13, // tpkt header
+        0x0E, 0xD0, 0x00, 0x00, 0x12, 0x34, 0x00, // tpdu header
+        0x02, // negotiation message
+        flags.bits(),
+        0x08, 0x00, // length
+        0x02, 0x00, 0x00, 0x00, // selected protocol
+    ];
+
+    let mut buffer = vec![0; expected.len()];
+
+    write_negotiation_response(&mut buffer.as_mut_slice(), flags, SecurityProtocol::Hybrid, 0x3412).unwrap();
+
+    assert_eq!(buffer, expected);
+}
+
+#[test]
+fn negotiation_error_is_written_correclty() {
+    let flags = NegotiationResponseFlags::all();
+    #[rustfmt::skip]
+    let expected = [
+        0x03, 0x00, 0x00, 0x13, // tpkt header
+        0x0E, 0xD0, 0x00, 0x00, 0x12, 0x34, 0x00, // tpdu header
+        0x03, // negotiation message
+        flags.bits(),
+        0x08, 0x00, // length
+        0x02, 0x00, 0x00, 0x00, // selected protocol
+    ];
+
+    let mut buffer = vec![0; expected.len()];
+
+    write_negotiation_response_error(&mut buffer.as_mut_slice(), flags, SecurityProtocol::Hybrid, 0x3412).unwrap();
+
+    assert_eq!(buffer, expected);
 }

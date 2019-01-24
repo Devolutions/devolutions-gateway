@@ -9,6 +9,7 @@ use std::{
     io::{self, prelude::*},
 };
 
+use bitflags::bitflags;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -55,40 +56,51 @@ enum X224TPDUType {
     Error = 0x70,
 }
 
-fn send_negotiation_request(mut transport: impl io::Write, settings: &Settings) -> io::Result<u64> {
-    let mut buffer = io::Cursor::new(Vec::with_capacity(512));
-
-    buffer.seek(io::SeekFrom::Start(TPDU_CONNECTION_REQUEST_LENGTH as u64))?;
-    write!(buffer, "Cookie: mstshash={}", settings.username)?;
-    let cr = 0x0D;
-    buffer.write_u8(cr)?;
-    let lf = 0x0A;
-    buffer.write_u8(lf)?;
-
-    if settings.security_protocol.bits() > SecurityProtocol::RDP.bits() {
-        buffer.write_u8(NegotiationMessage::NegotiationRequest.to_u8().unwrap())?;
-        let restricted_admin_mode_required = 0;
-        buffer.write_u8(restricted_admin_mode_required)?;
-        buffer.write_u16::<LittleEndian>(RDP_NEG_DATA_LENGTH)?;
-        buffer.write_u32::<LittleEndian>(SecurityProtocol::NLA.bits())?;
+bitflags! {
+    /// https://msdn.microsoft.com/en-us/library/cc240500.aspx
+    #[derive(Default)]
+    struct NegotiationRequestFlags: u8 {
+        const RestrictedAdminModeRequied = 0x01;
+        const RedirectedAuthenticationModeRequied = 0x02;
+        const CorrelationInfoPresent = 0x08;
     }
+}
 
-    let length = buffer.position();
-    buffer.seek(io::SeekFrom::Start(0))?;
-    write_tpkt_header(&mut buffer, length as u16)?;
-    write_tpdu_header(
-        &mut buffer,
-        (length - TPKT_HEADER_LENGTH as u64) as u8,
-        X224TPDUType::ConnectionRequest,
-    )?;
+bitflags! {
+    /// https://msdn.microsoft.com/en-us/library/cc240506.aspx
+    #[derive(Default)]
+    struct NegotiationResponseFlags: u8 {
+        const ExtendedClientDataSupported = 0x01;
+        const DynvcGfxProtocolSupported = 0x02;
+        const RdpNegRspReserved = 0x04;
+        const RestrictedAdminModeSupported = 0x08;
+        const RedirectedAuthenticationModeSupported = 0x10;
+    }
+}
 
-    transport.write_all(buffer.into_inner().as_slice())?;
-    transport.flush()?;
+fn send_negotiation_request(transport: impl io::Write, settings: &Settings) -> io::Result<u64> {
+    let length = write_tpkt_tpdu_message(transport, X224TPDUType::ConnectionRequest, 0, |buffer| {
+        write!(buffer, "Cookie: mstshash={}", settings.username)?;
+        buffer.write_u8('\r' as u8)?;
+        buffer.write_u8('\n' as u8)?;
+
+        if settings.security_protocol.bits() > SecurityProtocol::RDP.bits() {
+            buffer.write_u8(NegotiationMessage::NegotiationRequest.to_u8().unwrap())?;
+            let restricted_admin_mode_required = 0;
+            buffer.write_u8(restricted_admin_mode_required)?;
+            buffer.write_u16::<LittleEndian>(RDP_NEG_DATA_LENGTH)?;
+            buffer.write_u32::<LittleEndian>(settings.security_protocol.bits())?;
+        }
+
+        Ok(())
+    })?;
 
     Ok(length)
 }
 
-fn receive_nego_response(mut stream: impl io::Read) -> Result<SecurityProtocol, NegotiationError> {
+fn receive_nego_response(
+    mut stream: impl io::Read,
+) -> Result<(SecurityProtocol, NegotiationResponseFlags), NegotiationError> {
     let mut buffer = Vec::with_capacity(512);
     read_tpkt_pdu(&mut buffer, &mut stream)?;
     let mut slice = buffer.as_slice();
@@ -114,7 +126,12 @@ fn receive_nego_response(mut stream: impl io::Read) -> Result<SecurityProtocol, 
             "invalid negotiation response code",
         ))
     })?;
-    let _flags = slice.read_u8()?;
+    let flags = NegotiationResponseFlags::from_bits(slice.read_u8()?).ok_or_else(|| {
+        NegotiationError::IOError(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid negotiation response flags",
+        ))
+    })?;
     let _length = slice.read_u16::<LittleEndian>()?;
 
     if neg_resp == NegotiationMessage::NegotiationResponse {
@@ -124,7 +141,7 @@ fn receive_nego_response(mut stream: impl io::Read) -> Result<SecurityProtocol, 
                 "invalid security protocol code",
             ))
         })?;
-        Ok(selected_protocol)
+        Ok((selected_protocol, flags))
     } else if neg_resp == NegotiationMessage::NegotiationFailure {
         let error = slice.read_u32::<LittleEndian>()?;
         Err(NegotiationError::NegotiationFailure(error))
@@ -134,6 +151,144 @@ fn receive_nego_response(mut stream: impl io::Read) -> Result<SecurityProtocol, 
             "invalid negotiation response code",
         )))
     }
+}
+
+fn parse_request_cookie(mut stream: impl io::BufRead) -> io::Result<String> {
+    let mut start = String::new();
+    stream.by_ref().take(17).read_to_string(&mut start)?;
+
+    if start == "Cookie: mstshash=" {
+        let mut cookie = String::new();
+        stream.read_line(&mut cookie)?;
+        match cookie.pop() {
+            Some('\n') => (),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "cookie message uncorrectly terminated",
+                ));
+            }
+        }
+        cookie.pop(); // cr
+
+        Ok(cookie)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid or unsuppored cookie message",
+        ))
+    }
+}
+
+fn parse_negotiation_request(
+    mut stream: impl io::Read,
+) -> io::Result<(String, NegotiationRequestFlags, SecurityProtocol)> {
+    let mut buffer = Vec::with_capacity(512);
+    read_tpkt_pdu(&mut buffer, &mut stream)?;
+    let mut slice = buffer.as_slice();
+    let (_length, code) = parse_tdpu_header(&mut slice)?;
+
+    if code != X224TPDUType::ConnectionRequest {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid connection request code",
+        ));
+    }
+
+    let cookie = parse_request_cookie(&mut slice)?;
+
+    if slice.len() >= 8 {
+        let neg_req = NegotiationMessage::from_u8(slice.read_u8()?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid negotiation request code"))?;
+        if neg_req != NegotiationMessage::NegotiationRequest {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid negotiation request code",
+            ));
+        }
+
+        let flags = NegotiationRequestFlags::from_bits(slice.read_u8()?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid negotiation request flags"))?;
+        let _length = slice.read_u16::<LittleEndian>()?;
+        let protocol = SecurityProtocol::from_bits(slice.read_u32::<LittleEndian>()?)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid security protocol code"))?;
+
+        Ok((cookie, flags, protocol))
+    } else {
+        Ok((cookie, NegotiationRequestFlags::default(), SecurityProtocol::RDP))
+    }
+}
+
+fn write_negotiation_response(
+    transport: impl io::Write,
+    flags: NegotiationResponseFlags,
+    protocol: SecurityProtocol,
+    src_ref: u16,
+) -> io::Result<u64> {
+    let length = write_tpkt_tpdu_message(transport, X224TPDUType::ConnectionConfirm, src_ref, |buffer| {
+        write_negotiation_data(
+            buffer,
+            NegotiationMessage::NegotiationResponse,
+            flags.bits(),
+            protocol.bits(),
+        )
+    })?;
+
+    Ok(length)
+}
+
+fn write_negotiation_response_error(
+    transport: impl io::Write,
+    flags: NegotiationResponseFlags,
+    protocol: SecurityProtocol,
+    src_ref: u16,
+) -> io::Result<u64> {
+    let length = write_tpkt_tpdu_message(transport, X224TPDUType::ConnectionConfirm, src_ref, |buffer| {
+        write_negotiation_data(
+            buffer,
+            NegotiationMessage::NegotiationFailure,
+            flags.bits(),
+            protocol.bits() & !0x80000000,
+        )
+    })?;
+
+    Ok(length)
+}
+
+fn write_negotiation_data(
+    cursor: &mut io::Cursor<Vec<u8>>,
+    message: NegotiationMessage,
+    flags: u8,
+    data: u32,
+) -> io::Result<()> {
+    cursor.write_u8(message.to_u8().unwrap())?;
+    cursor.write_u8(flags)?;
+    cursor.write_u16::<LittleEndian>(RDP_NEG_DATA_LENGTH)?;
+    cursor.write_u32::<LittleEndian>(data)?;
+
+    Ok(())
+}
+
+fn write_tpkt_tpdu_message(
+    mut transport: impl io::Write,
+    code: X224TPDUType,
+    src_ref: u16,
+    callback: impl Fn(&mut io::Cursor<Vec<u8>>) -> io::Result<()>,
+) -> io::Result<u64> {
+    let mut buffer = io::Cursor::new(Vec::with_capacity(512));
+
+    buffer.seek(io::SeekFrom::Start(TPDU_CONNECTION_REQUEST_LENGTH as u64))?;
+    callback(&mut buffer)?;
+    let length = buffer.position();
+    buffer.seek(io::SeekFrom::Start(0))?;
+
+    write_tpkt_header(&mut buffer, length as u16)?;
+    write_tpdu_header(&mut buffer, (length - TPKT_HEADER_LENGTH as u64) as u8, code, src_ref)?;
+
+    transport.write_all(buffer.into_inner().as_slice())?;
+    transport.flush()?;
+
+    Ok(length)
 }
 
 fn write_tpkt_header(mut stream: impl io::Write, length: u16) -> io::Result<()> {
@@ -166,7 +321,7 @@ fn read_tpkt_pdu(buffer: &mut Vec<u8>, mut stream: impl io::Read) -> io::Result<
     }
 }
 
-fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType) -> io::Result<()> {
+fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType, src_ref: u16) -> io::Result<()> {
     // tpdu header length field doesn't include the length of the length field
     stream.write_u8(length - 1)?;
     stream.write_u8(code.to_u8().unwrap())?;
@@ -177,7 +332,6 @@ fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType)
     } else {
         let dst_ref = 0;
         stream.write_u16::<LittleEndian>(dst_ref)?;
-        let src_ref = 0;
         stream.write_u16::<LittleEndian>(src_ref)?;
         let class = 0;
         stream.write_u8(class)?;
