@@ -1,18 +1,9 @@
+// FromPrimitive and ToPrimitive causes clippy error, so we disable it until
+// https://github.com/rust-num/num-derive/issues/20 is fixed
+#![cfg_attr(feature = "cargo-clippy", allow(clippy::useless_attribute))]
+
 mod nego;
+mod tpdu;
 
-use bitflags::bitflags;
-
-struct Settings {
-    pub username: String,
-    pub security_protocol: SecurityProtocol,
-}
-
-bitflags! {
-    struct SecurityProtocol: u32 {
-        const RDP = 0x00000000;
-        const SSL = 0x00000001;
-        const Hybrid = 0x00000002;
-        const RDSTLS = 0x00000004;
-        const HybridEx = 0x00000008;
-    }
-}
+pub use crate::nego::*;
+pub use crate::tpdu::*;

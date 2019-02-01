@@ -12,6 +12,7 @@ use url::Url;
 
 use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 use crate::interceptor::PacketInterceptor;
+use crate::utils::url_to_socket_arr;
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -148,27 +149,12 @@ impl Transport for TcpTransport {
     where
         Self: Sized,
     {
+        let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {
             "tcp" => {
-                let mut addr = String::new();
-                let host = url.host_str().unwrap().to_string();
-                let port = url.port().map(|port| port.to_string()).unwrap();
-                addr.push_str(&host);
-                addr.push_str(":");
-                addr.push_str(&port);
-                let socket_addr = addr.parse::<SocketAddr>().unwrap();
-
                 Box::new(TcpStream::connect(&socket_addr).map(|stream| TcpTransport::new(stream))) as JetFuture<Self>
             }
             "tls" => {
-                let mut addr = String::new();
-                let host = url.host_str().unwrap().to_string();
-                let port = url.port().map(|port| port.to_string()).unwrap();
-                addr.push_str(&host);
-                addr.push_str(":");
-                addr.push_str(&port);
-                let socket_addr = addr.parse::<SocketAddr>().unwrap();
-
                 let socket = TcpStream::connect(&socket_addr);
                 let cx = TlsConnector::builder()
                     .danger_accept_invalid_certs(true)

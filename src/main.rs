@@ -2,7 +2,9 @@ mod config;
 mod interceptor;
 mod jet_client;
 mod routing_client;
+mod rdp;
 mod transport;
+mod utils;
 
 use std::collections::HashMap;
 use std::io;
@@ -24,6 +26,7 @@ use crate::interceptor::pcap::PcapInterceptor;
 use crate::interceptor::{UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::routing_client::Client;
+use crate::rdp::RdpClient;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 
@@ -89,7 +92,10 @@ fn main() {
                             }),
                     ) as Box<Future<Item = (), Error = io::Error> + Send>
                 }
-                _ => unreachable!(),
+                "rdp" => {
+                    RdpClient::new(routing_url.clone(), executor_handle.clone()).serve(conn)
+                }
+                scheme => panic!("Unsupported routing url scheme {}", scheme),
             }
         } else {
             JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone())
