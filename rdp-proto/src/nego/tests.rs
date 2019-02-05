@@ -197,7 +197,7 @@ fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
         0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
     ];
 
-    let (cookie, flags, protocol) =
+    let (cookie, protocol, flags) =
         parse_negotiation_request(X224TPDUType::ConnectionRequest, &mut request.as_ref()).unwrap();
 
     assert_eq!(cookie, "User");
@@ -212,7 +212,7 @@ fn negotiation_request_without_negotiation_data_is_parsed_correctly() {
         0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
     ];
 
-    let (cookie, flags, protocol) =
+    let (cookie, protocol, flags) =
         parse_negotiation_request(X224TPDUType::ConnectionRequest, &mut request.as_ref()).unwrap();
 
     assert_eq!(cookie, "User");

@@ -115,7 +115,7 @@ pub fn write_negotiation_request(
 pub fn parse_negotiation_request(
     code: X224TPDUType,
     mut slice: &[u8],
-) -> io::Result<(String, NegotiationRequestFlags, SecurityProtocol)> {
+) -> io::Result<(String, SecurityProtocol, NegotiationRequestFlags)> {
     if code != X224TPDUType::ConnectionRequest {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -141,9 +141,9 @@ pub fn parse_negotiation_request(
         let protocol = SecurityProtocol::from_bits(slice.read_u32::<LittleEndian>()?)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid security protocol code"))?;
 
-        Ok((cookie, flags, protocol))
+        Ok((cookie, protocol, flags))
     } else {
-        Ok((cookie, NegotiationRequestFlags::default(), SecurityProtocol::RDP))
+        Ok((cookie, SecurityProtocol::RDP, NegotiationRequestFlags::default()))
     }
 }
 
