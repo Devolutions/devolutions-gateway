@@ -61,7 +61,7 @@ pub fn sizeof_integer(value: u32) -> u16 {
         3
     } else if value < 0x8000 {
         4
-    } else if value < 0x800000 {
+    } else if value < 0x800_000 {
         5
     } else {
         6
@@ -135,13 +135,11 @@ pub fn read_application_tag(mut stream: impl io::Read, tagnum: u8) -> io::Result
                 "invalid application tag identifier",
             ));
         }
-    } else {
-        if identifier != Class::Application as u8 | Pc::Construct as u8 | (TAG_MASK & tagnum) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "invalid application tag identifier",
-            ));
-        }
+    } else if identifier != Class::Application as u8 | Pc::Construct as u8 | (TAG_MASK & tagnum) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid application tag identifier",
+        ));
     }
 
     read_length(stream)
@@ -186,7 +184,7 @@ pub fn write_integer(mut stream: impl io::Write, value: u32) -> io::Result<usize
         stream.write_u16::<BigEndian>(value as u16)?;
 
         Ok(4)
-    } else if value < 0x800000 {
+    } else if value < 0x800_000 {
         write_length(&mut stream, 3)?;
         stream.write_u8((value >> 16) as u8)?;
         stream.write_u16::<BigEndian>((value & 0xFFFF) as u16)?;
@@ -205,16 +203,16 @@ pub fn read_integer(mut stream: impl io::Read) -> io::Result<u64> {
     let length = read_length(&mut stream)?;
 
     if length == 1 {
-        stream.read_u8().map(|v| u64::from(v))
+        stream.read_u8().map(u64::from)
     } else if length == 2 {
-        stream.read_u16::<BigEndian>().map(|v| u64::from(v))
+        stream.read_u16::<BigEndian>().map(u64::from)
     } else if length == 3 {
         let a = stream.read_u8()?;
         let b = stream.read_u16::<BigEndian>()?;
 
         Ok(u64::from(b) + (u64::from(a) << 16))
     } else if length == 4 {
-        stream.read_u32::<BigEndian>().map(|v| u64::from(v))
+        stream.read_u32::<BigEndian>().map(u64::from)
     } else if length == 8 {
         stream.read_u64::<BigEndian>()
     } else {
@@ -316,7 +314,7 @@ fn read_length(mut stream: impl io::Read) -> io::Result<u16> {
         let len = byte & !0x80;
 
         if len == 1 {
-            stream.read_u8().map(|v| u16::from(v))
+            stream.read_u8().map(u16::from)
         } else if len == 2 {
             stream.read_u16::<BigEndian>()
         } else {
