@@ -1,6 +1,3 @@
-// TODO: remove after
-#![allow(unused)]
-
 #[cfg(test)]
 mod tests;
 
@@ -9,12 +6,14 @@ use std::io;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 #[repr(u8)]
+#[allow(unused)]
 pub enum Pc {
     Primitive = 0x00,
     Construct = 0x20,
 }
 
 #[repr(u8)]
+#[allow(unused)]
 enum Class {
     Universal = 0x00,
     Application = 0x40,
@@ -23,13 +22,14 @@ enum Class {
 }
 
 #[repr(u8)]
+#[allow(unused)]
 enum Tag {
     Mask = 0x1F,
     Boolean = 0x01,
     Integer = 0x02,
     BitString = 0x03,
     OctetString = 0x04,
-    ObjectIdentidier = 0x06,
+    ObjectIdentifier = 0x06,
     Enumerated = 0x0A,
     Sequence = 0x10,
 }
@@ -329,5 +329,11 @@ fn read_length(mut stream: impl io::Read) -> io::Result<u16> {
 }
 
 fn sizeof_length(length: u16) -> u16 {
-    1 + length / 128
+    if length > 0xff {
+        3
+    } else if length > 0x7f {
+        2
+    } else {
+        1
+    }
 }

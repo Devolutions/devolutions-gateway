@@ -350,7 +350,10 @@ fn read_integer_is_correct_with_1_byte_integer() {
 #[test]
 fn read_integer_returns_error_on_incorrect_len() {
     let buf = vec![0x02, 0x06, 0x79];
-    assert_eq!(read_integer(&mut buf.as_slice()).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    assert_eq!(
+        read_integer(&mut buf.as_slice()).unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
 }
 
 #[test]
@@ -368,4 +371,11 @@ fn write_universal_tag_construct_enumerated_is_correct() {
         1
     );
     assert_eq!(buf, vec![0x2A]);
+}
+
+#[test]
+fn sizeof_length_with_long_len() {
+    let len = 625;
+    let expected = 3;
+    assert_eq!(sizeof_length(len), expected);
 }
