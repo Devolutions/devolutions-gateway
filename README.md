@@ -1,5 +1,8 @@
 # devolutions-jet
 
+[![Build Status](https://travis-ci.com/vaffeine/devolutions-jet.svg?token=FxErzCAno8oL7CSUGoD1&branch=rdp)](https://travis-ci.com/vaffeine/devolutions-jet)
+[![codecov](https://codecov.io/gh/vaffeine/devolutions-jet/branch/rdp/graph/badge.svg?token=eXgEoo0BnD)](https://codecov.io/gh/vaffeine/devolutions-jet)
+
 A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
 
 Use `cargo run` to build and run devolutions-jet locally with default options.
