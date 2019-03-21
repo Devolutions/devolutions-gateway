@@ -5,7 +5,9 @@
 mod ber;
 mod encryption;
 mod nego;
+mod sspi;
 mod tpdu;
 
 pub use crate::nego::*;
+pub use crate::sspi::{Credentials, SspiError, SspiErrorType};
 pub use crate::tpdu::*;
