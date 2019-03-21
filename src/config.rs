@@ -3,7 +3,7 @@ use clap::{crate_name, crate_version, App, Arg};
 #[derive(Clone)]
 pub enum Protocol {
     WAYK,
-    UNKNOWN
+    UNKNOWN,
 }
 
 #[derive(Clone)]
@@ -11,7 +11,8 @@ pub struct Config {
     listener_url: String,
     routing_url: Option<String>,
     pcap_filename: Option<String>,
-    protocol: Protocol
+    protocol: Protocol,
+    identities_filename: Option<String>,
 }
 
 impl Config {
@@ -29,6 +30,10 @@ impl Config {
 
     pub fn protocol(&self) -> &Protocol {
         &self.protocol
+    }
+
+    pub fn identities_filename(&self) -> Option<String> {
+        self.identities_filename.clone()
     }
 
     pub fn init() -> Self {
@@ -78,6 +83,16 @@ impl Config {
                     .takes_value(true)
                     .possible_values(&["wayk"])
                     .empty_values(false)
+            )
+            .arg(
+                Arg::with_name("identities-file")
+                    .short("i")
+                    .long("identities_file")
+                    .value_name("IDENTITIES_FILE")
+                    .help("A JSON-file with proxy credentials and a list of target's credentials")
+                    .long_help("A JSON-file with proxy credentials and a list of target's credentials. Every credential must consist of 'username' and 'password' fields with a string, and optional field 'domain', which also a string if it is present (otherwise - null). The proxy object must be present with a 'proxy' name, the list of targets with a 'targets' name and a list of Credentials in the content.")
+                    .takes_value(true)
+                    .empty_values(false),
             );
 
         let matches = cli_app.get_matches();
@@ -95,12 +110,16 @@ impl Config {
             _ => Protocol::UNKNOWN,
         };
 
+        let identities_filename = matches
+            .value_of("identities-file")
+            .map(|identities_filename| identities_filename.to_string());
 
         Config {
             listener_url,
             routing_url,
             pcap_filename,
             protocol,
+            identities_filename,
         }
     }
 }

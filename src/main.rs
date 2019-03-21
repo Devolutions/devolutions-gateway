@@ -1,10 +1,11 @@
+#[macro_use]
+mod utils;
 mod config;
 mod interceptor;
 mod jet_client;
-mod routing_client;
 mod rdp;
+mod routing_client;
 mod transport;
-mod utils;
 
 use std::collections::HashMap;
 use std::io;
@@ -14,21 +15,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{future, future::ok, Future, Stream};
+use native_tls::Identity;
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
 use log::{error, info, warn};
-use native_tls::Identity;
 use url::Url;
 
 use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
 use crate::interceptor::{UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
-use crate::routing_client::Client;
 use crate::rdp::RdpClient;
+use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
+use crate::utils::get_tls_pubkey;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -65,6 +67,7 @@ fn main() {
 
     // Create the TLS acceptor.
     let der = include_bytes!("cert/certificate.p12");
+    let tls_public_key = get_tls_pubkey(der.as_ref(), "").unwrap();
     let cert = Identity::from_pkcs12(der, "").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
@@ -92,9 +95,14 @@ fn main() {
                             }),
                     ) as Box<Future<Item = (), Error = io::Error> + Send>
                 }
-                "rdp" => {
-                    RdpClient::new(routing_url.clone(), executor_handle.clone()).serve(conn)
-                }
+                "rdp" => RdpClient::new(
+                    routing_url.clone(),
+                    config.clone(),
+                    executor_handle.clone(),
+                    tls_public_key.clone(),
+                    tls_acceptor.clone(),
+                )
+                .serve(conn),
                 scheme => panic!("Unsupported routing url scheme {}", scheme),
             }
         } else {
@@ -164,11 +172,11 @@ impl Proxy {
                 Protocol::WAYK => {
                     info!("WaykMessageReader will be used to interpret application protocol.");
                     interceptor.set_message_reader(WaykMessageReader::get_messages);
-                },
+                }
                 Protocol::UNKNOWN => {
                     warn!("Protocol is unknown. Data received will not be split to get application message.");
                     interceptor.set_message_reader(UnknownMessageReader::get_messages)
-                },
+                }
             }
 
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
@@ -195,11 +203,11 @@ impl Proxy {
             let server_addr = jet_stream_1
                 .peer_addr()
                 .map(|addr| addr.to_string())
-                .unwrap_or("unknown".to_string());
+                .unwrap_or_else(|_| "unknown".to_string());
             let client_addr = jet_stream_2
                 .peer_addr()
                 .map(|addr| addr.to_string())
-                .unwrap_or("unknown".to_string());
+                .unwrap_or_else(|_| "unknown".to_string());
             info!(
                 "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
                 jet_stream_1.nb_bytes_read(),
