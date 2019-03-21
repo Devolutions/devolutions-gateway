@@ -16,6 +16,7 @@ const MCS_RESULT_ENUM_LENGTH: u8 = 16;
 pub struct Fastpath {
     pub encryption_flags: u8,
     pub number_events: u8,
+    pub length: u16,
 }
 
 #[derive(Debug, PartialEq)]
@@ -62,14 +63,17 @@ pub fn parse_fastpath_header(mut stream: impl io::Read) -> io::Result<(Fastpath,
     let header = stream.read_u8()?;
 
     let (length, sizeof_length) = per_read_length(&mut stream)?;
-    let pdu_length = length - sizeof_length - 1;
+    let pdu_length = length
+        .checked_sub(sizeof_length + 1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid fastpath length"))?;
 
     Ok((
         Fastpath {
             encryption_flags: (header & 0xC0) >> 6,
             number_events: (header & 0x3C) >> 2,
+            length: pdu_length,
         },
-        pdu_length,
+        length,
     ))
 }
 

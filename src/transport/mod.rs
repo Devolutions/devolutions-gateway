@@ -105,4 +105,3 @@ pub trait JetSink: Sink {
     fn shutdown(&self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
 }
-

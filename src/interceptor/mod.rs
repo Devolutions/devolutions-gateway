@@ -2,6 +2,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::net::SocketAddr;
 
 pub mod pcap;
+pub mod rdp;
 
 pub trait PacketInterceptor: Send + Sync {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>);
@@ -68,4 +69,3 @@ impl WaykMessageReader {
         messages
     }
 }
-

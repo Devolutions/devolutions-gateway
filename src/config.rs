@@ -3,6 +3,7 @@ use clap::{crate_name, crate_version, App, Arg};
 #[derive(Clone)]
 pub enum Protocol {
     WAYK,
+    RDP,
     UNKNOWN,
 }
 
@@ -81,7 +82,7 @@ impl Config {
                     .help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet.")
                     .long_help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not split between 2 tcp packets.")
                     .takes_value(true)
-                    .possible_values(&["wayk"])
+                    .possible_values(&["wayk", "rdp"])
                     .empty_values(false)
             )
             .arg(
@@ -107,6 +108,7 @@ impl Config {
 
         let protocol = match matches.value_of("protocol") {
             Some("wayk") => Protocol::WAYK,
+            Some("rdp") => Protocol::RDP,
             _ => Protocol::UNKNOWN,
         };
 

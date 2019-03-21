@@ -12,7 +12,8 @@ fn fastpath_header_with_long_len_is_parsed_correctly() {
 
     assert_eq!(fastpath.encryption_flags, 0x02);
     assert_eq!(fastpath.number_events, 7);
-    assert_eq!(length, 484);
+    assert_eq!(fastpath.length, 484);
+    assert_eq!(length, 487);
 }
 
 #[test]
@@ -23,7 +24,8 @@ fn fastpath_header_with_short_len_is_parsed_correctly() {
 
     assert_eq!(fastpath.encryption_flags, 0x02);
     assert_eq!(fastpath.number_events, 2);
-    assert_eq!(length, 6);
+    assert_eq!(fastpath.length, 6);
+    assert_eq!(length, 8);
 }
 
 #[test]
