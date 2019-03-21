@@ -2,8 +2,6 @@ use std::{error::Error, fmt, io, str};
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::ntlm::{Ntlm, NTLM_VERSION_SIZE};
-
 pub type SspiResult = std::result::Result<SspiOk, SspiError>;
 pub type Result<T> = std::result::Result<T, SspiError>;
 

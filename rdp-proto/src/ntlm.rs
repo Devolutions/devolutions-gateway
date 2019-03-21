@@ -55,7 +55,7 @@ pub struct Ntlm {
     recv_sealing_key: Option<Rc4>,
 }
 
-struct ChannelBindings {
+struct _ChannelBindings {
     initiator_addr_type: u32,
     initiator_length: u32,
     acceptor_addr_type: u32,

@@ -14,7 +14,7 @@ impl RdpMessageReader {
                 _ => {
                     // fastpath
                     if let Ok((_, len)) = parse_fastpath_header(data.as_slice()) {
-                        len as u64
+                        u64::from(len)
                     } else {
                         break;
                     }

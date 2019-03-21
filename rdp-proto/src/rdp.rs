@@ -167,7 +167,7 @@ fn per_read_int(mut stream: impl io::Read) -> io::Result<u16> {
 
     match length {
         0 => Ok(0),
-        1 => Ok(stream.read_u8()? as u16),
+        1 => Ok(u16::from(stream.read_u8()?)),
         2 => stream.read_u16::<BigEndian>(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,

@@ -41,12 +41,18 @@ struct Identities {
     pub targets: Vec<rdp_proto::Credentials>,
 }
 
-const TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
+const LOGGER_TIMESTAMP_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
+
+struct NegotiationResponseResult {
+    protocol: Option<rdp_proto::SecurityProtocol>,
+    send_future: futures::sink::Send<Framed<TcpStream, X224Transport>>,
+}
+
 fn create_client_logger(client_addr: String) -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
         .use_custom_timestamp(|output: &mut io::Write| -> io::Result<()> {
-            write!(output, "{}", chrono::Utc::now().format(TIMESTAMP_FORMAT))
+            write!(output, "{}", chrono::Utc::now().format(LOGGER_TIMESTAMP_FORMAT))
         })
         .build()
         .fuse();
@@ -119,10 +125,12 @@ impl RdpClient {
                     .targets
                     .iter()
                     .find(|credentials| credentials.username == cookie)
-                    .ok_or(rdp_proto::SspiError::new(
-                        rdp_proto::SspiErrorType::TargetUnknown,
-                        format!("Failed to find credentials with the username: {}", cookie),
-                    ))?
+                    .ok_or_else(|| {
+                        rdp_proto::SspiError::new(
+                            rdp_proto::SspiErrorType::TargetUnknown,
+                            format!("Failed to find credentials with the username: {}", cookie),
+                        )
+                    })?
                     .clone();
                 let tls_public_key = self.tls_public_key;
                 let tls_acceptor = self.tls_acceptor;
@@ -240,11 +248,11 @@ fn negotiate_with_server(
         .and_then(move |server| {
             server.into_future().map_err(|(e, _)| e).and_then(move |(req, server)| {
                 if let Some((code, buf)) = req {
-                    let (protocol, f) =
+                    let negotiation_response_result =
                         process_negotiation_response(buf, client, client_logger.clone(), code, protocol)?;
 
-                    if protocol.is_some() {
-                        Ok((server, f))
+                    if negotiation_response_result.protocol.is_some() {
+                        Ok((server, negotiation_response_result.send_future))
                     } else {
                         Err(io::Error::new(
                             io::ErrorKind::Other,
@@ -271,20 +279,17 @@ fn process_negotiation_response(
     client_logger: slog::Logger,
     code: rdp_proto::X224TPDUType,
     protocol: rdp_proto::SecurityProtocol,
-) -> io::Result<(
-    Option<rdp_proto::SecurityProtocol>,
-    futures::sink::Send<Framed<TcpStream, X224Transport>>,
-)> {
+) -> io::Result<NegotiationResponseResult> {
     if buf.is_empty() {
         if protocol == rdp_proto::SecurityProtocol::RDP {
             info!(
                 client_logger,
                 "received negotiation response for client (protocol: {:?})", protocol
             );
-            Ok((
-                Some(rdp_proto::SecurityProtocol::RDP),
-                client.send((rdp_proto::X224TPDUType::ConnectionConfirm, buf)),
-            ))
+            Ok(NegotiationResponseResult {
+                protocol: Some(rdp_proto::SecurityProtocol::RDP),
+                send_future: client.send((rdp_proto::X224TPDUType::ConnectionConfirm, buf)),
+            })
         } else {
             error!(client_logger, "invalid negotiation response");
             Err(io::Error::new(
@@ -304,10 +309,10 @@ fn process_negotiation_response(
                 );
 
                 rdp_proto::write_negotiation_response(response_data.as_mut(), flags, selected_protocol).unwrap();
-                Ok((
-                    Some(selected_protocol),
-                    client.send((rdp_proto::X224TPDUType::ConnectionConfirm, response_data)),
-                ))
+                Ok(NegotiationResponseResult {
+                    protocol: Some(selected_protocol),
+                    send_future: client.send((rdp_proto::X224TPDUType::ConnectionConfirm, response_data)),
+                })
             }
             Err(rdp_proto::NegotiationError::NegotiationFailure(code)) => {
                 info!(
@@ -316,10 +321,10 @@ fn process_negotiation_response(
                 );
 
                 rdp_proto::write_negotiation_response_error(response_data.as_mut(), code).unwrap();
-                Ok((
-                    None,
-                    client.send((rdp_proto::X224TPDUType::ConnectionConfirm, response_data)),
-                ))
+                Ok(NegotiationResponseResult {
+                    protocol: None,
+                    send_future: client.send((rdp_proto::X224TPDUType::ConnectionConfirm, response_data)),
+                })
             }
             Err(rdp_proto::NegotiationError::IOError(e)) => Err(e),
         }

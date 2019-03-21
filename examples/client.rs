@@ -24,7 +24,7 @@ struct Program {
 
 impl Program {
     fn new(name: String) -> Program {
-        Program { name: name }
+        Program { name }
     }
 
     fn usage(&self) {
@@ -32,7 +32,7 @@ impl Program {
     }
 
     fn print_error(&self, mesg: String) {
-        writeln!(io::stderr(), "{}: error: {}", self.name, mesg);
+        writeln!(io::stderr(), "{}: error: {}", self.name, mesg).unwrap();
     }
 
     fn print_fail(&self, mesg: String) -> ! {
@@ -50,7 +50,7 @@ impl Program {
 
 fn main() {
     let mut args = env::args();
-    let program = Program::new(args.next().unwrap_or("test".to_string()));
+    let program = Program::new(args.next().unwrap_or_else(|| "test".to_string()));
 
     let host = args.next().unwrap_or_else(|| {
         program.usage();
@@ -73,7 +73,7 @@ fn main() {
     let server_uuid = args
         .next()
         .map(|uuid| {
-            Uuid::from_str(&uuid).map(|uuid| Some(uuid)).unwrap_or_else(|e| {
+            Uuid::from_str(&uuid).map(Some).unwrap_or_else(|e| {
                 program.print_error(format!("invalid UUID: {}", e));
                 program.usage();
                 program.fail();
@@ -102,7 +102,7 @@ fn main() {
                             jet_packet_received = true;
                             &client_buffer[8..n]
                         };
-                        io::stdout().write(&buffer).unwrap();
+                        io::stdout().write_all(&buffer).unwrap();
                         io::stdout().flush().unwrap();
                     }
                 }
@@ -125,13 +125,13 @@ fn main() {
     let mut v: Vec<u8> = Vec::new();
     jet_packet.write_to(&mut v).unwrap();
     println!("jet_packet = {:?}", jet_packet);
-    output_stream.write(&v).unwrap();
+    output_stream.write_all(&v).unwrap();
     output_stream.flush().unwrap();
 
     loop {
         user_buffer.clear();
         io::stdin().read_line(&mut user_buffer).unwrap();
-        output_stream.write(user_buffer.as_bytes()).unwrap();
+        output_stream.write_all(user_buffer.as_bytes()).unwrap();
         output_stream.flush().unwrap();
     }
 }

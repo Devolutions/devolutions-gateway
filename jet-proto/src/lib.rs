@@ -9,7 +9,7 @@ use std::ops::Add;
 use std::str::FromStr;
 use uuid::Uuid;
 
-pub const JET_MSG_SIGNATURE: u32 = 0x0054454A;
+pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
 pub const JET_VERSION: u8 = 1;
 
@@ -111,7 +111,7 @@ impl JetPacket {
     }
 
     pub fn association(&self) -> Option<Uuid> {
-        self.association.clone()
+        self.association
     }
 
     pub fn set_association(&mut self, association: Option<Uuid>) {
@@ -163,7 +163,7 @@ impl JetPacket {
                 break;
             }
 
-            let fields: Vec<&str> = line.split(":").collect();
+            let fields: Vec<&str> = line.split(':').collect();
 
             if fields.len() != 2 {
                 return Err(error_other(&format!(

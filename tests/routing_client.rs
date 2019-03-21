@@ -12,8 +12,8 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
-const SERVER_DATA: &'static str = "Server Response";
-const CLIENT_DATA: &'static str = "Client Request";
+const SERVER_DATA: &str = "Server Response";
+const CLIENT_DATA: &str = "Client Request";
 
 fn bin() -> PathBuf {
     let mut me = env::current_exe().unwrap();
@@ -22,7 +22,8 @@ fn bin() -> PathBuf {
         me.pop();
     }
     me.push("devolutions-jet");
-    return me;
+
+    me
 }
 
 struct KillOnDrop(Child);

@@ -151,9 +151,7 @@ impl Transport for TcpTransport {
     {
         let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {
-            "tcp" => {
-                Box::new(TcpStream::connect(&socket_addr).map(|stream| TcpTransport::new(stream))) as JetFuture<Self>
-            }
+            "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)) as JetFuture<Self>,
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr);
                 let cx = TlsConnector::builder()
@@ -168,7 +166,7 @@ impl Transport for TcpTransport {
                     cx.connect(url_clone.host_str().unwrap_or(""), socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
-                let request = tls_handshake.map(|tls_stream| TcpTransport::new_tls(tls_stream));
+                let request = tls_handshake.map(TcpTransport::new_tls);
                 Box::new(request) as JetFuture<Self>
             }
 

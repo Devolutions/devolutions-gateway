@@ -12,8 +12,8 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
-const SERVER_DATA: &'static str = "Server Response";
-const CLIENT_DATA: &'static str = "Client Request";
+const SERVER_DATA: &str = "Server Response";
+const CLIENT_DATA: &str = "Client Request";
 
 fn bin() -> PathBuf {
     let mut me = env::current_exe().unwrap();
@@ -22,7 +22,8 @@ fn bin() -> PathBuf {
         me.pop();
     }
     me.push("devolutions-jet");
-    return me;
+
+    me
 }
 
 struct KillOnDrop(Child);
@@ -57,7 +58,7 @@ fn smoke() {
                     jet_packet.set_version(Some(0));
                     let mut v: Vec<u8> = Vec::new();
                     jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
+                    stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
                     // Receive response and get the UUID
@@ -95,7 +96,7 @@ fn smoke() {
 
                     // Send data to server
                     let data = SERVER_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
                     thread::sleep(Duration::from_millis(10));
                     break;
                 }
@@ -118,7 +119,7 @@ fn smoke() {
                     jet_packet.set_association(Some(uuid));
                     let mut v: Vec<u8> = Vec::new();
                     jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
+                    stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
                     // Receive response
@@ -138,7 +139,7 @@ fn smoke() {
 
                     // Send data to server
                     let data = CLIENT_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
 
                     // Read data sent by server
                     loop {

@@ -44,7 +44,7 @@ impl PcapInterceptor {
 }
 
 impl PacketInterceptor for PcapInterceptor {
-    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>) {
+    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]) {
         debug!("New packet intercepted. Packet size = {}", data.len());
 
         let mut server_info = self.server_info.lock().unwrap();
@@ -52,7 +52,7 @@ impl PacketInterceptor for PcapInterceptor {
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         let (messages, source_addr, dest_addr, seq_number, ack_number) = if is_from_server {
-            server_info.data.append(&mut data.clone());
+            server_info.data.append(&mut data.to_vec());
             (
                 (self.message_reader)(&mut server_info.data),
                 server_info.addr,
@@ -61,7 +61,7 @@ impl PacketInterceptor for PcapInterceptor {
                 server_info.sequence_number,
             )
         } else {
-            client_info.data.append(&mut data.clone());
+            client_info.data.append(&mut data.to_vec());
             (
                 (self.message_reader)(&mut client_info.data),
                 client_info.addr,
