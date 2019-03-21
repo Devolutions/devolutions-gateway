@@ -1,3 +1,4 @@
+use crate::interceptor::PacketInterceptor;
 use crate::transport::tcp::TcpTransport;
 use futures::{Async, Future, Sink, Stream};
 use std::io::{Read, Write};
@@ -6,11 +7,10 @@ use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
-use crate::interceptor::PacketInterceptor;
 
 pub mod tcp;
-pub mod x224;
 pub mod tsrequest;
+pub mod x224;
 
 pub type JetFuture<T> = Box<Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<JetStream<Item = T, Error = io::Error> + Send>;

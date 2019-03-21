@@ -10,8 +10,8 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 use url::Url;
 
-use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 use crate::interceptor::PacketInterceptor;
+use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 use crate::utils::url_to_socket_arr;
 
 pub enum TcpStreamWrapper {

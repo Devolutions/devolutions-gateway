@@ -1,8 +1,8 @@
-extern crate log;
 extern crate byteorder;
+extern crate log;
 extern crate uuid;
 
-use byteorder::{LittleEndian, BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Read;
 use std::io::{self, Write};
 use std::ops::Add;
@@ -137,10 +137,7 @@ impl JetPacket {
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
         let signature = reader.read_u32::<LittleEndian>()?;
         if signature != JET_MSG_SIGNATURE {
-            return Err(error_other(&format!(
-                "Invalid JetPacket - Signature = {}.",
-                signature
-            )));
+            return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
         }
         let size = reader.read_u16::<BigEndian>()?;
         let flags = reader.read_u8()?;

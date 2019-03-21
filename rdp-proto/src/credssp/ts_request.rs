@@ -220,12 +220,10 @@ impl TsRequest {
 
     pub fn check_error(&self) -> sspi::Result<()> {
         match self.error_code {
-            Some(error_code) if error_code != 0 => {
-                Err(SspiError::new(
-                    SspiErrorType::InvalidToken,
-                    format!("Server has returned an error: 0x{:x}", error_code),
-                ))
-            }
+            Some(error_code) if error_code != 0 => Err(SspiError::new(
+                SspiErrorType::InvalidToken,
+                format!("Server has returned an error: 0x{:x}", error_code),
+            )),
             _ => Ok(()),
         }
     }

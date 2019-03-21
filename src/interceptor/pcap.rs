@@ -1,3 +1,5 @@
+use crate::interceptor::MessageReader;
+use crate::interceptor::UnknownMessageReader;
 use crate::interceptor::{PacketInterceptor, PeerInfo};
 use log::{debug, error};
 use packet::builder::Builder;
@@ -9,8 +11,6 @@ use pcap_file::PcapWriter;
 use std::fs::File;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use crate::interceptor::MessageReader;
-use crate::interceptor::UnknownMessageReader;
 
 const TCP_IP_PACKET_MAX_SIZE: usize = 16384;
 
@@ -35,7 +35,10 @@ impl PcapInterceptor {
         }
     }
 
-    pub fn set_message_reader<F: 'static + Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync>(&mut self, message_reader: F) {
+    pub fn set_message_reader<F: 'static + Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync>(
+        &mut self,
+        message_reader: F,
+    ) {
         self.message_reader = Arc::new(Box::new(message_reader));
     }
 }
@@ -74,23 +77,40 @@ impl PacketInterceptor for PcapInterceptor {
                 let tcpip_packet = match (source_addr, dest_addr) {
                     (SocketAddr::V4(source), SocketAddr::V4(dest)) => {
                         BuildEthernet::default()
-                            .destination([0x00, 0x15, 0x5D, 0x01, 0x64, 0x04].into()).unwrap() // 00:15:5D:01:64:04
-                            .source([0x00, 0x15, 0x5D, 0x01, 0x64, 0x01].into()).unwrap() // 00:15:5D:01:64:01
-                            .protocol(Protocol::Ipv4).unwrap()
-                            .ip().unwrap()
-                            .v4().unwrap()
-                            .source(*source.ip()).unwrap()
-                            .destination(*dest.ip()).unwrap()
-                            .ttl(128).unwrap()
-                            .tcp().unwrap()
-                            .window(0x7fff).unwrap()
-                            .source(source_addr.port()).unwrap()
-                            .destination(dest_addr.port()).unwrap()
-                            .acknowledgment(ack_number).unwrap()
-                            .sequence(*seq_number).unwrap()
-                            .flags(Flags::from_bits_truncate(0x0018)).unwrap()
-                            .payload(data_chunk).unwrap()
-                            .build().unwrap()
+                            .destination([0x00, 0x15, 0x5D, 0x01, 0x64, 0x04].into())
+                            .unwrap() // 00:15:5D:01:64:04
+                            .source([0x00, 0x15, 0x5D, 0x01, 0x64, 0x01].into())
+                            .unwrap() // 00:15:5D:01:64:01
+                            .protocol(Protocol::Ipv4)
+                            .unwrap()
+                            .ip()
+                            .unwrap()
+                            .v4()
+                            .unwrap()
+                            .source(*source.ip())
+                            .unwrap()
+                            .destination(*dest.ip())
+                            .unwrap()
+                            .ttl(128)
+                            .unwrap()
+                            .tcp()
+                            .unwrap()
+                            .window(0x7fff)
+                            .unwrap()
+                            .source(source_addr.port())
+                            .unwrap()
+                            .destination(dest_addr.port())
+                            .unwrap()
+                            .acknowledgment(ack_number)
+                            .unwrap()
+                            .sequence(*seq_number)
+                            .unwrap()
+                            .flags(Flags::from_bits_truncate(0x0018))
+                            .unwrap()
+                            .payload(data_chunk)
+                            .unwrap()
+                            .build()
+                            .unwrap()
                     }
                     (SocketAddr::V6(_source), SocketAddr::V6(_dest)) => BuildV6::default().build().unwrap(),
                     (_, _) => unreachable!(),

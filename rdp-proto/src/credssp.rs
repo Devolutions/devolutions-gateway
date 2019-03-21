@@ -206,21 +206,21 @@ impl CredSsp for CredSspServer {
                         .unwrap()
                         .sspi_context
                         .accept_security_context(input.as_slice(), &mut output)
-                        {
-                            Ok(SspiOk::ContinueNeeded) => {
-                                self.ts_request.nego_tokens = Some(output);
-                            }
-                            Ok(SspiOk::CompleteNeeded) => {
-                                self.context.as_mut().unwrap().sspi_context.complete_auth_token()?;
-                                self.ts_request.nego_tokens = None;
+                    {
+                        Ok(SspiOk::ContinueNeeded) => {
+                            self.ts_request.nego_tokens = Some(output);
+                        }
+                        Ok(SspiOk::CompleteNeeded) => {
+                            self.context.as_mut().unwrap().sspi_context.complete_auth_token()?;
+                            self.ts_request.nego_tokens = None;
 
-                                let pub_key_auth = self.ts_request.pub_key_auth.take().ok_or_else(|| {
-                                    SspiError::new(
-                                        SspiErrorType::InvalidToken,
-                                        String::from("Expected an encrypted public key"),
-                                    )
-                                })?;
-                                self.context.as_mut().unwrap().decrypt_public_key(
+                            let pub_key_auth = self.ts_request.pub_key_auth.take().ok_or_else(|| {
+                                SspiError::new(
+                                    SspiErrorType::InvalidToken,
+                                    String::from("Expected an encrypted public key"),
+                                )
+                            })?;
+                            self.context.as_mut().unwrap().decrypt_public_key(
                                     self.public_key.as_ref(),
                                     pub_key_auth.as_ref(),
                                     EndpointType::Server,
@@ -229,7 +229,7 @@ impl CredSsp for CredSspServer {
                                         "An decrypt public key server function cannot be fired without any incoming TSRequest",
                                     ),
                                 )?;
-                                self.ts_request.pub_key_auth = Some(self.context.as_mut().unwrap().encrypt_public_key(
+                            self.ts_request.pub_key_auth = Some(self.context.as_mut().unwrap().encrypt_public_key(
                                     self.public_key.as_ref(),
                                     EndpointType::Server,
                                     &self.ts_request.client_nonce,
@@ -238,14 +238,14 @@ impl CredSsp for CredSspServer {
                                     ),
                                 )?);
 
-                                self.state = CredSspState::AuthInfo;
-                            }
-                            Err(e) => {
-                                self.ts_request.error_code =
-                                    Some(((e.error_type as i64 & 0x0000_FFFF) | (0x7 << 16) | 0xC000_0000) as u32);
-                                return Err(e);
-                            }
-                        };
+                            self.state = CredSspState::AuthInfo;
+                        }
+                        Err(e) => {
+                            self.ts_request.error_code =
+                                Some(((e.error_type as i64 & 0x0000_FFFF) | (0x7 << 16) | 0xC000_0000) as u32);
+                            return Err(e);
+                        }
+                    };
 
                     return Ok(CredSspResult::ReplyNeeded(self.ts_request.clone()));
                 }
