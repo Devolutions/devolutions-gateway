@@ -5,9 +5,11 @@
 mod ber;
 mod encryption;
 mod nego;
+mod ntlm;
 mod sspi;
 mod tpdu;
 
 pub use crate::nego::*;
+pub use crate::ntlm::NTLM_VERSION_SIZE;
 pub use crate::sspi::{Credentials, SspiError, SspiErrorType};
 pub use crate::tpdu::*;
