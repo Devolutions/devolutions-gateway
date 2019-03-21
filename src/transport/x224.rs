@@ -13,16 +13,6 @@ impl X224Transport {
     }
 }
 
-macro_rules! io_try {
-    ($e:expr) => (match $e {
-        Ok(v) => v,
-        Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-            return Ok(None);
-        }
-        Err(e) => return Err(e),
-    });
-}
-
 impl Decoder for X224Transport {
     type Item = (rdp_proto::X224TPDUType, BytesMut);
     type Error = io::Error;

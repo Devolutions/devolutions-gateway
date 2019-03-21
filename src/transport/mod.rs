@@ -10,6 +10,7 @@ use crate::interceptor::PacketInterceptor;
 
 pub mod tcp;
 pub mod x224;
+pub mod tsrequest;
 
 pub type JetFuture<T> = Box<Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<JetStream<Item = T, Error = io::Error> + Send>;

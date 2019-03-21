@@ -106,6 +106,21 @@ pub fn read_contextual_tag(mut stream: impl io::Read, tagnum: u8, pc: Pc) -> io:
     }
 }
 
+pub fn read_contextual_tag_or_unwind(
+    mut stream: impl io::Read + io::Seek,
+    tagnum: u8,
+    pc: Pc,
+) -> io::Result<Option<u16>> {
+    match read_contextual_tag(&mut stream, tagnum, pc) {
+        Ok(contextual_tag_len) => Ok(Some(contextual_tag_len)),
+        Err(_) => {
+            stream.seek(io::SeekFrom::Current(-1))?;
+
+            Ok(None)
+        }
+    }
+}
+
 pub fn write_application_tag(mut stream: impl io::Write, tagnum: u8, length: u16) -> io::Result<usize> {
     let taglen = if tagnum > 0x1E {
         stream.write_u8(Class::Application as u8 | Pc::Construct as u8 | TAG_MASK)?;
