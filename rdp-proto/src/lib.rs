@@ -11,7 +11,7 @@ mod ntlm;
 mod sspi;
 mod tpdu;
 
-pub use crate::credssp::ts_request::TsRequest;
+pub use crate::credssp::{ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer};
 pub use crate::nego::*;
 pub use crate::ntlm::NTLM_VERSION_SIZE;
 pub use crate::sspi::{Credentials, SspiError, SspiErrorType};
