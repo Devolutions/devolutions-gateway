@@ -112,7 +112,6 @@ impl RdpClient {
                 let server_addr = url_to_socket_arr(&routing_url);
                 let server = TcpStream::connect(&server_addr);
                 let client_logger_clone = client_logger.clone();
-                let client_logger_err_clone = client_logger.clone();
                 let config_clone = self.config.clone();
 
                 let identities_filename = self
@@ -135,73 +134,94 @@ impl RdpClient {
                 let tls_public_key = self.tls_public_key;
                 let tls_acceptor = self.tls_acceptor;
 
-                let server_fut = negotiate_with_server(server, client, client_logger, cookie, protocol, flags)
-                    .map_err(move |e| error!(client_logger_err_clone, "negotiation of client failed: {}", e))
-                    .and_then(move |(server, client_fut)| {
-                        let client_logger_err_clone = client_logger_clone.clone();
-
+                let server_fut = negotiate_with_server(server, client, client_logger.clone(), cookie, protocol, flags)
+                    .map_err(move |e| {
+                        io::Error::new(io::ErrorKind::Other, format!("negotiation of client failed: {}", e))
+                    })
+                    .and_then(move |(protocol, server, client_fut)| {
                         client_fut
-                            .map_err(move |e| error!(client_logger_err_clone, "negotiation of server failed: {}", e))
+                            .map_err(move |e| {
+                                io::Error::new(io::ErrorKind::Other, format!("negotiation of server failed: {}", e))
+                            })
                             .and_then(move |client| {
                                 let client = client.into_inner();
                                 let server = server.into_inner();
-                                let client_logger = client_logger_clone.clone();
-                                let client_logger_err_clone = client_logger_clone.clone();
+                                let create_proxy = move |client_transport, server_transport| {
+                                    Proxy::new(config_clone)
+                                        .build(server_transport, client_transport)
+                                        .map_err(move |e| {
+                                            io::Error::new(io::ErrorKind::Other, format!("Proxy error: {}", e))
+                                        })
+                                };
 
-                                tls_acceptor
-                                    .accept(client)
-                                    .map_err(move |e| {
-                                        error!(client_logger_err_clone, "failed to accept client connection: {}", e);
-                                    })
-                                    .and_then(move |client_tls| {
-                                        info!(client_logger, "tls connection has been created with client");
-                                        let client_logger_err_clone = client_logger_clone.clone();
-
-                                        let tls_connector = TlsConnector::builder()
-                                            .danger_accept_invalid_certs(true)
-                                            .danger_accept_invalid_hostnames(true)
-                                            .build()
-                                            .unwrap();
-                                        let tls_connector = tokio_tls::TlsConnector::from(tls_connector);
-                                        let tls_handshake = tls_connector
-                                            .connect(routing_url.host_str().unwrap(), server)
-                                            .map_err(move |e| {
-                                                error!(
-                                                    client_logger_err_clone,
-                                                    "failed to handshake with a server: {}", e
-                                                )
-                                            });
-
-                                        tls_handshake.and_then(move |server_tls| {
-                                            info!(client_logger, "tls connection has been created with server");
-                                            let client_logger_err_clone = client_logger_clone.clone();
-
-                                            process_credssp_phase(
-                                                client_tls,
-                                                server_tls,
-                                                target_identity,
-                                                proxy_identity,
-                                                flags,
-                                                tls_public_key,
+                                match protocol {
+                                    rdp_proto::SecurityProtocol::HYBRID
+                                    | rdp_proto::SecurityProtocol::HYBRID_EX
+                                    | rdp_proto::SecurityProtocol::SSL => {
+                                        let accept_invalid_certs_and_hostnames = match protocol {
+                                            rdp_proto::SecurityProtocol::HYBRID
+                                            | rdp_proto::SecurityProtocol::HYBRID_EX => true,
+                                            _ => false,
+                                        };
+                                        Ok(future::Either::A(
+                                            establish_tls_connection(
+                                                client,
+                                                server,
+                                                client_logger_clone.clone(),
+                                                tls_acceptor,
+                                                routing_url,
+                                                accept_invalid_certs_and_hostnames,
                                             )
-                                            .map_err(move |e| error!(client_logger_err_clone, "CredSSP failed: {}", e))
                                             .and_then(
                                                 move |(client_tls, server_tls)| {
-                                                    info!(client_logger_clone, "CredSSP phase finished");
-                                                    let client_transport = TcpTransport::new_tls(client_tls);
-                                                    let server_transport = TcpTransport::new_tls(server_tls);
+                                                    let fut = match protocol {
+                                                        rdp_proto::SecurityProtocol::HYBRID
+                                                        | rdp_proto::SecurityProtocol::HYBRID_EX => future::Either::A(
+                                                            process_credssp_phase(
+                                                                client_tls,
+                                                                server_tls,
+                                                                target_identity,
+                                                                proxy_identity,
+                                                                flags,
+                                                                tls_public_key,
+                                                            )
+                                                            .map_err(move |e| {
+                                                                io::Error::new(
+                                                                    io::ErrorKind::Other,
+                                                                    format!("CredSSP failed: {}", e),
+                                                                )
+                                                            })
+                                                            .and_then(move |(client_tls, server_tls)| {
+                                                                info!(client_logger_clone, "CredSSP phase finished");
+                                                                future::ok((client_tls, server_tls))
+                                                            }),
+                                                        ),
+                                                        _ => future::Either::B(future::ok((client_tls, server_tls))),
+                                                    };
 
-                                                    Proxy::new(config_clone)
-                                                        .build(server_transport, client_transport)
-                                                        .map_err(move |e| {
-                                                            error!(client_logger_clone, "Proxy error: {}", e)
-                                                        })
+                                                    fut.and_then(move |(client_tls, server_tls)| {
+                                                        create_proxy(
+                                                            TcpTransport::new_tls(client_tls),
+                                                            TcpTransport::new_tls(server_tls),
+                                                        )
+                                                    })
                                                 },
-                                            )
-                                        })
-                                    })
+                                            ),
+                                        ))
+                                    }
+                                    rdp_proto::SecurityProtocol::RDP => Ok(future::Either::B(create_proxy(
+                                        TcpTransport::new(client),
+                                        TcpTransport::new(server),
+                                    ))),
+                                    _ => Err(io::Error::new(
+                                        io::ErrorKind::NotConnected,
+                                        "cannot connect security layer because no protocol has been selected yet",
+                                    )),
+                                }
                             })
-                    });
+                            .and_then(|fut| fut)
+                    })
+                    .map_err(move |e| error!(client_logger, "RDP error: {}", e));
 
                 self.executor_handle.spawn(server_fut);
 
@@ -231,6 +251,7 @@ fn negotiate_with_server(
     flags: rdp_proto::NegotiationRequestFlags,
 ) -> impl Future<
     Item = (
+        rdp_proto::SecurityProtocol,
         Framed<TcpStream, X224Transport>,
         impl Future<Item = Framed<TcpStream, X224Transport>, Error = io::Error> + Send,
     ),
@@ -251,8 +272,8 @@ fn negotiate_with_server(
                     let negotiation_response_result =
                         process_negotiation_response(buf, client, client_logger.clone(), code, protocol)?;
 
-                    if negotiation_response_result.protocol.is_some() {
-                        Ok((server, negotiation_response_result.send_future))
+                    if let Some(protocol) = negotiation_response_result.protocol {
+                        Ok((protocol, server, negotiation_response_result.send_future))
                     } else {
                         Err(io::Error::new(
                             io::ErrorKind::Other,
@@ -329,6 +350,49 @@ fn process_negotiation_response(
             Err(rdp_proto::NegotiationError::IOError(e)) => Err(e),
         }
     }
+}
+
+fn establish_tls_connection(
+    client: TcpStream,
+    server: TcpStream,
+    client_logger: slog::Logger,
+    tls_acceptor: TlsAcceptor,
+    routing_url: Url,
+    accept_invalid_certs_and_hostnames: bool,
+) -> impl Future<Item = (TlsStream<TcpStream>, TlsStream<TcpStream>), Error = io::Error> + Send {
+    tls_acceptor
+        .accept(client)
+        .map_err(move |e| {
+            io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("failed to accept client connection: {}", e),
+            )
+        })
+        .and_then(move |client_tls| {
+            info!(client_logger, "tls connection has been created with client");
+
+            let tls_connector = TlsConnector::builder()
+                .danger_accept_invalid_certs(accept_invalid_certs_and_hostnames)
+                .danger_accept_invalid_hostnames(accept_invalid_certs_and_hostnames)
+                .build()
+                .unwrap();
+            let tls_connector = tokio_tls::TlsConnector::from(tls_connector);
+
+            let tls_handshake = tls_connector
+                .connect(routing_url.host_str().unwrap(), server)
+                .map_err(move |e| {
+                    io::Error::new(
+                        io::ErrorKind::ConnectionRefused,
+                        format!("failed to handshake with a server: {}", e),
+                    )
+                });
+
+            tls_handshake.and_then(move |server_tls| {
+                info!(client_logger, "tls connection has been created with server");
+
+                future::ok((client_tls, server_tls))
+            })
+        })
 }
 
 fn process_credssp_phase(
