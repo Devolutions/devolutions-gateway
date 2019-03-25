@@ -6,7 +6,7 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 
 use crate::transport::tsrequest::TsRequestTransport;
-use rdp_proto::{CredSsp, TsRequest};
+use rdp_proto::{CredSsp, CredSspResult, SspiError, SspiErrorType, TsRequest};
 
 pub enum CredSspManagerResult {
     Done(TlsStream<TcpStream>),
@@ -27,6 +27,8 @@ enum CredSspManagerState {
     ParseMessage,
     SendMessage,
     SendFinalMessage,
+    SendAndFail,
+    TakeData,
     Finished,
 }
 
@@ -77,10 +79,21 @@ impl<T: CredSsp> Stream for CredSspStream<T> {
                     self.state = CredSspManagerState::ParseMessage;
                 }
                 CredSspManagerState::ParseMessage => {
-                    match self.cred_ssp_context.process(self.ts_request.take().expect("the ts_request must be set in the previous state"))? {
-                        rdp_proto::CredSspResult::ReplyNeeded(ts_request) => {
-                            self.state = CredSspManagerState::SendMessage;
-
+                    let response = self.cred_ssp_context.process(
+                        self.ts_request
+                            .take()
+                            .expect("the ts_request must be set in the previous state"),
+                    )?;
+                    self.state = match response {
+                        CredSspResult::ReplyNeeded(_) => CredSspManagerState::SendMessage,
+                        CredSspResult::FinalMessage(_) => CredSspManagerState::SendFinalMessage,
+                        CredSspResult::WithError(_) => CredSspManagerState::SendAndFail,
+                        CredSspResult::Finished => CredSspManagerState::TakeData,
+                    };
+                    match response {
+                        CredSspResult::ReplyNeeded(ts_request)
+                        | CredSspResult::FinalMessage(ts_request)
+                        | CredSspResult::WithError(ts_request) => {
                             self.send_future = Some(
                                 self.stream
                                     .take()
@@ -88,29 +101,12 @@ impl<T: CredSsp> Stream for CredSspStream<T> {
                                     .send(ts_request),
                             );
                         }
-                        rdp_proto::CredSspResult::FinalMessage(ts_request) => {
-                            self.state = CredSspManagerState::SendFinalMessage;
-
-                            self.send_future = Some(
-                                self.stream
-                                    .take()
-                                    .expect("the stream must exist in the ParseMessage state")
-                                    .send(ts_request),
-                            );
-                        }
-                        rdp_proto::CredSspResult::Finished => {
-                            self.state = CredSspManagerState::Finished;
-
-                            return Ok(Async::Ready(Some(CredSspManagerResult::Done(
-                                self.stream
-                                    .take()
-                                    .expect("TakeData state cannot be fired without the stream")
-                                    .into_inner(),
-                            ))));
-                        }
+                        CredSspResult::Finished => (),
                     };
                 }
-                CredSspManagerState::SendMessage | CredSspManagerState::SendFinalMessage => {
+                CredSspManagerState::SendMessage
+                | CredSspManagerState::SendFinalMessage
+                | CredSspManagerState::SendAndFail => {
                     self.stream = Some(try_ready!(self
                         .send_future
                         .as_mut()
@@ -118,12 +114,33 @@ impl<T: CredSsp> Stream for CredSspStream<T> {
                         .poll()));
                     self.send_future = None;
 
-                    if self.state == CredSspManagerState::SendFinalMessage {
-                        self.state = CredSspManagerState::ParseMessage;
-                    } else {
-                        self.state = CredSspManagerState::GetMessage;
-                        return Ok(Async::Ready(Some(CredSspManagerResult::NotDone)));
+                    match self.state {
+                        CredSspManagerState::SendMessage => {
+                            self.state = CredSspManagerState::GetMessage;
+                            return Ok(Async::Ready(Some(CredSspManagerResult::NotDone)));
+                        }
+                        CredSspManagerState::SendFinalMessage => {
+                            self.state = CredSspManagerState::TakeData;
+                        }
+                        CredSspManagerState::SendAndFail => {
+                            return Err(SspiError::new(
+                                SspiErrorType::InternalError,
+                                String::from("CredSSP finished with error"),
+                            )
+                            .into());
+                        }
+                        _ => unreachable!(),
                     };
+                }
+                CredSspManagerState::TakeData => {
+                    self.state = CredSspManagerState::Finished;
+
+                    return Ok(Async::Ready(Some(CredSspManagerResult::Done(
+                        self.stream
+                            .take()
+                            .expect("TakeData state cannot be fired without the stream")
+                            .into_inner(),
+                    ))));
                 }
                 CredSspManagerState::Finished => return Ok(Async::Ready(None)),
             };

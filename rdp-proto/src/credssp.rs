@@ -36,6 +36,7 @@ pub struct CredSspServer {
 pub enum CredSspResult {
     ReplyNeeded(TsRequest),
     FinalMessage(TsRequest),
+    WithError(TsRequest),
     Finished,
 }
 
@@ -248,7 +249,8 @@ impl CredSsp for CredSspServer {
                         Err(e) => {
                             ts_request.error_code =
                                 Some(((e.error_type as i64 & 0x0000_FFFF) | (0x7 << 16) | 0xC000_0000) as u32);
-                            return Err(e);
+
+                            return Ok(CredSspResult::WithError(ts_request));
                         }
                     };
 
