@@ -6,7 +6,7 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 
 use crate::transport::tsrequest::TsRequestTransport;
-use rdp_proto::CredSsp;
+use rdp_proto::{CredSsp, TsRequest};
 
 pub enum CredSspManagerResult {
     Done(TlsStream<TcpStream>),
@@ -15,6 +15,7 @@ pub enum CredSspManagerResult {
 
 pub struct CredSspStream<T: CredSsp> {
     cred_ssp_context: T,
+    ts_request: Option<TsRequest>,
     stream: Option<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>,
     send_future: Option<futures::sink::Send<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>>,
     state: CredSspManagerState,
@@ -36,6 +37,7 @@ impl<T: CredSsp> CredSspStream<T> {
     ) -> Self {
         Self {
             cred_ssp_context,
+            ts_request: Some(TsRequest::default()),
             stream: Some(stream),
             send_future: None,
             state: CredSspManagerState::ParseMessage,
@@ -48,6 +50,7 @@ impl<T: CredSsp> CredSspStream<T> {
     ) -> Self {
         Self {
             cred_ssp_context,
+            ts_request: None,
             stream: Some(stream),
             send_future: None,
             state: CredSspManagerState::GetMessage,
@@ -70,12 +73,11 @@ impl<T: CredSsp> Stream for CredSspStream<T> {
                         .into_future()
                         .map_err(|(e, _)| e)
                         .poll());
-                    self.cred_ssp_context
-                        .update_ts_request(read_ts_request.expect("TsRequestTransport returned invalid TsRequest"))?;
+                    self.ts_request = read_ts_request;
                     self.state = CredSspManagerState::ParseMessage;
                 }
                 CredSspManagerState::ParseMessage => {
-                    match self.cred_ssp_context.process()? {
+                    match self.cred_ssp_context.process(self.ts_request.take().expect("the ts_request must be set in the previous state"))? {
                         rdp_proto::CredSspResult::ReplyNeeded(ts_request) => {
                             self.state = CredSspManagerState::SendMessage;
 

@@ -3,8 +3,6 @@ mod test;
 
 use std::io::{self, Read};
 
-use rand::{rngs::OsRng, Rng};
-
 use crate::{
     ber,
     nego::NegotiationRequestFlags,
@@ -26,17 +24,6 @@ pub struct TsRequest {
 }
 
 impl TsRequest {
-    pub fn with_random_nonce() -> Result<Self, rand::Error> {
-        Ok(Self {
-            peer_version: None,
-            nego_tokens: None,
-            auth_info: None,
-            pub_key_auth: None,
-            error_code: None,
-            client_nonce: Some(OsRng::new()?.gen::<[u8; NONCE_SIZE]>()),
-        })
-    }
-
     pub fn from_buffer(buffer: &[u8]) -> io::Result<TsRequest> {
         let mut stream = io::Cursor::new(buffer);
 
@@ -172,48 +159,6 @@ impl TsRequest {
         Ok(())
     }
 
-    pub fn update(&mut self, other: TsRequest) -> sspi::Result<()> {
-        match (self.peer_version, other.peer_version) {
-            (Some(peer_version), Some(other_peer_version)) => {
-                if peer_version != other_peer_version {
-                    return Err(SspiError::new(
-                        SspiErrorType::MessageAltered,
-                        format!(
-                            "CredSSP peer changed protocol version from {} to {}",
-                            peer_version,
-                            other.peer_version.unwrap()
-                        ),
-                    ));
-                }
-            }
-            (None, Some(other_peer_version)) => self.peer_version = Some(other_peer_version),
-            _ => {
-                return Err(SspiError::new(
-                    SspiErrorType::InvalidToken,
-                    String::from("CredSSP peer did not provide the version"),
-                ));
-            }
-        };
-
-        if other.nego_tokens.is_some() {
-            self.nego_tokens = other.nego_tokens;
-        }
-        if other.auth_info.is_some() {
-            self.auth_info = other.auth_info;
-        }
-        if other.pub_key_auth.is_some() {
-            self.pub_key_auth = other.pub_key_auth;
-        }
-        if other.error_code.is_some() {
-            self.error_code = other.error_code;
-        }
-        if other.client_nonce.is_some() {
-            self.client_nonce = other.client_nonce;
-        }
-
-        Ok(())
-    }
-
     pub fn buffer_len(&self) -> u16 {
         ber::sizeof_sequence(self.ts_request_len())
     }
@@ -247,6 +192,19 @@ impl TsRequest {
             + error_code_len;
 
         fields_len + ber::sizeof_integer(2) + ber::sizeof_contextual_tag(3)
+    }
+}
+
+impl Default for TsRequest {
+    fn default() -> Self {
+        Self {
+            peer_version: None,
+            nego_tokens: None,
+            auth_info: None,
+            pub_key_auth: None,
+            error_code: None,
+            client_nonce: None,
+        }
     }
 }
 
