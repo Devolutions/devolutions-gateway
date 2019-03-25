@@ -44,7 +44,8 @@ fn get_system_time_as_file_time_test_returns_value_in_correct_case() {
 
 #[test]
 fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
-    let challenge_target_info_buffer = get_challenge_target_info(TIMESTAMP).unwrap();
+    let identity = get_test_identity().into();
+    let challenge_target_info_buffer = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
     let mut av_pairs = AvPair::buffer_to_av_pairs(&challenge_target_info_buffer).unwrap();
 
     // check that does not have duplicates
@@ -60,6 +61,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
+            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
             _ => unreachable!(),
         };
     }
@@ -67,7 +72,8 @@ fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
 
 #[test]
 fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp() {
-    let challenge_target_info_buffer = get_challenge_target_info(TIMESTAMP).unwrap();
+    let identity = get_test_identity().into();
+    let challenge_target_info_buffer = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
     let mut av_pairs = AvPair::buffer_to_av_pairs(&challenge_target_info_buffer).unwrap();
 
     // check that does not have duplicates
@@ -83,6 +89,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp()
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
+            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
             _ => unreachable!(),
         };
     }
@@ -91,7 +101,8 @@ fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp()
 #[test]
 fn get_authenticate_target_info_correct_returns_with_use_mic() {
     let send_single_host_data = false;
-    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
+    let identity = get_test_identity().into();
+    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -120,6 +131,10 @@ fn get_authenticate_target_info_correct_returns_with_use_mic() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
             AvPair::EOL => (),
+            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
             _ => unreachable!(),
         };
     }
@@ -128,7 +143,8 @@ fn get_authenticate_target_info_correct_returns_with_use_mic() {
 #[test]
 fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
     let send_single_host_data = true;
-    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
+    let identity = get_test_identity().into();
+    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -158,6 +174,10 @@ fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
             AvPair::SingleHost(value) => assert_eq!(value[..], SINGLE_HOST_DATA[..]),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
+            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
             _ => unreachable!(),
         };
     }
@@ -166,7 +186,8 @@ fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
 #[test]
 fn get_authenticate_target_info_returns_without_principal_name() {
     let send_single_host_data = false;
-    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
+    let identity = get_test_identity().into();
+    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -195,6 +216,10 @@ fn get_authenticate_target_info_returns_without_principal_name() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
+            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
+            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
             _ => unreachable!(),
         };
     }

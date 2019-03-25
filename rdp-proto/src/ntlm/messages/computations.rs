@@ -61,16 +61,17 @@ where
     }
 }
 
-pub fn get_challenge_target_info(timestamp: u64) -> sspi::Result<Vec<u8>> {
-    let mut av_pairs_list: Vec<AvPair> = Vec::with_capacity(2);
+pub fn get_challenge_target_info(identity: &AuthIdentity, timestamp: u64) -> sspi::Result<Vec<u8>> {
+    let mut av_pairs: Vec<AvPair> = Vec::with_capacity(6);
 
-    // will not set NbDomainName, NbComputerName, DnsDomainName, DnsComputerName,
-    // because they are not used anywhere
+    av_pairs.push(AvPair::NbDomainName(identity.domain.clone()));
+    av_pairs.push(AvPair::NbComputerName(identity.domain.clone()));
+    av_pairs.push(AvPair::DnsDomainName(identity.domain.clone()));
+    av_pairs.push(AvPair::DnsComputerName(identity.domain.clone()));
+    av_pairs.push(AvPair::Timestamp(timestamp));
+    av_pairs.push(AvPair::EOL);
 
-    av_pairs_list.push(AvPair::Timestamp(timestamp));
-    av_pairs_list.push(AvPair::EOL);
-
-    Ok(AvPair::list_to_buffer(&av_pairs_list)?)
+    Ok(AvPair::list_to_buffer(&av_pairs)?)
 }
 
 pub fn get_authenticate_target_info(target_info: &[u8], send_single_host_data: bool) -> sspi::Result<Vec<u8>> {

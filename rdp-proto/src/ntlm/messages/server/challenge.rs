@@ -44,7 +44,7 @@ pub fn write_challenge(mut context: &mut Ntlm, mut transport: impl io::Write) ->
 
     let server_challenge = generate_challenge()?;
     let timestamp = generate_timestamp()?;
-    let target_info = get_challenge_target_info(timestamp)?;
+    let target_info = get_challenge_target_info(&context.identity, timestamp)?;
 
     context.flags = get_flags(context.flags);
     let message_fields = ChallengeMessageFields::new(target_info.as_ref(), CHALLENGE_MESSAGE_OFFSET as u32);
