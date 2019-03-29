@@ -13,7 +13,7 @@ fn cookie_is_written_to_request() {
     write_negotiation_request(
         &mut buff,
         cookie,
-        SecurityProtocol::Hybrid | SecurityProtocol::SSL,
+        SecurityProtocol::HYBRID | SecurityProtocol::SSL,
         NegotiationRequestFlags::default(),
     )
     .unwrap();
@@ -30,7 +30,7 @@ fn rdp_negotiation_data_is_written_to_request_if_nla_security() {
     write_negotiation_request(
         &mut buff,
         cookie,
-        SecurityProtocol::Hybrid | SecurityProtocol::SSL,
+        SecurityProtocol::HYBRID | SecurityProtocol::SSL,
         NegotiationRequestFlags::default(),
     )
     .unwrap();
@@ -66,7 +66,7 @@ fn negotiation_request_is_written_correclty() {
     write_negotiation_request(
         &mut buff,
         "User",
-        SecurityProtocol::Hybrid | SecurityProtocol::SSL,
+        SecurityProtocol::HYBRID | SecurityProtocol::SSL,
         NegotiationRequestFlags::default(),
     )
     .unwrap();
@@ -88,7 +88,7 @@ fn negotiation_response_is_processed_correctly() {
     let (selected_protocol, flags) =
         parse_negotiation_response(X224TPDUType::ConnectionConfirm, &mut stream.as_ref()).unwrap();
 
-    assert_eq!(selected_protocol, SecurityProtocol::Hybrid);
+    assert_eq!(selected_protocol, SecurityProtocol::HYBRID);
     assert_eq!(flags, expected_flags);
 }
 
@@ -186,8 +186,8 @@ fn parse_request_cookie_on_unterminated_cookie_results_in_error() {
 
 #[test]
 fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
-    let expected_flags = NegotiationRequestFlags::RestrictedAdminModeRequied
-        | NegotiationRequestFlags::RedirectedAuthenticationModeRequied;
+    let expected_flags = NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIED
+        | NegotiationRequestFlags::REDIRECTED_AUTHENTICATION_MODE_REQUIED;
     #[rustfmt::skip]
     let request = [
         0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
@@ -202,7 +202,7 @@ fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
 
     assert_eq!(cookie, "User");
     assert_eq!(flags, expected_flags);
-    assert_eq!(protocol, SecurityProtocol::Hybrid | SecurityProtocol::SSL);
+    assert_eq!(protocol, SecurityProtocol::HYBRID | SecurityProtocol::SSL);
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn negotiation_response_is_written_correctly() {
 
     let mut buffer = vec![0; expected.len()];
 
-    write_negotiation_response(&mut buffer.as_mut_slice(), flags, SecurityProtocol::Hybrid).unwrap();
+    write_negotiation_response(&mut buffer.as_mut_slice(), flags, SecurityProtocol::HYBRID).unwrap();
 
     assert_eq!(buffer, expected);
 }

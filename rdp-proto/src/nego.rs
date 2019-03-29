@@ -2,6 +2,7 @@
 mod tests;
 
 use std::{
+    error::Error,
     fmt,
     io::{self, prelude::*},
 };
@@ -22,9 +23,9 @@ bitflags! {
     pub struct SecurityProtocol: u32 {
         const RDP = 0;
         const SSL = 1;
-        const Hybrid = 2;
+        const HYBRID = 2;
         const RDSTLS = 4;
-        const HybridEx = 8;
+        const HYBRID_EX = 8;
     }
 }
 
@@ -32,9 +33,9 @@ bitflags! {
     /// https://msdn.microsoft.com/en-us/library/cc240500.aspx
     #[derive(Default)]
     pub struct NegotiationRequestFlags: u8 {
-        const RestrictedAdminModeRequied = 0x01;
-        const RedirectedAuthenticationModeRequied = 0x02;
-        const CorrelationInfoPresent = 0x08;
+        const RESTRICTED_ADMIN_MODE_REQUIED = 0x01;
+        const REDIRECTED_AUTHENTICATION_MODE_REQUIED = 0x02;
+        const CORRELATION_INFO_PRESENT = 0x08;
     }
 }
 
@@ -42,11 +43,11 @@ bitflags! {
     /// https://msdn.microsoft.com/en-us/library/cc240506.aspx
     #[derive(Default)]
     pub struct NegotiationResponseFlags: u8 {
-        const ExtendedClientDataSupported = 0x01;
-        const DynvcGfxProtocolSupported = 0x02;
-        const RdpNegRspReserved = 0x04;
-        const RestrictedAdminModeSupported = 0x08;
-        const RedirectedAuthenticationModeSupported = 0x10;
+        const EXTENDED_CLIENT_DATA_SUPPORTED = 0x01;
+        const DYNVC_GFX_PROTOCOL_SUPPORTED = 0x02;
+        const RDP_NEG_RSP_RESERVED = 0x04;
+        const RESTRICTED_ADMIN_MODE_SUPPORTED = 0x08;
+        const REDIRECTED_AUTHENTICATION_MODE_SUPPORTED = 0x10;
     }
 }
 
@@ -77,6 +78,8 @@ impl fmt::Display for NegotiationError {
     }
 }
 
+impl Error for NegotiationError {}
+
 impl From<io::Error> for NegotiationError {
     fn from(e: io::Error) -> Self {
         NegotiationError::IOError(e)
@@ -101,12 +104,7 @@ pub fn write_negotiation_request(
     buffer.write_u8(b'\n')?;
 
     if protocol.bits() > SecurityProtocol::RDP.bits() {
-        write_negotiation_data(
-            buffer,
-            NegotiationMessage::Request,
-            flags.bits(),
-            protocol.bits(),
-        )?;
+        write_negotiation_data(buffer, NegotiationMessage::Request, flags.bits(), protocol.bits())?;
     }
 
     Ok(())
@@ -152,12 +150,7 @@ pub fn write_negotiation_response(
     flags: NegotiationResponseFlags,
     protocol: SecurityProtocol,
 ) -> io::Result<()> {
-    write_negotiation_data(
-        buffer,
-        NegotiationMessage::Response,
-        flags.bits(),
-        protocol.bits(),
-    )
+    write_negotiation_data(buffer, NegotiationMessage::Response, flags.bits(), protocol.bits())
 }
 
 pub fn write_negotiation_response_error(buffer: impl io::Write, error: NegotiationFailureCodes) -> io::Result<()> {
