@@ -100,7 +100,7 @@ impl SspiError {
 impl Error for SspiError {}
 
 impl fmt::Display for SspiError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -136,7 +136,7 @@ impl From<SspiError> for io::Error {
 }
 
 impl fmt::Display for SspiOk {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
