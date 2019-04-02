@@ -1,7 +1,3 @@
-extern crate byteorder;
-extern crate jet_proto;
-extern crate uuid;
-
 use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command};

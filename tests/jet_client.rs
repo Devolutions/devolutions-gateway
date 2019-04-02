@@ -1,7 +1,3 @@
-extern crate byteorder;
-extern crate jet_proto;
-extern crate uuid;
-
 mod common;
 
 use jet_proto::{JetMethod, JetPacket};

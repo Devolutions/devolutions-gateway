@@ -93,7 +93,7 @@ fn main() {
                                 let transport = TcpTransport::new_tls(tls_stream);
                                 Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
-                    ) as Box<Future<Item = (), Error = io::Error> + Send>
+                    ) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                 }
                 "rdp" => RdpClient::new(
                     routing_url.clone(),
@@ -154,7 +154,7 @@ impl Proxy {
         &self,
         server_transport: T,
         client_transport: U,
-    ) -> Box<Future<Item = (), Error = io::Error> + Send> {
+    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let jet_sink_server = server_transport.message_sink();
         let mut jet_stream_server = server_transport.message_stream();
 

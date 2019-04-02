@@ -51,7 +51,7 @@ struct NegotiationResponseResult {
 fn create_client_logger(client_addr: String) -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)
-        .use_custom_timestamp(|output: &mut io::Write| -> io::Result<()> {
+        .use_custom_timestamp(|output: &mut dyn io::Write| -> io::Result<()> {
             write!(output, "{}", chrono::Utc::now().format(LOGGER_TIMESTAMP_FORMAT))
         })
         .build()
@@ -238,7 +238,7 @@ impl RdpClient {
             }
         });
 
-        Box::new(future) as Box<Future<Item = (), Error = io::Error> + Send>
+        Box::new(future) as Box<dyn Future<Item = (), Error = io::Error> + Send>
     }
 }
 

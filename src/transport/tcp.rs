@@ -180,7 +180,7 @@ impl Transport for TcpTransport {
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: u64,
-    packet_interceptor: Option<Box<PacketInterceptor>>,
+    packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl TcpJetStream {
@@ -241,7 +241,7 @@ impl JetStream for TcpJetStream {
         self.nb_bytes_read
     }
 
-    fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>) {
+    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
         self.packet_interceptor = Some(interceptor);
     }
 }

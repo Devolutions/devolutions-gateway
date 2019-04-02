@@ -8,7 +8,7 @@ pub trait PacketInterceptor: Send + Sync {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
 }
 
-type MessageReader = Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
+type MessageReader = dyn Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
 pub struct PeerInfo {
     pub addr: SocketAddr,
     pub sequence_number: u32,

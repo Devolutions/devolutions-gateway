@@ -1,8 +1,5 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
-extern crate byteorder;
-extern crate jet_proto;
-extern crate uuid;
 
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
@@ -32,7 +29,7 @@ impl Program {
     }
 
     fn print_error(&self, mesg: String) {
-        writeln!(io::stderr(), "{}: error: {}", self.name, mesg).unwrap();
+        eprintln!("{}: error: {}", self.name, mesg);
     }
 
     fn print_fail(&self, mesg: String) -> ! {

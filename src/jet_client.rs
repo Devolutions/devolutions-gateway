@@ -43,7 +43,7 @@ impl JetClient {
         }
     }
 
-    pub fn serve(self, transport: JetTransport) -> Box<Future<Item = (), Error = io::Error> + Send> {
+    pub fn serve(self, transport: JetTransport) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let msg_reader = JetMsgReader::new(transport.clone());
         let jet_associations = self.jet_associations.clone();
         let executor_handle = self._executor_handle.clone();
@@ -52,13 +52,13 @@ impl JetClient {
         Box::new(msg_reader.and_then(move |msg| {
             if msg.is_accept() {
                 let handle_msg = HandleAcceptJetMsg::new(transport.clone(), msg, jet_associations, executor_handle);
-                Box::new(handle_msg) as Box<Future<Item = (), Error = io::Error> + Send>
+                Box::new(handle_msg) as Box<dyn Future<Item = (), Error = io::Error> + Send>
             } else if msg.is_connect() {
                 let handle_msg = HandleConnectJetMsg::new(transport.clone(), msg, jet_associations);
                 Box::new(handle_msg.and_then(|(t1, t2)| Proxy::new(config).build(t1, t2)))
-                    as Box<Future<Item = (), Error = io::Error> + Send>
+                    as Box<dyn Future<Item = (), Error = io::Error> + Send>
             } else {
-                Box::new(err(error_other("Invalid method"))) as Box<Future<Item = (), Error = io::Error> + Send>
+                Box::new(err(error_other("Invalid method"))) as Box<dyn Future<Item = (), Error = io::Error> + Send>
             }
         }))
     }
