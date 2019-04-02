@@ -33,6 +33,7 @@ pub struct CredSspServer {
     public_key: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub enum CredSspResult {
     ReplyNeeded(TsRequest),
     FinalMessage(TsRequest),
