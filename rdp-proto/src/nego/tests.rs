@@ -103,7 +103,7 @@ fn wrong_x224_code_in_negotiation_response_results_in_error() {
 
     match parse_negotiation_response(X224TPDUType::ConnectionRequest, &mut stream.as_ref()) {
         Err(NegotiationError::IOError(ref e)) if e.kind() == io::ErrorKind::InvalidData => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -119,7 +119,7 @@ fn wrong_message_code_in_negotiation_response_results_in_error() {
 
     match parse_negotiation_response(X224TPDUType::ConnectionConfirm, &mut stream.as_ref()) {
         Err(NegotiationError::IOError(ref e)) if e.kind() == io::ErrorKind::InvalidData => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -135,11 +135,8 @@ fn negotiation_failure_in_repsonse_results_in_error() {
 
     match parse_negotiation_response(X224TPDUType::ConnectionConfirm, &mut stream.as_ref()) {
         Err(NegotiationError::NegotiationFailure(e))
-            if e == NegotiationFailureCodes::SSLWithUserAuthRequiredByServer =>
-        {
-            ()
-        }
-        Err(_) => panic!("wrong error type"),
+            if e == NegotiationFailureCodes::SSLWithUserAuthRequiredByServer => {}
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -165,7 +162,7 @@ fn parse_request_cookie_on_non_cookie_results_in_error() {
 
     match parse_request_cookie(&mut request.as_ref()) {
         Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -179,7 +176,7 @@ fn parse_request_cookie_on_unterminated_cookie_results_in_error() {
 
     match parse_request_cookie(&mut request.as_ref()) {
         Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -198,7 +195,7 @@ fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
     ];
 
     let (cookie, protocol, flags) =
-        parse_negotiation_request(X224TPDUType::ConnectionRequest, &mut request.as_ref()).unwrap();
+        parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()).unwrap();
 
     assert_eq!(cookie, "User");
     assert_eq!(flags, expected_flags);
@@ -213,7 +210,7 @@ fn negotiation_request_without_negotiation_data_is_parsed_correctly() {
     ];
 
     let (cookie, protocol, flags) =
-        parse_negotiation_request(X224TPDUType::ConnectionRequest, &mut request.as_ref()).unwrap();
+        parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()).unwrap();
 
     assert_eq!(cookie, "User");
     assert_eq!(flags, NegotiationRequestFlags::default());
@@ -229,9 +226,9 @@ fn negotiation_request_with_invalid_negotiation_code_results_in_error() {
         0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
     ];
 
-    match parse_negotiation_request(X224TPDUType::ConnectionRequest, &mut request.as_ref()) {
+    match parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()) {
         Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }
@@ -245,9 +242,9 @@ fn negotiation_request_with_invalid_x224_code_results_in_error() {
         0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
     ];
 
-    match parse_negotiation_request(X224TPDUType::ConnectionConfirm, &mut request.as_ref()) {
+    match parse_negotiation_request(X224TPDUType::ConnectionConfirm, request.as_ref()) {
         Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
-        Err(_) => panic!("wrong error type"),
+        Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
     }
 }

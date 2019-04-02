@@ -9,7 +9,7 @@ use crate::{
 fn get_system_time_as_file_time_test_same_start_and_end_date() {
     let expected = 0;
     let start_date = Utc::now();
-    let end_date = start_date.clone();
+    let end_date = start_date;
     assert_eq!(get_system_time_as_file_time(start_date, end_date).unwrap(), expected);
 }
 
@@ -463,7 +463,7 @@ fn av_pair_list_to_buffer_with_all_possible_pairs() {
     let dns_domain_name = b"DnsDomainName".to_vec();
     let dns_tree_name = b"DnsTreeName".to_vec();
     let flags = 0;
-    let timestamp = 1234567890;
+    let timestamp = 1_234_567_890;
     let single_host_data = *SINGLE_HOST_DATA;
     let target_name = b"TargetName".to_vec();
     let channel_bindings = [0xff; HASH_SIZE];
