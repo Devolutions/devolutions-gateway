@@ -2,47 +2,27 @@ extern crate byteorder;
 extern crate jet_proto;
 extern crate uuid;
 
+mod common;
+
 use jet_proto::{JetMethod, JetPacket};
-use std::env;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
-use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
+use common::run_proxy;
+
+const PROXY_ADDR: &str = "127.0.0.1:8079";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
-fn bin() -> PathBuf {
-    let mut me = env::current_exe().unwrap();
-    me.pop();
-    if me.ends_with("deps") {
-        me.pop();
-    }
-    me.push("devolutions-jet");
-
-    me
-}
-
-struct KillOnDrop(Child);
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        self.0.kill().unwrap();
-        self.0.wait().unwrap();
-    }
-}
-
 #[test]
 fn smoke() {
-    let proxy_addr = "127.0.0.1:8080";
-    let cmd_line_arg = "-urltcp://127.0.0.1:8080";
+    let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let proxy = Command::new(bin()).arg(cmd_line_arg).spawn().unwrap();
-    let _proxy = KillOnDrop(proxy);
+    let _proxy = run_proxy(proxy_addr, None, None);
 
     let (sender_uuid, receiver_uuid) = channel();
     let (sender_end, receiver_end) = channel();
