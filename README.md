@@ -22,6 +22,41 @@ FLAGS:
 
 
 OPTIONS:
+    -i, --identities_file <IDENTITIES_FILE>
+            JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
+            Every credential must consist of 'username' and 'password' fields with a string,
+            and optional field 'domain', which also a string if it is present (otherwise - null).
+            The proxy object must be present with a 'proxy' name, the target object with a 'target' name.
+            The target destination must be a string with a target URL and be named 'destination'.
+            identities_file example:
+            '[
+                {
+                    "proxy":{
+                        "username":"ProxyUser1",
+                        "password":"ProxyPassword1",
+                        "domain":null
+                    },
+                    "target":{
+                        "username":"TargetUser1",
+                        "password":"TargetPassword1",
+                        "domain":null
+                    },
+                    "destination":"192.168.1.2:3389"
+                },
+                {
+                    "proxy":{
+                        "username":"ProxyUser2",
+                        "password":"ProxyPassword2",
+                        "domain":"ProxyDomain2"
+                    },
+                    "target":{
+                        "username":"TargetUser1",
+                        "password":"TargetPassword2",
+                        "domain":"TargetDomain2"
+                    },
+                    "destination":"192.168.1.3:3389"
+                }
+            ]'"
     -u, --url <LISTENER_URL>
             An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port> [default:
             tcp://0.0.0.0:8080]

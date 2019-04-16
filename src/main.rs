@@ -98,7 +98,6 @@ fn main() {
                 "rdp" => RdpClient::new(
                     routing_url.clone(),
                     config.clone(),
-                    executor_handle.clone(),
                     tls_public_key.clone(),
                     tls_acceptor.clone(),
                 )

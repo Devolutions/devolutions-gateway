@@ -90,8 +90,43 @@ impl Config {
                     .short("i")
                     .long("identities_file")
                     .value_name("IDENTITIES_FILE")
-                    .help("A JSON-file with proxy credentials and a list of target's credentials")
-                    .long_help("A JSON-file with proxy credentials and a list of target's credentials. Every credential must consist of 'username' and 'password' fields with a string, and optional field 'domain', which also a string if it is present (otherwise - null). The proxy object must be present with a 'proxy' name, the list of targets with a 'targets' name and a list of Credentials in the content.")
+                    .help("A JSON-file with a list of identities: proxy credentials, target credentials, and target destination")
+                    .long_help(r###"
+JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
+Every credential must consist of 'username' and 'password' fields with a string,
+and optional field 'domain', which also a string if it is present (otherwise - null).
+The proxy object must be present with a 'proxy' name, the target object with a 'target' name.
+The target destination must be a string with a target URL and be named 'destination'.
+identities_file example:
+'[
+    {
+        "proxy":{
+            "username":"ProxyUser1",
+            "password":"ProxyPassword1",
+            "domain":null
+        },
+        "target":{
+            "username":"TargetUser1",
+            "password":"TargetPassword1",
+            "domain":null
+        },
+        "destination":"192.168.1.2:3389"
+    },
+    {
+        "proxy":{
+            "username":"ProxyUser2",
+            "password":"ProxyPassword2",
+            "domain":"ProxyDomain2"
+        },
+        "target":{
+            "username":"TargetUser1",
+            "password":"TargetPassword2",
+            "domain":"TargetDomain2"
+        },
+        "destination":"192.168.1.3:3389"
+    }
+]'"
+                        "###)
                     .takes_value(true)
                     .empty_values(false),
             );

@@ -17,20 +17,23 @@ use rdp_proto::{self, CredSsp};
 lazy_static! {
     static ref X224_REQUEST_PROTOCOL: rdp_proto::SecurityProtocol =
         rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::SSL;
-    static ref X224_REQUEST_FLAGS: rdp_proto::NegotiationRequestFlags = rdp_proto::NegotiationRequestFlags::default();
+    static ref X224_REQUEST_FLAGS: rdp_proto::NegotiationRequestFlags = rdp_proto::NegotiationRequestFlags::empty();
     static ref X224_RESPONSE_PROTOCOL: rdp_proto::SecurityProtocol = rdp_proto::SecurityProtocol::HYBRID;
     static ref X224_RESPONSE_FLAGS: rdp_proto::NegotiationResponseFlags =
         rdp_proto::NegotiationResponseFlags::EXTENDED_CLIENT_DATA_SUPPORTED
-            | rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED;
+            | rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+            | rdp_proto::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
+            | rdp_proto::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
+            | rdp_proto::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
     static ref PROXY_CREDENTIALS: rdp_proto::Credentials = rdp_proto::Credentials::new(
         String::from("Username1"),
         String::from("Password1"),
-        Some(String::from("Domain")),
+        Some(String::from("Domain1")),
     );
     static ref SERVER_CREDENTIALS: rdp_proto::Credentials = rdp_proto::Credentials::new(
         String::from("Username2"),
         String::from("Password2"),
-        Some(String::from("Domain")),
+        Some(String::from("Domain2")),
     );
     static ref ROUTING_URL: String = format!("rdp://{}", ROUTING_ADDR);
     static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../src/cert/certificate.p12").to_vec();
@@ -39,6 +42,7 @@ lazy_static! {
 const TLS_PUBLIC_KEY_HEADER: usize = 24;
 const PROXY_ADDR: &str = "127.0.0.1:8080";
 const ROUTING_ADDR: &str = "127.0.0.1:8081";
+const JET_SERVER: &str = "rdp://127.0.0.1:8082";
 const NTLM_VERSION: [u8; rdp_proto::NTLM_VERSION_SIZE] = [0x00; rdp_proto::NTLM_VERSION_SIZE];
 const CERT_PKCS12_PASS: &str = "";
 
@@ -48,9 +52,15 @@ type RdpResult<T> = Result<T, RdpError>;
 pub struct RdpError(String);
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Identities {
+pub struct RdpIdentity {
     pub proxy: rdp_proto::Credentials,
-    pub targets: Vec<rdp_proto::Credentials>,
+    pub target: rdp_proto::Credentials,
+    pub destination: String,
+}
+
+#[derive(Clone)]
+pub struct IdentitiesProxy {
+    rdp_identity: rdp_proto::Credentials,
 }
 
 struct RdpClient {
@@ -61,24 +71,23 @@ struct RdpClient {
 
 struct RdpServer {
     routing_addr: &'static str,
-    server_credentials: rdp_proto::Credentials,
+    identities_proxy: IdentitiesProxy,
 }
 
 #[test]
 fn rdp_with_nla_ntlm() {
     let mut identities_file = tempfile::NamedTempFile::new().expect("Failed to create a named temporary file");
-    write_identities_to_file(
-        Identities {
-            proxy: PROXY_CREDENTIALS.clone(),
-            targets: vec![SERVER_CREDENTIALS.clone()],
-        },
-        identities_file.as_file_mut(),
-    )
-    .expect("Failed to write identities to file");
+    let rdp_identities = vec![RdpIdentity::new(
+        PROXY_CREDENTIALS.clone(),
+        SERVER_CREDENTIALS.clone(),
+        ROUTING_ADDR.to_string(),
+    )];
+    RdpIdentity::list_to_buffer(rdp_identities.as_ref(), identities_file.as_file_mut())
+        .expect("Failed to write identities to file");
 
     let _proxy = run_proxy(
         PROXY_ADDR,
-        Some(&*ROUTING_URL),
+        Some(JET_SERVER),
         Some(
             identities_file
                 .path()
@@ -88,7 +97,7 @@ fn rdp_with_nla_ntlm() {
     );
 
     let server_thread = thread::spawn(move || {
-        let server = RdpServer::new(ROUTING_ADDR, SERVER_CREDENTIALS.clone());
+        let mut server = RdpServer::new(ROUTING_ADDR, IdentitiesProxy::new(SERVER_CREDENTIALS.clone()));
         server.run().expect("Error in server");
     });
     let client_thread = thread::spawn(move || {
@@ -256,14 +265,14 @@ impl RdpClient {
 }
 
 impl RdpServer {
-    fn new(routing_addr: &'static str, server_credentials: rdp_proto::Credentials) -> Self {
+    fn new(routing_addr: &'static str, identities_proxy: IdentitiesProxy) -> Self {
         Self {
             routing_addr,
-            server_credentials,
+            identities_proxy,
         }
     }
 
-    fn run(&self) -> RdpResult<()> {
+    fn run(&mut self) -> RdpResult<()> {
         let mut stream = accept_tcp_stream(self.routing_addr)
             .map_err(|e| RdpError::new(format!("Failed to accept tcp stream: {}", e)))?;
         self.read_negotiation_request(&mut stream).map_err(|e| {
@@ -284,7 +293,7 @@ impl RdpServer {
             .map_err(|e| RdpError::new(format!("Failed to get tls public key: {}", e)))?;
 
         let mut cred_ssp_context =
-            rdp_proto::CredSspServer::new(tls_pubkey, self.server_credentials.clone(), NTLM_VERSION.to_vec())
+            rdp_proto::CredSspServer::new(tls_pubkey, self.identities_proxy.clone(), NTLM_VERSION.to_vec())
                 .map_err(|e| RdpError::new(format!("Failed to create a CredSSP server: {}", e)))?;
 
         self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context)
@@ -309,11 +318,8 @@ impl RdpServer {
         let (code, data) = rdp_proto::decode_x224(&mut buffer)
             .map_err(|e| RdpError::new(format!("Failed to decode negotiation request: {}", e)))?;
         assert_eq!(code, rdp_proto::X224TPDUType::ConnectionRequest);
-        let (cookie, protocol, flags) = rdp_proto::parse_negotiation_request(code, data.as_ref())
+        let (_cookie, _protocol, _flags) = rdp_proto::parse_negotiation_request(code, data.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse negotiation request: {}", e)))?;
-        assert_eq!(self.server_credentials.username, cookie);
-        assert_eq!(*X224_REQUEST_PROTOCOL, protocol);
-        assert_eq!(*X224_REQUEST_FLAGS, flags);
 
         Ok(())
     }
@@ -340,10 +346,10 @@ impl RdpServer {
         Ok(())
     }
 
-    fn read_negotiate_message_and_write_challenge_message(
+    fn read_negotiate_message_and_write_challenge_message<C: rdp_proto::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer,
+        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
@@ -352,10 +358,10 @@ impl RdpServer {
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
     }
 
-    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth(
+    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: rdp_proto::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer,
+        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
@@ -364,10 +370,10 @@ impl RdpServer {
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
     }
 
-    fn read_ts_credentials(
+    fn read_ts_credentials<C: rdp_proto::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer,
+        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
@@ -380,7 +386,12 @@ impl RdpServer {
             ))
         })?;
         match reply {
-            rdp_proto::CredSspResult::Finished => (),
+            rdp_proto::CredSspResult::ClientCredentials(client_credentials) => {
+                let expected_credentials = &self.identities_proxy.rdp_identity;
+                assert_eq!(expected_credentials.username, client_credentials.username);
+                assert_eq!(expected_credentials.domain, client_credentials.domain);
+                assert_eq!(expected_credentials.password, client_credentials.password);
+            }
             _ => panic!("The CredSSP server has returned unexpected result: {:?}", reply),
         };
 
@@ -397,6 +408,40 @@ impl std::error::Error for RdpError {}
 impl std::fmt::Display for RdpError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl RdpIdentity {
+    fn new(proxy: rdp_proto::Credentials, target: rdp_proto::Credentials, destination: String) -> Self {
+        Self {
+            proxy,
+            target,
+            destination,
+        }
+    }
+
+    fn list_to_buffer(rdp_identities: &[Self], mut file: impl io::Write) -> RdpResult<()> {
+        let identities_buffer = serde_json::to_string(&rdp_identities)
+            .map_err(|e| RdpError::new(format!("Failed to convert identities to json: {}", e)))?;
+        file.write_all(identities_buffer.as_bytes())
+            .map_err(|e| RdpError::new(format!("Failed to write identities to file: {}", e)))?;
+
+        Ok(())
+    }
+}
+
+impl IdentitiesProxy {
+    pub fn new(rdp_identity: rdp_proto::Credentials) -> Self {
+        Self { rdp_identity }
+    }
+}
+
+impl rdp_proto::CredentialsProxy for IdentitiesProxy {
+    fn password_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<String> {
+        assert_eq!(username, self.rdp_identity.username);
+        assert_eq!(domain, self.rdp_identity.domain);
+
+        Ok(self.rdp_identity.password.clone())
     }
 }
 
@@ -426,15 +471,6 @@ fn process_cred_ssp_phase_with_reply_needed(
             reply
         ))),
     }
-}
-
-fn write_identities_to_file(identities: Identities, mut file: impl io::Write) -> RdpResult<()> {
-    let identities_buffer = serde_json::to_string(&identities)
-        .map_err(|e| RdpError::new(format!("Failed to convert identities to json: {}", e)))?;
-    file.write_all(identities_buffer.as_bytes())
-        .map_err(|e| RdpError::new(format!("Failed to write identities to file: {}", e)))?;
-
-    Ok(())
 }
 
 fn read_stream_buffer(stream: &mut impl io::Read) -> BytesMut {

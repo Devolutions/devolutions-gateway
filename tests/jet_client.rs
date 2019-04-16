@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use common::run_proxy;
 
-const PROXY_ADDR: &str = "127.0.0.1:8079";
+const PROXY_ADDR: &str = "127.0.0.1:8070";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
