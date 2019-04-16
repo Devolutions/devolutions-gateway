@@ -10,9 +10,10 @@ use crate::{
             computations::*, MessageFields, MessageTypes, CLIENT_SEAL_MAGIC, CLIENT_SIGN_MAGIC, NTLM_SIGNATURE,
             NTLM_VERSION_SIZE, SERVER_SEAL_MAGIC, SERVER_SIGN_MAGIC,
         },
-        AuthenticateMessage, Mic, NegotiateFlags, Ntlm, NtlmState, MESSAGE_INTEGRITY_CHECK_SIZE, SESSION_KEY_SIZE,
+        AuthenticateMessage, Mic, NegotiateFlags, Ntlm, NtlmState, ENCRYPTED_RANDOM_SESSION_KEY_SIZE,
+        MESSAGE_INTEGRITY_CHECK_SIZE, SESSION_KEY_SIZE,
     },
-    sspi::{self, AuthIdentity, SspiError, SspiErrorType},
+    sspi::{self, CredentialsBuffers, SspiError, SspiErrorType},
 };
 
 const MIC_SIZE: usize = 16;
@@ -30,7 +31,7 @@ struct AuthenticateMessageFields {
 
 impl AuthenticateMessageFields {
     pub fn new(
-        identity: &AuthIdentity,
+        identity: &CredentialsBuffers,
         lm_challenge_response: &[u8],
         nt_challenge_response: &[u8],
         negotiate_flags: NegotiateFlags,
@@ -94,6 +95,10 @@ pub fn write_authenticate(mut context: &mut Ntlm, mut transport: impl io::Write)
         .challenge_message
         .as_ref()
         .expect("challenge message must be set on challenge phase");
+    let identity = context
+        .identity
+        .as_ref()
+        .expect("Identity must be present on authenticate phase");
 
     // calculate needed fields
     // NTLMv2
@@ -101,7 +106,7 @@ pub fn write_authenticate(mut context: &mut Ntlm, mut transport: impl io::Write)
         get_authenticate_target_info(challenge_message.target_info.as_ref(), context.send_single_host_data)?;
 
     let client_challenge = generate_challenge()?;
-    let ntlm_v2_hash = compute_ntlm_v2_hash(&context.identity)?;
+    let ntlm_v2_hash = compute_ntlm_v2_hash(identity)?;
     let lm_challenge_response = compute_lm_v2_response(
         client_challenge.as_ref(),
         challenge_message.server_challenge.as_ref(),
@@ -115,11 +120,13 @@ pub fn write_authenticate(mut context: &mut Ntlm, mut transport: impl io::Write)
         challenge_message.timestamp,
     )?;
     let session_key = OsRng::new()?.gen::<[u8; SESSION_KEY_SIZE]>();
-    let encrypted_session_key = Rc4::new(&key_exchange_key).process(session_key.as_ref());
+    let encrypted_session_key_vec = Rc4::new(&key_exchange_key).process(session_key.as_ref());
+    let mut encrypted_session_key = [0x00; ENCRYPTED_RANDOM_SESSION_KEY_SIZE];
+    encrypted_session_key.clone_from_slice(encrypted_session_key_vec.as_ref());
 
-    context.flags = get_flags(context.flags, &context.identity);
+    context.flags = get_flags(context.flags, identity);
     let message_fields = AuthenticateMessageFields::new(
-        &context.identity,
+        identity,
         lm_challenge_response.as_ref(),
         nt_challenge_response.as_ref(),
         context.flags,
@@ -152,7 +159,13 @@ pub fn write_authenticate(mut context: &mut Ntlm, mut transport: impl io::Write)
     context.send_sealing_key = Some(Rc4::new(&generate_signing_key(session_key.as_ref(), CLIENT_SEAL_MAGIC)));
     context.recv_sealing_key = Some(Rc4::new(&generate_signing_key(session_key.as_ref(), SERVER_SEAL_MAGIC)));
 
-    context.authenticate_message = Some(AuthenticateMessage::new(message, Some(mic), session_key));
+    context.authenticate_message = Some(AuthenticateMessage::new(
+        message,
+        Some(mic),
+        target_info,
+        client_challenge,
+        encrypted_session_key,
+    ));
     context.state = NtlmState::Final;
 
     Ok(sspi::SspiOk::CompleteNeeded)
@@ -169,7 +182,7 @@ fn check_state(state: NtlmState) -> sspi::Result<()> {
     }
 }
 
-fn get_flags(negotiate_flags: NegotiateFlags, identity: &AuthIdentity) -> NegotiateFlags {
+fn get_flags(negotiate_flags: NegotiateFlags, identity: &CredentialsBuffers) -> NegotiateFlags {
     // set KEY_EXCH flag if it was in the challenge message
     let mut negotiate_flags = negotiate_flags & NegotiateFlags::NTLM_SSP_NEGOTIATE_KEY_EXCH;
 

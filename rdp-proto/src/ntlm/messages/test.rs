@@ -120,10 +120,10 @@ lazy_static! {
     };
 }
 
-pub fn get_test_identity() -> Credentials {
-    Credentials::new(
+pub fn get_test_identity() -> Option<Credentials> {
+    Some(Credentials::new(
         String::from("User"),
         String::from("Password"),
         Some(String::from("Domain")),
-    )
+    ))
 }

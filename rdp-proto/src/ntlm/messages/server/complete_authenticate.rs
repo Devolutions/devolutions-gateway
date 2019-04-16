@@ -1,8 +1,9 @@
+use crate::encryption::HASH_SIZE;
 use crate::{
     encryption::rc4::Rc4,
     ntlm::{
         messages::{computations::*, CLIENT_SEAL_MAGIC, CLIENT_SIGN_MAGIC, SERVER_SEAL_MAGIC, SERVER_SIGN_MAGIC},
-        Mic, Ntlm, NtlmState, MESSAGE_INTEGRITY_CHECK_SIZE,
+        Mic, NegotiateFlags, Ntlm, NtlmState, MESSAGE_INTEGRITY_CHECK_SIZE, SESSION_KEY_SIZE,
     },
     sspi::{self, SspiError, SspiErrorType},
 };
@@ -23,18 +24,35 @@ pub fn complete_authenticate(mut context: &mut Ntlm) -> sspi::Result<()> {
         .as_ref()
         .expect("authenticate message must be set on authenticate phase");
 
-    let session_key = authenticate_message.session_key.as_ref();
-    context.send_signing_key = generate_signing_key(session_key, SERVER_SIGN_MAGIC);
-    context.recv_signing_key = generate_signing_key(session_key, CLIENT_SIGN_MAGIC);
-    context.send_sealing_key = Some(Rc4::new(&generate_signing_key(session_key, SERVER_SEAL_MAGIC)));
-    context.recv_sealing_key = Some(Rc4::new(&generate_signing_key(session_key, CLIENT_SEAL_MAGIC)));
+    let ntlm_v2_hash = compute_ntlm_v2_hash(
+        context
+            .identity
+            .as_ref()
+            .expect("Identity must be present on complete_authenticate phase"),
+    )?;
+    let (_, key_exchange_key) = compute_ntlm_v2_response(
+        authenticate_message.client_challenge.as_ref(),
+        challenge_message.server_challenge.as_ref(),
+        authenticate_message.target_info.as_ref(),
+        ntlm_v2_hash.as_ref(),
+        challenge_message.timestamp,
+    )?;
+    let session_key = get_session_key(
+        key_exchange_key,
+        authenticate_message.encrypted_random_session_key.as_ref(),
+        context.flags,
+    )?;
+    context.send_signing_key = generate_signing_key(session_key.as_ref(), SERVER_SIGN_MAGIC);
+    context.recv_signing_key = generate_signing_key(session_key.as_ref(), CLIENT_SIGN_MAGIC);
+    context.send_sealing_key = Some(Rc4::new(&generate_signing_key(session_key.as_ref(), SERVER_SEAL_MAGIC)));
+    context.recv_sealing_key = Some(Rc4::new(&generate_signing_key(session_key.as_ref(), CLIENT_SEAL_MAGIC)));
 
     check_mic_correctness(
         negotiate_message.message.as_ref(),
         challenge_message.message.as_ref(),
         authenticate_message.message.as_ref(),
         &authenticate_message.mic,
-        authenticate_message.session_key.as_ref(),
+        session_key.as_ref(),
     )?;
 
     context.state = NtlmState::Final;
@@ -85,4 +103,25 @@ fn check_mic_correctness(
     }
 
     Ok(())
+}
+
+fn get_session_key(
+    key_exchange_key: [u8; HASH_SIZE],
+    encrypted_random_session_key: &[u8],
+    flags: NegotiateFlags,
+) -> sspi::Result<[u8; SESSION_KEY_SIZE]> {
+    let session_key = if flags.contains(NegotiateFlags::NTLM_SSP_NEGOTIATE_KEY_EXCH) {
+        let mut session_key = [0x00; SESSION_KEY_SIZE];
+        session_key.clone_from_slice(
+            Rc4::new(key_exchange_key.as_ref())
+                .process(encrypted_random_session_key)
+                .as_slice(),
+        );
+
+        session_key
+    } else {
+        key_exchange_key
+    };
+
+    Ok(session_key)
 }

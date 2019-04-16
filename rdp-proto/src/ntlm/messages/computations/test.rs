@@ -44,8 +44,7 @@ fn get_system_time_as_file_time_test_returns_value_in_correct_case() {
 
 #[test]
 fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
-    let identity = get_test_identity().into();
-    let challenge_target_info_buffer = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
+    let challenge_target_info_buffer = get_challenge_target_info(TIMESTAMP).unwrap();
     let mut av_pairs = AvPair::buffer_to_av_pairs(&challenge_target_info_buffer).unwrap();
 
     // check that does not have duplicates
@@ -61,10 +60,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
-            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -72,8 +71,7 @@ fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
 
 #[test]
 fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp() {
-    let identity = get_test_identity().into();
-    let challenge_target_info_buffer = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
+    let challenge_target_info_buffer = get_challenge_target_info(TIMESTAMP).unwrap();
     let mut av_pairs = AvPair::buffer_to_av_pairs(&challenge_target_info_buffer).unwrap();
 
     // check that does not have duplicates
@@ -89,10 +87,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp()
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
-            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -101,8 +99,7 @@ fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp()
 #[test]
 fn get_authenticate_target_info_correct_returns_with_use_mic() {
     let send_single_host_data = false;
-    let identity = get_test_identity().into();
-    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
+    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -131,10 +128,10 @@ fn get_authenticate_target_info_correct_returns_with_use_mic() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
             AvPair::EOL => (),
-            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -143,8 +140,7 @@ fn get_authenticate_target_info_correct_returns_with_use_mic() {
 #[test]
 fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
     let send_single_host_data = true;
-    let identity = get_test_identity().into();
-    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
+    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -174,10 +170,10 @@ fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
             AvPair::SingleHost(value) => assert_eq!(value[..], SINGLE_HOST_DATA[..]),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
-            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -186,8 +182,7 @@ fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
 #[test]
 fn get_authenticate_target_info_returns_without_principal_name() {
     let send_single_host_data = false;
-    let identity = get_test_identity().into();
-    let target_info = get_challenge_target_info(&identity, TIMESTAMP).unwrap();
+    let target_info = get_challenge_target_info(TIMESTAMP).unwrap();
 
     let mut authenticate_target_info =
         get_authenticate_target_info(target_info.as_ref(), send_single_host_data).unwrap();
@@ -216,10 +211,10 @@ fn get_authenticate_target_info_returns_without_principal_name() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
-            AvPair::NbDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::NbComputerName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsDomainName(value) => assert_eq!(*value, identity.domain),
-            AvPair::DnsComputerName(value) => assert_eq!(*value, identity.domain),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -227,7 +222,7 @@ fn get_authenticate_target_info_returns_without_principal_name() {
 
 #[test]
 fn compute_ntlmv2_hash_password_is_less_than_hash_len_offset() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
     let expected = [
         0xc, 0x86, 0x8a, 0x40, 0x3b, 0xfd, 0x7a, 0x93, 0xa3, 0x0, 0x1e, 0xf2, 0x2e, 0xf0, 0x2e, 0x3f,
     ];
@@ -302,14 +297,14 @@ fn compute_ntlmv2_hash_with_large_password() {
 #[test]
 #[should_panic]
 fn compute_ntlmv2_hash_fails_on_empty_identity() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     assert!(compute_ntlm_v2_hash(&identity).is_err());
 }
 
 #[test]
 fn compute_lm_v2_repsonse_correct_computes_response() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
     let ntlm_v2_hash = compute_ntlm_v2_hash(&identity).unwrap();
     let client_challenge = CLIENT_CHALLENGE.as_ref();
     let server_challenge = SERVER_CHALLENGE.as_ref();
@@ -327,7 +322,7 @@ fn compute_lm_v2_repsonse_correct_computes_response() {
 
 #[test]
 fn compute_ntlm_v2_repsonse_correct_computes_challenge_response() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     let server_challenge = SERVER_CHALLENGE;
     let client_challenge = CLIENT_CHALLENGE;
@@ -354,7 +349,7 @@ fn compute_ntlm_v2_repsonse_correct_computes_challenge_response() {
 
 #[test]
 fn compute_ntlm_v2_repsonse_correct_computes_key_exchange_key() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     let server_challenge = SERVER_CHALLENGE;
     let client_challenge = CLIENT_CHALLENGE;

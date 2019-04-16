@@ -6,14 +6,14 @@ use std::io::{self, Read};
 use crate::{
     ber,
     nego::NegotiationRequestFlags,
-    sspi::{self, AuthIdentity, SspiError, SspiErrorType},
+    sspi::{self, CredentialsBuffers, SspiError, SspiErrorType},
 };
 
 pub const NONCE_SIZE: usize = 32;
 const NLA_VERSION: u32 = 6;
 const NONCE_FIELD_LEN: u16 = 36;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TsRequest {
     pub peer_version: Option<u32>,
     pub nego_tokens: Option<Vec<u8>>,
@@ -195,21 +195,8 @@ impl TsRequest {
     }
 }
 
-impl Default for TsRequest {
-    fn default() -> Self {
-        Self {
-            peer_version: None,
-            nego_tokens: None,
-            auth_info: None,
-            pub_key_auth: None,
-            error_code: None,
-            client_nonce: None,
-        }
-    }
-}
-
-pub fn write_ts_credentials(identity: &AuthIdentity, nego_flags: NegotiationRequestFlags) -> io::Result<Vec<u8>> {
-    let empty_identity = AuthIdentity::default();
+pub fn write_ts_credentials(identity: &CredentialsBuffers, nego_flags: NegotiationRequestFlags) -> io::Result<Vec<u8>> {
+    let empty_identity = CredentialsBuffers::default();
     let identity = if nego_flags.contains(NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIED) {
         &empty_identity
     } else {
@@ -249,7 +236,7 @@ pub fn write_ts_credentials(identity: &AuthIdentity, nego_flags: NegotiationRequ
     Ok(buffer)
 }
 
-pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<AuthIdentity> {
+pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<CredentialsBuffers> {
     // TSCredentials (SEQUENCE)
     ber::read_sequence_tag(&mut buffer)?;
     // [0] credType (INTEGER)
@@ -286,16 +273,16 @@ pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<AuthIdentity
         buffer.read_exact(&mut password)?;
     }
 
-    Ok(AuthIdentity::new(user, domain, password))
+    Ok(CredentialsBuffers::new(user, domain, password))
 }
 
-fn sizeof_ts_credentials(identity: &AuthIdentity) -> u16 {
+fn sizeof_ts_credentials(identity: &CredentialsBuffers) -> u16 {
     ber::sizeof_integer(1)
         + ber::sizeof_contextual_tag(ber::sizeof_integer(1))
         + ber::sizeof_sequence_octet_string(ber::sizeof_sequence(sizeof_ts_password_creds(&identity)))
 }
 
-fn sizeof_ts_password_creds(identity: &AuthIdentity) -> u16 {
+fn sizeof_ts_password_creds(identity: &CredentialsBuffers) -> u16 {
     ber::sizeof_sequence_octet_string(identity.domain.len() as u16)
         + ber::sizeof_sequence_octet_string(identity.user.len() as u16)
         + ber::sizeof_sequence_octet_string(identity.password.len() as u16)

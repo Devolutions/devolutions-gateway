@@ -3,7 +3,7 @@ use lazy_static::lazy_static;
 use super::*;
 use crate::{
     nego::NegotiationRequestFlags,
-    sspi::{AuthIdentity, Credentials},
+    sspi::{Credentials, CredentialsBuffers},
 };
 
 const NTLM_CLIENT_NONCE: [u8; 32] = [
@@ -199,21 +199,21 @@ const TS_CREDENTIALS_WITH_RESTRICTED_ADMIN_MODE_REQUIRED: [u8; 25] = [
 ];
 
 lazy_static! {
-    static ref AUTH_IDENTITY_ONE_SYMBOL_USER_AND_PASSWORD: AuthIdentity =
+    static ref AUTH_IDENTITY_ONE_SYMBOL_USER_AND_PASSWORD: CredentialsBuffers =
         Credentials::new(String::from("a"), String::from("1"), None).into();
-    static ref AUTH_IDENTITY_STRONG_USERNAME_AND_PASSWORD: AuthIdentity = Credentials::new(
+    static ref AUTH_IDENTITY_STRONG_USERNAME_AND_PASSWORD: CredentialsBuffers = Credentials::new(
         String::from("QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm1234567890"),
         String::from("@#$%^&*()_+1234567890-=QWERTYUIOP{}qwertyuiop[]asdfghjkl;ASDFGHJKL:\\\"|zxcvbnm,.ZXCVBNM<>?"),
         None
     )
     .into();
-    static ref AUTH_IDENTITY_SIMPLE_WITH_USERNAME_AND_DOMAIN_AND_PASSWORD: AuthIdentity = Credentials::new(
+    static ref AUTH_IDENTITY_SIMPLE_WITH_USERNAME_AND_DOMAIN_AND_PASSWORD: CredentialsBuffers = Credentials::new(
         String::from("Username"),
         String::from("Password"),
         Some(String::from("Domain"))
     )
     .into();
-    static ref AUTH_IDENTITY_WITH_RESTRICTED_ADMIN_MODE_REQUIRED: AuthIdentity =
+    static ref AUTH_IDENTITY_WITH_RESTRICTED_ADMIN_MODE_REQUIRED: CredentialsBuffers =
         Credentials::new(String::from(""), String::from(""), Some(String::from(""))).into();
 }
 
