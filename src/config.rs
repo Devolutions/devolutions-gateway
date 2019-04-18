@@ -69,8 +69,8 @@ impl Config {
                     .short("f")
                     .long("pcap_file")
                     .value_name("PCAP_FILENAME")
-                    .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
-                    .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. Only WaykNow protocol can be saved.")
+                    .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
+                    .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
                     .takes_value(true)
                     .empty_values(false),
             )
