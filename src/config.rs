@@ -135,11 +135,9 @@ identities_file example:
 
         let listener_url = String::from(matches.value_of("listener-url").expect("This should never happend"));
 
-        let routing_url = matches.value_of("routing-url").map(|url| url.to_string());
+        let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
 
-        let pcap_filename = matches
-            .value_of("pcap-filename")
-            .map(|pcap_filename| pcap_filename.to_string());
+        let pcap_filename = matches.value_of("pcap-filename").map(std::string::ToString::to_string);
 
         let protocol = match matches.value_of("protocol") {
             Some("wayk") => Protocol::WAYK,
@@ -149,7 +147,7 @@ identities_file example:
 
         let identities_filename = matches
             .value_of("identities-file")
-            .map(|identities_filename| identities_filename.to_string());
+            .map(std::string::ToString::to_string);
 
         Config {
             listener_url,
