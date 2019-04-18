@@ -40,7 +40,7 @@ pub fn read_authenticate(mut context: &mut Ntlm, mut stream: impl io::Read) -> s
     let message = buffer.into_inner();
 
     let (authenticate_message, updated_identity) =
-        process_message_fiels(&context.identity, message_fields, mic, message)?;
+        process_message_fields(&context.identity, message_fields, mic, message)?;
     context.identity = Some(updated_identity);
     context.authenticate_message = Some(authenticate_message);
 
@@ -138,7 +138,7 @@ where
     Ok(mic)
 }
 
-fn process_message_fiels(
+fn process_message_fields(
     identity: &Option<CredentialsBuffers>,
     message_fields: AuthenticateMessageFields,
     mic: Option<Mic>,
