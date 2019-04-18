@@ -90,7 +90,7 @@ impl Ntlm {
 
             state: NtlmState::Initial,
             flags: NegotiateFlags::empty(),
-            identity: credentials.map(|credentials| credentials.into()),
+            identity: credentials.map(std::convert::Into::into),
             version,
 
             send_single_host_data: false,

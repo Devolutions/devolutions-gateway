@@ -108,7 +108,7 @@ pub fn write_negotiation_request(
     protocol: SecurityProtocol,
     flags: NegotiationRequestFlags,
 ) -> io::Result<()> {
-    write!(buffer, "{}{}\r\n", COOKIE_PREFIX, cookie)?;
+    writeln!(buffer, "{}{}\r", COOKIE_PREFIX, cookie)?;
 
     if protocol.bits() > SecurityProtocol::RDP.bits() {
         write_negotiation_data(buffer, NegotiationMessage::Request, flags.bits(), protocol.bits())?;
