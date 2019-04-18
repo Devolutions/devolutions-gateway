@@ -38,12 +38,17 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
     let (_, code) = parse_tdpu_header(&mut stream)?;
 
     let mut tpdu = input.split_to(len as usize);
-    match code {
-        X224TPDUType::Data => tpdu.advance(TPDU_DATA_LENGTH),
-        _ => tpdu.advance(TPDU_REQUEST_LENGTH),
-    }
+    let header_len = match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    };
+    if header_len <= tpdu.len() {
+        tpdu.advance(header_len);
 
-    Ok((code, tpdu))
+        Ok((code, tpdu))
+    } else {
+        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "TPKT len is too small"))
+    }
 }
 
 pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) -> io::Result<()> {

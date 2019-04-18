@@ -109,3 +109,59 @@ fn parse_tdpu_data_header_advance_stream_position() {
     let next = slice.read_u8().unwrap();
     assert_eq!(next, 0xbf);
 }
+
+#[test]
+fn decode_x224_correctly_decodes_connection_request() {
+    let tpkt_tpdu_header = [0x03, 0x00, 0x00, 0x2c, 0x27, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let expected_tpdu = [
+        0x43, 0x6f, 0x6f, 0x6b, 0x69, 0x65, 0x3a, 0x20, 0x6d, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3d, 0x65,
+        0x6c, 0x74, 0x6f, 0x6e, 0x73, 0x0d, 0x0a, 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+    let mut stream = BytesMut::with_capacity(tpkt_tpdu_header.len() + expected_tpdu.len());
+    stream.extend_from_slice(&tpkt_tpdu_header);
+    stream.extend_from_slice(&expected_tpdu);
+
+    let (code, tpdu) = decode_x224(&mut stream).unwrap();
+
+    assert_eq!(code, X224TPDUType::ConnectionRequest);
+    assert_eq!(tpdu.as_ref(), expected_tpdu.as_ref());
+}
+
+#[test]
+fn decode_x224_correctly_decodes_connection_confirm() {
+    let tpkt_tpdu_header = [0x03, 0x00, 0x00, 0x13, 0x0e, 0xd0, 0x00, 0x00, 0x12, 0x34, 0x00];
+    let expected_tpdu = [0x02, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let mut stream = BytesMut::with_capacity(tpkt_tpdu_header.len() + expected_tpdu.len());
+    stream.extend_from_slice(&tpkt_tpdu_header);
+    stream.extend_from_slice(&expected_tpdu);
+
+    let (code, tpdu) = decode_x224(&mut stream).unwrap();
+
+    assert_eq!(code, X224TPDUType::ConnectionConfirm);
+    assert_eq!(tpdu.as_ref(), expected_tpdu.as_ref());
+}
+
+#[test]
+fn decode_x224_correctly_decodes_data() {
+    let tpkt_tpdu_header = [0x03, 0x00, 0x00, 0x0c, 0x02, 0xf0, 0x80];
+    let expected_tpdu = [0x04, 0x01, 0x00, 0x01, 0x00];
+    let mut stream = BytesMut::with_capacity(tpkt_tpdu_header.len() + expected_tpdu.len());
+    stream.extend_from_slice(&tpkt_tpdu_header);
+    stream.extend_from_slice(&expected_tpdu);
+
+    let (code, tpdu) = decode_x224(&mut stream).unwrap();
+
+    assert_eq!(code, X224TPDUType::Data);
+    assert_eq!(tpdu.as_ref(), expected_tpdu.as_ref());
+}
+
+#[test]
+fn decode_x224_fails_on_incorrect_tpkt_len() {
+    let mut stream = vec![0x03, 0x00, 0x00, 0x00, 0x02, 0xf0, 0x80, 0x04, 0x01, 0x00, 0x01, 0x00].into();
+
+    match decode_x224(&mut stream) {
+        Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => (),
+        Err(_e) => panic!("wrong error type"),
+        _ => panic!("error expected"),
+    };
+}
