@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::io;
+use std::{error::Error, fmt, io};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use num_derive::FromPrimitive;
@@ -59,13 +59,15 @@ enum DomainMCSPDU {
     SendDataIndication = 26,
 }
 
-pub fn parse_fastpath_header(mut stream: impl io::Read) -> io::Result<(Fastpath, u16)> {
+pub fn parse_fastpath_header(mut stream: impl io::Read) -> Result<(Fastpath, u16), FastpathParsingError> {
     let header = stream.read_u8()?;
 
     let (length, sizeof_length) = per_read_length(&mut stream)?;
-    let pdu_length = length
-        .checked_sub(sizeof_length + 1)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Invalid fastpath length"))?;
+    if length < sizeof_length + 1 {
+        return Err(FastpathParsingError::NullLength(sizeof_length as usize + 1));
+    }
+
+    let pdu_length = length - sizeof_length - 1;
 
     Ok((
         Fastpath {
@@ -186,5 +188,30 @@ fn per_read_enumerated(mut stream: impl io::Read, count: u8) -> io::Result<u8> {
         ))
     } else {
         Ok(enumerated)
+    }
+}
+
+#[derive(Debug)]
+pub enum FastpathParsingError {
+    NullLength(usize),
+    IoError(io::Error),
+}
+
+impl fmt::Display for FastpathParsingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FastpathParsingError::NullLength(_bytes_read) => {
+                write!(f, "Received invalid Fast-Path package with 0 length")
+            }
+            FastpathParsingError::IoError(e) => e.fmt(f),
+        }
+    }
+}
+
+impl Error for FastpathParsingError {}
+
+impl From<io::Error> for FastpathParsingError {
+    fn from(e: io::Error) -> Self {
+        FastpathParsingError::IoError(e)
     }
 }
