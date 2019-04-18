@@ -268,11 +268,17 @@ fn negotiate_with_client(
         .map_err(|(e, _)| e)
         .and_then(move |(req, client_transport)| {
             if let Some((code, buf)) = req {
-                let (cookie, request_protocol, request_flags) =
+                let (nego_data, request_protocol, request_flags) =
                     rdp_proto::parse_negotiation_request(code, buf.as_ref())?;
+                let (routing_token, cookie) = match nego_data {
+                    Some(rdp_proto::NegoData::RoutingToken(routing_token)) => (Some(routing_token), None),
+                    Some(rdp_proto::NegoData::Cookie(cookie)) => (None, Some(cookie)),
+                    None => (None, None),
+                };
                 info!(
                     client_logger,
-                    "processing request (cookie: {}, protocol: {:?}, flags: {:?})",
+                    "processing request (routing_token: {:?}, cookie: {:?}, protocol: {:?}, flags: {:?})",
+                    routing_token,
                     cookie,
                     request_protocol,
                     request_flags

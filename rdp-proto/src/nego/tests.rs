@@ -148,19 +148,38 @@ fn cookie_in_request_is_parsed_correctly() {
         0x73, 0x65, 0x72, 0x0D, 0x0A, 0xFF, 0xFF,
     ];
 
-    let cookie = parse_request_cookie(&mut request.as_ref()).unwrap();
+    let (nego_data, _read_len) = read_nego_data(request.as_ref()).unwrap();
 
-    assert_eq!(cookie, "User");
+    match nego_data {
+        NegoData::Cookie(cookie) => assert_eq!(cookie, "User"),
+        _ => panic!("Cookie expected"),
+    };
 }
 
 #[test]
-fn parse_request_cookie_on_non_cookie_results_in_error() {
+fn routing_token_in_request_is_parsed_correctly() {
+    let request = [
+        0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x3D, 0x33, 0x36, 0x34, 0x30, 0x32,
+        0x30, 0x35, 0x32, 0x32, 0x38, 0x2E, 0x31, 0x35, 0x36, 0x32, 0x39, 0x2E, 0x30, 0x30, 0x30, 0x30, 0x0D, 0x0A,
+        0xFF, 0xFF,
+    ];
+
+    let (nego_data, _read_len) = read_nego_data(request.as_ref()).unwrap();
+
+    match nego_data {
+        NegoData::RoutingToken(routing_token) => assert_eq!(routing_token, "3640205228.15629.0000"),
+        _ => panic!("Routing token expected"),
+    };
+}
+
+#[test]
+fn read_string_with_cr_lf_on_non_value_results_in_error() {
     let request = [
         0x6e, 0x6f, 0x74, 0x20, 0x61, 0x20, 0x63, 0x6f, 0x6f, 0x6b, 0x69, 0x65, 0x0F, 0x42, 0x73, 0x65, 0x72, 0x0D,
         0x0A, 0xFF, 0xFF,
     ];
 
-    match parse_request_cookie(&mut request.as_ref()) {
+    match read_string_with_cr_lf(&mut request.as_ref(), COOKIE_PREFIX) {
         Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
         Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
@@ -168,13 +187,13 @@ fn parse_request_cookie_on_non_cookie_results_in_error() {
 }
 
 #[test]
-fn parse_request_cookie_on_unterminated_cookie_results_in_error() {
+fn read_string_with_cr_lf_on_unterminated_message_results_in_error() {
     let request = [
         0x43, 0x6F, 0x6F, 0x6B, 0x69, 0x65, 0x3A, 0x20, 0x6D, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3D, 0x55,
         0x73, 0x65, 0x72,
     ];
 
-    match parse_request_cookie(&mut request.as_ref()) {
+    match read_string_with_cr_lf(&mut request.as_ref(), COOKIE_PREFIX) {
         Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => (),
         Err(_e) => panic!("wrong error type"),
         _ => panic!("error expected"),
@@ -194,10 +213,33 @@ fn negotiation_request_with_negotiation_data_is_parsed_correctly() {
         0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
     ];
 
-    let (cookie, protocol, flags) =
+    let (nego_data, protocol, flags) =
         parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()).unwrap();
 
-    assert_eq!(cookie, "User");
+    match nego_data {
+        Some(NegoData::Cookie(cookie)) => assert_eq!(cookie, "User"),
+        _ => panic!("Cookie expected"),
+    };
+
+    assert_eq!(flags, expected_flags);
+    assert_eq!(protocol, SecurityProtocol::HYBRID | SecurityProtocol::SSL);
+}
+
+#[test]
+fn negotiation_request_without_variable_fields_is_parsed_correctly() {
+    let expected_flags = NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIED
+        | NegotiationRequestFlags::REDIRECTED_AUTHENTICATION_MODE_REQUIED;
+    #[rustfmt::skip]
+    let request = [
+        0x01, // request code
+        expected_flags.bits(),
+        0x08, 0x00, 0x03, 0x00, 0x00, 0x00, // request message
+    ];
+
+    let (nego_data, protocol, flags) =
+        parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()).unwrap();
+
+    assert_eq!(nego_data, None);
     assert_eq!(flags, expected_flags);
     assert_eq!(protocol, SecurityProtocol::HYBRID | SecurityProtocol::SSL);
 }
@@ -209,10 +251,14 @@ fn negotiation_request_without_negotiation_data_is_parsed_correctly() {
         0x73, 0x65, 0x72, 0x0D, 0x0A, // cookie
     ];
 
-    let (cookie, protocol, flags) =
+    let (nego_data, protocol, flags) =
         parse_negotiation_request(X224TPDUType::ConnectionRequest, request.as_ref()).unwrap();
 
-    assert_eq!(cookie, "User");
+    match nego_data {
+        Some(NegoData::Cookie(cookie)) => assert_eq!(cookie, "User"),
+        _ => panic!("Cookie expected"),
+    };
+
     assert_eq!(flags, NegotiationRequestFlags::default());
     assert_eq!(protocol, SecurityProtocol::RDP);
 }

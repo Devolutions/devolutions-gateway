@@ -318,7 +318,7 @@ impl RdpServer {
         let (code, data) = rdp_proto::decode_x224(&mut buffer)
             .map_err(|e| RdpError::new(format!("Failed to decode negotiation request: {}", e)))?;
         assert_eq!(code, rdp_proto::X224TPDUType::ConnectionRequest);
-        let (_cookie, _protocol, _flags) = rdp_proto::parse_negotiation_request(code, data.as_ref())
+        let (_nego_data, _protocol, _flags) = rdp_proto::parse_negotiation_request(code, data.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse negotiation request: {}", e)))?;
 
         Ok(())
