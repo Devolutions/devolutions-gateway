@@ -285,9 +285,11 @@ impl Sink for TcpJetSink {
                     } else {
                         debug!("0 bytes written on {}", stream.peer_addr().unwrap())
                     }
+
                     if item.is_empty() {
                         Ok(AsyncSink::Ready)
                     } else {
+                        futures::task::current().notify();
                         Ok(AsyncSink::NotReady(item))
                     }
                 }
