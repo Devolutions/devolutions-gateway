@@ -8,6 +8,7 @@ WORKDIR /opt/devolutions-jet
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./jet-proto ./jet-proto
+COPY ./rdp-proto ./rdp-proto
 COPY ./src ./src
 
 RUN cargo build --release
