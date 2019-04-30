@@ -4,6 +4,7 @@ mod tests;
 use std::io;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use bytes::BytesMut;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
@@ -21,6 +22,44 @@ pub enum X224TPDUType {
     DisconnectRequest = 0x80,
     Data = 0xF0,
     Error = 0x70,
+}
+
+pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)> {
+    let mut stream = input.as_ref();
+    let len = read_tpkt_len(&mut stream)? as usize;
+
+    if input.len() < len {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "The buffer length is less then the real length",
+        ));
+    }
+
+    let (_, code) = parse_tdpu_header(&mut stream)?;
+
+    let mut tpdu = input.split_to(len as usize);
+    let header_len = match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    };
+    if header_len <= tpdu.len() {
+        tpdu.advance(header_len);
+
+        Ok((code, tpdu))
+    } else {
+        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "TPKT len is too small"))
+    }
+}
+
+pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) -> io::Result<()> {
+    let length = TPDU_REQUEST_LENGTH + data.len();
+    let mut output_slice = output.as_mut();
+    write_tpkt_header(&mut output_slice, length as u16)?;
+    write_tpdu_header(&mut output_slice, length as u8 - TPKT_HEADER_LENGTH as u8, code, 0)?;
+
+    output.extend_from_slice(&data);
+
+    Ok(())
 }
 
 pub fn write_tpkt_header(mut stream: impl io::Write, length: u16) -> io::Result<()> {
@@ -45,7 +84,7 @@ pub fn read_tpkt_len(mut stream: impl io::Read) -> io::Result<u64> {
     Ok(len)
 }
 
-pub fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType, src_ref: u16) -> io::Result<()> {
+fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType, src_ref: u16) -> io::Result<()> {
     // tpdu header length field doesn't include the length of the length field
     stream.write_u8(length - 1)?;
     stream.write_u8(code.to_u8().unwrap())?;
@@ -64,7 +103,7 @@ pub fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUT
     Ok(())
 }
 
-pub fn parse_tdpu_header(mut stream: impl io::Read) -> io::Result<(u8, X224TPDUType)> {
+fn parse_tdpu_header(mut stream: impl io::Read) -> io::Result<(u8, X224TPDUType)> {
     let length = stream.read_u8()?;
     let code = X224TPDUType::from_u8(stream.read_u8()?)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid X224 TPDU type"))?;

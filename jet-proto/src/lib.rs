@@ -1,15 +1,15 @@
-extern crate log;
 extern crate byteorder;
+extern crate log;
 extern crate uuid;
 
-use byteorder::{LittleEndian, BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Read;
 use std::io::{self, Write};
 use std::ops::Add;
 use std::str::FromStr;
 use uuid::Uuid;
 
-pub const JET_MSG_SIGNATURE: u32 = 0x0054454A;
+pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
 pub const JET_VERSION: u8 = 1;
 
@@ -111,7 +111,7 @@ impl JetPacket {
     }
 
     pub fn association(&self) -> Option<Uuid> {
-        self.association.clone()
+        self.association
     }
 
     pub fn set_association(&mut self, association: Option<Uuid>) {
@@ -137,10 +137,7 @@ impl JetPacket {
     pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
         let signature = reader.read_u32::<LittleEndian>()?;
         if signature != JET_MSG_SIGNATURE {
-            return Err(error_other(&format!(
-                "Invalid JetPacket - Signature = {}.",
-                signature
-            )));
+            return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
         }
         let size = reader.read_u16::<BigEndian>()?;
         let flags = reader.read_u8()?;
@@ -166,7 +163,7 @@ impl JetPacket {
                 break;
             }
 
-            let fields: Vec<&str> = line.split(":").collect();
+            let fields: Vec<&str> = line.split(':').collect();
 
             if fields.len() != 2 {
                 return Err(error_other(&format!(

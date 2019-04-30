@@ -307,7 +307,8 @@ fn write_authenticate_correct_writes_domain_name() {
         expected
     );
     assert_eq!(
-        buff[AUTHENTICATE_OFFSET_WITH_MIC..AUTHENTICATE_OFFSET_WITH_MIC + context.identity.domain.len()],
+        buff[AUTHENTICATE_OFFSET_WITH_MIC
+            ..AUTHENTICATE_OFFSET_WITH_MIC + context.identity.as_ref().unwrap().domain.len()],
         expected_buffer[..]
     );
 }
@@ -340,8 +341,11 @@ fn write_authenticate_correct_writes_user_name() {
         buff[AUTHENTICATE_USER_NAME_START..AUTHENTICATE_WORKSTATION_START],
         expected
     );
-    let offset = AUTHENTICATE_OFFSET_WITH_MIC + context.identity.domain.len();
-    assert_eq!(buff[offset..offset + context.identity.user.len()], expected_buffer[..]);
+    let offset = AUTHENTICATE_OFFSET_WITH_MIC + context.identity.as_ref().unwrap().domain.len();
+    assert_eq!(
+        buff[offset..offset + context.identity.as_ref().unwrap().user.len()],
+        expected_buffer[..]
+    );
 }
 
 #[test]

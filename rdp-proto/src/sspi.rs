@@ -1,15 +1,15 @@
 use std::{error::Error, fmt, io, str};
 
+use byteorder::{LittleEndian, ReadBytesExt};
 use serde_derive::{Deserialize, Serialize};
-
-use crate::ntlm::{Ntlm, NTLM_VERSION_SIZE};
 
 pub type SspiResult = std::result::Result<SspiOk, SspiError>;
 pub type Result<T> = std::result::Result<T, SspiError>;
 
 pub trait Sspi {
     fn package_type(&self) -> PackageType;
-    fn identity(&self) -> &AuthIdentity;
+    fn identity(&self) -> Option<CredentialsBuffers>;
+    fn update_identity(&mut self, identity: Option<CredentialsBuffers>);
     fn initialize_security_context(&mut self, input: impl io::Read, output: impl io::Write) -> self::SspiResult;
     fn accept_security_context(&mut self, input: impl io::Read, output: impl io::Write) -> self::SspiResult;
     fn complete_auth_token(&mut self) -> self::Result<()>;
@@ -21,15 +21,15 @@ pub enum PackageType {
     Ntlm,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
-    password: String,
-    domain: Option<String>,
+    pub password: String,
+    pub domain: Option<String>,
 }
 
 #[derive(Clone, PartialEq, Debug, Default)]
-pub struct AuthIdentity {
+pub struct CredentialsBuffers {
     pub user: Vec<u8>,
     pub domain: Vec<u8>,
     pub password: Vec<u8>,
@@ -45,7 +45,7 @@ impl Credentials {
     }
 }
 
-impl AuthIdentity {
+impl CredentialsBuffers {
     pub fn new(user: Vec<u8>, domain: Vec<u8>, password: Vec<u8>) -> Self {
         Self { user, domain, password }
     }
@@ -53,17 +53,28 @@ impl AuthIdentity {
     pub fn is_empty(&self) -> bool {
         self.user.is_empty() || self.password.is_empty()
     }
-    pub fn is_eq(&self, other: &AuthIdentity) -> bool {
-        self.user == other.user && self.domain == other.domain && self.password == other.password
-    }
 }
 
-impl From<Credentials> for AuthIdentity {
-    fn from(credentials: Credentials) -> AuthIdentity {
-        AuthIdentity {
+impl From<Credentials> for CredentialsBuffers {
+    fn from(credentials: Credentials) -> Self {
+        Self {
             user: string_to_utf16(credentials.username),
             domain: credentials.domain.map(string_to_utf16).unwrap_or_default(),
             password: string_to_utf16(credentials.password),
+        }
+    }
+}
+
+impl From<CredentialsBuffers> for Credentials {
+    fn from(credentials_buffers: CredentialsBuffers) -> Self {
+        Self {
+            username: bytes_to_utf16_string(credentials_buffers.user.as_ref()),
+            password: bytes_to_utf16_string(credentials_buffers.password.as_ref()),
+            domain: if credentials_buffers.domain.is_empty() {
+                None
+            } else {
+                Some(bytes_to_utf16_string(credentials_buffers.domain.as_ref()))
+            },
         }
     }
 }
@@ -102,7 +113,7 @@ impl SspiError {
 impl Error for SspiError {}
 
 impl fmt::Display for SspiError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
@@ -138,14 +149,23 @@ impl From<SspiError> for io::Error {
 }
 
 impl fmt::Display for SspiOk {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-fn string_to_utf16(value: String) -> Vec<u8> {
+pub fn string_to_utf16(value: String) -> Vec<u8> {
     value
         .encode_utf16()
         .flat_map(|i| i.to_le_bytes().to_vec())
         .collect::<Vec<u8>>()
+}
+
+pub fn bytes_to_utf16_string(mut value: &[u8]) -> String {
+    let mut value_u16 = vec![0x00; value.len() / 2];
+    value
+        .read_u16_into::<LittleEndian>(value_u16.as_mut())
+        .expect("read_u16_into cannot fail at this point");
+
+    String::from_utf16_lossy(value_u16.as_ref())
 }

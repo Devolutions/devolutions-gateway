@@ -1,0 +1,47 @@
+# Based on the "trust" template v0.1.2
+# https://github.com/japaric/trust/tree/v0.1.2
+
+dist: xenial
+language: rust
+
+rust:
+  - stable
+
+before_install:
+  - set -e
+  - rustup self update
+
+addons:
+  apt:
+    packages:
+      # Codecov
+      - libcurl4-openssl-dev
+      - libelf-dev
+      - libdw-dev
+      - cmake
+      - gcc
+      - binutils-dev
+      - libiberty-dev
+
+install:
+  - source ~/.cargo/env || true
+  - rustup component add rustfmt clippy
+  - rustup target add wasm32-unknown-unknown
+
+script:
+  - bash ci/test.sh
+
+after_success:
+  - bash ci/after_success.sh
+
+after_script: set +e
+
+before_cache:
+  # Travis can't cache files that are not readable by "others"
+  - chmod -R a+r $HOME/.cargo
+
+cache: cargo
+
+notifications:
+  email:
+    on_success: never

@@ -1,53 +1,30 @@
-extern crate byteorder;
-extern crate jet_proto;
-extern crate uuid;
+mod common;
 
-use std::env;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
-const SERVER_DATA: &'static str = "Server Response";
-const CLIENT_DATA: &'static str = "Client Request";
+use common::run_proxy;
 
-fn bin() -> PathBuf {
-    let mut me = env::current_exe().unwrap();
-    me.pop();
-    if me.ends_with("deps") {
-        me.pop();
-    }
-    me.push("devolutions-jet");
-    return me;
-}
+const PROXY_ADDR: &str = "127.0.0.1:8090";
+const ROUTING_ADDR: &str = "127.0.0.1:8091";
+const SERVER_DATA: &str = "Server Response";
+const CLIENT_DATA: &str = "Client Request";
 
-struct KillOnDrop(Child);
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        self.0.kill().unwrap();
-        self.0.wait().unwrap();
-    }
+fn construct_routing_url(scheme: &str, addr: &str) -> String {
+    format!("{}://{}", scheme, addr)
 }
 
 #[test]
 fn smoke() {
-    let proxy_addr = "127.0.0.1:8080";
-    let routing_url = "127.0.0.1:8081";
-    let cmd_line_arg = "-urltcp://127.0.0.1:8080";
+    let proxy_addr = PROXY_ADDR;
+    let routing_url = ROUTING_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let proxy = Command::new(bin())
-        .arg(cmd_line_arg)
-        .arg("--routing_url")
-        .arg("tcp://127.0.0.1:8081")
-        .spawn()
-        .unwrap();
-    let _proxy = KillOnDrop(proxy);
+    let _proxy = run_proxy(proxy_addr, Some(&construct_routing_url("tcp", routing_url)), None);
 
     let (sender_end, receiver_end) = channel();
 
@@ -77,7 +54,7 @@ fn smoke() {
 
                     // Send data to client
                     let data = SERVER_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
                     thread::sleep(Duration::from_millis(10));
                     break;
                 }
@@ -93,7 +70,7 @@ fn smoke() {
                 Ok(mut stream) => {
                     // Send data to server
                     let data = CLIENT_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
 
                     // Read data sent by server
                     loop {

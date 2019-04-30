@@ -24,7 +24,7 @@ use url::Url;
 
 use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
-use crate::interceptor::{UnknownMessageReader, WaykMessageReader};
+use crate::interceptor::{rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::rdp::RdpClient;
 use crate::routing_client::Client;
@@ -93,12 +93,11 @@ fn main() {
                                 let transport = TcpTransport::new_tls(tls_stream);
                                 Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
-                    ) as Box<Future<Item = (), Error = io::Error> + Send>
+                    ) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                 }
                 "rdp" => RdpClient::new(
                     routing_url.clone(),
                     config.clone(),
-                    executor_handle.clone(),
                     tls_public_key.clone(),
                     tls_acceptor.clone(),
                 )
@@ -154,7 +153,7 @@ impl Proxy {
         &self,
         server_transport: T,
         client_transport: U,
-    ) -> Box<Future<Item = (), Error = io::Error> + Send> {
+    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let jet_sink_server = server_transport.message_sink();
         let mut jet_stream_server = server_transport.message_stream();
 
@@ -173,9 +172,13 @@ impl Proxy {
                     info!("WaykMessageReader will be used to interpret application protocol.");
                     interceptor.set_message_reader(WaykMessageReader::get_messages);
                 }
+                Protocol::RDP => {
+                    info!("RdpMessageReader will be used to interpret application protocol");
+                    interceptor.set_message_reader(RdpMessageReader::get_messages);
+                }
                 Protocol::UNKNOWN => {
                     warn!("Protocol is unknown. Data received will not be split to get application message.");
-                    interceptor.set_message_reader(UnknownMessageReader::get_messages)
+                    interceptor.set_message_reader(UnknownMessageReader::get_messages);
                 }
             }
 

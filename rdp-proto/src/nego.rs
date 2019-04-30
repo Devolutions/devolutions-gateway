@@ -17,6 +17,9 @@ use crate::tpdu::X224TPDUType;
 pub const NEGOTIATION_REQUEST_LEN: usize = 27;
 pub const NEGOTIATION_RESPONSE_LEN: usize = 8;
 
+const COOKIE_PREFIX: &str = "Cookie: mstshash=";
+const ROUTING_TOKEN_PREFIX: &str = "Cookie: msts=";
+
 const RDP_NEG_DATA_LENGTH: u16 = 8;
 
 bitflags! {
@@ -61,6 +64,12 @@ pub enum NegotiationFailureCodes {
     SSLWithUserAuthRequiredByServer = 6,
 }
 
+#[derive(PartialEq, Debug)]
+pub enum NegoData {
+    RoutingToken(String),
+    Cookie(String),
+}
+
 #[derive(Debug)]
 pub enum NegotiationError {
     IOError(io::Error),
@@ -68,7 +77,7 @@ pub enum NegotiationError {
 }
 
 impl fmt::Display for NegotiationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NegotiationError::IOError(e) => e.fmt(f),
             NegotiationError::NegotiationFailure(code) => {
@@ -99,9 +108,7 @@ pub fn write_negotiation_request(
     protocol: SecurityProtocol,
     flags: NegotiationRequestFlags,
 ) -> io::Result<()> {
-    write!(buffer, "Cookie: mstshash={}", cookie)?;
-    buffer.write_u8(b'\r')?;
-    buffer.write_u8(b'\n')?;
+    writeln!(buffer, "{}{}\r", COOKIE_PREFIX, cookie)?;
 
     if protocol.bits() > SecurityProtocol::RDP.bits() {
         write_negotiation_data(buffer, NegotiationMessage::Request, flags.bits(), protocol.bits())?;
@@ -113,7 +120,7 @@ pub fn write_negotiation_request(
 pub fn parse_negotiation_request(
     code: X224TPDUType,
     mut slice: &[u8],
-) -> io::Result<(String, SecurityProtocol, NegotiationRequestFlags)> {
+) -> io::Result<(Option<NegoData>, SecurityProtocol, NegotiationRequestFlags)> {
     if code != X224TPDUType::ConnectionRequest {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -121,7 +128,13 @@ pub fn parse_negotiation_request(
         ));
     }
 
-    let cookie = parse_request_cookie(&mut slice)?;
+    let nego_data = if let Some((nego_data, read_len)) = read_nego_data(slice) {
+        slice.consume(read_len);
+
+        Some(nego_data)
+    } else {
+        None
+    };
 
     if slice.len() >= 8 {
         let neg_req = NegotiationMessage::from_u8(slice.read_u8()?)
@@ -139,9 +152,9 @@ pub fn parse_negotiation_request(
         let protocol = SecurityProtocol::from_bits(slice.read_u32::<LittleEndian>()?)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid security protocol code"))?;
 
-        Ok((cookie, protocol, flags))
+        Ok((nego_data, protocol, flags))
     } else {
-        Ok((cookie, SecurityProtocol::RDP, NegotiationRequestFlags::default()))
+        Ok((nego_data, SecurityProtocol::RDP, NegotiationRequestFlags::default()))
     }
 }
 
@@ -211,29 +224,43 @@ pub fn parse_negotiation_response(
     }
 }
 
-fn parse_request_cookie(mut stream: impl io::BufRead) -> io::Result<String> {
-    let mut start = String::new();
-    stream.by_ref().take(17).read_to_string(&mut start)?;
+fn read_nego_data(stream: &[u8]) -> Option<(NegoData, usize)> {
+    if let Ok((routing_token, read_len)) = read_string_with_cr_lf(stream, ROUTING_TOKEN_PREFIX) {
+        Some((NegoData::RoutingToken(routing_token), read_len))
+    } else if let Ok((cookie, read_len)) = read_string_with_cr_lf(stream, COOKIE_PREFIX) {
+        Some((NegoData::Cookie(cookie), read_len))
+    } else {
+        None
+    }
+}
 
-    if start == "Cookie: mstshash=" {
-        let mut cookie = String::new();
-        stream.read_line(&mut cookie)?;
-        match cookie.pop() {
+fn read_string_with_cr_lf(mut stream: impl io::BufRead, start: &str) -> io::Result<(String, usize)> {
+    let mut read_start = String::new();
+    stream
+        .by_ref()
+        .take(start.len() as u64)
+        .read_to_string(&mut read_start)?;
+
+    if read_start == start {
+        let mut value = String::new();
+        stream.read_line(&mut value)?;
+        match value.pop() {
             Some('\n') => (),
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "cookie message uncorrectly terminated",
+                    "message uncorrectly terminated",
                 ));
             }
         }
-        cookie.pop(); // cr
+        value.pop(); // cr
+        let value_len = value.len();
 
-        Ok(cookie)
+        Ok((value, start.len() + value_len + 2))
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid or unsuppored cookie message",
+            "invalid or unsuppored message",
         ))
     }
 }

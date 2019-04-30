@@ -9,7 +9,7 @@ use crate::{
 fn get_system_time_as_file_time_test_same_start_and_end_date() {
     let expected = 0;
     let start_date = Utc::now();
-    let end_date = start_date.clone();
+    let end_date = start_date;
     assert_eq!(get_system_time_as_file_time(start_date, end_date).unwrap(), expected);
 }
 
@@ -60,6 +60,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_timestamp() {
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -83,6 +87,10 @@ fn get_challenge_target_info_correct_writes_needed_values_with_empty_timestamp()
         match av_pair {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -120,6 +128,10 @@ fn get_authenticate_target_info_correct_returns_with_use_mic() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
             AvPair::EOL => (),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -158,6 +170,10 @@ fn get_authenticate_target_info_correct_returns_with_send_single_host_data() {
             AvPair::SingleHost(value) => assert_eq!(value[..], SINGLE_HOST_DATA[..]),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -195,6 +211,10 @@ fn get_authenticate_target_info_returns_without_principal_name() {
             AvPair::Timestamp(value) => assert_eq!(*value, TIMESTAMP),
             AvPair::EOL => (),
             AvPair::Flags(value) => assert_eq!(*value, MsvAvFlags::MESSAGE_INTEGRITY_CHECK.bits()),
+            AvPair::NbDomainName(_value) => (),
+            AvPair::NbComputerName(_value) => (),
+            AvPair::DnsDomainName(_value) => (),
+            AvPair::DnsComputerName(_value) => (),
             _ => unreachable!(),
         };
     }
@@ -202,7 +222,7 @@ fn get_authenticate_target_info_returns_without_principal_name() {
 
 #[test]
 fn compute_ntlmv2_hash_password_is_less_than_hash_len_offset() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
     let expected = [
         0xc, 0x86, 0x8a, 0x40, 0x3b, 0xfd, 0x7a, 0x93, 0xa3, 0x0, 0x1e, 0xf2, 0x2e, 0xf0, 0x2e, 0x3f,
     ];
@@ -277,14 +297,14 @@ fn compute_ntlmv2_hash_with_large_password() {
 #[test]
 #[should_panic]
 fn compute_ntlmv2_hash_fails_on_empty_identity() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     assert!(compute_ntlm_v2_hash(&identity).is_err());
 }
 
 #[test]
 fn compute_lm_v2_repsonse_correct_computes_response() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
     let ntlm_v2_hash = compute_ntlm_v2_hash(&identity).unwrap();
     let client_challenge = CLIENT_CHALLENGE.as_ref();
     let server_challenge = SERVER_CHALLENGE.as_ref();
@@ -302,7 +322,7 @@ fn compute_lm_v2_repsonse_correct_computes_response() {
 
 #[test]
 fn compute_ntlm_v2_repsonse_correct_computes_challenge_response() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     let server_challenge = SERVER_CHALLENGE;
     let client_challenge = CLIENT_CHALLENGE;
@@ -329,7 +349,7 @@ fn compute_ntlm_v2_repsonse_correct_computes_challenge_response() {
 
 #[test]
 fn compute_ntlm_v2_repsonse_correct_computes_key_exchange_key() {
-    let identity = get_test_identity().into();
+    let identity = get_test_identity().unwrap().into();
 
     let server_challenge = SERVER_CHALLENGE;
     let client_challenge = CLIENT_CHALLENGE;
@@ -438,7 +458,7 @@ fn av_pair_list_to_buffer_with_all_possible_pairs() {
     let dns_domain_name = b"DnsDomainName".to_vec();
     let dns_tree_name = b"DnsTreeName".to_vec();
     let flags = 0;
-    let timestamp = 1234567890;
+    let timestamp = 1_234_567_890;
     let single_host_data = *SINGLE_HOST_DATA;
     let target_name = b"TargetName".to_vec();
     let channel_bindings = [0xff; HASH_SIZE];

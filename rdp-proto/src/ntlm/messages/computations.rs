@@ -11,7 +11,7 @@ use rand::{rngs::OsRng, Rng};
 use crate::{
     encryption::{compute_hmac_md5, compute_md4, compute_md5, HASH_SIZE},
     ntlm::{messages::av_pair::*, CHALLENGE_SIZE, LM_CHALLENGE_RESPONSE_BUFFER_SIZE, MESSAGE_INTEGRITY_CHECK_SIZE},
-    sspi::{self, AuthIdentity, SspiError, SspiErrorType},
+    sspi::{self, bytes_to_utf16_string, string_to_utf16, CredentialsBuffers, SspiError, SspiErrorType},
 };
 
 pub const SSPI_CREDENTIALS_HASH_LENGTH_OFFSET: usize = 512;
@@ -62,15 +62,17 @@ where
 }
 
 pub fn get_challenge_target_info(timestamp: u64) -> sspi::Result<Vec<u8>> {
-    let mut av_pairs_list: Vec<AvPair> = Vec::with_capacity(2);
+    let mut av_pairs: Vec<AvPair> = Vec::with_capacity(6);
 
-    // will not set NbDomainName, NbComputerName, DnsDomainName, DnsComputerName,
-    // because they are not used anywhere
+    // Windows requires _DomainName, _ComputerName fields, but does not care what they are contain
+    av_pairs.push(AvPair::NbDomainName(Vec::new()));
+    av_pairs.push(AvPair::NbComputerName(Vec::new()));
+    av_pairs.push(AvPair::DnsDomainName(Vec::new()));
+    av_pairs.push(AvPair::DnsComputerName(Vec::new()));
+    av_pairs.push(AvPair::Timestamp(timestamp));
+    av_pairs.push(AvPair::EOL);
 
-    av_pairs_list.push(AvPair::Timestamp(timestamp));
-    av_pairs_list.push(AvPair::EOL);
-
-    Ok(AvPair::list_to_buffer(&av_pairs_list)?)
+    Ok(AvPair::list_to_buffer(&av_pairs)?)
 }
 
 pub fn get_authenticate_target_info(target_info: &[u8], send_single_host_data: bool) -> sspi::Result<Vec<u8>> {
@@ -156,27 +158,7 @@ pub fn convert_password_hash(identity_password: &[u8]) -> sspi::Result<[u8; HASH
     }
 }
 
-fn utf8_bytes_to_utf16(buffer: &[u8]) -> io::Result<Vec<u16>> {
-    let buffer_len = buffer.len() as u64;
-    let mut result = Vec::with_capacity(buffer_len as usize / 2);
-
-    let mut cursor = io::Cursor::new(buffer);
-    while cursor.position() < buffer_len {
-        result.push(cursor.read_u16::<LittleEndian>()?);
-    }
-
-    Ok(result)
-}
-
-fn utf16_bytes_to_utf8(buffer: &[u16]) -> Vec<u8> {
-    buffer
-        .iter()
-        .map(|i| i.to_le_bytes().to_vec())
-        .flatten()
-        .collect::<Vec<u8>>()
-}
-
-pub fn compute_ntlm_v2_hash(identity: &AuthIdentity) -> sspi::Result<[u8; HASH_SIZE]> {
+pub fn compute_ntlm_v2_hash(identity: &CredentialsBuffers) -> sspi::Result<[u8; HASH_SIZE]> {
     if !identity.is_empty() {
         let hmac_key = if identity.password.len() > SSPI_CREDENTIALS_HASH_LENGTH_OFFSET {
             convert_password_hash(&identity.password)?
@@ -184,9 +166,8 @@ pub fn compute_ntlm_v2_hash(identity: &AuthIdentity) -> sspi::Result<[u8; HASH_S
             compute_md4(&identity.password)
         };
 
-        let user_utf16 = String::from_utf16(&utf8_bytes_to_utf16(&identity.user)?)?;
-        let mut user_uppercase_with_domain =
-            utf16_bytes_to_utf8(&user_utf16.to_uppercase().encode_utf16().collect::<Vec<u16>>());
+        let user_utf16 = bytes_to_utf16_string(identity.user.as_ref());
+        let mut user_uppercase_with_domain = string_to_utf16(user_utf16.to_uppercase());
         user_uppercase_with_domain.extend(&identity.domain);
 
         Ok(compute_hmac_md5(&hmac_key, &user_uppercase_with_domain)?)

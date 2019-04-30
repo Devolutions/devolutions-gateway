@@ -2,19 +2,19 @@ use std::io::{self, Read};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
+use crate::sspi::CredentialsBuffers;
 use crate::{
-    encryption::rc4::Rc4,
     ntlm::{
         messages::{
             av_pair::MsvAvFlags, computations::*, read_ntlm_header, try_read_version, MessageFields, MessageTypes,
         },
-        AuthenticateMessage, Mic, NegotiateFlags, Ntlm, NtlmState, MESSAGE_INTEGRITY_CHECK_SIZE, SESSION_KEY_SIZE,
+        AuthenticateMessage, Mic, NegotiateFlags, Ntlm, NtlmState, ENCRYPTED_RANDOM_SESSION_KEY_SIZE,
+        MESSAGE_INTEGRITY_CHECK_SIZE,
     },
-    sspi::{self, AuthIdentity, SspiError, SspiErrorType},
+    sspi::{self, SspiError, SspiErrorType},
 };
 
 const HEADER_SIZE: usize = 64;
-const ENCRYPTED_RANDOM_SESSION_KEY_SIZE: usize = 16;
 
 struct AuthenticateMessageFields {
     workstation: MessageFields,
@@ -28,11 +28,6 @@ struct AuthenticateMessageFields {
 pub fn read_authenticate(mut context: &mut Ntlm, mut stream: impl io::Read) -> sspi::SspiResult {
     check_state(context.state)?;
 
-    let challenge_message = context
-        .challenge_message
-        .as_ref()
-        .expect("challenge message must be set on challenge phase");
-
     let mut buffer = Vec::with_capacity(HEADER_SIZE);
     stream.read_to_end(&mut buffer)?;
     let mut buffer = io::Cursor::new(buffer);
@@ -44,16 +39,9 @@ pub fn read_authenticate(mut context: &mut Ntlm, mut stream: impl io::Read) -> s
     let mic = read_payload(flags, &mut message_fields, &mut buffer)?;
     let message = buffer.into_inner();
 
-    let (authenticate_message, updated_identity) = get_authenticate_message_fields(
-        message_fields,
-        mic,
-        flags,
-        challenge_message.server_challenge.as_ref(),
-        challenge_message.timestamp,
-        &context.identity,
-        message,
-    )?;
-    context.identity = updated_identity;
+    let (authenticate_message, updated_identity) =
+        process_message_fields(&context.identity, message_fields, mic, message)?;
+    context.identity = Some(updated_identity);
     context.authenticate_message = Some(authenticate_message);
 
     context.state = NtlmState::Completion;
@@ -150,15 +138,12 @@ where
     Ok(mic)
 }
 
-fn get_authenticate_message_fields(
+fn process_message_fields(
+    identity: &Option<CredentialsBuffers>,
     message_fields: AuthenticateMessageFields,
     mic: Option<Mic>,
-    negotiate_flags: NegotiateFlags,
-    server_challenge: &[u8],
-    timestamp: u64,
-    identity: &AuthIdentity,
     authenticate_message: Vec<u8>,
-) -> sspi::Result<(AuthenticateMessage, AuthIdentity)> {
+) -> sspi::Result<(AuthenticateMessage, CredentialsBuffers)> {
     if message_fields.nt_challenge_response.buffer.is_empty() {
         return Err(SspiError::new(
             SspiErrorType::InvalidToken,
@@ -179,7 +164,15 @@ fn get_authenticate_message_fields(
 
     // will not set workstation because it is not used anywhere
 
-    let mut identity = identity.clone();
+    let mut encrypted_random_session_key = [0x00; ENCRYPTED_RANDOM_SESSION_KEY_SIZE];
+    encrypted_random_session_key.clone_from_slice(message_fields.encrypted_random_session_key.buffer.as_ref());
+
+    let mut identity = if let Some(identity) = identity {
+        identity.clone()
+    } else {
+        CredentialsBuffers::default()
+    };
+
     if !message_fields.user_name.buffer.is_empty() {
         identity.user = message_fields.user_name.buffer.clone();
     }
@@ -187,32 +180,14 @@ fn get_authenticate_message_fields(
         identity.domain = message_fields.domain_name.buffer.clone();
     }
 
-    let encrypted_random_session_key = message_fields.encrypted_random_session_key.buffer;
-
-    let ntlm_v2_hash = compute_ntlm_v2_hash(&identity)?;
-    let (_, key_exchange_key) = compute_ntlm_v2_response(
-        client_challenge.as_ref(),
-        server_challenge,
-        target_info.as_ref(),
-        ntlm_v2_hash.as_ref(),
-        timestamp,
-    )?;
-
-    let session_key = if negotiate_flags.contains(NegotiateFlags::NTLM_SSP_NEGOTIATE_KEY_EXCH) {
-        let mut session_key = [0x00; SESSION_KEY_SIZE];
-        session_key.clone_from_slice(
-            Rc4::new(&key_exchange_key)
-                .process(encrypted_random_session_key.as_ref())
-                .as_slice(),
-        );
-
-        session_key
-    } else {
-        key_exchange_key
-    };
-
     Ok((
-        AuthenticateMessage::new(authenticate_message, mic, session_key),
+        AuthenticateMessage::new(
+            authenticate_message,
+            mic,
+            target_info,
+            client_challenge,
+            encrypted_random_session_key,
+        ),
         identity,
     ))
 }

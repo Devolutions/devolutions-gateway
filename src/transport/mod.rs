@@ -1,3 +1,4 @@
+use crate::interceptor::PacketInterceptor;
 use crate::transport::tcp::TcpTransport;
 use futures::{Async, Future, Sink, Stream};
 use std::io::{Read, Write};
@@ -6,15 +7,14 @@ use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
-use crate::interceptor::PacketInterceptor;
 
 pub mod tcp;
-pub mod x224;
 pub mod tsrequest;
+pub mod x224;
 
-pub type JetFuture<T> = Box<Future<Item = T, Error = io::Error> + Send>;
-pub type JetStreamType<T> = Box<JetStream<Item = T, Error = io::Error> + Send>;
-pub type JetSinkType<T> = Box<JetSink<SinkItem = T, SinkError = io::Error> + Send>;
+pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
+pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
+pub type JetSinkType<T> = Box<dyn JetSink<SinkItem = T, SinkError = io::Error> + Send>;
 
 pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
@@ -98,11 +98,10 @@ pub trait JetStream: Stream {
     fn shutdown(&self) -> std::io::Result<()>;
     fn peer_addr(&self) -> std::io::Result<SocketAddr>;
     fn nb_bytes_read(&self) -> u64;
-    fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>);
+    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
 }
 
 pub trait JetSink: Sink {
     fn shutdown(&self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
 }
-

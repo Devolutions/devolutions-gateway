@@ -10,11 +10,12 @@ use byteorder::{LittleEndian, WriteBytesExt};
 use self::messages::{client, server};
 use crate::{
     encryption::{compute_hmac_md5, rc4::Rc4, HASH_SIZE},
-    sspi::{self, AuthIdentity, PackageType, Sspi, SspiError, SspiErrorType},
+    sspi::{self, CredentialsBuffers, PackageType, Sspi, SspiError, SspiErrorType},
     Credentials,
 };
 
 pub const NTLM_VERSION_SIZE: usize = 8;
+pub const ENCRYPTED_RANDOM_SESSION_KEY_SIZE: usize = 16;
 
 const SIGNATURE_SIZE: usize = SIGNATURE_VERSION_SIZE + SIGNATURE_CHECKSUM_SIZE + SIGNATURE_SEQ_NUM_SIZE;
 const CHALLENGE_SIZE: usize = 8;
@@ -44,7 +45,7 @@ pub struct Ntlm {
 
     state: NtlmState,
     flags: NegotiateFlags,
-    identity: AuthIdentity,
+    identity: Option<CredentialsBuffers>,
     version: [u8; NTLM_VERSION_SIZE],
 
     send_single_host_data: bool,
@@ -53,15 +54,6 @@ pub struct Ntlm {
     recv_signing_key: [u8; HASH_SIZE],
     send_sealing_key: Option<Rc4>,
     recv_sealing_key: Option<Rc4>,
-}
-
-struct ChannelBindings {
-    initiator_addr_type: u32,
-    initiator_length: u32,
-    acceptor_addr_type: u32,
-    acceptor_length: u32,
-    application_data_length: u32,
-    application_data_offset: u32,
 }
 
 #[derive(Clone)]
@@ -84,11 +76,13 @@ struct ChallengeMessage {
 struct AuthenticateMessage {
     message: Vec<u8>,
     mic: Option<Mic>,
-    session_key: [u8; SESSION_KEY_SIZE],
+    target_info: Vec<u8>,
+    client_challenge: [u8; CHALLENGE_SIZE],
+    encrypted_random_session_key: [u8; ENCRYPTED_RANDOM_SESSION_KEY_SIZE],
 }
 
 impl Ntlm {
-    pub fn new(credentials: Credentials, version: [u8; NTLM_VERSION_SIZE]) -> Self {
+    pub fn new(credentials: Option<Credentials>, version: [u8; NTLM_VERSION_SIZE]) -> Self {
         Self {
             negotiate_message: None,
             challenge_message: None,
@@ -96,7 +90,7 @@ impl Ntlm {
 
             state: NtlmState::Initial,
             flags: NegotiateFlags::empty(),
-            identity: credentials.into(),
+            identity: credentials.map(std::convert::Into::into),
             version,
 
             send_single_host_data: false,
@@ -113,8 +107,11 @@ impl Sspi for Ntlm {
     fn package_type(&self) -> PackageType {
         PackageType::Ntlm
     }
-    fn identity(&self) -> &AuthIdentity {
-        &self.identity
+    fn identity(&self) -> Option<CredentialsBuffers> {
+        self.identity.clone()
+    }
+    fn update_identity(&mut self, identity: Option<CredentialsBuffers>) {
+        self.identity = identity;
     }
     fn initialize_security_context(&mut self, input: impl io::Read, mut output: impl io::Write) -> sspi::SspiResult {
         match self.state {
@@ -206,11 +203,19 @@ impl ChallengeMessage {
 }
 
 impl AuthenticateMessage {
-    fn new(message: Vec<u8>, mic: Option<Mic>, session_key: [u8; SESSION_KEY_SIZE]) -> Self {
+    fn new(
+        message: Vec<u8>,
+        mic: Option<Mic>,
+        target_info: Vec<u8>,
+        client_challenge: [u8; CHALLENGE_SIZE],
+        encrypted_random_session_key: [u8; ENCRYPTED_RANDOM_SESSION_KEY_SIZE],
+    ) -> Self {
         Self {
             message,
             mic,
-            session_key,
+            target_info,
+            client_challenge,
+            encrypted_random_session_key,
         }
     }
 }

@@ -3,19 +3,17 @@ mod test;
 
 use std::io::{self, Read};
 
-use rand::{rngs::OsRng, Rng};
-
 use crate::{
     ber,
     nego::NegotiationRequestFlags,
-    sspi::{self, AuthIdentity, SspiError, SspiErrorType},
+    sspi::{self, CredentialsBuffers, SspiError, SspiErrorType},
 };
 
 pub const NONCE_SIZE: usize = 32;
 const NLA_VERSION: u32 = 6;
 const NONCE_FIELD_LEN: u16 = 36;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TsRequest {
     pub peer_version: Option<u32>,
     pub nego_tokens: Option<Vec<u8>>,
@@ -26,17 +24,6 @@ pub struct TsRequest {
 }
 
 impl TsRequest {
-    pub fn with_random_nonce() -> Result<Self, rand::Error> {
-        Ok(Self {
-            peer_version: None,
-            nego_tokens: None,
-            auth_info: None,
-            pub_key_auth: None,
-            error_code: None,
-            client_nonce: Some(OsRng::new()?.gen::<[u8; NONCE_SIZE]>()),
-        })
-    }
-
     pub fn from_buffer(buffer: &[u8]) -> io::Result<TsRequest> {
         let mut stream = io::Cursor::new(buffer);
 
@@ -172,60 +159,16 @@ impl TsRequest {
         Ok(())
     }
 
-    pub fn update(&mut self, other: TsRequest) -> sspi::Result<()> {
-        match (self.peer_version, other.peer_version) {
-            (Some(peer_version), Some(other_peer_version)) => {
-                if peer_version != other_peer_version {
-                    return Err(SspiError::new(
-                        SspiErrorType::MessageAltered,
-                        format!(
-                            "CredSSP peer changed protocol version from {} to {}",
-                            peer_version,
-                            other.peer_version.unwrap()
-                        ),
-                    ));
-                }
-            }
-            (None, Some(other_peer_version)) => self.peer_version = Some(other_peer_version),
-            _ => {
-                return Err(SspiError::new(
-                    SspiErrorType::InvalidToken,
-                    String::from("CredSSP peer did not provide the version"),
-                ));
-            }
-        };
-
-        if other.nego_tokens.is_some() {
-            self.nego_tokens = other.nego_tokens;
-        }
-        if other.auth_info.is_some() {
-            self.auth_info = other.auth_info;
-        }
-        if other.pub_key_auth.is_some() {
-            self.pub_key_auth = other.pub_key_auth;
-        }
-        if other.error_code.is_some() {
-            self.error_code = other.error_code;
-        }
-        if other.client_nonce.is_some() {
-            self.client_nonce = other.client_nonce;
-        }
-
-        Ok(())
-    }
-
     pub fn buffer_len(&self) -> u16 {
         ber::sizeof_sequence(self.ts_request_len())
     }
 
     pub fn check_error(&self) -> sspi::Result<()> {
         match self.error_code {
-            Some(error_code) if error_code != 0 => {
-                Err(SspiError::new(
-                    SspiErrorType::InvalidToken,
-                    format!("Server has returned an error: 0x{:x}", error_code),
-                ))
-            }
+            Some(error_code) if error_code != 0 => Err(SspiError::new(
+                SspiErrorType::InvalidToken,
+                format!("Server has returned an error: 0x{:x}", error_code),
+            )),
             _ => Ok(()),
         }
     }
@@ -252,8 +195,8 @@ impl TsRequest {
     }
 }
 
-pub fn write_ts_credentials(identity: &AuthIdentity, nego_flags: NegotiationRequestFlags) -> io::Result<Vec<u8>> {
-    let empty_identity = AuthIdentity::default();
+pub fn write_ts_credentials(identity: &CredentialsBuffers, nego_flags: NegotiationRequestFlags) -> io::Result<Vec<u8>> {
+    let empty_identity = CredentialsBuffers::default();
     let identity = if nego_flags.contains(NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIED) {
         &empty_identity
     } else {
@@ -293,7 +236,7 @@ pub fn write_ts_credentials(identity: &AuthIdentity, nego_flags: NegotiationRequ
     Ok(buffer)
 }
 
-pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<AuthIdentity> {
+pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<CredentialsBuffers> {
     // TSCredentials (SEQUENCE)
     ber::read_sequence_tag(&mut buffer)?;
     // [0] credType (INTEGER)
@@ -330,16 +273,16 @@ pub fn read_ts_credentials(mut buffer: impl io::Read) -> io::Result<AuthIdentity
         buffer.read_exact(&mut password)?;
     }
 
-    Ok(AuthIdentity::new(user, domain, password))
+    Ok(CredentialsBuffers::new(user, domain, password))
 }
 
-fn sizeof_ts_credentials(identity: &AuthIdentity) -> u16 {
+fn sizeof_ts_credentials(identity: &CredentialsBuffers) -> u16 {
     ber::sizeof_integer(1)
         + ber::sizeof_contextual_tag(ber::sizeof_integer(1))
         + ber::sizeof_sequence_octet_string(ber::sizeof_sequence(sizeof_ts_password_creds(&identity)))
 }
 
-fn sizeof_ts_password_creds(identity: &AuthIdentity) -> u16 {
+fn sizeof_ts_password_creds(identity: &CredentialsBuffers) -> u16 {
     ber::sizeof_sequence_octet_string(identity.domain.len() as u16)
         + ber::sizeof_sequence_octet_string(identity.user.len() as u16)
         + ber::sizeof_sequence_octet_string(identity.password.len() as u16)

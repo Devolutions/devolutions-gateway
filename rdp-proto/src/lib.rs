@@ -8,11 +8,15 @@ mod credssp;
 mod encryption;
 mod nego;
 mod ntlm;
+mod rdp;
 mod sspi;
 mod tpdu;
 
-pub use crate::credssp::{ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer};
+pub use crate::credssp::{
+    ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy,
+};
 pub use crate::nego::*;
 pub use crate::ntlm::NTLM_VERSION_SIZE;
+pub use crate::rdp::*;
 pub use crate::sspi::{Credentials, SspiError, SspiErrorType};
 pub use crate::tpdu::*;

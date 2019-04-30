@@ -2,12 +2,13 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::net::SocketAddr;
 
 pub mod pcap;
+pub mod rdp;
 
 pub trait PacketInterceptor: Send + Sync {
-    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &Vec<u8>);
+    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
 }
 
-type MessageReader = Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
+type MessageReader = dyn Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
 pub struct PeerInfo {
     pub addr: SocketAddr,
     pub sequence_number: u32,
@@ -46,7 +47,7 @@ impl WaykMessageReader {
                     if header & 0x8000_0000 != 0 {
                         (header & 0x0000_FFFF) as usize + 4
                     } else {
-                        (header & 0x7FFF_FFF) as usize + 6
+                        (header & 0x07FF_FFFF) as usize + 6
                     }
                 } else {
                     break;
@@ -68,4 +69,3 @@ impl WaykMessageReader {
         messages
     }
 }
-

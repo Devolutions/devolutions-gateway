@@ -10,8 +10,8 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 use url::Url;
 
-use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 use crate::interceptor::PacketInterceptor;
+use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
 use crate::utils::url_to_socket_arr;
 
 pub enum TcpStreamWrapper {
@@ -151,9 +151,7 @@ impl Transport for TcpTransport {
     {
         let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {
-            "tcp" => {
-                Box::new(TcpStream::connect(&socket_addr).map(|stream| TcpTransport::new(stream))) as JetFuture<Self>
-            }
+            "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)) as JetFuture<Self>,
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr);
                 let cx = TlsConnector::builder()
@@ -168,7 +166,7 @@ impl Transport for TcpTransport {
                     cx.connect(url_clone.host_str().unwrap_or(""), socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
-                let request = tls_handshake.map(|tls_stream| TcpTransport::new_tls(tls_stream));
+                let request = tls_handshake.map(TcpTransport::new_tls);
                 Box::new(request) as JetFuture<Self>
             }
 
@@ -182,7 +180,7 @@ impl Transport for TcpTransport {
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: u64,
-    packet_interceptor: Option<Box<PacketInterceptor>>,
+    packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl TcpJetStream {
@@ -243,7 +241,7 @@ impl JetStream for TcpJetStream {
         self.nb_bytes_read
     }
 
-    fn set_packet_interceptor(&mut self, interceptor: Box<PacketInterceptor>) {
+    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
         self.packet_interceptor = Some(interceptor);
     }
 }

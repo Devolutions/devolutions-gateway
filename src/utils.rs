@@ -25,7 +25,7 @@ macro_rules! io_try {
 
 #[cfg(target_os = "linux")]
 pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
-    let cert = openssl::pkcs12::Pkcs12::from_der(der)?.parse(pass.into())?.cert;
+    let cert = openssl::pkcs12::Pkcs12::from_der(der)?.parse(pass)?.cert;
     get_tls_pubkey_from_cert(cert)
 }
 
@@ -37,7 +37,7 @@ pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
     for cert in cert_store.certs() {
         match get_tls_pubkey_from_cert(cert) {
             Ok(pubkey) => return Ok(pubkey),
-            Err(e) => warn!(
+            Err(e) => log::warn!(
                 "An error occurred while trying to get the public key from the certificates store: {}",
                 e
             ),

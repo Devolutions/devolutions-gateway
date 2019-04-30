@@ -1,47 +1,24 @@
-extern crate byteorder;
-extern crate jet_proto;
-extern crate uuid;
+mod common;
 
 use jet_proto::{JetMethod, JetPacket};
-use std::env;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
-use std::process::{Child, Command};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 
-const SERVER_DATA: &'static str = "Server Response";
-const CLIENT_DATA: &'static str = "Client Request";
+use common::run_proxy;
 
-fn bin() -> PathBuf {
-    let mut me = env::current_exe().unwrap();
-    me.pop();
-    if me.ends_with("deps") {
-        me.pop();
-    }
-    me.push("devolutions-jet");
-    return me;
-}
-
-struct KillOnDrop(Child);
-
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        self.0.kill().unwrap();
-        self.0.wait().unwrap();
-    }
-}
+const PROXY_ADDR: &str = "127.0.0.1:8070";
+const SERVER_DATA: &str = "Server Response";
+const CLIENT_DATA: &str = "Client Request";
 
 #[test]
 fn smoke() {
-    let proxy_addr = "127.0.0.1:8080";
-    let cmd_line_arg = "-urltcp://127.0.0.1:8080";
+    let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let proxy = Command::new(bin()).arg(cmd_line_arg).spawn().unwrap();
-    let _proxy = KillOnDrop(proxy);
+    let _proxy = run_proxy(proxy_addr, None, None);
 
     let (sender_uuid, receiver_uuid) = channel();
     let (sender_end, receiver_end) = channel();
@@ -57,7 +34,7 @@ fn smoke() {
                     jet_packet.set_version(Some(0));
                     let mut v: Vec<u8> = Vec::new();
                     jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
+                    stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
                     // Receive response and get the UUID
@@ -95,7 +72,7 @@ fn smoke() {
 
                     // Send data to server
                     let data = SERVER_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
                     thread::sleep(Duration::from_millis(10));
                     break;
                 }
@@ -118,7 +95,7 @@ fn smoke() {
                     jet_packet.set_association(Some(uuid));
                     let mut v: Vec<u8> = Vec::new();
                     jet_packet.write_to(&mut v).unwrap();
-                    stream.write(&v).unwrap();
+                    stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
                     // Receive response
@@ -138,7 +115,7 @@ fn smoke() {
 
                     // Send data to server
                     let data = CLIENT_DATA;
-                    stream.write(&data.as_bytes()).unwrap();
+                    stream.write_all(&data.as_bytes()).unwrap();
 
                     // Read data sent by server
                     loop {
