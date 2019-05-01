@@ -1,6 +1,7 @@
 #[macro_use]
 mod utils;
 mod config;
+mod http;
 mod interceptor;
 mod jet_client;
 mod rdp;
@@ -13,6 +14,7 @@ use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::{future, future::ok, Future, Stream};
 use native_tls::Identity;
@@ -21,6 +23,7 @@ use tokio_tcp::{TcpListener, TcpStream};
 
 use log::{error, info, warn};
 use url::Url;
+use lazy_static::lazy_static;
 
 use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
@@ -31,9 +34,14 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::get_tls_pubkey;
+use crate::http::http_server::HttpServer;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
+
+lazy_static! {
+    pub static ref SESSION_IN_PROGRESS_COUNT: AtomicU64 = AtomicU64::new(0);
+}
 
 fn main() {
     env_logger::init();
@@ -64,6 +72,14 @@ fn main() {
     let mut runtime =
         Runtime::new().expect("This should never fails, a runtime is needed by the entire implementation");
     let executor_handle = runtime.executor();
+
+    info!("Starting http server ...");
+    let http_server = HttpServer::new();
+    if let Err(e) = http_server.start(executor_handle.clone()) {
+        error!("http_server failed to start: {}", e);
+        return;
+    }
+    info!("Http server succesfully started");
 
     // Create the TLS acceptor.
     let der = include_bytes!("cert/certificate.p12");
@@ -120,6 +136,7 @@ fn main() {
     });
 
     runtime.block_on(server.map_err(|_| ())).unwrap();
+    http_server.stop()
 }
 
 fn set_socket_option(stream: &TcpStream) {
@@ -186,9 +203,12 @@ impl Proxy {
             jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
         }
 
+
         // Build future to forward all bytes
         let f1 = jet_stream_server.forward(jet_sink_client);
         let f2 = jet_stream_client.forward(jet_sink_server);
+
+        SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
         Box::new(f1.and_then(|(jet_stream, jet_sink)| {
             // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
@@ -221,6 +241,9 @@ impl Proxy {
                 client = client_addr
             );
             ok(())
-        }))
+        }).then(|result|{
+            SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+            result
+        }) )
     }
 }
