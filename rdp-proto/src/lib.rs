@@ -9,6 +9,7 @@ mod credssp;
 mod encryption;
 mod nego;
 mod ntlm;
+mod per;
 mod rdp;
 mod sspi;
 mod tpdu;
