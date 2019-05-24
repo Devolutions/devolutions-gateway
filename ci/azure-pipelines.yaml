@@ -1,0 +1,65 @@
+name: $(BuildID)
+
+trigger:
+  branches:
+    include:
+      - master
+
+variables:
+  openssl_version: 1.1.1b-3
+
+jobs:
+  - job: linux64
+    pool:
+      name: 'Devolutions - Linux containers'
+
+    workspace:
+      clean: all
+
+    container: devolutions/waykbuilder:linux
+
+    steps:
+      - checkout: self
+        clean: true
+        fetchDepth: 1
+
+      - script: |
+          conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
+          . activate.sh
+          cargo build --release
+          mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
+          cp $(Build.Repository.LocalPath)/target/release/devolutions-jet $(Build.ArtifactStagingDirectory)/linux/x86_64/
+        displayName: Building devolutions-jet
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          pathToPublish: $(Build.ArtifactStagingDirectory)
+          artifactName: devolutions-jet
+
+  - job: windows64
+    pool:
+      name: 'Devolutions - Windows containers'
+
+    workspace:
+      clean: all
+
+    container: devolutions/waykbuilder:vstools2k19
+
+    steps:
+      - checkout: self
+        clean: true
+        fetchDepth: 1
+
+      - powershell: |
+          conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
+          .\activate.ps1
+          cargo build --release
+          mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
+          cp $(Build.Repository.LocalPath)/target/release/devolutions-jet.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/
+        displayName: Building devolutions-jet
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          pathToPublish: $(Build.ArtifactStagingDirectory)
+          artifactName: devolutions-jet
+

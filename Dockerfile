@@ -1,30 +1,13 @@
-# build container
-
-FROM rust:1-stretch as rust-build
-LABEL maintainer "Devolutions Inc."
-
-WORKDIR /opt/devolutions-jet
-
-COPY ./Cargo.lock ./Cargo.lock
-COPY ./Cargo.toml ./Cargo.toml
-COPY ./jet-proto ./jet-proto
-COPY ./rdp-proto ./rdp-proto
-COPY ./src ./src
-
-RUN cargo build --release
-
-# production container
-
 FROM debian:stretch-slim
 LABEL maintainer "Devolutions Inc."
 
-WORKDIR /opt/devolutions-jet
+WORKDIR /opt/wayk
 
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends libssl1.1
 RUN rm -rf /var/lib/apt/lists/*
 
-COPY --from=rust-build /opt/devolutions-jet/target/release/devolutions-jet .
+COPY devolutions-jet .
 
 EXPOSE 8080
 
