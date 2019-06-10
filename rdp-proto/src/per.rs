@@ -35,6 +35,14 @@ pub fn write_length(mut stream: impl io::Write, length: u16) -> io::Result<usize
     }
 }
 
+pub fn sizeof_length(length: u16) -> usize {
+    if length > 0x7f {
+        2
+    } else {
+        1
+    }
+}
+
 pub fn read_choice(mut stream: impl io::Read) -> io::Result<u8> {
     stream.read_u8()
 }

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn read_length_returns_correct_length() {
+fn read_length_is_correct_length() {
     let buf = [0x05];
 
     let (length, sizeof_length) = read_length(buf.as_ref()).unwrap();
@@ -11,7 +11,7 @@ fn read_length_returns_correct_length() {
 }
 
 #[test]
-fn read_length_returns_correct_long_length() {
+fn read_length_is_correct_long_length() {
     let buf = [0x80, 0x8d];
 
     let (length, sizeof_length) = read_length(buf.as_ref()).unwrap();
@@ -32,7 +32,7 @@ fn write_length_is_correct() {
 }
 
 #[test]
-fn write_length_returns_is_correct_with_long_length() {
+fn write_length_is_correct_with_long_length() {
     let expected_buf = vec![0x80, 0x8d];
 
     let mut buf = Vec::new();
@@ -40,6 +40,16 @@ fn write_length_returns_is_correct_with_long_length() {
 
     assert_eq!(expected_buf, buf);
     assert_eq!(expected_buf.len(), size);
+}
+
+#[test]
+fn sizeof_length_is_correct_with_small_length() {
+    assert_eq!(1, sizeof_length(10));
+}
+
+#[test]
+fn sizeof_length_is_correct_with_long_length() {
+    assert_eq!(2, sizeof_length(10_000));
 }
 
 #[test]
