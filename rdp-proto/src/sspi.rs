@@ -21,6 +21,7 @@ pub enum PackageType {
     Ntlm,
 }
 
+/// Owns credentials of an identity used in negotiations and communications.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
@@ -79,16 +80,22 @@ impl From<CredentialsBuffers> for Credentials {
     }
 }
 
+/// The kind of an SSPI related error. Enables to specify the error based on its type.
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum SspiErrorType {
+    /// May correspond to any internal error (I/O error, server error, etc.).
     InternalError = 0x8009_0304,
+    /// Used in cases when supplied data is missing or invalid.
     InvalidToken = 0x8009_0308,
+    /// Used when a required NTLM state does not correspond to the current.
     OutOfSequence = 0x8009_0310,
+    /// Used in contexts of supplying invalid credentials.
     MessageAltered = 0x8009_030F,
     TargetUnknown = 0x8009_0303,
 }
 
+/// Holds the [`SspiErrorType`](enum.SspiErrorType.html) and the description of the error.
 #[derive(Debug, PartialEq)]
 pub struct SspiError {
     pub error_type: SspiErrorType,
@@ -102,6 +109,7 @@ pub enum SspiOk {
 }
 
 impl SspiError {
+    /// Allows to fill a new error easily, supplying it with a coherent description.
     pub fn new(error_type: SspiErrorType, error: String) -> Self {
         Self {
             error_type,

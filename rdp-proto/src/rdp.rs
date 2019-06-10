@@ -12,6 +12,7 @@ use crate::tpdu::X224TPDUType;
 const MCS_BASE_CHANNEL_ID: u16 = 1001;
 const MCS_RESULT_ENUM_LENGTH: u8 = 16;
 
+/// Implements the Fast-Path RDP message header PDU.
 #[derive(Debug)]
 pub struct Fastpath {
     pub encryption_flags: u8,
@@ -19,6 +20,7 @@ pub struct Fastpath {
     pub length: u16,
 }
 
+/// The kind of the RDP header message that may carry additional data.
 #[derive(Debug, PartialEq)]
 pub enum RdpHeaderMessage {
     ErectDomainRequest,
@@ -30,12 +32,15 @@ pub enum RdpHeaderMessage {
     DisconnectProviderUltimatum(DisconnectUltimatumReason),
 }
 
+/// Contains the channel ID and the length of the data. This structure is a part of the
+/// [`RdpHeaderMessage`](enum.RdpHeaderMessage.html).
 #[derive(Debug, PartialEq)]
 pub struct SendDataContext {
     channel_id: u16,
     length: u16,
 }
 
+/// The reason of [`DisconnectProviderUltimatum`](enum.RdpHeaderMessage.html).
 #[repr(u8)]
 #[derive(Debug, PartialEq, FromPrimitive)]
 pub enum DisconnectUltimatumReason {
@@ -59,6 +64,12 @@ enum DomainMCSPDU {
     SendDataIndication = 26,
 }
 
+/// Parses the data received as an argument and returns a
+/// [`Fastpath`](struct.Fastpath.html) structure upon success.
+/// 
+/// # Arguments
+/// 
+/// * `stream` - the type to read data from
 pub fn parse_fastpath_header(mut stream: impl io::Read) -> Result<(Fastpath, u16), FastpathParsingError> {
     let header = stream.read_u8()?;
 
@@ -79,6 +90,13 @@ pub fn parse_fastpath_header(mut stream: impl io::Read) -> Result<(Fastpath, u16
     ))
 }
 
+/// Parses the data received as an argument and returns an
+/// [`RdpHeaderMessage`](enum.RdpHeaderMessage.html) upon success.
+/// 
+/// # Arguments
+/// 
+/// * `stream` - the type to read data from
+/// * `code` - the [X.224 message code](struct.X224TPDUType.html)
 pub fn parse_rdp_header(mut stream: impl io::Read, code: X224TPDUType) -> io::Result<RdpHeaderMessage> {
     if code != X224TPDUType::Data {
         return Err(io::Error::new(
@@ -191,9 +209,12 @@ fn per_read_enumerated(mut stream: impl io::Read, count: u8) -> io::Result<u8> {
     }
 }
 
+/// The type of a Fast-Path parsing error. Includes *length error* and *I/O error*.
 #[derive(Debug)]
 pub enum FastpathParsingError {
+    /// Used in the length-related error during Fast-Path parsing.
     NullLength(usize),
+    /// May be used in I/O related errors such as receiving empty Fast-Path packages.
     IoError(io::Error),
 }
 

@@ -13,17 +13,39 @@ pub const NONCE_SIZE: usize = 32;
 const NLA_VERSION: u32 = 6;
 const NONCE_FIELD_LEN: u16 = 36;
 
+/// Used for communication in the CredSSP [client](struct.CredSspServer.html)
+/// and [server](struct.CredSspServer.html). It's a top-most structure that
+/// they use.
+///
+/// # MSDN
+///
+/// * [TSRequest](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/6aac4dea-08ef-47a6-8747-22ea7f6d8685)
 #[derive(Debug, Clone, Default)]
 pub struct TsRequest {
+    /// Specifies the supported version of the CredSSP protocol.
     pub peer_version: Option<u32>,
+    /// Contains the SPNEGO tokens or NTLM messages that are passed between the client
+    /// and server.
     pub nego_tokens: Option<Vec<u8>>,
+    /// Contains the user's credentials that are delegated to the server.
     pub auth_info: Option<Vec<u8>>,
+    /// Used to assure that the public key that is used by the server during
+    /// the TLS handshake belongs to the target server and not to a man-in-the-middle.
     pub pub_key_auth: Option<Vec<u8>>,
+    /// If the SPNEGO exchange fails on the server, this field is used to send
+    /// the failure code to the client.
     pub error_code: Option<u32>,
+    /// An array of cryptographically random bytes used to provide sufficient
+    /// entropy during hash computation.
     pub client_nonce: Option<[u8; NONCE_SIZE]>,
 }
 
 impl TsRequest {
+    /// Creates a `TsRequest` structure from a raw array.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - the array of bytess
     pub fn from_buffer(buffer: &[u8]) -> io::Result<TsRequest> {
         let mut stream = io::Cursor::new(buffer);
 
@@ -108,6 +130,11 @@ impl TsRequest {
         })
     }
 
+    /// Encodes the `TsRequest` to be ready to be sent to the TLS stream.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - an output buffer
     pub fn encode_ts_request(&self, mut buffer: impl io::Write) -> io::Result<()> {
         let len = self.ts_request_len();
 

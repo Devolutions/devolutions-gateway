@@ -17,14 +17,31 @@ const HASH_MAGIC_LEN: usize = 38;
 const SERVER_CLIENT_HASH_MAGIC: &[u8; HASH_MAGIC_LEN] = b"CredSSP Server-To-Client Binding Hash\0";
 const CLIENT_SERVER_HASH_MAGIC: &[u8; HASH_MAGIC_LEN] = b"CredSSP Client-To-Server Binding Hash\0";
 
+/// Provides an interface for implementing proxy credentials structures.
 pub trait CredentialsProxy {
+    /// A method signature for implementing a behavior of searching and returning
+    /// a user password based on a username and a domain provided as arguments.
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - the username string
+    /// * `domain` - the domain string (optional)
     fn password_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<String>;
 }
 
+/// Provides an interface to be implemented by the CredSSP-related structs:
+/// [`CredSspServer`](struct.CredSspServer.html) and
+/// [`CredSspClient`](struct.CredSspClient.html).
 pub trait CredSsp {
     fn process(&mut self, ts_request: TsRequest) -> sspi::Result<CredSspResult>;
 }
 
+/// Implements the CredSSP *client*. The client's credentials are to
+/// be securely delegated to the server.
+///
+/// # MSDN
+///
+/// * [Glossary](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/97e4a826-1112-4ab4-8662-cfa58418b4c1)
 pub struct CredSspClient {
     state: CredSspState,
     context: Option<CredSspContext>,
@@ -35,6 +52,12 @@ pub struct CredSspClient {
     client_nonce: [u8; NONCE_SIZE],
 }
 
+/// Implements the CredSSP *server*. The client's credentials
+/// securely delegated to the server for authentication using TLS.
+///
+/// # MSDN
+///
+/// * [Glossary](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/97e4a826-1112-4ab4-8662-cfa58418b4c1)
 pub struct CredSspServer<C: CredentialsProxy> {
     pub credentials: C,
     state: CredSspState,
@@ -43,12 +66,20 @@ pub struct CredSspServer<C: CredentialsProxy> {
     public_key: Vec<u8>,
 }
 
+/// The result of a CredSSP client or server processing.
+/// The enum may carry a [`TsRequest`](struct.TsRequest.html) or
+/// [`Credentials`](struct.Credentials.html).
 #[derive(Debug)]
 pub enum CredSspResult {
+    /// Used as a result of processing of negotiation tokens by the client and server.
     ReplyNeeded(TsRequest),
+    /// Used as a result of processing of authentication info by the client.
     FinalMessage(TsRequest),
+    /// Used by the server when processing of negotiation tokens resulted in error.
     WithError(TsRequest),
+    /// Used as a result of the final state of the client and server.
     Finished,
+    /// Used as a result of  processing of authentication info by the server.
     ClientCredentials(Credentials),
 }
 
