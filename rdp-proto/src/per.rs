@@ -1,12 +1,13 @@
-//TODO: remove after
-#![allow(dead_code)]
-
 use std::io;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 #[cfg(test)]
 mod test;
+
+pub const SIZEOF_CHOICE: usize = 1;
+pub const SIZEOF_ENUM: usize = 1;
+pub const SIZEOF_U16: usize = 2;
 
 const OBJECT_ID_LEN: usize = 6;
 
@@ -40,6 +41,16 @@ pub fn sizeof_length(length: u16) -> usize {
         2
     } else {
         1
+    }
+}
+
+pub fn sizeof_u32(value: u32) -> usize {
+    if value <= 0xff {
+        2
+    } else if value <= 0xffff {
+        3
+    } else {
+        5
     }
 }
 
