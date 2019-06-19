@@ -12,20 +12,21 @@ use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::{future, future::ok, Future, Stream};
 use native_tls::Identity;
 use tokio::runtime::Runtime;
 use tokio_tcp::{TcpListener, TcpStream};
 
+use lazy_static::lazy_static;
 use log::{error, info, warn};
 use url::Url;
-use lazy_static::lazy_static;
 
 use crate::config::{Config, Protocol};
+use crate::http::http_server::HttpServer;
 use crate::interceptor::pcap::PcapInterceptor;
 use crate::interceptor::{rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader};
 use crate::jet_client::{JetAssociationsMap, JetClient};
@@ -34,7 +35,6 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::get_tls_pubkey;
-use crate::http::http_server::HttpServer;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -202,7 +202,6 @@ impl Proxy {
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
             jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
         }
-
 
         // Build future to forward all bytes
         let f1 = jet_stream_server.forward(jet_sink_client);

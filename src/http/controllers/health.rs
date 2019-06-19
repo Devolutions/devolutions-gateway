@@ -1,8 +1,7 @@
-use saphir::*;
 use saphir::Method;
+use saphir::*;
 
-struct ControllerData {
-}
+struct ControllerData {}
 
 pub struct HealthController {
     dispatch: ControllerDispatch<ControllerData>,
@@ -10,14 +9,10 @@ pub struct HealthController {
 
 impl HealthController {
     pub fn new() -> Self {
-        let dispatch = ControllerDispatch::new(ControllerData{});
-        dispatch.add(Method::GET,
-                     "/",
-                     health);
+        let dispatch = ControllerDispatch::new(ControllerData {});
+        dispatch.add(Method::GET, "/", health);
 
-        HealthController {
-            dispatch
-        }
+        HealthController { dispatch }
     }
 }
 
