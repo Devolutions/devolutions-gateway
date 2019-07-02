@@ -225,6 +225,12 @@ fn write_octet_string_is_correct() {
 }
 
 #[test]
+fn read_octet_string_is_correct() {
+    let buf = vec![0x04, 0x03, 0x00, 0x01, 0x02];
+    assert_eq!(read_octet_string(&mut buf.as_slice()).unwrap(), vec![0x00, 0x01, 0x02]);
+}
+
+#[test]
 fn write_sequence_octet_string_is_correct() {
     let mut buf = Vec::new();
     let string = [0x68, 0x65, 0x6c, 0x6c, 0x6f];

@@ -7,9 +7,9 @@
 #[macro_use]
 mod utils;
 
+pub mod ber;
 pub mod gcc;
 
-mod ber;
 mod credssp;
 mod encryption;
 mod nego;
