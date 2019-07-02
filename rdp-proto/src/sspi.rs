@@ -1,7 +1,8 @@
 use std::{error::Error, fmt, io, str};
 
-use byteorder::{LittleEndian, ReadBytesExt};
 use serde_derive::{Deserialize, Serialize};
+
+use crate::utils;
 
 pub type SspiResult = std::result::Result<SspiOk, SspiError>;
 pub type Result<T> = std::result::Result<T, SspiError>;
@@ -22,7 +23,7 @@ pub enum PackageType {
 }
 
 /// Owns credentials of an identity used in negotiations and communications.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -59,9 +60,12 @@ impl CredentialsBuffers {
 impl From<Credentials> for CredentialsBuffers {
     fn from(credentials: Credentials) -> Self {
         Self {
-            user: string_to_utf16(credentials.username),
-            domain: credentials.domain.map(string_to_utf16).unwrap_or_default(),
-            password: string_to_utf16(credentials.password),
+            user: utils::string_to_utf16(credentials.username.as_str()),
+            domain: credentials
+                .domain
+                .map(|v| utils::string_to_utf16(v.as_str()))
+                .unwrap_or_default(),
+            password: utils::string_to_utf16(credentials.password.as_str()),
         }
     }
 }
@@ -69,12 +73,12 @@ impl From<Credentials> for CredentialsBuffers {
 impl From<CredentialsBuffers> for Credentials {
     fn from(credentials_buffers: CredentialsBuffers) -> Self {
         Self {
-            username: bytes_to_utf16_string(credentials_buffers.user.as_ref()),
-            password: bytes_to_utf16_string(credentials_buffers.password.as_ref()),
+            username: utils::bytes_to_utf16_string(credentials_buffers.user.as_ref()),
+            password: utils::bytes_to_utf16_string(credentials_buffers.password.as_ref()),
             domain: if credentials_buffers.domain.is_empty() {
                 None
             } else {
-                Some(bytes_to_utf16_string(credentials_buffers.domain.as_ref()))
+                Some(utils::bytes_to_utf16_string(credentials_buffers.domain.as_ref()))
             },
         }
     }
@@ -160,20 +164,4 @@ impl fmt::Display for SspiOk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
-}
-
-pub fn string_to_utf16(value: String) -> Vec<u8> {
-    value
-        .encode_utf16()
-        .flat_map(|i| i.to_le_bytes().to_vec())
-        .collect::<Vec<u8>>()
-}
-
-pub fn bytes_to_utf16_string(mut value: &[u8]) -> String {
-    let mut value_u16 = vec![0x00; value.len() / 2];
-    value
-        .read_u16_into::<LittleEndian>(value_u16.as_mut())
-        .expect("read_u16_into cannot fail at this point");
-
-    String::from_utf16_lossy(value_u16.as_ref())
 }

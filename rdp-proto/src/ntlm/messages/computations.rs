@@ -11,7 +11,8 @@ use rand::{rngs::OsRng, Rng};
 use crate::{
     encryption::{compute_hmac_md5, compute_md4, compute_md5, HASH_SIZE},
     ntlm::{messages::av_pair::*, CHALLENGE_SIZE, LM_CHALLENGE_RESPONSE_BUFFER_SIZE, MESSAGE_INTEGRITY_CHECK_SIZE},
-    sspi::{self, bytes_to_utf16_string, string_to_utf16, CredentialsBuffers, SspiError, SspiErrorType},
+    sspi::{self, CredentialsBuffers, SspiError, SspiErrorType},
+    utils,
 };
 
 pub const SSPI_CREDENTIALS_HASH_LENGTH_OFFSET: usize = 512;
@@ -166,8 +167,8 @@ pub fn compute_ntlm_v2_hash(identity: &CredentialsBuffers) -> sspi::Result<[u8; 
             compute_md4(&identity.password)
         };
 
-        let user_utf16 = bytes_to_utf16_string(identity.user.as_ref());
-        let mut user_uppercase_with_domain = string_to_utf16(user_utf16.to_uppercase());
+        let user_utf16 = utils::bytes_to_utf16_string(identity.user.as_ref());
+        let mut user_uppercase_with_domain = utils::string_to_utf16(user_utf16.to_uppercase().as_str());
         user_uppercase_with_domain.extend(&identity.domain);
 
         Ok(compute_hmac_md5(&hmac_key, &user_uppercase_with_domain)?)

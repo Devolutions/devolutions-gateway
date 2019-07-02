@@ -4,6 +4,9 @@
 // https://github.com/rust-num/num-derive/issues/20 is fixed
 #![cfg_attr(feature = "cargo-clippy", allow(clippy::useless_attribute))]
 
+#[macro_use]
+mod utils;
+
 mod ber;
 mod credssp;
 mod encryption;
@@ -14,11 +17,11 @@ mod rdp;
 mod sspi;
 mod tpdu;
 
-pub use crate::credssp::{
-    ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy,
+pub use crate::{
+    credssp::{ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy},
+    nego::*,
+    ntlm::NTLM_VERSION_SIZE,
+    rdp::*,
+    sspi::{Credentials, SspiError, SspiErrorType},
+    tpdu::*,
 };
-pub use crate::nego::*;
-pub use crate::ntlm::NTLM_VERSION_SIZE;
-pub use crate::rdp::*;
-pub use crate::sspi::{Credentials, SspiError, SspiErrorType};
-pub use crate::tpdu::*;
