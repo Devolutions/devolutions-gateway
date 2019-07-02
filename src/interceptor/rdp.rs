@@ -1,6 +1,6 @@
 use std::io;
 
-use rdp_proto::{parse_fastpath_header, read_tpkt_len};
+use rdp_proto::{parse_fast_path_header, read_tpkt_len};
 
 pub struct RdpMessageReader;
 impl RdpMessageReader {
@@ -10,15 +10,15 @@ impl RdpMessageReader {
         loop {
             let len = match read_tpkt_len(data.as_slice()) {
                 Ok(len) => {
-                    // tpkt&tpdu
+                    // TPKT&TPDU
                     Some(len)
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                 _ => {
-                    // fastpath
-                    match parse_fastpath_header(data.as_slice()) {
+                    // Fast-Path
+                    match parse_fast_path_header(data.as_slice()) {
                         Ok((_, len)) => Some(u64::from(len)),
-                        Err(rdp_proto::FastpathParsingError::NullLength(bytes_read)) => {
+                        Err(rdp_proto::FastPathError::NullLength { bytes_read }) => {
                             data.drain(..bytes_read);
 
                             None
