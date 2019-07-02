@@ -69,7 +69,12 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
 /// * `data` - the message data to be encoded
 /// * `output` - the output buffer for the endoded data
 pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) -> io::Result<()> {
-    let length = TPDU_REQUEST_LENGTH + data.len();
+    let tpdu_length = match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    };
+
+    let length = tpdu_length + data.len();
     let mut output_slice = output.as_mut();
     write_tpkt_header(&mut output_slice, length as u16)?;
     write_tpdu_header(&mut output_slice, length as u8 - TPKT_HEADER_LENGTH as u8, code, 0)?;
@@ -113,8 +118,12 @@ pub fn read_tpkt_len(mut stream: impl io::Read) -> io::Result<u64> {
 }
 
 fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType, src_ref: u16) -> io::Result<()> {
-    // tpdu header length field doesn't include the length of the length field
-    stream.write_u8(length - 1)?;
+    let tpdu_length = match code {
+        X224TPDUType::Data => 2,
+        _ => length - 1, // tpdu header length field doesn't include the length of the length field
+    };
+
+    stream.write_u8(tpdu_length)?;
     stream.write_u8(code.to_u8().unwrap())?;
 
     if code == X224TPDUType::Data {

@@ -39,7 +39,7 @@ fn tpdu_header_data_is_written_correctly() {
     let length = 0x42;
     let code = X224TPDUType::Data;
     let expected = [
-        length - 1,
+        2,
         code.to_u8().unwrap(),
         0x80, // EOT
     ];
