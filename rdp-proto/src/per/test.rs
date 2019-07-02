@@ -160,17 +160,7 @@ fn write_u16_fails_if_min_is_greater_then_number() {
 #[test]
 fn read_object_id_returns_ok() {
     let buf = [0x05, 0x00, 0x14, 0x7c, 0x00, 0x01];
-    read_object_id(buf.as_ref(), [0, 0, 20, 124, 0, 1]).unwrap();
-}
-
-#[test]
-fn read_object_fails_on_invalid_object_ids() {
-    let buf = [0x05, 0x00, 0x14, 0x7c, 0x00, 0x01];
-
-    match read_object_id(buf.as_ref(), [1, 0, 20, 124, 0, 1]) {
-        Err(ref e) if e.kind() == io::ErrorKind::InvalidData => (),
-        _ => panic!("Invalid result for read_object_id"),
-    };
+    assert_eq!([0, 0, 20, 124, 0, 1], read_object_id(buf.as_ref()).unwrap());
 }
 
 #[test]
@@ -230,14 +220,14 @@ fn write_numeric_string_is_correct() {
 #[test]
 fn read_octet_string_returns_ok() {
     let buf = [0x00, 0x44, 0x75, 0x63, 0x61];
-    let octet_string = b"Duca";
-    read_octet_string(buf.as_ref(), octet_string.as_ref(), 4).unwrap();
+    assert_eq!(b"Duca".as_ref(), read_octet_string(buf.as_ref(), 4).unwrap().as_slice());
 }
 
 #[test]
 fn write_octet_string_is_correct() {
     let expected_buf = vec![0x00, 0x44, 0x75, 0x63, 0x61];
     let octet_string = b"Duca";
+
     let mut buf = Vec::new();
     write_octet_string(&mut buf, octet_string.as_ref(), 4).unwrap();
 

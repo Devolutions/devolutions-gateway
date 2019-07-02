@@ -169,7 +169,7 @@ pub fn write_enum(mut stream: impl io::Write, enumerated: u8) -> io::Result<usiz
     Ok(1)
 }
 
-pub fn read_object_id(mut stream: impl io::Read, object_ids: [u8; OBJECT_ID_LEN]) -> io::Result<()> {
+pub fn read_object_id(mut stream: impl io::Read) -> io::Result<[u8; OBJECT_ID_LEN]> {
     let (length, _) = read_length(&mut stream)?;
     if length != 5 {
         return Err(io::Error::new(
@@ -187,14 +187,7 @@ pub fn read_object_id(mut stream: impl io::Read, object_ids: [u8; OBJECT_ID_LEN]
         *read_object_id = stream.read_u8()?;
     }
 
-    if read_object_ids != object_ids {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Read object identifier does not equal to the object identifier",
-        ))
-    } else {
-        Ok(())
-    }
+    Ok(read_object_ids)
 }
 
 pub fn write_object_id(mut stream: impl io::Write, object_ids: [u8; OBJECT_ID_LEN]) -> io::Result<usize> {
@@ -210,26 +203,13 @@ pub fn write_object_id(mut stream: impl io::Write, object_ids: [u8; OBJECT_ID_LE
     Ok(size + OBJECT_ID_LEN - 1)
 }
 
-pub fn read_octet_string(mut stream: impl io::Read, octet_string: &[u8], min: u16) -> io::Result<()> {
+pub fn read_octet_string(mut stream: impl io::Read, min: usize) -> io::Result<Vec<u8>> {
     let (read_length, _) = read_length(&mut stream)?;
-    if read_length + min != octet_string.len() as u16 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Got invalid octet string length",
-        ));
-    }
 
-    let mut read_octet_string = vec![0; octet_string.len()];
+    let mut read_octet_string = vec![0; min + read_length as usize];
     stream.read_exact(read_octet_string.as_mut())?;
 
-    if read_octet_string != octet_string {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Read octet string does not equal to the octet string",
-        ))
-    } else {
-        Ok(())
-    }
+    Ok(read_octet_string)
 }
 
 pub fn write_octet_string(mut stream: impl io::Write, octet_string: &[u8], min: usize) -> io::Result<usize> {
@@ -250,8 +230,8 @@ pub fn read_numeric_string(mut stream: impl io::Read, min: u16) -> io::Result<()
 
     let length = (read_length + min + 1) / 2;
 
-    let mut buf = vec![0; length as usize];
-    stream.read_exact(buf.as_mut())?;
+    let mut read_numeric_string = vec![0; length as usize];
+    stream.read_exact(read_numeric_string.as_mut())?;
 
     Ok(())
 }
