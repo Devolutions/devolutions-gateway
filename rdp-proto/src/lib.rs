@@ -7,6 +7,8 @@
 #[macro_use]
 mod utils;
 
+pub mod gcc;
+
 mod ber;
 mod credssp;
 mod encryption;
@@ -25,3 +27,13 @@ pub use crate::{
     sspi::{Credentials, SspiError, SspiErrorType},
     tpdu::*,
 };
+
+pub trait PduParsing {
+    type Error;
+
+    fn from_buffer(stream: impl std::io::Read) -> Result<Self, Self::Error>
+    where
+        Self: std::marker::Sized;
+    fn to_buffer(&self, stream: impl std::io::Write) -> Result<(), Self::Error>;
+    fn buffer_length(&self) -> usize;
+}
