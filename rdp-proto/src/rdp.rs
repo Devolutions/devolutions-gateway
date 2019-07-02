@@ -1,185 +1,166 @@
 #[cfg(test)]
-mod tests;
+pub mod test;
 
-use std::{error::Error, fmt, io};
+mod client_info;
+mod client_license;
 
-use byteorder::ReadBytesExt;
-use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use std::io;
 
-use crate::{per, tpdu::X224TPDUType};
+use bitflags::bitflags;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use failure::Fail;
 
-const MCS_BASE_CHANNEL_ID: u16 = 1001;
-const MCS_RESULT_ENUM_LENGTH: u8 = 16;
+use self::{
+    client_info::{ClientInfo, ClientInfoError},
+    client_license::{ClientLicense, ClientLicenseError},
+};
+use crate::PduParsing;
 
-/// Implements the Fast-Path RDP message header PDU.
-#[derive(Debug)]
-pub struct Fastpath {
-    pub encryption_flags: u8,
-    pub number_events: u8,
-    pub length: u16,
+const BASIC_SECURITY_HEADER_SIZE: usize = 4;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientInfoPdu {
+    pub security_header: BasicSecurityHeader,
+    pub client_info: ClientInfo,
 }
 
-/// The kind of the RDP header message that may carry additional data.
-#[derive(Debug, PartialEq)]
-pub enum RdpHeaderMessage {
-    ErectDomainRequest,
-    AttachUserRequest,
-    AttachUserId(u16),
-    ChannelIdJoinRequest(u16),
-    ChannelIdJoinConfirm(u16),
-    SendData(SendDataContext),
-    DisconnectProviderUltimatum(DisconnectUltimatumReason),
-}
+impl PduParsing for ClientInfoPdu {
+    type Error = RdpError;
 
-/// Contains the channel ID and the length of the data. This structure is a part of the
-/// [`RdpHeaderMessage`](enum.RdpHeaderMessage.html).
-#[derive(Debug, PartialEq)]
-pub struct SendDataContext {
-    channel_id: u16,
-    length: u16,
-}
+    fn from_buffer(mut stream: impl io::Read) -> Result<Self, Self::Error> {
+        let security_header = BasicSecurityHeader::from_buffer(&mut stream)?;
+        if security_header.flags.contains(BasicSecurityHeaderFlags::INFO_PKT) {
+            let client_info = ClientInfo::from_buffer(&mut stream)?;
 
-/// The reason of [`DisconnectProviderUltimatum`](enum.RdpHeaderMessage.html).
-#[repr(u8)]
-#[derive(Debug, PartialEq, FromPrimitive)]
-pub enum DisconnectUltimatumReason {
-    DomainDisconnected = 0,
-    ProviderInitiated = 1,
-    TokenPurged = 2,
-    UserRequested = 3,
-    ChannelPurged = 4,
-}
-
-#[repr(u8)]
-#[derive(Debug, FromPrimitive)]
-enum DomainMCSPDU {
-    ErectDomainRequest = 1,
-    DisconnectProviderUltimatum = 8,
-    AttachUserRequest = 10,
-    AttachUserConfirm = 11,
-    ChannelJoinRequest = 14,
-    ChannelJoinConfirm = 15,
-    SendDataRequest = 25,
-    SendDataIndication = 26,
-}
-
-/// Parses the data received as an argument and returns a
-/// [`Fastpath`](struct.Fastpath.html) structure upon success.
-///
-/// # Arguments
-///
-/// * `stream` - the type to read data from
-pub fn parse_fastpath_header(mut stream: impl io::Read) -> Result<(Fastpath, u16), FastpathParsingError> {
-    let header = stream.read_u8()?;
-
-    let (length, sizeof_length) = per::read_length(&mut stream)?;
-    if length < sizeof_length as u16 + 1 {
-        return Err(FastpathParsingError::NullLength(sizeof_length as usize + 1));
+            Ok(Self {
+                security_header,
+                client_info,
+            })
+        } else {
+            Err(RdpError::InvalidPdu(String::from(
+                "Expected ClientInfo PDU, got invalid SecurityHeader flags",
+            )))
+        }
     }
 
-    let pdu_length = length - sizeof_length as u16 - 1;
+    fn to_buffer(&self, mut stream: impl io::Write) -> Result<(), Self::Error> {
+        self.security_header.to_buffer(&mut stream)?;
+        self.client_info.to_buffer(&mut stream)?;
 
-    Ok((
-        Fastpath {
-            encryption_flags: (header & 0xC0) >> 6,
-            number_events: (header & 0x3C) >> 2,
-            length: pdu_length,
-        },
-        length,
-    ))
-}
-
-/// Parses the data received as an argument and returns an
-/// [`RdpHeaderMessage`](enum.RdpHeaderMessage.html) upon success.
-///
-/// # Arguments
-///
-/// * `stream` - the type to read data from
-/// * `code` - the [X.224 message code](struct.X224TPDUType.html)
-pub fn parse_rdp_header(mut stream: impl io::Read, code: X224TPDUType) -> io::Result<RdpHeaderMessage> {
-    if code != X224TPDUType::Data {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid X224 code, expected data",
-        ));
+        Ok(())
     }
 
-    let choice = per::read_choice(&mut stream)?;
-    let mcspdu = DomainMCSPDU::from_u8(choice >> 2)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid domain MCSPDU"))?;
-    match mcspdu {
-        DomainMCSPDU::ErectDomainRequest => {
-            let _sub_height = per::read_u32(&mut stream)?;
-            let _sub_interval = per::read_u32(&mut stream)?;
-            Ok(RdpHeaderMessage::ErectDomainRequest)
-        }
-        DomainMCSPDU::AttachUserRequest => Ok(RdpHeaderMessage::AttachUserRequest),
-        DomainMCSPDU::AttachUserConfirm => {
-            let _enumerated = per::read_enum(&mut stream, MCS_RESULT_ENUM_LENGTH)?;
-            let user_id = per::read_u16(&mut stream, MCS_BASE_CHANNEL_ID)?;
-
-            Ok(RdpHeaderMessage::AttachUserId(user_id))
-        }
-        DomainMCSPDU::ChannelJoinRequest => {
-            let _user_id = per::read_u16(&mut stream, MCS_BASE_CHANNEL_ID)?;
-            let channel_id = per::read_u16(&mut stream, 0)?;
-
-            Ok(RdpHeaderMessage::ChannelIdJoinRequest(channel_id))
-        }
-        DomainMCSPDU::ChannelJoinConfirm => {
-            let _result = per::read_enum(&mut stream, MCS_RESULT_ENUM_LENGTH)?;
-            let _initiator = per::read_u16(&mut stream, MCS_BASE_CHANNEL_ID)?;
-            let _requested = per::read_u16(&mut stream, 0)?;
-            let channel_id = per::read_u16(&mut stream, 0)?;
-
-            Ok(RdpHeaderMessage::ChannelIdJoinConfirm(channel_id))
-        }
-        DomainMCSPDU::SendDataRequest | DomainMCSPDU::SendDataIndication => {
-            let _indicator = per::read_u16(&mut stream, MCS_BASE_CHANNEL_ID)?;
-            let channel_id = per::read_u16(&mut stream, 0)?;
-            let _data_priority_and_segmentation = stream.read_u8()?;
-            let (length, _) = per::read_length(&mut stream)?;
-
-            Ok(RdpHeaderMessage::SendData(SendDataContext { length, channel_id }))
-        }
-        DomainMCSPDU::DisconnectProviderUltimatum => {
-            let b = stream.read_u8()?;
-            let reason = DisconnectUltimatumReason::from_u8(((choice & 0x01) << 1) | (b >> 7)).ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "unknown disconnect provider ultimatum reason",
-                )
-            })?;
-            Ok(RdpHeaderMessage::DisconnectProviderUltimatum(reason))
-        }
+    fn buffer_length(&self) -> usize {
+        self.security_header.buffer_length() + self.client_info.buffer_length()
     }
 }
 
-/// The type of a Fast-Path parsing error. Includes *length error* and *I/O error*.
-#[derive(Debug)]
-pub enum FastpathParsingError {
-    /// Used in the length-related error during Fast-Path parsing.
-    NullLength(usize),
-    /// May be used in I/O related errors such as receiving empty Fast-Path packages.
-    IoError(io::Error),
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientLicensePdu {
+    pub security_header: BasicSecurityHeader,
+    pub client_license: ClientLicense,
 }
 
-impl fmt::Display for FastpathParsingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FastpathParsingError::NullLength(_bytes_read) => {
-                write!(f, "Received invalid Fast-Path package with 0 length")
-            }
-            FastpathParsingError::IoError(e) => e.fmt(f),
+impl PduParsing for ClientLicensePdu {
+    type Error = RdpError;
+
+    fn from_buffer(mut stream: impl io::Read) -> Result<Self, Self::Error> {
+        let security_header = BasicSecurityHeader::from_buffer(&mut stream)?;
+        if security_header.flags.contains(BasicSecurityHeaderFlags::LICENSE_PKT) {
+            let client_license = ClientLicense::from_buffer(&mut stream)?;
+
+            Ok(Self {
+                security_header,
+                client_license,
+            })
+        } else {
+            Err(RdpError::InvalidPdu(String::from(
+                "Expected ClientLicense PDU, got invalid SecurityHeader flags",
+            )))
         }
+    }
+
+    fn to_buffer(&self, mut stream: impl io::Write) -> Result<(), Self::Error> {
+        self.security_header.to_buffer(&mut stream)?;
+        self.client_license.to_buffer(&mut stream)?;
+
+        Ok(())
+    }
+
+    fn buffer_length(&self) -> usize {
+        self.security_header.buffer_length() + self.client_license.buffer_length()
     }
 }
 
-impl Error for FastpathParsingError {}
+#[derive(Debug, Clone, PartialEq)]
+pub struct BasicSecurityHeader {
+    flags: BasicSecurityHeaderFlags,
+}
 
-impl From<io::Error> for FastpathParsingError {
-    fn from(e: io::Error) -> Self {
-        FastpathParsingError::IoError(e)
+impl PduParsing for BasicSecurityHeader {
+    type Error = RdpError;
+
+    fn from_buffer(mut stream: impl io::Read) -> Result<Self, Self::Error> {
+        let flags = BasicSecurityHeaderFlags::from_bits(stream.read_u16::<LittleEndian>()?)
+            .ok_or(RdpError::InvalidSecurityHeader)?;
+        let _flags_hi = stream.read_u16::<LittleEndian>()?; // unused
+
+        Ok(Self { flags })
+    }
+
+    fn to_buffer(&self, mut stream: impl io::Write) -> Result<(), Self::Error> {
+        stream.write_u16::<LittleEndian>(self.flags.bits())?;
+        stream.write_u16::<LittleEndian>(0)?; // flags_hi
+
+        Ok(())
+    }
+
+    fn buffer_length(&self) -> usize {
+        BASIC_SECURITY_HEADER_SIZE
+    }
+}
+
+bitflags! {
+    pub struct BasicSecurityHeaderFlags: u16 {
+        const EXCHANGE_PKT = 0x0001;
+        const TRANSPORT_REQ = 0x0002;
+        const TRANSPORT_RSP = 0x0004;
+        const ENCRYPT = 0x0008;
+        const RESET_SEQNO = 0x0010;
+        const IGNORE_SEQNO = 0x0020;
+        const INFO_PKT = 0x0040;
+        const LICENSE_PKT = 0x0080;
+        const LICENSE_ENCRYPT_CS = 0x0100;
+        const LICENSE_ENCRYPT_SC = 0x0200;
+        const REDIRECTION_PKT = 0x0400;
+        const SECURE_CHECKSUM = 0x0800;
+        const AUTODETECT_REQ = 0x1000;
+        const AUTODETECT_RSP = 0x2000;
+        const HEARTBEAT = 0x4000;
+        const FLAGSHI_VALID = 0x8000;
+    }
+}
+
+#[derive(Debug, Fail)]
+pub enum RdpError {
+    #[fail(display = "IO error: {}", _0)]
+    IOError(#[fail(cause)] io::Error),
+    #[fail(display = "Client Info PDU error: {}", _0)]
+    ClientInfoError(ClientInfoError),
+    #[fail(display = "Client License PDU error: {}", _0)]
+    ClientLicenseError(ClientLicenseError),
+    #[fail(display = "Invalid RDP security header")]
+    InvalidSecurityHeader,
+    #[fail(display = "Invalid RDP Connection Sequence PDU")]
+    InvalidPdu(String),
+}
+
+impl_from_error!(io::Error, RdpError, RdpError::IOError);
+impl_from_error!(ClientInfoError, RdpError, RdpError::ClientInfoError);
+impl_from_error!(ClientLicenseError, RdpError, RdpError::ClientLicenseError);
+
+impl From<RdpError> for io::Error {
+    fn from(e: RdpError) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, format!("RDP Connection Sequence error: {}", e))
     }
 }

@@ -27,7 +27,7 @@ pub use crate::{
     mcs::{ConnectInitial, ConnectResponse, McsError, McsPdu, SendDataContext},
     nego::*,
     ntlm::NTLM_VERSION_SIZE,
-    rdp::*,
+    rdp::{ClientInfoPdu, ClientLicensePdu},
     sspi::{Credentials, SspiError, SspiErrorType},
     tpdu::*,
 };
