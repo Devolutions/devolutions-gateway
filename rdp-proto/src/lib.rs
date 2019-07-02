@@ -12,6 +12,7 @@ pub mod gcc;
 
 mod credssp;
 mod encryption;
+mod mcs;
 mod nego;
 mod ntlm;
 mod per;
@@ -21,6 +22,7 @@ mod tpdu;
 
 pub use crate::{
     credssp::{ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy},
+    mcs::{ConnectInitial, ConnectResponse, McsError, McsPdu, SendDataContext},
     nego::*,
     ntlm::NTLM_VERSION_SIZE,
     rdp::*,

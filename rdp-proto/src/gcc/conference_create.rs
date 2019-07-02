@@ -4,7 +4,7 @@ pub mod test;
 use std::io;
 
 use super::{ClientGccBlocks, GccError, ServerGccBlocks};
-use crate::{per, PduParsing};
+use crate::{mcs, per, PduParsing};
 
 const CONFERENCE_REQUEST_OBJECT_ID: [u8; 6] = [0, 0, 20, 124, 0, 1];
 const CONFERENCE_REQUEST_CLIENT_TO_SERVER_H221_NON_STANDARD: &[u8; 4] = b"Duca";
@@ -23,7 +23,6 @@ const CONFERENCE_RESPONSE_TAG: u32 = 1;
 const CONFERENCE_RESPONSE_RESULT: u8 = 0;
 const H221_NON_STANDARD_MIN_LENGTH: usize = 4;
 const CONFERENCE_NAME: &[u8] = b"1";
-const RESULT_ENUM_LENGTH: u8 = 16;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConferenceCreateRequest {
@@ -184,7 +183,7 @@ impl PduParsing for ConferenceCreateResponse {
             )));
         }
         // ConferenceCreateResponse::result (ENUMERATED)
-        if per::read_enum(&mut stream, RESULT_ENUM_LENGTH)? != CONFERENCE_RESPONSE_RESULT {
+        if per::read_enum(&mut stream, mcs::RESULT_ENUM_LENGTH)? != CONFERENCE_RESPONSE_RESULT {
             return Err(GccError::InvalidConferenceCreateResponse(String::from(
                 "Got invalid ConferenceCreateResponse result",
             )));
