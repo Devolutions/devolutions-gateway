@@ -22,7 +22,10 @@ mod sspi;
 mod tpdu;
 
 pub use crate::{
-    credssp::{ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy},
+    credssp::{
+        ts_request::TsRequest, CredSsp, CredSspClient, CredSspResult, CredSspServer, CredentialsProxy,
+        EarlyUserAuthResult, EARLY_USER_AUTH_RESULT_PDU_SIZE,
+    },
     fast_path::{parse_fast_path_header, FastPath, FastPathError},
     mcs::{ConnectInitial, ConnectResponse, McsError, McsPdu, SendDataContext},
     nego::*,
