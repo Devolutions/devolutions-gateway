@@ -245,38 +245,51 @@ impl RdpClient {
                     }
                 },
             )
-            .and_then(|either_fut| {
+            .and_then(move |either_fut| {
                 either_fut.and_then(
-                    |(client_tls, server_tls, rdp_identity, client_logger, _selected_protocol)| {
-                        let filter_config = FilterConfig::new(rdp_identity.proxy.clone());
+                    |(client_tls, server_tls, rdp_identity, client_logger, selected_protocol)| {
                         let client_logger_clone = client_logger.clone();
-                        let client_transport = X224Transport::new().framed(client_tls);
-                        let server_transport = X224Transport::new().framed(server_tls);
+                        let fut = if selected_protocol == rdp_proto::SecurityProtocol::HYBRID_EX {
+                            future::Either::A(process_early_auth_result(client_tls, server_tls).map_err(move |e| {
+                                error!(
+                                    client_logger_clone,
+                                    "Failed to process  Early User Authorization Result PDU: {}", e
+                                );
+                                e
+                            }))
+                        } else {
+                            future::Either::B(future::ok((client_tls, server_tls)))
+                        };
 
-                        process_mcs_connect_initial(
-                            client_transport,
-                            server_transport,
-                            filter_config,
-                            client_logger.clone(),
-                        )
-                        .map_err(move |e| {
-                            error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
-                            e
+                        fut.and_then(move |(client_tls, server_tls)| {
+                            Ok((client_tls, server_tls, rdp_identity, client_logger))
                         })
-                        .and_then(
-                            move |(client_transport, server_transport, connect_initial, filter_config)| {
-                                info!(client_logger, "MCS Connect Initial redirected successfully");
-                                Ok((
-                                    client_transport,
-                                    server_transport,
-                                    connect_initial,
-                                    filter_config,
-                                    client_logger,
-                                ))
-                            },
-                        )
                     },
                 )
+            })
+            .and_then(|(client_tls, server_tls, rdp_identity, client_logger)| {
+                let filter_config = FilterConfig::new(rdp_identity.proxy.clone());
+                let client_logger_clone = client_logger.clone();
+                let client_transport = X224Transport::new().framed(client_tls);
+                let server_transport = X224Transport::new().framed(server_tls);
+
+                process_mcs_connect_initial(client_transport, server_transport, filter_config, client_logger.clone())
+                    .map_err(move |e| {
+                        error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
+                        e
+                    })
+                    .and_then(
+                        move |(client_transport, server_transport, connect_initial, filter_config)| {
+                            info!(client_logger, "MCS Connect Initial redirected successfully");
+                            Ok((
+                                client_transport,
+                                server_transport,
+                                connect_initial,
+                                filter_config,
+                                client_logger,
+                            ))
+                        },
+                    )
             })
             .and_then(
                 move |(client_transport, server_transport, connect_initial, filter_config, client_logger)| {
@@ -628,6 +641,27 @@ fn process_cred_ssp_with_server(
         Ok(client_context)
     })
     .and_then(|f| f)
+}
+
+fn process_early_auth_result(
+    client_tls: TlsStream<TcpStream>,
+    server_tls: TlsStream<TcpStream>,
+) -> impl Future<Item = (TlsStream<TcpStream>, TlsStream<TcpStream>), Error = io::Error> + Send {
+    future::lazy(|| {
+        let buffer = [0; rdp_proto::EARLY_USER_AUTH_RESULT_PDU_SIZE];
+        tokio::io::read_exact(server_tls, buffer)
+            .and_then(
+                move |(server_tls, buffer)| match rdp_proto::EarlyUserAuthResult::from_buffer(buffer.as_ref())? {
+                    rdp_proto::EarlyUserAuthResult::Success => Ok(tokio::io::write_all(client_tls, buffer)
+                        .and_then(move |(client_tls, _)| Ok((client_tls, server_tls)))),
+                    _ => Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "The user does not have permission to access the server",
+                    )),
+                },
+            )
+            .and_then(|f| f)
+    })
 }
 
 fn process_mcs_connect_initial(
