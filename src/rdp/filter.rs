@@ -1,4 +1,4 @@
-use rdp_proto::{gcc, ConnectInitial, ConnectResponse, Credentials};
+use rdp_proto::{gcc, ClientInfoPdu, ConnectInitial, ConnectResponse, Credentials};
 
 pub trait Filter {
     fn filter(&mut self, config: &FilterConfig);
@@ -43,5 +43,11 @@ impl Filter for ConnectResponse {
         let mut gcc_blocks = &mut self.conference_create_response.gcc_blocks;
         gcc_blocks.multi_transport_channel = None;
         gcc_blocks.message_channel = None;
+    }
+}
+
+impl Filter for ClientInfoPdu {
+    fn filter(&mut self, config: &FilterConfig) {
+        self.client_info.credentials = config.client_credentials.clone();
     }
 }

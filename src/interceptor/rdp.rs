@@ -116,7 +116,6 @@ mod tests {
     fn does_not_read_incomplete_tpkt_packet() {
         let mut packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
         packet.split_off(3);
-        println!("PACKET: {:x?}", packet);
         let mut data = packet.clone();
         let messages = RdpMessageReader::get_messages(&mut data);
         assert!(messages.is_empty());

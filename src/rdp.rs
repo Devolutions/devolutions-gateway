@@ -2,6 +2,7 @@ mod credssp_future;
 mod filter;
 mod identities_proxy;
 mod mcs_future;
+mod rdp_future;
 
 use std::{io, iter, net::SocketAddr};
 
@@ -342,6 +343,28 @@ impl RdpClient {
                                 client_logger,
                                 "MCS Connection Sequence finished, static channels collected"
                             );
+
+                            Ok((
+                                client_transport,
+                                server_transport,
+                                static_channels,
+                                filter_config,
+                                client_logger,
+                            ))
+                        })
+                },
+            )
+            .and_then(
+                move |(client_transport, server_transport, static_channels, filter_config, client_logger)| {
+                    let client_logger_clone = client_logger.clone();
+
+                    RdpFuture::new(client_transport, server_transport, filter_config, client_logger.clone())
+                        .map_err(move |e| {
+                            error!(client_logger_clone, "RDP Connection Sequence failed: {}", e);
+                            io::Error::new(io::ErrorKind::Other, e.compat())
+                        })
+                        .and_then(move |(client_transport, server_transport, filter_config)| {
+                            info!(client_logger, "RDP Connection Sequence finished");
 
                             Ok((
                                 client_transport,
