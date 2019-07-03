@@ -46,10 +46,7 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
     let (_, code) = parse_tdpu_header(&mut stream)?;
 
     let mut tpdu = input.split_to(len as usize);
-    let header_len = match code {
-        X224TPDUType::Data => TPDU_DATA_LENGTH,
-        _ => TPDU_REQUEST_LENGTH,
-    };
+    let header_len = tpdu_header_length(code);
     if header_len <= tpdu.len() {
         tpdu.advance(header_len);
 
@@ -67,7 +64,7 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
 ///
 /// * `code` - the [X.224 request type code](enum.X224TPDUType.html)
 /// * `data` - the message data to be encoded
-/// * `output` - the output buffer for the endoded data
+/// * `output` - the output buffer for the encoded data
 pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) -> io::Result<()> {
     let tpdu_length = match code {
         X224TPDUType::Data => TPDU_DATA_LENGTH,
@@ -82,6 +79,18 @@ pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) ->
     output.extend_from_slice(&data);
 
     Ok(())
+}
+
+/// Returns TPDU header length using a [X.224 message type code](enum.X224TPDUType.html).
+///
+/// # Arguments
+///
+/// * `code` - the [X.224 request type code](enum.X224TPDUType.html)
+pub fn tpdu_header_length(code: X224TPDUType) -> usize {
+    match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    }
 }
 
 /// Writes the TPKT header to an output source.
