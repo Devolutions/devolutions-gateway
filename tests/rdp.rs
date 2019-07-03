@@ -20,8 +20,7 @@ lazy_static! {
     static ref X224_REQUEST_FLAGS: rdp_proto::NegotiationRequestFlags = rdp_proto::NegotiationRequestFlags::empty();
     static ref X224_RESPONSE_PROTOCOL: rdp_proto::SecurityProtocol = rdp_proto::SecurityProtocol::HYBRID;
     static ref X224_RESPONSE_FLAGS: rdp_proto::NegotiationResponseFlags =
-        rdp_proto::NegotiationResponseFlags::EXTENDED_CLIENT_DATA_SUPPORTED
-            | rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+        rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
             | rdp_proto::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
             | rdp_proto::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
             | rdp_proto::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;

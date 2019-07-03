@@ -23,6 +23,16 @@ macro_rules! io_try {
     };
 }
 
+macro_rules! codec_try {
+    ($e:expr) => {
+        match $e {
+            Ok(Some(v)) => v,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+    };
+}
+
 #[cfg(target_os = "linux")]
 pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
     let cert = openssl::pkcs12::Pkcs12::from_der(der)?.parse(pass)?.cert;

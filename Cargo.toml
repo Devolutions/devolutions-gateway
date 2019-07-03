@@ -33,6 +33,7 @@ slog = "2.4"
 slog-term = "2.4"
 slog-async = "2.3"
 chrono = "0.4"
+failure = "0.1"
 
 jet-proto = { path = "./jet-proto"}
 rdp-proto = { path = "./rdp-proto"}

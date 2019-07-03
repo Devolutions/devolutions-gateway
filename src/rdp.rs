@@ -1,12 +1,15 @@
 mod credssp_future;
+mod filter;
 mod identities_proxy;
+mod mcs_future;
 
-use std::{io, net::SocketAddr};
+use std::{io, iter, net::SocketAddr};
 
 use bytes::BytesMut;
+use failure::Fail;
 use futures::{Future, Stream};
 use native_tls::TlsConnector;
-use slog::{error, info, Drain};
+use slog::{debug, error, info, Drain};
 use tokio::{
     codec::{Decoder, Framed},
     net::tcp::ConnectFuture,
@@ -18,14 +21,18 @@ use url::Url;
 
 use self::{
     credssp_future::{CredSspClientFuture, CredSspServerFuture},
+    filter::{Filter, FilterConfig},
     identities_proxy::{IdentitiesProxy, RdpIdentity},
+    mcs_future::McsFuture,
+    rdp_future::RdpFuture,
 };
 use crate::{
     config::Config,
-    transport::{tcp::TcpTransport, tsrequest::TsRequestTransport, x224::X224Transport},
+    transport::{mcs::McsTransport, tcp::TcpTransport, tsrequest::TsRequestTransport, x224::X224Transport},
     utils::get_tls_peer_pubkey,
     Proxy,
 };
+use rdp_proto::PduParsing;
 
 const DEFAULT_NTLM_VERSION: [u8; rdp_proto::NTLM_VERSION_SIZE] = [0x00; rdp_proto::NTLM_VERSION_SIZE];
 
@@ -125,8 +132,8 @@ impl RdpClient {
         let future = client_future
             .and_then(
                 move |(client_tls, rdp_identity, client_logger, request_protocol, request_flags)| {
-                    let target_identity = rdp_identity.target;
-                    let destination = rdp_identity.destination;
+                    let target_identity = rdp_identity.target.clone();
+                    let destination = rdp_identity.destination.clone();
                     let client_logger_clone = client_logger.clone();
 
                     let server_addr = destination.parse().map_err(move |e| {
@@ -153,7 +160,7 @@ impl RdpClient {
                                                 client_tls,
                                                 protocol,
                                                 nego_flags,
-                                                target_identity,
+                                                rdp_identity,
                                                 server_addr,
                                                 client_logger,
                                             ))
@@ -175,77 +182,191 @@ impl RdpClient {
             )
             .and_then(|nego_fut| nego_fut)
             .and_then(
-                move |(server, client_tls, protocol, nego_flags, target_identity, server_addr, client_logger)| {
-                    let client_logger_clone = client_logger.clone();
-                    let create_proxy = move |server_transport| {
-                        Proxy::new(config_clone)
-                            .build(server_transport, TcpTransport::new_tls(client_tls))
-                            .map_err(move |e| {
-                                error!(client_logger_clone, "proxy error: {}", e);
-                                e
-                            })
-                    };
-
-                    match protocol {
+                move |(server, client_tls, selected_protocol, nego_flags, rdp_identity, server_addr, client_logger)| {
+                    let target_identity = rdp_identity.target.clone();
+                    match selected_protocol {
                         rdp_proto::SecurityProtocol::HYBRID
                         | rdp_proto::SecurityProtocol::HYBRID_EX
                         | rdp_proto::SecurityProtocol::SSL => {
-                            let accept_invalid_certs_and_hostnames = match protocol {
+                            let accept_invalid_certs_and_hostnames = match selected_protocol {
                                 rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::HYBRID_EX => true,
                                 _ => false,
                             };
                             let client_logger_clone = client_logger.clone();
 
-                            Ok(future::Either::A(
-                                establish_tls_connection_with_server(
-                                    server,
-                                    server_addr,
-                                    accept_invalid_certs_and_hostnames,
-                                )
-                                .map_err(move |e| {
-                                    error!(client_logger_clone, "failed to accept a tls connection: {}", e);
-                                    e
+                            Ok(establish_tls_connection_with_server(
+                                server,
+                                server_addr,
+                                accept_invalid_certs_and_hostnames,
+                            )
+                            .map_err(move |e| {
+                                error!(client_logger_clone, "failed to accept a tls connection: {}", e);
+                                e
+                            })
+                            .and_then(move |server_tls| {
+                                info!(client_logger, "TLS connection has been established with server");
+                                let client_logger_clone = client_logger.clone();
+                                let server_fut = match selected_protocol {
+                                    rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::HYBRID_EX => {
+                                        let client_logger_clone = client_logger.clone();
+                                        future::Either::A(
+                                            process_cred_ssp_with_server(server_tls, target_identity, nego_flags)
+                                                .map_err(move |e| {
+                                                    error!(client_logger_clone, "CredSSP failed: {}", e);
+                                                    e
+                                                })
+                                                .and_then(move |server_transport| {
+                                                    info!(client_logger, "CredSSP has been finished with server");
+                                                    let server_tls = server_transport.into_inner();
+
+                                                    Ok(server_tls)
+                                                }),
+                                        )
+                                    }
+                                    _ => future::Either::B(future::ok(server_tls)),
+                                };
+
+                                server_fut.and_then(move |server_tls| {
+                                    Ok((
+                                        client_tls,
+                                        server_tls,
+                                        rdp_identity,
+                                        client_logger_clone,
+                                        selected_protocol,
+                                    ))
                                 })
-                                .and_then(move |server_tls| {
-                                    info!(client_logger, "TLS connection has been established with server");
-                                    let server_fut = match protocol {
-                                        rdp_proto::SecurityProtocol::HYBRID
-                                        | rdp_proto::SecurityProtocol::HYBRID_EX => {
-                                            let client_logger_clone = client_logger.clone();
-                                            future::Either::A(
-                                                process_cred_ssp_with_server(server_tls, target_identity, nego_flags)
-                                                    .map_err(move |e| {
-                                                        error!(client_logger_clone, "CredSSP failed: {}", e);
-                                                        e
-                                                    })
-                                                    .and_then(move |server_transport| {
-                                                        info!(client_logger, "CredSSP has been finished with server");
-                                                        let server_tls = server_transport.into_inner();
-
-                                                        Ok(server_tls)
-                                                    }),
-                                            )
-                                        }
-                                        _ => future::Either::B(future::ok(server_tls)),
-                                    };
-
-                                    server_fut
-                                        .and_then(move |server_tls| create_proxy(TcpTransport::new_tls(server_tls)))
-                                }),
-                            ))
-                        }
-                        rdp_proto::SecurityProtocol::RDP => {
-                            Ok(future::Either::B(create_proxy(TcpTransport::new(server))))
+                            }))
                         }
                         _ => Err(io::Error::new(
                             io::ErrorKind::NotConnected,
-                            format!("unsupported security protocol: {:?}", protocol),
+                            format!("unsupported security protocol: {:?}", selected_protocol),
                         )),
                     }
                 },
             )
-            .and_then(|either_fut| either_fut)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("RDP failed: {}", e)));
+            .and_then(|either_fut| {
+                either_fut.and_then(
+                    |(client_tls, server_tls, rdp_identity, client_logger, _selected_protocol)| {
+                        let filter_config = FilterConfig::new(rdp_identity.proxy.clone());
+                        let client_logger_clone = client_logger.clone();
+                        let client_transport = X224Transport::new().framed(client_tls);
+                        let server_transport = X224Transport::new().framed(server_tls);
+
+                        process_mcs_connect_initial(
+                            client_transport,
+                            server_transport,
+                            filter_config,
+                            client_logger.clone(),
+                        )
+                        .map_err(move |e| {
+                            error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
+                            e
+                        })
+                        .and_then(
+                            move |(client_transport, server_transport, connect_initial, filter_config)| {
+                                info!(client_logger, "MCS Connect Initial redirected successfully");
+                                Ok((
+                                    client_transport,
+                                    server_transport,
+                                    connect_initial,
+                                    filter_config,
+                                    client_logger,
+                                ))
+                            },
+                        )
+                    },
+                )
+            })
+            .and_then(
+                move |(client_transport, server_transport, connect_initial, filter_config, client_logger)| {
+                    let client_logger_clone = client_logger.clone();
+
+                    process_mcs_connect_response(
+                        client_transport,
+                        server_transport,
+                        filter_config,
+                        client_logger.clone(),
+                    )
+                    .map_err(move |e| {
+                        error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
+                        e
+                    })
+                    .and_then(
+                        move |(client_transport, server_transport, connect_response, filter_config)| {
+                            info!(client_logger, "MCS Connect Response redirected successfully");
+                            Ok((
+                                client_transport,
+                                server_transport,
+                                connect_initial,
+                                connect_response,
+                                filter_config,
+                                client_logger,
+                            ))
+                        },
+                    )
+                },
+            )
+            .and_then(
+                move |(
+                    client_transport,
+                    server_transport,
+                    connect_initial,
+                    connect_response,
+                    filter_config,
+                    client_logger,
+                )| {
+                    let client_logger_clone = client_logger.clone();
+                    let client_transport = McsTransport::default().framed(client_transport.into_inner());
+                    let server_transport = McsTransport::default().framed(server_transport.into_inner());
+
+                    let channel_names = connect_initial.channel_names();
+                    let channel_ids = connect_response.channel_ids();
+                    let global_channel_id = connect_response.global_channel_id();
+                    let channels = channel_ids
+                        .into_iter()
+                        .zip(channel_names.into_iter().map(|v| v.name))
+                        .chain(iter::once((
+                            global_channel_id,
+                            mcs_future::GLOBAL_CHANNEL_NAME.to_string(),
+                        )))
+                        .collect::<mcs_future::StaticChannels>();
+
+                    McsFuture::new(client_transport, server_transport, channels, client_logger.clone())
+                        .map_err(move |e| {
+                            error!(client_logger_clone, "MCS Connection Sequence failed: {}", e);
+                            io::Error::new(io::ErrorKind::Other, e.compat())
+                        })
+                        .and_then(|(client_transport, server_transport, static_channels)| {
+                            debug!(client_logger, "Static channels: {:?}", static_channels);
+                            info!(
+                                client_logger,
+                                "MCS Connection Sequence finished, static channels collected"
+                            );
+
+                            Ok((
+                                client_transport,
+                                server_transport,
+                                static_channels,
+                                filter_config,
+                                client_logger,
+                            ))
+                        })
+                },
+            )
+            .and_then(
+                move |(client_transport, server_transport, _static_channels, _filter, client_logger)| {
+                    let client_tls = client_transport.into_inner();
+                    let server_tls = server_transport.into_inner();
+
+                    Proxy::new(config_clone)
+                        .build(TcpTransport::new_tls(server_tls), TcpTransport::new_tls(client_tls))
+                        .map_err(move |e| {
+                            error!(client_logger, "proxy error: {}", e);
+                            e
+                        })
+                },
+            )
+            .map_err(move |e| io::Error::new(io::ErrorKind::Other, format!("RDP failed: {}", e)));
 
         Box::new(future) as Box<dyn Future<Item = (), Error = io::Error> + Send>
     }
@@ -284,8 +405,8 @@ fn negotiate_with_client(
                     request_flags
                 );
 
-                let response_flags = rdp_proto::NegotiationResponseFlags::EXTENDED_CLIENT_DATA_SUPPORTED
-                    | rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+                // For now, do not add EXTENDED_CLIENT_DATA_SUPPORTED flag to reduce optional GCC blocks
+                let response_flags = rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
                     | rdp_proto::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
                     | rdp_proto::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
                     | rdp_proto::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
@@ -484,4 +605,130 @@ fn process_cred_ssp_with_server(
         Ok(client_context)
     })
     .and_then(|f| f)
+}
+
+fn process_mcs_connect_initial(
+    client_transport: Framed<TlsStream<TcpStream>, X224Transport>,
+    server_transport: Framed<TlsStream<TcpStream>, X224Transport>,
+    filter_config: FilterConfig,
+    client_logger: slog::Logger,
+) -> impl Future<
+    Item = (
+        Framed<TlsStream<TcpStream>, X224Transport>,
+        Framed<TlsStream<TcpStream>, X224Transport>,
+        rdp_proto::ConnectInitial,
+        FilterConfig,
+    ),
+    Error = io::Error,
+> + Send {
+    let client_logger_clone = client_logger.clone();
+
+    client_transport
+        .into_future()
+        .map_err(|(e, _)| e)
+        .and_then(move |(req, client_transport)| {
+            if let Some((code, buf)) = req {
+                if code == rdp_proto::X224TPDUType::Data {
+                    let mut connect_initial =
+                        rdp_proto::ConnectInitial::from_buffer(buf.as_ref()).map_err(move |e| {
+                            error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
+                            io::Error::new(io::ErrorKind::Other, format!("{}", e))
+                        })?;
+                    debug!(client_logger, "Connect Initial PDU: {:?}", connect_initial);
+
+                    connect_initial.filter(&filter_config);
+                    debug!(client_logger, "Filtered Connect Initial PDU: {:?}", connect_initial);
+
+                    let mut response_data = BytesMut::new();
+                    response_data.resize(connect_initial.buffer_length(), 0);
+                    connect_initial.to_buffer(response_data.as_mut()).map_err(move |e| {
+                        error!(client_logger, "MCS Connect Initial failed: {}", e);
+                        io::Error::new(io::ErrorKind::Other, format!("{}", e))
+                    })?;
+
+                    Ok(server_transport
+                        .send((rdp_proto::X224TPDUType::Data, buf))
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to send negotiation response: {}", e),
+                            )
+                        })
+                        .and_then(move |server_transport| {
+                            Ok((client_transport, server_transport, connect_initial, filter_config))
+                        }))
+                } else {
+                    Err(io::Error::new(io::ErrorKind::InvalidData, "client sent invalid PDU"))
+                }
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "client closed connection before sending complete MCS Connect Initial PDU",
+                ))
+            }
+        })
+        .and_then(|f| f)
+}
+
+fn process_mcs_connect_response(
+    client_transport: Framed<TlsStream<TcpStream>, X224Transport>,
+    server_transport: Framed<TlsStream<TcpStream>, X224Transport>,
+    filter_config: FilterConfig,
+    client_logger: slog::Logger,
+) -> impl Future<
+    Item = (
+        Framed<TlsStream<TcpStream>, X224Transport>,
+        Framed<TlsStream<TcpStream>, X224Transport>,
+        rdp_proto::ConnectResponse,
+        FilterConfig,
+    ),
+    Error = io::Error,
+> + Send {
+    let client_logger_clone = client_logger.clone();
+
+    server_transport
+        .into_future()
+        .map_err(|(e, _)| e)
+        .and_then(move |(req, server_transport)| {
+            if let Some((code, buf)) = req {
+                if code == rdp_proto::X224TPDUType::Data {
+                    let mut connect_response =
+                        rdp_proto::ConnectResponse::from_buffer(buf.as_ref()).map_err(move |e| {
+                            error!(client_logger_clone, "MCS Connect Response failed: {}", e);
+                            io::Error::new(io::ErrorKind::Other, format!("{}", e))
+                        })?;
+                    debug!(client_logger, "Connect Response PDU: {:?}", connect_response);
+
+                    connect_response.filter(&filter_config);
+                    debug!(client_logger, "Filtered Connect Response PDU: {:?}", connect_response);
+
+                    let mut response_data = BytesMut::new();
+                    response_data.resize(connect_response.buffer_length(), 0);
+                    connect_response.to_buffer(response_data.as_mut()).map_err(move |e| {
+                        error!(client_logger, "MCS Connect Response failed: {}", e);
+                        io::Error::new(io::ErrorKind::Other, format!("{}", e))
+                    })?;
+
+                    Ok(client_transport
+                        .send((rdp_proto::X224TPDUType::Data, response_data))
+                        .map_err(|e| {
+                            io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("failed to send negotiation response: {}", e),
+                            )
+                        })
+                        .and_then(move |client_transport| {
+                            Ok((client_transport, server_transport, connect_response, filter_config))
+                        }))
+                } else {
+                    Err(io::Error::new(io::ErrorKind::InvalidData, "server sent invalid PDU"))
+                }
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "server closed connection before sending complete MCS Connect Response PDU",
+                ))
+            }
+        })
+        .and_then(|f| f)
 }
