@@ -57,6 +57,8 @@ jobs:
           mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
           cp $(Build.Repository.LocalPath)/target/release/devolutions-jet.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/
         displayName: Building devolutions-jet
+        env:
+          RUSTFLAGS: '-C target-feature=+crt-static'
 
       - task: PublishBuildArtifacts@1
         inputs:
