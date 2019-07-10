@@ -1,10 +1,10 @@
-use std::sync::Mutex;
-use saphir::ServerSpawn;
-use saphir::Server as SaphirServer;
-use log::info;
-use tokio::runtime::TaskExecutor;
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::sessions::SessionsController;
+use log::info;
+use saphir::Server as SaphirServer;
+use saphir::ServerSpawn;
+use std::sync::Mutex;
+use tokio::runtime::TaskExecutor;
 
 const HTTP_SERVER_PORT: u32 = 10256;
 
@@ -25,12 +25,9 @@ impl HttpServer {
                 let health = HealthController::new();
                 let session = SessionsController::new();
                 info!("Configuring http router");
-                router.add(health)
-                    .add(session)
+                router.add(health).add(session)
             })
-            .configure_listener(|list_config| {
-                list_config.set_uri(&format!("http://0.0.0.0:{}", HTTP_SERVER_PORT))
-            })
+            .configure_listener(|list_config| list_config.set_uri(&format!("http://0.0.0.0:{}", HTTP_SERVER_PORT)))
             .build();
 
         HttpServer {

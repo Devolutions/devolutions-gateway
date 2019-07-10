@@ -34,10 +34,19 @@ enum Tag {
     Sequence = 0x10,
 }
 
+pub const SIZEOF_ENUMERATED: u16 = 3;
+pub const SIZEOF_BOOL: u16 = 3;
+
 const TAG_MASK: u8 = 0x1F;
 
 pub fn sizeof_sequence(length: u16) -> u16 {
     1 + sizeof_length(length) + length
+}
+
+pub fn sizeof_application_tag(tagnum: u8, length: u16) -> u16 {
+    let tag_len = if tagnum > 0x1E { 2 } else { 1 };
+
+    sizeof_length(length) + tag_len
 }
 
 pub fn sizeof_sequence_tag(length: u16) -> u16 {
@@ -277,6 +286,15 @@ pub fn write_octet_string(mut stream: impl io::Write, value: &[u8]) -> io::Resul
 pub fn write_octet_string_tag(mut stream: impl io::Write, length: u16) -> io::Result<usize> {
     write_universal_tag(&mut stream, Tag::OctetString, Pc::Primitive)?;
     write_length(&mut stream, length).map(|length| length + 1)
+}
+
+pub fn read_octet_string(mut stream: impl io::Read) -> io::Result<Vec<u8>> {
+    let length = read_octet_string_tag(&mut stream)?;
+
+    let mut buffer = vec![0; length as usize];
+    stream.read_exact(&mut buffer)?;
+
+    Ok(buffer)
 }
 
 pub fn read_octet_string_tag(mut stream: impl io::Read) -> io::Result<u16> {

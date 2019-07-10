@@ -23,6 +23,12 @@ const ROUTING_TOKEN_PREFIX: &str = "Cookie: msts=";
 const RDP_NEG_DATA_LENGTH: u16 = 8;
 
 bitflags! {
+    /// The communication protocol which the client and server agree to transfer
+    /// data on during the X.224 phase.
+    ///
+    /// # MSDN
+    ///
+    /// * [RDP Negotiation Request (RDP_NEG_REQ)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3)
     pub struct SecurityProtocol: u32 {
         const RDP = 0;
         const SSL = 1;
@@ -33,7 +39,11 @@ bitflags! {
 }
 
 bitflags! {
-    /// https://msdn.microsoft.com/en-us/library/cc240500.aspx
+    /// Holds the negotiation protocol flags of the *request* message.
+    ///
+    /// # MSDN
+    ///
+    /// * [RDP Negotiation Request (RDP_NEG_REQ)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3)
     #[derive(Default)]
     pub struct NegotiationRequestFlags: u8 {
         const RESTRICTED_ADMIN_MODE_REQUIED = 0x01;
@@ -43,7 +53,11 @@ bitflags! {
 }
 
 bitflags! {
-    /// https://msdn.microsoft.com/en-us/library/cc240506.aspx
+    /// Holds the negotiation protocol flags of the *response* message.
+    ///
+    /// # MSDN
+    ///
+    /// * [RDP Negotiation Response (RDP_NEG_RSP)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817)
     #[derive(Default)]
     pub struct NegotiationResponseFlags: u8 {
         const EXTENDED_CLIENT_DATA_SUPPORTED = 0x01;
@@ -54,6 +68,8 @@ bitflags! {
     }
 }
 
+/// The type of the negotiation error. Contained in
+/// [`NegotiationError`](enum.NegotiationError.html).
 #[derive(Copy, Clone, Debug, PartialEq, FromPrimitive, ToPrimitive)]
 pub enum NegotiationFailureCodes {
     SSLRequiredByServer = 1,
@@ -61,18 +77,29 @@ pub enum NegotiationFailureCodes {
     SSLCertNotOnServer = 3,
     InconsistentFlags = 4,
     HybridRequiredByServer = 5,
+    /// Used when the failure caused by [`NegotiationFailure`](struct.NegotiationFailure.html).
     SSLWithUserAuthRequiredByServer = 6,
 }
 
+/// The kind of the negotiation request message, including the message as a
+/// [`String`](https://doc.rust-lang.org/std/string/struct.String.html).
+///
+/// # MSDN
+///
+/// * [Client X.224 Connection Request PDU](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/18a27ef9-6f9a-4501-b000-94b1fe3c2c10)
 #[derive(PartialEq, Debug)]
 pub enum NegoData {
     RoutingToken(String),
     Cookie(String),
 }
 
+///  The type of the error that may result from a negotiation process.
 #[derive(Debug)]
 pub enum NegotiationError {
+    /// Corresponds for an I/O error that may occur during a negotiation process
+    /// (invalid response code, invalid security protocol code, etc.)
     IOError(io::Error),
+    /// May indicate about a negotiation error recieved from a server.
     NegotiationFailure(NegotiationFailureCodes),
 }
 
@@ -102,6 +129,21 @@ enum NegotiationMessage {
     Failure = 3,
 }
 
+/// Writes the negotiation request to the output buffer. The request is composed
+/// of a cookie string, a [security protocol](struct.SecurityProtocol.html), and
+/// [negotiation request flags](struct.NegotiationRequestFlags.html).
+///
+/// # Arguments
+///
+/// * `buffer` - the output buffer
+/// * `cookie` - the cookie string slice
+/// * `protocol` - the [security protocol](struct.SecurityProtocol.html) of the message
+/// * `flags` - the [negotiation request flags](struct.NegotiationRequestFlags.html)
+///
+/// # MSDN
+///
+/// * [Client X.224 Connection Request PDU](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/18a27ef9-6f9a-4501-b000-94b1fe3c2c10)
+/// * [RDP Negotiation Request (RDP_NEG_REQ)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3)
 pub fn write_negotiation_request(
     mut buffer: impl io::Write,
     cookie: &str,
@@ -117,6 +159,19 @@ pub fn write_negotiation_request(
     Ok(())
 }
 
+/// Parses the negotiation request represented by the arguments and returns a tuple with
+/// [negotiation data](enum.NegoData.html) (optional), a [security protocol](struct.SecurityProtocol.html),
+/// and [negotiation request flags](struct.NegotiationRequestFlags.html).
+///
+/// # Arguments
+///
+/// * `code` - the [type](enum.X224TPDUType.html) of the X.224 request
+/// * `slice` - the input buffer of the request
+///
+/// # MSDN
+///
+/// * [Client X.224 Connection Request PDU](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/18a27ef9-6f9a-4501-b000-94b1fe3c2c10)
+/// * [RDP Negotiation Request (RDP_NEG_REQ)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/902b090b-9cb3-4efc-92bf-ee13373371e3)
 pub fn parse_negotiation_request(
     code: X224TPDUType,
     mut slice: &[u8],
@@ -158,6 +213,20 @@ pub fn parse_negotiation_request(
     }
 }
 
+/// Writes the negotiation response to an output buffer. The response is composed
+/// of a [security protocol](struct.SecurityProtocol.html) and
+/// [negotiation response flags](struct.NegotiationRequestFlags.html).
+///
+/// # Arguments
+///
+/// * `buffer` - the output buffer
+/// * `flags` - the [negotiation response flags](struct.NegotiationResponseFlags.html)
+/// * `protocol` - the [security protocol](struct.SecurityProtocol.html) of the message
+///
+/// # MSDN
+///
+/// * [Server X.224 Connection Confirm PDU](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/13757f8f-66db-4273-9d2c-385c33b1e483)
+/// * [RDP Negotiation Response (RDP_NEG_RSP)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817)
 pub fn write_negotiation_response(
     buffer: impl io::Write,
     flags: NegotiationResponseFlags,
@@ -166,6 +235,12 @@ pub fn write_negotiation_response(
     write_negotiation_data(buffer, NegotiationMessage::Response, flags.bits(), protocol.bits())
 }
 
+/// Writes the negotiation response error to an output buffer.
+///
+/// # Arguments
+///
+/// * `buffer` - the output buffer
+/// * `error` - the [failure code](enum.NegotiationFailureCodes.html)
 pub fn write_negotiation_response_error(buffer: impl io::Write, error: NegotiationFailureCodes) -> io::Result<()> {
     write_negotiation_data(
         buffer,
@@ -175,6 +250,19 @@ pub fn write_negotiation_response_error(buffer: impl io::Write, error: Negotiati
     )
 }
 
+/// Parses the negotiation response represented by the arguments and
+/// returns a tuple with a [security protocol](struct.SecurityProtocol.html)
+/// and [negotiation response flags](struct.NegotiationResponseFlags.html)
+/// upon success.
+///
+/// # Arguments
+///
+/// * `code` - the [type](enum.X224TPDUType.html) of the X.224 message
+/// * `stream` - the data type that contains the response
+///
+/// # MSDN
+///
+/// * [RDP Negotiation Response (RDP_NEG_RSP)](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/b2975bdc-6d56-49ee-9c57-f2ff3a0b6817)
 pub fn parse_negotiation_response(
     code: X224TPDUType,
     mut stream: impl io::Read,

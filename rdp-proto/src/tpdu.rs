@@ -15,6 +15,7 @@ pub const TPDU_REQUEST_LENGTH: usize = TPKT_HEADER_LENGTH + TPDU_REQUEST_HEADER_
 const TPDU_DATA_HEADER_LENGTH: usize = 3;
 const TPDU_REQUEST_HEADER_LENGTH: usize = 7;
 
+/// The PDU type of the X.224 negotiation phase.
 #[derive(Copy, Clone, Debug, PartialEq, FromPrimitive, ToPrimitive)]
 pub enum X224TPDUType {
     ConnectionRequest = 0xE0,
@@ -24,6 +25,13 @@ pub enum X224TPDUType {
     Error = 0x70,
 }
 
+/// Extracts a [X.224 message type code](enum.X224TPDUType.html)
+/// and a buffer ready for parsing from a raw request buffer provided
+/// by the argument.
+///
+/// # Arguments
+///
+/// * `input` - the raw buffer of the request (e.g. extracted from a stream)
 pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)> {
     let mut stream = input.as_ref();
     let len = read_tpkt_len(&mut stream)? as usize;
@@ -38,10 +46,7 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
     let (_, code) = parse_tdpu_header(&mut stream)?;
 
     let mut tpdu = input.split_to(len as usize);
-    let header_len = match code {
-        X224TPDUType::Data => TPDU_DATA_LENGTH,
-        _ => TPDU_REQUEST_LENGTH,
-    };
+    let header_len = tpdu_header_length(code);
     if header_len <= tpdu.len() {
         tpdu.advance(header_len);
 
@@ -51,8 +56,22 @@ pub fn decode_x224(input: &mut BytesMut) -> io::Result<(X224TPDUType, BytesMut)>
     }
 }
 
+/// Encodes and writes the message to an output buffer composed from a
+/// [request code](enum.X224TPDUType.html) and a data buffer provided by
+/// the arguments.
+///
+/// # Arguments
+///
+/// * `code` - the [X.224 request type code](enum.X224TPDUType.html)
+/// * `data` - the message data to be encoded
+/// * `output` - the output buffer for the encoded data
 pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) -> io::Result<()> {
-    let length = TPDU_REQUEST_LENGTH + data.len();
+    let tpdu_length = match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    };
+
+    let length = tpdu_length + data.len();
     let mut output_slice = output.as_mut();
     write_tpkt_header(&mut output_slice, length as u16)?;
     write_tpdu_header(&mut output_slice, length as u8 - TPKT_HEADER_LENGTH as u8, code, 0)?;
@@ -62,6 +81,24 @@ pub fn encode_x224(code: X224TPDUType, data: BytesMut, output: &mut BytesMut) ->
     Ok(())
 }
 
+/// Returns TPDU header length using a [X.224 message type code](enum.X224TPDUType.html).
+///
+/// # Arguments
+///
+/// * `code` - the [X.224 request type code](enum.X224TPDUType.html)
+pub fn tpdu_header_length(code: X224TPDUType) -> usize {
+    match code {
+        X224TPDUType::Data => TPDU_DATA_LENGTH,
+        _ => TPDU_REQUEST_LENGTH,
+    }
+}
+
+/// Writes the TPKT header to an output source.
+///
+/// # Arguments
+///
+/// * `stream` - the output buffer
+/// * `length` - the length of the header
 pub fn write_tpkt_header(mut stream: impl io::Write, length: u16) -> io::Result<()> {
     let version = 3;
 
@@ -72,6 +109,11 @@ pub fn write_tpkt_header(mut stream: impl io::Write, length: u16) -> io::Result<
     Ok(())
 }
 
+/// Reads a data source containing the TPKT header and returns its length upon success.
+///
+/// # Arguments
+///
+/// * `stream` - the data type that contains the header
 pub fn read_tpkt_len(mut stream: impl io::Read) -> io::Result<u64> {
     let version = stream.read_u8()?;
     if version != 3 {
@@ -85,8 +127,12 @@ pub fn read_tpkt_len(mut stream: impl io::Read) -> io::Result<u64> {
 }
 
 fn write_tpdu_header(mut stream: impl io::Write, length: u8, code: X224TPDUType, src_ref: u16) -> io::Result<()> {
-    // tpdu header length field doesn't include the length of the length field
-    stream.write_u8(length - 1)?;
+    let tpdu_length = match code {
+        X224TPDUType::Data => 2,
+        _ => length - 1, // tpdu header length field doesn't include the length of the length field
+    };
+
+    stream.write_u8(tpdu_length)?;
     stream.write_u8(code.to_u8().unwrap())?;
 
     if code == X224TPDUType::Data {

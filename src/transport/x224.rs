@@ -5,6 +5,7 @@ use tokio::codec::{Decoder, Encoder};
 
 use rdp_proto;
 
+#[derive(Default)]
 pub struct X224Transport {}
 
 impl X224Transport {
@@ -31,9 +32,11 @@ impl Encoder for X224Transport {
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let (code, data) = item;
 
-        let length = rdp_proto::TPDU_REQUEST_LENGTH + data.len();
+        let tpdu_header_len = rdp_proto::tpdu_header_length(code);
+
+        let length = tpdu_header_len + data.len();
         buf.reserve(length);
-        buf.resize(rdp_proto::TPDU_REQUEST_LENGTH, 0);
+        buf.resize(tpdu_header_len, 0);
 
         rdp_proto::encode_x224(code, data, buf)?;
 
