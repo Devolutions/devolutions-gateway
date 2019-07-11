@@ -1,3 +1,6 @@
 target/
 .idea/
 identities.json
+jet-proto/Cargo.lock
+rdp-proto/Cargo.lock
+rdp-proto/fuzz/
