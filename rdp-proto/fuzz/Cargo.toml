@@ -1,0 +1,39 @@
+
+[package]
+name = "rdp-proto-fuzz"
+version = "0.0.1"
+edition = "2018"
+authors = ["Automatically generated"]
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies.rdp-proto]
+path = ".."
+[dependencies.libfuzzer-sys]
+# git = "https://github.com/rust-fuzz/libfuzzer-sys.git"
+path = "../../libfuzzer-sys"
+
+[dependencies]
+bytes = "0.4"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_ts_request"
+path = "fuzz_targets/fuzz_ts_request.rs"
+
+[[bin]]
+name = "fuzz_x224"
+path = "fuzz_targets/fuzz_x224.rs"
+
+[[bin]]
+name = "fuzz_nego"
+path = "fuzz_targets/fuzz_nego.rs"
+
+[[bin]]
+name = "fuzz_mcs"
+path = "fuzz_targets/fuzz_mcs.rs"
