@@ -9,23 +9,23 @@ use crate::{
     rdp::identities_proxy::{RdpIdentity, RdpIdentityGetter},
     transport::tsrequest::TsRequestTransport,
 };
-use rdp_proto::CredSsp;
+use sspi::CredSsp;
 
 pub struct CredSspClientFuture {
-    cred_ssp_client: rdp_proto::CredSspClient,
-    ts_request: Option<rdp_proto::TsRequest>,
+    cred_ssp_client: sspi::CredSspClient,
+    ts_request: Option<sspi::TsRequest>,
     stream: Option<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>,
     send_future: Option<futures::sink::Send<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>>,
     state: CredSspFutureState,
 }
 
-pub struct CredSspServerFuture<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> {
-    cred_ssp_server: rdp_proto::CredSspServer<C>,
-    ts_request: Option<rdp_proto::TsRequest>,
+pub struct CredSspServerFuture<C: sspi::CredentialsProxy + RdpIdentityGetter> {
+    cred_ssp_server: sspi::CredSspServer<C>,
+    ts_request: Option<sspi::TsRequest>,
     stream: Option<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>,
     send_future: Option<futures::sink::Send<Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>>>,
     state: CredSspFutureState,
-    client_credentials: Option<rdp_proto::Credentials>,
+    client_credentials: Option<sspi::Credentials>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -41,11 +41,11 @@ enum CredSspFutureState {
 impl CredSspClientFuture {
     pub fn new(
         stream: Framed<tokio_tls::TlsStream<TcpStream>, TsRequestTransport>,
-        cred_ssp_context: rdp_proto::CredSspClient,
+        cred_ssp_context: sspi::CredSspClient,
     ) -> Self {
         Self {
             cred_ssp_client: cred_ssp_context,
-            ts_request: Some(rdp_proto::TsRequest::default()),
+            ts_request: Some(sspi::TsRequest::default()),
             stream: Some(stream),
             send_future: None,
             state: CredSspFutureState::ParseMessage,
@@ -53,10 +53,10 @@ impl CredSspClientFuture {
     }
 }
 
-impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> CredSspServerFuture<C> {
+impl<C: sspi::CredentialsProxy + RdpIdentityGetter> CredSspServerFuture<C> {
     pub fn new(
         stream: Framed<TlsStream<TcpStream>, TsRequestTransport>,
-        cred_ssp_server: rdp_proto::CredSspServer<C>,
+        cred_ssp_server: sspi::CredSspServer<C>,
     ) -> Self {
         Self {
             cred_ssp_server,
@@ -97,8 +97,8 @@ impl Future for CredSspClientFuture {
                     // we first set state to avoid clone() for the response
                     self.state = get_next_state(self.state, Some(&response));
                     match response {
-                        rdp_proto::CredSspResult::ReplyNeeded(ts_request)
-                        | rdp_proto::CredSspResult::FinalMessage(ts_request) => {
+                        sspi::CredSspResult::ReplyNeeded(ts_request)
+                        | sspi::CredSspResult::FinalMessage(ts_request) => {
                             self.send_future = Some(
                                 self.stream
                                     .take()
@@ -106,7 +106,7 @@ impl Future for CredSspClientFuture {
                                     .send(ts_request),
                             );
                         }
-                        rdp_proto::CredSspResult::Finished => (),
+                        sspi::CredSspResult::Finished => (),
                         _ => unreachable!(),
                     };
                 }
@@ -132,11 +132,11 @@ impl Future for CredSspClientFuture {
     }
 }
 
-impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> Future for CredSspServerFuture<C> {
+impl<C: sspi::CredentialsProxy + RdpIdentityGetter> Future for CredSspServerFuture<C> {
     type Item = (
         Framed<TlsStream<TcpStream>, TsRequestTransport>,
         RdpIdentity,
-        rdp_proto::Credentials,
+        sspi::Credentials,
     );
     type Error = io::Error;
 
@@ -164,9 +164,9 @@ impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> Future for CredSspServe
                     // we first set state to avoid clone() for the response
                     self.state = get_next_state(self.state, Some(&response));
                     match response {
-                        rdp_proto::CredSspResult::ReplyNeeded(ts_request)
-                        | rdp_proto::CredSspResult::FinalMessage(ts_request)
-                        | rdp_proto::CredSspResult::WithError(ts_request) => {
+                        sspi::CredSspResult::ReplyNeeded(ts_request)
+                        | sspi::CredSspResult::FinalMessage(ts_request)
+                        | sspi::CredSspResult::WithError(ts_request) => {
                             self.send_future = Some(
                                 self.stream
                                     .take()
@@ -174,10 +174,10 @@ impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> Future for CredSspServe
                                     .send(ts_request),
                             );
                         }
-                        rdp_proto::CredSspResult::ClientCredentials(client_credentials) => {
+                        sspi::CredSspResult::ClientCredentials(client_credentials) => {
                             self.client_credentials = Some(client_credentials);
                         }
-                        rdp_proto::CredSspResult::Finished => (),
+                        sspi::CredSspResult::Finished => (),
                     };
                 }
                 CredSspFutureState::SendMessage
@@ -191,8 +191,8 @@ impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> Future for CredSspServe
                     self.send_future = None;
 
                     if self.state == CredSspFutureState::SendAndFail {
-                        return Err(rdp_proto::SspiError::new(
-                            rdp_proto::SspiErrorType::InternalError,
+                        return Err(sspi::SspiError::new(
+                            sspi::SspiErrorType::InternalError,
                             String::from("CredSSP finished with error"),
                         )
                         .into());
@@ -217,7 +217,7 @@ impl<C: rdp_proto::CredentialsProxy + RdpIdentityGetter> Future for CredSspServe
 
 fn get_next_state(
     current_state: CredSspFutureState,
-    cred_ssp_result: Option<&rdp_proto::CredSspResult>,
+    cred_ssp_result: Option<&sspi::CredSspResult>,
 ) -> CredSspFutureState {
     match current_state {
         CredSspFutureState::GetMessage => CredSspFutureState::ParseMessage,
@@ -230,10 +230,10 @@ fn get_next_state(
                 .as_ref()
                 .expect("CredSSP result must be present for matching ParseMessage state")
             {
-                rdp_proto::CredSspResult::ReplyNeeded(_) => CredSspFutureState::SendMessage,
-                rdp_proto::CredSspResult::FinalMessage(_) => CredSspFutureState::SendFinalMessage,
-                rdp_proto::CredSspResult::WithError(_) => CredSspFutureState::SendAndFail,
-                rdp_proto::CredSspResult::ClientCredentials(_) | rdp_proto::CredSspResult::Finished => {
+                sspi::CredSspResult::ReplyNeeded(_) => CredSspFutureState::SendMessage,
+                sspi::CredSspResult::FinalMessage(_) => CredSspFutureState::SendFinalMessage,
+                sspi::CredSspResult::WithError(_) => CredSspFutureState::SendAndFail,
+                sspi::CredSspResult::ClientCredentials(_) | sspi::CredSspResult::Finished => {
                     CredSspFutureState::Finished
                 }
             }
