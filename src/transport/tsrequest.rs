@@ -4,8 +4,6 @@ use bytes::BytesMut;
 use log::debug;
 use tokio::codec::{Decoder, Encoder};
 
-use rdp_proto;
-
 pub struct TsRequestTransport {}
 
 impl TsRequestTransport {
@@ -15,11 +13,11 @@ impl TsRequestTransport {
 }
 
 impl Decoder for TsRequestTransport {
-    type Item = rdp_proto::TsRequest;
+    type Item = sspi::TsRequest;
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let ts_request = io_try!(rdp_proto::TsRequest::from_buffer(buf.as_ref()));
+        let ts_request = io_try!(sspi::TsRequest::from_buffer(buf.as_ref()));
         debug!("Got TSRequest: {:x?}", ts_request);
         buf.split_to(ts_request.buffer_len() as usize);
 
@@ -28,7 +26,7 @@ impl Decoder for TsRequestTransport {
 }
 
 impl Encoder for TsRequestTransport {
-    type Item = rdp_proto::TsRequest;
+    type Item = sspi::TsRequest;
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {

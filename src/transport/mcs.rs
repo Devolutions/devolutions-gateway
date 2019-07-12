@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder};
 
 use crate::transport::x224;
-use rdp_proto::PduParsing;
+use ironrdp::PduParsing;
 
 #[derive(Default)]
 pub struct McsTransport {
@@ -12,13 +12,13 @@ pub struct McsTransport {
 }
 
 impl Decoder for McsTransport {
-    type Item = rdp_proto::McsPdu;
+    type Item = ironrdp::McsPdu;
     type Error = io::Error;
 
     fn decode(&mut self, mut buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let (code, mcs_pdu_buffer) = codec_try!(self.x224_transport.decode(&mut buf));
-        if code == rdp_proto::X224TPDUType::Data {
-            Ok(Some(rdp_proto::McsPdu::from_buffer(mcs_pdu_buffer.as_ref())?))
+        if code == ironrdp::X224TPDUType::Data {
+            Ok(Some(ironrdp::McsPdu::from_buffer(mcs_pdu_buffer.as_ref())?))
         } else {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -29,7 +29,7 @@ impl Decoder for McsTransport {
 }
 
 impl Encoder for McsTransport {
-    type Item = rdp_proto::McsPdu;
+    type Item = ironrdp::McsPdu;
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
@@ -38,6 +38,6 @@ impl Encoder for McsTransport {
         item.to_buffer(data.as_mut())?;
 
         self.x224_transport
-            .encode((rdp_proto::X224TPDUType::Data, data), &mut buf)
+            .encode((ironrdp::X224TPDUType::Data, data), &mut buf)
     }
 }

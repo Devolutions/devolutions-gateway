@@ -7,7 +7,7 @@ use tokio_tcp::TcpStream;
 use tokio_tls::TlsStream;
 
 use crate::transport::mcs::McsTransport;
-use rdp_proto::McsPdu;
+use ironrdp::McsPdu;
 
 pub type StaticChannels = HashMap<u16, String>;
 
@@ -165,7 +165,7 @@ impl McsFuture {
 
 impl Future for McsFuture {
     type Item = (McsFutureTransport, McsFutureTransport, StaticChannels);
-    type Error = rdp_proto::McsError;
+    type Error = ironrdp::McsError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {

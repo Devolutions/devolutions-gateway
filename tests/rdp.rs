@@ -10,26 +10,26 @@ use std::{
 use bytes::BytesMut;
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
+use sspi::CredSsp;
 
 use common::run_proxy;
-use rdp_proto::{self, CredSsp};
 
 lazy_static! {
-    static ref X224_REQUEST_PROTOCOL: rdp_proto::SecurityProtocol =
-        rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::SSL;
-    static ref X224_REQUEST_FLAGS: rdp_proto::NegotiationRequestFlags = rdp_proto::NegotiationRequestFlags::empty();
-    static ref X224_RESPONSE_PROTOCOL: rdp_proto::SecurityProtocol = rdp_proto::SecurityProtocol::HYBRID;
-    static ref X224_RESPONSE_FLAGS: rdp_proto::NegotiationResponseFlags =
-        rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
-            | rdp_proto::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
-            | rdp_proto::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
-            | rdp_proto::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
-    static ref PROXY_CREDENTIALS: rdp_proto::Credentials = rdp_proto::Credentials::new(
+    static ref X224_REQUEST_PROTOCOL: ironrdp::SecurityProtocol =
+        ironrdp::SecurityProtocol::HYBRID | ironrdp::SecurityProtocol::SSL;
+    static ref X224_REQUEST_FLAGS: ironrdp::NegotiationRequestFlags = ironrdp::NegotiationRequestFlags::empty();
+    static ref X224_RESPONSE_PROTOCOL: ironrdp::SecurityProtocol = ironrdp::SecurityProtocol::HYBRID;
+    static ref X224_RESPONSE_FLAGS: ironrdp::NegotiationResponseFlags =
+        ironrdp::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+            | ironrdp::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
+            | ironrdp::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
+            | ironrdp::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
+    static ref PROXY_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
         String::from("Username1"),
         String::from("Password1"),
         Some(String::from("Domain1")),
     );
-    static ref SERVER_CREDENTIALS: rdp_proto::Credentials = rdp_proto::Credentials::new(
+    static ref SERVER_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
         String::from("Username2"),
         String::from("Password2"),
         Some(String::from("Domain2")),
@@ -42,7 +42,7 @@ const TLS_PUBLIC_KEY_HEADER: usize = 24;
 const PROXY_ADDR: &str = "127.0.0.1:8080";
 const ROUTING_ADDR: &str = "127.0.0.1:8081";
 const JET_SERVER: &str = "rdp://127.0.0.1:8082";
-const NTLM_VERSION: [u8; rdp_proto::NTLM_VERSION_SIZE] = [0x00; rdp_proto::NTLM_VERSION_SIZE];
+const NTLM_VERSION: [u8; sspi::NTLM_VERSION_SIZE] = [0x00; sspi::NTLM_VERSION_SIZE];
 const CERT_PKCS12_PASS: &str = "";
 
 type RdpResult<T> = Result<T, RdpError>;
@@ -52,20 +52,20 @@ pub struct RdpError(String);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
-    pub proxy: rdp_proto::Credentials,
-    pub target: rdp_proto::Credentials,
+    pub proxy: sspi::Credentials,
+    pub target: sspi::Credentials,
     pub destination: String,
 }
 
 #[derive(Clone)]
 pub struct IdentitiesProxy {
-    rdp_identity: rdp_proto::Credentials,
+    rdp_identity: sspi::Credentials,
 }
 
 struct RdpClient {
     proxy_addr: &'static str,
-    proxy_credentials: rdp_proto::Credentials,
-    server_credentials: rdp_proto::Credentials,
+    proxy_credentials: sspi::Credentials,
+    server_credentials: sspi::Credentials,
 }
 
 struct RdpServer {
@@ -111,8 +111,8 @@ fn rdp_with_nla_ntlm() {
 impl RdpClient {
     fn new(
         proxy_addr: &'static str,
-        proxy_credentials: rdp_proto::Credentials,
-        server_credentials: rdp_proto::Credentials,
+        proxy_credentials: sspi::Credentials,
+        server_credentials: sspi::Credentials,
     ) -> Self {
         Self {
             proxy_addr,
@@ -140,11 +140,18 @@ impl RdpClient {
             .map_err(|e| RdpError::new(format!("Failed to connect with TLS: {}", e)))?;
         let tls_pubkey = get_tls_peer_pubkey(&tls_stream)
             .map_err(|e| RdpError::new(format!("Failed to get tls peer public key from the certificate: {}", e)))?;
-        let mut cred_ssp_context = rdp_proto::CredSspClient::new(
+
+        let cred_ssp_mode =
+            if X224_REQUEST_FLAGS.contains(ironrdp::NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIRED) {
+                sspi::CredSspMode::CredentialLess
+            } else {
+                sspi::CredSspMode::WithCredentials
+            };
+        let mut cred_ssp_context = sspi::CredSspClient::new(
             tls_pubkey,
             self.proxy_credentials.clone(),
             NTLM_VERSION.to_vec(),
-            *X224_REQUEST_FLAGS,
+            cred_ssp_mode,
         )
         .map_err(|e| RdpError::new(format!("Failed to create a CredSSP client: {}", e)))?;
 
@@ -171,20 +178,20 @@ impl RdpClient {
 
     fn write_negotiation_request(&self, stream: &mut TcpStream) -> RdpResult<()> {
         let cookie = &self.server_credentials.username;
-        let mut request_data = BytesMut::with_capacity(rdp_proto::NEGOTIATION_REQUEST_LEN + cookie.len());
-        request_data.resize(rdp_proto::NEGOTIATION_REQUEST_LEN + cookie.len(), 0x00);
-        rdp_proto::write_negotiation_request(
+        let mut request_data = BytesMut::with_capacity(ironrdp::NEGOTIATION_REQUEST_LEN + cookie.len());
+        request_data.resize(ironrdp::NEGOTIATION_REQUEST_LEN + cookie.len(), 0x00);
+        ironrdp::write_negotiation_request(
             request_data.as_mut(),
             &cookie,
             *X224_REQUEST_PROTOCOL,
             *X224_REQUEST_FLAGS,
         )
         .map_err(|e| RdpError::new(format!("Failed to write negotiation request: {}", e)))?;
-        let x224_len = rdp_proto::TPDU_REQUEST_LENGTH + request_data.len();
+        let x224_len = ironrdp::TPDU_REQUEST_LENGTH + request_data.len();
         let mut x224_encoded_request = BytesMut::with_capacity(x224_len);
-        x224_encoded_request.resize(rdp_proto::TPDU_REQUEST_LENGTH, 0);
-        rdp_proto::encode_x224(
-            rdp_proto::X224TPDUType::ConnectionRequest,
+        x224_encoded_request.resize(ironrdp::TPDU_REQUEST_LENGTH, 0);
+        ironrdp::encode_x224(
+            ironrdp::X224TPDUType::ConnectionRequest,
             request_data,
             &mut x224_encoded_request,
         )
@@ -199,10 +206,10 @@ impl RdpClient {
 
     fn read_negotiation_response(&self, mut stream: &mut TcpStream) -> RdpResult<()> {
         let mut buffer = read_stream_buffer(&mut stream);
-        let (code, data) = rdp_proto::decode_x224(&mut buffer)
+        let (code, data) = ironrdp::decode_x224(&mut buffer)
             .map_err(|e| RdpError::new(format!("Failed to decode negotiation response: {}", e)))?;
-        assert_eq!(code, rdp_proto::X224TPDUType::ConnectionConfirm);
-        let (protocol, flags) = rdp_proto::parse_negotiation_response(code, data.as_ref())
+        assert_eq!(code, ironrdp::X224TPDUType::ConnectionConfirm);
+        let (protocol, flags) = ironrdp::parse_negotiation_response(code, data.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse negotiation response: {}", e)))?;
         assert_eq!(*X224_RESPONSE_PROTOCOL, protocol);
         assert_eq!(*X224_RESPONSE_FLAGS, flags);
@@ -213,9 +220,9 @@ impl RdpClient {
     fn write_negotiate_message(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspClient,
+        cred_ssp_context: &mut sspi::CredSspClient,
     ) -> RdpResult<()> {
-        process_cred_ssp_phase_with_reply_needed(rdp_proto::TsRequest::default(), cred_ssp_context, tls_stream)
+        process_cred_ssp_phase_with_reply_needed(sspi::TsRequest::default(), cred_ssp_context, tls_stream)
             .map_err(|e| RdpError::new(format!("Failed to process a credssp phase: {}", e)))?;
 
         Ok(())
@@ -224,10 +231,10 @@ impl RdpClient {
     fn read_challenge_message_and_write_authenticate_message_with_pub_key_auth(
         &self,
         mut tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspClient,
+        cred_ssp_context: &mut sspi::CredSspClient,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(&mut tls_stream);
-        let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse ts request: {}", e)))?;
 
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
@@ -236,17 +243,17 @@ impl RdpClient {
     fn read_pub_key_auth_and_write_ts_credentials(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspClient,
+        cred_ssp_context: &mut sspi::CredSspClient,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm challenge message: {}", e)))?;
 
         let reply = cred_ssp_context
             .process(read_ts_request)
             .map_err(|e| RdpError::new(format!("CredSSP process call error: {}", e)))?;
         match reply {
-            rdp_proto::CredSspResult::FinalMessage(ts_request) => {
+            sspi::CredSspResult::FinalMessage(ts_request) => {
                 let mut ts_request_buffer = Vec::with_capacity(ts_request.buffer_len() as usize);
                 ts_request
                     .encode_ts_request(&mut ts_request_buffer)
@@ -292,7 +299,7 @@ impl RdpServer {
             .map_err(|e| RdpError::new(format!("Failed to get tls public key: {}", e)))?;
 
         let mut cred_ssp_context =
-            rdp_proto::CredSspServer::new(tls_pubkey, self.identities_proxy.clone(), NTLM_VERSION.to_vec())
+            sspi::CredSspServer::new(tls_pubkey, self.identities_proxy.clone(), NTLM_VERSION.to_vec())
                 .map_err(|e| RdpError::new(format!("Failed to create a CredSSP server: {}", e)))?;
 
         self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context)
@@ -314,25 +321,25 @@ impl RdpServer {
     fn read_negotiation_request(&self, stream: &mut TcpStream) -> RdpResult<()> {
         let mut buffer = read_stream_buffer(stream);
 
-        let (code, data) = rdp_proto::decode_x224(&mut buffer)
+        let (code, data) = ironrdp::decode_x224(&mut buffer)
             .map_err(|e| RdpError::new(format!("Failed to decode negotiation request: {}", e)))?;
-        assert_eq!(code, rdp_proto::X224TPDUType::ConnectionRequest);
-        let (_nego_data, _protocol, _flags) = rdp_proto::parse_negotiation_request(code, data.as_ref())
+        assert_eq!(code, ironrdp::X224TPDUType::ConnectionRequest);
+        let (_nego_data, _protocol, _flags) = ironrdp::parse_negotiation_request(code, data.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse negotiation request: {}", e)))?;
 
         Ok(())
     }
 
     fn write_negotiation_response(&self, stream: &mut TcpStream) -> RdpResult<()> {
-        let mut response_data = BytesMut::with_capacity(rdp_proto::NEGOTIATION_RESPONSE_LEN);
-        response_data.resize(rdp_proto::NEGOTIATION_RESPONSE_LEN, 0x00);
-        rdp_proto::write_negotiation_response(response_data.as_mut(), *X224_RESPONSE_FLAGS, *X224_RESPONSE_PROTOCOL)
+        let mut response_data = BytesMut::with_capacity(ironrdp::NEGOTIATION_RESPONSE_LEN);
+        response_data.resize(ironrdp::NEGOTIATION_RESPONSE_LEN, 0x00);
+        ironrdp::write_negotiation_response(response_data.as_mut(), *X224_RESPONSE_FLAGS, *X224_RESPONSE_PROTOCOL)
             .map_err(|e| RdpError::new(format!("Failed to write negotiation response: {}", e)))?;
-        let x224_len = rdp_proto::TPDU_REQUEST_LENGTH + response_data.len();
+        let x224_len = ironrdp::TPDU_REQUEST_LENGTH + response_data.len();
         let mut x224_encoded_response = BytesMut::with_capacity(x224_len);
-        x224_encoded_response.resize(rdp_proto::TPDU_REQUEST_LENGTH, 0);
-        rdp_proto::encode_x224(
-            rdp_proto::X224TPDUType::ConnectionConfirm,
+        x224_encoded_response.resize(ironrdp::TPDU_REQUEST_LENGTH, 0);
+        ironrdp::encode_x224(
+            ironrdp::X224TPDUType::ConnectionConfirm,
             response_data,
             &mut x224_encoded_response,
         )
@@ -345,37 +352,37 @@ impl RdpServer {
         Ok(())
     }
 
-    fn read_negotiate_message_and_write_challenge_message<C: rdp_proto::CredentialsProxy>(
+    fn read_negotiate_message_and_write_challenge_message<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
+        cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
 
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
     }
 
-    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: rdp_proto::CredentialsProxy>(
+    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
+        cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
 
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
     }
 
-    fn read_ts_credentials<C: rdp_proto::CredentialsProxy>(
+    fn read_ts_credentials<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut native_tls::TlsStream<TcpStream>,
-        cred_ssp_context: &mut rdp_proto::CredSspServer<C>,
+        cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) -> RdpResult<()> {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = rdp_proto::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
             .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
 
         let reply = cred_ssp_context.process(read_ts_request).map_err(|e| {
@@ -385,7 +392,7 @@ impl RdpServer {
             ))
         })?;
         match reply {
-            rdp_proto::CredSspResult::ClientCredentials(client_credentials) => {
+            sspi::CredSspResult::ClientCredentials(client_credentials) => {
                 let expected_credentials = &self.identities_proxy.rdp_identity;
                 assert_eq!(expected_credentials.username, client_credentials.username);
                 assert_eq!(expected_credentials.domain, client_credentials.domain);
@@ -411,7 +418,7 @@ impl std::fmt::Display for RdpError {
 }
 
 impl RdpIdentity {
-    fn new(proxy: rdp_proto::Credentials, target: rdp_proto::Credentials, destination: String) -> Self {
+    fn new(proxy: sspi::Credentials, target: sspi::Credentials, destination: String) -> Self {
         Self {
             proxy,
             target,
@@ -430,12 +437,12 @@ impl RdpIdentity {
 }
 
 impl IdentitiesProxy {
-    pub fn new(rdp_identity: rdp_proto::Credentials) -> Self {
+    pub fn new(rdp_identity: sspi::Credentials) -> Self {
         Self { rdp_identity }
     }
 }
 
-impl rdp_proto::CredentialsProxy for IdentitiesProxy {
+impl sspi::CredentialsProxy for IdentitiesProxy {
     fn password_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<String> {
         assert_eq!(username, self.rdp_identity.username);
         assert_eq!(domain, self.rdp_identity.domain);
@@ -445,15 +452,15 @@ impl rdp_proto::CredentialsProxy for IdentitiesProxy {
 }
 
 fn process_cred_ssp_phase_with_reply_needed(
-    ts_request: rdp_proto::TsRequest,
-    cred_ssp_context: &mut impl rdp_proto::CredSsp,
+    ts_request: sspi::TsRequest,
+    cred_ssp_context: &mut impl sspi::CredSsp,
     tls_stream: &mut (impl io::Write + io::Read),
 ) -> RdpResult<()> {
     let reply = cred_ssp_context
         .process(ts_request)
         .map_err(|e| RdpError::new(format!("Failed to process CredSSP phase: {}", e)))?;
     match reply {
-        rdp_proto::CredSspResult::ReplyNeeded(ts_request) => {
+        sspi::CredSspResult::ReplyNeeded(ts_request) => {
             let mut ts_request_buffer = Vec::with_capacity(ts_request.buffer_len() as usize);
             ts_request
                 .encode_ts_request(&mut ts_request_buffer)
