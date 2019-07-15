@@ -33,7 +33,7 @@ macro_rules! codec_try {
     };
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
     let cert = openssl::pkcs12::Pkcs12::from_der(der)?.parse(pass)?.cert;
     get_tls_pubkey_from_cert(cert)
@@ -60,7 +60,7 @@ pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
     ))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_tls::TlsStream<S>) -> io::Result<Vec<u8>>
 where
     S: io::Read + io::Write,
@@ -105,7 +105,7 @@ where
         })
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn get_tls_pubkey_from_cert(cert: openssl::x509::X509) -> io::Result<Vec<u8>> {
     Ok(cert.public_key()?.public_key_to_der()?.split_off(TLS_PUBLIC_KEY_HEADER))
 }
