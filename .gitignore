@@ -3,3 +3,4 @@ target/
 identities.json
 jet-proto/Cargo.lock
 rdp-proto/Cargo.lock
+.DS_Store
