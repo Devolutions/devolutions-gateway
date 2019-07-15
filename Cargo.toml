@@ -34,15 +34,10 @@ slog-term = "2.4"
 slog-async = "2.3"
 chrono = "0.4"
 failure = "0.1"
+openssl = "0.10"
 
 jet-proto = { path = "./jet-proto"}
 rdp-proto = { path = "./rdp-proto"}
-
-[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-openssl = "0.10"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-schannel = "0.1"
 
 [dev-dependencies]
 tempfile = "3.0"
