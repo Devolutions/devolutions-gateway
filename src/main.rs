@@ -83,8 +83,8 @@ fn main() {
 
     // Create the TLS acceptor.
     let der = include_bytes!("cert/certificate.p12");
-    let tls_public_key = get_tls_pubkey(der.as_ref(), "").unwrap();
-    let cert = Identity::from_pkcs12(der, "").unwrap();
+    let tls_public_key = get_tls_pubkey(der.as_ref(), "password").unwrap();
+    let cert = Identity::from_pkcs12(der, "password").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
     info!("Listening for devolutions-jet proxy connections on {}", socket_addr);
