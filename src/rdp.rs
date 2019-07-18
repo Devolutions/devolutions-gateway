@@ -33,9 +33,7 @@ use crate::{
     utils::get_tls_peer_pubkey,
     Proxy,
 };
-use rdp_proto::PduParsing;
-
-const DEFAULT_NTLM_VERSION: [u8; rdp_proto::NTLM_VERSION_SIZE] = [0x00; rdp_proto::NTLM_VERSION_SIZE];
+use ironrdp::PduParsing;
 
 #[allow(unused)]
 pub struct RdpClient {
@@ -186,11 +184,11 @@ impl RdpClient {
                 move |(server, client_tls, selected_protocol, nego_flags, rdp_identity, server_addr, client_logger)| {
                     let target_identity = rdp_identity.target.clone();
                     match selected_protocol {
-                        rdp_proto::SecurityProtocol::HYBRID
-                        | rdp_proto::SecurityProtocol::HYBRID_EX
-                        | rdp_proto::SecurityProtocol::SSL => {
+                        ironrdp::SecurityProtocol::HYBRID
+                        | ironrdp::SecurityProtocol::HYBRID_EX
+                        | ironrdp::SecurityProtocol::SSL => {
                             let accept_invalid_certs_and_hostnames = match selected_protocol {
-                                rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::HYBRID_EX => true,
+                                ironrdp::SecurityProtocol::HYBRID | ironrdp::SecurityProtocol::HYBRID_EX => true,
                                 _ => false,
                             };
                             let client_logger_clone = client_logger.clone();
@@ -208,7 +206,7 @@ impl RdpClient {
                                 info!(client_logger, "TLS connection has been established with server");
                                 let client_logger_clone = client_logger.clone();
                                 let server_fut = match selected_protocol {
-                                    rdp_proto::SecurityProtocol::HYBRID | rdp_proto::SecurityProtocol::HYBRID_EX => {
+                                    ironrdp::SecurityProtocol::HYBRID | ironrdp::SecurityProtocol::HYBRID_EX => {
                                         let client_logger_clone = client_logger.clone();
                                         future::Either::A(
                                             process_cred_ssp_with_server(server_tls, target_identity, nego_flags)
@@ -249,7 +247,7 @@ impl RdpClient {
                 either_fut.and_then(
                     |(client_tls, server_tls, rdp_identity, client_logger, selected_protocol)| {
                         let client_logger_clone = client_logger.clone();
-                        let fut = if selected_protocol == rdp_proto::SecurityProtocol::HYBRID_EX {
+                        let fut = if selected_protocol == ironrdp::SecurityProtocol::HYBRID_EX {
                             future::Either::A(process_early_auth_result(client_tls, server_tls).map_err(move |e| {
                                 error!(
                                     client_logger_clone,
@@ -414,8 +412,8 @@ fn negotiate_with_client(
 ) -> impl Future<
     Item = (
         Framed<TcpStream, X224Transport>,
-        rdp_proto::SecurityProtocol,
-        rdp_proto::NegotiationRequestFlags,
+        ironrdp::SecurityProtocol,
+        ironrdp::NegotiationRequestFlags,
     ),
     Error = io::Error,
 > + Send {
@@ -426,10 +424,10 @@ fn negotiate_with_client(
         .and_then(move |(req, client_transport)| {
             if let Some((code, buf)) = req {
                 let (nego_data, request_protocol, request_flags) =
-                    rdp_proto::parse_negotiation_request(code, buf.as_ref())?;
+                    ironrdp::parse_negotiation_request(code, buf.as_ref())?;
                 let (routing_token, cookie) = match nego_data {
-                    Some(rdp_proto::NegoData::RoutingToken(routing_token)) => (Some(routing_token), None),
-                    Some(rdp_proto::NegoData::Cookie(cookie)) => (None, Some(cookie)),
+                    Some(ironrdp::NegoData::RoutingToken(routing_token)) => (Some(routing_token), None),
+                    Some(ironrdp::NegoData::Cookie(cookie)) => (None, Some(cookie)),
                     None => (None, None),
                 };
                 info!(
@@ -442,22 +440,22 @@ fn negotiate_with_client(
                 );
 
                 // For now, do not add EXTENDED_CLIENT_DATA_SUPPORTED flag to reduce optional GCC blocks
-                let response_flags = rdp_proto::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
-                    | rdp_proto::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
-                    | rdp_proto::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
-                    | rdp_proto::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
-                let response_protocol = if request_protocol.contains(rdp_proto::SecurityProtocol::HYBRID_EX) {
-                    rdp_proto::SecurityProtocol::HYBRID_EX
+                let response_flags = ironrdp::NegotiationResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+                    | ironrdp::NegotiationResponseFlags::RDP_NEG_RSP_RESERVED
+                    | ironrdp::NegotiationResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
+                    | ironrdp::NegotiationResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
+                let response_protocol = if request_protocol.contains(ironrdp::SecurityProtocol::HYBRID_EX) {
+                    ironrdp::SecurityProtocol::HYBRID_EX
                 } else {
-                    rdp_proto::SecurityProtocol::HYBRID
+                    ironrdp::SecurityProtocol::HYBRID
                 };
 
                 let mut response_data = BytesMut::new();
-                response_data.resize(rdp_proto::NEGOTIATION_RESPONSE_LEN, 0);
-                rdp_proto::write_negotiation_response(response_data.as_mut(), response_flags, response_protocol)?;
+                response_data.resize(ironrdp::NEGOTIATION_RESPONSE_LEN, 0);
+                ironrdp::write_negotiation_response(response_data.as_mut(), response_flags, response_protocol)?;
 
                 Ok(client_transport
-                    .send((rdp_proto::X224TPDUType::ConnectionConfirm, response_data))
+                    .send((ironrdp::X224TPDUType::ConnectionConfirm, response_data))
                     .map_err(|e| {
                         io::Error::new(
                             io::ErrorKind::Other,
@@ -497,7 +495,7 @@ fn process_cred_ssp_with_client(
 
         let server_context = CredSspServerFuture::new(
             client_transport,
-            rdp_proto::CredSspServer::new(proxy_public_key, identities_proxy, DEFAULT_NTLM_VERSION.to_vec())?,
+            sspi::CredSspServer::with_default_version(proxy_public_key, identities_proxy)?,
         );
 
         let client_future = server_context.and_then(|(client_transport, rdp_identity, client_credentials)| {
@@ -507,8 +505,8 @@ fn process_cred_ssp_with_client(
             {
                 Ok((client_transport, rdp_identity))
             } else {
-                Err(rdp_proto::SspiError::new(
-                    rdp_proto::SspiErrorType::MessageAltered,
+                Err(sspi::SspiError::new(
+                    sspi::SspiErrorType::MessageAltered,
                     String::from("Got invalid credentials from the client"),
                 )
                 .into())
@@ -522,22 +520,22 @@ fn process_cred_ssp_with_client(
 
 fn negotiate_with_server(
     server: ConnectFuture,
-    credentials: rdp_proto::Credentials,
-    protocol: rdp_proto::SecurityProtocol,
-    flags: rdp_proto::NegotiationRequestFlags,
-) -> impl Future<Item = (Framed<TcpStream, X224Transport>, rdp_proto::NegotiationRequestFlags), Error = io::Error> + Send
+    credentials: sspi::Credentials,
+    protocol: ironrdp::SecurityProtocol,
+    flags: ironrdp::NegotiationRequestFlags,
+) -> impl Future<Item = (Framed<TcpStream, X224Transport>, ironrdp::NegotiationRequestFlags), Error = io::Error> + Send
 {
     server
         .and_then(move |server| {
             let cookie: &str = credentials.username.as_ref();
             let mut request_data = BytesMut::new();
-            request_data.resize(rdp_proto::NEGOTIATION_REQUEST_LEN + cookie.len(), 0);
-            rdp_proto::write_negotiation_request(request_data.as_mut(), cookie, protocol, flags)?;
+            request_data.resize(ironrdp::NEGOTIATION_REQUEST_LEN + cookie.len(), 0);
+            ironrdp::write_negotiation_request(request_data.as_mut(), cookie, protocol, flags)?;
 
             let server_transport = X224Transport::new().framed(server);
 
             Ok(server_transport
-                .send((rdp_proto::X224TPDUType::ConnectionRequest, request_data))
+                .send((ironrdp::X224TPDUType::ConnectionRequest, request_data))
                 .map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::Other,
@@ -552,7 +550,7 @@ fn negotiate_with_server(
 fn process_negotiation_response_from_server(
     server_transport: Framed<TcpStream, X224Transport>,
     client_logger: slog::Logger,
-) -> impl Future<Item = (Framed<TcpStream, X224Transport>, Option<rdp_proto::SecurityProtocol>), Error = io::Error> + Send
+) -> impl Future<Item = (Framed<TcpStream, X224Transport>, Option<ironrdp::SecurityProtocol>), Error = io::Error> + Send
 {
     server_transport
         .into_future()
@@ -565,7 +563,7 @@ fn process_negotiation_response_from_server(
                         "invalid negotiation response",
                     ))
                 } else {
-                    let protocol = match rdp_proto::parse_negotiation_response(code, buf.as_ref()) {
+                    let protocol = match ironrdp::parse_negotiation_response(code, buf.as_ref()) {
                         Ok((selected_protocol, flags)) => {
                             info!(
                                 client_logger,
@@ -576,7 +574,7 @@ fn process_negotiation_response_from_server(
 
                             Some(selected_protocol)
                         }
-                        Err(rdp_proto::NegotiationError::NegotiationFailure(code)) => {
+                        Err(ironrdp::NegotiationError::NegotiationFailure(code)) => {
                             info!(
                                 client_logger,
                                 "received negotiation failure from server (code: {:?})", code
@@ -584,7 +582,7 @@ fn process_negotiation_response_from_server(
 
                             None
                         }
-                        Err(rdp_proto::NegotiationError::IOError(e)) => return Err(e),
+                        Err(ironrdp::NegotiationError::IOError(e)) => return Err(e),
                     };
 
                     Ok((server_transport, protocol))
@@ -621,21 +619,21 @@ fn establish_tls_connection_with_server(
 
 fn process_cred_ssp_with_server(
     server_tls: TlsStream<TcpStream>,
-    target_identity: rdp_proto::Credentials,
-    nego_flags: rdp_proto::NegotiationRequestFlags,
+    target_identity: sspi::Credentials,
+    nego_flags: ironrdp::NegotiationRequestFlags,
 ) -> impl Future<Item = Framed<TlsStream<TcpStream>, TsRequestTransport>, Error = io::Error> + Send {
     future::lazy(move || {
         let client_public_key = get_tls_peer_pubkey(&server_tls)?;
         let server_transport = TsRequestTransport::new().framed(server_tls);
 
+        let cred_ssp_mode = if nego_flags.contains(ironrdp::NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIRED) {
+            sspi::CredSspMode::CredentialLess
+        } else {
+            sspi::CredSspMode::WithCredentials
+        };
         let client_context = CredSspClientFuture::new(
             server_transport,
-            rdp_proto::CredSspClient::new(
-                client_public_key,
-                target_identity,
-                DEFAULT_NTLM_VERSION.to_vec(),
-                nego_flags,
-            )?,
+            sspi::CredSspClient::with_default_version(client_public_key, target_identity, cred_ssp_mode)?,
         );
 
         Ok(client_context)
@@ -648,11 +646,11 @@ fn process_early_auth_result(
     server_tls: TlsStream<TcpStream>,
 ) -> impl Future<Item = (TlsStream<TcpStream>, TlsStream<TcpStream>), Error = io::Error> + Send {
     future::lazy(|| {
-        let buffer = [0; rdp_proto::EARLY_USER_AUTH_RESULT_PDU_SIZE];
+        let buffer = [0; sspi::EARLY_USER_AUTH_RESULT_PDU_SIZE];
         tokio::io::read_exact(server_tls, buffer)
             .and_then(
-                move |(server_tls, buffer)| match rdp_proto::EarlyUserAuthResult::from_buffer(buffer.as_ref())? {
-                    rdp_proto::EarlyUserAuthResult::Success => Ok(tokio::io::write_all(client_tls, buffer)
+                move |(server_tls, buffer)| match sspi::EarlyUserAuthResult::from_buffer(buffer.as_ref())? {
+                    sspi::EarlyUserAuthResult::Success => Ok(tokio::io::write_all(client_tls, buffer)
                         .and_then(move |(client_tls, _)| Ok((client_tls, server_tls)))),
                     _ => Err(io::Error::new(
                         io::ErrorKind::Other,
@@ -673,7 +671,7 @@ fn process_mcs_connect_initial(
     Item = (
         Framed<TlsStream<TcpStream>, X224Transport>,
         Framed<TlsStream<TcpStream>, X224Transport>,
-        rdp_proto::ConnectInitial,
+        ironrdp::ConnectInitial,
         FilterConfig,
     ),
     Error = io::Error,
@@ -685,12 +683,11 @@ fn process_mcs_connect_initial(
         .map_err(|(e, _)| e)
         .and_then(move |(req, client_transport)| {
             if let Some((code, buf)) = req {
-                if code == rdp_proto::X224TPDUType::Data {
-                    let mut connect_initial =
-                        rdp_proto::ConnectInitial::from_buffer(buf.as_ref()).map_err(move |e| {
-                            error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
-                            io::Error::new(io::ErrorKind::Other, format!("{}", e))
-                        })?;
+                if code == ironrdp::X224TPDUType::Data {
+                    let mut connect_initial = ironrdp::ConnectInitial::from_buffer(buf.as_ref()).map_err(move |e| {
+                        error!(client_logger_clone, "MCS Connect Initial failed: {}", e);
+                        io::Error::new(io::ErrorKind::Other, format!("{}", e))
+                    })?;
                     debug!(client_logger, "Connect Initial PDU: {:?}", connect_initial);
 
                     connect_initial.filter(&filter_config);
@@ -704,7 +701,7 @@ fn process_mcs_connect_initial(
                     })?;
 
                     Ok(server_transport
-                        .send((rdp_proto::X224TPDUType::Data, buf))
+                        .send((ironrdp::X224TPDUType::Data, buf))
                         .map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,
@@ -736,7 +733,7 @@ fn process_mcs_connect_response(
     Item = (
         Framed<TlsStream<TcpStream>, X224Transport>,
         Framed<TlsStream<TcpStream>, X224Transport>,
-        rdp_proto::ConnectResponse,
+        ironrdp::ConnectResponse,
         FilterConfig,
     ),
     Error = io::Error,
@@ -748,9 +745,9 @@ fn process_mcs_connect_response(
         .map_err(|(e, _)| e)
         .and_then(move |(req, server_transport)| {
             if let Some((code, buf)) = req {
-                if code == rdp_proto::X224TPDUType::Data {
+                if code == ironrdp::X224TPDUType::Data {
                     let mut connect_response =
-                        rdp_proto::ConnectResponse::from_buffer(buf.as_ref()).map_err(move |e| {
+                        ironrdp::ConnectResponse::from_buffer(buf.as_ref()).map_err(move |e| {
                             error!(client_logger_clone, "MCS Connect Response failed: {}", e);
                             io::Error::new(io::ErrorKind::Other, format!("{}", e))
                         })?;
@@ -767,7 +764,7 @@ fn process_mcs_connect_response(
                     })?;
 
                     Ok(client_transport
-                        .send((rdp_proto::X224TPDUType::Data, response_data))
+                        .send((ironrdp::X224TPDUType::Data, response_data))
                         .map_err(|e| {
                             io::Error::new(
                                 io::ErrorKind::Other,

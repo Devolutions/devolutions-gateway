@@ -10,7 +10,7 @@ use crate::{
     rdp::filter::{Filter, FilterConfig},
     transport::mcs::McsTransport,
 };
-use rdp_proto::{ClientInfoPdu, ClientLicensePdu, McsPdu, PduParsing, SendDataContext};
+use ironrdp::{ClientInfoPdu, ClientLicensePdu, McsPdu, PduParsing, SendDataContext};
 
 type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 
@@ -174,7 +174,7 @@ impl RdpFuture {
 
 impl Future for RdpFuture {
     type Item = (McsFutureTransport, McsFutureTransport, FilterConfig);
-    type Error = rdp_proto::McsError;
+    type Error = ironrdp::McsError;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {

@@ -1,6 +1,6 @@
 use std::io;
 
-use rdp_proto::{parse_fast_path_header, read_tpkt_len};
+use ironrdp::{parse_fast_path_header, read_tpkt_len};
 
 pub struct RdpMessageReader;
 impl RdpMessageReader {
@@ -18,7 +18,7 @@ impl RdpMessageReader {
                     // Fast-Path
                     match parse_fast_path_header(data.as_slice()) {
                         Ok((_, len)) => Some(u64::from(len)),
-                        Err(rdp_proto::FastPathError::NullLength { bytes_read }) => {
+                        Err(ironrdp::FastPathError::NullLength { bytes_read }) => {
                             data.drain(..bytes_read);
 
                             None

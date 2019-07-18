@@ -22,9 +22,9 @@ native-tls = "0.2"
 env_logger = "0.5.13"
 byteorder = "1.2.7"
 bytes = "0.4"
-uuid = {version = "0.7.1", features = ["v4"]}
+uuid = { version = "0.7.1", features = ["v4"] }
 pcap-file = "0.10.0"
-packet = { git = "https://github.com/fdubois1/rust-packet.git"}
+packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 saphir = { version = "0.9.3", features = ["request_handler"] }
 serde = "1.0"
 serde_derive = "1.0"
@@ -36,8 +36,10 @@ chrono = "0.4"
 failure = "0.1"
 openssl = "0.10"
 
-jet-proto = { path = "./jet-proto"}
-rdp-proto = { path = "./rdp-proto"}
+sspi = "0.2"
+ironrdp = "0.1"
+
+jet-proto = { path = "./jet-proto" }
 
 [dev-dependencies]
 tempfile = "3.0"

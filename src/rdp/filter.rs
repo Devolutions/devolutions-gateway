@@ -1,4 +1,5 @@
-use rdp_proto::{gcc, ClientInfoPdu, ConnectInitial, ConnectResponse, Credentials};
+use ironrdp::{gcc, ClientInfoPdu, ConnectInitial, ConnectResponse};
+use sspi::Credentials;
 
 pub trait Filter {
     fn filter(&mut self, config: &FilterConfig);

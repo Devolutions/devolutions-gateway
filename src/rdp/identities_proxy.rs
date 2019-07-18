@@ -8,8 +8,8 @@ pub trait RdpIdentityGetter {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
-    pub proxy: rdp_proto::Credentials,
-    pub target: rdp_proto::Credentials,
+    pub proxy: sspi::Credentials,
+    pub target: sspi::Credentials,
     pub destination: String,
 }
 
@@ -51,7 +51,7 @@ impl RdpIdentityGetter for IdentitiesProxy {
     }
 }
 
-impl rdp_proto::CredentialsProxy for IdentitiesProxy {
+impl sspi::CredentialsProxy for IdentitiesProxy {
     fn password_by_user(&mut self, username: String, _domain: Option<String>) -> io::Result<String> {
         let rdp_identities = RdpIdentity::from_file(self.rdp_identities_filename.as_ref())?;
         let rdp_identity = rdp_identities
