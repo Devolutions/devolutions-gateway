@@ -35,8 +35,6 @@ use crate::{
 };
 use ironrdp::PduParsing;
 
-const DEFAULT_NTLM_VERSION: [u8; sspi::NTLM_VERSION_SIZE] = [0x00; sspi::NTLM_VERSION_SIZE];
-
 #[allow(unused)]
 pub struct RdpClient {
     routing_url: Url,
@@ -497,7 +495,7 @@ fn process_cred_ssp_with_client(
 
         let server_context = CredSspServerFuture::new(
             client_transport,
-            sspi::CredSspServer::new(proxy_public_key, identities_proxy, DEFAULT_NTLM_VERSION.to_vec())?,
+            sspi::CredSspServer::with_default_version(proxy_public_key, identities_proxy)?,
         );
 
         let client_future = server_context.and_then(|(client_transport, rdp_identity, client_credentials)| {
@@ -635,12 +633,7 @@ fn process_cred_ssp_with_server(
         };
         let client_context = CredSspClientFuture::new(
             server_transport,
-            sspi::CredSspClient::new(
-                client_public_key,
-                target_identity,
-                DEFAULT_NTLM_VERSION.to_vec(),
-                cred_ssp_mode,
-            )?,
+            sspi::CredSspClient::with_default_version(client_public_key, target_identity, cred_ssp_mode)?,
         );
 
         Ok(client_context)

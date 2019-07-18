@@ -42,7 +42,6 @@ const TLS_PUBLIC_KEY_HEADER: usize = 24;
 const PROXY_ADDR: &str = "127.0.0.1:8080";
 const ROUTING_ADDR: &str = "127.0.0.1:8081";
 const JET_SERVER: &str = "rdp://127.0.0.1:8082";
-const NTLM_VERSION: [u8; sspi::NTLM_VERSION_SIZE] = [0x00; sspi::NTLM_VERSION_SIZE];
 const CERT_PKCS12_PASS: &str = "";
 
 type RdpResult<T> = Result<T, RdpError>;
@@ -147,13 +146,9 @@ impl RdpClient {
             } else {
                 sspi::CredSspMode::WithCredentials
             };
-        let mut cred_ssp_context = sspi::CredSspClient::new(
-            tls_pubkey,
-            self.proxy_credentials.clone(),
-            NTLM_VERSION.to_vec(),
-            cred_ssp_mode,
-        )
-        .map_err(|e| RdpError::new(format!("Failed to create a CredSSP client: {}", e)))?;
+        let mut cred_ssp_context =
+            sspi::CredSspClient::with_default_version(tls_pubkey, self.proxy_credentials.clone(), cred_ssp_mode)
+                .map_err(|e| RdpError::new(format!("Failed to create a CredSSP client: {}", e)))?;
 
         self.write_negotiate_message(&mut tls_stream, &mut cred_ssp_context)
             .map_err(|e| {
@@ -298,9 +293,8 @@ impl RdpServer {
         let tls_pubkey = get_tls_pubkey(CERT_PKCS12_DER.clone().as_ref(), CERT_PKCS12_PASS)
             .map_err(|e| RdpError::new(format!("Failed to get tls public key: {}", e)))?;
 
-        let mut cred_ssp_context =
-            sspi::CredSspServer::new(tls_pubkey, self.identities_proxy.clone(), NTLM_VERSION.to_vec())
-                .map_err(|e| RdpError::new(format!("Failed to create a CredSSP server: {}", e)))?;
+        let mut cred_ssp_context = sspi::CredSspServer::with_default_version(tls_pubkey, self.identities_proxy.clone())
+            .map_err(|e| RdpError::new(format!("Failed to create a CredSSP server: {}", e)))?;
 
         self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context)
             .map_err(|e| {
