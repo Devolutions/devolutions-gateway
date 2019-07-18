@@ -43,7 +43,7 @@ const PROXY_ADDR: &str = "127.0.0.1:8080";
 const ROUTING_ADDR: &str = "127.0.0.1:8081";
 const JET_SERVER: &str = "rdp://127.0.0.1:8082";
 const NTLM_VERSION: [u8; rdp_proto::NTLM_VERSION_SIZE] = [0x00; rdp_proto::NTLM_VERSION_SIZE];
-const CERT_PKCS12_PASS: &str = "";
+const CERT_PKCS12_PASS: &str = "password";
 
 type RdpResult<T> = Result<T, RdpError>;
 
