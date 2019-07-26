@@ -1,108 +1,125 @@
-use futures::{Async, AsyncSink, Future, Sink, Stream};
-use log::{debug, error};
-use native_tls::TlsConnector;
+use tungstenite::WebSocket;
+use hyper::upgrade::Upgraded;
+use std::sync::{Mutex, Arc};
 use std::io::{Read, Write};
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_tcp::TcpStream;
-use tokio_tls::TlsStream;
-use url::Url;
-
+use tokio::io;
+use log::{debug, error};
 use crate::interceptor::PacketInterceptor;
-use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
+use futures::{Async, Stream, Sink, AsyncSink};
+use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStream, JetSink};
+use url::Url;
+use std::net::SocketAddr;
+use tungstenite::Message;
+use tungstenite::protocol::Role;
+use tungstenite::client::AutoStream;
 use crate::utils::url_to_socket_arr;
+use std::error::Error;
 
-pub enum TcpStreamWrapper {
-    Plain(TcpStream),
-    Tls(TlsStream<TcpStream>),
+pub enum WsStreamWrapper {
+    Http((WebSocket<Upgraded>, Option<SocketAddr>)),
+    Tls((WebSocket<AutoStream>, Option<SocketAddr>)),
 }
 
-impl TcpStreamWrapper {
+impl WsStreamWrapper {
     fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
-            TcpStreamWrapper::Plain(stream) => stream.peer_addr().ok(),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr().ok(),
+            WsStreamWrapper::Http((_stream, addr)) => addr.clone(),
+            WsStreamWrapper::Tls((_stream, addr)) => addr.clone(),
         }
     }
 
-    pub fn shutdown(&self) -> std::io::Result<()> {
+    pub fn shutdown(&mut self) -> std::io::Result<()> {
         match self {
-            TcpStreamWrapper::Plain(stream) => TcpStream::shutdown(stream, std::net::Shutdown::Both),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().shutdown(std::net::Shutdown::Both),
+            WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
+            WsStreamWrapper::Tls((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
         }
     }
 
     pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self {
-            TcpStreamWrapper::Plain(stream) => AsyncWrite::shutdown(stream),
-            TcpStreamWrapper::Tls(stream) => AsyncWrite::shutdown(stream),
+            WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
+            WsStreamWrapper::Tls((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
         }
     }
 }
 
-impl Read for TcpStreamWrapper {
+impl Read for WsStreamWrapper {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         match *self {
-            TcpStreamWrapper::Plain(ref mut stream) => stream.read(&mut buf),
-            TcpStreamWrapper::Tls(ref mut stream) => stream.read(&mut buf),
+            WsStreamWrapper::Http((ref mut stream, _)) => {
+                stream.read_message().map_err(|e| tungstenite_err_to_io_err(e)).and_then(move |m| {
+                    buf.write(m.into_data().as_mut_slice())
+                })
+            }
+            WsStreamWrapper::Tls((ref mut stream, _)) => {
+                stream.read_message().map_err(|e| tungstenite_err_to_io_err(e)).and_then(move |m| {
+                    buf.write(m.into_data().as_mut_slice())
+                })
+            }
         }
     }
 }
 
-impl Write for TcpStreamWrapper {
+impl Write for WsStreamWrapper {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            match *self {
-                TcpStreamWrapper::Plain(ref mut stream) => stream.write(&buf),
-                TcpStreamWrapper::Tls(ref mut stream) => stream.write(&buf),
-            }
+        match *self {
+            WsStreamWrapper::Http((ref mut stream, _)) =>
+                stream.write_message(Message::Binary(buf.to_vec())).map(|_| buf.len()).map_err(|e| tungstenite_err_to_io_err(e)),
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) =>
+                stream.write_message(Message::Binary(buf.to_vec())).map(|_| buf.len()).map_err(|e| tungstenite_err_to_io_err(e)),
         }
-        fn flush(&mut self) -> io::Result<()> {
-            match *self {
-                TcpStreamWrapper::Plain(ref mut stream) => stream.flush(),
-                TcpStreamWrapper::Tls(ref mut stream) => stream.flush(),
-            }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
+            WsStreamWrapper::Http((ref mut stream, _)) =>
+                stream.write_pending().map(|_| ()).map_err(|e| tungstenite_err_to_io_err(e)),
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) =>
+                stream.write_pending().map(|_| ()).map_err(|e| tungstenite_err_to_io_err(e)),
+        }
     }
 }
 
-impl AsyncRead for TcpStreamWrapper {}
-impl AsyncWrite for TcpStreamWrapper {
+impl AsyncRead for WsStreamWrapper {}
+
+impl AsyncWrite for WsStreamWrapper {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match *self {
-            TcpStreamWrapper::Plain(ref mut stream) => AsyncWrite::shutdown(stream),
-            TcpStreamWrapper::Tls(ref mut stream) => AsyncWrite::shutdown(stream),
+            WsStreamWrapper::Http((ref mut stream, _)) =>
+                stream.close(None).map(|_| Async::Ready(())).map_err(|e| tungstenite_err_to_io_err(e)),
+            WsStreamWrapper::Tls((ref mut stream, _)) =>
+                stream.close(None).map(|_| Async::Ready(())).map_err(|e| tungstenite_err_to_io_err(e)),
         }
     }
 }
 
-pub struct TcpTransport {
-    stream: Arc<Mutex<TcpStreamWrapper>>,
+pub struct WsTransport {
+    stream: Arc<Mutex<WsStreamWrapper>>,
 }
 
-impl Clone for TcpTransport {
+impl Clone for WsTransport {
     fn clone(&self) -> Self {
-        TcpTransport {
+        WsTransport {
             stream: self.stream.clone(),
         }
     }
 }
 
-impl TcpTransport {
-    pub fn new(stream: TcpStream) -> Self {
-        TcpTransport {
-            stream: Arc::new(Mutex::new(TcpStreamWrapper::Plain(stream))),
+impl WsTransport {
+    pub fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
+        WsTransport {
+            stream: Arc::new(Mutex::new(WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)))),
         }
     }
 
-    pub fn new_tls(stream: TlsStream<TcpStream>) -> Self {
-        TcpTransport {
-            stream: Arc::new(Mutex::new(TcpStreamWrapper::Tls(stream))),
+    pub fn new_tls(stream: WebSocket<AutoStream>, addr: Option<SocketAddr>) -> Self {
+        WsTransport {
+            stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)))),
         }
     }
 }
 
-impl Read for TcpTransport {
+impl Read for WsTransport {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.read(&mut buf),
@@ -110,9 +127,10 @@ impl Read for TcpTransport {
         }
     }
 }
-impl AsyncRead for TcpTransport {}
 
-impl Write for TcpTransport {
+impl AsyncRead for WsTransport {}
+
+impl Write for WsTransport {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.write(&buf),
@@ -127,7 +145,7 @@ impl Write for TcpTransport {
     }
 }
 
-impl AsyncWrite for TcpTransport {
+impl AsyncWrite for WsTransport {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.async_shutdown(),
@@ -136,56 +154,38 @@ impl AsyncWrite for TcpTransport {
     }
 }
 
-impl Transport for TcpTransport {
-    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(TcpJetStream::new(self.stream.clone()))
+impl Transport for WsTransport {
+    fn connect(url: &Url) -> JetFuture<Self>
+        where
+            Self: Sized,
+    {
+        let addr = url_to_socket_arr(url);
+        let owned_url = url.clone();
+        Box::new(futures::lazy(move || {
+            tungstenite::connect(owned_url).map(|(stream, _)| {
+                WsTransport::new_tls(stream, Some(addr))
+            }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+        })) as JetFuture<Self>
     }
 
     fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(TcpJetSink::new(self.stream.clone()))
+        Box::new(WsJetSink::new(self.stream.clone()))
     }
 
-    fn connect(url: &Url) -> JetFuture<Self>
-    where
-        Self: Sized,
-    {
-        let socket_addr = url_to_socket_arr(&url);
-        match url.scheme() {
-            "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)) as JetFuture<Self>,
-            "tls" => {
-                let socket = TcpStream::connect(&socket_addr);
-                let cx = TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .unwrap();
-                let cx = tokio_tls::TlsConnector::from(cx);
-
-                let url_clone = url.clone();
-                let tls_handshake = socket.and_then(move |socket| {
-                    cx.connect(url_clone.host_str().unwrap_or(""), socket)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                });
-                let request = tls_handshake.map(TcpTransport::new_tls);
-                Box::new(request) as JetFuture<Self>
-            }
-
-            scheme => {
-                panic!("Unsuported scheme: {}", scheme);
-            }
-        }
+    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
+        Box::new(WsJetStream::new(self.stream.clone()))
     }
 }
 
-struct TcpJetStream {
-    stream: Arc<Mutex<TcpStreamWrapper>>,
+struct WsJetStream {
+    stream: Arc<Mutex<WsStreamWrapper>>,
     nb_bytes_read: u64,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
-impl TcpJetStream {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>) -> Self {
-        TcpJetStream {
+impl WsJetStream {
+    fn new(stream: Arc<Mutex<WsStreamWrapper>>) -> Self {
+        WsJetStream {
             stream,
             nb_bytes_read: 0,
             packet_interceptor: None,
@@ -193,7 +193,7 @@ impl TcpJetStream {
     }
 }
 
-impl Stream for TcpJetStream {
+impl Stream for WsJetStream {
     type Item = Vec<u8>;
     type Error = io::Error;
 
@@ -216,7 +216,7 @@ impl Stream for TcpJetStream {
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Err(e) => {
-                    error!("Can't read on socket: {}", e);
+                    error!("Can't read on socket: {}", dbg!(e));
                     Ok(Async::Ready(None))
                 }
             }
@@ -226,9 +226,9 @@ impl Stream for TcpJetStream {
     }
 }
 
-impl JetStream for TcpJetStream {
+impl JetStream for WsJetStream {
     fn shutdown(&mut self) -> std::io::Result<()> {
-        let stream = self.stream.lock().unwrap();
+        let mut stream = self.stream.lock().unwrap();
         stream.shutdown()
     }
 
@@ -246,14 +246,14 @@ impl JetStream for TcpJetStream {
     }
 }
 
-struct TcpJetSink {
-    stream: Arc<Mutex<TcpStreamWrapper>>,
+struct WsJetSink {
+    stream: Arc<Mutex<WsStreamWrapper>>,
     nb_bytes_written: u64,
 }
 
-impl TcpJetSink {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>) -> Self {
-        TcpJetSink {
+impl WsJetSink {
+    fn new(stream: Arc<Mutex<WsStreamWrapper>>) -> Self {
+        WsJetSink {
             stream,
             nb_bytes_written: 0,
         }
@@ -264,7 +264,7 @@ impl TcpJetSink {
     }
 }
 
-impl Sink for TcpJetSink {
+impl Sink for WsJetSink {
     type SinkItem = Vec<u8>;
     type SinkError = io::Error;
 
@@ -315,13 +315,21 @@ impl Sink for TcpJetSink {
     }
 }
 
-impl JetSink for TcpJetSink {
+impl JetSink for WsJetSink {
     fn shutdown(&mut self) -> std::io::Result<()> {
-        let stream = self.stream.lock().unwrap();
+        let mut stream = self.stream.lock().unwrap();
         stream.shutdown()
     }
 
     fn nb_bytes_written(&self) -> u64 {
         self.nb_bytes_written
+    }
+}
+
+
+fn tungstenite_err_to_io_err(err: tungstenite::Error) -> io::Error {
+    match err {
+        tungstenite::Error::Io(e) => e,
+        other => io::Error::new(io::ErrorKind::Other, other.description()),
     }
 }

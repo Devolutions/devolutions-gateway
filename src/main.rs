@@ -7,6 +7,7 @@ mod jet_client;
 mod rdp;
 mod routing_client;
 mod transport;
+mod websocket_client;
 
 use std::collections::HashMap;
 use std::io;
@@ -35,6 +36,10 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::get_tls_pubkey;
+use hyper::service::{service_fn, make_service_fn};
+use crate::websocket_client::WebsocketService;
+use std::error::Error;
+use futures::future::Either;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -87,6 +92,55 @@ fn main() {
     let cert = Identity::from_pkcs12(der, "password").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
+    info!("Starting websocket server ...");
+    let websocket_url = Url::parse(config.websocket_url().unwrap_or("ws://0.0.0.0:80".to_string()).as_str()).expect("url should be ok");
+    let mut websocket_addr = String::new();
+    websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
+    websocket_addr.push_str(":");
+    websocket_addr.push_str(websocket_url
+        .port()
+        .map(|port| port.to_string())
+        .unwrap_or_else(|| "80".to_string()).as_str());
+    let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().unwrap()).unwrap();
+    let websocket_service = WebsocketService {
+        jet_associations: jet_associations.clone(),
+        executor_handle: executor_handle.clone(),
+        config: config.clone(),
+    };
+
+    let closure = |_| ();
+    let ws_tls_acceptor = tls_acceptor.clone();
+    let websocket_server = match websocket_url.scheme() {
+        "ws" => {
+            let incoming = websocket_listener.incoming();
+            Either::A(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio::net::tcp::TcpStream| {
+                let remote_addr = stream.peer_addr().ok();
+                let mut ws_serve = websocket_service.clone();
+                service_fn(move |req| {
+                    ws_serve.handle(req, remote_addr.clone())
+                })
+            }))).map_err(closure)
+        }
+
+        "wss" => {
+            let incoming = websocket_listener.incoming().and_then(move |conn| {
+                ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description()))
+            });
+            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_tls::TlsStream<tokio::net::tcp::TcpStream>| {
+                let remote_addr = stream.get_ref().get_ref().peer_addr().ok();
+                let mut ws_serve = websocket_service.clone();
+                service_fn(move |req| {
+                    ws_serve.handle(req, remote_addr.clone())
+                })
+            }))).map_err(closure)
+        }
+
+        scheme => panic!("Not a websocket scheme {}", scheme),
+    };
+
+    &executor_handle.spawn(websocket_server);
+
+
     info!("Listening for devolutions-jet proxy connections on {}", socket_addr);
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);
@@ -109,7 +163,7 @@ fn main() {
                                 let transport = TcpTransport::new_tls(tls_stream);
                                 Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
-                    ) as Box<dyn Future<Item = (), Error = io::Error> + Send>
+                    ) as Box<dyn Future<Item=(), Error=io::Error> + Send>
                 }
                 "rdp" => RdpClient::new(
                     routing_url.clone(),
@@ -117,7 +171,7 @@ fn main() {
                     tls_public_key.clone(),
                     tls_acceptor.clone(),
                 )
-                .serve(conn),
+                    .serve(conn),
                 scheme => panic!("Unsupported routing url scheme {}", scheme),
             }
         } else {
@@ -170,7 +224,7 @@ impl Proxy {
         &self,
         server_transport: T,
         client_transport: U,
-    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+    ) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
         let jet_sink_server = server_transport.message_sink();
         let mut jet_stream_server = server_transport.message_stream();
 
@@ -209,40 +263,40 @@ impl Proxy {
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        Box::new(f1.and_then(|(jet_stream, jet_sink)| {
+        Box::new(f1.and_then(|(mut jet_stream, mut jet_sink)| {
             // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
             let _ = jet_stream.shutdown();
             let _ = jet_sink.shutdown();
             ok((jet_stream, jet_sink))
         })
-        .join(f2.and_then(|(jet_stream, jet_sink)| {
-            // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-            let _ = jet_stream.shutdown();
-            let _ = jet_sink.shutdown();
-            ok((jet_stream, jet_sink))
-        }))
-        .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
-            let server_addr = jet_stream_1
-                .peer_addr()
-                .map(|addr| addr.to_string())
-                .unwrap_or_else(|_| "unknown".to_string());
-            let client_addr = jet_stream_2
-                .peer_addr()
-                .map(|addr| addr.to_string())
-                .unwrap_or_else(|_| "unknown".to_string());
-            info!(
-                "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-                jet_stream_1.nb_bytes_read(),
-                jet_sink_1.nb_bytes_written(),
-                jet_stream_2.nb_bytes_read(),
-                jet_sink_2.nb_bytes_written(),
-                server = server_addr,
-                client = client_addr
-            );
-            ok(())
-        }).then(|result|{
+            .join(f2.and_then(|(mut jet_stream, mut jet_sink)| {
+                // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
+                let _ = jet_stream.shutdown();
+                let _ = jet_sink.shutdown();
+                ok((jet_stream, jet_sink))
+            }))
+            .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
+                let server_addr = jet_stream_1
+                    .peer_addr()
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let client_addr = jet_stream_2
+                    .peer_addr()
+                    .map(|addr| addr.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!(
+                    "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+                    jet_stream_1.nb_bytes_read(),
+                    jet_sink_1.nb_bytes_written(),
+                    jet_stream_2.nb_bytes_read(),
+                    jet_sink_2.nb_bytes_written(),
+                    server = server_addr,
+                    client = client_addr
+                );
+                ok(())
+            }).then(|result| {
             SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
             result
-        }) )
+        }))
     }
 }
