@@ -53,20 +53,21 @@ impl Read for TcpStreamWrapper {
 
 impl Write for TcpStreamWrapper {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            match *self {
-                TcpStreamWrapper::Plain(ref mut stream) => stream.write(&buf),
-                TcpStreamWrapper::Tls(ref mut stream) => stream.write(&buf),
-            }
+        match *self {
+            TcpStreamWrapper::Plain(ref mut stream) => stream.write(&buf),
+            TcpStreamWrapper::Tls(ref mut stream) => stream.write(&buf),
         }
-        fn flush(&mut self) -> io::Result<()> {
-            match *self {
-                TcpStreamWrapper::Plain(ref mut stream) => stream.flush(),
-                TcpStreamWrapper::Tls(ref mut stream) => stream.flush(),
-            }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match *self {
+            TcpStreamWrapper::Plain(ref mut stream) => stream.flush(),
+            TcpStreamWrapper::Tls(ref mut stream) => stream.flush(),
+        }
     }
 }
 
 impl AsyncRead for TcpStreamWrapper {}
+
 impl AsyncWrite for TcpStreamWrapper {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match *self {
@@ -110,6 +111,7 @@ impl Read for TcpTransport {
         }
     }
 }
+
 impl AsyncRead for TcpTransport {}
 
 impl Write for TcpTransport {
@@ -146,8 +148,8 @@ impl Transport for TcpTransport {
     }
 
     fn connect(url: &Url) -> JetFuture<Self>
-    where
-        Self: Sized,
+        where
+            Self: Sized,
     {
         let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {

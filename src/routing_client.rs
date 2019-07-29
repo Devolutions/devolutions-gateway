@@ -27,7 +27,7 @@ impl Client {
     pub fn serve<T: 'static + Transport + Send>(
         self,
         client_transport: T,
-    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+    ) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
         let server_conn = TcpTransport::connect(&self.routing_url);
 
         Box::new(server_conn.and_then(move |server_transport| {
