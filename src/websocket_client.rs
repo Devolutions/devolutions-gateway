@@ -26,18 +26,27 @@ impl WebsocketService {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().unwrap_or("not a websocket") == "websocket" {
                         if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                            let res = process_req(&req);
+                            if let Ok(jet_associations) = self.jet_associations.try_lock() {
+                                if let Some(assc) = jet_associations.get(&uuid) {
+                                    if assc.is_none() {
+                                        let res = process_req(&req);
 
-                            let jet_associations_clone = self.jet_associations.clone();
-                            let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                if let Ok(mut jet_assc) = jet_associations_clone.try_lock() {
-                                    jet_assc.insert(uuid, JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+                                        let jet_associations_clone = self.jet_associations.clone();
+                                        let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                            if let Ok(mut jet_assc) = jet_associations_clone.try_lock() {
+                                                jet_assc.insert(uuid, Some(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr))));
+                                            }
+                                        }).map_err(|e| error!("upgrade error: {}", e));
+
+                                        self.executor_handle.spawn(fut);
+
+                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
+                                    }
+                                } else {
+                                    *response.status_mut() = StatusCode::PRECONDITION_REQUIRED;
+                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
                                 }
-                            }).map_err(|e| error!("upgrade error: {}", e));
-
-                            self.executor_handle.spawn(fut);
-
-                            return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
+                            }
                         }
                     }
                 }
@@ -47,18 +56,24 @@ impl WebsocketService {
                     if header.to_str().unwrap_or("not a websocket") == "websocket" {
                         if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                             if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                                if let Some(assc) = jet_associations.remove(&uuid) {
-                                    let res = process_req(&req);
+                                if let Some(assc_temp) = jet_associations.get(&uuid) {
+                                    if assc_temp.is_some() {
+                                        let owned_assc = jet_associations.remove(&uuid).expect("should be ok").expect("should be ok");
+                                        let res = process_req(&req);
 
-                                    let self_clone = self.clone();
-                                    let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                        let proxy = Proxy::new(self_clone.config.clone()).build(WsTransport::new_http(upgraded, client_addr), assc).map_err(|_| ());
-                                        self_clone.executor_handle.spawn(proxy);
-                                    }).map_err(|e| error!("upgrade error: {}", e));
+                                        let self_clone = self.clone();
+                                        let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                            let proxy = Proxy::new(self_clone.config.clone()).build(WsTransport::new_http(upgraded, client_addr), owned_assc).map_err(|_| ());
+                                            self_clone.executor_handle.spawn(proxy);
+                                        }).map_err(|e| error!("upgrade error: {}", e));
 
-                                    self.executor_handle.spawn(fut);
+                                        self.executor_handle.spawn(fut);
 
-                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
+                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
+                                    } else {
+                                        *response.status_mut() = StatusCode::PRECONDITION_REQUIRED;
+                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
+                                    }
                                 }
                             }
                         }
@@ -66,7 +81,11 @@ impl WebsocketService {
                 }
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             } else if req.uri().path().starts_with("/jet/create") {
-                *response.body_mut() = Body::from(Uuid::new_v4().to_string())
+                let uuid = Uuid::new_v4();
+                if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
+                    jet_associations.insert(uuid, None);
+                    *response.body_mut() = Body::from(uuid.to_string())
+                }
             } else {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             },

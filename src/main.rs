@@ -100,7 +100,13 @@ fn main() {
     websocket_addr.push_str(websocket_url
         .port()
         .map(|port| port.to_string())
-        .unwrap_or_else(|| "80".to_string()).as_str());
+        .unwrap_or_else(|| {
+            match websocket_url.scheme() {
+                "wss" => "443".to_string(),
+                "ws" => "80".to_string(),
+                _ => "80".to_string()
+            }
+        }).as_str());
     let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().unwrap()).unwrap();
     let websocket_service = WebsocketService {
         jet_associations: jet_associations.clone(),
@@ -139,6 +145,7 @@ fn main() {
     };
 
     &executor_handle.spawn(websocket_server);
+    info!("Websocket server started successfully");
 
 
     info!("Listening for devolutions-jet proxy connections on {}", socket_addr);

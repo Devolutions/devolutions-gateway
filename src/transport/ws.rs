@@ -216,7 +216,7 @@ impl Stream for WsJetStream {
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Err(e) => {
-                    error!("Can't read on socket: {}", dbg!(e));
+                    error!("Can't read on socket: {}", e);
                     Ok(Async::Ready(None))
                 }
             }

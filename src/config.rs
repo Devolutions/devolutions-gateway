@@ -74,10 +74,10 @@ impl Config {
                     .short("w")
                     .long("ws_url")
                     .value_name("WEBSOCKET_URL")
-                    .help("A port on which the websocket proxy will listen. Format: <scheme>://<local_iface_ip>:<port>")
-                    .long_help("A port on which the websocket proxy will listen. Format: <scheme>://<local_iface_ip>:<port>. This port accepts http requests and websocket upgrades")
+                    .help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>")
+                    .long_help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>. This address accepts http requests and websocket upgrades")
                     .takes_value(true)
-                    .default_value("ws://0.0.0.0:80")
+                    .default_value("ws://0.0.0.0")
                     .empty_values(false),
             )
             .arg(
