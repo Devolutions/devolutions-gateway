@@ -42,9 +42,6 @@ impl WebsocketService {
 
                                         return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
                                     }
-                                } else {
-                                    *response.status_mut() = StatusCode::PRECONDITION_REQUIRED;
-                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
                                 }
                             }
                         }
