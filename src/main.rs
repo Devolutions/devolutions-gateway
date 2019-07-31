@@ -37,9 +37,10 @@ use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::get_tls_pubkey;
 use hyper::service::{service_fn, make_service_fn};
-use crate::websocket_client::WebsocketService;
+use crate::websocket_client::{WebsocketService, WsClient};
 use std::error::Error;
 use futures::future::Either;
+use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -170,6 +171,55 @@ fn main() {
                                 let transport = TcpTransport::new_tls(tls_stream);
                                 Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
+                    ) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                }
+                "ws" => {
+                    let routing_url_clone = routing_url.clone();
+                    let executor_handle_clone = executor_handle.clone();
+                    let peer_addr = conn.peer_addr().ok();
+                    let accept = tungstenite::accept(conn);
+                    match accept {
+                        Ok(stream) => {
+                            let transport = WsTransport::new_tcp(stream, peer_addr);
+                            Box::new(WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                        },
+                        Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
+                            Box::new(TcpWebSocketServerHandshake(Some(e)).and_then(move |stream| {
+                                let transport = WsTransport::new_tcp(stream, peer_addr);
+                                WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
+                            })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                        }
+                        Err(tungstenite::handshake::HandshakeError::Failure(e)) => Box::new(future::lazy(|| {
+                            future::err(io::Error::new(io::ErrorKind::Other, e))
+                        })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                    }
+                }
+                "wss" => {
+                    let routing_url_clone = routing_url.clone();
+                    let executor_handle_clone = executor_handle.clone();
+                    Box::new(
+                        tls_acceptor
+                            .accept(conn)
+                            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
+                            .and_then(move |tls_stream| {
+                                let peer_addr = tls_stream.get_ref().get_ref().peer_addr().ok().clone();
+                                let accept = tungstenite::accept(tls_stream);
+                                match accept {
+                                    Ok(stream) => {
+                                        let transport = WsTransport::new_tls(stream, peer_addr);
+                                        Box::new(WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                                    },
+                                    Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
+                                        Box::new(TlsWebSocketServerHandshake(Some(e)).and_then(move |stream| {
+                                            let transport = WsTransport::new_tls(stream, peer_addr);
+                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
+                                        })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                                    }
+                                    Err(tungstenite::handshake::HandshakeError::Failure(e)) => Box::new(future::lazy(|| {
+                                        future::err(io::Error::new(io::ErrorKind::Other, e))
+                                    })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                                }
+                            })
                     ) as Box<dyn Future<Item=(), Error=io::Error> + Send>
                 }
                 "rdp" => RdpClient::new(

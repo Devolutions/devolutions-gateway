@@ -3,12 +3,14 @@ use hyper::{Request, Body, Response, Method, StatusCode, header, Version, http};
 use futures::Future;
 use tokio::runtime::TaskExecutor;
 use uuid::Uuid;
-use crate::transport::JetTransport;
+use crate::transport::{JetTransport, Transport};
 use crate::transport::ws::WsTransport;
 use std::net::SocketAddr;
 use crate::config::Config;
 use crate::Proxy;
 use log::error;
+use url::Url;
+use std::io;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -24,7 +26,7 @@ impl WebsocketService {
         match req.method() {
             &Method::GET => if req.uri().path().starts_with("/jet/accept") {
                 if let Some(header) = req.headers().get("upgrade") {
-                    if header.to_str().unwrap_or("not a websocket") == "websocket" {
+                    if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Some(uuid) = uuid_from_path(req.uri().path()) {
                             if let Ok(jet_associations) = self.jet_associations.try_lock() {
                                 if let Some(assc) = jet_associations.get(&uuid) {
@@ -50,7 +52,7 @@ impl WebsocketService {
                 *response.status_mut() = StatusCode::FORBIDDEN;
             } else if req.uri().path().starts_with("/jet/connect") {
                 if let Some(header) = req.headers().get("upgrade") {
-                    if header.to_str().unwrap_or("not a websocket") == "websocket" {
+                    if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                             if let Some(uuid) = uuid_from_path(req.uri().path()) {
                                 if let Some(assc_temp) = jet_associations.get(&uuid) {
@@ -125,15 +127,16 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         .get(header::UPGRADE)
         .and_then(|v| v.to_str().ok())
         .map_or(false, |v| v.eq_ignore_ascii_case("websocket"));
-    let is_websocket_version_13 = req.headers()
+
+    let is_websocket_version_13_or_higher = req.headers()
         .get(header::SEC_WEBSOCKET_VERSION)
         .and_then(|v| v.to_str().ok())
-        .map_or(false, |v| v == "13");
-    if !is_http_11 || !is_upgrade || !is_websocket_upgrade || !is_websocket_version_13 {
+        .map_or(false, |v| v.parse::<u32>().unwrap_or_else(|_| 0) >= 13);
+
+    if !is_http_11 || !is_upgrade || !is_websocket_upgrade || !is_websocket_version_13_or_higher {
         return Response::builder()
             .status(http::StatusCode::UPGRADE_REQUIRED)
-            .header(http::header::SEC_WEBSOCKET_VERSION, "13")
-            .body("Expected Upgrade to WebSocket version 13".into())
+            .body("Expected Upgrade to WebSocket".into())
             .unwrap();
     }
 
@@ -158,14 +161,36 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 
 
 fn uuid_from_path(path: &str) -> Option<Uuid> {
-    let path_split: Vec<&str> = path.split("/").skip(3).collect();
-    if let Some(raw_uuid) = path_split.get(0) {
-        if let Ok(uuid) = Uuid::parse_str(raw_uuid) {
-            Some(uuid)
-        } else {
-            None
-        }
+    if let Some(raw_uuid) = path.split("/").skip(3).next() {
+        Uuid::parse_str(raw_uuid).ok()
     } else {
         None
+    }
+}
+
+pub struct WsClient {
+    routing_url: Url,
+    config: Config,
+    _executor_handle: TaskExecutor,
+}
+
+impl WsClient {
+    pub fn new(routing_url: Url, config: Config, executor_handle: TaskExecutor) -> Self {
+        WsClient {
+            routing_url,
+            config,
+            _executor_handle: executor_handle,
+        }
+    }
+
+    pub fn serve<T: 'static + Transport + Send>(
+        self,
+        client_transport: T,
+    ) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
+        let server_conn = WsTransport::connect(&self.routing_url);
+
+        Box::new(server_conn.and_then(move |server_transport| {
+            Proxy::new(self.config.clone()).build(server_transport, client_transport)
+        }))
     }
 }

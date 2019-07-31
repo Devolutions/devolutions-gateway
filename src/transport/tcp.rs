@@ -139,14 +139,6 @@ impl AsyncWrite for TcpTransport {
 }
 
 impl Transport for TcpTransport {
-    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(TcpJetStream::new(self.stream.clone()))
-    }
-
-    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(TcpJetSink::new(self.stream.clone()))
-    }
-
     fn connect(url: &Url) -> JetFuture<Self>
         where
             Self: Sized,
@@ -177,7 +169,17 @@ impl Transport for TcpTransport {
             }
         }
     }
+
+    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
+        Box::new(TcpJetSink::new(self.stream.clone()))
+    }
+
+    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
+        Box::new(TcpJetStream::new(self.stream.clone()))
+    }
 }
+
+pub const TCP_READ_LEN: usize = 57343;
 
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
@@ -201,27 +203,39 @@ impl Stream for TcpJetStream {
 
     fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
         if let Ok(ref mut stream) = self.stream.try_lock() {
-            let mut buffer = [0u8; 65535];
-            match stream.poll_read(&mut buffer) {
-                Ok(Async::Ready(0)) => Ok(Async::Ready(None)),
-                Ok(Async::Ready(len)) => {
-                    let mut v = buffer.to_vec();
-                    v.truncate(len);
-                    self.nb_bytes_read += len as u64;
-                    debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+            let mut result = Vec::new();
+            while result.len() <= TCP_READ_LEN {
+                let mut buffer = [0u8; 8192];
+                match stream.poll_read(&mut buffer) {
 
-                    if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                        interceptor.on_new_packet(stream.peer_addr(), &v);
+                    Ok(Async::Ready(0)) => return Ok(Async::Ready(None)),
+
+                    Ok(Async::Ready(len)) => {
+                        self.nb_bytes_read += len as u64;
+                        debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+                        if len < buffer.len() {
+                            result.extend_from_slice(&buffer[0..len]);
+                        } else {
+                            result.extend_from_slice(&buffer);
+                            continue;
+                        }
+
+                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                            interceptor.on_new_packet(stream.peer_addr(), &result);
+                        }
+
+                        return Ok(Async::Ready(Some(result)));
                     }
 
-                    Ok(Async::Ready(Some(v)))
-                }
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => {
-                    error!("Can't read on socket: {}", e);
-                    Ok(Async::Ready(None))
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+
+                    Err(e) => {
+                        error!("Can't read on socket: {}", e);
+                        return Ok(Async::Ready(None));
+                    }
                 }
             }
+            Ok(Async::Ready(Some(result)))
         } else {
             Ok(Async::NotReady)
         }
