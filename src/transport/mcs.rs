@@ -1,8 +1,8 @@
 use std::io;
 
 use bytes::BytesMut;
-use tokio::codec::{Decoder, Encoder};
 use ironrdp::PduParsing;
+use tokio::codec::{Decoder, Encoder};
 
 use crate::transport::x224;
 
