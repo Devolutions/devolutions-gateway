@@ -290,7 +290,17 @@ impl Stream for WsJetStream {
             while result.len() <= TCP_READ_LEN {
                 let mut buffer = [0u8; 8192];
                 match stream.poll_read(&mut buffer) {
-                    Ok(Async::Ready(0)) => return Ok(Async::Ready(None)),
+                    Ok(Async::Ready(0)) => {
+                        if result.len() > 0 {
+                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                            }
+
+                            return Ok(Async::Ready(Some(result)));
+                        }
+
+                        return Ok(Async::Ready(None))
+                    },
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read += len as u64;
