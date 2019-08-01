@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::transport::JetTransport;
 use crate::Proxy;
 
-pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, JetTransport>>>;
+pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Option<JetTransport>>>>;
 
 lazy_static! {
     static ref JET_INSTANCE: Option<String> = { env::var("JET_INSTANCE").ok() };
@@ -170,7 +170,7 @@ impl Future for HandleAcceptJetMsg {
                 response_msg.set_jet_instance(JET_INSTANCE.clone());
                 self.response_msg = Some(response_msg);
 
-                jet_associations.insert(uuid, self.transport.clone());
+                jet_associations.insert(uuid, Some(self.transport.clone()));
             } else {
                 return Ok(Async::NotReady);
             }
@@ -253,7 +253,7 @@ impl Future for HandleConnectJetMsg {
                 let server_stream_opt = jet_associations.remove(&self.request_msg.association().unwrap());
 
                 if let Some(server_transport) = server_stream_opt {
-                    self.server_transport = Some(server_transport);
+                    self.server_transport = server_transport;
                     self.response_msg = Some(JetPacket::new_response(
                         self.request_msg.flags(),
                         self.request_msg.mask(),

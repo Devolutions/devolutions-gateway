@@ -7,11 +7,13 @@ use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
+use crate::transport::ws::WsTransport;
 
 pub mod mcs;
 pub mod tcp;
 pub mod tsrequest;
 pub mod x224;
+pub mod ws;
 
 pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
@@ -27,6 +29,8 @@ pub trait Transport {
 
 pub enum JetTransport {
     Tcp(TcpTransport),
+    Ws(WsTransport),
+
 }
 
 impl JetTransport {
@@ -39,6 +43,7 @@ impl Clone for JetTransport {
     fn clone(&self) -> Self {
         match self {
             JetTransport::Tcp(tcp_transport) => JetTransport::Tcp(tcp_transport.clone()),
+            JetTransport::Ws(ws_transport) => JetTransport::Ws(ws_transport.clone()),
         }
     }
 }
@@ -55,12 +60,14 @@ impl Transport for JetTransport {
     fn message_sink(&self) -> JetSinkType<Vec<u8>> {
         match self {
             JetTransport::Tcp(tcp_transport) => tcp_transport.message_sink(),
+            JetTransport::Ws(ws_transport) => ws_transport.message_sink(),
         }
     }
 
     fn message_stream(&self) -> JetStreamType<Vec<u8>> {
         match self {
             JetTransport::Tcp(tcp_transport) => tcp_transport.message_stream(),
+            JetTransport::Ws(ws_transport) => ws_transport.message_stream(),
         }
     }
 }
@@ -69,6 +76,7 @@ impl Read for JetTransport {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         match self {
             JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.read(&mut buf),
+            JetTransport::Ws(ref mut ws_transport) => ws_transport.read(&mut buf),
         }
     }
 }
@@ -78,11 +86,13 @@ impl Write for JetTransport {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.write(&buf),
+            JetTransport::Ws(ref mut ws_transport) => ws_transport.write(&buf),
         }
     }
     fn flush(&mut self) -> io::Result<()> {
         match self {
             JetTransport::Tcp(ref mut tcp_transport) => Write::flush(tcp_transport),
+            JetTransport::Ws(ref mut ws_transport) => Write::flush(ws_transport),
         }
     }
 }
@@ -91,18 +101,19 @@ impl AsyncWrite for JetTransport {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self {
             JetTransport::Tcp(ref mut tcp_transport) => AsyncWrite::shutdown(tcp_transport),
+            JetTransport::Ws(ref mut ws_transport) => AsyncWrite::shutdown(ws_transport),
         }
     }
 }
 
 pub trait JetStream: Stream {
-    fn shutdown(&self) -> std::io::Result<()>;
-    fn peer_addr(&self) -> std::io::Result<SocketAddr>;
+    fn shutdown(&mut self) -> std::io::Result<()>;
+    fn peer_addr(&self) -> Option<SocketAddr>;
     fn nb_bytes_read(&self) -> u64;
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
 }
 
 pub trait JetSink: Sink {
-    fn shutdown(&self) -> std::io::Result<()>;
+    fn shutdown(&mut self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
 }

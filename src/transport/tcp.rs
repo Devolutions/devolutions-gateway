@@ -20,10 +20,10 @@ pub enum TcpStreamWrapper {
 }
 
 impl TcpStreamWrapper {
-    fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+    fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
-            TcpStreamWrapper::Plain(stream) => stream.peer_addr(),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr(),
+            TcpStreamWrapper::Plain(stream) => stream.peer_addr().ok(),
+            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr().ok(),
         }
     }
 
@@ -67,6 +67,7 @@ impl Write for TcpStreamWrapper {
 }
 
 impl AsyncRead for TcpStreamWrapper {}
+
 impl AsyncWrite for TcpStreamWrapper {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match *self {
@@ -110,6 +111,7 @@ impl Read for TcpTransport {
         }
     }
 }
+
 impl AsyncRead for TcpTransport {}
 
 impl Write for TcpTransport {
@@ -137,17 +139,9 @@ impl AsyncWrite for TcpTransport {
 }
 
 impl Transport for TcpTransport {
-    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(TcpJetStream::new(self.stream.clone()))
-    }
-
-    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(TcpJetSink::new(self.stream.clone()))
-    }
-
     fn connect(url: &Url) -> JetFuture<Self>
-    where
-        Self: Sized,
+        where
+            Self: Sized,
     {
         let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {
@@ -175,7 +169,17 @@ impl Transport for TcpTransport {
             }
         }
     }
+
+    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
+        Box::new(TcpJetSink::new(self.stream.clone()))
+    }
+
+    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
+        Box::new(TcpJetStream::new(self.stream.clone()))
+    }
 }
+
+pub const TCP_READ_LEN: usize = 57343;
 
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
@@ -199,27 +203,60 @@ impl Stream for TcpJetStream {
 
     fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
         if let Ok(ref mut stream) = self.stream.try_lock() {
-            let mut buffer = [0u8; 65535];
-            match stream.poll_read(&mut buffer) {
-                Ok(Async::Ready(0)) => Ok(Async::Ready(None)),
-                Ok(Async::Ready(len)) => {
-                    let mut v = buffer.to_vec();
-                    v.truncate(len);
-                    self.nb_bytes_read += len as u64;
-                    debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+            let mut result = Vec::new();
+            while result.len() <= TCP_READ_LEN {
+                let mut buffer = [0u8; 8192];
+                match stream.poll_read(&mut buffer) {
 
-                    if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                        interceptor.on_new_packet(stream.peer_addr().ok(), &v);
+                    Ok(Async::Ready(0)) => {
+                        if result.len() > 0 {
+                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                            }
+
+                            return Ok(Async::Ready(Some(result)));
+                        }
+
+                        return Ok(Async::Ready(None))
+                    },
+
+                    Ok(Async::Ready(len)) => {
+                        self.nb_bytes_read += len as u64;
+                        debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+                        if len < buffer.len() {
+                            result.extend_from_slice(&buffer[0..len]);
+                        } else {
+                            result.extend_from_slice(&buffer);
+                            continue;
+                        }
+
+                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                            interceptor.on_new_packet(stream.peer_addr(), &result);
+                        }
+
+                        return Ok(Async::Ready(Some(result)));
                     }
 
-                    Ok(Async::Ready(Some(v)))
-                }
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(e) => {
-                    error!("Can't read on socket: {}", e);
-                    Ok(Async::Ready(None))
+                    Ok(Async::NotReady) => {
+
+                        if result.len() > 0 {
+                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                            }
+
+                            return Ok(Async::Ready(Some(result)));
+                        }
+
+                        return Ok(Async::NotReady)
+                    },
+
+                    Err(e) => {
+                        error!("Can't read on socket: {}", e);
+                        return Ok(Async::Ready(None));
+                    }
                 }
             }
+            Ok(Async::Ready(Some(result)))
         } else {
             Ok(Async::NotReady)
         }
@@ -227,12 +264,12 @@ impl Stream for TcpJetStream {
 }
 
 impl JetStream for TcpJetStream {
-    fn shutdown(&self) -> std::io::Result<()> {
+    fn shutdown(&mut self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
         stream.shutdown()
     }
 
-    fn peer_addr(&self) -> std::io::Result<SocketAddr> {
+    fn peer_addr(&self) -> Option<SocketAddr> {
         let stream = self.stream.lock().unwrap();
         stream.peer_addr()
     }
@@ -316,7 +353,7 @@ impl Sink for TcpJetSink {
 }
 
 impl JetSink for TcpJetSink {
-    fn shutdown(&self) -> std::io::Result<()> {
+    fn shutdown(&mut self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
         stream.shutdown()
     }

@@ -11,6 +11,7 @@ pub enum Protocol {
 pub struct Config {
     listener_url: String,
     routing_url: Option<String>,
+    websocket_url: Option<String>,
     pcap_filename: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
@@ -23,6 +24,10 @@ impl Config {
 
     pub fn routing_url(&self) -> Option<String> {
         self.routing_url.clone()
+    }
+
+    pub fn websocket_url(&self) -> Option<String> {
+        self.websocket_url.clone()
     }
 
     pub fn pcap_filename(&self) -> Option<String> {
@@ -62,6 +67,17 @@ impl Config {
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
                     .takes_value(true)
+                    .empty_values(false),
+            )
+            .arg(
+                Arg::with_name("websocket-url")
+                    .short("w")
+                    .long("ws_url")
+                    .value_name("WEBSOCKET_URL")
+                    .help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>")
+                    .long_help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>. This address accepts http requests and websocket upgrades")
+                    .takes_value(true)
+                    .default_value("ws://0.0.0.0")
                     .empty_values(false),
             )
             .arg(
@@ -149,9 +165,12 @@ identities_file example:
             .value_of("identities-file")
             .map(std::string::ToString::to_string);
 
+        let websocket_url = matches.value_of("websocket-url").map(std::string::ToString::to_string);
+
         Config {
             listener_url,
             routing_url,
+            websocket_url,
             pcap_filename,
             protocol,
             identities_filename,
