@@ -6,12 +6,6 @@ use tokio::codec::{Decoder, Encoder};
 #[derive(Default)]
 pub struct X224Transport {}
 
-impl X224Transport {
-    pub fn new() -> X224Transport {
-        X224Transport {}
-    }
-}
-
 impl Decoder for X224Transport {
     type Item = (ironrdp::X224TPDUType, BytesMut);
     type Error = io::Error;
