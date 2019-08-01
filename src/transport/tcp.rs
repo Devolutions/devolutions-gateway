@@ -237,7 +237,18 @@ impl Stream for TcpJetStream {
                         return Ok(Async::Ready(Some(result)));
                     }
 
-                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Ok(Async::NotReady) => {
+
+                        if result.len() > 0 {
+                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                            }
+
+                            return Ok(Async::Ready(Some(result)));
+                        }
+
+                        return Ok(Async::NotReady)
+                    },
 
                     Err(e) => {
                         error!("Can't read on socket: {}", e);
