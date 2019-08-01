@@ -1,4 +1,4 @@
-use ironrdp::{gcc, ClientInfoPdu, ConnectInitial, ConnectResponse};
+use ironrdp::{gcc, CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive};
 use sspi::Credentials;
 
 pub trait Filter {
@@ -50,5 +50,20 @@ impl Filter for ConnectResponse {
 impl Filter for ClientInfoPdu {
     fn filter(&mut self, config: &FilterConfig) {
         self.client_info.credentials = config.client_credentials.clone();
+    }
+}
+
+impl Filter for DemandActive {
+    fn filter(&mut self, _config: &FilterConfig) {
+        self.capability_sets.retain(|capability_set| match capability_set {
+            CapabilitySet::BitmapCacheHostSupport(_)
+            | CapabilitySet::Control(_)
+            | CapabilitySet::WindowActivation(_)
+            | CapabilitySet::Share(_)
+            | CapabilitySet::Font(_)
+            | CapabilitySet::LargePointer(_)
+            | CapabilitySet::DesktopComposition(_) => false,
+            _ => true,
+        });
     }
 }
