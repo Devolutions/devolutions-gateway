@@ -72,7 +72,6 @@ fn main() {
     };
 
     // Initialize the various data structures we're going to use in our server.
-    let listener = TcpListener::bind(&socket_addr).unwrap();
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
 
     let mut runtime =
@@ -93,63 +92,66 @@ fn main() {
     let cert = Identity::from_pkcs12(der, "password").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
-    info!("Starting websocket server ...");
-    let websocket_url = Url::parse(config.websocket_url().unwrap_or("ws://0.0.0.0:80".to_string()).as_str()).expect("url should be ok");
-    let mut websocket_addr = String::new();
-    websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
-    websocket_addr.push_str(":");
-    websocket_addr.push_str(websocket_url
-        .port()
-        .map(|port| port.to_string())
-        .unwrap_or_else(|| {
-            match websocket_url.scheme() {
-                "wss" => "443".to_string(),
-                "ws" => "80".to_string(),
-                _ => "80".to_string()
+    // Start websocket server if needed
+    if let Some(ws_url) = config.websocket_url() {
+        info!("Starting websocket server ...");
+        let websocket_url = Url::parse(&ws_url).expect("url should be ok");
+        let mut websocket_addr = String::new();
+        websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
+        websocket_addr.push_str(":");
+        websocket_addr.push_str(websocket_url
+            .port()
+            .map(|port| port.to_string())
+            .unwrap_or_else(|| {
+                match websocket_url.scheme() {
+                    "wss" => "443".to_string(),
+                    "ws" => "80".to_string(),
+                    _ => "80".to_string()
+                }
+            }).as_str());
+        let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().expect("Websocket addr can't be parsed.")).unwrap();
+        let websocket_service = WebsocketService {
+            jet_associations: jet_associations.clone(),
+            executor_handle: executor_handle.clone(),
+            config: config.clone(),
+        };
+
+        let closure = |_| ();
+        let ws_tls_acceptor = tls_acceptor.clone();
+        let websocket_server = match websocket_url.scheme() {
+            "ws" => {
+                let incoming = websocket_listener.incoming();
+                Either::A(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio::net::tcp::TcpStream| {
+                    let remote_addr = stream.peer_addr().ok();
+                    let mut ws_serve = websocket_service.clone();
+                    service_fn(move |req| {
+                        ws_serve.handle(req, remote_addr.clone())
+                    })
+                }))).map_err(closure)
             }
-        }).as_str());
-    let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().unwrap()).unwrap();
-    let websocket_service = WebsocketService {
-        jet_associations: jet_associations.clone(),
-        executor_handle: executor_handle.clone(),
-        config: config.clone(),
-    };
 
-    let closure = |_| ();
-    let ws_tls_acceptor = tls_acceptor.clone();
-    let websocket_server = match websocket_url.scheme() {
-        "ws" => {
-            let incoming = websocket_listener.incoming();
-            Either::A(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio::net::tcp::TcpStream| {
-                let remote_addr = stream.peer_addr().ok();
-                let mut ws_serve = websocket_service.clone();
-                service_fn(move |req| {
-                    ws_serve.handle(req, remote_addr.clone())
-                })
-            }))).map_err(closure)
-        }
+            "wss" => {
+                let incoming = websocket_listener.incoming().and_then(move |conn| {
+                    ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description()))
+                });
+                Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_tls::TlsStream<tokio::net::tcp::TcpStream>| {
+                    let remote_addr = stream.get_ref().get_ref().peer_addr().ok();
+                    let mut ws_serve = websocket_service.clone();
+                    service_fn(move |req| {
+                        ws_serve.handle(req, remote_addr.clone())
+                    })
+                }))).map_err(closure)
+            }
 
-        "wss" => {
-            let incoming = websocket_listener.incoming().and_then(move |conn| {
-                ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description()))
-            });
-            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_tls::TlsStream<tokio::net::tcp::TcpStream>| {
-                let remote_addr = stream.get_ref().get_ref().peer_addr().ok();
-                let mut ws_serve = websocket_service.clone();
-                service_fn(move |req| {
-                    ws_serve.handle(req, remote_addr.clone())
-                })
-            }))).map_err(closure)
-        }
+            scheme => panic!("Not a websocket scheme {}", scheme),
+        };
 
-        scheme => panic!("Not a websocket scheme {}", scheme),
-    };
+        &executor_handle.spawn(websocket_server);
+        info!("Websocket server started successfully. Listening on {}", websocket_addr);
+    }
 
-    &executor_handle.spawn(websocket_server);
-    info!("Websocket server started successfully");
-
-
-    info!("Listening for devolutions-jet proxy connections on {}", socket_addr);
+    info!("Starting TCP jet server...");
+    let listener = TcpListener::bind(&socket_addr).unwrap();
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);
 
@@ -245,6 +247,7 @@ fn main() {
         }));
         ok(())
     });
+    info!("TCP jet server started successfully. Listening on {}", socket_addr);
 
     runtime.block_on(server.map_err(|_| ())).unwrap();
     http_server.stop()

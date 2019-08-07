@@ -77,7 +77,6 @@ impl Config {
                     .help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>")
                     .long_help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>. This address accepts http requests and websocket upgrades")
                     .takes_value(true)
-                    .default_value("ws://0.0.0.0")
                     .empty_values(false),
             )
             .arg(
