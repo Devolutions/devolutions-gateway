@@ -1,7 +1,7 @@
 use std::io;
 
 use ironrdp::{
-    mcs::SendDataContext, ClientInfoPdu, ClientLicensePdu, ControlAction, McsPdu, PduParsing, ShareControlHeader,
+    mcs::SendDataContext, ClientInfoPdu, ControlAction, McsPdu, PduParsing, ServerLicensePdu, ShareControlHeader,
     ShareControlPdu, ShareDataHeader, ShareDataPdu,
 };
 use slog::{debug, info};
@@ -245,7 +245,7 @@ fn process_send_data_indication_pdu(
 ) -> io::Result<(SequenceState, Vec<u8>)> {
     match sequence_state {
         SequenceState::Licensing => {
-            let client_license_pdu = ClientLicensePdu::from_buffer(pdu.as_slice())?;
+            let client_license_pdu = ServerLicensePdu::from_buffer(pdu.as_slice())?;
             debug!(client_logger, "Got Client License PDU: {:?}", client_license_pdu);
 
             let mut client_license_buffer = Vec::with_capacity(client_license_pdu.buffer_length());
