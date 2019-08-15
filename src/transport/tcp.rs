@@ -228,7 +228,12 @@ impl Stream for TcpJetStream {
                     Ok(Async::Ready(0)) => {
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                                let peer_addr = match stream.peer_addr() {
+                                    Ok(addr) => Some(addr),
+                                    _ => None,
+                                };
+
+                                interceptor.on_new_packet(peer_addr, &result);
                             }
 
                             return Ok(Async::Ready(Some(result)));
@@ -248,7 +253,12 @@ impl Stream for TcpJetStream {
                         }
 
                         if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            interceptor.on_new_packet(stream.peer_addr(), &result);
+                            let peer_addr = match stream.peer_addr() {
+                                Ok(addr) => Some(addr),
+                                _ => None,
+                            };
+
+                            interceptor.on_new_packet(peer_addr, &result);
                         }
 
                         return Ok(Async::Ready(Some(result)));
@@ -258,7 +268,12 @@ impl Stream for TcpJetStream {
 
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                interceptor.on_new_packet(stream.peer_addr(), &result);
+                                let peer_addr = match stream.peer_addr() {
+                                Ok(addr) => Some(addr),
+                                _ => None,
+                            };
+
+                                interceptor.on_new_packet(peer_addr, &result);
                             }
 
                             return Ok(Async::Ready(Some(result)));
@@ -288,7 +303,11 @@ impl JetStream for TcpJetStream {
 
     fn peer_addr(&self) -> Option<SocketAddr> {
         let stream = self.stream.lock().unwrap();
-        stream.peer_addr()
+
+        match stream.peer_addr() {
+            Ok(addr) => Some(addr),
+            _ => None,
+        }
     }
 
     fn nb_bytes_read(&self) -> u64 {
