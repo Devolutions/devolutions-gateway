@@ -128,7 +128,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for McsFuture 
             | McsSequenceState::AttachUserRequest
             | McsSequenceState::ChannelJoinRequest => NextStream::Client,
             McsSequenceState::AttachUserConfirm | McsSequenceState::ChannelJoinConfirm => NextStream::Server,
-            McsSequenceState::Finished => unreachable!(
+            McsSequenceState::Finished => panic!(
                 "In MCS Connection Sequence, the future must not require a next sender in the Finished sequence state"
             ),
         }
@@ -223,7 +223,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
                 (McsInitialSequenceState::Finished, connect_response_buffer)
             }
             McsInitialSequenceState::Finished => {
-                unreachable!("The McsInitialFuture process_pdu method must not be fired in Finished state")
+                panic!("The McsInitialFuture process_pdu method must not be fired in Finished state")
             }
         };
 
@@ -273,7 +273,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
         match self.sequence_state {
             McsInitialSequenceState::ConnectInitial => NextStream::Client,
             McsInitialSequenceState::ConnectResponse => NextStream::Server,
-            McsInitialSequenceState::Finished => unreachable!(
+            McsInitialSequenceState::Finished => panic!(
                 "In MCS initial PDUs processing, the future must not require a next sender in the Finished sequence state"
             ),
         }
