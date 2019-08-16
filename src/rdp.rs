@@ -6,7 +6,7 @@ mod sequence_future;
 use std::io;
 
 use futures::Future;
-use slog::{error, Drain};
+use slog::{error, info, Drain};
 use tokio_tcp::TcpStream;
 use tokio_tls::TlsAcceptor;
 use url::Url;
@@ -76,6 +76,8 @@ impl RdpClient {
             io::Error::new(io::ErrorKind::Other, e)
         })
         .and_then(move |(client_tls, server_tls, _joined_static_channels)| {
+            info!(client_logger, "RDP Connection Sequence finished");
+
             Proxy::new(config_clone)
                 .build(TcpTransport::new_tls(server_tls), TcpTransport::new_tls(client_tls))
                 .map_err(move |e| {
