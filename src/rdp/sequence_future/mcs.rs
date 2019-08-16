@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io, iter};
 
 use bytes::BytesMut;
-use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing, X224TPDUType};
+use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
 use slog::{debug, info};
 use tokio::codec::Framed;
 use tokio_tcp::TcpStream;
@@ -10,13 +10,13 @@ use tokio_tls::TlsStream;
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{
     rdp::filter::{Filter, FilterConfig},
-    transport::{mcs::McsTransport, x224::X224Transport},
+    transport::{mcs::McsTransport, x224::DataTransport},
 };
 
 pub type StaticChannels = HashMap<u16, String>;
 pub type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 
-type X224FutureTransport = Framed<TlsStream<TcpStream>, X224Transport>;
+type X224FutureTransport = Framed<TlsStream<TcpStream>, DataTransport>;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -176,75 +176,60 @@ impl McsInitialFuture {
     }
 }
 
-impl SequenceFutureProperties<TlsStream<TcpStream>, X224Transport> for McsInitialFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitialFuture {
     type Item = (X224FutureTransport, X224FutureTransport, FilterConfig, StaticChannels);
 
-    fn process_pdu(
-        &mut self,
-        pdu: (X224TPDUType, BytesMut),
-        client_logger: &slog::Logger,
-    ) -> io::Result<Option<(X224TPDUType, BytesMut)>> {
-        let (code, buf) = pdu;
-        if code == X224TPDUType::Data {
-            let (next_sequence_state, result) = match self.sequence_state {
-                McsInitialSequenceState::ConnectInitial => {
-                    let mut connect_initial = ConnectInitial::from_buffer(buf.as_ref())?;
-                    info!(client_logger, "Got MCS Connect Initial PDU");
-                    debug!(client_logger, "Got MCS Connect Initial PDU: {:?}", connect_initial);
+    fn process_pdu(&mut self, data: BytesMut, client_logger: &slog::Logger) -> io::Result<Option<BytesMut>> {
+        let (next_sequence_state, result) = match self.sequence_state {
+            McsInitialSequenceState::ConnectInitial => {
+                let mut connect_initial = ConnectInitial::from_buffer(data.as_ref())?;
+                info!(client_logger, "Got MCS Connect Initial PDU");
+                debug!(client_logger, "Got MCS Connect Initial PDU: {:?}", connect_initial);
 
-                    connect_initial.filter(
-                        self.filter_config
-                            .as_ref()
-                            .expect("The filter config must exist for filtering the Connect Initial PDU"),
-                    );
-                    debug!(client_logger, "Filtered Connect Initial PDU: {:?}", connect_initial);
+                connect_initial.filter(
+                    self.filter_config
+                        .as_ref()
+                        .expect("The filter config must exist for filtering the Connect Initial PDU"),
+                );
+                debug!(client_logger, "Filtered Connect Initial PDU: {:?}", connect_initial);
 
-                    let mut connect_initial_buffer = BytesMut::new();
-                    connect_initial_buffer.resize(connect_initial.buffer_length(), 0);
-                    connect_initial.to_buffer(connect_initial_buffer.as_mut())?;
+                let mut connect_initial_buffer = BytesMut::with_capacity(connect_initial.buffer_length());
+                connect_initial_buffer.resize(connect_initial.buffer_length(), 0x00);
+                connect_initial.to_buffer(connect_initial_buffer.as_mut())?;
 
-                    self.channel_names = Some(connect_initial.channel_names());
+                self.channel_names = Some(connect_initial.channel_names());
 
-                    (
-                        McsInitialSequenceState::ConnectResponse,
-                        (X224TPDUType::Data, connect_initial_buffer),
-                    )
-                }
-                McsInitialSequenceState::ConnectResponse => {
-                    let mut connect_response = ConnectResponse::from_buffer(buf.as_ref())?;
-                    info!(client_logger, "Got MCS Connect Response PDU");
-                    debug!(client_logger, "Got MCS Connect Response PDU: {:?}", connect_response);
+                (McsInitialSequenceState::ConnectResponse, connect_initial_buffer)
+            }
+            McsInitialSequenceState::ConnectResponse => {
+                let mut connect_response = ConnectResponse::from_buffer(data.as_ref())?;
+                info!(client_logger, "Got MCS Connect Response PDU");
+                debug!(client_logger, "Got MCS Connect Response PDU: {:?}", connect_response);
 
-                    connect_response.filter(
-                        self.filter_config
-                            .as_ref()
-                            .expect("The filter config must exist for filtering the Connect Response PDU"),
-                    );
-                    debug!(client_logger, "Filtered Connect Response PDU: {:?}", connect_response);
+                connect_response.filter(
+                    self.filter_config
+                        .as_ref()
+                        .expect("The filter config must exist for filtering the Connect Response PDU"),
+                );
+                debug!(client_logger, "Filtered Connect Response PDU: {:?}", connect_response);
 
-                    let mut connect_response_buffer = BytesMut::new();
-                    connect_response_buffer.resize(connect_response.buffer_length(), 0);
-                    connect_response.to_buffer(connect_response_buffer.as_mut())?;
+                let mut connect_response_buffer = BytesMut::new();
+                connect_response_buffer.resize(connect_response.buffer_length(), 0);
+                connect_response.to_buffer(connect_response_buffer.as_mut())?;
 
-                    self.channel_ids = Some(connect_response.channel_ids());
-                    self.global_channel_id = connect_response.global_channel_id();
+                self.channel_ids = Some(connect_response.channel_ids());
+                self.global_channel_id = connect_response.global_channel_id();
 
-                    (
-                        McsInitialSequenceState::Finished,
-                        (X224TPDUType::Data, connect_response_buffer),
-                    )
-                }
-                McsInitialSequenceState::Finished => {
-                    unreachable!("The McsInitialFuture process_pdu method must not be fired in Finished state")
-                }
-            };
+                (McsInitialSequenceState::Finished, connect_response_buffer)
+            }
+            McsInitialSequenceState::Finished => {
+                unreachable!("The McsInitialFuture process_pdu method must not be fired in Finished state")
+            }
+        };
 
-            self.sequence_state = next_sequence_state;
+        self.sequence_state = next_sequence_state;
 
-            Ok(Some(result))
-        } else {
-            Err(io::Error::new(io::ErrorKind::InvalidData, "Client sent invalid PDU"))
-        }
+        Ok(Some(result))
     }
     fn return_item(
         &mut self,

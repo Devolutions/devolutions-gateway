@@ -5,10 +5,7 @@ mod post_mcs;
 
 pub use self::{
     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
-    negotiation::{
-        create_negotiation_request, NegotiationWithClientFuture, NegotiationWithClientFutureResponse,
-        NegotiationWithServerFuture,
-    },
+    negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
     nla::{NlaWithClientFuture, NlaWithServerFuture},
     post_mcs::PostMcs,
 };
