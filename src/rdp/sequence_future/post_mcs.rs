@@ -122,7 +122,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
             | SequenceState::ServerControlCooperate
             | SequenceState::ServerGrantedControl
             | SequenceState::ServerFontMap => NextStream::Server,
-            SequenceState::Finished => unreachable!(
+            SequenceState::Finished => panic!(
                 "In RDP Connection Sequence, the future must not require a next sender in the Finished sequence state"
             ),
         }

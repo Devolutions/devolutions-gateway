@@ -75,7 +75,7 @@ where
                 FutureState::ParseMessage => FutureState::SendMessage,
                 FutureState::SendMessage => FutureState::GetMessage,
                 FutureState::Finished => {
-                    unreachable!("next_future_state method cannot be fired in the Finished future state")
+                    panic!("next_future_state method cannot be fired in the Finished future state")
                 }
             }
         }
