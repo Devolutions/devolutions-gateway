@@ -13,6 +13,7 @@ pub fn url_to_socket_arr(url: &Url) -> SocketAddr {
     format!("{}:{}", host, port).parse::<SocketAddr>().unwrap()
 }
 
+//TODO: add macro_export
 macro_rules! io_try {
     ($e:expr) => {
         match $e {

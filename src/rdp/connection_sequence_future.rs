@@ -1,7 +1,7 @@
 use std::io;
 
 use futures::{try_ready, Future};
-use ironrdp::{NegotiationRequestFlags, SecurityProtocol};
+use ironrdp::nego;
 use tokio::{codec::Decoder, prelude::*};
 use tokio_tcp::{ConnectFuture, TcpStream};
 use tokio_tls::{TlsAcceptor, TlsStream};
@@ -12,11 +12,14 @@ use crate::{
         identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
             create_negotiation_request, FutureState, McsFuture, McsFutureTransport, McsInitialFuture,
-            NegotiationWithClientFuture, NegotiationWithClientFutureResponse, NegotiationWithServerFuture,
-            NlaWithClientFuture, NlaWithServerFuture, PostMcs, SequenceFuture, StaticChannels,
+            NegotiationWithClientFuture, NegotiationWithServerFuture, NlaWithClientFuture, NlaWithServerFuture,
+            PostMcs, SequenceFuture, StaticChannels,
         },
     },
-    transport::{mcs::McsTransport, x224::X224Transport},
+    transport::{
+        mcs::McsTransport,
+        x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
+    },
 };
 
 pub struct ConnectionSequenceFuture {
@@ -25,8 +28,7 @@ pub struct ConnectionSequenceFuture {
     tls_proxy_pubkey: Option<Vec<u8>>,
     tls_acceptor: Option<TlsAcceptor>,
     identities_proxy: Option<IdentitiesProxy>,
-    client_request_protocol: SecurityProtocol,
-    client_request_flags: NegotiationRequestFlags,
+    request: Option<nego::Request>,
     rdp_identity: Option<RdpIdentity>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
@@ -44,7 +46,7 @@ impl ConnectionSequenceFuture {
         Self {
             state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(SequenceFuture {
                 future: NegotiationWithClientFuture::new(),
-                client: Some(X224Transport::default().framed(client)),
+                client: Some(NegotiationWithClientTransport::default().framed(client)),
                 server: None,
                 send_future: None,
                 pdu: None,
@@ -55,8 +57,7 @@ impl ConnectionSequenceFuture {
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
             identities_proxy: Some(identities_proxy),
-            client_request_protocol: SecurityProtocol::empty(),
-            client_request_flags: NegotiationRequestFlags::empty(),
+            request: None,
             rdp_identity: None,
             filter_config: None,
             joined_static_channels: None,
@@ -67,7 +68,7 @@ impl ConnectionSequenceFuture {
     fn create_nla_client_future(
         &mut self,
         client: TcpStream,
-        client_response_protocol: SecurityProtocol,
+        client_response_protocol: nego::SecurityProtocol,
     ) -> NlaWithClientFuture {
         NlaWithClientFuture::new(
             client,
@@ -101,10 +102,10 @@ impl ConnectionSequenceFuture {
         Ok(TcpStream::connect(&destination_addr))
     }
     fn create_server_negotiation_future(
-        &self,
+        &mut self,
         server: TcpStream,
-    ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, X224Transport>> {
-        let server_transport = X224Transport::default().framed(server);
+    ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>> {
+        let server_transport = NegotiationWithServerTransport::default().framed(server);
 
         let target_credentials = self.rdp_identity
             .as_ref()
@@ -112,8 +113,10 @@ impl ConnectionSequenceFuture {
             .target.clone();
         let pdu = create_negotiation_request(
             target_credentials,
-            self.client_request_protocol,
-            self.client_request_flags,
+            self.request
+                .as_ref()
+                .expect("For server negotiation future, the request must be set after negotiation with client")
+                .clone(),
         )?;
         let send_future = Some(server_transport.send(pdu));
 
@@ -130,11 +133,11 @@ impl ConnectionSequenceFuture {
     fn create_nla_server_future(
         &self,
         server: TcpStream,
-        server_response_protocol: SecurityProtocol,
+        server_response_protocol: nego::SecurityProtocol,
     ) -> io::Result<NlaWithServerFuture> {
         NlaWithServerFuture::new(
             server,
-            self.client_request_flags,
+            self.request.as_ref().expect("for NLA server future, the request must be set after negotiation with client").flags,
             server_response_protocol,
             self.rdp_identity
                 .as_ref()
@@ -146,7 +149,7 @@ impl ConnectionSequenceFuture {
     fn create_mcs_initial_future(
         &mut self,
         server_tls: TlsStream<TcpStream>,
-    ) -> SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, X224Transport> {
+    ) -> SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport> {
         let client_tls = self
             .client_tls
             .take()
@@ -160,8 +163,8 @@ impl ConnectionSequenceFuture {
                     .proxy
                     .clone(),
             )),
-            client: Some(X224Transport::default().framed(client_tls)),
-            server: Some(X224Transport::default().framed(server_tls)),
+            client: Some(DataTransport::default().framed(client_tls)),
+            server: Some(DataTransport::default().framed(server_tls)),
             send_future: None,
             pdu: None,
             future_state: FutureState::GetMessage,
@@ -217,21 +220,18 @@ impl Future for ConnectionSequenceFuture {
         loop {
             match &mut self.state {
                 ConnectionSequenceFutureState::NegotiationWithClient(negotiation_future) => {
-                    let NegotiationWithClientFutureResponse {
-                        transport,
-                        client_request_protocol,
-                        client_request_flags,
-                        client_response_protocol,
-                        ..
-                    } = try_ready!(negotiation_future.poll());
-                    self.client_request_protocol = client_request_protocol;
-                    self.client_request_flags = client_request_flags;
+                    let (transport, request, response) = try_ready!(negotiation_future.poll());
+                    self.request = Some(request);
 
                     let client = transport.into_inner();
 
-                    self.state = ConnectionSequenceFutureState::NlaWithClient(Box::new(
-                        self.create_nla_client_future(client, client_response_protocol),
-                    ));
+                    if let Some(nego::ResponseData::Response { protocol, .. }) = response.response {
+                        self.state = ConnectionSequenceFutureState::NlaWithClient(Box::new(
+                            self.create_nla_client_future(client, protocol),
+                        ));
+                    } else {
+                        unreachable!("The negotiation with client future must return response");
+                    }
                 }
                 ConnectionSequenceFutureState::NlaWithClient(nla_future) => {
                     let (client_tls, rdp_identity) = try_ready!(nla_future.poll());
@@ -248,13 +248,17 @@ impl Future for ConnectionSequenceFuture {
                     ));
                 }
                 ConnectionSequenceFutureState::NegotiationWithServer(negotiation_future) => {
-                    let (server_transport, response_protocol, _response_flags) = try_ready!(negotiation_future.poll());
+                    let (server_transport, response) = try_ready!(negotiation_future.poll());
 
                     let server = server_transport.into_inner();
 
-                    self.state = ConnectionSequenceFutureState::NlaWithServer(Box::new(
-                        self.create_nla_server_future(server, response_protocol)?,
-                    ));
+                    if let Some(nego::ResponseData::Response { protocol, .. }) = response.response {
+                        self.state = ConnectionSequenceFutureState::NlaWithServer(Box::new(
+                            self.create_nla_server_future(server, protocol)?,
+                        ));
+                    } else {
+                        unreachable!("The negotiation with client future must return response");
+                    }
                 }
                 ConnectionSequenceFutureState::NlaWithServer(nla_future) => {
                     let server_tls = try_ready!(nla_future.poll());
@@ -302,12 +306,12 @@ impl Future for ConnectionSequenceFuture {
 }
 
 enum ConnectionSequenceFutureState {
-    NegotiationWithClient(Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, X224Transport>>),
+    NegotiationWithClient(Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport>>),
     NlaWithClient(Box<NlaWithClientFuture>),
     ConnectToServer(ConnectFuture),
-    NegotiationWithServer(Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, X224Transport>>),
+    NegotiationWithServer(Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>>),
     NlaWithServer(Box<NlaWithServerFuture>),
-    McsInitial(Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, X224Transport>>),
+    McsInitial(Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport>>),
     Mcs(Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport>>),
     PostMcs(Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, McsTransport>>),
 }

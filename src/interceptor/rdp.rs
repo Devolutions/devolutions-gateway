@@ -1,6 +1,6 @@
 use std::io;
 
-use ironrdp::{parse_fast_path_header, read_tpkt_len};
+use ironrdp::{parse_fast_path_header, PduParsing, TpktHeader};
 
 pub struct RdpMessageReader;
 impl RdpMessageReader {
@@ -8,16 +8,16 @@ impl RdpMessageReader {
         let mut messages = Vec::new();
 
         loop {
-            let len = match read_tpkt_len(data.as_slice()) {
-                Ok(len) => {
+            let len = match TpktHeader::from_buffer(data.as_slice()) {
+                Ok(TpktHeader { length }) => {
                     // TPKT&TPDU
-                    Some(len)
+                    Some(length)
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                 _ => {
                     // Fast-Path
                     match parse_fast_path_header(data.as_slice()) {
-                        Ok((_, len)) => Some(u64::from(len)),
+                        Ok((_, len)) => Some(usize::from(len)),
                         Err(ironrdp::FastPathError::NullLength { bytes_read }) => {
                             data.drain(..bytes_read);
 

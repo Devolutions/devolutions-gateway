@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::BytesMut;
 use futures::{sink::Send, stream::StreamFuture, try_ready, Future, Poll};
-use ironrdp::{NegotiationRequestFlags, SecurityProtocol};
+use ironrdp::nego;
 use slog::{debug, info};
 use sspi::{
     CredSsp, CredSspClient, CredSspResult, CredSspServer, Credentials, EarlyUserAuthResult, TsRequest,
@@ -27,7 +27,7 @@ type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUser
 
 pub struct NlaWithClientFuture {
     state: NlaWithClientFutureState,
-    client_response_protocol: SecurityProtocol,
+    client_response_protocol: nego::SecurityProtocol,
     tls_proxy_pubkey: Option<Vec<u8>>,
     identities_proxy: Option<IdentitiesProxy>,
     rdp_identity: Option<RdpIdentity>,
@@ -37,7 +37,7 @@ pub struct NlaWithClientFuture {
 impl NlaWithClientFuture {
     pub fn new(
         client: TcpStream,
-        client_response_protocol: SecurityProtocol,
+        client_response_protocol: nego::SecurityProtocol,
         tls_proxy_pubkey: Vec<u8>,
         identities_proxy: IdentitiesProxy,
         tls_acceptor: TlsAcceptor,
@@ -94,7 +94,10 @@ impl Future for NlaWithClientFuture {
 
                     let client_tls = client_transport.into_inner();
 
-                    if self.client_response_protocol.contains(SecurityProtocol::HYBRID_EX) {
+                    if self
+                        .client_response_protocol
+                        .contains(nego::SecurityProtocol::HYBRID_EX)
+                    {
                         self.rdp_identity = Some(rdp_identity);
 
                         self.state = NlaWithClientFutureState::EarlyUserAuthResult(
@@ -125,8 +128,8 @@ impl Future for NlaWithClientFuture {
 
 pub struct NlaWithServerFuture {
     state: NlaWithServerFutureState,
-    client_request_flags: NegotiationRequestFlags,
-    server_response_protocol: SecurityProtocol,
+    client_request_flags: nego::RequestFlags,
+    server_response_protocol: nego::SecurityProtocol,
     target_credentials: Credentials,
     client_logger: slog::Logger,
 }
@@ -134,8 +137,8 @@ pub struct NlaWithServerFuture {
 impl NlaWithServerFuture {
     pub fn new(
         server: TcpStream,
-        client_request_flags: NegotiationRequestFlags,
-        server_response_protocol: SecurityProtocol,
+        client_request_flags: nego::RequestFlags,
+        server_response_protocol: nego::SecurityProtocol,
         target_credentials: Credentials,
         accept_invalid_certs_and_host_names: bool,
         client_logger: slog::Logger,
@@ -198,7 +201,10 @@ impl Future for NlaWithServerFuture {
 
                     let server_tls = server_transport.into_inner();
 
-                    if self.server_response_protocol.contains(SecurityProtocol::HYBRID_EX) {
+                    if self
+                        .server_response_protocol
+                        .contains(nego::SecurityProtocol::HYBRID_EX)
+                    {
                         self.state = NlaWithServerFutureState::EarlyUserAuthResult(
                             EarlyUserAuthResultTransport::default().framed(server_tls).into_future(),
                         );
@@ -315,11 +321,10 @@ pub struct CredSspWithServerFuture {
 impl CredSspWithServerFuture {
     pub fn new(
         public_key: Vec<u8>,
-        request_flags: NegotiationRequestFlags,
+        request_flags: nego::RequestFlags,
         target_credentials: Credentials,
     ) -> Result<Self, sspi::SspiError> {
-        let cred_ssp_mode = if request_flags.contains(ironrdp::NegotiationRequestFlags::RESTRICTED_ADMIN_MODE_REQUIRED)
-        {
+        let cred_ssp_mode = if request_flags.contains(nego::RequestFlags::RESTRICTED_ADMIN_MODE_REQUIRED) {
             sspi::CredSspMode::CredentialLess
         } else {
             sspi::CredSspMode::WithCredentials
