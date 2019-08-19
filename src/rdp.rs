@@ -58,10 +58,16 @@ impl RdpClient {
         let config_clone = self.config.clone();
         let tls_acceptor = self.tls_acceptor;
         let tls_public_key = self.tls_public_key;
-        let identities_filename = self
-            .config
-            .identities_filename()
-            .expect("identities file is not present");
+        let identities_filename = if let Some(identities_filename) = self.config.identities_filename() {
+            identities_filename
+        } else {
+            error!(client_logger, "Identities file is not present");
+
+            return Box::new(futures::future::err(io::Error::new(
+                io::ErrorKind::Other,
+                "identities file is not present",
+            )));
+        };
 
         let connection_sequence_future = ConnectionSequenceFuture::new(
             client,

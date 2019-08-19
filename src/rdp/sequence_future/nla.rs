@@ -70,6 +70,10 @@ impl Future for NlaWithClientFuture {
                             )
                         })
                         .poll());
+                    info!(
+                        self.client_logger,
+                        "TLS connection has been established with the client"
+                    );
 
                     let client_transport = TsRequestTransport::default().framed(client_tls);
                     self.state = NlaWithClientFutureState::CredSsp(Box::new(SequenceFuture {
@@ -178,6 +182,10 @@ impl Future for NlaWithServerFuture {
                             )
                         })
                         .poll());
+                    info!(
+                        self.client_logger,
+                        "TLS connection has been established with the server"
+                    );
 
                     let client_public_key = utils::get_tls_peer_pubkey(&server_tls)?;
                     let server_transport = TsRequestTransport::default().framed(server_tls);
