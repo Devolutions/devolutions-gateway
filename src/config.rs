@@ -141,6 +141,7 @@ impl Config {
                     .short("i")
                     .long("identities-file")
                     .value_name("IDENTITIES_FILE")
+                    .required_if("protocol", "rdp")
                     .help("A JSON-file with a list of identities: proxy credentials, target credentials, and target destination")
                     .long_help(r###"
 JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
