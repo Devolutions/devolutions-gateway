@@ -228,11 +228,7 @@ impl Stream for TcpJetStream {
                     Ok(Async::Ready(0)) => {
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                let peer_addr = match stream.peer_addr() {
-                                    Ok(addr) => Some(addr),
-                                    _ => None,
-                                };
-
+                                let peer_addr = stream.peer_addr();
                                 interceptor.on_new_packet(peer_addr, &result);
                             }
 
@@ -253,11 +249,7 @@ impl Stream for TcpJetStream {
                         }
 
                         if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            let peer_addr = match stream.peer_addr() {
-                                Ok(addr) => Some(addr),
-                                _ => None,
-                            };
-
+                            let peer_addr = stream.peer_addr();
                             interceptor.on_new_packet(peer_addr, &result);
                         }
 
@@ -268,11 +260,7 @@ impl Stream for TcpJetStream {
 
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                let peer_addr = match stream.peer_addr() {
-                                Ok(addr) => Some(addr),
-                                _ => None,
-                            };
-
+                                let peer_addr = stream.peer_addr();
                                 interceptor.on_new_packet(peer_addr, &result);
                             }
 
@@ -304,10 +292,7 @@ impl JetStream for TcpJetStream {
     fn peer_addr(&self) -> Option<SocketAddr> {
         let stream = self.stream.lock().unwrap();
 
-        match stream.peer_addr() {
-            Ok(addr) => Some(addr),
-            _ => None,
-        }
+        stream.peer_addr()
     }
 
     fn nb_bytes_read(&self) -> u64 {
