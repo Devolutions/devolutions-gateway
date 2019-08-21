@@ -3,8 +3,6 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-#[macro_use]
-mod utils;
 mod config;
 mod http;
 mod interceptor;
@@ -13,6 +11,7 @@ mod jet_client;
 mod rdp;
 mod routing_client;
 mod transport;
+mod utils;
 mod websocket_client;
 
 use std::collections::HashMap;

@@ -16,6 +16,7 @@ use tokio_tcp::TcpStream;
 use tokio_tls::{Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 
 use crate::{
+    io_try,
     rdp::identities_proxy::{IdentitiesProxy, RdpIdentity, RdpIdentityGetter},
     rdp::sequence_future::{FutureState, NextStream, SequenceFuture, SequenceFutureProperties},
     transport::tsrequest::TsRequestTransport,

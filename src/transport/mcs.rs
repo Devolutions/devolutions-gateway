@@ -16,10 +16,11 @@ impl Decoder for McsTransport {
     type Error = io::Error;
 
     fn decode(&mut self, mut buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let data = codec_try!(self.x224_transport.decode(&mut buf));
-        let mcs_pdu = McsPdu::from_buffer(data.as_ref())?;
-
-        Ok(Some(mcs_pdu))
+        if let Some(data) = self.x224_transport.decode(&mut buf)? {
+            Ok(Some(McsPdu::from_buffer(data.as_ref())?))
+        } else {
+            Ok(None)
+        }
     }
 }
 
