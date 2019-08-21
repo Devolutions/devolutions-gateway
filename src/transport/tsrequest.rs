@@ -3,6 +3,8 @@ use std::io;
 use bytes::BytesMut;
 use tokio::codec::{Decoder, Encoder};
 
+use crate::io_try;
+
 #[derive(Default)]
 pub struct TsRequestTransport {}
 

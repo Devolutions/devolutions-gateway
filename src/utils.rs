@@ -13,7 +13,7 @@ pub fn url_to_socket_arr(url: &Url) -> SocketAddr {
     format!("{}:{}", host, port).parse::<SocketAddr>().unwrap()
 }
 
-//TODO: add macro_export
+#[macro_export]
 macro_rules! io_try {
     ($e:expr) => {
         match $e {
@@ -21,16 +21,6 @@ macro_rules! io_try {
             Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                 return Ok(None);
             }
-            Err(e) => return Err(e),
-        }
-    };
-}
-
-macro_rules! codec_try {
-    ($e:expr) => {
-        match $e {
-            Ok(Some(v)) => v,
-            Ok(None) => return Ok(None),
             Err(e) => return Err(e),
         }
     };
