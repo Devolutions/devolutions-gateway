@@ -51,9 +51,7 @@ const MCS_STATIC_CHANNELS_START_ID: u16 = 1004;
 const SHARE_ID: u32 = 66_538;
 const SERVER_PDU_SOURCE: u16 = 0x03ea;
 
-type RdpResult<T> = Result<T, RdpError>;
-
-fn run_client() -> RdpResult<Child> {
+fn run_client() -> Child {
     let mut client_command = Command::new(IRONRDP_CLIENT_PATH);
     client_command
         .arg(JET_PROXY_SERVER_ADDR)
@@ -61,23 +59,18 @@ fn run_client() -> RdpResult<Child> {
         .args(&["--username", PROXY_CREDENTIALS.username.as_str()])
         .args(&["--password", PROXY_CREDENTIALS.password.as_str()]);
 
-    let client = client_command
-        .spawn()
-        .map_err(|e| RdpError::new(format!("Failed to run IronRDP client: {}", e)))?;
-
-    Ok(client)
+    client_command.spawn().expect("failed to run IronRDP client")
 }
 
 #[test]
 fn rdp_with_nla_ntlm() {
-    let mut identities_file = tempfile::NamedTempFile::new().expect("Failed to create a named temporary file");
+    let mut identities_file = tempfile::NamedTempFile::new().expect("failed to create a named temporary file");
     let rdp_identities = vec![RdpIdentity::new(
         PROXY_CREDENTIALS.clone(),
         SERVER_CREDENTIALS.clone(),
         TARGET_SERVER_ADDR.to_string(),
     )];
-    RdpIdentity::list_to_buffer(rdp_identities.as_ref(), identities_file.as_file_mut())
-        .expect("Failed to write identities to file");
+    RdpIdentity::list_to_buffer(rdp_identities.as_ref(), identities_file.as_file_mut());
 
     let _proxy = run_proxy(
         JET_PROXY_SERVER_ADDR,
@@ -87,22 +80,22 @@ fn rdp_with_nla_ntlm() {
             identities_file
                 .path()
                 .to_str()
-                .expect("Failed to get path to a temporary file"),
+                .expect("failed to get path to a temporary file"),
         ),
     );
     thread::sleep(Duration::from_millis(500));
 
     let server_thread = thread::spawn(move || {
         let mut server = RdpServer::new(TARGET_SERVER_ADDR, IdentitiesProxy::new(SERVER_CREDENTIALS.clone()));
-        server.run().expect("Error in server");
+        server.run();
     });
     let client_thread = thread::spawn(move || {
-        let mut client = run_client().expect("IronRDP client did not start");
-        client.wait().expect("Error in client")
+        let mut client = run_client();
+        client.wait().expect("error occurred in IronRDP client");
     });
 
-    server_thread.join().expect("Failed to join the server thread");
-    client_thread.join().expect("Failed to join the client thread");
+    server_thread.join().expect("failed to join the server thread");
+    client_thread.join().expect("failed to join the client thread");
 }
 
 struct RdpServer {
@@ -118,150 +111,78 @@ impl RdpServer {
         }
     }
 
-    fn run(&mut self) -> RdpResult<()> {
-        let mut stream = accept_tcp_stream(self.routing_addr)
-            .map_err(|e| RdpError::new(format!("Failed to accept tcp stream: {}", e)))?;
-        self.x224(&mut stream)?;
+    fn run(&mut self) {
+        let mut stream = accept_tcp_stream(self.routing_addr);
+        self.x224(&mut stream);
 
-        let mut tls_stream = accept_tls(stream, CERT_PKCS12_DER.clone(), CERT_PKCS12_PASS)?;
-        self.nla(&mut tls_stream)?;
+        let mut tls_stream = accept_tls(stream, CERT_PKCS12_DER.clone(), CERT_PKCS12_PASS);
+        self.nla(&mut tls_stream);
 
-        let client_color_depth = self.mcs(&mut tls_stream)?;
+        let client_color_depth = self.mcs(&mut tls_stream);
 
-        self.read_client_info(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to read Client Info PDU: {}", e)))?;
+        self.read_client_info(&mut tls_stream);
 
-        self.write_server_license(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to write Server License PDU: {}", e)))?;
+        self.write_server_license(&mut tls_stream);
 
-        let client_pdu_source = self.capabilities_exchange(&mut tls_stream, client_color_depth)?;
+        let client_pdu_source = self.capabilities_exchange(&mut tls_stream, client_color_depth);
 
-        self.finalization(&mut tls_stream, client_pdu_source)?;
-
-        Ok(())
+        self.finalization(&mut tls_stream, client_pdu_source);
     }
 
-    fn x224(&self, mut stream: &mut TcpStream) -> RdpResult<()> {
-        self.read_negotiation_request(&mut stream).map_err(|e| {
-            RdpError::new(format!(
-                "Error in the server during reading an negotiation request: {}",
-                e
-            ))
-        })?;
-        self.write_negotiation_response(&mut stream).map_err(|e| {
-            RdpError::new(format!(
-                "Error in the server during writing an negotiation response: {}",
-                e
-            ))
-        })?;
-
-        Ok(())
+    fn x224(&self, mut stream: &mut TcpStream) {
+        self.read_negotiation_request(&mut stream);
+        self.write_negotiation_response(&mut stream);
     }
 
-    fn nla(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
-        let tls_pubkey = get_tls_pubkey(CERT_PKCS12_DER.clone().as_ref(), CERT_PKCS12_PASS)
-            .map_err(|e| RdpError::new(format!("Failed to get tls public key: {}", e)))?;
+    fn nla(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+        let tls_pubkey = get_tls_pubkey(CERT_PKCS12_DER.clone().as_ref(), CERT_PKCS12_PASS);
 
         let mut cred_ssp_context = sspi::CredSspServer::with_default_version(tls_pubkey, self.identities_proxy.clone())
-            .map_err(|e| RdpError::new(format!("Failed to create a CredSSP server: {}", e)))?;
+            .expect("failed to create a CredSSP server");
 
-        self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context)
-            .map_err(|e| {
-                RdpError::new(format!(
-                    "Error in the server during reading an negotiate message and writing challenge message: {}",
-                    e
-                ))
-            })?;
-        self.read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth(&mut tls_stream, &mut cred_ssp_context)
-            .map_err(|e| {
-                RdpError::new(format!(
-                    "Error in the server during reading an authenticate \
-                     message with an encrypted client public key and writing an encrypted server public key: {}",
-                    e
-                ))
-            })?;
-        self.read_ts_credentials(&mut tls_stream, &mut cred_ssp_context)
-            .map_err(|e| RdpError::new(format!("Error in the server during reading a TSCredentials: {}", e)))?;
-
-        Ok(())
+        self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context);
+        self.read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth(&mut tls_stream, &mut cred_ssp_context);
+        self.read_ts_credentials(&mut tls_stream, &mut cred_ssp_context);
     }
 
-    fn mcs(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<gcc::ClientColorDepth> {
-        let (channel_names, client_color_depth) = self
-            .read_mcs_connect_initial(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Connect Initial PDU: {}", e)))?;
+    fn mcs(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> gcc::ClientColorDepth {
+        let (channel_names, client_color_depth) = self.read_mcs_connect_initial(&mut tls_stream);
+        let channel_ids = self.write_mcs_connect_response(&mut tls_stream, channel_names.as_ref());
+        self.read_mcs_erect_domain_request(&mut tls_stream);
+        self.read_mcs_attach_user_request(&mut tls_stream);
+        self.write_mcs_attach_user_confirm(&mut tls_stream);
+        self.process_mcs_channel_joins(&mut tls_stream, channel_ids);
 
-        let channel_ids = self
-            .write_mcs_connect_response(&mut tls_stream, channel_names.as_ref())
-            .map_err(|e| RdpError::new(format!("Error during writing MCS Connect Response: {}", e)))?;
-
-        self.read_mcs_erect_domain_request(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Erect Domain Request PDU: {}", e)))?;
-
-        self.read_mcs_attach_user_request(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Attach User Request PDU: {}", e)))?;
-
-        self.write_mcs_attach_user_confirm(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Attach User Confirm: {}", e)))?;
-
-        self.process_mcs_channel_joins(&mut tls_stream, channel_ids)
-            .map_err(|e| RdpError::new(format!("Error during joins of MCS channels: {}", e)))?;
-
-        Ok(client_color_depth)
+        client_color_depth
     }
 
     fn capabilities_exchange(
         &self,
         mut tls_stream: &mut TlsStream<TcpStream>,
         client_color_depth: gcc::ClientColorDepth,
-    ) -> RdpResult<u16> {
-        self.write_demand_active(&mut tls_stream, client_color_depth)
-            .map_err(|e| RdpError::new(format!("Error during writing demand active pdu: {}", e)))?;
+    ) -> u16 {
+        self.write_demand_active(&mut tls_stream, client_color_depth);
 
-        let client_pdu_source = self
-            .read_confirm_active(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading confirm active pdu: {}", e)))?;
-
-        Ok(client_pdu_source)
+        self.read_confirm_active(&mut tls_stream)
     }
 
-    fn finalization(&self, mut tls_stream: &mut TlsStream<TcpStream>, client_pdu_source: u16) -> RdpResult<()> {
-        self.read_synchronize_pdu(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading sychronize pdu: {}", e)))?;
-
-        self.write_synchronize_pdu(&mut tls_stream, client_pdu_source)
-            .map_err(|e| RdpError::new(format!("Error during reading sychronize pdu: {}", e)))?;
-
-        self.read_control_pdu_cooperate(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu cooperate: {}", e)))?;
-
-        self.write_control_pdu_cooperate(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu cooperate: {}", e)))?;
-
-        self.read_request_control_pdu(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu request control: {}", e)))?;
-
-        self.write_granted_control_pdu(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu request control: {}", e)))?;
-
-        self.read_font_list(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu request control: {}", e)))?;
-
-        self.write_font_map(&mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Error during reading control pdu request control: {}", e)))?;
-
-        Ok(())
+    fn finalization(&self, mut tls_stream: &mut TlsStream<TcpStream>, client_pdu_source: u16) {
+        self.read_synchronize_pdu(&mut tls_stream);
+        self.write_synchronize_pdu(&mut tls_stream, client_pdu_source);
+        self.read_control_pdu_cooperate(&mut tls_stream);
+        self.write_control_pdu_cooperate(&mut tls_stream);
+        self.read_request_control_pdu(&mut tls_stream);
+        self.write_granted_control_pdu(&mut tls_stream);
+        self.read_font_list(&mut tls_stream);
+        self.write_font_map(&mut tls_stream);
     }
 
-    fn read_negotiation_request(&self, stream: &mut TcpStream) -> RdpResult<()> {
+    fn read_negotiation_request(&self, stream: &mut TcpStream) {
         let buffer = read_stream_buffer(stream);
-        let _request = Request::from_buffer(buffer.as_ref())
-            .map_err(|e| RdpError::new(format!("Failed to decode negotiation request: {}", e)))?;
-
-        Ok(())
+        let _request = Request::from_buffer(buffer.as_ref());
     }
 
-    fn write_negotiation_response(&self, stream: &mut TcpStream) -> RdpResult<()> {
+    fn write_negotiation_response(&self, stream: &mut TcpStream) {
         let response = Response {
             response: Some(ResponseData::Response {
                 flags: ResponseFlags::all(),
@@ -275,72 +196,61 @@ impl RdpServer {
         response_buffer.resize(response.buffer_length(), 0x00);
         response
             .to_buffer(response_buffer.as_mut())
-            .map_err(|e| RdpError::new(format!("Failed to write negotiation response: {}", e)))?;
+            .expect("failed to write negotiation response");
 
         stream
             .write_all(response_buffer.as_ref())
-            .map_err(|e| RdpError::new(format!("Failed to send negotiation response: {}", e)))?;
-
-        Ok(())
+            .expect("failed to send negotiation response");
     }
 
     fn read_negotiate_message_and_write_challenge_message<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut TlsStream<TcpStream>,
         cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) -> RdpResult<()> {
+    ) {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
-            .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
+            .expect("failed to parse TSRequest with NTLM negotiate message");
 
-        process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
+        process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream);
     }
 
     fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut TlsStream<TcpStream>,
         cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) -> RdpResult<()> {
+    ) {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
-            .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
+            .expect("failed to parse ts request with NTLM negotiate message");
 
-        process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream)
+        process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream);
     }
 
     fn read_ts_credentials<C: sspi::CredentialsProxy>(
         &self,
         tls_stream: &mut TlsStream<TcpStream>,
         cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) -> RdpResult<()> {
+    ) {
         let buffer = read_stream_buffer(tls_stream);
         let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
-            .map_err(|e| RdpError::new(format!("Failed to parse ts request with ntlm negotiate message: {}", e)))?;
+            .expect("failed to parse ts request with ntlm negotiate message");
 
-        let reply = cred_ssp_context.process(read_ts_request).map_err(|e| {
-            RdpError::new(format!(
-                "Failed to parse ntlm authenticate message and write pub key auth: {}",
-                e
-            ))
-        })?;
+        let reply = cred_ssp_context
+            .process(read_ts_request)
+            .expect("failed to parse NTLM authenticate message and write pub key auth");
         match reply {
             sspi::CredSspResult::ClientCredentials(ref client_credentials) => {
                 let expected_credentials = &self.identities_proxy.rdp_identity;
                 assert_eq!(expected_credentials, client_credentials);
             }
-            _ => panic!("The CredSSP server has returned unexpected result: {:?}", reply),
+            _ => panic!("the CredSSP server has returned unexpected result: {:?}", reply),
         };
-
-        Ok(())
     }
 
-    fn read_mcs_connect_initial(
-        &self,
-        stream: &mut TlsStream<TcpStream>,
-    ) -> RdpResult<(Vec<String>, gcc::ClientColorDepth)> {
+    fn read_mcs_connect_initial(&self, stream: &mut TlsStream<TcpStream>) -> (Vec<String>, gcc::ClientColorDepth) {
         let mut buffer = read_stream_buffer(stream);
-        let connect_initial = read_x224_data_pdu::<ConnectInitial>(&mut buffer)
-            .map_err(|e| RdpError::new(format!("Failed to decode MCS Connect Initial PDU: {}", e)))?;
+        let connect_initial = read_x224_data_pdu::<ConnectInitial>(&mut buffer);
 
         // check that jet removed specific fields
         let gcc_blocks = connect_initial.conference_create_request.gcc_blocks;
@@ -358,14 +268,14 @@ impl RdpServer {
 
         let channels = gcc_blocks.channel_names().iter().map(|v| v.name.clone()).collect();
 
-        Ok((channels, gcc_blocks.core.client_color_depth()))
+        (channels, gcc_blocks.core.client_color_depth())
     }
 
     fn write_mcs_connect_response(
         &self,
         mut tls_stream: &mut TlsStream<TcpStream>,
         channel_names: &[String],
-    ) -> RdpResult<Vec<u16>> {
+    ) -> Vec<u16> {
         let channel_ids = (MCS_STATIC_CHANNELS_START_ID..MCS_STATIC_CHANNELS_START_ID + channel_names.len() as u16)
             .collect::<Vec<_>>();
         let connection_response = ConnectResponse {
@@ -391,51 +301,38 @@ impl RdpServer {
             called_connect_id: 1,
             domain_parameters: mcs::DomainParameters::target(),
         };
-        write_x224_data_pdu(connection_response, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to write MCS Connect Response PDU: {}", e)))?;
+        write_x224_data_pdu(connection_response, &mut tls_stream);
 
-        Ok(channel_ids)
+        channel_ids
     }
 
-    fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(&mut tls_stream);
-        match read_x224_data_pdu::<McsPdu>(&mut buffer)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Erect Domain Request: {}", e)))?
-        {
+        match read_x224_data_pdu::<McsPdu>(&mut buffer) {
             McsPdu::ErectDomainRequest(_) => (),
             pdu => panic!("Got unexpected MCS PDU: {:?}", pdu),
         };
-
-        Ok(())
     }
 
-    fn read_mcs_attach_user_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_mcs_attach_user_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(&mut tls_stream);
-        match read_x224_data_pdu::<McsPdu>(&mut buffer)
-            .map_err(|e| RdpError::new(format!("Error during reading MCS Attach User Request: {}", e)))?
-        {
+        match read_x224_data_pdu::<McsPdu>(&mut buffer) {
             McsPdu::AttachUserRequest => (),
             pdu => panic!("Got unexpected MCS PDU: {:?}", pdu),
         };
-
-        Ok(())
     }
 
-    fn write_mcs_attach_user_confirm(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn write_mcs_attach_user_confirm(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let attach_user_confirm = McsPdu::AttachUserConfirm(mcs::AttachUserConfirmPdu {
             initiator_id: MCS_INITIATOR_ID,
             result: 1,
         });
-        write_x224_data_pdu(attach_user_confirm, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to write MCS Attach User Confirm PDU: {}", e)))?;
-
-        Ok(())
+        write_x224_data_pdu(attach_user_confirm, &mut tls_stream);
     }
 
-    fn read_mcs_channel_join_request(&self, stream: &mut TlsStream<TcpStream>) -> RdpResult<u16> {
+    fn read_mcs_channel_join_request(&self, stream: &mut TlsStream<TcpStream>) -> u16 {
         let mut buffer = read_stream_buffer(stream);
-        let mcs_pdu = read_x224_data_pdu(&mut buffer)
-            .map_err(|e| RdpError::new(format!("Failed to decode MCS Channel Join Request: {}", e)))?;
+        let mcs_pdu = read_x224_data_pdu(&mut buffer);
         match mcs_pdu {
             McsPdu::ChannelJoinRequest(mcs::ChannelJoinRequestPdu {
                 initiator_id,
@@ -443,61 +340,37 @@ impl RdpServer {
             }) => {
                 assert_eq!(MCS_INITIATOR_ID, initiator_id);
 
-                Ok(channel_id)
+                channel_id
             }
             pdu => panic!("Got unexpected MCS PDU: {:?}", pdu),
         }
     }
 
-    fn write_mcs_channel_join_confirm(
-        &self,
-        channel_id: u16,
-        mut tls_stream: &mut TlsStream<TcpStream>,
-    ) -> RdpResult<()> {
+    fn write_mcs_channel_join_confirm(&self, channel_id: u16, mut tls_stream: &mut TlsStream<TcpStream>) {
         let channel_join_confirm = McsPdu::ChannelJoinConfirm(mcs::ChannelJoinConfirmPdu {
             channel_id,
             result: 1,
             initiator_id: MCS_INITIATOR_ID,
             requested_channel_id: channel_id,
         });
-        write_x224_data_pdu(channel_join_confirm, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to encode MCS Channel Join Confirm: {}", e)))?;
-
-        Ok(())
+        write_x224_data_pdu(channel_join_confirm, &mut tls_stream);
     }
 
-    fn process_mcs_channel_joins(
-        &self,
-        mut tls_stream: &mut TlsStream<TcpStream>,
-        gcc_channel_ids: Vec<u16>,
-    ) -> RdpResult<()> {
+    fn process_mcs_channel_joins(&self, mut tls_stream: &mut TlsStream<TcpStream>, gcc_channel_ids: Vec<u16>) {
         let mut ids = gcc_channel_ids;
         ids.extend_from_slice(&[MCS_IO_CHANNEL_ID, MCS_INITIATOR_ID]);
 
         while !ids.is_empty() {
-            let channel_id = self
-                .read_mcs_channel_join_request(tls_stream)
-                .map_err(|e| RdpError::new(format!("Failed to read MCS Channel Join Request PDU: {}", e)))?;
-
+            let channel_id = self.read_mcs_channel_join_request(tls_stream);
             ids.retain(|&v| v != channel_id);
-
-            self.write_mcs_channel_join_confirm(channel_id, &mut tls_stream)
-                .map_err(|e| RdpError::new(format!("Failed to write MCS Channel Join Confirm PDU: {}", e)))?;
+            self.write_mcs_channel_join_confirm(channel_id, &mut tls_stream);
         }
-
-        Ok(())
     }
 
-    fn read_client_info(&self, stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_client_info(&self, stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(stream);
         let client_info =
-            read_and_parse_send_data_context_pdu::<ClientInfoPdu>(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID)
-                .map_err(|e| {
-                    RdpError::new(format!(
-                        "Failed to decode Send Data Context with Client Info PDU: {}",
-                        e
-                    ))
-                })?;
+            read_and_parse_send_data_context_pdu::<ClientInfoPdu>(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
         let expected_address_family = match CLIENT_IP_ADDR {
             IpAddr::V4(_) => rdp::AddressFamily::INet,
@@ -511,11 +384,9 @@ impl RdpServer {
             expected_address_family
         );
         assert_eq!(client_info.client_info.extra_info.address, expected_address);
-
-        Ok(())
     }
 
-    fn write_server_license(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn write_server_license(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let pdu = ServerLicensePdu {
             security_header: rdp::BasicSecurityHeader {
                 flags: rdp::BasicSecurityHeaderFlags::LICENSE_PKT,
@@ -536,18 +407,14 @@ impl RdpServer {
                 },
             },
         };
-
-        encode_and_write_send_data_context_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to encode Send Data Context Server License PDU: {}", e)))?;
-
-        Ok(())
+        encode_and_write_send_data_context_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
     fn write_demand_active(
         &self,
         mut tls_stream: &mut TlsStream<TcpStream>,
         client_color_depth: gcc::ClientColorDepth,
-    ) -> RdpResult<()> {
+    ) {
         let pref_bits_per_pix = match client_color_depth {
             gcc::ClientColorDepth::Bpp4 => 4,
             gcc::ClientColorDepth::Bpp8 => 8,
@@ -600,31 +467,16 @@ impl RdpServer {
         };
         let pdu = rdp::ShareControlPdu::ServerDemandActive(demand_active);
         let header = rdp::ShareControlHeader::new(pdu, SERVER_PDU_SOURCE, SHARE_ID);
-        encode_and_write_send_data_context_pdu(header, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream).map_err(
-            |e| {
-                RdpError::new(format!(
-                    "Failed to encode Send Data Context with Share Control Header with Server Demand Active PDU: {}",
-                    e
-                ))
-            },
-        )?;
-
-        Ok(())
+        encode_and_write_send_data_context_pdu(header, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_confirm_active(&self, tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<u16> {
+    fn read_confirm_active(&self, tls_stream: &mut TlsStream<TcpStream>) -> u16 {
         let mut buffer = read_stream_buffer(tls_stream);
         let mut share_control_header = read_and_parse_send_data_context_pdu::<rdp::ShareControlHeader>(
             &mut buffer,
             MCS_INITIATOR_ID,
             MCS_IO_CHANNEL_ID,
-        )
-        .map_err(|e| {
-            RdpError::new(format!(
-                "Failed to decode Send Data Context with Share Control Header with Client Confirm Active: {}",
-                e
-            ))
-        })?;
+        );
         if share_control_header.share_id != SHARE_ID {
             panic!(
                 "Unexpected Client Confirm Active Share Control Header PDU share ID: {} != {}",
@@ -650,7 +502,7 @@ impl RdpServer {
                 panic!("The Jet did not filter qualitatively capability sets");
             }
 
-            Ok(share_control_header.pdu_source)
+            share_control_header.pdu_source
         } else {
             panic!(
                 "Got unexpected Share Control PDU while was expected Client Confirm Active PDU: {:?}",
@@ -659,15 +511,9 @@ impl RdpServer {
         }
     }
 
-    fn read_synchronize_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_synchronize_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(tls_stream);
-        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID)
-            .map_err(|e| {
-                RdpError::new(format!(
-                    "Failed to read and parse Finalization PDU with Synchronize PDU: {}",
-                    e
-                ))
-            })?;
+        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
         if let rdp::ShareDataPdu::Synchronize(rdp::SynchronizePdu { target_user_id }) = share_data_pdu {
             if target_user_id != MCS_INITIATOR_ID {
@@ -676,8 +522,6 @@ impl RdpServer {
                     MCS_INITIATOR_ID, target_user_id
                 );
             }
-
-            Ok(())
         } else {
             panic!(
                 "Unexpected Finalization PDU while was expected Synchronize PDU: {:?}",
@@ -686,27 +530,14 @@ impl RdpServer {
         }
     }
 
-    fn write_synchronize_pdu(
-        &self,
-        mut tls_stream: &mut TlsStream<TcpStream>,
-        client_pdu_source: u16,
-    ) -> RdpResult<()> {
+    fn write_synchronize_pdu(&self, mut tls_stream: &mut TlsStream<TcpStream>, client_pdu_source: u16) {
         let pdu = rdp::ShareDataPdu::Synchronize(rdp::SynchronizePdu::new(client_pdu_source));
-        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to encode and write Synchronize PDU: {}", e)))?;
-
-        Ok(())
+        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_control_pdu_cooperate(&self, tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_control_pdu_cooperate(&self, tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(tls_stream);
-        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID)
-            .map_err(|e| {
-                RdpError::new(format!(
-                    "Failed to read and parse Finalization PDU with Control PDU - Cooperate: {}",
-                    e
-                ))
-            })?;
+        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
         if let rdp::ShareDataPdu::Control(rdp::ControlPdu {
             action,
@@ -723,8 +554,6 @@ impl RdpServer {
                     grant_id, control_id
                 );
             }
-
-            Ok(())
         } else {
             panic!(
                 "Unexpected Finalization PDU while was expected Control PDU - Cooperate: {:?}",
@@ -733,23 +562,14 @@ impl RdpServer {
         }
     }
 
-    fn write_control_pdu_cooperate(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn write_control_pdu_cooperate(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let pdu = rdp::ShareDataPdu::Control(rdp::ControlPdu::new(rdp::ControlAction::Cooperate, 0, 0));
-        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to encode and write Control PDU - Cooperate: {}", e)))?;
-
-        Ok(())
+        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_request_control_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_request_control_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(tls_stream);
-        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID)
-            .map_err(|e| {
-                RdpError::new(format!(
-                    "Failed to read and parse Finalization PDU with Control PDU - Request Control: {}",
-                    e
-                ))
-            })?;
+        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
         if let rdp::ShareDataPdu::Control(rdp::ControlPdu {
             action,
@@ -766,8 +586,6 @@ impl RdpServer {
                     grant_id, control_id
                 );
             }
-
-            Ok(())
         } else {
             panic!(
                 "Unexpected Finalization PDU while was expected Control PDU - Request Control: {:?}",
@@ -776,65 +594,36 @@ impl RdpServer {
         }
     }
 
-    fn write_granted_control_pdu(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn write_granted_control_pdu(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let pdu = rdp::ShareDataPdu::Control(rdp::ControlPdu::new(
             rdp::ControlAction::GrantedControl,
             MCS_INITIATOR_ID,
             u32::from(SERVER_PDU_SOURCE),
         ));
-        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream).map_err(|e| {
-            RdpError::new(format!(
-                "Failed to encode and write Control PDU - Granted Control: {}",
-                e
-            ))
-        })?;
-
-        Ok(())
+        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_font_list(&self, tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn read_font_list(&self, tls_stream: &mut TlsStream<TcpStream>) {
         let mut buffer = read_stream_buffer(tls_stream);
-        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID)
-            .map_err(|e| RdpError::new(format!("Failed to read and parse Font List PDU: {}", e)))?;
+        let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
-        if let rdp::ShareDataPdu::FontList(_) = share_data_pdu {
-            Ok(())
-        } else {
-            panic!(
+        match share_data_pdu {
+            rdp::ShareDataPdu::FontList(_) => (),
+            _ => panic!(
                 "Unexpected Finalization PDU while was expected Font List PDU: {:?}",
                 share_data_pdu
-            );
+            ),
         }
     }
 
-    fn write_font_map(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> RdpResult<()> {
+    fn write_font_map(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let pdu = rdp::ShareDataPdu::FontMap(rdp::FontPdu::new(
             0,
             0,
             rdp::SequenceFlags::FIRST | rdp::SequenceFlags::LAST,
             4,
         ));
-        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream)
-            .map_err(|e| RdpError::new(format!("Failed to encode and write Font Map PDU: {}", e)))?;
-
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct RdpError(String);
-
-impl RdpError {
-    fn new(error: String) -> Self {
-        Self(error)
-    }
-}
-
-impl std::error::Error for RdpError {}
-
-impl fmt::Display for RdpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 }
 
@@ -854,13 +643,10 @@ impl RdpIdentity {
         }
     }
 
-    fn list_to_buffer(rdp_identities: &[Self], mut file: impl io::Write) -> RdpResult<()> {
-        let identities_buffer = serde_json::to_string(&rdp_identities)
-            .map_err(|e| RdpError::new(format!("Failed to convert identities to json: {}", e)))?;
+    fn list_to_buffer(rdp_identities: &[Self], mut file: impl io::Write) {
+        let identities_buffer = serde_json::to_string(&rdp_identities).expect("failed to convert identities to json");
         file.write_all(identities_buffer.as_bytes())
-            .map_err(|e| RdpError::new(format!("Failed to write identities to file: {}", e)))?;
-
-        Ok(())
+            .expect("failed to write identities to file");
     }
 }
 
@@ -888,72 +674,59 @@ fn process_cred_ssp_phase_with_reply_needed(
     ts_request: sspi::TsRequest,
     cred_ssp_context: &mut impl sspi::CredSsp,
     tls_stream: &mut (impl io::Write + io::Read),
-) -> RdpResult<()> {
+) {
     let reply = cred_ssp_context
         .process(ts_request)
-        .map_err(|e| RdpError::new(format!("Failed to process CredSSP phase: {}", e)))?;
+        .expect("failed to process CredSSP phase");
     match reply {
         sspi::CredSspResult::ReplyNeeded(ts_request) => {
             let mut ts_request_buffer = Vec::with_capacity(ts_request.buffer_len() as usize);
             ts_request
                 .encode_ts_request(&mut ts_request_buffer)
-                .map_err(|e| RdpError::new(format!("Failed to encode ts request: {}", e)))?;
+                .expect("failed to encode TSRequest");
 
             tls_stream
                 .write_all(&ts_request_buffer)
-                .map_err(|e| RdpError::new(format!("Failed to send CredSSP message: {}", e)))?;
-
-            Ok(())
+                .expect("failed to send CredSSP message");
         }
-        _ => Err(RdpError::new(format!(
-            "The CredSSP server has returned unexpected result: {:?}",
-            reply
-        ))),
+        _ => panic!("the CredSSP server has returned unexpected result: {:?}", reply),
     }
 }
 
-fn read_x224_data_pdu<T>(buffer: &mut BytesMut) -> RdpResult<T>
+fn read_x224_data_pdu<T>(buffer: &mut BytesMut) -> T
 where
     T: PduParsing,
     T::Error: fmt::Debug,
 {
-    let data_pdu =
-        Data::from_buffer(buffer.as_ref()).map_err(|e| RdpError::new(format!("Failed to read X224 Data: {}", e)))?;
+    let data_pdu = Data::from_buffer(buffer.as_ref()).expect("failed to read X224 Data");
     buffer.split_to(data_pdu.buffer_length() - data_pdu.data_length);
-    let pdu =
-        T::from_buffer(buffer.as_ref()).map_err(|e| RdpError::new(format!("Failed to decode X224 Data: {:?}", e)))?;
+    let pdu = T::from_buffer(buffer.as_ref()).expect("failed to decode X224 Data");
     buffer.split_to(data_pdu.data_length);
 
-    Ok(pdu)
+    pdu
 }
 
-fn write_x224_data_pdu<T>(pdu: T, mut stream: impl io::Write) -> RdpResult<()>
+fn write_x224_data_pdu<T>(pdu: T, mut stream: impl io::Write)
 where
     T: PduParsing,
     T::Error: fmt::Debug,
 {
     Data::new(pdu.buffer_length())
         .to_buffer(&mut stream)
-        .map_err(|e| RdpError::new(format!("Failed to write X224 Data: {}", e)))?;
-    pdu.to_buffer(&mut stream)
-        .map_err(|e| RdpError::new(format!("Failed to encode X224 Data: {:?}", e)))?;
-
-    Ok(())
+        .expect("failed to write X224 Data");
+    pdu.to_buffer(&mut stream).expect("failed to encode X224 Data");
 }
 
 fn read_and_parse_send_data_context_pdu<T>(
     mut buffer: &mut BytesMut,
     expected_initiator_id: u16,
     expected_channel_id: u16,
-) -> RdpResult<T>
+) -> T
 where
     T: PduParsing,
     T::Error: fmt::Debug,
 {
-    let mcs_pdu = read_x224_data_pdu::<McsPdu>(&mut buffer)
-        .map_err(|e| RdpError::new(format!("Failed to decode MCS PDU with Send Data Context PDU: {}", e)))?;
-
-    match mcs_pdu {
+    match read_x224_data_pdu::<McsPdu>(&mut buffer) {
         mcs::McsPdu::SendDataRequest(send_data_context) => {
             if send_data_context.initiator_id != expected_initiator_id {
                 panic!(
@@ -968,10 +741,7 @@ where
                 );
             }
 
-            let pdu = T::from_buffer(send_data_context.pdu.as_slice())
-                .map_err(|e| RdpError::new(format!("Failed to decode Send Data Context PDU: {:?}", e)))?;
-
-            Ok(pdu)
+            T::from_buffer(send_data_context.pdu.as_slice()).expect("failed to decode Send Data Context PDU")
         }
         pdu => panic!(
             "Got unexpected MCS PDU, while was expected Channel Join Confirm PDU: {:?}",
@@ -980,44 +750,30 @@ where
     }
 }
 
-fn encode_and_write_send_data_context_pdu<T>(
-    pdu: T,
-    initiator_id: u16,
-    channel_id: u16,
-    mut stream: impl io::Write,
-) -> RdpResult<()>
+fn encode_and_write_send_data_context_pdu<T>(pdu: T, initiator_id: u16, channel_id: u16, mut stream: impl io::Write)
 where
     T: PduParsing,
     T::Error: fmt::Debug,
 {
     let mut pdu_buffer = Vec::with_capacity(pdu.buffer_length());
     pdu.to_buffer(&mut pdu_buffer)
-        .map_err(|e| RdpError::new(format!("Failed to encode Send Data Context PDU: {:?}", e)))?;
+        .expect("failed to encode Send Data Context PDU");
 
     let send_data_context_pdu = SendDataContext::new(pdu_buffer, initiator_id, channel_id);
 
-    write_x224_data_pdu(McsPdu::SendDataIndication(send_data_context_pdu), &mut stream)
-        .map_err(|e| RdpError::new(format!("Failed to encode Send Data Indication PDU: {}", e)))?;
-
-    Ok(())
+    write_x224_data_pdu(McsPdu::SendDataIndication(send_data_context_pdu), &mut stream);
 }
 
 fn read_and_parse_finalization_pdu(
     mut buffer: &mut BytesMut,
     expected_initiator_id: u16,
     expected_channel_id: u16,
-) -> RdpResult<rdp::ShareDataPdu> {
+) -> rdp::ShareDataPdu {
     let share_control_header = read_and_parse_send_data_context_pdu::<ShareControlHeader>(
         &mut buffer,
         expected_initiator_id,
         expected_channel_id,
-    )
-    .map_err(|e| {
-        RdpError::new(format!(
-            "Failed to read and parse Send Data Context for Finalization PDU: {}",
-            e
-        ))
-    })?;
+    );
     if share_control_header.share_id != SHARE_ID {
         panic!(
             "Got unexpected Share ID for Finalization PDU: {} != {}",
@@ -1038,7 +794,7 @@ fn read_and_parse_finalization_pdu(
             );
         }
 
-        Ok(share_data_pdu)
+        share_data_pdu
     } else {
         panic!(
             "Got unexpected Share Control PDU while was expected Data with Finalization PDU: {:?}",
@@ -1052,7 +808,7 @@ fn encode_and_write_finalization_pdu(
     initiator_id: u16,
     channel_id: u16,
     mut stream: impl io::Write,
-) -> RdpResult<()> {
+) {
     let share_data_header = rdp::ShareDataHeader::new(
         pdu,
         rdp::StreamPriority::Medium,
@@ -1065,16 +821,7 @@ fn encode_and_write_finalization_pdu(
         SERVER_PDU_SOURCE,
         SHARE_ID,
     );
-    encode_and_write_send_data_context_pdu(share_control_header, initiator_id, channel_id, &mut stream).map_err(
-        |e| {
-            RdpError::new(format!(
-                "Failed to encode and write Send Data Context with Share Control Header with Finalization PDU: {}",
-                e
-            ))
-        },
-    )?;
-
-    Ok(())
+    encode_and_write_send_data_context_pdu(share_control_header, initiator_id, channel_id, &mut stream);
 }
 
 fn read_stream_buffer(stream: &mut impl io::Read) -> BytesMut {
@@ -1092,71 +839,67 @@ fn read_stream_buffer(stream: &mut impl io::Read) -> BytesMut {
     }
 }
 
-fn accept_tcp_stream(addr: &str) -> RdpResult<TcpStream> {
-    let listener_addr = addr
-        .parse::<SocketAddr>()
-        .map_err(|e| RdpError::new(format!("Failed to parse an addr: {}", e)))?;
-    let listener = TcpListener::bind(&listener_addr)
-        .map_err(|e| RdpError::new(format!("Failed to exec TcpListener::bind(): {}", e)))?;
+fn accept_tcp_stream(addr: &str) -> TcpStream {
+    let listener_addr = addr.parse::<SocketAddr>().expect("failed to parse an addr");
+    let listener = TcpListener::bind(&listener_addr).expect("failed to bind to stream");
     loop {
         match listener.accept() {
-            Ok((stream, _addr)) => return Ok(stream),
+            Ok((stream, _addr)) => return stream,
             Err(_) => thread::sleep(Duration::from_millis(10)),
         }
     }
 }
 
-fn accept_tls<S>(stream: S, cert_pkcs12_der: Vec<u8>, cert_pass: &str) -> RdpResult<TlsStream<S>>
+fn accept_tls<S>(stream: S, cert_pkcs12_der: Vec<u8>, cert_pass: &str) -> TlsStream<S>
 where
     S: io::Read + io::Write + fmt::Debug + 'static,
 {
     let cert = native_tls::Identity::from_pkcs12(cert_pkcs12_der.as_ref(), cert_pass).unwrap();
     let tls_acceptor = TlsAcceptor::builder(cert)
         .build()
-        .map_err(|e| RdpError::new(format!("Failed to create TlsStreamAcceptor: {}", e)))?;
+        .expect("failed to create TlsAcceptor");
 
     tls_acceptor
         .accept(stream)
-        .map_err(|e| RdpError::new(format!("Failed to accept the ssl connection: {}", e)))
+        .expect("failed to accept the SSL connection")
 }
 
-pub fn get_tls_pubkey(der: &[u8], pass: &str) -> io::Result<Vec<u8>> {
-    let cert = openssl::pkcs12::Pkcs12::from_der(der)?.parse(pass)?.cert;
+pub fn get_tls_pubkey(der: &[u8], pass: &str) -> Vec<u8> {
+    let cert = openssl::pkcs12::Pkcs12::from_der(der)
+        .expect("failed to get PKCS12 from DER")
+        .parse(pass)
+        .expect("failed to parse PKCS12 DER")
+        .cert;
+
     get_tls_pubkey_from_cert(cert)
 }
 
-pub fn get_tls_peer_pubkey<S>(stream: &TlsStream<S>) -> io::Result<Vec<u8>>
+pub fn get_tls_peer_pubkey<S>(stream: &TlsStream<S>) -> Vec<u8>
 where
     S: io::Read + io::Write,
 {
-    let der = get_der_cert_from_stream(&stream)?;
-    let cert = openssl::x509::X509::from_der(&der)?;
+    let der = get_der_cert_from_stream(&stream);
+    let cert = openssl::x509::X509::from_der(&der).expect("failed to get X509 cert from DER");
 
     get_tls_pubkey_from_cert(cert)
 }
 
-fn get_der_cert_from_stream<S>(stream: &TlsStream<S>) -> io::Result<Vec<u8>>
+fn get_der_cert_from_stream<S>(stream: &TlsStream<S>) -> Vec<u8>
 where
     S: io::Read + io::Write,
 {
     stream
         .peer_certificate()
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to get the peer certificate: {}", e),
-            )
-        })?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "A server must provide the certificate"))?
+        .expect("failed to get the peer certificate")
+        .expect("A server must provide the certificate")
         .to_der()
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to convert the peer certificate to der: {}", e),
-            )
-        })
+        .expect("failed to convert the peer certificate to DER")
 }
 
-fn get_tls_pubkey_from_cert(cert: openssl::x509::X509) -> io::Result<Vec<u8>> {
-    Ok(cert.public_key()?.public_key_to_der()?.split_off(TLS_PUBLIC_KEY_HEADER))
+fn get_tls_pubkey_from_cert(cert: openssl::x509::X509) -> Vec<u8> {
+    cert.public_key()
+        .expect("failed to get public key from cert")
+        .public_key_to_der()
+        .expect("failed to convert public key to DER")
+        .split_off(TLS_PUBLIC_KEY_HEADER)
 }
