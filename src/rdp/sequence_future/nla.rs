@@ -18,7 +18,9 @@ use tokio_tls::{Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 use crate::{
     io_try,
     rdp::identities_proxy::{IdentitiesProxy, RdpIdentity, RdpIdentityGetter},
-    rdp::sequence_future::{FutureState, NextStream, SequenceFuture, SequenceFutureProperties},
+    rdp::sequence_future::{
+        FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
+    },
     transport::tsrequest::TsRequestTransport,
     utils,
 };
@@ -77,8 +79,8 @@ impl Future for NlaWithClientFuture {
                     );
 
                     let client_transport = TsRequestTransport::default().framed(client_tls);
-                    self.state = NlaWithClientFutureState::CredSsp(Box::new(SequenceFuture {
-                        future: CredSspWithClientFuture::new(
+                    self.state = NlaWithClientFutureState::CredSsp(Box::new(SequenceFuture::with_get_state(
+                        CredSspWithClientFuture::new(
                             self.tls_proxy_pubkey
                                 .take()
                                 .expect("The TLS proxy public key must be set in the constructor"),
@@ -86,13 +88,12 @@ impl Future for NlaWithClientFuture {
                                 .take()
                                 .expect("The identities proxy must be set in the constructor"),
                         )?,
-                        client: Some(client_transport),
-                        server: None,
-                        send_future: None,
-                        pdu: None,
-                        future_state: FutureState::GetMessage,
-                        client_logger: self.client_logger.clone(),
-                    }));
+                        self.client_logger.clone(),
+                        GetStateArgs {
+                            client: Some(client_transport),
+                            server: None,
+                        },
+                    )));
                 }
                 NlaWithClientFutureState::CredSsp(cred_ssp_future) => {
                     let (client_transport, rdp_identity) = try_ready!(cred_ssp_future.poll());
@@ -191,19 +192,19 @@ impl Future for NlaWithServerFuture {
                     let client_public_key = utils::get_tls_peer_pubkey(&server_tls)?;
                     let server_transport = TsRequestTransport::default().framed(server_tls);
 
-                    self.state = NlaWithServerFutureState::CredSsp(Box::new(SequenceFuture {
-                        future: CredSspWithServerFuture::new(
+                    self.state = NlaWithServerFutureState::CredSsp(Box::new(SequenceFuture::with_parse_state(
+                        CredSspWithServerFuture::new(
                             client_public_key,
                             self.client_request_flags,
                             self.target_credentials.clone(),
                         )?,
-                        client: None,
-                        server: Some(server_transport),
-                        send_future: None,
-                        pdu: Some(TsRequest::default()),
-                        future_state: FutureState::ParseMessage,
-                        client_logger: self.client_logger.clone(),
-                    }));
+                        self.client_logger.clone(),
+                        ParseStateArgs {
+                            client: None,
+                            server: Some(server_transport),
+                            pdu: TsRequest::default(),
+                        },
+                    )));
                 }
                 NlaWithServerFutureState::CredSsp(cred_ssp_future) => {
                     let server_transport = try_ready!(cred_ssp_future.poll());
