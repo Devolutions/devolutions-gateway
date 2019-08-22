@@ -11,9 +11,9 @@ use crate::{
         filter::FilterConfig,
         identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
-            create_negotiation_request, FutureState, McsFuture, McsFutureTransport, McsInitialFuture,
+            create_negotiation_request, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaWithClientFuture, NlaWithServerFuture,
-            PostMcs, SequenceFuture, StaticChannels,
+            PostMcs, SendStateArgs, SequenceFuture, StaticChannels,
         },
     },
     transport::{
@@ -44,15 +44,14 @@ impl ConnectionSequenceFuture {
         client_logger: slog::Logger,
     ) -> Self {
         Self {
-            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(SequenceFuture {
-                future: NegotiationWithClientFuture::new(),
-                client: Some(NegotiationWithClientTransport::default().framed(client)),
-                server: None,
-                send_future: None,
-                pdu: None,
-                future_state: FutureState::GetMessage,
-                client_logger: client_logger.clone(),
-            })),
+            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(SequenceFuture::with_get_state(
+                NegotiationWithClientFuture::new(),
+                client_logger.clone(),
+                GetStateArgs {
+                    client: Some(NegotiationWithClientTransport::default().framed(client)),
+                    server: None,
+                },
+            ))),
             client_tls: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
@@ -118,17 +117,14 @@ impl ConnectionSequenceFuture {
                 .expect("For server negotiation future, the request must be set after negotiation with client")
                 .clone(),
         )?;
-        let send_future = Some(server_transport.send(pdu));
 
-        Ok(SequenceFuture {
-            future: NegotiationWithServerFuture::new(),
-            client: None,
-            server: None,
-            send_future,
-            pdu: None,
-            future_state: FutureState::SendMessage,
-            client_logger: self.client_logger.clone(),
-        })
+        Ok(SequenceFuture::with_send_state(
+            NegotiationWithServerFuture::new(),
+            self.client_logger.clone(),
+            SendStateArgs {
+                send_future: server_transport.send(pdu),
+            },
+        ))
     }
     fn create_nla_server_future(
         &self,
@@ -155,21 +151,20 @@ impl ConnectionSequenceFuture {
             .take()
             .expect("For the McsInitial state, the client TLS stream must be set after the client negotiation");
 
-        SequenceFuture {
-            future: McsInitialFuture::new(FilterConfig::new(
+        SequenceFuture::with_get_state(
+            McsInitialFuture::new(FilterConfig::new(
                 self.rdp_identity
                     .as_ref()
                     .expect("the RDP identity must be set after the server NLA")
                     .target
                     .clone(),
             )),
-            client: Some(DataTransport::default().framed(client_tls)),
-            server: Some(DataTransport::default().framed(server_tls)),
-            send_future: None,
-            pdu: None,
-            future_state: FutureState::GetMessage,
-            client_logger: self.client_logger.clone(),
-        }
+            self.client_logger.clone(),
+            GetStateArgs {
+                client: Some(DataTransport::default().framed(client_tls)),
+                server: Some(DataTransport::default().framed(server_tls)),
+            },
+        )
     }
     fn create_mcs_future(
         &mut self,
@@ -181,34 +176,32 @@ impl ConnectionSequenceFuture {
             .take()
             .expect("the client TLS stream must be set after the MCS initial");
 
-        SequenceFuture {
-            future: McsFuture::new(static_channels),
-            client: Some(McsTransport::default().framed(client_tls)),
-            server: Some(McsTransport::default().framed(server_tls)),
-            send_future: None,
-            pdu: None,
-            future_state: FutureState::GetMessage,
-            client_logger: self.client_logger.clone(),
-        }
+        SequenceFuture::with_get_state(
+            McsFuture::new(static_channels),
+            self.client_logger.clone(),
+            GetStateArgs {
+                client: Some(McsTransport::default().framed(client_tls)),
+                server: Some(McsTransport::default().framed(server_tls)),
+            },
+        )
     }
     fn create_rdp_future(
         &mut self,
         client_transport: McsFutureTransport,
         server_transport: McsFutureTransport,
     ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, McsTransport> {
-        SequenceFuture {
-            future: PostMcs::new(
+        SequenceFuture::with_get_state(
+            PostMcs::new(
                 self.filter_config
                     .take()
                     .expect("the filter config must be set after the MCS initial"),
             ),
-            client: Some(client_transport),
-            server: Some(server_transport),
-            send_future: None,
-            pdu: None,
-            future_state: FutureState::GetMessage,
-            client_logger: self.client_logger.clone(),
-        }
+            self.client_logger.clone(),
+            GetStateArgs {
+                client: Some(client_transport),
+                server: Some(server_transport),
+            },
+        )
     }
 }
 

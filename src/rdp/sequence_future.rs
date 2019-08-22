@@ -49,13 +49,13 @@ where
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder>::Error>,
 {
-    pub future: F,
-    pub client: Option<Framed<T, U>>,
-    pub server: Option<Framed<T, U>>,
-    pub send_future: Option<Send<Framed<T, U>>>,
-    pub pdu: Option<<U as Decoder>::Item>,
-    pub future_state: FutureState,
-    pub client_logger: slog::Logger,
+    future: F,
+    client: Option<Framed<T, U>>,
+    server: Option<Framed<T, U>>,
+    send_future: Option<Send<Framed<T, U>>>,
+    pdu: Option<<U as Decoder>::Item>,
+    future_state: FutureState,
+    client_logger: slog::Logger,
 }
 
 impl<F, T, U> SequenceFuture<F, T, U>
@@ -66,6 +66,40 @@ where
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder>::Error>,
 {
+    pub fn with_get_state(future: F, client_logger: slog::Logger, args: GetStateArgs<T, U>) -> Self {
+        Self {
+            future,
+            client: args.client,
+            server: args.server,
+            send_future: None,
+            pdu: None,
+            future_state: FutureState::GetMessage,
+            client_logger,
+        }
+    }
+    pub fn with_parse_state(future: F, client_logger: slog::Logger, args: ParseStateArgs<T, U>) -> Self {
+        Self {
+            future,
+            client: args.client,
+            server: args.server,
+            send_future: None,
+            pdu: Some(args.pdu),
+            future_state: FutureState::ParseMessage,
+            client_logger,
+        }
+    }
+    pub fn with_send_state(future: F, client_logger: slog::Logger, args: SendStateArgs<T, U>) -> Self {
+        Self {
+            future,
+            client: None,
+            server: None,
+            send_future: Some(args.send_future),
+            pdu: None,
+            future_state: FutureState::SendMessage,
+            client_logger,
+        }
+    }
+
     fn next_future_state(&self) -> FutureState {
         if self.future.sequence_finished(self.future_state) {
             FutureState::Finished
@@ -170,4 +204,31 @@ pub enum FutureState {
     ParseMessage,
     SendMessage,
     Finished,
+}
+
+pub struct GetStateArgs<T, U>
+where
+    T: AsyncRead + AsyncWrite,
+    U: Decoder + Encoder,
+{
+    pub client: Option<Framed<T, U>>,
+    pub server: Option<Framed<T, U>>,
+}
+
+pub struct ParseStateArgs<T, U>
+where
+    T: AsyncRead + AsyncWrite,
+    U: Decoder + Encoder,
+{
+    pub client: Option<Framed<T, U>>,
+    pub server: Option<Framed<T, U>>,
+    pub pdu: <U as Decoder>::Item,
+}
+
+pub struct SendStateArgs<T, U>
+where
+    T: AsyncRead + AsyncWrite,
+    U: Decoder + Encoder,
+{
+    pub send_future: Send<Framed<T, U>>,
 }
