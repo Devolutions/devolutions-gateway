@@ -16,7 +16,7 @@ struct ConfigTemp {
     listeners: Vec<String>,
     jet_instance: Option<String>,
     routing_url: Option<String>,
-    pcap_filename: Option<String>,
+    pcap_files_path: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
 }
@@ -34,7 +34,7 @@ pub struct Config {
     listeners: Vec<ListenerConfig>,
     jet_instance: String,
     routing_url: Option<String>,
-    pcap_filename: Option<String>,
+    pcap_files_path: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
 }
@@ -60,8 +60,8 @@ impl Config {
         self.routing_url.clone()
     }
 
-    pub fn pcap_filename(&self) -> Option<String> {
-        self.pcap_filename.clone()
+    pub fn pcap_files_path(&self) -> Option<String> {
+        self.pcap_files_path.clone()
     }
 
     pub fn protocol(&self) -> &Protocol {
@@ -116,14 +116,20 @@ impl Config {
                     .empty_values(false),
             )
             .arg(
-                Arg::with_name("pcap-filename")
+                Arg::with_name("pcap-files-path")
                     .short("f")
-                    .long("pcap-file")
-                    .value_name("PCAP_FILENAME")
-                    .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
-                    .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
+                    .long("pcap-files-path")
+                    .value_name("PCAP_FILES_PATH")
+                    .help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
+                    .long_help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
                     .takes_value(true)
-                    .empty_values(false),
+                    .empty_values(false)
+                    .validator(|v| if std::path::PathBuf::from(v).is_dir() {
+                        Ok(())
+                    } else {
+                        Err(String::from("The value does not exist or is not a path"))
+                    })
+                ,
             )
             .arg(
                 Arg::with_name("protocol")
@@ -195,7 +201,9 @@ identities_file example:
 
         let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
 
-        let pcap_filename = matches.value_of("pcap-filename").map(std::string::ToString::to_string);
+        let pcap_files_path = matches
+            .value_of("pcap-files-path")
+            .map(std::string::ToString::to_string);
 
         let protocol = match matches.value_of("protocol") {
             Some("wayk") => Protocol::WAYK,
@@ -213,7 +221,7 @@ identities_file example:
             listeners,
             jet_instance,
             routing_url,
-            pcap_filename,
+            pcap_files_path,
             protocol,
             identities_filename,
         };
@@ -280,7 +288,7 @@ impl From<ConfigTemp> for Config {
             listeners,
             jet_instance: jet_instance,
             routing_url: temp.routing_url,
-            pcap_filename: temp.pcap_filename,
+            pcap_files_path: temp.pcap_files_path,
             protocol: temp.protocol,
             identities_filename: temp.identities_filename,
 

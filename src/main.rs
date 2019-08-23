@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -155,11 +156,25 @@ impl Proxy {
         let jet_sink_client = client_transport.message_sink();
         let mut jet_stream_client = client_transport.message_stream();
 
-        if let Some(pcap_filename) = self.config.pcap_filename() {
+        if let Some(pcap_files_path) = self.config.pcap_files_path() {
+            let server_peer_addr = jet_stream_server.peer_addr().unwrap();
+            let client_peer_addr = jet_stream_client.peer_addr().unwrap();
+
+            let filename = format!(
+                "{}({})-to-{}({})-at-{}.pcap",
+                client_peer_addr.ip(),
+                client_peer_addr.port(),
+                server_peer_addr.ip().to_string(),
+                server_peer_addr.port(),
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+            );
+            let mut path = path::PathBuf::from(pcap_files_path);
+            path.push(filename);
+
             let mut interceptor = PcapInterceptor::new(
-                jet_stream_server.peer_addr().unwrap(),
-                jet_stream_client.peer_addr().unwrap(),
-                &pcap_filename,
+                server_peer_addr,
+                client_peer_addr,
+                path.to_str().expect("path to pcap files must be valid"),
             );
 
             match self.config.protocol() {
