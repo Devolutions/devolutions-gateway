@@ -236,9 +236,7 @@ impl Stream for TcpJetStream {
 
                             return Ok(Async::Ready(Some(result)));
                         }
-
-                        return Ok(Async::Ready(None))
-                    },
+                    }
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
@@ -268,16 +266,24 @@ impl Stream for TcpJetStream {
 
                             return Ok(Async::Ready(Some(result)));
                         }
-
-                        return Ok(Async::NotReady)
-                    },
+                    }
 
                     Err(e) => {
                         error!("Can't read on socket: {}", e);
+
                         return Ok(Async::Ready(None));
                     }
+                };
+
+                if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                    let peer_addr = Some(stream.peer_addr()?);
+
+                    interceptor.on_new_packet(peer_addr, &result);
                 }
+
+                return Ok(Async::Ready(Some(result)));
             }
+
             Ok(Async::Ready(Some(result)))
         } else {
             Ok(Async::NotReady)
