@@ -10,17 +10,17 @@ pub struct FilterConfig {
     client_early_capability_flags: gcc::ClientEarlyCapabilityFlags,
     server_early_capability_flags: gcc::ServerEarlyCapabilityFlags,
     encryption_methods: gcc::EncryptionMethod,
-    client_credentials: Credentials,
+    target_credentials: Credentials,
 }
 
 impl FilterConfig {
-    pub fn new(client_credentials: Credentials) -> Self {
+    pub fn new(target_credentials: Credentials) -> Self {
         Self {
             version: gcc::RdpVersion::V5Plus,
             client_early_capability_flags: gcc::ClientEarlyCapabilityFlags::empty(),
             server_early_capability_flags: gcc::ServerEarlyCapabilityFlags::empty(),
             encryption_methods: gcc::EncryptionMethod::empty(),
-            client_credentials,
+            target_credentials,
         }
     }
 }
@@ -55,7 +55,7 @@ impl Filter for ConnectResponse {
 
 impl Filter for ClientInfoPdu {
     fn filter(&mut self, config: &FilterConfig) {
-        self.client_info.credentials = config.client_credentials.clone();
+        self.client_info.credentials = config.target_credentials.clone();
     }
 }
 

@@ -160,7 +160,7 @@ impl ConnectionSequenceFuture {
                 self.rdp_identity
                     .as_ref()
                     .expect("the RDP identity must be set after the server NLA")
-                    .proxy
+                    .target
                     .clone(),
             )),
             client: Some(DataTransport::default().framed(client_tls)),
