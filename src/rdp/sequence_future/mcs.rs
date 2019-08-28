@@ -70,6 +70,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for McsFuture 
                         .insert(channel_id, channel_name);
 
                     let sequence_state = if self.channels_to_join.is_empty() {
+                        debug!(client_logger, "Joined static channels: {:?}", self.joined_channels);
+
                         McsSequenceState::Finished
                     } else {
                         McsSequenceState::ChannelJoinRequest
@@ -254,7 +256,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
             .zip(channel_names.into_iter().map(|v| v.name))
             .chain(iter::once((global_channel_id, GLOBAL_CHANNEL_NAME.to_string())))
             .collect::<StaticChannels>();
-        debug!(client_logger, "Static channels: {:?}", static_channels);
+        debug!(client_logger, "Static channels to join: {:?}", static_channels);
 
         (
         client.take().expect(

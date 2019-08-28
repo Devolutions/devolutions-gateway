@@ -163,6 +163,7 @@ fn process_send_data_request_pdu(
             debug!(client_logger, "Got Client Info PDU: {:?}", client_info_pdu);
 
             client_info_pdu.filter(filter_config);
+            debug!(client_logger, "Filtered Client Info PDU: {:?}", client_info_pdu);
 
             let mut client_info_pdu_buffer = Vec::with_capacity(client_info_pdu.buffer_length());
             client_info_pdu.to_buffer(&mut client_info_pdu_buffer)?;
