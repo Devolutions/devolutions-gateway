@@ -233,7 +233,10 @@ impl Future for ConnectionSequenceFuture {
                             self.create_nla_client_future(client, protocol),
                         ));
                     } else {
-                        unreachable!("The negotiation with client future must return response");
+                        return Err(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "The client does not support HYBRID (or HYBRID_EX) protocol",
+                        ));
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithClient(nla_future) => {
