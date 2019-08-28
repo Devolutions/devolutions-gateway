@@ -71,11 +71,11 @@ impl Future for NlaWithClientFuture {
                         .map_err(move |e| {
                             io::Error::new(
                                 io::ErrorKind::ConnectionRefused,
-                                format!("Failed to accept a client connection: {}", e),
+                                format!("Failed to accept the client TLS connection: {}", e),
                             )
                         })
                         .poll());
-                    info!(
+                    debug!(
                         self.client_logger,
                         "TLS connection has been established with the client"
                     );
@@ -120,8 +120,13 @@ impl Future for NlaWithClientFuture {
                 }
                 NlaWithClientFutureState::EarlyUserAuthResult(early_user_auth_result_future) => {
                     let transport = try_ready!(early_user_auth_result_future.poll());
-
                     let client_tls = transport.into_inner();
+
+                    debug!(
+                        self.client_logger,
+                        "Success Early User Authorization Result PDU sent to the client"
+                    );
+                    info!(self.client_logger, "NLA phase has been finished with the client");
 
                     return Ok(Async::Ready((
                         client_tls,
@@ -188,7 +193,7 @@ impl Future for NlaWithServerFuture {
                             )
                         })
                         .poll());
-                    info!(
+                    debug!(
                         self.client_logger,
                         "TLS connection has been established with the server"
                     );
@@ -233,19 +238,32 @@ impl Future for NlaWithServerFuture {
                     let (early_user_auth_result, transport) =
                         try_ready!(early_user_auth_result_future.map_err(|(e, _)| e).poll());
 
-                    if let Some(early_user_auth_result) = early_user_auth_result {
-                        if let EarlyUserAuthResult::Success = early_user_auth_result {
+                    match early_user_auth_result {
+                        Some(EarlyUserAuthResult::Success) => {
                             let server_tls = transport.into_inner();
 
+                            debug!(
+                                self.client_logger,
+                                "Got Success Early User Authorization Result from the server"
+                            );
+                            info!(self.client_logger, "NLA phase has been finished with the server");
+
                             return Ok(Async::Ready(server_tls));
-                        } else {
+                        }
+                        Some(EarlyUserAuthResult::AccessDenied) => {
+                            debug!(
+                                self.client_logger,
+                                "The server has denied access via Early User Authorization Result PDU"
+                            );
+
                             return Err(io::Error::new(io::ErrorKind::Other, "The server failed CredSSP phase"));
                         }
-                    } else {
-                        return Err(io::Error::new(
-                            io::ErrorKind::UnexpectedEof,
-                            "The stream was closed unexpectedly",
-                        ));
+                        None => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::UnexpectedEof,
+                                "The stream was closed unexpectedly",
+                            ))
+                        }
                     }
                 }
             }
@@ -280,8 +298,16 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                 let response = self.cred_ssp_server.process(pdu);
 
                 let (next_sequence_state, ts_request) = match response {
-                    Ok(CredSspResult::ReplyNeeded(ts_request)) => (SequenceState::CredSspSequence, Some(ts_request)),
-                    Ok(CredSspResult::FinalMessage(ts_request)) => (SequenceState::FinalMessage, Some(ts_request)),
+                    Ok(CredSspResult::ReplyNeeded(ts_request)) => {
+                        debug!(client_logger, "Sending TSRequest to the client: {:x?}", ts_request);
+
+                        (SequenceState::CredSspSequence, Some(ts_request))
+                    }
+                    Ok(CredSspResult::FinalMessage(ts_request)) => {
+                        debug!(client_logger, "Sending last TSRequest to the client: {:x?}", ts_request);
+
+                        (SequenceState::FinalMessage, Some(ts_request))
+                    }
                     Ok(CredSspResult::ClientCredentials(read_credentials)) => {
                         let expected_credentials = &self.cred_ssp_server.credentials.get_rdp_identity().proxy;
                         if expected_credentials.username == read_credentials.username
@@ -306,7 +332,6 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                     }
                     _ => unreachable!(),
                 };
-                debug!(client_logger, "Sending TSRequest to the client: {:x?}", ts_request);
 
                 self.sequence_state = next_sequence_state;
 
@@ -324,7 +349,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         _server: Option<TsRequestFutureTransport>,
         client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully processed CredSSP with the server");
+        info!(client_logger, "Successfully processed CredSSP with the client");
 
         (
             client.take().expect(
@@ -398,7 +423,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         mut server: Option<TsRequestFutureTransport>,
         client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully processed CredSSP with the client");
+        info!(client_logger, "Successfully processed CredSSP with the server");
 
         server.take().expect(
             "In CredSSP Connection Sequence, the server's stream must exist in a return_item method, and the method cannot be fired multiple times",
