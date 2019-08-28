@@ -1,7 +1,7 @@
 use std::io;
 
-use ironrdp::nego::{NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
-use slog::info;
+use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
+use slog::{debug, info};
 use tokio::codec::Framed;
 use tokio_tcp::TcpStream;
 
@@ -31,30 +31,45 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for Neg
             Some(NegoData::Cookie(cookie)) => (None, Some(cookie)),
             None => (None, None),
         };
-        info!(
+        debug!(
             client_logger,
-            "Processing request (routing_token: {:?}, cookie: {:?}, protocol: {:?}, flags: {:?})",
+            "Processing negotiation request from the client (routing_token: {:?}, cookie: {:?}, protocol: {:?}, flags: {:?})",
             routing_token,
             cookie,
             request.protocol,
             request.flags,
         );
 
-        let flags = ResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
-            | ResponseFlags::RDP_NEG_RSP_RESERVED
-            | ResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
-            | ResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
-        let protocol = if request.protocol.contains(SecurityProtocol::HYBRID_EX) {
-            SecurityProtocol::HYBRID_EX
+        let response_data = if request.protocol.contains(SecurityProtocol::HYBRID)
+            || request.protocol.contains(SecurityProtocol::HYBRID_EX)
+        {
+            let protocol = if request.protocol.contains(SecurityProtocol::HYBRID_EX) {
+                SecurityProtocol::HYBRID_EX
+            } else {
+                SecurityProtocol::HYBRID
+            };
+            let flags = ResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED
+                | ResponseFlags::RDP_NEG_RSP_RESERVED
+                | ResponseFlags::RESTRICTED_ADMIN_MODE_SUPPORTED
+                | ResponseFlags::REDIRECTED_AUTHENTICATION_MODE_SUPPORTED;
+
+            ResponseData::Response { flags, protocol }
         } else {
-            SecurityProtocol::HYBRID
+            ResponseData::Failure {
+                code: FailureCode::HybridRequiredByServer,
+            }
         };
 
         let response = Response {
-            response: Some(ResponseData::Response { flags, protocol }),
+            response: Some(response_data),
             dst_ref: 0,
-            src_ref: 0,
+            src_ref: request.src_ref,
         };
+        debug!(
+            client_logger,
+            "Sending response to the client: {:?}",
+            response.response.as_ref().unwrap()
+        );
 
         self.request = Some(request);
         self.response = Some(response.clone());
@@ -108,9 +123,9 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
     fn process_pdu(&mut self, response: Response, client_logger: &slog::Logger) -> io::Result<Option<Request>> {
         match response.response {
             Some(ResponseData::Response { protocol, flags }) => {
-                info!(
+                debug!(
                     client_logger,
-                    "Received negotiation response from server (protocol: {:?}, flags: {:?})", protocol, flags,
+                    "Received negotiation response from the server (protocol: {:?}, flags: {:?})", protocol, flags,
                 );
 
                 match protocol {
