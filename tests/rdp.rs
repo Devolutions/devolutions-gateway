@@ -87,15 +87,19 @@ fn rdp_with_nla_ntlm() {
                 .expect("failed to get path to a temporary file"),
         ),
     );
-    thread::sleep(Duration::from_millis(500));
 
     let server_thread = thread::spawn(move || {
         let mut server = RdpServer::new(TARGET_SERVER_ADDR, IdentitiesProxy::new(SERVER_CREDENTIALS.clone()));
         server.run();
     });
-    let client_thread = thread::spawn(move || {
+    let client_thread = thread::spawn(move || loop {
         let mut client = run_client();
-        client.wait().expect("error occurred in IronRDP client");
+        match client.wait().expect("error occurred in IronRDP client").code() {
+            Some(exitcode::NOHOST) => thread::sleep(Duration::from_millis(10)),
+            Some(exitcode::OK) => break,
+            Some(code) => panic!("The client exited with error code: {}", code),
+            None => panic!("Client's exit code is none"),
+        }
     });
 
     client_thread.join().expect("failed to join the client thread");
