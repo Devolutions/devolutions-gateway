@@ -1,4 +1,4 @@
-use ironrdp::{gcc, CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive};
+use ironrdp::{gcc, rdp::ClientInfoFlags, CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive};
 use sspi::Credentials;
 
 pub trait Filter {
@@ -56,6 +56,9 @@ impl Filter for ConnectResponse {
 impl Filter for ClientInfoPdu {
     fn filter(&mut self, config: &FilterConfig) {
         self.client_info.credentials = config.target_credentials.clone();
+        self.client_info
+            .flags
+            .remove(ClientInfoFlags::AUTOLOGON | ClientInfoFlags::LOGON_NOTIFY);
     }
 }
 

@@ -106,12 +106,14 @@ impl ConnectionSequenceFuture {
     ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>> {
         let server_transport = NegotiationWithServerTransport::default().framed(server);
 
-        let target_credentials = self.rdp_identity
+        let target_username = self.rdp_identity
             .as_ref()
             .expect("The RDP identity must be set after the client negotiation and be taken by reference in the connect server state")
-            .target.clone();
+            .target
+            .username
+            .clone();
         let pdu = create_negotiation_request(
-            target_credentials,
+            target_username,
             self.request
                 .as_ref()
                 .expect("For server negotiation future, the request must be set after negotiation with client")
@@ -131,13 +133,20 @@ impl ConnectionSequenceFuture {
         server: TcpStream,
         server_response_protocol: nego::SecurityProtocol,
     ) -> io::Result<NlaWithServerFuture> {
+        let target_identity = self.rdp_identity
+            .as_ref()
+            .expect("The RDP identity must be set after the client negotiation and be taken by reference in the server negotiation state").target.clone().into();
+        let request_flags = self
+            .request
+            .as_ref()
+            .expect("for NLA server future, the request must be set after negotiation with client")
+            .flags;
+
         NlaWithServerFuture::new(
             server,
-            self.request.as_ref().expect("for NLA server future, the request must be set after negotiation with client").flags,
+            request_flags,
             server_response_protocol,
-            self.rdp_identity
-                .as_ref()
-                .expect("The RDP identity must be set after the client negotiation and be taken by reference in the server negotiation state").target.clone(),
+            target_identity,
             true,
             self.client_logger.clone(),
         )
@@ -157,7 +166,8 @@ impl ConnectionSequenceFuture {
                     .as_ref()
                     .expect("the RDP identity must be set after the server NLA")
                     .target
-                    .clone(),
+                    .clone()
+                    .into(),
             )),
             self.client_logger.clone(),
             GetStateArgs {
