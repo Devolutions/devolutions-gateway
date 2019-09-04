@@ -7,9 +7,26 @@ pub trait RdpIdentityGetter {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct FullCredentials {
+    pub username: String,
+    pub password: String,
+    pub domain: String,
+}
+
+impl From<FullCredentials> for sspi::Credentials {
+    fn from(identity: FullCredentials) -> Self {
+        Self {
+            username: identity.username,
+            password: identity.password,
+            domain: Some(identity.domain),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
     pub proxy: sspi::Credentials,
-    pub target: sspi::Credentials,
+    pub target: FullCredentials,
     pub destination: String,
 }
 

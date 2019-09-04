@@ -2,7 +2,6 @@ use std::io;
 
 use ironrdp::nego::{NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
 use slog::info;
-use sspi::Credentials;
 use tokio::codec::Framed;
 use tokio_tcp::TcpStream;
 
@@ -161,8 +160,8 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
     }
 }
 
-pub fn create_negotiation_request(credentials: Credentials, mut request: Request) -> io::Result<Request> {
-    request.nego_data = Some(NegoData::Cookie(credentials.username));
+pub fn create_negotiation_request(cookie: String, mut request: Request) -> io::Result<Request> {
+    request.nego_data = Some(NegoData::Cookie(cookie));
 
     Ok(request)
 }
