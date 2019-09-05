@@ -3,9 +3,9 @@ use std::io;
 use bytes::BytesMut;
 use futures::{sink::Send, stream::StreamFuture, try_ready, Future, Poll};
 use ironrdp::nego;
-use slog::{debug, info};
+use slog::{debug, error, info};
 use sspi::{
-    CredSsp, CredSspClient, CredSspResult, CredSspServer, Credentials, EarlyUserAuthResult, TsRequest,
+    CredSspClient, CredSspResult, CredSspServer, Credentials, EarlyUserAuthResult, TsRequest,
     EARLY_USER_AUTH_RESULT_PDU_SIZE,
 };
 use tokio::{
@@ -253,7 +253,7 @@ pub struct CredSspWithClientFuture {
 
 impl CredSspWithClientFuture {
     pub fn new(tls_proxy_pubkey: Vec<u8>, identities_proxy: IdentitiesProxy) -> io::Result<Self> {
-        let cred_ssp_server = CredSspServer::with_default_version(tls_proxy_pubkey, identities_proxy)?;
+        let cred_ssp_server = CredSspServer::new(tls_proxy_pubkey, identities_proxy)?;
 
         Ok(Self {
             cred_ssp_server,
@@ -266,33 +266,50 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
     type Item = (TsRequestFutureTransport, RdpIdentity);
 
     fn process_pdu(&mut self, pdu: TsRequest, client_logger: &slog::Logger) -> io::Result<Option<TsRequest>> {
-        debug!(client_logger, "Got client's TSRequest: {:?}", pdu);
-        let response = self.cred_ssp_server.process(pdu)?;
+        debug!(client_logger, "Got client's TSRequest: {:x?}", pdu);
 
-        let (next_sequence_state, result) = match response {
-            CredSspResult::ReplyNeeded(ts_request) => (SequenceState::CredSspSequence, Some(ts_request)),
-            CredSspResult::WithError(ts_request) | CredSspResult::FinalMessage(ts_request) => {
-                (SequenceState::FinalMessage, Some(ts_request))
+        match self.sequence_state {
+            SequenceState::CredSspSequence => {
+                let response = self.cred_ssp_server.process(pdu);
+
+                let (next_sequence_state, ts_request) = match response {
+                    Ok(CredSspResult::ReplyNeeded(ts_request)) => (SequenceState::CredSspSequence, Some(ts_request)),
+                    Ok(CredSspResult::FinalMessage(ts_request)) => (SequenceState::FinalMessage, Some(ts_request)),
+                    Ok(CredSspResult::ClientCredentials(read_credentials)) => {
+                        let expected_credentials = &self.cred_ssp_server.credentials.get_rdp_identity().proxy;
+                        if expected_credentials.username == read_credentials.username
+                            && expected_credentials.password == read_credentials.password
+                        {
+                            (SequenceState::Finished, None)
+                        } else {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                String::from("Got invalid credentials from the client"),
+                            ));
+                        }
+                    }
+                    Err(ts_request) => {
+                        error!(
+                            client_logger,
+                            "Error happened in CredSSP server, error code: {}",
+                            ts_request.error_code.unwrap()
+                        );
+
+                        (SequenceState::SendingError, Some(ts_request))
+                    }
+                    _ => unreachable!(),
+                };
+                debug!(client_logger, "Sending TSRequest to the client: {:x?}", ts_request);
+
+                self.sequence_state = next_sequence_state;
+
+                Ok(ts_request)
             }
-            CredSspResult::ClientCredentials(read_credentials) => {
-                let expected_credentials = &self.cred_ssp_server.credentials.get_rdp_identity().proxy;
-                if expected_credentials.username == read_credentials.username
-                    && expected_credentials.password == read_credentials.password
-                {
-                    (SequenceState::Finished, None)
-                } else {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        String::from("Got invalid credentials from the client"),
-                    ));
-                }
+            SequenceState::SendingError => Err(io::Error::new(io::ErrorKind::Other, "CredSsp server error")),
+            SequenceState::FinalMessage | SequenceState::Finished => {
+                unreachable!("CredSspWithClientFuture must not be fired in FinalMessage/Finished state")
             }
-            _ => unreachable!(),
-        };
-
-        self.sequence_state = next_sequence_state;
-
-        Ok(result)
+        }
     }
     fn return_item(
         &mut self,
@@ -339,7 +356,7 @@ impl CredSspWithServerFuture {
         } else {
             sspi::CredSspMode::WithCredentials
         };
-        let cred_ssp_client = CredSspClient::with_default_version(public_key, target_credentials, cred_ssp_mode)?;
+        let cred_ssp_client = CredSspClient::new(public_key, target_credentials, cred_ssp_mode)?;
 
         Ok(Self {
             cred_ssp_client,
@@ -352,7 +369,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
     type Item = TsRequestFutureTransport;
 
     fn process_pdu(&mut self, pdu: TsRequest, client_logger: &slog::Logger) -> io::Result<Option<TsRequest>> {
-        debug!(client_logger, "Got server's TSRequest: {:?}", pdu);
+        debug!(client_logger, "Got server's TSRequest: {:x?}", pdu);
         let response = self.cred_ssp_client.process(pdu)?;
 
         let ts_request = match response {
@@ -364,6 +381,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
             }
             _ => unreachable!(),
         };
+        debug!(client_logger, "Sending TSRequest to the server: {:x?}", ts_request);
 
         Ok(Some(ts_request))
     }
@@ -422,6 +440,7 @@ impl Encoder for EarlyUserAuthResultTransport {
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum SequenceState {
     CredSspSequence,
+    SendingError,
     FinalMessage,
     Finished,
 }
