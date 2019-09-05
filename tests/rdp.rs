@@ -20,9 +20,9 @@ use ironrdp::{
 use lazy_static::lazy_static;
 use native_tls::{TlsAcceptor, TlsStream};
 use serde_derive::{Deserialize, Serialize};
-use sspi::CredSsp;
 
 use common::run_proxy;
+use sspi::{CredSspServer, CredentialsProxy};
 
 lazy_static! {
     static ref PROXY_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
@@ -137,7 +137,7 @@ impl RdpServer {
     fn nla(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
         let tls_pubkey = get_tls_pubkey(CERT_PKCS12_DER.clone().as_ref(), CERT_PKCS12_PASS);
 
-        let mut cred_ssp_context = sspi::CredSspServer::with_default_version(tls_pubkey, self.identities_proxy.clone())
+        let mut cred_ssp_context = sspi::CredSspServer::new(tls_pubkey, self.identities_proxy.clone())
             .expect("failed to create a CredSSP server");
 
         self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context);
@@ -670,9 +670,9 @@ impl sspi::CredentialsProxy for IdentitiesProxy {
     }
 }
 
-fn process_cred_ssp_phase_with_reply_needed(
+fn process_cred_ssp_phase_with_reply_needed<C: CredentialsProxy>(
     ts_request: sspi::TsRequest,
-    cred_ssp_context: &mut impl sspi::CredSsp,
+    cred_ssp_context: &mut CredSspServer<C>,
     tls_stream: &mut (impl io::Write + io::Read),
 ) {
     let reply = cred_ssp_context
