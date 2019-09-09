@@ -80,11 +80,15 @@ impl WebsocketService {
                 }
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             } else if req.uri().path().starts_with("/jet/create") {
-                let uuid = Uuid::new_v4();
-                if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
-                    jet_associations.insert(uuid, None);
-                    *response.body_mut() = Body::from(uuid.to_string())
+                if let Some(uuid) = uuid_from_path(req.uri().path()) {
+                    if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
+                        if !jet_associations.contains_key(&uuid) {
+                            jet_associations.insert(uuid, None);
+                            return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
+                        }
+                    }
                 }
+                *response.status_mut() = StatusCode::BAD_REQUEST;
             } else {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             },
