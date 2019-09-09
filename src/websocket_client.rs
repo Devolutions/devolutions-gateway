@@ -28,14 +28,14 @@ impl WebsocketService {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                            if let Ok(jet_associations) = self.jet_associations.try_lock() {
+                            if let Ok(jet_associations) = self.jet_associations.lock() {
                                 if let Some(assc) = jet_associations.get(&uuid) {
                                     if assc.is_none() {
                                         let res = process_req(&req);
 
                                         let jet_associations_clone = self.jet_associations.clone();
                                         let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                            if let Ok(mut jet_assc) = jet_associations_clone.try_lock() {
+                                            if let Ok(mut jet_assc) = jet_associations_clone.lock() {
                                                 jet_assc.insert(uuid, Some(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr))));
                                             }
                                         }).map_err(|e| error!("upgrade error: {}", e));
@@ -53,7 +53,7 @@ impl WebsocketService {
             } else if req.uri().path().starts_with("/jet/connect") {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
-                        if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
+                        if let Ok(mut jet_associations) = self.jet_associations.lock() {
                             if let Some(uuid) = uuid_from_path(req.uri().path()) {
                                 if let Some(assc_temp) = jet_associations.get(&uuid) {
                                     if assc_temp.is_some() {
@@ -81,7 +81,7 @@ impl WebsocketService {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             } else if req.uri().path().starts_with("/jet/create") {
                 if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                    if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
+                    if let Ok(mut jet_associations) = self.jet_associations.lock() {
                         if !jet_associations.contains_key(&uuid) {
                             jet_associations.insert(uuid, None);
                             return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
