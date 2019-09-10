@@ -13,14 +13,18 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use lazy_static::lazy_static;
 use uuid::Uuid;
 
-use jet_proto::{JetPacket, ResponseStatusCode};
+use jet_proto::{JetPacket, ResponseStatusCode, JET_VERSION_V1};
 use log::{debug, error, info};
 
 use crate::config::Config;
 use crate::transport::JetTransport;
 use crate::Proxy;
+use url::Url;
+use crate::jet::Role;
+use crate::jet::association::Association;
+use crate::jet::candidate::Candidate;
 
-pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Option<JetTransport>>>>;
+pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
 lazy_static! {
     static ref JET_INSTANCE: Option<String> = { env::var("JET_INSTANCE").ok() };
@@ -170,7 +174,12 @@ impl Future for HandleAcceptJetMsg {
                 response_msg.set_jet_instance(JET_INSTANCE.clone());
                 self.response_msg = Some(response_msg);
 
-                jet_associations.insert(uuid, Some(self.transport.clone()));
+                let mut association = Association::new(uuid, JET_VERSION_V1);
+                let mut candidate = Candidate::new_v1(); //TODO Remove unwrap
+                candidate.set_server_transport(self.transport.clone());
+                association.add_candidate(candidate);
+
+                jet_associations.insert(uuid, association);
             } else {
                 return Ok(Async::NotReady);
             }
@@ -250,15 +259,18 @@ impl Future for HandleConnectJetMsg {
         // Find the server transport
         if self.server_transport.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
-                let server_stream_opt = jet_associations.remove(&self.request_msg.association().unwrap());
+                let association_opt = jet_associations.remove(&self.request_msg.association().unwrap());
 
-                if let Some(server_transport) = server_stream_opt {
-                    self.server_transport = server_transport;
-                    self.response_msg = Some(JetPacket::new_response(
-                        self.request_msg.flags(),
-                        self.request_msg.mask(),
-                        ResponseStatusCode::StatusCode200,
-                    ));
+                if let Some(mut association) = association_opt {
+                    if let Some(candidate) = association.get_candidate_by_index(0) {
+                        self.server_transport = candidate.server_transport();
+                        self.response_msg = Some(JetPacket::new_response(
+                                self.request_msg.flags(),
+                                self.request_msg.mask(),
+                                ResponseStatusCode::StatusCode200,
+                            ));
+                    }
+
                 } else {
                     self.response_msg = Some(JetPacket::new_response(
                         self.request_msg.flags(),

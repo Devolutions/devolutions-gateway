@@ -42,6 +42,8 @@ tungstenite = "0.8.1"
 sha1 = "0.6.0"
 base64 = "0.9.1"
 
+indexmap = "1.0"
+
 jet-proto = { path = "./jet-proto" }
 
 [dev-dependencies]

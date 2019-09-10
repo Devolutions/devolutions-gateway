@@ -3,6 +3,7 @@ mod utils;
 mod config;
 mod http;
 mod interceptor;
+mod jet;
 mod jet_client;
 mod rdp;
 mod routing_client;
@@ -41,6 +42,7 @@ use crate::websocket_client::{WebsocketService, WsClient};
 use std::error::Error;
 use futures::future::Either;
 use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
+use uuid::Uuid;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;

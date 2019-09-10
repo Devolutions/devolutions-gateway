@@ -8,3 +8,4 @@ authors = ["Francois Dubois <fdubois@devolutions.net>"]
 log = "0.4.6"
 byteorder = "1.2.7"
 uuid = {version = "0.7.1", features = ["v4"]}
+

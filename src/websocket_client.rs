@@ -11,6 +11,8 @@ use crate::Proxy;
 use log::error;
 use url::Url;
 use std::io;
+use crate::jet::association::Association;
+use jet_proto::{JET_VERSION_V1, JET_VERSION_V2};
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -27,23 +29,25 @@ impl WebsocketService {
             &Method::GET => if req.uri().path().starts_with("/jet/accept") {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
-                        if let Some(uuid) = uuid_from_path(req.uri().path()) {
+                        if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 3), get_uuid_in_path(req.uri().path(), 4)) {
                             if let Ok(jet_associations) = self.jet_associations.lock() {
-                                if let Some(assc) = jet_associations.get(&uuid) {
-                                    if assc.is_none() {
-                                        let res = process_req(&req);
+                                if let Some(assc) = jet_associations.get(&association_id) {
+                                    let res = process_req(&req);
 
-                                        let jet_associations_clone = self.jet_associations.clone();
-                                        let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                            if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                                jet_assc.insert(uuid, Some(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr))));
+                                    let jet_associations_clone = self.jet_associations.clone();
+                                    let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                        if let Ok(mut jet_assc) = jet_associations_clone.lock() {
+                                            if let Some(mut assc) = jet_assc.get_mut(&association_id) {
+                                                if let Some(mut candidate) = assc.get_candidate_mut(candidate_id) {
+                                                    candidate.set_server_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+                                                }
                                             }
-                                        }).map_err(|e| error!("upgrade error: {}", e));
+                                        }
+                                    }).map_err(|e| error!("upgrade error: {}", e));
 
-                                        self.executor_handle.spawn(fut);
+                                    self.executor_handle.spawn(fut);
 
-                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
-                                    }
+                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
                                 }
                             }
                         }
@@ -54,25 +58,31 @@ impl WebsocketService {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                            if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                                if let Some(assc_temp) = jet_associations.get(&uuid) {
-                                    if assc_temp.is_some() {
-                                        let owned_assc = jet_associations.remove(&uuid).expect("should be ok").expect("should be ok");
-                                        let res = process_req(&req);
+                            if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 3), get_uuid_in_path(req.uri().path(), 4)) {
+                                if let Some(association) = jet_associations.get_mut(&association_id) {
+                                    let res = process_req(&req);
 
-                                        let self_clone = self.clone();
-                                        let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                            let proxy = Proxy::new(self_clone.config.clone()).build(WsTransport::new_http(upgraded, client_addr), owned_assc).map_err(|_| ());
-                                            self_clone.executor_handle.spawn(proxy);
-                                        }).map_err(|e| error!("upgrade error: {}", e));
+                                    let jet_associations_clone = self.jet_associations.clone();
+                                    let self_clone = self.clone();
+                                    let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                        if let Ok(mut jet_assc) = jet_associations_clone.lock() {
+                                            if let Some(mut assc) = jet_assc.get_mut(&association_id) {
+                                                if let Some(mut candidate) = assc.get_candidate_mut(candidate_id) {
+                                                    candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
 
-                                        self.executor_handle.spawn(fut);
+                                                    // Start the proxy
+                                                    if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
+                                                        let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
+                                                        self_clone.executor_handle.spawn(proxy);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                                                            }).map_err(|e| error!("upgrade error: {}", e));
 
-                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
-                                    } else {
-                                        *response.status_mut() = StatusCode::PRECONDITION_REQUIRED;
-                                        return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
-                                    }
+                                    self.executor_handle.spawn(fut);
+
+                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
                                 }
                             }
                         }
@@ -83,13 +93,19 @@ impl WebsocketService {
                 if let Some(uuid) = uuid_from_path(req.uri().path()) {
                     if let Ok(mut jet_associations) = self.jet_associations.lock() {
                         if !jet_associations.contains_key(&uuid) {
-                            jet_associations.insert(uuid, None);
+                            jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
                             return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
                         }
                     }
                 }
                 *response.status_mut() = StatusCode::BAD_REQUEST;
-            } else {
+            } else if req.uri().path().starts_with("/jet/gather_candidate") {
+                if let Some(uuid) = uuid_from_path(req.uri().path()) {
+                    
+                }
+            }
+
+            else {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
             },
 
@@ -163,6 +179,13 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         .unwrap()
 }
 
+fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
+    if let Some(raw_uuid) = path.split("/").skip(index).next() {
+        Uuid::parse_str(raw_uuid).ok()
+    } else {
+        None
+    }
+}
 
 fn uuid_from_path(path: &str) -> Option<Uuid> {
     if let Some(raw_uuid) = path.split("/").skip(3).next() {

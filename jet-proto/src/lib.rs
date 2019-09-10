@@ -8,10 +8,13 @@ use std::io::{self, Write};
 use std::ops::Add;
 use std::str::FromStr;
 use uuid::Uuid;
+use std::convert::TryFrom;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
-pub const JET_VERSION: u8 = 1;
+pub const JET_VERSION_V1: u8 = 1;
+pub const JET_VERSION_V2: u8 = 2;
+pub const JET_VERSION: u8 = 2;
 
 const JET_HEADER_VERSION: &str = "Jet-Version";
 const JET_HEADER_METHOD: &str = "Jet-Method";
@@ -86,7 +89,7 @@ impl JetPacket {
             flags,
             mask,
             response_status_code: Some(response_status_code),
-            version: Some(JET_VERSION),
+            version: Some(JET_VERSION_V1),
             method: None,
             association: None,
             timeout: None,

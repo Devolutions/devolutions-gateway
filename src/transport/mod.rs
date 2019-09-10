@@ -30,7 +30,6 @@ pub trait Transport {
 pub enum JetTransport {
     Tcp(TcpTransport),
     Ws(WsTransport),
-
 }
 
 impl JetTransport {
