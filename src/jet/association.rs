@@ -2,6 +2,7 @@ use uuid::Uuid;
 use indexmap::IndexMap;
 use crate::jet::candidate::Candidate;
 use crate::jet::{TransportPolicy, Role};
+use serde_json::Value;
 
 pub struct Association {
     id: Uuid,
@@ -42,7 +43,28 @@ impl Association {
         else {
             None
         }
+    }
 
+    pub fn gather_candidate(&self) -> Value {
+        let mut candidates = json!({
+            "id": self.id.to_string()
+        });
+
+        let mut candidate_list = Vec::new();
+        for (id, candidate) in &self.candidates {
+            if let Some(url) = candidate.url() {
+                let json_candidate = json!({
+                    "url": url.to_string(),
+                    "id": id.to_string()
+                });
+
+                candidate_list.push(json_candidate);
+            }
+        }
+
+        candidates.as_object_mut().unwrap().insert("candidates".into(), candidate_list.into());
+
+        candidates
     }
 }
 

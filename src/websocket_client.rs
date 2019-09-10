@@ -8,11 +8,13 @@ use crate::transport::ws::WsTransport;
 use std::net::SocketAddr;
 use crate::config::Config;
 use crate::Proxy;
-use log::error;
+use log::{info, error};
 use url::Url;
 use std::io;
 use crate::jet::association::Association;
 use jet_proto::{JET_VERSION_V1, JET_VERSION_V2};
+use crate::jet::candidate::{CandidateState, Candidate};
+use crate::jet_client::JET_INSTANCE;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -24,12 +26,12 @@ pub struct WebsocketService {
 impl WebsocketService {
     pub fn handle(&mut self, req: Request<Body>, client_addr: Option<SocketAddr>) -> Box<dyn Future<Item=Response<Body>, Error=hyper::Error> + Send> {
         let mut response = Response::new(Body::empty());
-
+        info!("HTTP request received: {} on path {}", req.method(), req.uri().path());
         match req.method() {
             &Method::GET => if req.uri().path().starts_with("/jet/accept") {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
-                        if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 3), get_uuid_in_path(req.uri().path(), 4)) {
+                        if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
                             if let Ok(jet_associations) = self.jet_associations.lock() {
                                 if let Some(assc) = jet_associations.get(&association_id) {
                                     let res = process_req(&req);
@@ -58,7 +60,7 @@ impl WebsocketService {
                 if let Some(header) = req.headers().get("upgrade") {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                            if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 3), get_uuid_in_path(req.uri().path(), 4)) {
+                            if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
                                 if let Some(association) = jet_associations.get_mut(&association_id) {
                                     let res = process_req(&req);
 
@@ -89,7 +91,11 @@ impl WebsocketService {
                     }
                 }
                 *response.status_mut() = StatusCode::BAD_REQUEST;
-            } else if req.uri().path().starts_with("/jet/create") {
+            } else {
+                *response.status_mut() = StatusCode::BAD_REQUEST;
+            },
+
+            &Method::POST => if req.uri().path().starts_with("/jet/create") {
                 if let Some(uuid) = uuid_from_path(req.uri().path()) {
                     if let Ok(mut jet_associations) = self.jet_associations.lock() {
                         if !jet_associations.contains_key(&uuid) {
@@ -99,15 +105,33 @@ impl WebsocketService {
                     }
                 }
                 *response.status_mut() = StatusCode::BAD_REQUEST;
-            } else if req.uri().path().starts_with("/jet/gather_candidate") {
-                if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                    
-                }
-            }
 
-            else {
+            } else if req.uri().path().starts_with("/jet/gather") {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
-            },
+                if let Some(association_id) = get_uuid_in_path(req.uri().path(), 2) {
+                    if let Ok(mut jet_associations) = self.jet_associations.lock() {
+                        if let Some(mut association) = jet_associations.get_mut(&association_id) {
+                            if let Some(jet_instance) = JET_INSTANCE.clone() {
+                                if let Some(candidate_tcp) = Candidate::new(&format!("tcp://{}", jet_instance)) {
+                                    association.add_candidate(candidate_tcp);
+                                }
+                            }
+
+                            if let Some(websocket_url) = self.config.websocket_url() {
+                                if let Some(candidate_ws) = Candidate::new(&websocket_url) {
+                                    association.add_candidate(candidate_ws);
+                                }
+                            }
+
+                            let body = association.gather_candidate();
+                            *response.body_mut() = body.to_string().into();
+                            *response.status_mut() = StatusCode::OK;
+                        }
+                    }
+                }
+            } else {
+                *response.status_mut() = StatusCode::BAD_REQUEST;
+            }
 
             _ => {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
@@ -180,7 +204,7 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 }
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split("/").skip(index).next() {
+    if let Some(raw_uuid) = path.split("/").skip(index + 1).next() {
         Uuid::parse_str(raw_uuid).ok()
     } else {
         None

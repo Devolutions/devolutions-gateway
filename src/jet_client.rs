@@ -27,7 +27,7 @@ use crate::jet::candidate::Candidate;
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
 lazy_static! {
-    static ref JET_INSTANCE: Option<String> = { env::var("JET_INSTANCE").ok() };
+    pub static ref JET_INSTANCE: Option<String> = { env::var("JET_INSTANCE").ok() };
 }
 
 const ACCEPT_REQUEST_TIMEOUT_SEC: u64 = 5 * 60;

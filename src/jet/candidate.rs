@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use url::Url;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 
@@ -30,10 +30,32 @@ impl Candidate {
         }
     }
 
+    pub fn new(url: &str) -> Option<Self> {
+        if let Ok(url) = Url::parse(url) {
+            if let Ok(transport_type) = url.scheme().try_into() {
+                return Some(Candidate {
+                    id: Uuid::new_v4(),
+                    url: Some(url),
+                    ctype: CandidateType::Relay,
+                    state: CandidateState::Initial,
+                    association_id: Uuid::nil(),
+                    transport_type: transport_type,
+                    server_transport: None,
+                    client_transport: None,
+                });
+            }
+        }
+
+        None
+    }
+
     pub fn id(&self) -> Uuid {
         self.id.clone()
     }
 
+    pub fn url(&self) -> Option<Url> {
+        self.url.clone()
+    }
     pub fn client_transport(&self) -> Option<JetTransport> {
         self.client_transport.clone()
     }
