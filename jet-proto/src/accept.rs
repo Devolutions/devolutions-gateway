@@ -3,6 +3,7 @@ use crate::{Error, get_uuid_in_path, JET_HEADER_VERSION, JET_HEADER_INSTANCE, JE
 use std::str::{FromStr};
 use crate::utils::{RequestHelper, ResponseHelper};
 use std::io;
+use http::StatusCode;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct JetAcceptReq {
@@ -68,7 +69,7 @@ impl JetAcceptReq {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct JetAcceptRsp {
-    pub status_code: u16,
+    pub status_code: StatusCode,
     pub version: u32,
     pub association: Uuid,
     pub timeout: u32,
@@ -78,14 +79,14 @@ pub struct JetAcceptRsp {
 impl JetAcceptRsp {
     pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         if self.version == 1 {
-            stream.write_fmt(format_args!("HTTP/1.1 {} TODO\r\n", &self.status_code))?;
+            stream.write_fmt(format_args!("HTTP/1.1 {} {}\r\n", &self.status_code, self.status_code.as_str()))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_INSTANCE, &self.instance))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_ASSOCIATION, &self.association.to_string()))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_TIMEOUT, &self.timeout.to_string()))?;
             stream.write_fmt(format_args!("\r\n"))?;
         } else { // version = 2
-            stream.write_fmt(format_args!("HTTP/1.1 {} TODO\r\n", &self.status_code))?;
+            stream.write_fmt(format_args!("HTTP/1.1 {} {}\r\n", &self.status_code, self.status_code.as_str()))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
             stream.write_fmt(format_args!("\r\n"))?;
         }
@@ -93,7 +94,7 @@ impl JetAcceptRsp {
     }
 
     pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
-        if let Some(code) = response.code {
+        if let Some(status_code) = response.code.map_or(None, |code| StatusCode::from_u16(code).ok()) {
             let version_opt = response.get_header_value(JET_HEADER_VERSION).map_or(None, |version| version.parse::<u32>().ok());
 
             match version_opt {
@@ -104,7 +105,7 @@ impl JetAcceptRsp {
 
                     if let (Some(association), Some(timeout), Some(instance)) = (association_opt, timeout_opt, instance_opt) {
                         return Ok(JetAcceptRsp {
-                            status_code: code,
+                            status_code,
                             version: 1,
                             association,
                             timeout,
@@ -115,7 +116,7 @@ impl JetAcceptRsp {
                 }
                 Some(2) => {
                     return Ok(JetAcceptRsp {
-                        status_code: code,
+                        status_code,
                         version: 2,
                         association: Uuid::nil(),
                         timeout: 0,

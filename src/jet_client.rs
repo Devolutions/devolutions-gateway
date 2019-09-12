@@ -12,6 +12,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use lazy_static::lazy_static;
 use uuid::Uuid;
+use jet_proto::StatusCode;
 
 use jet_proto::{JET_VERSION_V1, JetMessage};
 use log::{debug, error, info};
@@ -183,7 +184,7 @@ impl Future for HandleAcceptJetMsg {
 
                         // Build response
                         self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
-                            status_code: 200,
+                            status_code: StatusCode::OK,
                             version: request.version,
                             association: uuid,
                             instance: JET_INSTANCE.clone(),
@@ -192,14 +193,14 @@ impl Future for HandleAcceptJetMsg {
                     }
                     2 => {
                         let mut candidate_found = false;
-                        if let Some(mut association) = jet_associations.get_mut(&request.association) {
-                            if let Some(mut candidate) = association.get_candidate_mut(request.candidate) {
+                        if let Some(association) = jet_associations.get_mut(&request.association) {
+                            if let Some(candidate) = association.get_candidate_mut(request.candidate) {
                                 candidate_found = true;
 
                                 //TODO validate transport type
                                 candidate.set_server_transport(self.transport.clone());
                                 self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
-                                    status_code: 200,
+                                    status_code: StatusCode::OK,
                                     version: request.version,
                                     association: Uuid::nil(),
                                     instance: JET_INSTANCE.clone(),
@@ -210,7 +211,7 @@ impl Future for HandleAcceptJetMsg {
 
                         if !candidate_found {
                             self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
-                                status_code: 404,
+                                status_code: StatusCode::NOT_FOUND,
                                 version: request.version,
                                 association: Uuid::nil(),
                                 instance: JET_INSTANCE.clone(),
@@ -219,7 +220,8 @@ impl Future for HandleAcceptJetMsg {
                         }
                     }
                     _ => {
-                        unimplemented!()
+                        // No jet message exist with version different than 1 or 2
+                        unreachable!()
                     }
                 }
             } else {
@@ -294,13 +296,13 @@ impl Future for HandleConnectJetMsg {
                             if let Some(candidate) = association.get_candidate_by_index(0) {
                                 self.server_transport = candidate.server_transport();
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    status_code: 200,
+                                    status_code: StatusCode::OK,
                                     version: request.version,
                                 }));
                             } else {
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
                                     version: self.request_msg.version,
-                                    status_code: 404,
+                                    status_code: StatusCode::NOT_FOUND,
                                 }));
                             }
                         }
@@ -308,25 +310,26 @@ impl Future for HandleConnectJetMsg {
                             if let Some(candidate) = association.get_candidate_mut(request.candidate) {
                                 self.server_transport = candidate.server_transport();
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    status_code: 200,
+                                    status_code: StatusCode::OK,
                                     version: request.version,
                                 }));
                             } else {
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
                                     version: self.request_msg.version,
-                                    status_code: 404,
+                                    status_code: StatusCode::NOT_FOUND,
                                 }));
                             }
                         }
                         _ => {
-                            unimplemented!()
+                            // No jet message exist with version different than 1 or 2
+                            unreachable!();
                         }
                     }
 
                 } else {
                     self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
                         version: self.request_msg.version,
-                        status_code: 404,
+                        status_code: StatusCode::NOT_FOUND,
                     }));
                     error!("Invalid association ID received: {}", self.request_msg.association);
                 }

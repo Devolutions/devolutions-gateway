@@ -16,6 +16,7 @@ use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
 use log::trace;
+pub use http::StatusCode;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
@@ -309,19 +310,25 @@ static TEST_JET_ACCEPT_REQ_V2: &'static [u8] = &hex!("
 4a 65 74 2d 56 65 72 73 69 6f 6e 3a 20 32 0a 0a
 ");
 
-#[test]
-fn test_accept_v2() {
-    use std::str::FromStr;
-    use std::io::Cursor;
+#[cfg(test)]
+mod test {
+    use super::*;
 
-    let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
-    let jet_message = JetMessage::read_request(&mut cursor).unwrap();
-    assert!(jet_message ==
+    #[test]
+    fn test_accept_v2() {
+        use std::str::FromStr;
+        use std::io::Cursor;
+
+        let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
+        let jet_message = JetMessage::read_request(&mut cursor).unwrap();
+        assert!(jet_message ==
             JetMessage::JetAcceptReq(
-                JetAcceptReq{
+                JetAcceptReq {
                     association: Uuid::from_str("300f1c82-d33b-11e9-bb65-2a2ae2dbcce5").unwrap(),
                     candidate: Uuid::from_str("4c8f409a-c1a2-4cae-bda2-84c590fed618").unwrap(),
                     version: 2,
-                    host: "jet101.wayk.net".to_string()})
-    );
+                    host: "jet101.wayk.net".to_string()
+                })
+        );
+    }
 }
