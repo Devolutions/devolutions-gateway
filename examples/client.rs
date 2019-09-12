@@ -3,7 +3,7 @@
 
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
-use jet_proto::{JetMethod, JetPacket};
+use jet_proto::{JET_VERSION_V1, JetMessage};
 use std::env;
 use std::io::{self, Error, Read, Write};
 use std::net::TcpListener;
@@ -12,6 +12,8 @@ use std::process;
 use std::str::FromStr;
 use std::thread;
 use uuid::Uuid;
+use jet_proto::connect::JetConnectReq;
+use jet_proto::accept::JetAcceptReq;
 
 type Port = u16;
 
@@ -111,17 +113,25 @@ fn main() {
     let output_stream = &mut stream;
     let mut user_buffer = String::new();
 
-    let mut jet_packet = JetPacket::new(0, 0);
-    jet_packet.set_version(Some(0));
-    if let Some(uuid) = server_uuid {
-        jet_packet.set_method(Some(JetMethod::CONNECT));
-        jet_packet.set_association(Some(uuid));
+    let jet_message = if let Some(uuid) = server_uuid {
+        JetMessage::JetConnectReq(JetConnectReq {
+            version: 1,
+            host: host,
+            association: uuid,
+            candidate: Uuid::nil(),
+        })
     } else {
-        jet_packet.set_method(Some(JetMethod::ACCEPT));
-    }
+        JetMessage::JetAcceptReq(JetAcceptReq {
+            version: 1,
+            host: host,
+            association: Uuid::nil(),
+            candidate: Uuid::nil(),
+        })
+    };
+
     let mut v: Vec<u8> = Vec::new();
-    jet_packet.write_to(&mut v).unwrap();
-    println!("jet_packet = {:?}", jet_packet);
+    jet_message.write_to(&mut v).unwrap();
+    println!("jet_message = {:?}", jet_message);
     output_stream.write_all(&v).unwrap();
     output_stream.flush().unwrap();
 

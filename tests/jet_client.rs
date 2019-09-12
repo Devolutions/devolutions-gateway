@@ -1,13 +1,16 @@
 mod common;
 
-use jet_proto::{JetMethod, JetPacket};
+use jet_proto::{JetMessage};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
+use uuid::Uuid;
 
 use common::run_proxy;
+use jet_proto::accept::JetAcceptReq;
+use jet_proto::connect::JetConnectReq;
 
 const PROXY_ADDR: &str = "127.0.0.1:8070";
 const SERVER_DATA: &str = "Server Response";
@@ -29,11 +32,14 @@ fn smoke() {
             match TcpStream::connect(proxy_addr) {
                 Ok(mut stream) => {
                     // Send request
-                    let mut jet_packet = JetPacket::new(0, 0);
-                    jet_packet.set_method(Some(JetMethod::ACCEPT));
-                    jet_packet.set_version(Some(0));
+                    let jet_message = JetMessage::JetAcceptReq(JetAcceptReq {
+                        version: 1,
+                        host: proxy_addr.to_string(),
+                        candidate: Uuid::nil(),
+                        association: Uuid::nil(),
+                    });
                     let mut v: Vec<u8> = Vec::new();
-                    jet_packet.write_to(&mut v).unwrap();
+                    jet_message.write_to(&mut v).unwrap();
                     stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
@@ -43,9 +49,17 @@ fn smoke() {
                         match stream.read(&mut buffer) {
                             Ok(_n) => {
                                 let mut slice: &[u8] = &buffer;
-                                let response = JetPacket::read_from(&mut slice).unwrap();
-                                assert!(response.association().is_some());
-                                sender_uuid.send(response.association().unwrap()).unwrap();
+                                let response = JetMessage::read_accept_response(&mut slice).unwrap();
+                                match response {
+                                    JetMessage::JetAcceptRsp(rsp) => {
+                                        assert!(rsp.status_code == 200);
+                                        assert!(rsp.association != Uuid::nil());
+                                        sender_uuid.send(rsp.association).unwrap();
+                                    }
+                                    _ => {
+                                        assert!(false, "Wrong message type received");
+                                    }
+                                }
                                 break;
                             }
                             Err(_) => {
@@ -89,12 +103,14 @@ fn smoke() {
                     let uuid = receiver_uuid.recv().unwrap();
 
                     // Send request
-                    let mut jet_packet = JetPacket::new(0, 0);
-                    jet_packet.set_method(Some(JetMethod::CONNECT));
-                    jet_packet.set_version(Some(0));
-                    jet_packet.set_association(Some(uuid));
+                    let jet_message = JetMessage::JetConnectReq(JetConnectReq {
+                        version: 1,
+                        host: proxy_addr.to_string(),
+                        association: uuid,
+                        candidate: Uuid::nil(),
+                    });
                     let mut v: Vec<u8> = Vec::new();
-                    jet_packet.write_to(&mut v).unwrap();
+                    jet_message.write_to(&mut v).unwrap();
                     stream.write_all(&v).unwrap();
                     stream.flush().unwrap();
 
@@ -104,7 +120,16 @@ fn smoke() {
                         match stream.read(&mut buffer) {
                             Ok(_n) => {
                                 let mut slice: &[u8] = &buffer;
-                                let _response = JetPacket::read_from(&mut slice).unwrap();
+                                let response = JetMessage::read_connect_response(&mut slice).unwrap();
+                                match response {
+                                    JetMessage::JetConnectRsp(rsp) => {
+                                        assert!(rsp.status_code == 200);
+                                        assert!(rsp.version == 1);
+                                    }
+                                    _ => {
+                                        assert!(false, "Wrong message type received");
+                                    }
+                                }
                                 break;
                             }
                             Err(_) => {
@@ -135,6 +160,7 @@ fn smoke() {
                     }
 
                     sender_end.send(()).unwrap();
+                    thread::sleep(Duration::from_millis(100));
                     break;
                 }
                 Err(_) => thread::sleep(Duration::from_millis(10)),

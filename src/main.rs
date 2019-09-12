@@ -45,7 +45,6 @@ use crate::websocket_client::{WebsocketService, WsClient};
 use std::error::Error;
 use futures::future::Either;
 use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
-use uuid::Uuid;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;

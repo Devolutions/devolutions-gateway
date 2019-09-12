@@ -37,7 +37,7 @@ impl Association {
     }
 
     pub fn get_candidate_by_index(&mut self, index: usize) -> Option<&mut Candidate> {
-        if let Some((_, candidate)) = self.candidates.get_index_mut(0) {
+        if let Some((_, candidate)) = self.candidates.get_index_mut(index) {
             Some(candidate)
         }
         else {

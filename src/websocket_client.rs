@@ -12,8 +12,8 @@ use log::{info, error};
 use url::Url;
 use std::io;
 use crate::jet::association::Association;
-use jet_proto::{JET_VERSION_V1, JET_VERSION_V2};
-use crate::jet::candidate::{CandidateState, Candidate};
+use jet_proto::{JET_VERSION_V2};
+use crate::jet::candidate::{Candidate};
 use crate::jet_client::JET_INSTANCE;
 
 #[derive(Clone)]
@@ -33,14 +33,14 @@ impl WebsocketService {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
                             if let Ok(jet_associations) = self.jet_associations.lock() {
-                                if let Some(assc) = jet_associations.get(&association_id) {
+                                if let Some(_) = jet_associations.get(&association_id) {
                                     let res = process_req(&req);
 
                                     let jet_associations_clone = self.jet_associations.clone();
                                     let fut = req.into_body().on_upgrade().map(move |upgraded| {
                                         if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                            if let Some(mut assc) = jet_assc.get_mut(&association_id) {
-                                                if let Some(mut candidate) = assc.get_candidate_mut(candidate_id) {
+                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                                if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                                                     candidate.set_server_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
                                                 }
                                             }
@@ -61,15 +61,15 @@ impl WebsocketService {
                     if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
                         if let Ok(mut jet_associations) = self.jet_associations.lock() {
                             if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
-                                if let Some(association) = jet_associations.get_mut(&association_id) {
+                                if let Some(_) = jet_associations.get_mut(&association_id) {
                                     let res = process_req(&req);
 
                                     let jet_associations_clone = self.jet_associations.clone();
                                     let self_clone = self.clone();
                                     let fut = req.into_body().on_upgrade().map(move |upgraded| {
                                         if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                            if let Some(mut assc) = jet_assc.get_mut(&association_id) {
-                                                if let Some(mut candidate) = assc.get_candidate_mut(candidate_id) {
+                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                                if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                                                     candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
 
                                                     // Start the proxy
@@ -80,7 +80,7 @@ impl WebsocketService {
                                                 }
                                             }
                                         }
-                                                                            }).map_err(|e| error!("upgrade error: {}", e));
+                                    }).map_err(|e| error!("upgrade error: {}", e));
 
                                     self.executor_handle.spawn(fut);
 
@@ -110,11 +110,9 @@ impl WebsocketService {
                 *response.status_mut() = StatusCode::BAD_REQUEST;
                 if let Some(association_id) = get_uuid_in_path(req.uri().path(), 2) {
                     if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                        if let Some(mut association) = jet_associations.get_mut(&association_id) {
-                            if let Some(jet_instance) = JET_INSTANCE.clone() {
-                                if let Some(candidate_tcp) = Candidate::new(&format!("tcp://{}", jet_instance)) {
-                                    association.add_candidate(candidate_tcp);
-                                }
+                        if let Some(association) = jet_associations.get_mut(&association_id) {
+                            if let Some(candidate_tcp) = Candidate::new(&format!("tcp://{}", JET_INSTANCE.clone())) {
+                                association.add_candidate(candidate_tcp);
                             }
 
                             if let Some(websocket_url) = self.config.websocket_url() {
