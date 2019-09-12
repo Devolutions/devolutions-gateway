@@ -12,8 +12,12 @@ use common::run_proxy;
 use jet_proto::accept::JetAcceptReq;
 use jet_proto::connect::JetConnectReq;
 use std::str::FromStr;
+use reqwest::{Client, StatusCode};
+use url::Url;
+use serde_derive::{Deserialize, Serialize};
 
 const PROXY_ADDR: &str = "127.0.0.1:8080";
+const WEBSOCKET_URL: &str = "ws://127.0.0.1:12345";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
@@ -22,7 +26,7 @@ fn smoke_tcp_v1() {
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, None, None);
+    let _proxy = run_proxy(proxy_addr, None, None, None);
 
     let (sender_uuid, receiver_uuid) = channel();
     let (sender_end, receiver_end) = channel();
@@ -179,15 +183,35 @@ fn smoke_tcp_v2() {
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, None, None);
+    let _proxy = run_proxy(proxy_addr, Some(WEBSOCKET_URL), None, None);
 
-    let (sender_uuid, receiver_uuid) = channel();
+    let (sender_synchro, receiver_synchro) = channel();
     let (sender_end, receiver_end) = channel();
 
-    //TODO : Send request to create an association + gather candidates
-    let association_id = Uuid::from_str("300f1c82-d33b-11e9-bb65-2a2ae2dbcce5").unwrap();
-    let candidate_id = Uuid::from_str("f1c8deaa-0a3c-4f04-89bd-b4fb1305bf0a").unwrap();
+    // Association creation
+    let association_id = Uuid::new_v4();
+    let client = Client::new();
+    let mut url = WEBSOCKET_URL.parse::<Url>().unwrap();
+    url.set_scheme("http").unwrap();
+    let create_url = url.join(&format!("/jet/create/{}", association_id)).unwrap();
+    assert!(client.post(create_url).send().unwrap().status() == StatusCode::OK);
 
+    // Candidate gathering
+    let gather_url = url.join(&format!("/jet/gather/{}", association_id)).unwrap();
+    let mut result = client.post(gather_url).send().unwrap();
+    assert!(result.status() == StatusCode::OK);
+    let association_info: AssociationInfo = result.json().unwrap();
+    assert!(Uuid::from_str(&association_info.id).unwrap() == association_id);
+
+    let mut candidate_id_opt = None;
+    for candidate in &association_info.candidates {
+        if candidate.url.to_lowercase().starts_with("tcp") {
+            candidate_id_opt = Some(Uuid::from_str(&candidate.id).unwrap());
+        }
+    }
+    let candidate_id = candidate_id_opt.unwrap();
+
+    println!("Association info: {:?}", association_info);
     // Server (method = Accept)
     thread::spawn(move || {
         loop {
@@ -217,7 +241,7 @@ fn smoke_tcp_v2() {
                                         assert!(rsp.status_code == 200);
                                         assert!(rsp.association == Uuid::nil());
                                         assert!(rsp.version == 2);
-                                        sender_uuid.send(rsp.association).unwrap();
+                                        sender_synchro.send(()).unwrap();
                                     }
                                     _ => {
                                         assert!(false, "Wrong message type received");
@@ -263,7 +287,7 @@ fn smoke_tcp_v2() {
         loop {
             match TcpStream::connect(proxy_addr) {
                 Ok(mut stream) => {
-                    let _uuid = receiver_uuid.recv().unwrap();
+                    let _ = receiver_synchro.recv().unwrap();
 
                     // Send request
                     let jet_message = JetMessage::JetConnectReq(JetConnectReq {
@@ -333,4 +357,16 @@ fn smoke_tcp_v2() {
 
     receiver_end.recv().unwrap();
     thread::sleep(Duration::from_millis(100));
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CandidateInfo {
+    id: String,
+    url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AssociationInfo {
+    id: String,
+    candidates: Vec<CandidateInfo>
 }
