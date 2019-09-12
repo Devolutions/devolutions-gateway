@@ -169,6 +169,7 @@ impl Future for HandleAcceptJetMsg {
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
         if self.response_msg.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
+                let request = &self.request_msg;
                 match self.request_msg.version {
                     1 => {
                         // Association creation
@@ -183,14 +184,39 @@ impl Future for HandleAcceptJetMsg {
                         // Build response
                         self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
                             status_code: 200,
-                            version: self.request_msg.version,
+                            version: request.version,
                             association: uuid,
                             instance: JET_INSTANCE.clone(),
                             timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                         }));
                     }
                     2 => {
-                        unimplemented!()
+                        let mut candidate_found = false;
+                        if let Some(mut association) = jet_associations.get_mut(&request.association) {
+                            if let Some(mut candidate) = association.get_candidate_mut(request.candidate) {
+                                candidate_found = true;
+
+                                //TODO validate transport type
+                                candidate.set_server_transport(self.transport.clone());
+                                self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
+                                    status_code: 200,
+                                    version: request.version,
+                                    association: Uuid::nil(),
+                                    instance: JET_INSTANCE.clone(),
+                                    timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
+                                }));
+                            }
+                        }
+
+                        if !candidate_found {
+                            self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
+                                status_code: 404,
+                                version: request.version,
+                                association: Uuid::nil(),
+                                instance: JET_INSTANCE.clone(),
+                                timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
+                            }));
+                        }
                     }
                     _ => {
                         unimplemented!()
@@ -209,20 +235,22 @@ impl Future for HandleAcceptJetMsg {
 
         // Start timeout to remove the server if no connect request is received with that UUID
         if let JetMessage::JetAcceptRsp(accept_rsp) = response_msg {
-            let association = accept_rsp.association;
-            let jet_associations = self.jet_associations.clone();
-            let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-            self.executor_handle.spawn(timeout.then(move |_| {
-                RemoveAssociation::new(jet_associations, association).then(move |res| {
-                    if let Ok(true) = res {
-                        info!(
-                            "No connect request received with association {}. Association removed!",
-                            association
-                        );
-                    }
-                    ok(())
-                })
-            }));
+            if accept_rsp.status_code == 200 {
+                let association = accept_rsp.association;
+                let jet_associations = self.jet_associations.clone();
+                let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
+                self.executor_handle.spawn(timeout.then(move |_| {
+                    RemoveAssociation::new(jet_associations, association).then(move |res| {
+                        if let Ok(true) = res {
+                            info!(
+                                "No connect request received with association {}. Association removed!",
+                                association
+                            );
+                        }
+                        ok(())
+                    })
+                }));
+            }
         }
 
         Ok(Async::Ready(()))
@@ -260,18 +288,35 @@ impl Future for HandleConnectJetMsg {
                 let association_opt = jet_associations.remove(&self.request_msg.association);
 
                 if let Some(mut association) = association_opt {
+                    let request = &self.request_msg;
                     match self.request_msg.version {
                         1 => {
                             if let Some(candidate) = association.get_candidate_by_index(0) {
                                 self.server_transport = candidate.server_transport();
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    version: self.request_msg.version,
                                     status_code: 200,
+                                    version: request.version,
+                                }));
+                            } else {
+                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
+                                    version: self.request_msg.version,
+                                    status_code: 404,
                                 }));
                             }
                         }
                         2 => {
-                            unimplemented!()
+                            if let Some(candidate) = association.get_candidate_mut(request.candidate) {
+                                self.server_transport = candidate.server_transport();
+                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
+                                    status_code: 200,
+                                    version: request.version,
+                                }));
+                            } else {
+                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
+                                    version: self.request_msg.version,
+                                    status_code: 404,
+                                }));
+                            }
                         }
                         _ => {
                             unimplemented!()

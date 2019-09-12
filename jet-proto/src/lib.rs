@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
+use log::trace;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
@@ -50,6 +51,8 @@ impl JetMessage {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
 
+        trace!("Message received: {}", payload);
+
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut req = httparse::Request::new(&mut headers);
 
@@ -78,6 +81,8 @@ impl JetMessage {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
 
+        trace!("Message received: {}", payload);
+
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
 
@@ -91,6 +96,8 @@ impl JetMessage {
     pub fn read_connect_response<R: Read>(stream: &mut R) -> Result<Self, Error> {
         let jet_header = JetMessage::read_header(stream)?;
         let payload = JetMessage::read_payload(stream, &jet_header)?;
+
+        trace!("Message received: {}", payload);
 
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
@@ -306,7 +313,7 @@ static TEST_JET_ACCEPT_REQ_V2: &'static [u8] = &hex!("
 fn test_accept_v2() {
     use std::str::FromStr;
     use std::io::Cursor;
-    
+
     let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
     let jet_message = JetMessage::read_request(&mut cursor).unwrap();
     assert!(jet_message ==

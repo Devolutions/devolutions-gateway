@@ -17,6 +17,9 @@ pub struct Candidate {
 }
 
 impl Candidate {
+    pub fn set_id(&mut self, id: Uuid) {
+        self.id = id;
+    }
     pub fn new_v1() -> Self {
         Candidate {
             id: Uuid::new_v4(),

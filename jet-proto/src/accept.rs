@@ -1,5 +1,5 @@
 use uuid::Uuid;
-use crate::{Error, get_uuid_in_path, JET_HEADER_VERSION, JET_HEADER_INSTANCE, JET_HEADER_ASSOCIATION, JET_HEADER_TIMEOUT};
+use crate::{Error, get_uuid_in_path, JET_HEADER_VERSION, JET_HEADER_INSTANCE, JET_HEADER_ASSOCIATION, JET_HEADER_TIMEOUT, JET_HEADER_HOST, JET_HEADER_METHOD};
 use std::str::{FromStr};
 use crate::utils::{RequestHelper, ResponseHelper};
 use std::io;
@@ -22,7 +22,7 @@ impl JetAcceptReq {
             stream.write_fmt(format_args!("Jet-Version: {}\r\n", &self.version.to_string()))?;
             stream.write_fmt(format_args!("\r\n"))?;
         } else { // version = 2
-            stream.write_fmt(format_args!("GET /jet/accept/{} HTTP/1.1\r\n", &self.association.to_string()))?;
+            stream.write_fmt(format_args!("GET /jet/accept/{}/{} HTTP/1.1\r\n", &self.association.to_string(), &self.candidate.to_string()))?;
             stream.write_fmt(format_args!("Host: {}\r\n", &self.host))?;
             stream.write_fmt(format_args!("Connection: Keep-Alive\r\n"))?;
             stream.write_fmt(format_args!("Jet-Version: {}\r\n", &self.version.to_string()))?;
@@ -34,8 +34,8 @@ impl JetAcceptReq {
     pub fn from_request(request: &httparse::Request) -> Result<Self, Error> {
         if request.is_get_method() {
 
-            let version_opt = request.get_header_value("jet-version").map_or(None, |version| version.parse::<u32>().ok());
-            let host_opt = request.get_header_value("host");
+            let version_opt = request.get_header_value(JET_HEADER_VERSION).map_or(None, |version| version.parse::<u32>().ok());
+            let host_opt = request.get_header_value(JET_HEADER_HOST);
 
             if let (Some(version), Some(host)) = (version_opt, host_opt) {
                 if let Some(path) = request.path {
@@ -49,7 +49,7 @@ impl JetAcceptReq {
                             })
                         }
                     } else if path.eq("/") {
-                        if let Some(jet_method) = request.get_header_value("jet-method") {
+                        if let Some(jet_method) = request.get_header_value(JET_HEADER_METHOD) {
                             if jet_method.to_lowercase().eq("accept") {
                                 return Ok(JetAcceptReq {
                                     version: version,

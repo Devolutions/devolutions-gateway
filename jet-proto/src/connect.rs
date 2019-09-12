@@ -23,7 +23,7 @@ impl JetConnectReq {
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
             stream.write_fmt(format_args!("\r\n"))?;
         } else { // version = 2
-            stream.write_fmt(format_args!("GET /jet/connect/{} HTTP/1.1\r\n", &self.association.to_string()))?;
+            stream.write_fmt(format_args!("GET /jet/connect/{}/{} HTTP/1.1\r\n", &self.association.to_string(), &self.candidate.to_string()))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
             stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
             stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
@@ -79,7 +79,7 @@ impl JetConnectReq {
                 }
             }
         }
-        Err(format!("Invalid accept request: {:?}", request).into())
+        Err(format!("Invalid connect request: {:?}", request).into())
     }
 }
 
