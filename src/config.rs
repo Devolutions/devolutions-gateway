@@ -1,4 +1,5 @@
 use clap::{crate_name, crate_version, App, Arg};
+use url::Url;
 
 #[derive(Clone)]
 pub enum Protocol {
@@ -9,25 +10,26 @@ pub enum Protocol {
 
 #[derive(Clone)]
 pub struct Config {
-    listener_url: String,
+    listeners: Vec<String>,
     routing_url: Option<String>,
-    websocket_url: Option<String>,
     pcap_filename: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
 }
 
 impl Config {
-    pub fn listener_url(&self) -> String {
-        self.listener_url.clone()
+    pub fn listeners(&self) -> Result<Vec<Url>, String> {
+        let mut listeners = Vec::new();
+
+        for listener in &self.listeners {
+            listeners.push(listener.parse::<Url>().map_err(|e| format!("Listener {} is an invalid URL: {}", listener, e))?);
+        }
+
+        Ok(listeners)
     }
 
     pub fn routing_url(&self) -> Option<String> {
         self.routing_url.clone()
-    }
-
-    pub fn websocket_url(&self) -> Option<String> {
-        self.websocket_url.clone()
     }
 
     pub fn pcap_filename(&self) -> Option<String> {
@@ -48,17 +50,15 @@ impl Config {
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
             .about("Devolutions-Jet proxy")
-            .arg(
-                Arg::with_name("listener-url")
-                    .short("u")
-                    .long("url")
-                    .value_name("LISTENER_URL")
-                    .help("An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>")
-                    .long_help("An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>")
-                    .takes_value(true)
-                    .default_value("tcp://0.0.0.0:8080")
-                    .empty_values(false),
-            )
+            .arg(Arg::with_name("listeners")
+                .short("l")
+                .long("listener")
+                .value_name("LISTENER_URL")
+                .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
+                .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
+                .multiple(true)
+                .takes_value(true)
+                .number_of_values(1))
             .arg(
                 Arg::with_name("routing-url")
                     .short("r")
@@ -66,16 +66,6 @@ impl Config {
                     .value_name("ROUTING_URL")
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
-                    .takes_value(true)
-                    .empty_values(false),
-            )
-            .arg(
-                Arg::with_name("websocket-url")
-                    .short("w")
-                    .long("ws_url")
-                    .value_name("WEBSOCKET_URL")
-                    .help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>")
-                    .long_help("An address on which the websocket proxy will listen. Format: <wss or ws>://<local_iface_ip>:<port>. This address accepts http requests and websocket upgrades")
                     .takes_value(true)
                     .empty_values(false),
             )
@@ -148,7 +138,7 @@ identities_file example:
 
         let matches = cli_app.get_matches();
 
-        let listener_url = String::from(matches.value_of("listener-url").expect("This should never happend"));
+        let listeners = matches.values_of("listeners").expect("At least one listener has to be specified.").into_iter().map(|listener| listener.to_string()).collect();
 
         let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
 
@@ -164,12 +154,9 @@ identities_file example:
             .value_of("identities-file")
             .map(std::string::ToString::to_string);
 
-        let websocket_url = matches.value_of("websocket-url").map(std::string::ToString::to_string);
-
         Config {
-            listener_url,
+            listeners,
             routing_url,
-            websocket_url,
             pcap_filename,
             protocol,
             identities_filename,

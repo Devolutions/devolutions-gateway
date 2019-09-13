@@ -26,10 +26,10 @@ pub fn run_proxy(proxy_addr: &str, websocket_url: Option<&str>, routing_url: Opt
     let mut proxy_command = Command::new(bin());
 
     let cmd_line_arg = format!("tcp://{}", proxy_addr);
-    proxy_command.arg("--url").arg(cmd_line_arg);
+    proxy_command.arg("-l").arg(cmd_line_arg);
 
     if let Some(websocket_url) = websocket_url {
-        proxy_command.arg("--ws_url").arg(websocket_url);
+        proxy_command.arg("-l").arg(websocket_url);
     }
     if routing_url.is_some() {
         proxy_command.arg("--routing_url").arg(routing_url.unwrap());

@@ -15,7 +15,6 @@ use crate::jet::association::Association;
 use jet_proto::{JET_VERSION_V2};
 use crate::jet::candidate::{Candidate};
 use crate::jet_client::JET_INSTANCE;
-use std::str::FromStr;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -112,14 +111,9 @@ impl WebsocketService {
                 if let Some(association_id) = get_uuid_in_path(req.uri().path(), 2) {
                     if let Ok(mut jet_associations) = self.jet_associations.lock() {
                         if let Some(association) = jet_associations.get_mut(&association_id) {
-                            if let Some(mut candidate_tcp) = Candidate::new(&format!("tcp://{}", JET_INSTANCE.clone())) {
-                                candidate_tcp.set_id(Uuid::from_str("f1c8deaa-0a3c-4f04-89bd-b4fb1305bf0a").unwrap());
-                                association.add_candidate(candidate_tcp);
-                            }
-
-                            if let Some(websocket_url) = self.config.websocket_url() {
-                                if let Some(candidate_ws) = Candidate::new(&websocket_url) {
-                                    association.add_candidate(candidate_ws);
+                            for listener in self.config.listeners().expect("Should never happen") {
+                                if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), JET_INSTANCE.clone(), listener.port_or_known_default().unwrap_or(8080))) {
+                                    association.add_candidate(candidate);
                                 }
                             }
 
