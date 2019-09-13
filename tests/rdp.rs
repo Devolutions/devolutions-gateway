@@ -94,8 +94,8 @@ fn rdp_with_nla_ntlm() {
         client.wait().expect("error occurred in IronRDP client");
     });
 
-    server_thread.join().expect("failed to join the server thread");
     client_thread.join().expect("failed to join the client thread");
+    server_thread.join().expect("failed to join the server thread");
 }
 
 struct RdpServer {
