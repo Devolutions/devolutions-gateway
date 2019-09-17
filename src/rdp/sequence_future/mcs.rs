@@ -197,7 +197,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
                 connect_initial_buffer.resize(connect_initial.buffer_length(), 0x00);
                 connect_initial.to_buffer(connect_initial_buffer.as_mut())?;
 
-                self.channel_names = Some(connect_initial.channel_names());
+                self.channel_names = Some(connect_initial.channel_names().unwrap_or_default());
 
                 (McsInitialSequenceState::ConnectResponse, connect_initial_buffer)
             }

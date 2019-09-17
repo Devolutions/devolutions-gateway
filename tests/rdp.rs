@@ -266,7 +266,12 @@ impl RdpServer {
         assert!(gcc_blocks.multi_transport_channel.is_none());
         assert!(gcc_blocks.message_channel.is_none());
 
-        let channels = gcc_blocks.channel_names().iter().map(|v| v.name.clone()).collect();
+        let channels = gcc_blocks
+            .channel_names()
+            .unwrap_or_default()
+            .iter()
+            .map(|v| v.name.clone())
+            .collect();
 
         (channels, gcc_blocks.core.client_color_depth())
     }
@@ -460,7 +465,7 @@ impl RdpServer {
                     }),
                     rdp::CapabilitySet::VirtualChannel(capability_sets::VirtualChannel {
                         flags: capability_sets::VirtualChannelFlags::COMPRESSION_CLIENT_TO_SERVER_8K,
-                        chunk_size: 16256,
+                        chunk_size: Some(16256),
                     }),
                 ],
             },
