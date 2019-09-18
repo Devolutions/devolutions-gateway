@@ -1,7 +1,7 @@
 use tungstenite::{WebSocket, ServerHandshake, HandshakeError, ClientHandshake};
 use hyper::upgrade::Upgraded;
 use std::sync::{Mutex, Arc};
-use std::io::{Read, Write};
+use std::io::{Read, Write, ErrorKind};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio::io;
 use log::{debug, error};
@@ -57,21 +57,28 @@ impl WsStreamWrapper {
 
 impl Read for WsStreamWrapper {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        match *self {
+        let message_result = match *self {
             WsStreamWrapper::Http((ref mut stream, _)) => {
-                stream.read_message().map_err(|e| tungstenite_err_to_io_err(e)).and_then(move |m| {
-                    buf.write(m.into_data().as_mut_slice())
-                })
+                stream.read_message()
             }
             WsStreamWrapper::Tcp((ref mut stream, _)) => {
-                stream.read_message().map_err(|e| tungstenite_err_to_io_err(e)).and_then(move |m| {
-                    buf.write(m.into_data().as_mut_slice())
-                })
+                stream.read_message()
             }
             WsStreamWrapper::Tls((ref mut stream, _)) => {
-                stream.read_message().map_err(|e| tungstenite_err_to_io_err(e)).and_then(move |m| {
-                    buf.write(m.into_data().as_mut_slice())
-                })
+                stream.read_message()
+            }
+        };
+
+        match message_result {
+            Ok(message) => {
+                if (message.is_binary() || message.is_text()) && !message.is_empty() {
+                    buf.write(message.into_data().as_mut_slice())
+                } else {
+                    Err(io::Error::new(ErrorKind::WouldBlock, "No Data"))
+                }
+            }
+            Err(e) => {
+                Err(tungstenite_err_to_io_err(e))
             }
         }
     }
