@@ -59,7 +59,7 @@ lazy_static! {
 fn main() {
     env_logger::init();
     let config = Config::init();
-    let listeners = config.listeners().expect("Invalid listeners.");
+    let listeners = config.listeners();
 
     let tcp_listeners: Vec<&Url> = listeners.iter().filter(|listener| listener.scheme() == "tcp").collect();
     let websocket_listeners: Vec<&Url> = listeners.iter().filter(|listener| listener.scheme() == "ws" || listener.scheme() == "wss").collect();
@@ -212,7 +212,7 @@ impl Proxy {
 
 fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, tls_public_key: Vec<u8>, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
     info!("Starting TCP jet server...");
-    let socket_addr = url.to_socket_addrs().unwrap().into_iter().next().unwrap();
+    let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
     let server = listener.incoming().for_each(move |conn| {
         set_socket_option(&conn);

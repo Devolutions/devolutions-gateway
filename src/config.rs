@@ -1,5 +1,6 @@
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
+use std::env;
 
 #[derive(Clone)]
 pub enum Protocol {
@@ -9,8 +10,19 @@ pub enum Protocol {
 }
 
 #[derive(Clone)]
-pub struct Config {
+struct ConfigTemp {
     listeners: Vec<String>,
+    jet_instance: Option<String>,
+    routing_url: Option<String>,
+    pcap_filename: Option<String>,
+    protocol: Protocol,
+    identities_filename: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct Config {
+    listeners: Vec<Url>,
+    jet_instance: String,
     routing_url: Option<String>,
     pcap_filename: Option<String>,
     protocol: Protocol,
@@ -18,14 +30,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn listeners(&self) -> Result<Vec<Url>, String> {
-        let mut listeners = Vec::new();
-
-        for listener in &self.listeners {
-            listeners.push(listener.parse::<Url>().map_err(|e| format!("Listener {} is an invalid URL: {}", listener, e))?);
-        }
-
-        Ok(listeners)
+    pub fn listeners(&self) -> &Vec<Url> {
+        &self.listeners
     }
 
     pub fn routing_url(&self) -> Option<String> {
@@ -55,10 +61,16 @@ impl Config {
                 .long("listener")
                 .value_name("LISTENER_URL")
                 .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
-                .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
                 .multiple(true)
                 .takes_value(true)
-                .number_of_values(1))
+                .number_of_values(1)
+            )
+            .arg(Arg::with_name("jet-instance")
+                .long("jet_instance")
+                .value_name("JET_INSTANCE")
+                .help("Specific name to reach that instance of JET.")
+                .takes_value(true)
+            )
             .arg(
                 Arg::with_name("routing-url")
                     .short("r")
@@ -140,6 +152,8 @@ identities_file example:
 
         let listeners = matches.values_of("listeners").expect("At least one listener has to be specified.").into_iter().map(|listener| listener.to_string()).collect();
 
+        let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
+
         let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
 
         let pcap_filename = matches.value_of("pcap-filename").map(std::string::ToString::to_string);
@@ -154,12 +168,45 @@ identities_file example:
             .value_of("identities-file")
             .map(std::string::ToString::to_string);
 
-        Config {
+        let mut config_temp = ConfigTemp {
             listeners,
+            jet_instance,
             routing_url,
             pcap_filename,
             protocol,
             identities_filename,
+        };
+
+        config_temp.apply_env_variables();
+
+        config_temp.into()
+    }
+}
+
+impl ConfigTemp {
+    fn apply_env_variables(&mut self) {
+        if let Ok(val) = env::var("JET_INSTANCE"){
+            self.jet_instance = Some(val);
+        }
+    }
+}
+
+impl From<ConfigTemp> for Config {
+    fn from(temp: ConfigTemp) -> Self {
+        let mut listeners = Vec::new();
+
+        for listener in &temp.listeners {
+            listeners.push(listener.parse::<Url>().expect(&format!("Listener {} is an invalid URL.", listener)));
+        }
+
+        Config {
+            listeners,
+            jet_instance: temp.jet_instance.expect("JET_INSTANCE is mandatory. It has to be added on the command line or defined by JET_INSTANCE environment variable."),
+            routing_url: temp.routing_url,
+            pcap_filename: temp.pcap_filename,
+            protocol: temp.protocol,
+            identities_filename: temp.identities_filename,
+
         }
     }
 }

@@ -62,7 +62,7 @@ impl ControllerData {
                     if let Some(association) = jet_associations.get_mut(&uuid) {
 
                         if association.get_candidates().len() == 0 {
-                            for listener in self.config.listeners().expect("Should never happen") {
+                            for listener in self.config.listeners() {
                                 if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), JET_INSTANCE.clone(), listener.port_or_known_default().unwrap_or(8080))) {
                                     association.add_candidate(candidate);
                                 }
