@@ -27,6 +27,10 @@ impl Association {
         }
     }
 
+    pub fn get_candidates(&self) -> &IndexMap<Uuid, Candidate> {
+        &self.candidates
+    }
+
     pub fn add_candidate(&mut self, mut candidate: Candidate) {
         candidate.set_association_id(self.id);
         self.candidates.insert(candidate.id(), candidate);

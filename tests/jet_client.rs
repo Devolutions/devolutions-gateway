@@ -17,12 +17,13 @@ use url::Url;
 use serde_derive::{Deserialize, Serialize};
 
 const PROXY_ADDR: &str = "127.0.0.1:8080";
-const WEBSOCKET_URL: &str = "ws://127.0.0.1:12345";
+const HTTP_URL: &str = "http://127.0.0.1:10256";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
 #[test]
 fn smoke_tcp_v1() {
+    std::env::set_var("JET_INSTANCE", "127.0.0.1");
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
@@ -180,10 +181,11 @@ fn smoke_tcp_v1() {
 
 #[test]
 fn smoke_tcp_v2() {
+    std::env::set_var("JET_INSTANCE", "127.0.0.1");
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, Some(WEBSOCKET_URL), None, None);
+    let _proxy = run_proxy(proxy_addr, None, None, None);
 
     let (sender_synchro, receiver_synchro) = channel();
     let (sender_end, receiver_end) = channel();
@@ -191,9 +193,8 @@ fn smoke_tcp_v2() {
     // Association creation
     let association_id = Uuid::new_v4();
     let client = Client::new();
-    let mut url = WEBSOCKET_URL.parse::<Url>().unwrap();
-    url.set_scheme("http").unwrap();
-    let create_url = url.join(&format!("/jet/create/{}", association_id)).unwrap();
+    let url = HTTP_URL.parse::<Url>().unwrap();
+    let create_url = url.join(&format!("/jet/association/{}", association_id)).unwrap();
     assert!(client.post(create_url).send().unwrap().status() == StatusCode::OK);
 
     // Candidate gathering

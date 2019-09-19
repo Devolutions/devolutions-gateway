@@ -47,6 +47,7 @@ use std::error::Error;
 use futures::future::Either;
 use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
 use tokio_tls::TlsAcceptor;
+use saphir::server::HttpService;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -71,12 +72,13 @@ fn main() {
     let executor_handle = runtime.executor();
 
     info!("Starting http server ...");
-    let http_server = HttpServer::new();
+    let http_server = HttpServer::new(&config, jet_associations.clone());
     if let Err(e) = http_server.start(executor_handle.clone()) {
         error!("http_server failed to start: {}", e);
         return;
     }
     info!("Http server succesfully started");
+    let http_service = http_server.server.get_request_handler().clone();
 
     // Create the TLS acceptor.
     let der = include_bytes!("cert/certificate.p12");
@@ -85,7 +87,7 @@ fn main() {
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
     for url in websocket_listeners {
-        start_websocket_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone());
+        start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone());
     }
 
     let mut server_opt = None;
@@ -317,7 +319,7 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
     Box::new(server) as Box<dyn Future<Item=(), Error=io::Error> + Send>
 }
 
-fn start_websocket_server(websocket_url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) {
+fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) {
 
     // Start websocket server if needed
     info!("Starting websocket server ...");
@@ -336,6 +338,7 @@ fn start_websocket_server(websocket_url: Url, config: Config, jet_associations: 
         }).as_str());
     let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().expect("Websocket addr can't be parsed.")).unwrap();
     let websocket_service = WebsocketService {
+        http_service,
         jet_associations: jet_associations.clone(),
         executor_handle: executor_handle.clone(),
         config: config,

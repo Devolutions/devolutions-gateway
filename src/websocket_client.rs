@@ -11,128 +11,93 @@ use crate::Proxy;
 use log::{info, error};
 use url::Url;
 use std::io;
-use crate::jet::association::Association;
-use jet_proto::{JET_VERSION_V2};
-use crate::jet::candidate::{Candidate};
-use crate::jet_client::JET_INSTANCE;
+use saphir::server::HttpService;
 
 #[derive(Clone)]
 pub struct WebsocketService {
+    pub http_service: HttpService,
     pub jet_associations: JetAssociationsMap,
     pub executor_handle: TaskExecutor,
     pub config: Config,
 }
 
 impl WebsocketService {
-    pub fn handle(&mut self, req: Request<Body>, client_addr: Option<SocketAddr>) -> Box<dyn Future<Item=Response<Body>, Error=hyper::Error> + Send> {
+    pub fn handle(&mut self, req: Request<Body>, client_addr: Option<SocketAddr>) -> Box<dyn Future<Item=Response<Body>, Error=saphir::error::ServerError> + Send> {
         let mut response = Response::new(Body::empty());
-        info!("HTTP request received: {} on path {}", req.method(), req.uri().path());
-        match req.method() {
-            &Method::GET => if req.uri().path().starts_with("/jet/accept") {
-                if let Some(header) = req.headers().get("upgrade") {
-                    if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
+
+        if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
+            info!("{} {}", req.method(), req.uri().path());
+
+            if let Some(header) = req.headers().get("upgrade") {
+                if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
+                    if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
+                        if let Ok(jet_associations) = self.jet_associations.lock() {
+                            if let Some(_) = jet_associations.get(&association_id) {
+                                let res = process_req(&req);
+
+                                let jet_associations_clone = self.jet_associations.clone();
+                                let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                    if let Ok(mut jet_assc) = jet_associations_clone.lock() {
+                                        if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                            if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                                                candidate.set_server_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+                                            }
+                                        }
+                                    }
+                                }).map_err(|e| error!("upgrade error: {}", e));
+
+                                self.executor_handle.spawn(fut);
+
+                                return Box::new(futures::future::ok::<Response<Body>, saphir::error::ServerError>(res));
+                            }
+                        }
+                    }
+                }
+            }
+            *response.status_mut() = StatusCode::FORBIDDEN;
+        }
+        else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
+            info!("{} {}", req.method(), req.uri().path());
+
+            if let Some(header) = req.headers().get("upgrade") {
+                if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
+                    if let Ok(mut jet_associations) = self.jet_associations.lock() {
                         if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
-                            if let Ok(jet_associations) = self.jet_associations.lock() {
-                                if let Some(_) = jet_associations.get(&association_id) {
-                                    let res = process_req(&req);
+                            if let Some(_) = jet_associations.get_mut(&association_id) {
+                                let res = process_req(&req);
 
-                                    let jet_associations_clone = self.jet_associations.clone();
-                                    let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                        if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
-                                                if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                                                    candidate.set_server_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+                                let jet_associations_clone = self.jet_associations.clone();
+                                let self_clone = self.clone();
+                                let fut = req.into_body().on_upgrade().map(move |upgraded| {
+                                    if let Ok(mut jet_assc) = jet_associations_clone.lock() {
+                                        if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                            if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                                                candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+
+                                                // Start the proxy
+                                                if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
+                                                    let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
+                                                    self_clone.executor_handle.spawn(proxy);
                                                 }
                                             }
                                         }
-                                    }).map_err(|e| error!("upgrade error: {}", e));
+                                    }
+                                }).map_err(|e| error!("upgrade error: {}", e));
 
-                                    self.executor_handle.spawn(fut);
+                                self.executor_handle.spawn(fut);
 
-                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
-                                }
+                                return Box::new(futures::future::ok::<Response<Body>, saphir::error::ServerError>(res));
                             }
                         }
                     }
                 }
-                *response.status_mut() = StatusCode::FORBIDDEN;
-            } else if req.uri().path().starts_with("/jet/connect") {
-                if let Some(header) = req.headers().get("upgrade") {
-                    if header.to_str().ok().filter(|s| s == &"websocket").is_some() {
-                        if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                            if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(req.uri().path(), 2), get_uuid_in_path(req.uri().path(), 3)) {
-                                if let Some(_) = jet_associations.get_mut(&association_id) {
-                                    let res = process_req(&req);
-
-                                    let jet_associations_clone = self.jet_associations.clone();
-                                    let self_clone = self.clone();
-                                    let fut = req.into_body().on_upgrade().map(move |upgraded| {
-                                        if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
-                                                if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                                                    candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
-
-                                                    // Start the proxy
-                                                    if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
-                                                        let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
-                                                        self_clone.executor_handle.spawn(proxy);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }).map_err(|e| error!("upgrade error: {}", e));
-
-                                    self.executor_handle.spawn(fut);
-
-                                    return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(res));
-                                }
-                            }
-                        }
-                    }
-                }
-                *response.status_mut() = StatusCode::BAD_REQUEST;
-            } else {
-                *response.status_mut() = StatusCode::BAD_REQUEST;
-            },
-
-            &Method::POST => if req.uri().path().starts_with("/jet/create") {
-                if let Some(uuid) = uuid_from_path(req.uri().path()) {
-                    if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                        if !jet_associations.contains_key(&uuid) {
-                            jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
-                            return Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response));
-                        }
-                    }
-                }
-                *response.status_mut() = StatusCode::BAD_REQUEST;
-
-            } else if req.uri().path().starts_with("/jet/gather") {
-                *response.status_mut() = StatusCode::BAD_REQUEST;
-                if let Some(association_id) = get_uuid_in_path(req.uri().path(), 2) {
-                    if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                        if let Some(association) = jet_associations.get_mut(&association_id) {
-                            for listener in self.config.listeners().expect("Should never happen") {
-                                if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), JET_INSTANCE.clone(), listener.port_or_known_default().unwrap_or(8080))) {
-                                    association.add_candidate(candidate);
-                                }
-                            }
-
-                            let body = association.gather_candidate();
-                            *response.body_mut() = body.to_string().into();
-                            *response.status_mut() = StatusCode::OK;
-                        }
-                    }
-                }
-            } else {
-                *response.status_mut() = StatusCode::BAD_REQUEST;
             }
-
-            _ => {
-                *response.status_mut() = StatusCode::BAD_REQUEST;
-            }
+            *response.status_mut() = StatusCode::BAD_REQUEST;
+        } else {
+            return self.http_service.handle(req);
         }
 
-        Box::new(futures::future::ok::<Response<Body>, hyper::Error>(response))
+        Box::new(futures::future::ok::<Response<Body>, saphir::error::ServerError>(response))
     }
 }
 
@@ -199,14 +164,6 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
     if let Some(raw_uuid) = path.split("/").skip(index + 1).next() {
-        Uuid::parse_str(raw_uuid).ok()
-    } else {
-        None
-    }
-}
-
-fn uuid_from_path(path: &str) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split("/").skip(3).next() {
         Uuid::parse_str(raw_uuid).ok()
     } else {
         None
