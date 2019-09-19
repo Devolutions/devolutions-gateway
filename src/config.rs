@@ -34,6 +34,10 @@ impl Config {
         &self.listeners
     }
 
+    pub fn jet_instance(&self) -> String {
+        self.jet_instance.clone()
+    }
+
     pub fn routing_url(&self) -> Option<String> {
         self.routing_url.clone()
     }

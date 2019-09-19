@@ -6,7 +6,6 @@ use uuid::Uuid;
 use crate::jet::association::Association;
 use jet_proto::JET_VERSION_V2;
 use crate::jet::candidate::Candidate;
-use crate::jet_client::JET_INSTANCE;
 
 struct ControllerData {
     config: Config,
@@ -63,7 +62,7 @@ impl ControllerData {
 
                         if association.get_candidates().len() == 0 {
                             for listener in self.config.listeners() {
-                                if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), JET_INSTANCE.clone(), listener.port_or_known_default().unwrap_or(8080))) {
+                                if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), self.config.jet_instance(), listener.port_or_known_default().unwrap_or(8080))) {
                                     association.add_candidate(candidate);
                                 }
                             }

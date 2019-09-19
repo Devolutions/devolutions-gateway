@@ -1,6 +1,7 @@
 use uuid::Uuid;
 use url::Url;
 use std::convert::{TryFrom, TryInto};
+use log::error;
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 
@@ -44,6 +45,8 @@ impl Candidate {
                     client_transport: None,
                 });
             }
+        } else {
+            error!("Candidate can't be built. Invalid URL {}", url);
         }
 
         None

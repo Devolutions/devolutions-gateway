@@ -23,7 +23,6 @@ const CLIENT_DATA: &str = "Client Request";
 
 #[test]
 fn smoke_tcp_v1() {
-    std::env::set_var("JET_INSTANCE", "127.0.0.1");
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online
@@ -181,7 +180,6 @@ fn smoke_tcp_v1() {
 
 #[test]
 fn smoke_tcp_v2() {
-    std::env::set_var("JET_INSTANCE", "127.0.0.1");
     let proxy_addr = PROXY_ADDR;
 
     //Spawn our proxy and wait for it to come online

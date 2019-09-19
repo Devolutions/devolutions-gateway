@@ -28,6 +28,8 @@ pub fn run_proxy(proxy_addr: &str, websocket_url: Option<&str>, routing_url: Opt
     let cmd_line_arg = format!("tcp://{}", proxy_addr);
     proxy_command.arg("-l").arg(cmd_line_arg);
 
+    proxy_command.arg("--jet_instance").arg("127.0.0.1");
+
     if let Some(websocket_url) = websocket_url {
         proxy_command.arg("-l").arg(websocket_url);
     }

@@ -27,10 +27,6 @@ use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
-lazy_static! {
-    pub static ref JET_INSTANCE: String = { env::var("JET_INSTANCE").expect("JET_INSTANCE environment variable is mandatory") };
-}
-
 const ACCEPT_REQUEST_TIMEOUT_SEC: u32 = 5 * 60;
 
 pub struct JetClient {
@@ -57,7 +53,7 @@ impl JetClient {
         Box::new(msg_reader.and_then(move |msg| {
             match msg {
                 JetMessage::JetAcceptReq(jet_accept_req) => {
-                    let handle_msg = HandleAcceptJetMsg::new(transport.clone(), jet_accept_req, jet_associations, executor_handle);
+                    let handle_msg = HandleAcceptJetMsg::new(&config, transport.clone(), jet_accept_req, jet_associations, executor_handle);
                     Box::new(handle_msg) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                 }
                 JetMessage::JetConnectReq(jet_connect_req) => {
@@ -139,6 +135,7 @@ impl Future for JetMsgReader {
 }
 
 struct HandleAcceptJetMsg {
+    config: Config,
     transport: JetTransport,
     request_msg: JetAcceptReq,
     response_msg: Option<JetMessage>,
@@ -148,12 +145,14 @@ struct HandleAcceptJetMsg {
 
 impl HandleAcceptJetMsg {
     fn new(
+        config: &Config,
         transport: JetTransport,
         msg: JetAcceptReq,
         jet_associations: JetAssociationsMap,
         executor_handle: TaskExecutor,
     ) -> Self {
         HandleAcceptJetMsg {
+            config: config.clone(),
             transport,
             request_msg: msg,
             response_msg: None,
@@ -187,7 +186,7 @@ impl Future for HandleAcceptJetMsg {
                             status_code: StatusCode::OK,
                             version: request.version,
                             association: uuid,
-                            instance: JET_INSTANCE.clone(),
+                            instance: self.config.jet_instance(),
                             timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                         }));
                     }
@@ -203,7 +202,7 @@ impl Future for HandleAcceptJetMsg {
                                     status_code: StatusCode::OK,
                                     version: request.version,
                                     association: Uuid::nil(),
-                                    instance: JET_INSTANCE.clone(),
+                                    instance: self.config.jet_instance(),
                                     timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                                 }));
                             }
@@ -214,7 +213,7 @@ impl Future for HandleAcceptJetMsg {
                                 status_code: StatusCode::NOT_FOUND,
                                 version: request.version,
                                 association: Uuid::nil(),
-                                instance: JET_INSTANCE.clone(),
+                                instance: self.config.jet_instance(),
                                 timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                             }));
                         }
