@@ -6,7 +6,6 @@ use serde_json::Value;
 pub struct Association {
     id: Uuid,
     version: u8,
-    state: AssociationState,
     candidates: IndexMap<Uuid, Candidate>,
 }
 
@@ -15,7 +14,6 @@ impl Association {
         Association {
             id: id,
             version: version,
-            state: AssociationState::Initial,
             candidates: IndexMap::new(),
         }
     }
@@ -63,28 +61,8 @@ impl Association {
 
         candidates
     }
-}
 
-#[derive(Debug,Clone,PartialEq)]
-pub enum AssociationState {
-    Initial,
-    Gathering,
-    Checking,
-    Active,
-    Failed,
-    Final,
-}
-
-impl From<AssociationState> for &str {
-    fn from(val: AssociationState) -> Self {
-        match val {
-            AssociationState::Initial => "Initial",
-            AssociationState::Gathering => "Gathering",
-            AssociationState::Checking => "Checking",
-            AssociationState::Active => "Active",
-            AssociationState::Failed => "Failed",
-            AssociationState::Final => "Final",
-        }
+    pub fn version(&self) -> u8 {
+        self.version
     }
 }
-

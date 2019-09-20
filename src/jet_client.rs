@@ -11,7 +11,7 @@ use tokio_io::{AsyncRead, AsyncWrite};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use uuid::Uuid;
-use jet_proto::StatusCode;
+use jet_proto::{StatusCode, JET_VERSION_V2};
 
 use jet_proto::{JET_VERSION_V1, JetMessage};
 use log::{debug, error, info};
@@ -198,13 +198,15 @@ impl Future for HandleAcceptJetMsg {
                         let mut status_code = StatusCode::BAD_REQUEST;
 
                         if let Some(association) = jet_associations.get_mut(&request.association) {
-                            if let Some(candidate) = association.get_candidate_mut(request.candidate) {
-                                if candidate.transport_type() == TransportType::Tcp {
-                                    candidate.set_server_transport(self.transport.clone());
-                                    status_code = StatusCode::OK;
+                            if association.version() == JET_VERSION_V2 {
+                                if let Some(candidate) = association.get_candidate_mut(request.candidate) {
+                                    if candidate.transport_type() == TransportType::Tcp {
+                                        candidate.set_server_transport(self.transport.clone());
+                                        status_code = StatusCode::OK;
+                                    }
+                                } else {
+                                    status_code = StatusCode::NOT_FOUND;
                                 }
-                            } else {
-                                status_code = StatusCode::NOT_FOUND;
                             }
                         }
 
@@ -290,29 +292,35 @@ impl Future for HandleConnectJetMsg {
                 let mut status_code = StatusCode::BAD_REQUEST;
 
                 if let Some(mut association) = association_opt {
-                    match self.request_msg.version {
-                        1 => {
+                    match (association.version(), self.request_msg.version) {
+                        (1, 1) => {
                             // Only one candidate exists in version 1 and there is no candidate id.
                             if let Some(candidate) = association.get_candidate_by_index(0) {
-                                self.server_transport = candidate.server_transport();
-                                status_code = StatusCode::OK;
+                                if let Some(transport) = candidate.server_transport() {
+                                    // The accept request has been received before and a transport is available to open the proxy
+                                    self.server_transport = Some(transport);
+                                    status_code = StatusCode::OK;
+                                }
                             } else {
-                                error!("No candidate found for an association version 1.");
+                                error!("No candidate found for an association version 1. Should never happen.");
                                 status_code = StatusCode::INTERNAL_SERVER_ERROR;
                             }
                         }
-                        2 => {
+                        (2, 2) => {
                             if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
                                 if candidate.transport_type() == TransportType::Tcp {
-                                    self.server_transport = candidate.server_transport();
-                                    status_code = StatusCode::OK;
+                                    if let Some(transport) = candidate.server_transport() {
+                                        // The accept request has been received before and a transport is available to open the proxy
+                                        self.server_transport = Some(transport);
+                                        status_code = StatusCode::OK;
+                                    }
                                 }
                             } else {
                                 status_code = StatusCode::NOT_FOUND;
                             }
                         }
-                        _ => {
-                            error!("Invalid version: {}", self.request_msg.version)
+                        (association_version, request_version) => {
+                            error!("Invalid version: Association version={}, Request version={}", association_version, request_version);
                         }
                     }
 
