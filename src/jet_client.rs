@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, io, str};
+use std::{io, str};
 
 use futures::future::{err, ok};
 use futures::{try_ready, Async, Future};
@@ -10,7 +10,6 @@ use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use lazy_static::lazy_static;
 use uuid::Uuid;
 use jet_proto::StatusCode;
 
@@ -25,10 +24,11 @@ use crate::jet::candidate::Candidate;
 use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::jet::TransportType;
+use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
-const ACCEPT_REQUEST_TIMEOUT_SEC: u32 = 5 * 60;
+
 
 pub struct JetClient {
     config: Config,
@@ -168,6 +168,8 @@ impl Future for HandleAcceptJetMsg {
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
+        let mut new_association = false;
+
         if self.response_msg.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                 let request = &self.request_msg;
@@ -181,6 +183,7 @@ impl Future for HandleAcceptJetMsg {
                         association.add_candidate(candidate);
 
                         jet_associations.insert(uuid, association);
+                        new_association = true;
 
                         // Build response
                         self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
@@ -192,32 +195,26 @@ impl Future for HandleAcceptJetMsg {
                         }));
                     }
                     2 => {
-                        let mut candidate_found = false;
+                        let mut status_code = StatusCode::BAD_REQUEST;
+
                         if let Some(association) = jet_associations.get_mut(&request.association) {
                             if let Some(candidate) = association.get_candidate_mut(request.candidate) {
-                                candidate_found = true;
-
-                                //TODO validate transport type
-                                candidate.set_server_transport(self.transport.clone());
-                                self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
-                                    status_code: StatusCode::OK,
-                                    version: request.version,
-                                    association: Uuid::nil(),
-                                    instance: self.config.jet_instance(),
-                                    timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
-                                }));
+                                if candidate.transport_type() == TransportType::Tcp {
+                                    candidate.set_server_transport(self.transport.clone());
+                                    status_code = StatusCode::OK;
+                                }
+                            } else {
+                                status_code = StatusCode::NOT_FOUND;
                             }
                         }
 
-                        if !candidate_found {
-                            self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
-                                status_code: StatusCode::NOT_FOUND,
-                                version: request.version,
-                                association: Uuid::nil(),
-                                instance: self.config.jet_instance(),
-                                timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
-                            }));
-                        }
+                        self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
+                            status_code,
+                            version: request.version,
+                            association: Uuid::nil(),
+                            instance: self.config.jet_instance(),
+                            timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
+                        }));
                     }
                     _ => {
                         // No jet message exist with version different than 1 or 2
@@ -235,23 +232,25 @@ impl Future for HandleAcceptJetMsg {
         response_msg.write_to(&mut v)?;
         try_ready!(self.transport.poll_write(&v));
 
-        // Start timeout to remove the server if no connect request is received with that UUID
-        if let JetMessage::JetAcceptRsp(accept_rsp) = response_msg {
-            if accept_rsp.status_code == 200 {
-                let association = accept_rsp.association;
-                let jet_associations = self.jet_associations.clone();
-                let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-                self.executor_handle.spawn(timeout.then(move |_| {
-                    RemoveAssociation::new(jet_associations, association).then(move |res| {
-                        if let Ok(true) = res {
-                            info!(
-                                "No connect request received with association {}. Association removed!",
-                                association
-                            );
-                        }
-                        ok(())
-                    })
-                }));
+        // Start timeout to remove the association if no connect is received
+        if new_association {
+            if let JetMessage::JetAcceptRsp(accept_rsp) = response_msg {
+                if accept_rsp.status_code == 200 {
+                    let association = accept_rsp.association;
+                    let jet_associations = self.jet_associations.clone();
+                    let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
+                    self.executor_handle.spawn(timeout.then(move |_| {
+                        RemoveAssociation::new(jet_associations, association).then(move |res| {
+                            if let Ok(true) = res {
+                                info!(
+                                    "No connect request received with association {}. Association removed!",
+                                    association
+                                );
+                            }
+                            ok(())
+                        })
+                    }));
+                }
             }
         }
 
@@ -288,59 +287,44 @@ impl Future for HandleConnectJetMsg {
         if self.server_transport.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                 let association_opt = jet_associations.remove(&self.request_msg.association);
+                let mut status_code = StatusCode::BAD_REQUEST;
 
                 if let Some(mut association) = association_opt {
-                    let request = &self.request_msg;
                     match self.request_msg.version {
                         1 => {
+                            // Only one candidate exists in version 1 and there is no candidate id.
                             if let Some(candidate) = association.get_candidate_by_index(0) {
                                 self.server_transport = candidate.server_transport();
-                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    status_code: StatusCode::OK,
-                                    version: request.version,
-                                }));
+                                status_code = StatusCode::OK;
                             } else {
-                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    version: self.request_msg.version,
-                                    status_code: StatusCode::NOT_FOUND,
-                                }));
+                                error!("No candidate found for an association version 1.");
+                                status_code = StatusCode::INTERNAL_SERVER_ERROR;
                             }
                         }
                         2 => {
-                            let mut status_code = StatusCode::BAD_REQUEST;
-                            if let Some(candidate) = association.get_candidate_mut(request.candidate) {
+                            if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
                                 if candidate.transport_type() == TransportType::Tcp {
                                     self.server_transport = candidate.server_transport();
                                     status_code = StatusCode::OK;
-                                    self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                        status_code: StatusCode::OK,
-                                        version: request.version,
-                                    }));
                                 }
                             } else {
                                 status_code = StatusCode::NOT_FOUND;
                             }
-
-                            if status_code != StatusCode::OK {
-                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    version: request.version,
-                                    status_code,
-                                }));
-                            }
                         }
                         _ => {
-                            // No jet message exist with version different than 1 or 2
-                            unreachable!();
+                            error!("Invalid version: {}", self.request_msg.version)
                         }
                     }
 
                 } else {
-                    self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                        version: self.request_msg.version,
-                        status_code: StatusCode::NOT_FOUND,
-                    }));
-                    error!("Invalid association ID received: {}", self.request_msg.association);
+                    status_code = StatusCode::NOT_FOUND;
                 }
+
+                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
+                    status_code,
+                    version: self.request_msg.version,
+                }));
+
             } else {
                 return Ok(Async::NotReady);
             }
@@ -362,34 +346,6 @@ impl Future for HandleConnectJetMsg {
         } else {
             Err(error_other(&format!(
                 "Invalid association ID received: {}", self.request_msg.association)))
-        }
-    }
-}
-
-struct RemoveAssociation {
-    jet_associations: JetAssociationsMap,
-    association: Uuid,
-}
-
-impl RemoveAssociation {
-    fn new(jet_associations: JetAssociationsMap, association: Uuid) -> Self {
-        RemoveAssociation {
-            jet_associations,
-            association,
-        }
-    }
-}
-
-impl Future for RemoveAssociation {
-    type Item = bool;
-    type Error = ();
-
-    fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
-        if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
-            let removed = jet_associations.remove(&self.association).is_some();
-            Ok(Async::Ready(removed))
-        } else {
-            Ok(Async::NotReady)
         }
     }
 }

@@ -71,7 +71,7 @@ impl WebsocketService {
                                 let self_clone = self.clone();
                                 let fut = req.into_body().on_upgrade().map(move |upgraded| {
                                     if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                        if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                        if let Some(mut assc) = jet_assc.remove(&association_id) {
                                             if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                                                 if candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss {
                                                     candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));

@@ -17,7 +17,7 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
-    pub fn new(config: &Config, jet_associations: JetAssociationsMap) -> HttpServer {
+    pub fn new(config: &Config, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading http middlewares");
@@ -26,7 +26,7 @@ impl HttpServer {
             .configure_router(|router| {
                 info!("Loading http controllers");
                 let health = HealthController::new();
-                let jet = JetController::new(config.clone(), jet_associations.clone());
+                let jet = JetController::new(config.clone(), jet_associations.clone(), executor.clone());
                 let session = SessionsController::new();
                 info!("Configuring http router");
                 router.add(health)

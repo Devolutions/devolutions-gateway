@@ -1,15 +1,24 @@
 use saphir::Method;
 use saphir::*;
+use uuid::Uuid;
+use jet_proto::JET_VERSION_V2;
+use std::time::{Duration, Instant};
+use log::info;
+use tokio::runtime::TaskExecutor;
+use futures::future::{ok};
+
+use crate::jet::association::Association;
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
-use uuid::Uuid;
-use crate::jet::association::Association;
-use jet_proto::JET_VERSION_V2;
+use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
 use crate::jet::candidate::Candidate;
+use tokio::timer::Delay;
+use futures::Future;
 
 struct ControllerData {
     config: Config,
     jet_associations: JetAssociationsMap,
+    executor_handle: TaskExecutor,
 }
 
 pub struct JetController {
@@ -17,8 +26,8 @@ pub struct JetController {
 }
 
 impl JetController {
-    pub fn new(config: Config, jet_associations: JetAssociationsMap) -> Self {
-        let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations});
+    pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
+        let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
         dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);
         dispatch.add(Method::POST, "/gather/<association_id>", ControllerData::gather_candidate);
 
@@ -46,6 +55,22 @@ impl ControllerData {
                     if !jet_associations.contains_key(&uuid) {
                         jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
                         res.status(StatusCode::OK);
+
+                        // Start timeout to remove the association if no connect is received
+                        let jet_associations = self.jet_associations.clone();
+                        let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
+                        self.executor_handle.spawn(timeout.then(move |_| {
+                            RemoveAssociation::new(jet_associations, uuid).then(move |res| {
+                                if let Ok(true) = res {
+                                    info!(
+                                        "No connect request received with association {}. Association removed!",
+                                        uuid
+                                    );
+                                }
+                                ok(())
+                            })
+                        }));
+
                     }
                 }
             }

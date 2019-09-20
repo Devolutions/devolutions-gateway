@@ -1,29 +1,22 @@
 use uuid::Uuid;
 use indexmap::IndexMap;
 use crate::jet::candidate::Candidate;
-use crate::jet::{TransportPolicy, Role};
 use serde_json::Value;
 
 pub struct Association {
     id: Uuid,
-    role: Role,
     version: u8,
-    prefer_relay: bool,
     state: AssociationState,
-    pub candidates: IndexMap<Uuid, Candidate>,
-    transport_policy: TransportPolicy,
+    candidates: IndexMap<Uuid, Candidate>,
 }
 
 impl Association {
     pub fn new(id: Uuid, version: u8) -> Self {
         Association {
             id: id,
-            role: Role::Relay,
             version: version,
-            prefer_relay: false,
             state: AssociationState::Initial,
             candidates: IndexMap::new(),
-            transport_policy: TransportPolicy::All,
         }
     }
 

@@ -1,3 +1,5 @@
+pub mod association;
+
 use std::{io, net::SocketAddr};
 
 use url::Url;

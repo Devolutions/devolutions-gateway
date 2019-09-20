@@ -72,7 +72,7 @@ fn main() {
     let executor_handle = runtime.executor();
 
     info!("Starting http server ...");
-    let http_server = HttpServer::new(&config, jet_associations.clone());
+    let http_server = HttpServer::new(&config, jet_associations.clone(), executor_handle.clone());
     if let Err(e) = http_server.start(executor_handle.clone()) {
         error!("http_server failed to start: {}", e);
         return;
