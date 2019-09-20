@@ -24,6 +24,7 @@ use crate::jet::association::Association;
 use crate::jet::candidate::Candidate;
 use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use crate::jet::TransportType;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
@@ -306,16 +307,24 @@ impl Future for HandleConnectJetMsg {
                             }
                         }
                         2 => {
+                            let mut status_code = StatusCode::BAD_REQUEST;
                             if let Some(candidate) = association.get_candidate_mut(request.candidate) {
-                                self.server_transport = candidate.server_transport();
-                                self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    status_code: StatusCode::OK,
-                                    version: request.version,
-                                }));
+                                if candidate.transport_type() == TransportType::Tcp {
+                                    self.server_transport = candidate.server_transport();
+                                    status_code = StatusCode::OK;
+                                    self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
+                                        status_code: StatusCode::OK,
+                                        version: request.version,
+                                    }));
+                                }
                             } else {
+                                status_code = StatusCode::NOT_FOUND;
+                            }
+
+                            if status_code != StatusCode::OK {
                                 self.response_msg = Some(JetMessage::JetConnectRsp(JetConnectRsp {
-                                    version: self.request_msg.version,
-                                    status_code: StatusCode::NOT_FOUND,
+                                    version: request.version,
+                                    status_code,
                                 }));
                             }
                         }

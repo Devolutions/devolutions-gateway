@@ -55,7 +55,9 @@ impl Candidate {
     pub fn id(&self) -> Uuid {
         self.id.clone()
     }
-
+    pub fn transport_type(&self) -> TransportType {
+        self.transport_type.clone()
+    }
     pub fn url(&self) -> Option<Url> {
         self.url.clone()
     }

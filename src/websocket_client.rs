@@ -12,6 +12,7 @@ use log::{info, error};
 use url::Url;
 use std::io;
 use saphir::server::HttpService;
+use crate::jet::TransportType;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -72,12 +73,14 @@ impl WebsocketService {
                                     if let Ok(mut jet_assc) = jet_associations_clone.lock() {
                                         if let Some(assc) = jet_assc.get_mut(&association_id) {
                                             if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                                                candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
+                                                if candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss {
+                                                    candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
 
-                                                // Start the proxy
-                                                if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
-                                                    let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
-                                                    self_clone.executor_handle.spawn(proxy);
+                                                    // Start the proxy
+                                                    if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
+                                                        let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
+                                                        self_clone.executor_handle.spawn(proxy);
+                                                    }
                                                 }
                                             }
                                         }
