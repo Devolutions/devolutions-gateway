@@ -85,6 +85,7 @@ fn rdp_with_nla_ntlm() {
 
     let _proxy = run_proxy(
         PROXY_ADDR,
+        None,
         Some(JET_SERVER),
         Some(
             identities_file

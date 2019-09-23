@@ -1,256 +1,334 @@
 extern crate byteorder;
 extern crate log;
 extern crate uuid;
+#[macro_use]
+extern crate hex_literal;
+
+pub mod accept;
+pub mod connect;
+pub mod utils;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::Read;
-use std::io::{self, Write};
-use std::ops::Add;
-use std::str::FromStr;
+use std::io::{Read};
+use std::io::{self};
 use uuid::Uuid;
+use crate::accept::{JetAcceptReq, JetAcceptRsp};
+use crate::connect::{JetConnectReq, JetConnectRsp};
+use crate::utils::RequestHelper;
+use log::trace;
+pub use http::StatusCode;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
-pub const JET_VERSION: u8 = 1;
+pub const JET_VERSION_V1: u8 = 1;
+pub const JET_VERSION_V2: u8 = 2;
+
+//pub const JET_MSG_MASK: u8 = 0x73;
+pub const JET_MSG_MASK: u8 = 0x00;
 
 const JET_HEADER_VERSION: &str = "Jet-Version";
 const JET_HEADER_METHOD: &str = "Jet-Method";
 const JET_HEADER_ASSOCIATION: &str = "Jet-Association";
 const JET_HEADER_TIMEOUT: &str = "Jet-Timeout";
 const JET_HEADER_INSTANCE: &str = "Jet-Instance";
+const JET_HEADER_HOST: &str = "Host";
+const JET_HEADER_CONNECTION: &str = "Connection";
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum JetMethod {
-    ACCEPT,
-    CONNECT,
+#[derive(Debug, Clone, PartialEq)]
+pub enum JetMessage {
+    JetAcceptReq(JetAcceptReq),
+    JetAcceptRsp(JetAcceptRsp),
+    JetConnectReq(JetConnectReq),
+    JetConnectRsp(JetConnectRsp)
 }
 
-impl FromStr for JetMethod {
-    type Err = io::Error;
-
-    fn from_str(s: &str) -> Result<Self, <Self as FromStr>::Err> {
-        match s {
-            "Accept" => Ok(JetMethod::ACCEPT),
-            "Connect" => Ok(JetMethod::CONNECT),
-            _ => Err(error_other(&format!(
-                "JetMethod: Wrong value ({}). Only Accept and Connect are accepted",
-                s
-            ))),
-        }
-    }
-}
-
-impl ToString for JetMethod {
-    fn to_string(&self) -> String {
-        match self {
-            JetMethod::ACCEPT => "Accept".to_string(),
-            JetMethod::CONNECT => "Connect".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ResponseStatusCode {
-    StatusCode200,
-    StatusCode400,
-}
-
-#[derive(Debug, Clone)]
-pub struct JetPacket {
-    flags: u8,
+struct JetHeader {
+    msg_size: u16,
     mask: u8,
-    response_status_code: Option<ResponseStatusCode>,
-    version: Option<u8>,
-    method: Option<JetMethod>,
-    association: Option<Uuid>,
-    timeout: Option<u32>,
-    instance: Option<String>,
 }
 
-impl JetPacket {
-    pub fn new(flags: u8, mask: u8) -> Self {
-        JetPacket {
-            flags,
-            mask,
-            version: None,
-            method: None,
-            association: None,
-            timeout: None,
-            response_status_code: None,
-            instance: None,
+impl JetMessage {
+    pub fn read_request<R: Read>(stream: &mut R) -> Result<Self, Error> {
+        let jet_header = JetMessage::read_header(stream)?;
+        let payload = JetMessage::read_payload(stream, &jet_header)?;
+
+        trace!("Message received: {}", payload);
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        if let Ok(_) = req.parse(payload.as_bytes()) {
+            if let Some(path) = req.path.map(|path| path.to_lowercase()) {
+                if path.starts_with("/jet/accept") {
+                    return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
+                } else if path.starts_with("/jet/connect") {
+                    return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
+                } else if path.eq("/") {
+                    if let Some(jet_method) = req.get_header_value("jet-method") {
+                        if jet_method.to_lowercase().eq("accept") {
+                            return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
+                        } else {
+                            return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
+                        }
+                    }
+                }
+            }
         }
+
+        Err(format!("Invalid message received: Payload={}", payload).into())
     }
 
-    pub fn new_response(flags: u8, mask: u8, response_status_code: ResponseStatusCode) -> Self {
-        JetPacket {
-            flags,
-            mask,
-            response_status_code: Some(response_status_code),
-            version: Some(JET_VERSION),
-            method: None,
-            association: None,
-            timeout: None,
-            instance: None,
+    pub fn read_accept_response<R: Read>(stream: &mut R) -> Result<Self, Error> {
+        let jet_header = JetMessage::read_header(stream)?;
+        let payload = JetMessage::read_payload(stream, &jet_header)?;
+
+        trace!("Message received: {}", payload);
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut rsp = httparse::Response::new(&mut headers);
+
+        if let Ok(_) = rsp.parse(payload.as_bytes()) {
+            return Ok(JetMessage::JetAcceptRsp(JetAcceptRsp::from_response(&rsp)?));
         }
+
+        Err(format!("Invalid message received: Payload={}", payload).into())
     }
 
-    pub fn flags(&self) -> u8 {
-        self.flags
-    }
+    pub fn read_connect_response<R: Read>(stream: &mut R) -> Result<Self, Error> {
+        let jet_header = JetMessage::read_header(stream)?;
+        let payload = JetMessage::read_payload(stream, &jet_header)?;
 
-    pub fn mask(&self) -> u8 {
-        self.mask
-    }
+        trace!("Message received: {}", payload);
 
-    pub fn is_accept(&self) -> bool {
-        self.method == Some(JetMethod::ACCEPT)
-    }
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut rsp = httparse::Response::new(&mut headers);
 
-    pub fn is_connect(&self) -> bool {
-        self.method == Some(JetMethod::CONNECT)
-    }
-
-    pub fn association(&self) -> Option<Uuid> {
-        self.association
-    }
-
-    pub fn set_association(&mut self, association: Option<Uuid>) {
-        self.association = association;
-    }
-
-    pub fn set_jet_instance(&mut self, instance: Option<String>) {
-        self.instance = instance;
-    }
-
-    pub fn set_timeout(&mut self, timeout: Option<u32>) {
-        self.timeout = timeout;
-    }
-
-    pub fn set_method(&mut self, method: Option<JetMethod>) {
-        self.method = method;
-    }
-
-    pub fn set_version(&mut self, version: Option<u8>) {
-        self.version = version;
-    }
-
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self, io::Error> {
-        let signature = reader.read_u32::<LittleEndian>()?;
-        if signature != JET_MSG_SIGNATURE {
-            return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
+        if let Ok(_) = rsp.parse(payload.as_bytes()) {
+            return Ok(JetMessage::JetConnectRsp(JetConnectRsp::from_response(&rsp)?));
         }
-        let size = reader.read_u16::<BigEndian>()?;
-        let flags = reader.read_u8()?;
-        let mask = reader.read_u8()?;
-        let mut jet_packet = JetPacket::new(flags, mask);
 
-        let mut payload: Vec<u8> = vec![0; (size - 8) as usize];
-        reader.read_exact(&mut payload)?;
+        Err(format!("Invalid message received: Payload={}", payload).into())
+    }
+
+    pub fn write_to(&self, mut stream: impl io::Write) -> Result<(), Error> {
+        let flags: u8 = 0;
+        let mask: u8 = JET_MSG_MASK;
+
+        let mut v: Vec<u8> = Vec::new();
+        let mut payload = match self {
+            JetMessage::JetAcceptReq(req) => {
+                req.to_payload(&mut v)?;
+                &mut v
+            }
+            JetMessage::JetAcceptRsp(rsp) => {
+                rsp.to_payload(&mut v)?;
+                &mut v
+            }
+            JetMessage::JetConnectReq(req) => {
+                req.to_payload(&mut v)?;
+                &mut v
+            }
+            JetMessage::JetConnectRsp(rsp) => {
+                rsp.to_payload(&mut v)?;
+                &mut v
+            }
+        };
 
         apply_mask(mask, &mut payload);
 
-        let payload = String::from_utf8(payload).map_err(|e| {
-            error_other(&format!(
-                "Invalid JetPacket - Packet can't be converted in String: {}",
-                e
-            ))
-        })?;
-        let lines = payload.lines();
-
-        // First line is ignored (GET / HTTP/1.1)
-        for line in lines.skip(1) {
-            if line.is_empty() {
-                break;
-            }
-
-            let fields: Vec<&str> = line.split(':').collect();
-
-            if fields.len() != 2 {
-                return Err(error_other(&format!(
-                    "Invalid JetPacket: Error in header line ({})",
-                    line
-                )));
-            }
-            match fields[0] {
-                JET_HEADER_VERSION => {
-                    jet_packet.version = Some(
-                        fields[1]
-                            .trim()
-                            .parse::<u8>()
-                            .map_err(|e| error_other(&format!("Invalid version: {}", e)))?,
-                    )
-                }
-                JET_HEADER_METHOD => {
-                    jet_packet.method = Some(JetMethod::from_str(fields[1].trim())?);
-                }
-                JET_HEADER_ASSOCIATION => {
-                    jet_packet.association = Some(
-                        Uuid::from_str(fields[1].trim())
-                            .map_err(|e| error_other(&format!("Invalid association: {}", e)))?,
-                    );
-                }
-                _ => {
-                    // ignore unknown header
-                }
-            }
-        }
-        Ok(jet_packet)
-    }
-
-    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<(), io::Error> {
-        // Build payload
-        let mut payload = "".to_string();
-        match self.response_status_code {
-            Some(ResponseStatusCode::StatusCode200) => {
-                payload = payload.add(&format!("{} {} {}\r\n", "HTTP/1.1", "200", "OK"));
-            }
-            Some(ResponseStatusCode::StatusCode400) => {
-                payload = payload.add(&format!("{} {} {}\r\n", "HTTP/1.1", "400", "Bad Request"));
-            }
-            None => {
-                payload = payload.add(&format!("{} {} {}\r\n", "HTTP/1.1", "400", "Bad Request"));
-            }
-        }
-        if let Some(ref version) = self.version {
-            payload = payload.add(&format!("{}: {}\r\n", JET_HEADER_VERSION, version.to_string()));
-        }
-        if let Some(ref association) = self.association {
-            payload = payload.add(&format!("{}: {}\r\n", JET_HEADER_ASSOCIATION, association.to_string()));
-        }
-        if let Some(ref method) = self.method {
-            payload = payload.add(&format!("{}: {}\r\n", JET_HEADER_METHOD, method.to_string()));
-        }
-        if let Some(ref timeout) = self.timeout {
-            payload = payload.add(&format!("{}: {}\r\n", JET_HEADER_TIMEOUT, timeout.to_string()))
-        }
-        if let Some(ref instance) = self.instance {
-            payload = payload.add(&format!("{}: {}\r\n", JET_HEADER_INSTANCE, instance))
-        }
-        payload = payload.add("\r\n");
-
-        // Apply mask
-        let payload_bytes = unsafe { payload.as_bytes_mut() };
-        apply_mask(self.mask, payload_bytes);
-
-        // Write message
-        let size = payload_bytes.len() as u16 + JET_MSG_HEADER_SIZE as u16;
-        writer.write_u32::<LittleEndian>(JET_MSG_SIGNATURE)?;
-        writer.write_u16::<BigEndian>(size)?;
-        writer.write_u8(self.flags)?;
-        writer.write_u8(self.mask)?;
-
-        writer.write_all(payload_bytes)?;
+        let size = payload.len() as u16 + JET_MSG_HEADER_SIZE as u16;
+        stream.write_u32::<LittleEndian>(JET_MSG_SIGNATURE)?;
+        stream.write_u16::<BigEndian>(size)?;
+        stream.write_u8(flags)?;
+        stream.write_u8(mask)?;
+        stream.write_all(&mut payload)?;
 
         Ok(())
     }
+
+    fn read_header<R: Read>(stream: &mut R) -> Result<JetHeader, Error> {
+        let signature = stream.read_u32::<LittleEndian>()?;
+        if signature != JET_MSG_SIGNATURE {
+            return Err(Error::Str(format!("Invalid JetMessage - Signature = {}.", signature)));
+        }
+        let msg_size = stream.read_u16::<BigEndian>()?;
+        let _ = stream.read_u8()?;
+        let mask = stream.read_u8()?;
+
+        Ok(JetHeader {
+            msg_size,
+            mask
+        })
+    }
+
+    fn read_payload<R: Read>(stream: &mut R, header: &JetHeader) -> Result<String, Error> {
+        let mut payload: Vec<u8> = vec![0; (header.msg_size - 8) as usize];
+        stream.read_exact(&mut payload)?;
+
+        apply_mask(header.mask, &mut payload);
+
+        let payload = String::from_utf8(payload).map_err(|e| {
+            Error::Str(format!("Invalid JetMessage - Message can't be converted in String: {}", e))
+        })?;
+
+        Ok(payload)
+    }
 }
 
-fn error_other(desc: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
+fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
+    if let Some(raw_uuid) = path.split("/").skip(index + 1).next() {
+        Uuid::parse_str(raw_uuid).ok()
+    } else {
+        None
+    }
 }
 
 fn apply_mask(mask: u8, payload: &mut [u8]) {
     for byte in payload {
         *byte ^= mask;
+    }
+}
+
+
+#[derive(Debug)]
+pub enum Error {
+    Internal,
+    Version,
+    Capabilities,
+    Unresolved,
+    Unreachable,
+    Unavailable,
+    Transport,
+    Memory,
+    State,
+    Protocol,
+    Header,
+    Payload,
+    Size,
+    Type,
+    Value,
+    Offset,
+    Flags,
+    Argument,
+    Timeout,
+    Cancelled,
+    BadRequest,
+    Unauthorized,
+    Forbidden,
+    NotFound,
+    NotImplemented,
+    Io(io::Error),
+    Str(String),
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Error {
+        Error::Io(error)
+    }
+}
+
+impl From<Error> for io::Error {
+    fn from(error: Error) -> io::Error {
+        let error_string = error.to_string();
+        io::Error::new(io::ErrorKind::Other, error_string.as_str())
+    }
+}
+
+impl From<&'static str> for Error {
+    fn from(error: &'static str) -> Error {
+        Error::Str(error.to_string())
+    }
+}
+
+impl From<String> for Error {
+    fn from(error: String) -> Error {
+        Error::Str(error)
+    }
+}
+
+impl Error {
+    pub fn from_http_status_code(status_code: u16) -> Self {
+        return match status_code {
+            400 => Error::BadRequest,
+            401 => Error::Unauthorized,
+            403 => Error::Forbidden,
+            404 => Error::NotFound,
+            _ => Error::BadRequest,
+        }
+    }
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Error::Internal => write!(f, "Internal error"),
+            Error::Version => write!(f, "Version error"),
+            Error::Capabilities => write!(f, "Capabilities error"),
+            Error::Unresolved => write!(f, "Unresolved error"),
+            Error::Unreachable => write!(f, "Unreachable error"),
+            Error::Unavailable => write!(f, "Unavailable error"),
+            Error::Transport => write!(f, "Transport error"),
+            Error::Memory => write!(f, "Memory error"),
+            Error::State => write!(f, "State error"),
+            Error::Protocol => write!(f, "Protocol error"),
+            Error::Header => write!(f, "Header error"),
+            Error::Payload => write!(f, "Payload error"),
+            Error::Size => write!(f, "Size error"),
+            Error::Type => write!(f, "Type error"),
+            Error::Value => write!(f, "Value error"),
+            Error::Offset => write!(f, "Offset error"),
+            Error::Flags => write!(f, "Flags error"),
+            Error::Argument => write!(f, "Argument error"),
+            Error::Timeout => write!(f, "Timeout error"),
+            Error::Cancelled => write!(f, "Cancelled error"),
+            Error::BadRequest => write!(f, "BadRequest error"),
+            Error::Unauthorized => write!(f, "Unauthorized error"),
+            Error::Forbidden => write!(f, "Forbidden error"),
+            Error::NotFound => write!(f, "NotFound error"),
+            Error::NotImplemented => write!(f, "NotImplemented error"),
+            Error::Io(e) => write!(f, "{}", e),
+            Error::Str(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+//GET /jet/accept/300f1c82-d33b-11e9-bb65-2a2ae2dbcce5/4c8f409a-c1a2-4cae-bda2-84c590fed618 HTTP/1.1
+//Host: jet101.wayk.net
+//Connection: Keep-Alive
+//Jet-Version: 2
+static TEST_JET_ACCEPT_REQ_V2: &'static [u8] = &hex!("
+4a 45 54 00 00 A8 00 00
+47 45 54 20 2f 6a 65 74 2f 61 63 63 65 70 74 2f
+33 30 30 66 31 63 38 32 2d 64 33 33 62 2d 31 31
+65 39 2d 62 62 36 35 2d 32 61 32 61 65 32 64 62
+63 63 65 35 2f 34 63 38 66 34 30 39 61 2d 63 31
+61 32 2d 34 63 61 65 2d 62 64 61 32 2d 38 34 63
+35 39 30 66 65 64 36 31 38 20 48 54 54 50 2f 31
+2e 31 0a 48 6f 73 74 3a 20 6a 65 74 31 30 31 2e
+77 61 79 6b 2e 6e 65 74 0a 43 6f 6e 6e 65 63 74
+69 6f 6e 3a 20 4b 65 65 70 2d 41 6c 69 76 65 0a
+4a 65 74 2d 56 65 72 73 69 6f 6e 3a 20 32 0a 0a
+");
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_accept_v2() {
+        use std::str::FromStr;
+        use std::io::Cursor;
+
+        let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
+        let jet_message = JetMessage::read_request(&mut cursor).unwrap();
+        assert!(jet_message ==
+            JetMessage::JetAcceptReq(
+                JetAcceptReq {
+                    association: Uuid::from_str("300f1c82-d33b-11e9-bb65-2a2ae2dbcce5").unwrap(),
+                    candidate: Uuid::from_str("4c8f409a-c1a2-4cae-bda2-84c590fed618").unwrap(),
+                    version: 2,
+                    host: "jet101.wayk.net".to_string()
+                })
+        );
     }
 }

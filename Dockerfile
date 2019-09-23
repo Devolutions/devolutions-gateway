@@ -10,5 +10,6 @@ RUN rm -rf /var/lib/apt/lists/*
 COPY devolutions-jet .
 
 EXPOSE 8080
+EXPOSE 10256
 
 ENTRYPOINT [ "./devolutions-jet" ]

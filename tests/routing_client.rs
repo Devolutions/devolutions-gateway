@@ -24,7 +24,7 @@ fn smoke() {
     let routing_url = ROUTING_ADDR;
 
     //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, Some(&construct_routing_url("tcp", routing_url)), None);
+    let _proxy = run_proxy(proxy_addr, None, Some(&construct_routing_url("tcp", routing_url)), None);
 
     let (sender_end, receiver_end) = channel();
 

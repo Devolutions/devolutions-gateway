@@ -5,8 +5,11 @@ use saphir::Server as SaphirServer;
 use saphir::ServerSpawn;
 use std::sync::Mutex;
 use tokio::runtime::TaskExecutor;
+use crate::http::controllers::jet::JetController;
+use crate::jet_client::JetAssociationsMap;
+use crate::config::Config;
 
-const HTTP_SERVER_PORT: u32 = 10256;
+pub const HTTP_SERVER_PORT: u32 = 10256;
 
 pub struct HttpServer {
     pub server: SaphirServer,
@@ -14,7 +17,7 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
-    pub fn new() -> HttpServer {
+    pub fn new(config: &Config, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading http middlewares");
@@ -23,9 +26,12 @@ impl HttpServer {
             .configure_router(|router| {
                 info!("Loading http controllers");
                 let health = HealthController::new();
+                let jet = JetController::new(config.clone(), jet_associations.clone(), executor.clone());
                 let session = SessionsController::new();
                 info!("Configuring http router");
-                router.add(health).add(session)
+                router.add(health)
+                    .add(jet)
+                    .add(session)
             })
             .configure_listener(|list_config| list_config.set_uri(&format!("http://0.0.0.0:{}", HTTP_SERVER_PORT)))
             .build();
