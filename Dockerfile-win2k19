@@ -8,5 +8,6 @@ WORKDIR "C:\\wayk"
 COPY devolutions-jet.exe .
 
 EXPOSE 8080
+EXPOSE 10256
 
 ENTRYPOINT ["c:\\wayk\\devolutions-jet.exe"]
