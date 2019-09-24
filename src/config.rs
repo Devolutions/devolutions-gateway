@@ -70,7 +70,7 @@ impl Config {
                 .number_of_values(1)
             )
             .arg(Arg::with_name("jet-instance")
-                .long("jet_instance")
+                .long("jet-instance")
                 .value_name("JET_INSTANCE")
                 .help("Specific name to reach that instance of JET.")
                 .takes_value(true)
@@ -78,7 +78,7 @@ impl Config {
             .arg(
                 Arg::with_name("routing-url")
                     .short("r")
-                    .long("routing_url")
+                    .long("routing-url")
                     .value_name("ROUTING_URL")
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
@@ -88,7 +88,7 @@ impl Config {
             .arg(
                 Arg::with_name("pcap-filename")
                     .short("f")
-                    .long("pcap_file")
+                    .long("pcap-file")
                     .value_name("PCAP_FILENAME")
                     .help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
                     .long_help("Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and RDP protocols can be saved.")
@@ -109,7 +109,7 @@ impl Config {
             .arg(
                 Arg::with_name("identities-file")
                     .short("i")
-                    .long("identities_file")
+                    .long("identities-file")
                     .value_name("IDENTITIES_FILE")
                     .help("A JSON-file with a list of identities: proxy credentials, target credentials, and target destination")
                     .long_help(r###"

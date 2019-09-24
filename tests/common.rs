@@ -28,17 +28,17 @@ pub fn run_proxy(proxy_addr: &str, websocket_url: Option<&str>, routing_url: Opt
     let cmd_line_arg = format!("tcp://{}", proxy_addr);
     proxy_command.arg("-l").arg(cmd_line_arg);
 
-    proxy_command.arg("--jet_instance").arg("127.0.0.1");
+    proxy_command.arg("--jet-instance").arg("127.0.0.1");
 
     if let Some(websocket_url) = websocket_url {
         proxy_command.arg("-l").arg(websocket_url);
     }
     if routing_url.is_some() {
-        proxy_command.arg("--routing_url").arg(routing_url.unwrap());
+        proxy_command.arg("--routing-url").arg(routing_url.unwrap());
     }
 
     if identities_file.is_some() {
-        proxy_command.arg("--identities_file").arg(identities_file.unwrap());
+        proxy_command.arg("--identities-file").arg(identities_file.unwrap());
     }
 
     let proxy = proxy_command.spawn().unwrap();
