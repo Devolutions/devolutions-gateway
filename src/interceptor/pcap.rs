@@ -1,13 +1,13 @@
 use crate::interceptor::MessageReader;
 use crate::interceptor::UnknownMessageReader;
 use crate::interceptor::{PacketInterceptor, PeerInfo};
-use log::{debug, error};
 use packet::builder::Builder;
 use packet::ether::Builder as BuildEthernet;
 use packet::ether::Protocol;
 use packet::ip::v6::Builder as BuildV6;
 use packet::tcp::flag::Flags;
 use pcap_file::PcapWriter;
+use slog_scope::{debug, error};
 use std::fs::File;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

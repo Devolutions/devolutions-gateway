@@ -1,7 +1,7 @@
 use std::io;
 
 use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
-use slog::{debug, info};
+use slog_scope::{debug, info};
 use tokio::codec::Framed;
 use tokio_tcp::TcpStream;
 
@@ -25,19 +25,15 @@ impl NegotiationWithClientFuture {
 impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for NegotiationWithClientFuture {
     type Item = (Framed<TcpStream, NegotiationWithClientTransport>, Request, Response);
 
-    fn process_pdu(&mut self, request: Request, client_logger: &slog::Logger) -> io::Result<Option<Response>> {
+    fn process_pdu(&mut self, request: Request) -> io::Result<Option<Response>> {
         let (routing_token, cookie) = match &request.nego_data {
             Some(NegoData::RoutingToken(routing_token)) => (Some(routing_token), None),
             Some(NegoData::Cookie(cookie)) => (None, Some(cookie)),
             None => (None, None),
         };
-        debug!(
-            client_logger,
+        info!(
             "Processing negotiation request from the client (routing_token: {:?}, cookie: {:?}, protocol: {:?}, flags: {:?})",
-            routing_token,
-            cookie,
-            request.protocol,
-            request.flags,
+            routing_token, cookie, request.protocol, request.flags,
         );
 
         let response_data = if request.protocol.contains(SecurityProtocol::HYBRID)
@@ -66,7 +62,6 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for Neg
             src_ref: request.src_ref,
         };
         debug!(
-            client_logger,
             "Sending response to the client: {:?}",
             response.response.as_ref().unwrap()
         );
@@ -80,9 +75,8 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for Neg
         &mut self,
         mut client: Option<Framed<TcpStream, NegotiationWithClientTransport>>,
         _server: Option<Framed<TcpStream, NegotiationWithClientTransport>>,
-        client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully negotiated with the client");
+        info!("Successfully negotiated with the client");
 
         (
             client
@@ -120,12 +114,12 @@ impl NegotiationWithServerFuture {
 impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for NegotiationWithServerFuture {
     type Item = (Framed<TcpStream, NegotiationWithServerTransport>, Response);
 
-    fn process_pdu(&mut self, response: Response, client_logger: &slog::Logger) -> io::Result<Option<Request>> {
+    fn process_pdu(&mut self, response: Response) -> io::Result<Option<Request>> {
         match response.response {
             Some(ResponseData::Response { protocol, flags }) => {
-                debug!(
-                    client_logger,
-                    "Received negotiation response from the server (protocol: {:?}, flags: {:?})", protocol, flags,
+                info!(
+                    "Received negotiation response from the server (protocol: {:?}, flags: {:?})",
+                    protocol, flags,
                 );
 
                 match protocol {
@@ -151,9 +145,8 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
         &mut self,
         _client: Option<Framed<TcpStream, NegotiationWithServerTransport>>,
         mut server: Option<Framed<TcpStream, NegotiationWithServerTransport>>,
-        client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully negotiated with the server");
+        info!("Successfully negotiated with the server");
 
         (
             server

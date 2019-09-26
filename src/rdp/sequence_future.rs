@@ -25,17 +25,8 @@ where
 {
     type Item;
 
-    fn process_pdu(
-        &mut self,
-        pdu: <U as Decoder>::Item,
-        client_logger: &slog::Logger,
-    ) -> io::Result<Option<<U as Encoder>::Item>>;
-    fn return_item(
-        &mut self,
-        client: Option<Framed<T, U>>,
-        server: Option<Framed<T, U>>,
-        client_logger: &slog::Logger,
-    ) -> Self::Item;
+    fn process_pdu(&mut self, pdu: <U as Decoder>::Item) -> io::Result<Option<<U as Encoder>::Item>>;
+    fn return_item(&mut self, client: Option<Framed<T, U>>, server: Option<Framed<T, U>>) -> Self::Item;
     fn next_sender(&self) -> NextStream;
     fn next_receiver(&self) -> NextStream;
     fn sequence_finished(&self, future_state: FutureState) -> bool;
@@ -55,7 +46,6 @@ where
     send_future: Option<Send<Framed<T, U>>>,
     pdu: Option<<U as Decoder>::Item>,
     future_state: FutureState,
-    client_logger: slog::Logger,
 }
 
 impl<F, T, U> SequenceFuture<F, T, U>
@@ -66,7 +56,7 @@ where
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder>::Error>,
 {
-    pub fn with_get_state(future: F, client_logger: slog::Logger, args: GetStateArgs<T, U>) -> Self {
+    pub fn with_get_state(future: F, args: GetStateArgs<T, U>) -> Self {
         Self {
             future,
             client: args.client,
@@ -74,10 +64,9 @@ where
             send_future: None,
             pdu: None,
             future_state: FutureState::GetMessage,
-            client_logger,
         }
     }
-    pub fn with_parse_state(future: F, client_logger: slog::Logger, args: ParseStateArgs<T, U>) -> Self {
+    pub fn with_parse_state(future: F, args: ParseStateArgs<T, U>) -> Self {
         Self {
             future,
             client: args.client,
@@ -85,10 +74,9 @@ where
             send_future: None,
             pdu: Some(args.pdu),
             future_state: FutureState::ParseMessage,
-            client_logger,
         }
     }
-    pub fn with_send_state(future: F, client_logger: slog::Logger, args: SendStateArgs<T, U>) -> Self {
+    pub fn with_send_state(future: F, args: SendStateArgs<T, U>) -> Self {
         Self {
             future,
             client: None,
@@ -96,7 +84,6 @@ where
             send_future: Some(args.send_future),
             pdu: None,
             future_state: FutureState::SendMessage,
-            client_logger,
         }
     }
 
@@ -152,7 +139,7 @@ where
                         .pdu
                         .take()
                         .expect("next_pdu must be present in the Parse message future state");
-                    if let Some(next_pdu) = self.future.process_pdu(pdu, &self.client_logger)? {
+                    if let Some(next_pdu) = self.future.process_pdu(pdu)? {
                         let next_sender = match self.future.next_receiver() {
                             NextStream::Client => self
                                 .client
@@ -180,11 +167,9 @@ where
                     self.send_future = None;
                 }
                 FutureState::Finished => {
-                    return Ok(Async::Ready(self.future.return_item(
-                        self.client.take(),
-                        self.server.take(),
-                        &self.client_logger,
-                    )));
+                    return Ok(Async::Ready(
+                        self.future.return_item(self.client.take(), self.server.take()),
+                    ));
                 }
             };
             self.future_state = self.next_future_state();

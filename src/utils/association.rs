@@ -1,5 +1,5 @@
 use futures::{Future, Async};
-use log::debug;
+use slog_scope::debug;
 use uuid::Uuid;
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;

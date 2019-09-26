@@ -8,7 +8,7 @@ use crate::transport::ws::WsTransport;
 use std::net::SocketAddr;
 use crate::config::Config;
 use crate::Proxy;
-use log::{info, error};
+use slog_scope::{info, error};
 use url::Url;
 use std::io;
 use saphir::server::HttpService;

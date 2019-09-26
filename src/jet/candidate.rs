@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use url::Url;
-use std::convert::{TryInto};
-use log::error;
+use std::convert::TryInto;
+use slog_scope::error;
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 

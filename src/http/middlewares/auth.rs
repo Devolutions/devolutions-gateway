@@ -1,5 +1,5 @@
 use saphir::*;
-use log::error;
+use slog_scope::error;
 use crate::config::Config;
 
 pub struct AuthMiddleware {

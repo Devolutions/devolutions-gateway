@@ -19,6 +19,7 @@ struct ConfigTemp {
     pcap_files_path: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
+    log_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ pub struct Config {
     pcap_files_path: Option<String>,
     protocol: Protocol,
     identities_filename: Option<String>,
+    log_file: Option<String>,
 }
 
 impl Config {
@@ -70,6 +72,10 @@ impl Config {
 
     pub fn identities_filename(&self) -> Option<String> {
         self.identities_filename.clone()
+    }
+
+    pub fn log_file(&self) -> Option<String> {
+        self.log_file.clone()
     }
 
     pub fn init() -> Self {
@@ -140,6 +146,14 @@ impl Config {
                     .long_help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not split between 2 tcp packets.")
                     .takes_value(true)
                     .possible_values(&["wayk", "rdp"])
+                    .empty_values(false)
+            )
+            .arg(
+                Arg::with_name("log-file")
+                    .long("log-file")
+                    .value_name("LOG_FILE")
+                    .help("A file with logs")
+                    .takes_value(true)
                     .empty_values(false)
             )
             .arg(
@@ -215,6 +229,8 @@ identities_file example:
             .value_of("identities-file")
             .map(std::string::ToString::to_string);
 
+        let log_file = matches.value_of("log-file").map(String::from);
+
         let mut config_temp = ConfigTemp {
             unrestricted,
             api_key,
@@ -224,6 +240,7 @@ identities_file example:
             pcap_files_path,
             protocol,
             identities_filename,
+            log_file,
         };
 
         config_temp.apply_env_variables();
@@ -291,7 +308,7 @@ impl From<ConfigTemp> for Config {
             pcap_files_path: temp.pcap_files_path,
             protocol: temp.protocol,
             identities_filename: temp.identities_filename,
-
+            log_file: temp.log_file,
         }
     }
 }
