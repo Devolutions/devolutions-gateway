@@ -62,6 +62,9 @@ OPTIONS:
     -u, --url <LISTENER_URL>
             An address on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port> [default:
             tcp://0.0.0.0:8080]
+    -l, --log_file <LOG_FILE>                  
+            A file with logs
+
     -f, --pcap_file <PCAP_FILENAME>
             Path of the file where the pcap file will be saved. If not set, no pcap file will be created. WaykNow and
             RDP protocols can be saved.

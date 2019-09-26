@@ -3,7 +3,7 @@ use saphir::*;
 use uuid::Uuid;
 use jet_proto::JET_VERSION_V2;
 use std::time::{Duration, Instant};
-use log::info;
+use slog_scope::info;
 use tokio::runtime::TaskExecutor;
 use futures::future::{ok};
 

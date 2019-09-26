@@ -32,7 +32,6 @@ pub struct ConnectionSequenceFuture {
     rdp_identity: Option<RdpIdentity>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
-    client_logger: slog::Logger,
 }
 
 impl ConnectionSequenceFuture {
@@ -41,12 +40,10 @@ impl ConnectionSequenceFuture {
         tls_proxy_pubkey: Vec<u8>,
         tls_acceptor: TlsAcceptor,
         identities_proxy: IdentitiesProxy,
-        client_logger: slog::Logger,
     ) -> Self {
         Self {
             state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(SequenceFuture::with_get_state(
                 NegotiationWithClientFuture::new(),
-                client_logger.clone(),
                 GetStateArgs {
                     client: Some(NegotiationWithClientTransport::default().framed(client)),
                     server: None,
@@ -60,7 +57,6 @@ impl ConnectionSequenceFuture {
             rdp_identity: None,
             filter_config: None,
             joined_static_channels: None,
-            client_logger,
         }
     }
 
@@ -81,7 +77,6 @@ impl ConnectionSequenceFuture {
             self.tls_acceptor
                 .take()
                 .expect("TLS acceptor must be set in the constructor"),
-            self.client_logger.clone(),
         )
     }
     fn create_connect_server_future(&self) -> io::Result<ConnectFuture> {
@@ -122,7 +117,6 @@ impl ConnectionSequenceFuture {
 
         Ok(SequenceFuture::with_send_state(
             NegotiationWithServerFuture::new(),
-            self.client_logger.clone(),
             SendStateArgs {
                 send_future: server_transport.send(pdu),
             },
@@ -142,14 +136,7 @@ impl ConnectionSequenceFuture {
             .expect("for NLA server future, the request must be set after negotiation with client")
             .flags;
 
-        NlaWithServerFuture::new(
-            server,
-            request_flags,
-            server_response_protocol,
-            target_identity,
-            true,
-            self.client_logger.clone(),
-        )
+        NlaWithServerFuture::new(server, request_flags, server_response_protocol, target_identity, true)
     }
     fn create_mcs_initial_future(
         &mut self,
@@ -169,7 +156,6 @@ impl ConnectionSequenceFuture {
                     .clone()
                     .into(),
             )),
-            self.client_logger.clone(),
             GetStateArgs {
                 client: Some(DataTransport::default().framed(client_tls)),
                 server: Some(DataTransport::default().framed(server_tls)),
@@ -188,7 +174,6 @@ impl ConnectionSequenceFuture {
 
         SequenceFuture::with_get_state(
             McsFuture::new(static_channels),
-            self.client_logger.clone(),
             GetStateArgs {
                 client: Some(McsTransport::default().framed(client_tls)),
                 server: Some(McsTransport::default().framed(server_tls)),
@@ -206,7 +191,6 @@ impl ConnectionSequenceFuture {
                     .take()
                     .expect("the filter config must be set after the MCS initial"),
             ),
-            self.client_logger.clone(),
             GetStateArgs {
                 client: Some(client_transport),
                 server: Some(server_transport),

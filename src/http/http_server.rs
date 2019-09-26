@@ -1,8 +1,8 @@
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::sessions::SessionsController;
-use log::info;
 use saphir::Server as SaphirServer;
 use saphir::ServerSpawn;
+use slog_scope::{info};
 use std::sync::Mutex;
 use tokio::runtime::TaskExecutor;
 use crate::http::controllers::jet::JetController;

@@ -8,6 +8,7 @@ mod http;
 mod interceptor;
 mod jet;
 mod jet_client;
+mod logger;
 mod rdp;
 mod routing_client;
 mod transport;
@@ -23,13 +24,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::{future, future::ok, Future, Stream};
+use futures::{future, future::ok, future::Either, Future, Stream};
 use tokio::runtime::Runtime;
 use tokio::runtime::TaskExecutor;
 use tokio_tcp::{TcpListener, TcpStream};
 
 use lazy_static::lazy_static;
-use log::{error, info, warn};
+use slog::{o, Logger};
+use slog_scope::{error, info, slog_error, warn};
+use slog_scope_futures::future01::FutureExt;
 use url::Url;
 
 use crate::config::{Config, Protocol};
@@ -41,11 +44,10 @@ use crate::rdp::RdpClient;
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
-use hyper::service::{service_fn, make_service_fn};
+use hyper::service::{make_service_fn, service_fn};
 use crate::utils::{get_pub_key_from_der, load_certs, load_private_key};
 use crate::websocket_client::{WebsocketService, WsClient};
 use std::error::Error;
-use futures::future::Either;
 use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use saphir::server::HttpService;
@@ -60,8 +62,10 @@ lazy_static! {
 }
 
 fn main() {
-    env_logger::init();
     let config = Config::init();
+
+    let logger = logger::init(config.log_file().as_ref()).expect("logging setup must not fail");
+    let _logger_guard = slog_scope::set_global_logger(logger.clone());
 
     let listeners = config.listeners();
 
@@ -91,7 +95,7 @@ fn main() {
         error!("http_server failed to start: {}", e);
         return;
     }
-    info!("Http server succesfully started");
+    info!("Http server successfully started");
     let http_service = http_server.server.get_request_handler().clone();
 
     // Create the TLS acceptor.
@@ -106,33 +110,32 @@ fn main() {
 
     let mut futures = Vec::new();
     for url in websocket_listeners {
-        futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
+        futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()), logger.clone());
     }
 
     for url in tcp_listeners {
-        futures.push(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
+        futures.push(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
     }
 
     runtime.block_on(future::join_all(futures).map_err(|_| ())).unwrap();
-
     http_server.stop()
 }
 
-fn set_socket_option(stream: &TcpStream) {
+fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_nodelay(true) {
-        error!("set_nodelay on TcpStream failed: {}", e);
+        slog_error!(logger, "set_nodelay on TcpStream failed: {}", e);
     }
 
     if let Err(e) = stream.set_keepalive(Some(Duration::from_secs(2))) {
-        error!("set_keepalive on TcpStream failed: {}", e);
+        slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
     }
 
     if let Err(e) = stream.set_send_buffer_size(SOCKET_SEND_BUFFER_SIZE) {
-        error!("set_send_buffer_size on TcpStream failed: {}", e);
+        slog_error!(logger, "set_send_buffer_size on TcpStream failed: {}", e);
     }
 
     if let Err(e) = stream.set_recv_buffer_size(SOCKET_RECV_BUFFER_SIZE) {
-        error!("set_recv_buffer_size on TcpStream failed: {}", e);
+        slog_error!(logger, "set_recv_buffer_size on TcpStream failed: {}", e);
     }
 }
 
@@ -229,8 +232,8 @@ impl Proxy {
                     jet_sink_1.nb_bytes_written(),
                     jet_stream_2.nb_bytes_read(),
                     jet_sink_2.nb_bytes_written(),
-                    server = server_addr,
-                    client = client_addr
+                    server = &server_addr,
+                    client = &client_addr
                 );
                 ok(())
             }).then(|result| {
@@ -240,12 +243,21 @@ impl Proxy {
     }
 }
 
-fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
+fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
     let server = listener.incoming().for_each(move |conn| {
-        set_socket_option(&conn);
+        let mut logger = logger.clone();
+        if let Ok(peer_addr) = conn.peer_addr() {
+            logger = logger.new(o!( "client" => peer_addr.to_string()));
+        }
+
+        if let Some(ref url) = config.routing_url() {
+            let routing_url = Url::parse(&url).expect("routing_url is invalid.");
+            logger = logger.new(o!( "scheme" => routing_url.scheme().to_string()));
+        }
+        set_socket_option(&conn, &logger);
 
         let routing_url_opt = match config.routing_url() {
             Some(url) => Some(Url::parse(&url).expect("routing_url is invalid.")),
@@ -340,14 +352,18 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
             JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone())
                 .serve(JetTransport::new_tcp(conn))
         };
+        executor_handle.spawn(
+            client_fut
+                .then(move |res| {
+                    match res {
+                        Ok(_) => {}
+                        Err(e) => error!("Error with client: {}", e),
+                    }
 
-        executor_handle.spawn(client_fut.then(move |res| {
-            match res {
-                Ok(_) => {}
-                Err(e) => error!("Error with client: {}", e),
-            }
-            future::ok(())
-        }));
+                    future::ok(())
+                })
+                .with_logger(logger));
+
         ok(())
     });
     info!("TCP jet server started successfully. Listening on {}", socket_addr);
@@ -355,8 +371,7 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
     Box::new(server.map_err(|_|())) as Box<dyn Future<Item=(), Error=()> + Send>
 }
 
-fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=()> + Send> {
-
+fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: slog::Logger) -> Box<dyn Future<Item=(), Error=()> + Send>  {
     // Start websocket server if needed
     info!("Starting websocket server ...");
     let mut websocket_addr = String::new();
@@ -410,6 +425,7 @@ fn start_websocket_server(websocket_url: Url, config: Config, http_service: Http
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
+    executor_handle.spawn(websocket_server.with_logger(logger));
     info!("Websocket server started successfully. Listening on {}", websocket_addr);
     Box::new(websocket_server) as Box<dyn Future<Item=(), Error=()> + Send>
 }

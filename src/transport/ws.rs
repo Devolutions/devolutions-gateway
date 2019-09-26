@@ -9,7 +9,7 @@ use crate::interceptor::PacketInterceptor;
 use futures::{Async, Stream, Sink, AsyncSink, Future};
 use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStream, JetSink};
 use url::Url;
-use log::{debug, error};
+use slog_scope::{debug, error};
 use std::net::SocketAddr;
 use tungstenite::Message;
 use tungstenite::protocol::Role;

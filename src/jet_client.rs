@@ -14,7 +14,7 @@ use uuid::Uuid;
 use jet_proto::{StatusCode, JET_VERSION_V2};
 
 use jet_proto::{JET_VERSION_V1, JetMessage};
-use log::{debug, error, info};
+use slog_scope::{debug, error, info};
 
 use crate::config::Config;
 use crate::transport::JetTransport;

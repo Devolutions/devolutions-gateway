@@ -9,7 +9,6 @@ authors = ["François Dubois <fdubois@devolutions.net>",
            "Vlad Aleksashyn <vlad.al.dp@gmail.com"]
 
 [dependencies]
-log = "0.4.6"
 clap = "2.32"
 url = "1.7.1"
 lazy_static = "1.2.0"
@@ -21,7 +20,6 @@ rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
 tokio-rustls = "0.10.1"
 webpki = "0.21.0"
 native-tls = "0.2"
-env_logger = "0.5.13"
 byteorder = "1.2.7"
 bytes = "0.4"
 uuid = { version = "0.7.1", features = ["v4", "serde"] }
@@ -31,9 +29,11 @@ saphir = { version = "0.9.3", features = ["request_handler"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-slog = { version = "2.5", features = ["release_max_level_debug"] }
+slog = { version = "2.5", features = ["max_level_trace","release_max_level_trace"] }
 slog-term = "2.4"
 slog-async = "2.3"
+slog-scope = "4.1"
+slog-scope-futures = { git = "https://gitlab.com/Fotosmile/slog-scope-futures.git" }
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
 x509-parser = "0.6.0"

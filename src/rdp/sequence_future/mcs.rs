@@ -2,7 +2,7 @@ use std::{collections::HashMap, io, iter};
 
 use bytes::BytesMut;
 use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
-use slog::{debug, info};
+use slog_scope::{debug, info};
 use tokio::codec::Framed;
 use tokio_rustls::TlsStream;
 use tokio_tcp::TcpStream;
@@ -42,9 +42,9 @@ impl McsFuture {
 impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for McsFuture {
     type Item = (McsFutureTransport, McsFutureTransport, StaticChannels);
 
-    fn process_pdu(&mut self, mcs_pdu: McsPdu, client_logger: &slog::Logger) -> io::Result<Option<McsPdu>> {
-        info!(client_logger, "Got MCS Sequence PDU: {}", mcs_pdu.as_short_name());
-        debug!(client_logger, "Got MCS Sequence PDU: {:?}", mcs_pdu);
+    fn process_pdu(&mut self, mcs_pdu: McsPdu) -> io::Result<Option<McsPdu>> {
+        info!("Got MCS Sequence PDU: {}", mcs_pdu.as_short_name());
+        debug!("Got MCS Sequence PDU: {:?}", mcs_pdu);
 
         let (next_sequence_state, result) = match (self.sequence_state, mcs_pdu) {
             (McsSequenceState::ErectDomainRequest, McsPdu::ErectDomainRequest(pdu)) => {
@@ -70,7 +70,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for McsFuture 
                         .insert(channel_id, channel_name);
 
                     let sequence_state = if self.channels_to_join.is_empty() {
-                        debug!(client_logger, "Joined static channels: {:?}", self.joined_channels);
+                        debug!("Joined static channels: {:?}", self.joined_channels);
 
                         McsSequenceState::Finished
                     } else {
@@ -108,9 +108,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for McsFuture 
         &mut self,
         mut client: Option<McsFutureTransport>,
         mut server: Option<McsFutureTransport>,
-        client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully processed MCS Connection Sequence");
+        info!("Successfully processed MCS Connection Sequence");
 
         (
             client.take().expect(
@@ -181,19 +180,19 @@ impl McsInitialFuture {
 impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitialFuture {
     type Item = (X224FutureTransport, X224FutureTransport, FilterConfig, StaticChannels);
 
-    fn process_pdu(&mut self, data: BytesMut, client_logger: &slog::Logger) -> io::Result<Option<BytesMut>> {
+    fn process_pdu(&mut self, data: BytesMut) -> io::Result<Option<BytesMut>> {
         let (next_sequence_state, result) = match self.sequence_state {
             McsInitialSequenceState::ConnectInitial => {
                 let mut connect_initial = ConnectInitial::from_buffer(data.as_ref())?;
-                info!(client_logger, "Got MCS Connect Initial PDU");
-                debug!(client_logger, "Got MCS Connect Initial PDU: {:?}", connect_initial);
+                info!("Got MCS Connect Initial PDU");
+                debug!("Got MCS Connect Initial PDU: {:?}", connect_initial);
 
                 connect_initial.filter(
                     self.filter_config
                         .as_ref()
                         .expect("The filter config must exist for filtering the Connect Initial PDU"),
                 );
-                debug!(client_logger, "Filtered Connect Initial PDU: {:?}", connect_initial);
+                debug!("Filtered Connect Initial PDU: {:?}", connect_initial);
 
                 let mut connect_initial_buffer = BytesMut::with_capacity(connect_initial.buffer_length());
                 connect_initial_buffer.resize(connect_initial.buffer_length(), 0x00);
@@ -205,15 +204,15 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
             }
             McsInitialSequenceState::ConnectResponse => {
                 let mut connect_response = ConnectResponse::from_buffer(data.as_ref())?;
-                info!(client_logger, "Got MCS Connect Response PDU");
-                debug!(client_logger, "Got MCS Connect Response PDU: {:?}", connect_response);
+                info!("Got MCS Connect Response PDU");
+                debug!("Got MCS Connect Response PDU: {:?}", connect_response);
 
                 connect_response.filter(
                     self.filter_config
                         .as_ref()
                         .expect("The filter config must exist for filtering the Connect Response PDU"),
                 );
-                debug!(client_logger, "Filtered Connect Response PDU: {:?}", connect_response);
+                debug!("Filtered Connect Response PDU: {:?}", connect_response);
 
                 let mut connect_response_buffer = BytesMut::new();
                 connect_response_buffer.resize(connect_response.buffer_length(), 0);
@@ -237,9 +236,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
         &mut self,
         mut client: Option<X224FutureTransport>,
         mut server: Option<X224FutureTransport>,
-        client_logger: &slog::Logger,
     ) -> Self::Item {
-        info!(client_logger, "Successfully processed MCS initial PDUs");
+        info!("Successfully processed MCS initial PDUs");
 
         let channel_names = self
             .channel_names
@@ -256,7 +254,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
             .zip(channel_names.into_iter().map(|v| v.name))
             .chain(iter::once((global_channel_id, GLOBAL_CHANNEL_NAME.to_string())))
             .collect::<StaticChannels>();
-        debug!(client_logger, "Static channels to join: {:?}", static_channels);
+        debug!("Static channels to join: {:?}", static_channels);
 
         (
         client.take().expect(

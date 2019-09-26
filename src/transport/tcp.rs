@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use futures::{Async, AsyncSink, Future, Sink, Stream};
-use log::{debug, error};
+use slog_scope::{debug, error};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
