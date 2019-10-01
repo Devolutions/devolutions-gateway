@@ -168,8 +168,8 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
     }
 }
 
-pub fn create_negotiation_request(cookie: String, mut request: Request) -> io::Result<Request> {
-    request.nego_data = Some(NegoData::Cookie(cookie));
+pub fn create_negotiation_request(username: String, mut request: Request) -> io::Result<Request> {
+    request.nego_data = Some(NegoData::Cookie(username));
 
     Ok(request)
 }

@@ -1,6 +1,7 @@
 use std::{fs::File, io, io::prelude::*};
 
 use serde_derive::{Deserialize, Serialize};
+use sspi::{internal::CredentialsProxy, AuthIdentity};
 
 pub trait RdpIdentityGetter {
     fn get_rdp_identity(&self) -> RdpIdentity;
@@ -13,7 +14,7 @@ pub struct FullCredentials {
     pub domain: String,
 }
 
-impl From<FullCredentials> for sspi::Credentials {
+impl From<FullCredentials> for AuthIdentity {
     fn from(identity: FullCredentials) -> Self {
         Self {
             username: identity.username,
@@ -25,7 +26,7 @@ impl From<FullCredentials> for sspi::Credentials {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
-    pub proxy: sspi::Credentials,
+    pub proxy: AuthIdentity,
     pub target: FullCredentials,
     pub destination: String,
 }
@@ -68,16 +69,20 @@ impl RdpIdentityGetter for IdentitiesProxy {
     }
 }
 
-impl sspi::CredentialsProxy for IdentitiesProxy {
-    fn password_by_user(&mut self, username: String, _domain: Option<String>) -> io::Result<String> {
-        let rdp_identities = RdpIdentity::from_file(self.rdp_identities_filename.as_ref())?;
-        let rdp_identity = rdp_identities
-            .iter()
-            .find(|identity| identity.proxy.username == username);
+impl CredentialsProxy for IdentitiesProxy {
+    type AuthenticationData = AuthIdentity;
 
-        if let Some(identity) = rdp_identity {
-            self.rdp_identity = Some(identity.clone());
-            Ok(identity.proxy.password.clone())
+    fn auth_data_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<Self::AuthenticationData> {
+        let mut rdp_identities = RdpIdentity::from_file(self.rdp_identities_filename.as_ref())?;
+        let identity_position = rdp_identities
+            .iter()
+            .position(|identity| identity.proxy.username == username);
+
+        if let Some(position) = identity_position {
+            self.rdp_identity = Some(rdp_identities.remove(position));
+            self.rdp_identity.as_mut().unwrap().proxy.domain = domain;
+
+            Ok(self.rdp_identity.as_ref().unwrap().proxy.clone())
         } else {
             Err(io::Error::new(
                 io::ErrorKind::NotFound,

@@ -110,7 +110,7 @@ fn main() {
 
     let mut futures = Vec::new();
     for url in websocket_listeners {
-        futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()), logger.clone());
+        futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
     }
 
     for url in tcp_listeners {
@@ -243,7 +243,7 @@ impl Proxy {
     }
 }
 
-fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
+fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=()> + Send> {
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
@@ -425,9 +425,8 @@ fn start_websocket_server(websocket_url: Url, config: Config, http_service: Http
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    executor_handle.spawn(websocket_server.with_logger(logger));
     info!("Websocket server started successfully. Listening on {}", websocket_addr);
-    Box::new(websocket_server) as Box<dyn Future<Item=(), Error=()> + Send>
+    Box::new(websocket_server.with_logger(logger)) as Box<dyn Future<Item=(), Error=()> + Send>
 }
 
 fn default_port(url: &Url) -> Result<u16, ()> {

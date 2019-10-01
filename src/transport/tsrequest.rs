@@ -1,6 +1,7 @@
 use std::io;
 
 use bytes::BytesMut;
+use sspi::internal::TsRequest;
 use tokio::codec::{Decoder, Encoder};
 
 use crate::io_try;
@@ -9,11 +10,11 @@ use crate::io_try;
 pub struct TsRequestTransport {}
 
 impl Decoder for TsRequestTransport {
-    type Item = sspi::TsRequest;
+    type Item = TsRequest;
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let ts_request = io_try!(sspi::TsRequest::from_buffer(buf.as_ref()));
+        let ts_request = io_try!(TsRequest::from_buffer(buf.as_ref()));
         buf.split_to(ts_request.buffer_len() as usize);
 
         Ok(Some(ts_request))
@@ -21,7 +22,7 @@ impl Decoder for TsRequestTransport {
 }
 
 impl Encoder for TsRequestTransport {
-    type Item = sspi::TsRequest;
+    type Item = TsRequest;
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {

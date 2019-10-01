@@ -20,6 +20,7 @@ use crate::{
         mcs::McsTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
+    utils,
 };
 
 pub struct ConnectionSequenceFuture {
@@ -147,15 +148,17 @@ impl ConnectionSequenceFuture {
             .take()
             .expect("For the McsInitial state, the client TLS stream must be set after the client negotiation");
 
+        let credentials = utils::auth_identity_to_credentials(
+            self.rdp_identity
+                .as_ref()
+                .expect("the RDP identity must be set after the server NLA")
+                .target
+                .clone()
+                .into(),
+        );
+
         SequenceFuture::with_get_state(
-            McsInitialFuture::new(FilterConfig::new(
-                self.rdp_identity
-                    .as_ref()
-                    .expect("the RDP identity must be set after the server NLA")
-                    .target
-                    .clone()
-                    .into(),
-            )),
+            McsInitialFuture::new(FilterConfig::new(credentials)),
             GetStateArgs {
                 client: Some(DataTransport::default().framed(client_tls)),
                 server: Some(DataTransport::default().framed(server_tls)),
