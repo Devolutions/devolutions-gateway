@@ -49,8 +49,8 @@ impl Association {
         for (id, candidate) in &self.candidates {
             if let Some(url) = candidate.url() {
                 let json_candidate = json!({
-                    "url": url.to_string(),
-                    "id": id.to_string()
+                    "id": id.to_string(),
+                    "url": url.to_string()
                 });
 
                 candidate_list.push(json_candidate);
