@@ -6,8 +6,11 @@ use ironrdp::nego;
 
 use slog_scope::{debug, error, info};
 use sspi::{
-    CredSspClient, CredSspResult, CredSspServer, Credentials, EarlyUserAuthResult, TsRequest,
-    EARLY_USER_AUTH_RESULT_PDU_SIZE,
+    internal::{
+        CredSspClient, CredSspMode, CredSspResult, CredSspServer, EarlyUserAuthResult, TsRequest,
+        EARLY_USER_AUTH_RESULT_PDU_SIZE,
+    },
+    AuthIdentity,
 };
 use tokio::{
     codec::{Decoder, Encoder, Framed},
@@ -133,7 +136,7 @@ pub struct NlaWithServerFuture {
     state: NlaWithServerFutureState,
     client_request_flags: nego::RequestFlags,
     server_response_protocol: nego::SecurityProtocol,
-    target_credentials: Credentials,
+    target_credentials: AuthIdentity,
 }
 
 impl NlaWithServerFuture {
@@ -141,7 +144,7 @@ impl NlaWithServerFuture {
         server: TcpStream,
         client_request_flags: nego::RequestFlags,
         server_response_protocol: nego::SecurityProtocol,
-        target_credentials: Credentials,
+        target_credentials: AuthIdentity,
         accept_invalid_certs_and_host_names: bool,
     ) -> io::Result<Self> {
         let mut client_config = rustls::ClientConfig::default();
@@ -248,7 +251,7 @@ impl Future for NlaWithServerFuture {
 }
 
 pub struct CredSspWithClientFuture {
-    cred_ssp_server: sspi::CredSspServer<IdentitiesProxy>,
+    cred_ssp_server: CredSspServer<IdentitiesProxy>,
     sequence_state: SequenceState,
 }
 
@@ -356,12 +359,12 @@ impl CredSspWithServerFuture {
     pub fn new(
         public_key: Vec<u8>,
         request_flags: nego::RequestFlags,
-        target_credentials: Credentials,
-    ) -> Result<Self, sspi::SspiError> {
+        target_credentials: AuthIdentity,
+    ) -> Result<Self, sspi::Error> {
         let cred_ssp_mode = if request_flags.contains(nego::RequestFlags::RESTRICTED_ADMIN_MODE_REQUIRED) {
-            sspi::CredSspMode::CredentialLess
+            CredSspMode::CredentialLess
         } else {
-            sspi::CredSspMode::WithCredentials
+            CredSspMode::WithCredentials
         };
         let cred_ssp_client = CredSspClient::new(public_key, target_credentials, cred_ssp_mode)?;
 

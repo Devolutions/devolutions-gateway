@@ -24,20 +24,20 @@ use rustls;
 use serde_derive::{Deserialize, Serialize};
 
 use common::run_proxy;
-use sspi::{CredSspServer, CredentialsProxy};
+use sspi::internal::{CredSspServer, CredentialsProxy};
 use x509_parser::{parse_x509_der, pem::pem_to_der};
 
 lazy_static! {
-    static ref PROXY_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
-        String::from("ProxyUserName"),
-        String::from("ProxyPassword"),
-        Some(String::from("ProxyDomainName")),
-    );
-    static ref SERVER_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
-        String::from("TargetServerUserName"),
-        String::from("TargetServerPassword"),
-        Some(String::from("TargetServerDomainName")),
-    );
+    static ref PROXY_CREDENTIALS: sspi::AuthIdentity = sspi::AuthIdentity {
+        username: String::from("ProxyUserName"),
+        password: String::from("ProxyPassword"),
+        domain: Some(String::from("ProxyDomainName")),
+    };
+    static ref SERVER_CREDENTIALS: sspi::AuthIdentity = sspi::AuthIdentity {
+        username: String::from("TargetServerUserName"),
+        password: String::from("TargetServerPassword"),
+        domain: Some(String::from("TargetServerDomainName")),
+    };
     static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../src/cert/certificate.p12").to_vec();
 }
 
@@ -62,6 +62,10 @@ fn run_client() -> Child {
         .args(&["--security_protocol", "hybrid"])
         .args(&["--username", PROXY_CREDENTIALS.username.as_str()])
         .args(&["--password", PROXY_CREDENTIALS.password.as_str()]);
+
+    if let Some(ref domain) = PROXY_CREDENTIALS.domain {
+        client_command.args(&["--domain", domain]);
+    }
 
     client_command.spawn().expect("failed to run IronRDP client")
 }
@@ -207,7 +211,7 @@ impl RdpServer {
     fn nla(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let tls_pubkey = get_pub_key_from_pem_file("src/cert/publicCert.pem").unwrap();
 
-        let mut cred_ssp_context = sspi::CredSspServer::new(tls_pubkey, self.identities_proxy.clone())
+        let mut cred_ssp_context = sspi::internal::CredSspServer::new(tls_pubkey, self.identities_proxy.clone())
             .expect("failed to create a CredSSP server");
 
         self.read_negotiate_message_and_write_challenge_message(&mut tls_stream, &mut cred_ssp_context);
@@ -273,44 +277,50 @@ impl RdpServer {
             .expect("failed to send negotiation response");
     }
 
-    fn read_negotiate_message_and_write_challenge_message<C: sspi::CredentialsProxy>(
+    fn read_negotiate_message_and_write_challenge_message<C>(
         &self,
         tls_stream: &mut (impl io::Write + io::Read),
-        cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) {
+        cred_ssp_context: &mut sspi::internal::CredSspServer<C>,
+    ) where
+        C: sspi::internal::CredentialsProxy<AuthenticationData = sspi::AuthIdentity>,
+    {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::internal::TsRequest::from_buffer(buffer.as_ref())
             .expect("failed to parse TSRequest with NTLM negotiate message");
 
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream);
     }
 
-    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: sspi::CredentialsProxy>(
+    fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C>(
         &self,
         tls_stream: &mut (impl io::Write + io::Read),
-        cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) {
+        cred_ssp_context: &mut sspi::internal::CredSspServer<C>,
+    ) where
+        C: sspi::internal::CredentialsProxy<AuthenticationData = sspi::AuthIdentity>,
+    {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::internal::TsRequest::from_buffer(buffer.as_ref())
             .expect("failed to parse ts request with NTLM negotiate message");
 
         process_cred_ssp_phase_with_reply_needed(read_ts_request, cred_ssp_context, tls_stream);
     }
 
-    fn read_ts_credentials<C: sspi::CredentialsProxy>(
+    fn read_ts_credentials<C>(
         &self,
         tls_stream: &mut impl io::Read,
-        cred_ssp_context: &mut sspi::CredSspServer<C>,
-    ) {
+        cred_ssp_context: &mut sspi::internal::CredSspServer<C>,
+    ) where
+        C: sspi::internal::CredentialsProxy<AuthenticationData = sspi::AuthIdentity>,
+    {
         let buffer = read_stream_buffer(tls_stream);
-        let read_ts_request = sspi::TsRequest::from_buffer(buffer.as_ref())
+        let read_ts_request = sspi::internal::TsRequest::from_buffer(buffer.as_ref())
             .expect("failed to parse ts request with ntlm negotiate message");
 
         let reply = cred_ssp_context
             .process(read_ts_request)
             .expect("failed to parse NTLM authenticate message and write pub key auth");
         match reply {
-            sspi::CredSspResult::ClientCredentials(ref client_credentials) => {
+            sspi::internal::CredSspResult::ClientCredentials(ref client_credentials) => {
                 let expected_credentials = &self.identities_proxy.rdp_identity;
                 assert_eq!(expected_credentials, client_credentials);
             }
@@ -456,7 +466,10 @@ impl RdpServer {
         };
         let expected_address = CLIENT_IP_ADDR.to_string();
 
-        assert_eq!(client_info.client_info.credentials, *SERVER_CREDENTIALS);
+        assert_eq!(
+            client_info.client_info.credentials,
+            auth_identity_to_credentials(SERVER_CREDENTIALS.clone())
+        );
         assert_eq!(
             client_info.client_info.extra_info.address_family,
             expected_address_family
@@ -707,13 +720,13 @@ impl RdpServer {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
-    pub proxy: sspi::Credentials,
-    pub target: sspi::Credentials,
+    pub proxy: sspi::AuthIdentity,
+    pub target: sspi::AuthIdentity,
     pub destination: String,
 }
 
 impl RdpIdentity {
-    fn new(proxy: sspi::Credentials, target: sspi::Credentials, destination: String) -> Self {
+    fn new(proxy: sspi::AuthIdentity, target: sspi::AuthIdentity, destination: String) -> Self {
         Self {
             proxy,
             target,
@@ -730,34 +743,38 @@ impl RdpIdentity {
 
 #[derive(Clone)]
 pub struct IdentitiesProxy {
-    rdp_identity: sspi::Credentials,
+    rdp_identity: sspi::AuthIdentity,
 }
 
 impl IdentitiesProxy {
-    pub fn new(rdp_identity: sspi::Credentials) -> Self {
+    pub fn new(rdp_identity: sspi::AuthIdentity) -> Self {
         Self { rdp_identity }
     }
 }
 
-impl sspi::CredentialsProxy for IdentitiesProxy {
-    fn password_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<String> {
+impl sspi::internal::CredentialsProxy for IdentitiesProxy {
+    type AuthenticationData = sspi::AuthIdentity;
+
+    fn auth_data_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<Self::AuthenticationData> {
         assert_eq!(username, self.rdp_identity.username);
         assert_eq!(domain, self.rdp_identity.domain);
 
-        Ok(self.rdp_identity.password.clone())
+        Ok(self.rdp_identity.clone())
     }
 }
 
-fn process_cred_ssp_phase_with_reply_needed<C: CredentialsProxy>(
-    ts_request: sspi::TsRequest,
+fn process_cred_ssp_phase_with_reply_needed<C>(
+    ts_request: sspi::internal::TsRequest,
     cred_ssp_context: &mut CredSspServer<C>,
     tls_stream: &mut (impl io::Write + io::Read),
-) {
+) where
+    C: CredentialsProxy<AuthenticationData = sspi::AuthIdentity>,
+{
     let reply = cred_ssp_context
         .process(ts_request)
         .expect("failed to process CredSSP phase");
     match reply {
-        sspi::CredSspResult::ReplyNeeded(ts_request) => {
+        sspi::internal::CredSspResult::ReplyNeeded(ts_request) => {
             let mut ts_request_buffer = Vec::with_capacity(ts_request.buffer_len() as usize);
             ts_request
                 .encode_ts_request(&mut ts_request_buffer)
@@ -925,5 +942,13 @@ fn accept_tcp_stream(addr: &str) -> TcpStream {
             Ok((stream, _addr)) => return stream,
             Err(_) => thread::sleep(Duration::from_millis(10)),
         }
+    }
+}
+
+fn auth_identity_to_credentials(auth_identity: sspi::AuthIdentity) -> ironrdp::rdp::Credentials {
+    ironrdp::rdp::Credentials {
+        username: auth_identity.username,
+        password: auth_identity.password,
+        domain: auth_identity.domain,
     }
 }
