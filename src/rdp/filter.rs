@@ -1,5 +1,5 @@
 use ironrdp::{
-    gcc,
+    gcc, nego,
     rdp::{ClientInfoFlags, Credentials},
     CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive,
 };
@@ -9,6 +9,7 @@ pub trait Filter {
 }
 
 pub struct FilterConfig {
+    server_response_protocol: nego::SecurityProtocol,
     version: gcc::RdpVersion,
     client_early_capability_flags: gcc::ClientEarlyCapabilityFlags,
     server_early_capability_flags: gcc::ServerEarlyCapabilityFlags,
@@ -17,8 +18,9 @@ pub struct FilterConfig {
 }
 
 impl FilterConfig {
-    pub fn new(target_credentials: Credentials) -> Self {
+    pub fn new(server_response_protocol: nego::SecurityProtocol, target_credentials: Credentials) -> Self {
         Self {
+            server_response_protocol,
             version: gcc::RdpVersion::V5Plus,
             client_early_capability_flags: gcc::ClientEarlyCapabilityFlags::empty(),
             server_early_capability_flags: gcc::ServerEarlyCapabilityFlags::empty(),
@@ -34,6 +36,9 @@ impl Filter for ConnectInitial {
         gcc_blocks.core.version = config.version;
         if let Some(ref mut early_capability_flags) = gcc_blocks.core.optional_data.early_capability_flags {
             *early_capability_flags = config.client_early_capability_flags;
+        }
+        if let Some(ref mut server_selected_protocol) = gcc_blocks.core.optional_data.server_selected_protocol {
+            *server_selected_protocol = config.server_response_protocol;
         }
         gcc_blocks.security.encryption_methods = config.encryption_methods;
         gcc_blocks.cluster = None;

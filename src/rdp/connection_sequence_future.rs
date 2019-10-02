@@ -20,7 +20,6 @@ use crate::{
         mcs::McsTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
-    utils,
 };
 
 pub struct ConnectionSequenceFuture {
@@ -30,6 +29,7 @@ pub struct ConnectionSequenceFuture {
     tls_acceptor: Option<TlsAcceptor>,
     identities_proxy: Option<IdentitiesProxy>,
     request: Option<nego::Request>,
+    response_protocol: Option<nego::SecurityProtocol>,
     rdp_identity: Option<RdpIdentity>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
@@ -55,6 +55,7 @@ impl ConnectionSequenceFuture {
             tls_acceptor: Some(tls_acceptor),
             identities_proxy: Some(identities_proxy),
             request: None,
+            response_protocol: None,
             rdp_identity: None,
             filter_config: None,
             joined_static_channels: None,
@@ -148,17 +149,19 @@ impl ConnectionSequenceFuture {
             .take()
             .expect("For the McsInitial state, the client TLS stream must be set after the client negotiation");
 
-        let credentials = utils::auth_identity_to_credentials(
-            self.rdp_identity
-                .as_ref()
-                .expect("the RDP identity must be set after the server NLA")
-                .target
-                .clone()
-                .into(),
-        );
+        let response_protocol = self
+            .response_protocol
+            .expect("Response protocol must be set in NegotiationWithServer future");
+        let target = self
+            .rdp_identity
+            .as_ref()
+            .expect("the RDP identity must be set after the server NLA")
+            .target
+            .clone()
+            .into();
 
         SequenceFuture::with_get_state(
-            McsInitialFuture::new(FilterConfig::new(credentials)),
+            McsInitialFuture::new(FilterConfig::new(response_protocol, target)),
             GetStateArgs {
                 client: Some(DataTransport::default().framed(client_tls)),
                 server: Some(DataTransport::default().framed(server_tls)),
@@ -246,6 +249,7 @@ impl Future for ConnectionSequenceFuture {
                     let server = server_transport.into_inner();
 
                     if let Some(nego::ResponseData::Response { protocol, .. }) = response.response {
+                        self.response_protocol = Some(protocol);
                         self.state = ConnectionSequenceFutureState::NlaWithServer(Box::new(
                             self.create_nla_server_future(server, protocol)?,
                         ));
