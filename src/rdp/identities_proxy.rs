@@ -24,6 +24,16 @@ impl From<FullCredentials> for AuthIdentity {
     }
 }
 
+impl From<FullCredentials> for ironrdp::rdp::Credentials {
+    fn from(identity: FullCredentials) -> Self {
+        Self {
+            username: identity.username,
+            password: identity.password,
+            domain: Some(identity.domain),
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RdpIdentity {
     pub proxy: AuthIdentity,

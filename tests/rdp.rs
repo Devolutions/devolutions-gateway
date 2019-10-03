@@ -575,7 +575,7 @@ impl RdpServer {
             );
         }
 
-        if let rdp::ShareControlPdu::ClientConfirmActive(ClientConfirmActive { ref mut pdu }) =
+        if let rdp::ShareControlPdu::ClientConfirmActive(ClientConfirmActive { ref mut pdu, .. }) =
             share_control_header.share_control_pdu
         {
             let size = pdu.capability_sets.len();

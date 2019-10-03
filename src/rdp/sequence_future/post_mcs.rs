@@ -20,6 +20,7 @@ type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 pub struct PostMcs {
     sequence_state: SequenceState,
     filter: Option<FilterConfig>,
+    originator_id: Option<u16>,
 }
 
 impl PostMcs {
@@ -27,6 +28,7 @@ impl PostMcs {
         Self {
             sequence_state: SequenceState::ClientInfo,
             filter: Some(filter),
+            originator_id: None,
         }
     }
 }
@@ -45,7 +47,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
                 initiator_id,
                 channel_id,
             }) => {
-                let (next_sequence_state, pdu) = process_send_data_request_pdu(pdu, self.sequence_state, filter)?;
+                let (next_sequence_state, pdu) =
+                    process_send_data_request_pdu(pdu, self.sequence_state, filter, self.originator_id)?;
 
                 (
                     next_sequence_state,
@@ -62,7 +65,12 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
                 initiator_id,
                 channel_id,
             }) => {
-                let (next_sequence_state, pdu) = process_send_data_indication_pdu(pdu, self.sequence_state, filter)?;
+                let (next_sequence_state, pdu, originator_id) =
+                    process_send_data_indication_pdu(pdu, self.sequence_state, filter)?;
+
+                if let Some(originator_id) = originator_id {
+                    self.originator_id = Some(originator_id);
+                }
 
                 (
                     next_sequence_state,
@@ -150,8 +158,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
 fn process_send_data_request_pdu(
     pdu: Vec<u8>,
     sequence_state: SequenceState,
-
     filter_config: &FilterConfig,
+    originator_id: Option<u16>,
 ) -> io::Result<(SequenceState, Vec<u8>)> {
     match sequence_state {
         SequenceState::ClientInfo => {
@@ -172,8 +180,21 @@ fn process_send_data_request_pdu(
         | SequenceState::ClientRequestControl
         | SequenceState::ClientFontList => {
             let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
+
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
                 (SequenceState::ClientConfirmActive, ShareControlPdu::ClientConfirmActive(client_confirm_active)) => {
+                    if client_confirm_active.originator_id
+                        != originator_id.expect("Originator ID must be set during Server Demand Active PDU processing")
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "Got invalid originator ID: {} != {}",
+                                client_confirm_active.originator_id,
+                                originator_id.unwrap()
+                            ),
+                        ));
+                    }
                     client_confirm_active.pdu.filter(filter_config);
                     debug!("Got Client Confirm Active PDU: {:?}", client_confirm_active);
 
@@ -236,7 +257,7 @@ fn process_send_data_indication_pdu(
     sequence_state: SequenceState,
 
     filter_config: &FilterConfig,
-) -> io::Result<(SequenceState, Vec<u8>)> {
+) -> io::Result<(SequenceState, Vec<u8>, Option<u16>)> {
     match sequence_state {
         SequenceState::Licensing => {
             let client_license_pdu = ServerLicensePdu::from_buffer(pdu.as_slice())?;
@@ -245,7 +266,7 @@ fn process_send_data_indication_pdu(
             let mut client_license_buffer = Vec::with_capacity(client_license_pdu.buffer_length());
             client_license_pdu.to_buffer(&mut client_license_buffer)?;
 
-            Ok((SequenceState::ServerDemandActive, client_license_buffer))
+            Ok((SequenceState::ServerDemandActive, client_license_buffer, None))
         }
         SequenceState::ServerDemandActive
         | SequenceState::ServerSynchronize
@@ -253,6 +274,7 @@ fn process_send_data_indication_pdu(
         | SequenceState::ServerGrantedControl
         | SequenceState::ServerFontMap => {
             let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
+
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
                 (SequenceState::ServerDemandActive, ShareControlPdu::ServerDemandActive(server_demand_active)) => {
                     server_demand_active.pdu.filter(filter_config);
@@ -300,7 +322,11 @@ fn process_send_data_indication_pdu(
             let mut share_control_header_buffer = Vec::with_capacity(share_control_header.buffer_length());
             share_control_header.to_buffer(&mut share_control_header_buffer)?;
 
-            Ok((next_sequence_state, share_control_header_buffer))
+            Ok((
+                next_sequence_state,
+                share_control_header_buffer,
+                Some(share_control_header.pdu_source),
+            ))
         }
         state => Err(io::Error::new(
             io::ErrorKind::InvalidData,
