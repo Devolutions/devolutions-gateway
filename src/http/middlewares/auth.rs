@@ -38,10 +38,8 @@ impl Middleware for AuthMiddleware {
             match parse_auth_header(auth_str) {
                 Some((AuthHeaderType::Bearer, token)) => {
                     // API_KEY
-                    if let Some(api_key) = self.config.api_key() {
-                        if api_key == token {
-                            return RequestContinuation::Continue;
-                        }
+                    if api_key == token {
+                        return RequestContinuation::Continue;
                     }
                 }
                 _ => {
