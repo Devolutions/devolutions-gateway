@@ -53,14 +53,6 @@ where
     get_pub_key_from_der(der)
 }
 
-pub fn auth_identity_to_credentials(auth_identity: sspi::AuthIdentity) -> ironrdp::rdp::Credentials {
-    ironrdp::rdp::Credentials {
-        username: auth_identity.username,
-        password: auth_identity.password,
-        domain: auth_identity.domain,
-    }
-}
-
 pub fn get_pub_key_from_der(cert: Vec<u8>) -> io::Result<Vec<u8>> {
     let res = parse_x509_der(&cert[..])
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
