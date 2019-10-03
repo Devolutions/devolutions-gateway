@@ -11,6 +11,7 @@ pub enum Protocol {
 
 #[derive(Clone)]
 struct ConfigTemp {
+    api_key: Option<String>,
     listeners: Vec<String>,
     jet_instance: Option<String>,
     routing_url: Option<String>,
@@ -21,6 +22,7 @@ struct ConfigTemp {
 
 #[derive(Clone)]
 pub struct Config {
+    api_key: Option<String>,
     listeners: Vec<Url>,
     jet_instance: String,
     routing_url: Option<String>,
@@ -30,6 +32,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn api_key(&self) -> Option<String> {
+        self.api_key.clone()
+    }
+
     pub fn listeners(&self) -> &Vec<Url> {
         &self.listeners
     }
@@ -60,6 +66,12 @@ impl Config {
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
             .about("Devolutions-Jet proxy")
+            .arg(Arg::with_name("api-key")
+                .long("api-key")
+                .value_name("JET_API_KEY")
+                .help("The api key used by the server to authenticate client queries.")
+                .takes_value(true)
+                .empty_values(false))
             .arg(Arg::with_name("listeners")
                 .short("l")
                 .long("listener")
@@ -154,6 +166,8 @@ identities_file example:
 
         let matches = cli_app.get_matches();
 
+        let api_key = matches.value_of("api-key").map(std::string::ToString::to_string);
+
         let listeners = matches.values_of("listeners").expect("At least one listener has to be specified.").into_iter().map(|listener| listener.to_string()).collect();
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
@@ -173,6 +187,7 @@ identities_file example:
             .map(std::string::ToString::to_string);
 
         let mut config_temp = ConfigTemp {
+            api_key,
             listeners,
             jet_instance,
             routing_url,
@@ -192,6 +207,10 @@ impl ConfigTemp {
         if let Ok(val) = env::var("JET_INSTANCE"){
             self.jet_instance = Some(val);
         }
+
+        if let Ok(val) = env::var("JET_API_KEY") {
+            self.api_key = Some(val);
+        }
     }
 }
 
@@ -204,6 +223,7 @@ impl From<ConfigTemp> for Config {
         }
 
         Config {
+            api_key: temp.api_key,
             listeners,
             jet_instance: temp.jet_instance.expect("JET_INSTANCE is mandatory. It has to be added on the command line or defined by JET_INSTANCE environment variable."),
             routing_url: temp.routing_url,
