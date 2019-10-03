@@ -29,7 +29,7 @@ impl JetController {
     pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
         dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);
-        dispatch.add(Method::POST, "/gather/<association_id>", ControllerData::gather_candidate);
+        dispatch.add(Method::POST, "/association/<association_id>/candidates", ControllerData::gather_association_candidates);
 
         JetController { dispatch }
     }
@@ -77,7 +77,7 @@ impl ControllerData {
         }
     }
 
-    fn gather_candidate(&self, req: &SyncRequest, res: &mut SyncResponse) {
+    fn gather_association_candidates(&self, req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
         if let Some(association_id) = req.captures().get("association_id") {

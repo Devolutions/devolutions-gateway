@@ -8,6 +8,7 @@ use tokio::runtime::TaskExecutor;
 use crate::http::controllers::jet::JetController;
 use crate::jet_client::JetAssociationsMap;
 use crate::config::Config;
+use crate::http::middlewares::auth::AuthMiddleware;
 
 pub const HTTP_SERVER_PORT: u32 = 10256;
 
@@ -21,7 +22,12 @@ impl HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading http middlewares");
-                middlewares
+
+                // Only the create association has to be authorized.
+                let auth_include_path = vec!["/jet/association/<association_id>"];
+                let auth_exclude_path = vec!["/jet/association/<association_id>/<anything>"];
+
+                middlewares.apply(AuthMiddleware::new(config.clone()), auth_include_path, Some(auth_exclude_path))
             })
             .configure_router(|router| {
                 info!("Loading http controllers");
