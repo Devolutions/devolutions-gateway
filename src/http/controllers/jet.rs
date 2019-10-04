@@ -14,6 +14,7 @@ use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
 use crate::jet::candidate::Candidate;
 use tokio::timer::Delay;
 use futures::Future;
+use crate::http::controllers::utils::SyncResponseUtil;
 
 struct ControllerData {
     config: Config,
@@ -94,7 +95,7 @@ impl ControllerData {
                         }
 
                         let body = association.gather_candidate();
-                        res.body(body.to_string());
+                        res.json_body(body.to_string());
                         res.status(StatusCode::OK);
                     }
                 }
