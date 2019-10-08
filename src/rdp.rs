@@ -7,8 +7,8 @@ use std::io;
 
 use futures::Future;
 use slog::{error, info, Drain};
+use tokio_rustls::TlsAcceptor;
 use tokio_tcp::TcpStream;
-use tokio_tls::TlsAcceptor;
 use url::Url;
 
 use self::{connection_sequence_future::ConnectionSequenceFuture, identities_proxy::IdentitiesProxy};

@@ -5,24 +5,24 @@ use std::sync::{Mutex, Arc};
 use std::io::{Read, Write, ErrorKind};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio::io;
-use log::{debug, error};
 use crate::interceptor::PacketInterceptor;
 use futures::{Async, Stream, Sink, AsyncSink, Future};
 use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStream, JetSink};
 use url::Url;
+use log::{debug, error};
 use std::net::SocketAddr;
 use tungstenite::Message;
 use tungstenite::protocol::Role;
-use crate::utils::url_to_socket_arr;
+use crate::utils::{danger_transport, url_to_socket_arr};
 use crate::transport::tcp::TCP_READ_LEN;
-use std::error::Error;
 use tokio::net::TcpStream;
-use tokio_tls::TlsStream;
-use native_tls::TlsConnector;
+use tokio_rustls::TlsConnector;
+use tokio_rustls::TlsStream;
 use tungstenite::handshake::client::{Request, Response};
 use futures::future;
 use tungstenite::handshake::MidHandshake;
 use tungstenite::handshake::server::NoCallback;
+use std::error::Error;
 
 pub enum WsStreamWrapper {
     Http((WebSocket<Upgraded>, Option<SocketAddr>)),
@@ -242,24 +242,25 @@ impl Transport for WsTransport {
                 })) as JetFuture<Self>,
             "wss" => {
                 let socket = TcpStream::connect(&socket_addr);
-                let cx = TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .unwrap();
-                let cx = tokio_tls::TlsConnector::from(cx);
 
-                let url_clone = url.clone();
+                let mut client_config = rustls::ClientConfig::default();
+                client_config
+                    .dangerous()
+                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
+                let config_ref = Arc::new(client_config);
+                let cx = TlsConnector::from(config_ref);
+                let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
+
                 Box::new(socket.and_then(move |socket| {
-                    cx.connect(url_clone.host_str().unwrap_or(""), socket)
+                    cx.connect(dns_name, socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description())).and_then(|stream| {
-                    let peer_addr = stream.get_ref().get_ref().peer_addr().ok();
+                    let peer_addr = stream.get_ref().0.peer_addr().ok();
                     let client = tungstenite::client(
                         Request {
                             url: owned_url,
                             extra_headers: None,
-                        }, stream);
+                        }, TlsStream::Client(stream));
                     match client {
                         Ok((stream, _)) => Box::new(future::lazy(move || {
                             future::ok(WsTransport::new_tls(stream, peer_addr))
