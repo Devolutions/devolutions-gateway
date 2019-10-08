@@ -3,6 +3,8 @@ use std::io;
 use bytes::BytesMut;
 use futures::{sink::Send, stream::StreamFuture, try_ready, Future, Poll};
 use ironrdp::nego;
+use std::sync::Arc;
+
 use slog::{debug, error, info};
 use sspi::{
     CredSspClient, CredSspResult, CredSspServer, Credentials, EarlyUserAuthResult, TsRequest,
@@ -12,8 +14,8 @@ use tokio::{
     codec::{Decoder, Encoder, Framed},
     prelude::*,
 };
+use tokio_rustls::{Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 use tokio_tcp::TcpStream;
-use tokio_tls::{Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 
 use crate::{
     io_try,
@@ -78,7 +80,8 @@ impl Future for NlaWithClientFuture {
                         "TLS connection has been established with the client"
                     );
 
-                    let client_transport = TsRequestTransport::default().framed(client_tls);
+                    let client_transport =
+                        TsRequestTransport::default().framed(tokio_rustls::TlsStream::Server(client_tls));
                     self.state = NlaWithClientFutureState::CredSsp(Box::new(SequenceFuture::with_get_state(
                         CredSspWithClientFuture::new(
                             self.tls_proxy_pubkey
@@ -149,17 +152,18 @@ impl NlaWithServerFuture {
         accept_invalid_certs_and_host_names: bool,
         client_logger: slog::Logger,
     ) -> io::Result<Self> {
-        let tls_connector = native_tls::TlsConnector::builder()
-            .danger_accept_invalid_certs(accept_invalid_certs_and_host_names)
-            .danger_accept_invalid_hostnames(accept_invalid_certs_and_host_names)
-            .build()
-            .expect("Tls connector builder cannot fail");
-        let tls_connector = TlsConnector::from(tls_connector);
+        let mut client_config = rustls::ClientConfig::default();
+        if accept_invalid_certs_and_host_names {
+            client_config
+                .dangerous()
+                .set_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification {}));
+        }
+        let config_ref = Arc::new(client_config);
+        let tls_connector = TlsConnector::from(config_ref);
+        let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
 
         Ok(Self {
-            state: NlaWithServerFutureState::Tls(
-                tls_connector.connect(server.peer_addr()?.ip().to_string().as_ref(), server),
-            ),
+            state: NlaWithServerFutureState::Tls(tls_connector.connect(dns_name, server)),
             client_request_flags,
             server_response_protocol,
             target_credentials,
@@ -189,26 +193,29 @@ impl Future for NlaWithServerFuture {
                         "TLS connection has been established with the server"
                     );
 
-                    let client_public_key = utils::get_tls_peer_pubkey(&server_tls)?;
-                    let server_transport = TsRequestTransport::default().framed(server_tls);
+                    let client_tls = tokio_rustls::TlsStream::Client(server_tls);
+                    let client_public_key = utils::get_tls_peer_pubkey(&client_tls)?;
+                    let server_transport = TsRequestTransport::default().framed(client_tls);
+
+                    let credssp_future = CredSspWithServerFuture::new(
+                        client_public_key,
+                        self.client_request_flags,
+                        self.target_credentials.clone(),
+                    )?;
+                    let parse_args = ParseStateArgs {
+                        client: None,
+                        server: Some(server_transport),
+                        pdu: TsRequest::default(),
+                    };
 
                     self.state = NlaWithServerFutureState::CredSsp(Box::new(SequenceFuture::with_parse_state(
-                        CredSspWithServerFuture::new(
-                            client_public_key,
-                            self.client_request_flags,
-                            self.target_credentials.clone(),
-                        )?,
+                        credssp_future,
                         self.client_logger.clone(),
-                        ParseStateArgs {
-                            client: None,
-                            server: Some(server_transport),
-                            pdu: TsRequest::default(),
-                        },
+                        parse_args,
                     )));
                 }
                 NlaWithServerFutureState::CredSsp(cred_ssp_future) => {
                     let server_transport = try_ready!(cred_ssp_future.poll());
-
                     let server_tls = server_transport.into_inner();
 
                     if self

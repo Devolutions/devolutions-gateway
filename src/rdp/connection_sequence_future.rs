@@ -3,8 +3,8 @@ use std::io;
 use futures::{try_ready, Future};
 use ironrdp::nego;
 use tokio::{codec::Decoder, prelude::*};
+use tokio_rustls::{TlsAcceptor, TlsStream};
 use tokio_tcp::{ConnectFuture, TcpStream};
-use tokio_tls::{TlsAcceptor, TlsStream};
 
 use crate::{
     rdp::{

@@ -17,7 +17,9 @@ futures = "0.1"
 tokio = "0.1.11"
 tokio-tcp = "0.1.2"
 tokio-io = "0.1"
-tokio-tls = "0.2.0"
+rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
+tokio-rustls = "0.10.1"
+webpki = "0.21.0"
 native-tls = "0.2"
 env_logger = "0.5.13"
 byteorder = "1.2.7"
@@ -34,9 +36,9 @@ slog-term = "2.4"
 slog-async = "2.3"
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
-openssl = "0.10"
-sspi = "0.2"
-ironrdp = "0.1"
+x509-parser = "0.6.0"
+sspi = { path = "../sspi-rs/" }
+ironrdp = { path = "../IronRDP/ironrdp/" }
 hyper = "0.12.32"
 tungstenite = "0.8.1"
 sha1 = "0.6.0"

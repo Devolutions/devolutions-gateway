@@ -1,10 +1,11 @@
 mod common;
 
 use std::{
-    fmt,
-    io::{self, Write},
+    fmt, fs,
+    io::{self, BufReader, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     process::{Child, Command},
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -18,11 +19,13 @@ use ironrdp::{
     ServerDemandActive, ServerLicensePdu, ShareControlHeader,
 };
 use lazy_static::lazy_static;
-use native_tls::{TlsAcceptor, TlsStream};
+use rustls;
+
 use serde_derive::{Deserialize, Serialize};
 
 use common::run_proxy;
 use sspi::{CredSspServer, CredentialsProxy};
+use x509_parser::{parse_x509_der, pem::pem_to_der};
 
 lazy_static! {
     static ref PROXY_CREDENTIALS: sspi::Credentials = sspi::Credentials::new(
@@ -39,17 +42,18 @@ lazy_static! {
 }
 
 const IRONRDP_CLIENT_PATH: &str = "ironrdp_client";
-const TLS_PUBLIC_KEY_HEADER: usize = 24;
 const JET_PROXY_SERVER_ADDR: &str = "127.0.0.1:8080";
 const TARGET_SERVER_ADDR: &str = "127.0.0.1:8081";
 const DEVOLUTIONS_IDENTITIES_SERVER_URL: &str = "rdp://127.0.0.1:8082";
 const CLIENT_IP_ADDR: IpAddr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-const CERT_PKCS12_PASS: &str = "password";
 const MCS_INITIATOR_ID: u16 = 1001;
 const MCS_IO_CHANNEL_ID: u16 = 1003;
 const MCS_STATIC_CHANNELS_START_ID: u16 = 1004;
 const SHARE_ID: u32 = 66_538;
 const SERVER_PDU_SOURCE: u16 = 0x03ea;
+
+const PUBLIC_CERT_PATH: &str = "src/cert/publicCert.pem";
+const PRIVATE_CERT_PATH: &str = "src/cert/private.pem";
 
 fn run_client() -> Child {
     let mut client_command = Command::new(IRONRDP_CLIENT_PATH);
@@ -103,6 +107,66 @@ struct RdpServer {
     identities_proxy: IdentitiesProxy,
 }
 
+fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+    let certfile = fs::File::open(filename).unwrap();
+    let mut reader = BufReader::new(certfile);
+    rustls::internal::pemfile::certs(&mut reader).unwrap()
+}
+
+fn load_private_key(filename: &str) -> rustls::PrivateKey {
+    let rsa_keys = {
+        let keyfile = fs::File::open(filename).unwrap();
+        let mut reader = BufReader::new(keyfile);
+        rustls::internal::pemfile::rsa_private_keys(&mut reader).expect("file contains invalid rsa private key")
+    };
+
+    let pkcs8_keys = {
+        let keyfile = fs::File::open(filename).expect("cannot open private key file");
+        let mut reader = BufReader::new(keyfile);
+        rustls::internal::pemfile::pkcs8_private_keys(&mut reader)
+            .expect("file contains invalid pkcs8 private key (encrypted keys not supported)")
+    };
+
+    // prefer to load pkcs8 keys
+    if !pkcs8_keys.is_empty() {
+        pkcs8_keys[0].clone()
+    } else {
+        assert!(!rsa_keys.is_empty());
+        rsa_keys[0].clone()
+    }
+}
+
+fn get_pub_key_from_pem_file(file: &str) -> io::Result<Vec<u8>> {
+    let pem = &fs::read(file)?;
+    let der = pem_to_der(pem).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "get_pub_key_from_pem_file: invalid pem certificate.",
+        )
+    })?;
+    let res = parse_x509_der(&der.1.contents[..]).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "get_pub_key_from_pem_file: invalid der certificate.",
+        )
+    })?;
+    let public_key = res.1.tbs_certificate.subject_pki.subject_public_key;
+    Ok(public_key.data.to_vec())
+}
+
+fn get_server_session(cert_path: &str, priv_key_path: &str) -> rustls::ServerSession {
+    let certs = load_certs(cert_path);
+    let priv_key = load_private_key(priv_key_path);
+
+    let client_no_auth = rustls::NoClientAuth::new();
+    let mut server_config = rustls::ServerConfig::new(client_no_auth);
+    server_config.set_single_cert(certs, priv_key).unwrap();
+
+    let config_ref = Arc::new(server_config);
+
+    rustls::ServerSession::new(&config_ref)
+}
+
 impl RdpServer {
     fn new(routing_addr: &'static str, identities_proxy: IdentitiesProxy) -> Self {
         Self {
@@ -115,18 +179,20 @@ impl RdpServer {
         let mut stream = accept_tcp_stream(self.routing_addr);
         self.x224(&mut stream);
 
-        let mut tls_stream = accept_tls(stream, CERT_PKCS12_DER.clone(), CERT_PKCS12_PASS);
-        self.nla(&mut tls_stream);
+        let mut tls_session = get_server_session(PUBLIC_CERT_PATH, PRIVATE_CERT_PATH);
+        let mut rustls_stream = rustls::Stream::new(&mut tls_session, &mut stream);
 
-        let client_color_depth = self.mcs(&mut tls_stream);
+        self.nla(&mut rustls_stream);
 
-        self.read_client_info(&mut tls_stream);
+        let client_color_depth = self.mcs(&mut rustls_stream);
 
-        self.write_server_license(&mut tls_stream);
+        self.read_client_info(&mut rustls_stream);
 
-        let client_pdu_source = self.capabilities_exchange(&mut tls_stream, client_color_depth);
+        self.write_server_license(&mut rustls_stream);
 
-        self.finalization(&mut tls_stream, client_pdu_source);
+        let client_pdu_source = self.capabilities_exchange(&mut rustls_stream, client_color_depth);
+
+        self.finalization(&mut rustls_stream, client_pdu_source);
     }
 
     fn x224(&self, mut stream: &mut TcpStream) {
@@ -134,8 +200,8 @@ impl RdpServer {
         self.write_negotiation_response(&mut stream);
     }
 
-    fn nla(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
-        let tls_pubkey = get_tls_pubkey(CERT_PKCS12_DER.clone().as_ref(), CERT_PKCS12_PASS);
+    fn nla(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        let tls_pubkey = get_pub_key_from_pem_file("src/cert/publicCert.pem").unwrap();
 
         let mut cred_ssp_context = sspi::CredSspServer::new(tls_pubkey, self.identities_proxy.clone())
             .expect("failed to create a CredSSP server");
@@ -145,7 +211,7 @@ impl RdpServer {
         self.read_ts_credentials(&mut tls_stream, &mut cred_ssp_context);
     }
 
-    fn mcs(&self, mut tls_stream: &mut TlsStream<TcpStream>) -> gcc::ClientColorDepth {
+    fn mcs(&self, mut tls_stream: &mut (impl io::Write + io::Read)) -> gcc::ClientColorDepth {
         let (channel_names, client_color_depth) = self.read_mcs_connect_initial(&mut tls_stream);
         let channel_ids = self.write_mcs_connect_response(&mut tls_stream, channel_names.as_ref());
         self.read_mcs_erect_domain_request(&mut tls_stream);
@@ -158,7 +224,7 @@ impl RdpServer {
 
     fn capabilities_exchange(
         &self,
-        mut tls_stream: &mut TlsStream<TcpStream>,
+        mut tls_stream: &mut (impl io::Write + io::Read),
         client_color_depth: gcc::ClientColorDepth,
     ) -> u16 {
         self.write_demand_active(&mut tls_stream, client_color_depth);
@@ -166,7 +232,7 @@ impl RdpServer {
         self.read_confirm_active(&mut tls_stream)
     }
 
-    fn finalization(&self, mut tls_stream: &mut TlsStream<TcpStream>, client_pdu_source: u16) {
+    fn finalization(&self, mut tls_stream: &mut (impl io::Write + io::Read), client_pdu_source: u16) {
         self.read_synchronize_pdu(&mut tls_stream);
         self.write_synchronize_pdu(&mut tls_stream, client_pdu_source);
         self.read_control_pdu_cooperate(&mut tls_stream);
@@ -205,7 +271,7 @@ impl RdpServer {
 
     fn read_negotiate_message_and_write_challenge_message<C: sspi::CredentialsProxy>(
         &self,
-        tls_stream: &mut TlsStream<TcpStream>,
+        tls_stream: &mut (impl io::Write + io::Read),
         cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) {
         let buffer = read_stream_buffer(tls_stream);
@@ -217,7 +283,7 @@ impl RdpServer {
 
     fn read_authenticate_message_with_pub_key_auth_and_write_pub_key_auth<C: sspi::CredentialsProxy>(
         &self,
-        tls_stream: &mut TlsStream<TcpStream>,
+        tls_stream: &mut (impl io::Write + io::Read),
         cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) {
         let buffer = read_stream_buffer(tls_stream);
@@ -229,7 +295,7 @@ impl RdpServer {
 
     fn read_ts_credentials<C: sspi::CredentialsProxy>(
         &self,
-        tls_stream: &mut TlsStream<TcpStream>,
+        tls_stream: &mut impl io::Read,
         cred_ssp_context: &mut sspi::CredSspServer<C>,
     ) {
         let buffer = read_stream_buffer(tls_stream);
@@ -248,7 +314,10 @@ impl RdpServer {
         };
     }
 
-    fn read_mcs_connect_initial(&self, stream: &mut TlsStream<TcpStream>) -> (Vec<String>, gcc::ClientColorDepth) {
+    fn read_mcs_connect_initial(
+        &self,
+        stream: &mut (impl io::Write + io::Read),
+    ) -> (Vec<String>, gcc::ClientColorDepth) {
         let mut buffer = read_stream_buffer(stream);
         let connect_initial = read_x224_data_pdu::<ConnectInitial>(&mut buffer);
 
@@ -278,7 +347,7 @@ impl RdpServer {
 
     fn write_mcs_connect_response(
         &self,
-        mut tls_stream: &mut TlsStream<TcpStream>,
+        mut tls_stream: &mut (impl io::Write + io::Read),
         channel_names: &[String],
     ) -> Vec<u16> {
         let channel_ids = (MCS_STATIC_CHANNELS_START_ID..MCS_STATIC_CHANNELS_START_ID + channel_names.len() as u16)
@@ -311,7 +380,7 @@ impl RdpServer {
         channel_ids
     }
 
-    fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(&mut tls_stream);
         match read_x224_data_pdu::<McsPdu>(&mut buffer) {
             McsPdu::ErectDomainRequest(_) => (),
@@ -319,7 +388,7 @@ impl RdpServer {
         };
     }
 
-    fn read_mcs_attach_user_request(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_mcs_attach_user_request(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(&mut tls_stream);
         match read_x224_data_pdu::<McsPdu>(&mut buffer) {
             McsPdu::AttachUserRequest => (),
@@ -327,7 +396,7 @@ impl RdpServer {
         };
     }
 
-    fn write_mcs_attach_user_confirm(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_mcs_attach_user_confirm(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let attach_user_confirm = McsPdu::AttachUserConfirm(mcs::AttachUserConfirmPdu {
             initiator_id: MCS_INITIATOR_ID,
             result: 1,
@@ -335,8 +404,8 @@ impl RdpServer {
         write_x224_data_pdu(attach_user_confirm, &mut tls_stream);
     }
 
-    fn read_mcs_channel_join_request(&self, stream: &mut TlsStream<TcpStream>) -> u16 {
-        let mut buffer = read_stream_buffer(stream);
+    fn read_mcs_channel_join_request(&self, tls_stream: &mut (impl io::Write + io::Read)) -> u16 {
+        let mut buffer = read_stream_buffer(tls_stream);
         let mcs_pdu = read_x224_data_pdu(&mut buffer);
         match mcs_pdu {
             McsPdu::ChannelJoinRequest(mcs::ChannelJoinRequestPdu {
@@ -351,7 +420,7 @@ impl RdpServer {
         }
     }
 
-    fn write_mcs_channel_join_confirm(&self, channel_id: u16, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_mcs_channel_join_confirm(&self, channel_id: u16, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let channel_join_confirm = McsPdu::ChannelJoinConfirm(mcs::ChannelJoinConfirmPdu {
             channel_id,
             result: 1,
@@ -361,7 +430,7 @@ impl RdpServer {
         write_x224_data_pdu(channel_join_confirm, &mut tls_stream);
     }
 
-    fn process_mcs_channel_joins(&self, mut tls_stream: &mut TlsStream<TcpStream>, gcc_channel_ids: Vec<u16>) {
+    fn process_mcs_channel_joins(&self, mut tls_stream: &mut (impl io::Write + io::Read), gcc_channel_ids: Vec<u16>) {
         let mut ids = gcc_channel_ids;
         ids.extend_from_slice(&[MCS_IO_CHANNEL_ID, MCS_INITIATOR_ID]);
 
@@ -372,7 +441,7 @@ impl RdpServer {
         }
     }
 
-    fn read_client_info(&self, stream: &mut TlsStream<TcpStream>) {
+    fn read_client_info(&self, stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(stream);
         let client_info =
             read_and_parse_send_data_context_pdu::<ClientInfoPdu>(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
@@ -391,7 +460,7 @@ impl RdpServer {
         assert_eq!(client_info.client_info.extra_info.address, expected_address);
     }
 
-    fn write_server_license(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_server_license(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let pdu = ServerLicensePdu {
             security_header: rdp::BasicSecurityHeader {
                 flags: rdp::BasicSecurityHeaderFlags::LICENSE_PKT,
@@ -417,7 +486,7 @@ impl RdpServer {
 
     fn write_demand_active(
         &self,
-        mut tls_stream: &mut TlsStream<TcpStream>,
+        mut tls_stream: &mut (impl io::Write + io::Read),
         client_color_depth: gcc::ClientColorDepth,
     ) {
         let pref_bits_per_pix = match client_color_depth {
@@ -475,7 +544,7 @@ impl RdpServer {
         encode_and_write_send_data_context_pdu(header, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_confirm_active(&self, tls_stream: &mut TlsStream<TcpStream>) -> u16 {
+    fn read_confirm_active(&self, tls_stream: &mut (impl io::Write + io::Read)) -> u16 {
         let mut buffer = read_stream_buffer(tls_stream);
         let mut share_control_header = read_and_parse_send_data_context_pdu::<rdp::ShareControlHeader>(
             &mut buffer,
@@ -516,7 +585,7 @@ impl RdpServer {
         }
     }
 
-    fn read_synchronize_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_synchronize_pdu(&self, tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(tls_stream);
         let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
@@ -535,12 +604,12 @@ impl RdpServer {
         }
     }
 
-    fn write_synchronize_pdu(&self, mut tls_stream: &mut TlsStream<TcpStream>, client_pdu_source: u16) {
+    fn write_synchronize_pdu(&self, mut tls_stream: &mut (impl io::Write + io::Read), client_pdu_source: u16) {
         let pdu = rdp::ShareDataPdu::Synchronize(rdp::SynchronizePdu::new(client_pdu_source));
         encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_control_pdu_cooperate(&self, tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_control_pdu_cooperate(&self, tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(tls_stream);
         let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
@@ -567,12 +636,12 @@ impl RdpServer {
         }
     }
 
-    fn write_control_pdu_cooperate(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_control_pdu_cooperate(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let pdu = rdp::ShareDataPdu::Control(rdp::ControlPdu::new(rdp::ControlAction::Cooperate, 0, 0));
         encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_request_control_pdu(&self, tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_request_control_pdu(&self, tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(tls_stream);
         let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
@@ -599,7 +668,7 @@ impl RdpServer {
         }
     }
 
-    fn write_granted_control_pdu(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_granted_control_pdu(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let pdu = rdp::ShareDataPdu::Control(rdp::ControlPdu::new(
             rdp::ControlAction::GrantedControl,
             MCS_INITIATOR_ID,
@@ -608,7 +677,7 @@ impl RdpServer {
         encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
-    fn read_font_list(&self, tls_stream: &mut TlsStream<TcpStream>) {
+    fn read_font_list(&self, tls_stream: &mut (impl io::Write + io::Read)) {
         let mut buffer = read_stream_buffer(tls_stream);
         let share_data_pdu = read_and_parse_finalization_pdu(&mut buffer, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID);
 
@@ -621,7 +690,7 @@ impl RdpServer {
         }
     }
 
-    fn write_font_map(&self, mut tls_stream: &mut TlsStream<TcpStream>) {
+    fn write_font_map(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
         let pdu = rdp::ShareDataPdu::FontMap(rdp::FontPdu::new(
             0,
             0,
@@ -829,11 +898,11 @@ fn encode_and_write_finalization_pdu(
     encode_and_write_send_data_context_pdu(share_control_header, initiator_id, channel_id, &mut stream);
 }
 
-fn read_stream_buffer(stream: &mut impl io::Read) -> BytesMut {
+fn read_stream_buffer(tls_stream: &mut impl io::Read) -> BytesMut {
     let mut buffer = BytesMut::with_capacity(1024);
     buffer.resize(1024, 0u8);
     loop {
-        match stream.read(&mut buffer) {
+        match tls_stream.read(&mut buffer) {
             Ok(n) => {
                 buffer.truncate(n);
 
@@ -853,58 +922,4 @@ fn accept_tcp_stream(addr: &str) -> TcpStream {
             Err(_) => thread::sleep(Duration::from_millis(10)),
         }
     }
-}
-
-fn accept_tls<S>(stream: S, cert_pkcs12_der: Vec<u8>, cert_pass: &str) -> TlsStream<S>
-where
-    S: io::Read + io::Write + fmt::Debug + 'static,
-{
-    let cert = native_tls::Identity::from_pkcs12(cert_pkcs12_der.as_ref(), cert_pass).unwrap();
-    let tls_acceptor = TlsAcceptor::builder(cert)
-        .build()
-        .expect("failed to create TlsAcceptor");
-
-    tls_acceptor
-        .accept(stream)
-        .expect("failed to accept the SSL connection")
-}
-
-pub fn get_tls_pubkey(der: &[u8], pass: &str) -> Vec<u8> {
-    let cert = openssl::pkcs12::Pkcs12::from_der(der)
-        .expect("failed to get PKCS12 from DER")
-        .parse(pass)
-        .expect("failed to parse PKCS12 DER")
-        .cert;
-
-    get_tls_pubkey_from_cert(cert)
-}
-
-pub fn get_tls_peer_pubkey<S>(stream: &TlsStream<S>) -> Vec<u8>
-where
-    S: io::Read + io::Write,
-{
-    let der = get_der_cert_from_stream(&stream);
-    let cert = openssl::x509::X509::from_der(&der).expect("failed to get X509 cert from DER");
-
-    get_tls_pubkey_from_cert(cert)
-}
-
-fn get_der_cert_from_stream<S>(stream: &TlsStream<S>) -> Vec<u8>
-where
-    S: io::Read + io::Write,
-{
-    stream
-        .peer_certificate()
-        .expect("failed to get the peer certificate")
-        .expect("A server must provide the certificate")
-        .to_der()
-        .expect("failed to convert the peer certificate to DER")
-}
-
-fn get_tls_pubkey_from_cert(cert: openssl::x509::X509) -> Vec<u8> {
-    cert.public_key()
-        .expect("failed to get public key from cert")
-        .public_key_to_der()
-        .expect("failed to convert public key to DER")
-        .split_off(TLS_PUBLIC_KEY_HEADER)
 }

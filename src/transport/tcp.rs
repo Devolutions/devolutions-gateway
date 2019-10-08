@@ -1,19 +1,18 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use futures::{Async, AsyncSink, Future, Sink, Stream};
 use log::{debug, error};
-use native_tls::TlsConnector;
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_rustls::{TlsConnector, TlsStream};
 use tokio_tcp::TcpStream;
-use tokio_tls::TlsStream;
 use url::Url;
 
 use crate::interceptor::PacketInterceptor;
 use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
-use crate::utils::url_to_socket_arr;
+use crate::utils::{danger_transport, url_to_socket_arr};
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -165,19 +164,22 @@ impl Transport for TcpTransport {
             "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)) as JetFuture<Self>,
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr);
-                let cx = TlsConnector::builder()
-                    .danger_accept_invalid_certs(true)
-                    .danger_accept_invalid_hostnames(true)
-                    .build()
-                    .unwrap();
-                let cx = tokio_tls::TlsConnector::from(cx);
 
-                let url_clone = url.clone();
+                let mut client_config = rustls::ClientConfig::default();
+                client_config
+                    .dangerous()
+                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
+                let config_ref = Arc::new(client_config);
+                let tls_connector = TlsConnector::from(config_ref);
+                let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
+
                 let tls_handshake = socket.and_then(move |socket| {
-                    cx.connect(url_clone.host_str().unwrap_or(""), socket)
+                    tls_connector
+                        .connect(dns_name, socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 });
-                let request = tls_handshake.map(TcpTransport::new_tls);
+                let request =
+                    tls_handshake.map(|stream| TcpTransport::new_tls(tokio_rustls::TlsStream::Client(stream)));
                 Box::new(request) as JetFuture<Self>
             }
 

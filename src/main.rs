@@ -23,7 +23,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{future, future::ok, Future, Stream};
-use native_tls::Identity;
 use tokio::runtime::Runtime;
 use tokio::runtime::TaskExecutor;
 use tokio_tcp::{TcpListener, TcpStream};
@@ -41,14 +40,16 @@ use crate::rdp::RdpClient;
 use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
-use crate::utils::get_tls_pubkey;
 use hyper::service::{service_fn, make_service_fn};
+use crate::utils::{get_pub_key_from_der, load_certs, load_private_key};
 use crate::websocket_client::{WebsocketService, WsClient};
 use std::error::Error;
 use futures::future::Either;
 use crate::transport::ws::{WsTransport, TlsWebSocketServerHandshake, TcpWebSocketServerHandshake};
-use tokio_tls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsStream};
 use saphir::server::HttpService;
+
+use x509_parser::pem::pem_to_der;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -93,18 +94,22 @@ fn main() {
     let http_service = http_server.server.get_request_handler().clone();
 
     // Create the TLS acceptor.
-    let der = include_bytes!("cert/certificate.p12");
-    let tls_public_key = get_tls_pubkey(der.as_ref(), "password").unwrap();
-    let cert = Identity::from_pkcs12(der, "password").unwrap();
-    let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
+    let certs = load_certs("src/cert/publicCert.pem").expect("Could not load a certificate src/cert/publicCert.pem");
+    let priv_key = load_private_key("src/cert/private.pem").expect("Could not load a certificate src/cert/private.pem");
+
+    let client_no_auth = rustls::NoClientAuth::new();
+    let mut server_config = rustls::ServerConfig::new(client_no_auth);
+    server_config.set_single_cert(certs, priv_key).unwrap();
+    let config_ref = Arc::new(server_config);
+    let tls_acceptor = TlsAcceptor::from(config_ref);
 
     let mut futures = Vec::new();
     for url in websocket_listeners {
-         futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
+        futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
     }
 
     for url in tcp_listeners {
-        futures.push(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), tls_public_key.clone(), executor_handle.clone()));
+        futures.push(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
     }
 
     runtime.block_on(future::join_all(futures).map_err(|_| ())).unwrap();
@@ -220,7 +225,7 @@ impl Proxy {
     }
 }
 
-fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, tls_public_key: Vec<u8>, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=()> + Send> {
+fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
@@ -247,7 +252,7 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
                             .accept(conn)
                             .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
                             .and_then(move |tls_stream| {
-                                let transport = TcpTransport::new_tls(tls_stream);
+                                let transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
                                 Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
                             }),
                     ) as Box<dyn Future<Item=(), Error=io::Error> + Send>
@@ -281,8 +286,8 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
                             .accept(conn)
                             .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
                             .and_then(move |tls_stream| {
-                                let peer_addr = tls_stream.get_ref().get_ref().peer_addr().ok().clone();
-                                let accept = tungstenite::accept(tls_stream);
+                                let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
+                                let accept = tungstenite::accept(TlsStream::Server(tls_stream));
                                 match accept {
                                     Ok(stream) => {
                                         let transport = WsTransport::new_tls(stream, peer_addr);
@@ -301,13 +306,19 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
                             })
                     ) as Box<dyn Future<Item=(), Error=io::Error> + Send>
                 }
-                "rdp" => RdpClient::new(
-                    routing_url.clone(),
-                    config.clone(),
-                    tls_public_key.clone(),
-                    tls_acceptor.clone(),
-                )
-                    .serve(conn),
+                "rdp" => {
+                    let certificate = include_bytes!("cert/publicCert.pem");
+                    let pem = pem_to_der(certificate).expect("Could not convert pem to der file");
+                    let tls_public_key = get_pub_key_from_der(pem.1.contents).expect("Could not parse pem file");
+
+                    RdpClient::new(
+                        routing_url.clone(),
+                        config.clone(),
+                        tls_public_key.clone(),
+                        tls_acceptor.clone(),
+                    )
+                        .serve(conn)
+                },
                 scheme => panic!("Unsupported routing url scheme {}", scheme),
             }
         } else {
@@ -372,8 +383,8 @@ fn start_websocket_server(websocket_url: Url, config: Config, http_service: Http
             let incoming = websocket_listener.incoming().and_then(move |conn| {
                 ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description()))
             });
-            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_tls::TlsStream<tokio::net::tcp::TcpStream>| {
-                let remote_addr = stream.get_ref().get_ref().peer_addr().ok();
+            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_rustls::server::TlsStream<tokio::net::tcp::TcpStream>| {
+                let remote_addr = stream.get_ref().0.peer_addr().ok();
                 let mut ws_serve = websocket_service.clone();
                 service_fn(move |req| {
                     ws_serve.handle(req, remote_addr.clone())
