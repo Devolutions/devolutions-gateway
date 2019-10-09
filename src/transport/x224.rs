@@ -39,13 +39,11 @@ impl Encoder for NegotiationWithClientTransport {
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut item_buf = BytesMut::with_capacity(item.buffer_length());
-        item_buf.resize(item.buffer_length(), 0x00);
-        item.to_buffer(item_buf.as_mut()).map_err(map_negotiation_error)?;
+        let item_len = item.buffer_length();
+        let len = buf.len();
+        buf.resize(len + item_len, 0);
 
-        buf.extend_from_slice(item_buf.as_ref());
-
-        Ok(())
+        item.to_buffer(&mut buf[len..]).map_err(map_negotiation_error)
     }
 }
 
@@ -69,13 +67,11 @@ impl Encoder for NegotiationWithServerTransport {
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut item_buf = BytesMut::with_capacity(item.buffer_length());
-        item_buf.resize(item.buffer_length(), 0x00);
-        item.to_buffer(item_buf.as_mut()).map_err(map_negotiation_error)?;
+        let item_len = item.buffer_length();
+        let len = buf.len();
+        buf.resize(len + item_len, 0);
 
-        buf.extend_from_slice(item_buf.as_ref());
-
-        Ok(())
+        item.to_buffer(&mut buf[len..]).map_err(map_negotiation_error)
     }
 }
 
@@ -105,13 +101,10 @@ impl Encoder for DataTransport {
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let data_pdu = Data::new(item.len());
-        let mut data_pdu_buf = BytesMut::with_capacity(data_pdu.buffer_length() - data_pdu.data_length);
-        data_pdu_buf.resize(data_pdu.buffer_length() - data_pdu.data_length, 0x00);
-        data_pdu
-            .to_buffer(data_pdu_buf.as_mut())
-            .map_err(map_negotiation_error)?;
-
-        buf.extend_from_slice(data_pdu_buf.as_ref());
+        let item_len = data_pdu.buffer_length() - data_pdu.data_length;
+        let len = buf.len();
+        buf.resize(len + item_len, 0);
+        data_pdu.to_buffer(&mut buf[len..]).map_err(map_negotiation_error)?;
         buf.extend_from_slice(item.as_ref());
 
         Ok(())

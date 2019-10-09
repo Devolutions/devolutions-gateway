@@ -26,11 +26,10 @@ impl Encoder for TsRequestTransport {
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let len = item.buffer_len();
-        buf.resize(len as usize, 0x00);
+        let item_len = item.buffer_len() as usize;
+        let len = buf.len();
+        buf.resize(len + item_len, 0);
 
-        item.encode_ts_request(buf.as_mut())?;
-
-        Ok(())
+        item.encode_ts_request(&mut buf[len..])
     }
 }
