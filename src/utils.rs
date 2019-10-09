@@ -1,7 +1,6 @@
 pub mod association;
 
 use std::{
-    fs,
     io::{self, BufReader},
     net::SocketAddr,
 };
@@ -78,42 +77,26 @@ where
     Ok(payload[0].as_ref().to_vec())
 }
 
-pub fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>> {
-    let certfile = fs::File::open(filename)?;
-    let mut reader = BufReader::new(certfile);
-    rustls::internal::pemfile::certs(&mut reader).map_err(|()| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Failed to parse certificate: {}", filename),
-        )
-    })
+pub fn load_certs() -> io::Result<Vec<rustls::Certificate>> {
+    let certfile = include_bytes!("cert/publicCert.pem");
+    let mut reader = BufReader::new(certfile.as_ref());
+
+    rustls::internal::pemfile::certs(&mut reader)
+        .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
 }
 
-pub fn load_private_key(filename: &str) -> io::Result<rustls::PrivateKey> {
-    let mut rsa_keys = {
-        let keyfile = fs::File::open(filename)?;
-        let mut reader = BufReader::new(keyfile);
-        rustls::internal::pemfile::rsa_private_keys(&mut reader).map_err(|()| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("File contains invalid rsa private key: {}", filename),
-            )
-        })?
-    };
+pub fn load_private_key() -> io::Result<rustls::PrivateKey> {
+    let keyfile = include_bytes!("cert/private.pem");
 
-    let mut pkcs8_keys = {
-        let keyfile = fs::File::open(filename)?;
-        let mut reader = BufReader::new(keyfile);
-        rustls::internal::pemfile::pkcs8_private_keys(&mut reader).map_err(|()| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "File contains invalid pkcs8 private key (encrypted keys not supported): {}",
-                    filename
-                ),
-            )
-        })?
-    };
+    let mut rsa_keys = rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))?;
+
+    let mut pkcs8_keys = rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "File contains invalid pkcs8 private key (encrypted keys not supported)",
+        )
+    })?;
 
     // prefer to load pkcs8 keys
     if !pkcs8_keys.is_empty() {

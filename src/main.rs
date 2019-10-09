@@ -99,8 +99,8 @@ fn main() {
     let http_service = http_server.server.get_request_handler().clone();
 
     // Create the TLS acceptor.
-    let certs = load_certs("src/cert/publicCert.pem").expect("Could not load a certificate src/cert/publicCert.pem");
-    let priv_key = load_private_key("src/cert/private.pem").expect("Could not load a certificate src/cert/private.pem");
+    let certs = load_certs().expect("Could not load a certificate src/cert/publicCert.pem");
+    let priv_key = load_private_key().expect("Could not load a certificate src/cert/private.pem");
 
     let client_no_auth = rustls::NoClientAuth::new();
     let mut server_config = rustls::ServerConfig::new(client_no_auth);
