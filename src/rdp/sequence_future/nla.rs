@@ -428,6 +428,7 @@ impl Decoder for EarlyUserAuthResultTransport {
             Ok(None)
         } else {
             let result = io_try!(EarlyUserAuthResult::from_buffer(buf.as_ref()));
+            buf.split_to(result.buffer_len());
 
             Ok(Some(result))
         }
@@ -439,9 +440,13 @@ impl Encoder for EarlyUserAuthResultTransport {
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        buf.resize(EARLY_USER_AUTH_RESULT_PDU_SIZE, 0);
+        let mut data = BytesMut::with_capacity(EARLY_USER_AUTH_RESULT_PDU_SIZE);
+        data.resize(EARLY_USER_AUTH_RESULT_PDU_SIZE, 0);
+        item.to_buffer(data.as_mut())?;
 
-        item.to_buffer(buf.as_mut())
+        buf.extend_from_slice(data.as_ref());
+
+        Ok(())
     }
 }
 
