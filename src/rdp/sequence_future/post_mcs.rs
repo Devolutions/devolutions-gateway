@@ -4,7 +4,7 @@ use ironrdp::{
     mcs::SendDataContext, ClientInfoPdu, ControlAction, McsPdu, PduParsing, ServerLicensePdu, ShareControlHeader,
     ShareControlPdu, ShareDataHeader, ShareDataPdu,
 };
-use slog_scope::{debug, info};
+use slog_scope::{debug, info, warn};
 use tokio::codec::Framed;
 use tokio_rustls::TlsStream;
 use tokio_tcp::TcpStream;
@@ -186,14 +186,11 @@ fn process_send_data_request_pdu(
                     if client_confirm_active.originator_id
                         != originator_id.expect("Originator ID must be set during Server Demand Active PDU processing")
                     {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!(
-                                "Got invalid originator ID: {} != {}",
-                                client_confirm_active.originator_id,
-                                originator_id.unwrap()
-                            ),
-                        ));
+                        warn!(
+                            "Got invalid originator ID: {} != {}",
+                            client_confirm_active.originator_id,
+                            originator_id.unwrap()
+                        );
                     }
                     client_confirm_active.pdu.filter(filter_config);
                     debug!("Got Client Confirm Active PDU: {:?}", client_confirm_active);
