@@ -196,7 +196,7 @@ fn smoke_tcp_v2() {
     assert!(client.post(create_url).send().unwrap().status() == StatusCode::OK);
 
     // Candidate gathering
-    let gather_url = url.join(&format!("/jet/gather/{}", association_id)).unwrap();
+    let gather_url = url.join(&format!("/jet/association/{}/candidates", association_id)).unwrap();
     let mut result = client.post(gather_url).send().unwrap();
     assert!(result.status() == StatusCode::OK);
     let association_info: AssociationInfo = result.json().unwrap();
