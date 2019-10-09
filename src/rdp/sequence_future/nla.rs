@@ -32,6 +32,11 @@ use crate::{
 type TsRequestFutureTransport = Framed<TlsStream<TcpStream>, TsRequestTransport>;
 type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUserAuthResultTransport>;
 
+pub enum NlaTransport {
+    TsRequest(TsRequestFutureTransport),
+    EarlyUserAuthResult(EarlyUserAuthResultFutureTransport),
+}
+
 pub struct NlaWithClientFuture {
     state: NlaWithClientFutureState,
     client_response_protocol: nego::SecurityProtocol,
@@ -59,7 +64,7 @@ impl NlaWithClientFuture {
 }
 
 impl Future for NlaWithClientFuture {
-    type Item = (TlsStream<TcpStream>, RdpIdentity);
+    type Item = (NlaTransport, RdpIdentity);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -96,8 +101,6 @@ impl Future for NlaWithClientFuture {
                 NlaWithClientFutureState::CredSsp(cred_ssp_future) => {
                     let (client_transport, rdp_identity) = try_ready!(cred_ssp_future.poll());
 
-                    let client_tls = client_transport.into_inner();
-
                     if self
                         .client_response_protocol
                         .contains(nego::SecurityProtocol::HYBRID_EX)
@@ -105,23 +108,21 @@ impl Future for NlaWithClientFuture {
                         self.rdp_identity = Some(rdp_identity);
 
                         self.state = NlaWithClientFutureState::EarlyUserAuthResult(
-                            EarlyUserAuthResultTransport::default()
-                                .framed(client_tls)
+                            utils::update_framed_codec(client_transport, EarlyUserAuthResultTransport::default())
                                 .send(EarlyUserAuthResult::Success),
                         );
                     } else {
-                        return Ok(Async::Ready((client_tls, rdp_identity)));
+                        return Ok(Async::Ready((NlaTransport::TsRequest(client_transport), rdp_identity)));
                     }
                 }
                 NlaWithClientFutureState::EarlyUserAuthResult(early_user_auth_result_future) => {
                     let transport = try_ready!(early_user_auth_result_future.poll());
-                    let client_tls = transport.into_inner();
 
                     debug!("Success Early User Authorization Result PDU sent to the client");
                     info!("NLA phase has been finished with the client");
 
                     return Ok(Async::Ready((
-                        client_tls,
+                        NlaTransport::EarlyUserAuthResult(transport),
                         self.rdp_identity
                             .take()
                             .expect("For NLA with client future, RDP identity must be set during CredSSP phase"),
@@ -167,7 +168,7 @@ impl NlaWithServerFuture {
 }
 
 impl Future for NlaWithServerFuture {
-    type Item = TlsStream<TcpStream>;
+    type Item = NlaTransport;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -206,17 +207,17 @@ impl Future for NlaWithServerFuture {
                 }
                 NlaWithServerFutureState::CredSsp(cred_ssp_future) => {
                     let server_transport = try_ready!(cred_ssp_future.poll());
-                    let server_tls = server_transport.into_inner();
 
                     if self
                         .server_response_protocol
                         .contains(nego::SecurityProtocol::HYBRID_EX)
                     {
                         self.state = NlaWithServerFutureState::EarlyUserAuthResult(
-                            EarlyUserAuthResultTransport::default().framed(server_tls).into_future(),
+                            utils::update_framed_codec(server_transport, EarlyUserAuthResultTransport::default())
+                                .into_future(),
                         );
                     } else {
-                        return Ok(Async::Ready(server_tls));
+                        return Ok(Async::Ready(NlaTransport::TsRequest(server_transport)));
                     }
                 }
                 NlaWithServerFutureState::EarlyUserAuthResult(early_user_auth_result_future) => {
@@ -225,12 +226,10 @@ impl Future for NlaWithServerFuture {
 
                     match early_user_auth_result {
                         Some(EarlyUserAuthResult::Success) => {
-                            let server_tls = transport.into_inner();
-
                             debug!("Got Success Early User Authorization Result from the server");
                             info!("NLA phase has been finished with the server");
 
-                            return Ok(Async::Ready(server_tls));
+                            return Ok(Async::Ready(NlaTransport::EarlyUserAuthResult(transport)));
                         }
                         Some(EarlyUserAuthResult::AccessDenied) => {
                             debug!("The server has denied access via Early User Authorization Result PDU");
