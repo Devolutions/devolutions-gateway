@@ -2,7 +2,10 @@ use std::io;
 
 use futures::{try_ready, Future};
 use ironrdp::nego;
-use tokio::{codec::Decoder, prelude::*};
+use tokio::{
+    codec::{Decoder, Framed},
+    prelude::*,
+};
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use tokio_tcp::{ConnectFuture, TcpStream};
 
@@ -12,19 +15,20 @@ use crate::{
         identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
             create_negotiation_request, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
-            NegotiationWithClientFuture, NegotiationWithServerFuture, NlaWithClientFuture, NlaWithServerFuture,
-            PostMcs, SendStateArgs, SequenceFuture, StaticChannels,
+            NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
+            NlaWithServerFuture, PostMcs, SendStateArgs, SequenceFuture, StaticChannels,
         },
     },
     transport::{
         mcs::McsTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
+    utils,
 };
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
-    client_tls: Option<TlsStream<TcpStream>>,
+    client_nla_transport: Option<NlaTransport>,
     tls_proxy_pubkey: Option<Vec<u8>>,
     tls_acceptor: Option<TlsAcceptor>,
     identities_proxy: Option<IdentitiesProxy>,
@@ -50,7 +54,7 @@ impl ConnectionSequenceFuture {
                     server: None,
                 },
             ))),
-            client_tls: None,
+            client_nla_transport: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
             identities_proxy: Some(identities_proxy),
@@ -142,12 +146,24 @@ impl ConnectionSequenceFuture {
     }
     fn create_mcs_initial_future(
         &mut self,
-        server_tls: TlsStream<TcpStream>,
+        server_nla_transport: NlaTransport,
     ) -> SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport> {
-        let client_tls = self
-            .client_tls
+        let client_nla_transport = self
+            .client_nla_transport
             .take()
-            .expect("For the McsInitial state, the client TLS stream must be set after the client negotiation");
+            .expect("For the McsInitial state, the client NLA transport must be set after the client negotiation");
+        let client_transport = match client_nla_transport {
+            NlaTransport::TsRequest(transport) => utils::update_framed_codec(transport, DataTransport::default()),
+            NlaTransport::EarlyUserAuthResult(transport) => {
+                utils::update_framed_codec(transport, DataTransport::default())
+            }
+        };
+        let server_transport = match server_nla_transport {
+            NlaTransport::TsRequest(transport) => utils::update_framed_codec(transport, DataTransport::default()),
+            NlaTransport::EarlyUserAuthResult(transport) => {
+                utils::update_framed_codec(transport, DataTransport::default())
+            }
+        };
 
         let response_protocol = self
             .response_protocol
@@ -163,26 +179,28 @@ impl ConnectionSequenceFuture {
         SequenceFuture::with_get_state(
             McsInitialFuture::new(FilterConfig::new(response_protocol, target)),
             GetStateArgs {
-                client: Some(DataTransport::default().framed(client_tls)),
-                server: Some(DataTransport::default().framed(server_tls)),
+                client: Some(client_transport),
+                server: Some(server_transport),
             },
         )
     }
     fn create_mcs_future(
         &mut self,
-        server_tls: TlsStream<TcpStream>,
+        client_mcs_initial_transport: Framed<TlsStream<TcpStream>, DataTransport>,
+        server_mcs_initial_transport: Framed<TlsStream<TcpStream>, DataTransport>,
         static_channels: StaticChannels,
     ) -> SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport> {
-        let client_tls = self
-            .client_tls
-            .take()
-            .expect("the client TLS stream must be set after the MCS initial");
-
         SequenceFuture::with_get_state(
             McsFuture::new(static_channels),
             GetStateArgs {
-                client: Some(McsTransport::default().framed(client_tls)),
-                server: Some(McsTransport::default().framed(server_tls)),
+                client: Some(utils::update_framed_codec(
+                    client_mcs_initial_transport,
+                    McsTransport::default(),
+                )),
+                server: Some(utils::update_framed_codec(
+                    server_mcs_initial_transport,
+                    McsTransport::default(),
+                )),
             },
         )
     }
@@ -230,8 +248,8 @@ impl Future for ConnectionSequenceFuture {
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithClient(nla_future) => {
-                    let (client_tls, rdp_identity) = try_ready!(nla_future.poll());
-                    self.client_tls = Some(client_tls);
+                    let (client_transport, rdp_identity) = try_ready!(nla_future.poll());
+                    self.client_nla_transport = Some(client_transport);
                     self.rdp_identity = Some(rdp_identity);
 
                     self.state = ConnectionSequenceFutureState::ConnectToServer(self.create_connect_server_future()?);
@@ -258,22 +276,22 @@ impl Future for ConnectionSequenceFuture {
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithServer(nla_future) => {
-                    let server_tls = try_ready!(nla_future.poll());
+                    let server_nla_transport = try_ready!(nla_future.poll());
 
-                    self.state =
-                        ConnectionSequenceFutureState::McsInitial(Box::new(self.create_mcs_initial_future(server_tls)))
+                    self.state = ConnectionSequenceFutureState::McsInitial(Box::new(
+                        self.create_mcs_initial_future(server_nla_transport),
+                    ))
                 }
                 ConnectionSequenceFutureState::McsInitial(mcs_initial_future) => {
                     let (client_transport, server_transport, filter_config, static_channels) =
                         try_ready!(mcs_initial_future.poll());
                     self.filter_config = Some(filter_config);
-                    self.client_tls = Some(client_transport.into_inner());
 
-                    let server_tls = server_transport.into_inner();
-
-                    self.state = ConnectionSequenceFutureState::Mcs(Box::new(
-                        self.create_mcs_future(server_tls, static_channels),
-                    ));
+                    self.state = ConnectionSequenceFutureState::Mcs(Box::new(self.create_mcs_future(
+                        client_transport,
+                        server_transport,
+                        static_channels,
+                    )));
                 }
                 ConnectionSequenceFutureState::Mcs(mcs_future) => {
                     let (client_transport, server_transport, joined_static_channels) = try_ready!(mcs_future.poll());

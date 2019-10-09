@@ -5,6 +5,8 @@ use std::{
     io::{self, BufReader},
     net::SocketAddr,
 };
+
+use tokio::codec::{Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 
@@ -120,4 +122,16 @@ pub fn load_private_key(filename: &str) -> io::Result<rustls::PrivateKey> {
         assert!(!rsa_keys.is_empty());
         Ok(rsa_keys.remove(0))
     }
+}
+
+pub fn update_framed_codec<Io, OldCodec, NewCodec>(
+    framed: Framed<Io, OldCodec>,
+    codec: NewCodec,
+) -> Framed<Io, NewCodec> {
+    let parts = framed.into_parts();
+
+    let mut new_parts = FramedParts::new(parts.io, codec);
+    new_parts.read_buf = parts.read_buf;
+
+    Framed::from_parts(new_parts)
 }
