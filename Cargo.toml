@@ -16,7 +16,7 @@ futures = "0.1"
 tokio = "0.1.11"
 tokio-tcp = "0.1.2"
 tokio-io = "0.1"
-rustls = { version = "0.16.0", features = ["dangerous_configuration"] }
+rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
 tokio-rustls = "0.10.1"
 webpki = "0.21.0"
 native-tls = "0.2"
@@ -48,6 +48,9 @@ indexmap = "1.0"
 
 
 jet-proto = { path = "./jet-proto" }
+
+[patch.crates-io]
+rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
 
 [dev-dependencies]
 tempfile = "3.0"
