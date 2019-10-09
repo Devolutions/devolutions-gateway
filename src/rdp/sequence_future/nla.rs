@@ -440,13 +440,10 @@ impl Encoder for EarlyUserAuthResultTransport {
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut data = BytesMut::with_capacity(EARLY_USER_AUTH_RESULT_PDU_SIZE);
-        data.resize(EARLY_USER_AUTH_RESULT_PDU_SIZE, 0);
-        item.to_buffer(data.as_mut())?;
+        let len = buf.len();
+        buf.resize(len + EARLY_USER_AUTH_RESULT_PDU_SIZE, 0);
 
-        buf.extend_from_slice(data.as_ref());
-
-        Ok(())
+        item.to_buffer(&mut buf[len..])
     }
 }
 
