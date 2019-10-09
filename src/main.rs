@@ -86,19 +86,17 @@ fn main() {
     let cert = Identity::from_pkcs12(der, "password").unwrap();
     let tls_acceptor = tokio_tls::TlsAcceptor::from(native_tls::TlsAcceptor::builder(cert).build().unwrap());
 
+    let mut futures = Vec::new();
     for url in websocket_listeners {
-        start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone());
+         futures.push(start_websocket_server(url.clone(), config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone()));
     }
 
-    let mut server_opt = None;
     for url in tcp_listeners {
-        server_opt = Some(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), tls_public_key.clone(), executor_handle.clone()));
+        futures.push(start_tcp_server(url.clone(), config.clone(), jet_associations.clone(), tls_acceptor.clone(), tls_public_key.clone(), executor_handle.clone()));
     }
 
+    runtime.block_on(future::join_all(futures).map_err(|_| ())).unwrap();
 
-    if let Some(server) = server_opt {
-        runtime.block_on(server.map_err(|_| ())).unwrap();
-    }
     http_server.stop()
 }
 
@@ -210,7 +208,7 @@ impl Proxy {
     }
 }
 
-fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, tls_public_key: Vec<u8>, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
+fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, tls_public_key: Vec<u8>, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=()> + Send> {
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
@@ -316,10 +314,10 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
     });
     info!("TCP jet server started successfully. Listening on {}", socket_addr);
 
-    Box::new(server) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+    Box::new(server.map_err(|_|())) as Box<dyn Future<Item=(), Error=()> + Send>
 }
 
-fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) {
+fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor) -> Box<dyn Future<Item=(), Error=()> + Send> {
 
     // Start websocket server if needed
     info!("Starting websocket server ...");
@@ -374,8 +372,8 @@ fn start_websocket_server(websocket_url: Url, config: Config, http_service: Http
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    &executor_handle.spawn(websocket_server);
     info!("Websocket server started successfully. Listening on {}", websocket_addr);
+    Box::new(websocket_server) as Box<dyn Future<Item=(), Error=()> + Send>
 }
 
 fn default_port(url: &Url) -> Result<u16, ()> {
