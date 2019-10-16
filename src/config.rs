@@ -1,6 +1,9 @@
+use std::{env, sync::Arc};
+
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
-use std::env;
+
+use crate::rdp;
 
 #[derive(Debug, Clone)]
 pub enum Protocol {
@@ -18,7 +21,7 @@ struct ConfigTemp {
     routing_url: Option<String>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
-    identities_filename: Option<String>,
+    rdp_identities: Option<rdp::IdentitiesProxy>,
     log_file: Option<String>,
 }
 
@@ -37,7 +40,7 @@ pub struct Config {
     routing_url: Option<String>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
-    identities_filename: Option<String>,
+    rdp_identities: Option<rdp::IdentitiesProxy>,
     log_file: Option<String>,
 }
 
@@ -70,8 +73,8 @@ impl Config {
         &self.protocol
     }
 
-    pub fn identities_filename(&self) -> Option<String> {
-        self.identities_filename.clone()
+    pub fn rdp_identities(&self) -> Option<rdp::IdentitiesProxy> {
+        self.rdp_identities.clone()
     }
 
     pub fn log_file(&self) -> Option<String> {
@@ -228,6 +231,13 @@ identities_file example:
         let identities_filename = matches
             .value_of("identities-file")
             .map(std::string::ToString::to_string);
+        let rdp_identities = if let Some(filename) = identities_filename {
+            Some(rdp::IdentitiesProxy::new(Arc::new(
+                rdp::RdpIdentity::from_file(filename.as_str()).expect("identities-file is invalid"),
+            )))
+        } else {
+            None
+        };
 
         let log_file = matches.value_of("log-file").map(String::from);
 
@@ -239,7 +249,7 @@ identities_file example:
             routing_url,
             pcap_files_path,
             protocol,
-            identities_filename,
+            rdp_identities,
             log_file,
         };
 
@@ -307,7 +317,7 @@ impl From<ConfigTemp> for Config {
             routing_url: temp.routing_url,
             pcap_files_path: temp.pcap_files_path,
             protocol: temp.protocol,
-            identities_filename: temp.identities_filename,
+            rdp_identities: temp.rdp_identities,
             log_file: temp.log_file,
         }
     }
