@@ -1,7 +1,7 @@
 use std::io;
 
 use bytes::BytesMut;
-use sspi::internal::TsRequest;
+use sspi::internal::credssp::TsRequest;
 use tokio::codec::{Decoder, Encoder};
 
 use crate::io_try;

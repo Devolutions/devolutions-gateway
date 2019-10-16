@@ -6,8 +6,8 @@ use ironrdp::nego;
 
 use slog_scope::{debug, error, info};
 use sspi::{
-    internal::{
-        CredSspClient, CredSspMode, CredSspResult, CredSspServer, EarlyUserAuthResult, TsRequest,
+    internal::credssp::{
+        self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest,
         EARLY_USER_AUTH_RESULT_PDU_SIZE,
     },
     AuthIdentity,
@@ -276,20 +276,18 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                 let response = self.cred_ssp_server.process(pdu);
 
                 let (next_sequence_state, ts_request) = match response {
-                    Ok(CredSspResult::ReplyNeeded(ts_request)) => {
+                    Ok(credssp::ServerState::ReplyNeeded(ts_request)) => {
                         debug!("Sending TSRequest to the client: {:x?}", ts_request);
 
                         (SequenceState::CredSspSequence, Some(ts_request))
                     }
-                    Ok(CredSspResult::FinalMessage(ts_request)) => {
-                        debug!("Sending last TSRequest to the client: {:x?}", ts_request);
-
-                        (SequenceState::FinalMessage, Some(ts_request))
-                    }
-                    Ok(CredSspResult::ClientCredentials(read_credentials)) => {
-                        let expected_credentials = &self.cred_ssp_server.credentials.get_rdp_identity().proxy;
-                        if expected_credentials.username == read_credentials.username
-                            && expected_credentials.password == read_credentials.password
+                    Ok(credssp::ServerState::Finished(read_credentials)) => {
+                        let rdp_identity = self.identities_proxy.identity_by_proxy(
+                            read_credentials.username.as_str(),
+                            read_credentials.domain.as_ref().map(String::as_str),
+                        )?;
+                        if rdp_identity.proxy.username == read_credentials.username
+                            && rdp_identity.proxy.password == read_credentials.password
                         {
                             (SequenceState::Finished, None)
                         } else {
@@ -299,15 +297,11 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                             ));
                         }
                     }
-                    Err(ts_request) => {
-                        error!(
-                            "Error happened in CredSSP server, error code: {}",
-                            ts_request.error_code.unwrap()
-                        );
+                    Err(credssp::ServerError { ts_request, error }) => {
+                        error!("Error happened in the CredSSP server: {:?}", error);
 
                         (SequenceState::SendingError, Some(ts_request))
                     }
-                    _ => unreachable!(),
                 };
                 debug!("Sending TSRequest to the client: {:x?}", ts_request);
 
@@ -382,13 +376,12 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         let response = self.cred_ssp_client.process(pdu)?;
 
         let ts_request = match response {
-            CredSspResult::ReplyNeeded(ts_request) => ts_request,
-            CredSspResult::FinalMessage(ts_request) => {
+            credssp::ClientState::ReplyNeeded(ts_request) => ts_request,
+            credssp::ClientState::FinalMessage(ts_request) => {
                 self.sequence_state = SequenceState::FinalMessage;
 
                 ts_request
             }
-            _ => unreachable!(),
         };
         debug!("Sending TSRequest to the server: {:x?}", ts_request);
 
