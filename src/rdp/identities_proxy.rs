@@ -1,7 +1,7 @@
 use std::{fs::File, io, io::prelude::*};
 
 use serde_derive::{Deserialize, Serialize};
-use sspi::{internal::CredentialsProxy, AuthIdentity};
+use sspi::{internal::credssp, AuthIdentity};
 
 pub trait RdpIdentityGetter {
     fn get_rdp_identity(&self) -> RdpIdentity;
@@ -79,7 +79,7 @@ impl RdpIdentityGetter for IdentitiesProxy {
     }
 }
 
-impl CredentialsProxy for IdentitiesProxy {
+impl credssp::CredentialsProxy for IdentitiesProxy {
     type AuthenticationData = AuthIdentity;
 
     fn auth_data_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<Self::AuthenticationData> {
