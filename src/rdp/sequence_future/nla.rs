@@ -21,9 +21,11 @@ use tokio_tcp::TcpStream;
 
 use crate::{
     io_try,
-    rdp::identities_proxy::{IdentitiesProxy, RdpIdentity, RdpIdentityGetter},
-    rdp::sequence_future::{
-        FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
+    rdp::{
+        identities_proxy::{IdentitiesProxy, RdpIdentity},
+        sequence_future::{
+            FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
+        },
     },
     transport::tsrequest::TsRequestTransport,
     utils,
@@ -41,7 +43,7 @@ pub struct NlaWithClientFuture {
     state: NlaWithClientFutureState,
     client_response_protocol: nego::SecurityProtocol,
     tls_proxy_pubkey: Option<Vec<u8>>,
-    identities_proxy: Option<IdentitiesProxy>,
+    identities_proxy: IdentitiesProxy,
     rdp_identity: Option<RdpIdentity>,
 }
 
@@ -57,7 +59,7 @@ impl NlaWithClientFuture {
             state: NlaWithClientFutureState::Tls(tls_acceptor.accept(client)),
             client_response_protocol,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
-            identities_proxy: Some(identities_proxy),
+            identities_proxy,
             rdp_identity: None,
         }
     }
@@ -88,9 +90,7 @@ impl Future for NlaWithClientFuture {
                             self.tls_proxy_pubkey
                                 .take()
                                 .expect("The TLS proxy public key must be set in the constructor"),
-                            self.identities_proxy
-                                .take()
-                                .expect("The identities proxy must be set in the constructor"),
+                            self.identities_proxy.clone(),
                         )?,
                         GetStateArgs {
                             client: Some(client_transport),
@@ -251,15 +251,19 @@ impl Future for NlaWithServerFuture {
 
 pub struct CredSspWithClientFuture {
     cred_ssp_server: CredSspServer<IdentitiesProxy>,
+    identities_proxy: IdentitiesProxy,
+    rdp_identity: Option<RdpIdentity>,
     sequence_state: SequenceState,
 }
 
 impl CredSspWithClientFuture {
     pub fn new(tls_proxy_pubkey: Vec<u8>, identities_proxy: IdentitiesProxy) -> io::Result<Self> {
-        let cred_ssp_server = CredSspServer::new(tls_proxy_pubkey, identities_proxy)?;
+        let cred_ssp_server = CredSspServer::new(tls_proxy_pubkey, identities_proxy.clone())?;
 
         Ok(Self {
             cred_ssp_server,
+            identities_proxy,
+            rdp_identity: None,
             sequence_state: SequenceState::CredSspSequence,
         })
     }
@@ -289,6 +293,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                         if rdp_identity.proxy.username == read_credentials.username
                             && rdp_identity.proxy.password == read_credentials.password
                         {
+                            self.rdp_identity = Some(rdp_identity);
+
                             (SequenceState::Finished, None)
                         } else {
                             return Err(io::Error::new(
@@ -325,7 +331,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         (
             client.take().expect(
             "In CredSSP Connection Sequence, the client's stream must exist in a return_item method, and the method cannot be fired multiple times"),
-            self.cred_ssp_server.credentials.get_rdp_identity(),
+            self.rdp_identity.take().expect("Must be set on the last CredSSP server call"),
         )
     }
     fn next_sender(&self) -> NextStream {

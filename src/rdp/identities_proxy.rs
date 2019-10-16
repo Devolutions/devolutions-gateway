@@ -1,11 +1,7 @@
-use std::{fs::File, io, io::prelude::*};
+use std::{fs::File, io, io::prelude::*, sync::Arc};
 
 use serde_derive::{Deserialize, Serialize};
 use sspi::{internal::credssp, AuthIdentity};
-
-pub trait RdpIdentityGetter {
-    fn get_rdp_identity(&self) -> RdpIdentity;
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FullCredentials {
@@ -41,13 +37,8 @@ pub struct RdpIdentity {
     pub destination: String,
 }
 
-pub struct IdentitiesProxy {
-    pub rdp_identity: Option<RdpIdentity>,
-    rdp_identities_filename: String,
-}
-
 impl RdpIdentity {
-    fn from_file(filename: &str) -> io::Result<Vec<Self>> {
+    pub fn from_file(filename: &str) -> io::Result<Vec<Self>> {
         let mut f = File::open(filename)?;
         let mut contents = String::new();
         f.read_to_string(&mut contents)?;
@@ -61,21 +52,27 @@ impl RdpIdentity {
     }
 }
 
-impl IdentitiesProxy {
-    pub fn new(rdp_identities_filename: String) -> Self {
-        Self {
-            rdp_identities_filename,
-            rdp_identity: None,
-        }
-    }
+#[derive(Clone)]
+pub struct IdentitiesProxy {
+    rdp_identities: Arc<Vec<RdpIdentity>>,
 }
 
-impl RdpIdentityGetter for IdentitiesProxy {
-    fn get_rdp_identity(&self) -> RdpIdentity {
-        self.rdp_identity
-            .as_ref()
-            .expect("RdpIdentity must be set before the call")
-            .clone()
+impl IdentitiesProxy {
+    pub fn new(rdp_identities: Arc<Vec<RdpIdentity>>) -> Self {
+        Self { rdp_identities }
+    }
+
+    pub fn identity_by_proxy(&self, username: &str, _domain: Option<&str>) -> io::Result<RdpIdentity> {
+        self.rdp_identities
+            .iter()
+            .find(|c| c.proxy.username == username)
+            .cloned()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("failed to find RDP identity by proxy username '{}'", username),
+                )
+            })
     }
 }
 
@@ -83,16 +80,16 @@ impl credssp::CredentialsProxy for IdentitiesProxy {
     type AuthenticationData = AuthIdentity;
 
     fn auth_data_by_user(&mut self, username: String, domain: Option<String>) -> io::Result<Self::AuthenticationData> {
-        let mut rdp_identities = RdpIdentity::from_file(self.rdp_identities_filename.as_ref())?;
-        let identity_position = rdp_identities
+        let identity = self
+            .rdp_identities
             .iter()
-            .position(|identity| identity.proxy.username == username);
+            .find(|identity| identity.proxy.username == username);
 
-        if let Some(position) = identity_position {
-            self.rdp_identity = Some(rdp_identities.remove(position));
-            self.rdp_identity.as_mut().unwrap().proxy.domain = domain;
+        if let Some(identity) = identity {
+            let mut credentials = identity.proxy.clone();
+            credentials.domain = domain;
 
-            Ok(self.rdp_identity.as_ref().unwrap().proxy.clone())
+            Ok(credentials)
         } else {
             Err(io::Error::new(
                 io::ErrorKind::NotFound,

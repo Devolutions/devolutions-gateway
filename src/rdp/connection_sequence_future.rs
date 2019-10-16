@@ -31,7 +31,7 @@ pub struct ConnectionSequenceFuture {
     client_nla_transport: Option<NlaTransport>,
     tls_proxy_pubkey: Option<Vec<u8>>,
     tls_acceptor: Option<TlsAcceptor>,
-    identities_proxy: Option<IdentitiesProxy>,
+    identities_proxy: IdentitiesProxy,
     request: Option<nego::Request>,
     response_protocol: Option<nego::SecurityProtocol>,
     rdp_identity: Option<RdpIdentity>,
@@ -57,7 +57,7 @@ impl ConnectionSequenceFuture {
             client_nla_transport: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
-            identities_proxy: Some(identities_proxy),
+            identities_proxy,
             request: None,
             response_protocol: None,
             rdp_identity: None,
@@ -77,9 +77,7 @@ impl ConnectionSequenceFuture {
             self.tls_proxy_pubkey
                 .take()
                 .expect("TLS proxy public key must be set in the constructor"),
-            self.identities_proxy
-                .take()
-                .expect("Identities proxy must be set in the constructor"),
+            self.identities_proxy.clone(),
             self.tls_acceptor
                 .take()
                 .expect("TLS acceptor must be set in the constructor"),
