@@ -1,9 +1,8 @@
 use uuid::Uuid;
 use indexmap::IndexMap;
-use crate::jet::candidate::{Candidate, CandidateState};
+use crate::jet::candidate::{Candidate, CandidateState, CandidateResponse};
 use serde_json::Value;
 
-#[derive(Serialize)]
 pub struct Association {
     id: Uuid,
     version: u8,
@@ -71,5 +70,22 @@ impl Association {
         self.candidates.iter().find(|(_, candidate)| {
             candidate.state() == CandidateState::Connected
         }).is_some()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AssociationResponse {
+    id: Uuid,
+    version: u8,
+    candidate: Vec<CandidateResponse>,
+}
+
+impl From<&Association> for AssociationResponse {
+    fn from(association: &Association) -> Self {
+        AssociationResponse {
+            id: association.id,
+            version: association.version,
+            candidate: association.candidates.values().map(|candidate| candidate.into()).collect()
+        }
     }
 }

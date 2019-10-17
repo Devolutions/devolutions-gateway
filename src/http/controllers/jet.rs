@@ -7,7 +7,7 @@ use log::info;
 use tokio::runtime::TaskExecutor;
 use futures::future::{ok};
 
-use crate::jet::association::Association;
+use crate::jet::association::{Association, AssociationResponse};
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
@@ -51,20 +51,18 @@ impl ControllerData {
     fn get_associations(&self, _req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
+        let associations_response: Vec<AssociationResponse>;
+
         if let Ok(associations) = self.jet_associations.lock() {
-            let associations_vec: Vec<&Association> = associations.values().collect();
-            let quantity = associations_vec.len();
-
-            let body = json!({"associations": associations_vec,
-                              "associations_qty": quantity});
-
-            if let Ok(body) = serde_json::to_string(&body) {
-                res.json_body(body);
-                res.status(StatusCode::OK);
-            }
+            associations_response = associations.values().map(|association| association.into()).collect();
         } else {
             res.status(StatusCode::INTERNAL_SERVER_ERROR);
             return;
+        }
+
+        if let Ok(body) = serde_json::to_string(&associations_response) {
+            res.json_body(body);
+            res.status(StatusCode::OK);
         }
     }
 
