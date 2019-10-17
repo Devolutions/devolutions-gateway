@@ -5,14 +5,19 @@ use log::error;
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 
-#[derive(Clone)]
+#[derive(Serialize, Clone)]
 pub struct Candidate {
     id: Uuid,
+    #[serde(skip_serializing)]
     url: Option<Url>,
     state: CandidateState,
+    #[serde(skip_serializing)]
     association_id: Uuid,
+    #[serde(skip_serializing)]
     transport_type: TransportType,
+    #[serde(skip_serializing)]
     server_transport: Option<JetTransport>,
+    #[serde(skip_serializing)]
     client_transport: Option<JetTransport>,
 }
 
@@ -90,7 +95,7 @@ impl Candidate {
     }
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Serialize, Deserialize, Debug,Clone,PartialEq)]
 pub enum CandidateState {
     Initial,
     Accepted,

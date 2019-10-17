@@ -54,20 +54,19 @@ impl ControllerData {
         let association_ids: Vec<Uuid>;
 
         if let Ok(associations) = self.jet_associations.lock() {
-            association_ids = associations.keys().map(|id| id.clone()).collect();
+            let associations_vec: Vec<&Association> = associations.values().collect();
+            let quantity = associations_vec.len();
+
+            let body = json!({"associations": associations_vec,
+                              "associations_qty": quantity});
+
+            if let Ok(body) = serde_json::to_string(&body) {
+                res.json_body(body);
+                res.status(StatusCode::OK);
+            }
         } else {
             res.status(StatusCode::INTERNAL_SERVER_ERROR);
             return;
-        }
-
-        let quantity = association_ids.len();
-
-        let body = json!({"associations": association_ids,
-                                 "associations_qty": quantity});
-
-        if let Ok(body) = serde_json::to_string(&body) {
-            res.json_body(body);
-            res.status(StatusCode::OK);
         }
     }
 

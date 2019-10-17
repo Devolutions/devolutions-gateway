@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use crate::jet::candidate::{Candidate, CandidateState};
 use serde_json::Value;
 
+#[derive(Serialize)]
 pub struct Association {
     id: Uuid,
     version: u8,
