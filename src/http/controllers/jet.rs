@@ -29,6 +29,7 @@ pub struct JetController {
 impl JetController {
     pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
+        dispatch.add(Method::GET, "/association", ControllerData::get_associations);
         dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);
         dispatch.add(Method::POST, "/association/<association_id>/candidates", ControllerData::gather_association_candidates);
 
@@ -47,6 +48,29 @@ impl Controller for JetController {
 }
 
 impl ControllerData {
+    fn get_associations(&self, _req: &SyncRequest, res: &mut SyncResponse) {
+        res.status(StatusCode::BAD_REQUEST);
+
+        let association_ids: Vec<Uuid>;
+
+        if let Ok(associations) = self.jet_associations.lock() {
+            association_ids = associations.keys().map(|id| id.clone()).collect();
+        } else {
+            res.status(StatusCode::INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        let quantity = association_ids.len();
+
+        let body = json!({"associations": association_ids,
+                                 "associations_qty": quantity});
+
+        if let Ok(body) = serde_json::to_string(&body) {
+            res.json_body(body);
+            res.status(StatusCode::OK);
+        }
+    }
+
     fn create_association(&self, req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
@@ -61,7 +85,7 @@ impl ControllerData {
                         let jet_associations = self.jet_associations.clone();
                         let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
                         self.executor_handle.spawn(timeout.then(move |_| {
-                            RemoveAssociation::new(jet_associations, uuid).then(move |res| {
+                            RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
                                 if let Ok(true) = res {
                                     info!(
                                         "No connect request received with association {}. Association removed!",

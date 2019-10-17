@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use indexmap::IndexMap;
-use crate::jet::candidate::Candidate;
+use crate::jet::candidate::{Candidate, CandidateState};
 use serde_json::Value;
 
 pub struct Association {
@@ -64,5 +64,11 @@ impl Association {
 
     pub fn version(&self) -> u8 {
         self.version
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.candidates.iter().find(|(_, candidate)| {
+            candidate.state() == CandidateState::Connected
+        }).is_some()
     }
 }

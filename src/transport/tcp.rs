@@ -222,7 +222,7 @@ impl Stream for TcpJetStream {
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read += len as u64;
-                        debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+                        debug!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
                         if len < buffer.len() {
                             result.extend_from_slice(&buffer[0..len]);
                         } else {
@@ -310,15 +310,16 @@ impl Sink for TcpJetSink {
         mut item: <Self as Sink>::SinkItem,
     ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
-            debug!("{} bytes to write on {}", item.len(), stream.peer_addr().unwrap());
+            let peer_addr = stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string());
+            debug!("{} bytes to write on {}", item.len(), peer_addr);
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
                         self.nb_bytes_written += len as u64;
                         item.drain(0..len);
-                        debug!("{} bytes written on {}", len, stream.peer_addr().unwrap())
+                        debug!("{} bytes written on {}", len, peer_addr)
                     } else {
-                        debug!("0 bytes written on {}", stream.peer_addr().unwrap())
+                        debug!("0 bytes written on {}", peer_addr)
                     }
 
                     if item.is_empty() {

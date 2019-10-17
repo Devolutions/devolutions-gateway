@@ -22,7 +22,7 @@ native-tls = "0.2"
 env_logger = "0.5.13"
 byteorder = "1.2.7"
 bytes = "0.4"
-uuid = { version = "0.7.1", features = ["v4"] }
+uuid = { version = "0.7.1", features = ["v4", "serde"] }
 pcap-file = "0.10.0"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 saphir = { version = "0.9.3", features = ["request_handler"] }

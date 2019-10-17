@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use url::Url;
-use std::convert::{TryFrom, TryInto};
+use std::convert::{TryInto};
 use log::error;
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
@@ -9,7 +9,6 @@ use crate::transport::JetTransport;
 pub struct Candidate {
     id: Uuid,
     url: Option<Url>,
-    ctype: CandidateType,
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
@@ -22,7 +21,6 @@ impl Candidate {
         Candidate {
             id: Uuid::new_v4(),
             url: None,
-            ctype: CandidateType::Relay,
             state: CandidateState::Initial,
             association_id: Uuid::nil(),
             transport_type: TransportType::Tcp,
@@ -37,7 +35,6 @@ impl Candidate {
                 return Some(Candidate {
                     id: Uuid::new_v4(),
                     url: Some(url),
-                    ctype: CandidateType::Relay,
                     state: CandidateState::Initial,
                     association_id: Uuid::nil(),
                     transport_type: transport_type,
@@ -55,6 +52,9 @@ impl Candidate {
     pub fn id(&self) -> Uuid {
         self.id.clone()
     }
+    pub fn state(&self) -> CandidateState {
+        self.state.clone()
+    }
     pub fn transport_type(&self) -> TransportType {
         self.transport_type.clone()
     }
@@ -69,55 +69,32 @@ impl Candidate {
         self.server_transport.clone()
     }
 
+    pub fn association_id(&self) -> Uuid {
+        self.association_id.clone()
+    }
+
     pub fn set_association_id(&mut self, association_id: Uuid) {
         self.association_id = association_id.clone();
+    }
+
+    pub fn set_client_transport(&mut self, transport: JetTransport) {
+        self.client_transport = Some(transport);
     }
 
     pub fn set_server_transport(&mut self, transport: JetTransport) {
         self.server_transport = Some(transport);
     }
 
-    pub fn set_client_transport(&mut self, transport: JetTransport) {
-        self.client_transport = Some(transport);
-    }
-}
-
-#[derive(Debug,Clone,PartialEq)]
-pub enum CandidateType {
-    Host,
-    Relay,
-}
-
-impl TryFrom<&str> for CandidateType {
-    type Error = &'static str;
-    fn try_from(val: &str) -> Result<Self, Self::Error> {
-        let ival = val.to_lowercase();
-        match ival.as_str() {
-            "host" => Ok(CandidateType::Host),
-            "relay" => Ok(CandidateType::Relay),
-            _ => Err("Invalid CandidateType"),
-        }
-    }
-}
-
-impl From<CandidateType> for &str {
-    fn from(val: CandidateType) -> Self {
-        match val {
-            CandidateType::Host => "Host",
-            CandidateType::Relay => "Relay",
-        }
+    pub fn set_state(&mut self, state: CandidateState) {
+        self.state = state;
     }
 }
 
 #[derive(Debug,Clone,PartialEq)]
 pub enum CandidateState {
     Initial,
-    Created,
     Accepted,
     Connected,
-    Selected,
-    Discarded,
-    Failed,
     Final,
 }
 
@@ -125,12 +102,8 @@ impl From<CandidateState> for &str {
     fn from(val: CandidateState) -> Self {
         match val {
             CandidateState::Initial => "Initial",
-            CandidateState::Created => "Created",
             CandidateState::Accepted => "Accepted",
             CandidateState::Connected => "Connected",
-            CandidateState::Selected => "Selected",
-            CandidateState::Discarded => "Discarded",
-            CandidateState::Failed => "Failed",
             CandidateState::Final => "Final",
         }
     }

@@ -14,6 +14,7 @@ use std::io;
 use saphir::server::HttpService;
 use crate::jet::TransportType;
 use jet_proto::JET_VERSION_V2;
+use crate::utils::association::RemoveAssociation;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -75,14 +76,19 @@ impl WebsocketService {
                                     let self_clone = self.clone();
                                     let fut = req.into_body().on_upgrade().map(move |upgraded| {
                                         if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                            if let Some(mut assc) = jet_assc.remove(&association_id) {
+                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
                                                 if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                                                     if candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss {
                                                         candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
 
                                                         // Start the proxy
                                                         if let (Some(server_transport), Some(client_transport)) = (candidate.server_transport(), candidate.client_transport()) {
-                                                            let proxy = Proxy::new(self_clone.config.clone()).build(server_transport, client_transport).map_err(|_| ());
+                                                            let remove_association = RemoveAssociation::new(jet_associations_clone.clone(), candidate.association_id(), Some(candidate.id()));
+                                                            let proxy =
+                                                                Proxy::new(self_clone.config.clone()).build(server_transport, client_transport)
+                                                                    .then(move |_| {
+                                                                        remove_association//.then(move |result| futures::future::result(proxy_result))
+                                                                    }).map(|_| ()).map_err(|_| ());
                                                             self_clone.executor_handle.spawn(proxy);
                                                         }
                                                     }
