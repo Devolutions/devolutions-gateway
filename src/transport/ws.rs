@@ -152,6 +152,14 @@ impl WsTransport {
             stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)))),
         }
     }
+
+    pub fn get_nb_bytes_read(&self) -> u64 {
+        unimplemented!()
+    }
+
+    pub fn get_nb_bytes_written(&self) -> u64 {
+        unimplemented!()
+    }
 }
 
 impl Read for WsTransport {

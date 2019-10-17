@@ -77,14 +77,29 @@ impl Association {
 pub struct AssociationResponse {
     id: Uuid,
     version: u8,
+    bytes_sent: u64,
+    bytes_recv: u64,
     candidate: Vec<CandidateResponse>,
 }
 
 impl From<&Association> for AssociationResponse {
     fn from(association: &Association) -> Self {
+        let (client_bytes_sent, client_bytes_recv) = association.candidates.iter().find_map(|(_, candidate)| {
+            if let Some(transport) = candidate.client_transport() {
+                let client_bytes_sent = transport.get_nb_bytes_read();
+                let client_bytes_recv = transport.get_nb_bytes_written();
+                if client_bytes_sent != 0 || client_bytes_recv != 0 {
+                    return Some((client_bytes_sent, client_bytes_recv))
+                }
+            }
+            None
+        }).unwrap_or((0, 0));
+
         AssociationResponse {
             id: association.id,
             version: association.version,
+            bytes_sent: client_bytes_sent,
+            bytes_recv: client_bytes_recv,
             candidate: association.candidates.values().map(|candidate| candidate.into()).collect()
         }
     }

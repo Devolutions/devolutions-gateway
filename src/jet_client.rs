@@ -61,7 +61,8 @@ impl JetClient {
                     let handle_msg = HandleConnectJetMsg::new(transport.clone(), jet_connect_req, jet_associations.clone());
                     Box::new(handle_msg.and_then(move |candidate| {
                         let remove_association = RemoveAssociation::new(jet_associations.clone(), candidate.association_id(), Some(candidate.id()));
-                        Box::new(Proxy::new(config).build(candidate.server_transport().unwrap(), candidate.client_transport().unwrap())
+                        Box::new(Proxy::new(config).build(candidate.server_transport().expect("Candidate returned without server transport is an error"),
+                                                          candidate.client_transport().expect("Candidate returned without client transport is an error"))
                             .then(|proxy_result| {
                                 remove_association.then(|_| {
                                     futures::future::result(proxy_result)

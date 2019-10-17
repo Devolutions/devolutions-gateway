@@ -36,6 +36,20 @@ impl JetTransport {
     pub fn new_tcp(stream: TcpStream) -> Self {
         JetTransport::Tcp(TcpTransport::new(stream))
     }
+
+    pub fn get_nb_bytes_read(&self) -> u64 {
+        match self {
+            JetTransport::Tcp(tcp_transport) => tcp_transport.get_nb_bytes_read(),
+            JetTransport::Ws(ws_transport) => ws_transport.get_nb_bytes_read(),
+        }
+    }
+
+    pub fn get_nb_bytes_written(&self) -> u64 {
+        match self {
+            JetTransport::Tcp(tcp_transport) => tcp_transport.get_nb_bytes_written(),
+            JetTransport::Ws(ws_transport) => ws_transport.get_nb_bytes_written(),
+        }
+    }
 }
 
 impl Clone for JetTransport {
