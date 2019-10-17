@@ -8,7 +8,8 @@ use crate::transport::JetTransport;
 #[derive(Serialize, Clone)]
 pub struct Candidate {
     id: Uuid,
-    #[serde(skip_serializing)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(with = "url_serde")]
     url: Option<Url>,
     state: CandidateState,
     #[serde(skip_serializing)]

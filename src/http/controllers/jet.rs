@@ -51,8 +51,6 @@ impl ControllerData {
     fn get_associations(&self, _req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
-        let association_ids: Vec<Uuid>;
-
         if let Ok(associations) = self.jet_associations.lock() {
             let associations_vec: Vec<&Association> = associations.values().collect();
             let quantity = associations_vec.len();
