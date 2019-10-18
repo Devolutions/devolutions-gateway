@@ -1,6 +1,6 @@
 use std::{env, fs::OpenOptions, io, result::Result, str::FromStr};
 
-use chrono::Utc;
+use chrono::Local;
 use slog::{o, warn, Drain, Duplicate, Level, LevelFilter, Logger};
 use slog_async::{Async, OverflowStrategy};
 use slog_term::{Decorator, FullFormat, PlainDecorator, TermDecorator};
@@ -13,7 +13,7 @@ const DEBUG_CHAN_SIZE: usize = 256;
 fn format_decorator(decorator: impl Decorator) -> FullFormat<impl Decorator> {
     FullFormat::new(decorator)
         .use_custom_timestamp(|output: &mut dyn io::Write| -> io::Result<()> {
-            write!(output, "{}", Utc::now().format(LOGGER_TIMESTAMP_FORMAT))
+            write!(output, "{}", Local::now().format(LOGGER_TIMESTAMP_FORMAT))
         })
         .build()
 }
