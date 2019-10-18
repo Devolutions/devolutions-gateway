@@ -88,7 +88,7 @@ impl ControllerData {
 
                         if association.get_candidates().len() == 0 {
                             for listener in self.config.listeners() {
-                                if let Some(candidate) = Candidate::new(&format!("{}://{}:{}", listener.scheme(), self.config.jet_instance(), listener.port_or_known_default().unwrap_or(8080))) {
+                                if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches("/")) {
                                     association.add_candidate(candidate);
                                 }
                             }

@@ -59,10 +59,21 @@ lazy_static! {
 fn main() {
     env_logger::init();
     let config = Config::init();
+
     let listeners = config.listeners();
 
-    let tcp_listeners: Vec<&Url> = listeners.iter().filter(|listener| listener.scheme() == "tcp").collect();
-    let websocket_listeners: Vec<&Url> = listeners.iter().filter(|listener| listener.scheme() == "ws" || listener.scheme() == "wss").collect();
+    let tcp_listeners: Vec<Url> = listeners.iter().filter_map(|listener| {
+        if listener.url.scheme() == "tcp" {
+            return Some(listener.url.clone());
+        }
+        None
+    }).collect();
+    let websocket_listeners: Vec<Url> = listeners.iter().filter_map(|listener| {
+        if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
+            return Some(listener.url.clone());
+        }
+        None
+    }).collect();
 
     // Initialize the various data structures we're going to use in our server.
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
