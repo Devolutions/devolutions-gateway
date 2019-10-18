@@ -2,7 +2,7 @@ use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
 use std::env;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Protocol {
     WAYK,
     RDP,
@@ -20,10 +20,16 @@ struct ConfigTemp {
     identities_filename: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
+pub struct ListenerConfig {
+    pub url: Url,
+    pub external_url: Url,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     api_key: Option<String>,
-    listeners: Vec<Url>,
+    listeners: Vec<ListenerConfig>,
     jet_instance: String,
     routing_url: Option<String>,
     pcap_filename: Option<String>,
@@ -36,7 +42,7 @@ impl Config {
         self.api_key.clone()
     }
 
-    pub fn listeners(&self) -> &Vec<Url> {
+    pub fn listeners(&self) -> &Vec<ListenerConfig> {
         &self.listeners
     }
 
@@ -77,6 +83,8 @@ impl Config {
                 .long("listener")
                 .value_name("LISTENER_URL")
                 .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
+                .long_help("An URL on which the server will listen on. The external URL returned as candidate can be specified after the listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
+                If it is not specified, the external url will be <scheme>://<jet_instance>:<port> where <jet_instance> is the value of the jet-instance parameter.")
                 .multiple(true)
                 .takes_value(true)
                 .number_of_values(1)
@@ -218,14 +226,38 @@ impl From<ConfigTemp> for Config {
     fn from(temp: ConfigTemp) -> Self {
         let mut listeners = Vec::new();
 
+        let jet_instance = temp.jet_instance.expect("JET_INSTANCE is mandatory. It has to be added on the command line or defined by JET_INSTANCE environment variable.");
+
         for listener in &temp.listeners {
-            listeners.push(listener.parse::<Url>().expect(&format!("Listener {} is an invalid URL.", listener)));
+            let url;
+            let external_url;
+
+            if let Some(pos) = listener.find(",") {
+                let url_str = &listener[0..pos];
+                url = listener[0..pos].parse::<Url>().expect(&format!("Listener {} is an invalid URL.", url_str));
+
+                if listener.len() > pos + 1 {
+                    let external_str = listener[pos+1..].to_string();
+                    let external_str = external_str.replace("<jet_instance>", &jet_instance);
+                    external_url = external_str.parse::<Url>().expect(&format!("External_url {} is an invalid URL.", external_str));
+                } else {
+                    panic!("External url has to be specified after the comma : {}", listener);
+                }
+            } else {
+                url = listener.parse::<Url>().expect(&format!("Listener {} is an invalid URL.", listener));
+                external_url = format!("{}://{}:{}", url.scheme(), jet_instance, url.port_or_known_default().unwrap_or(8080)).parse::<Url>().expect(&format!("External_url can't be built based on listener {}", listener));
+            }
+
+            listeners.push(ListenerConfig {
+                url,
+                external_url
+            });
         }
 
         Config {
             api_key: temp.api_key,
             listeners,
-            jet_instance: temp.jet_instance.expect("JET_INSTANCE is mandatory. It has to be added on the command line or defined by JET_INSTANCE environment variable."),
+            jet_instance: jet_instance,
             routing_url: temp.routing_url,
             pcap_filename: temp.pcap_filename,
             protocol: temp.protocol,
