@@ -1,11 +1,15 @@
+use chrono::serde::ts_seconds;
 use uuid::Uuid;
 use indexmap::IndexMap;
-use crate::jet::candidate::Candidate;
+use crate::jet::candidate::{Candidate, CandidateState};
 use serde_json::Value;
+use chrono::{Utc, DateTime};
+
 
 pub struct Association {
     id: Uuid,
     version: u8,
+    creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
 }
 
@@ -14,6 +18,7 @@ impl Association {
         Association {
             id: id,
             version: version,
+            creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
         }
     }
@@ -64,5 +69,44 @@ impl Association {
 
     pub fn version(&self) -> u8 {
         self.version
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.candidates.iter().find(|(_, candidate)| {
+            candidate.state() == CandidateState::Connected
+        }).is_some()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AssociationResponse {
+    id: Uuid,
+    version: u8,
+    bytes_sent: u64,
+    bytes_recv: u64,
+    #[serde(with = "ts_seconds")]
+    creation_timestamp: DateTime<Utc>,
+}
+
+impl From<&Association> for AssociationResponse {
+    fn from(association: &Association) -> Self {
+        let (client_bytes_sent, client_bytes_recv) = association.candidates.iter().find_map(|(_, candidate)| {
+            if let Some(transport) = candidate.client_transport() {
+                let client_bytes_sent = transport.get_nb_bytes_read();
+                let client_bytes_recv = transport.get_nb_bytes_written();
+                if client_bytes_sent != 0 || client_bytes_recv != 0 {
+                    return Some((client_bytes_sent, client_bytes_recv))
+                }
+            }
+            None
+        }).unwrap_or((0, 0));
+
+        AssociationResponse {
+            id: association.id,
+            version: association.version,
+            bytes_sent: client_bytes_sent,
+            bytes_recv: client_bytes_recv,
+            creation_timestamp: association.creation_timestamp
+        }
     }
 }

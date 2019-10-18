@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::transport::JetTransport;
 use crate::Proxy;
 use crate::jet::association::Association;
-use crate::jet::candidate::Candidate;
+use crate::jet::candidate::{Candidate, CandidateState};
 use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::jet::TransportType;
@@ -54,13 +54,22 @@ impl JetClient {
         Box::new(msg_reader.and_then(move |msg| {
             match msg {
                 JetMessage::JetAcceptReq(jet_accept_req) => {
-                    let handle_msg = HandleAcceptJetMsg::new(&config, transport.clone(), jet_accept_req, jet_associations, executor_handle);
+                    let handle_msg = HandleAcceptJetMsg::new(&config, transport.clone(), jet_accept_req, jet_associations.clone(), executor_handle);
                     Box::new(handle_msg) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                 }
                 JetMessage::JetConnectReq(jet_connect_req) => {
-                    let handle_msg = HandleConnectJetMsg::new(transport.clone(), jet_connect_req, jet_associations);
-                    Box::new(handle_msg.and_then(|(t1, t2)| Proxy::new(config).build(t1, t2)))
-                        as Box<dyn Future<Item = (), Error = io::Error> + Send>
+                    let handle_msg = HandleConnectJetMsg::new(transport.clone(), jet_connect_req, jet_associations.clone());
+                    Box::new(handle_msg.and_then(move |candidate| {
+                        let remove_association = RemoveAssociation::new(jet_associations.clone(), candidate.association_id(), Some(candidate.id()));
+                        Box::new(Proxy::new(config).build(candidate.server_transport().expect("Candidate returned without server transport is an error"),
+                                                          candidate.client_transport().expect("Candidate returned without client transport is an error"))
+                            .then(|proxy_result| {
+                                remove_association.then(|_| {
+                                    futures::future::result(proxy_result)
+                                })
+                            })) as Box<dyn Future<Item = (), Error = io::Error> + Send>
+                    }))
+
                 }
                 JetMessage::JetAcceptRsp(_) => {
                     Box::new(err(error_other("Jet-Accept response can't be handled by the server."))) as Box<dyn Future<Item = (), Error = io::Error> + Send>
@@ -179,6 +188,7 @@ impl Future for HandleAcceptJetMsg {
                         let uuid = Uuid::new_v4();
                         let mut association = Association::new(uuid, JET_VERSION_V1);
                         let mut candidate = Candidate::new_v1();
+                        candidate.set_state(CandidateState::Accepted);
                         candidate.set_server_transport(self.transport.clone());
                         association.add_candidate(candidate);
 
@@ -201,6 +211,7 @@ impl Future for HandleAcceptJetMsg {
                             if association.version() == JET_VERSION_V2 {
                                 if let Some(candidate) = association.get_candidate_mut(request.candidate) {
                                     if candidate.transport_type() == TransportType::Tcp {
+                                        candidate.set_state(CandidateState::Accepted);
                                         candidate.set_server_transport(self.transport.clone());
                                         status_code = StatusCode::OK;
                                     }
@@ -242,7 +253,7 @@ impl Future for HandleAcceptJetMsg {
                     let jet_associations = self.jet_associations.clone();
                     let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
                     self.executor_handle.spawn(timeout.then(move |_| {
-                        RemoveAssociation::new(jet_associations, association).then(move |res| {
+                        RemoveAssociation::new(jet_associations, association, None).then(move |res| {
                             if let Ok(true) = res {
                                 info!(
                                     "No connect request received with association {}. Association removed!",
@@ -266,6 +277,7 @@ struct HandleConnectJetMsg {
     request_msg: JetConnectReq,
     response_msg: Option<JetMessage>,
     jet_associations: JetAssociationsMap,
+    candidate: Option<Candidate>,
 }
 
 impl HandleConnectJetMsg {
@@ -276,30 +288,37 @@ impl HandleConnectJetMsg {
             request_msg: msg,
             response_msg: None,
             jet_associations,
+            candidate: None,
         }
     }
 }
 
 impl Future for HandleConnectJetMsg {
-    type Item = (JetTransport, JetTransport);
+    type Item = Candidate;
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
         // Find the server transport
         if self.server_transport.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
-                let association_opt = jet_associations.remove(&self.request_msg.association);
+                let association_opt = jet_associations.get_mut(&self.request_msg.association);
                 let mut status_code = StatusCode::BAD_REQUEST;
 
-                if let Some(mut association) = association_opt {
+                if let Some(association) = association_opt {
                     match (association.version(), self.request_msg.version) {
                         (1, 1) => {
                             // Only one candidate exists in version 1 and there is no candidate id.
                             if let Some(candidate) = association.get_candidate_by_index(0) {
-                                if let Some(transport) = candidate.server_transport() {
-                                    // The accept request has been received before and a transport is available to open the proxy
-                                    self.server_transport = Some(transport);
-                                    status_code = StatusCode::OK;
+                                if candidate.state() == CandidateState::Accepted {
+                                    if let Some(transport) = candidate.server_transport() {
+                                        candidate.set_state(CandidateState::Connected);
+                                        candidate.set_client_transport(self.transport.clone());
+
+                                        // The accept request has been received before and a transport is available to open the proxy
+                                        self.server_transport = Some(transport);
+                                        self.candidate = Some(candidate.clone());
+                                        status_code = StatusCode::OK;
+                                    }
                                 }
                             } else {
                                 error!("No candidate found for an association version 1. Should never happen.");
@@ -308,10 +327,14 @@ impl Future for HandleConnectJetMsg {
                         }
                         (2, 2) => {
                             if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
-                                if candidate.transport_type() == TransportType::Tcp {
+                                if candidate.transport_type() == TransportType::Tcp && candidate.state() == CandidateState::Accepted {
                                     if let Some(transport) = candidate.server_transport() {
+                                        candidate.set_state(CandidateState::Connected);
+                                        candidate.set_client_transport(self.transport.clone());
+
                                         // The accept request has been received before and a transport is available to open the proxy
                                         self.server_transport = Some(transport);
+                                        self.candidate = Some(candidate.clone());
                                         status_code = StatusCode::OK;
                                     }
                                 }
@@ -346,11 +369,8 @@ impl Future for HandleConnectJetMsg {
         let _ = try_ready!(self.transport.poll_write(&v));
 
         // If server stream found, start the proxy
-        if self.server_transport.is_some() {
-            Ok(Async::Ready((
-                self.server_transport.take().unwrap().clone(),
-                self.transport.clone(),
-            )))
+        if let Some(candidate) = &self.candidate {
+            Ok(Async::Ready(candidate.clone()))
         } else {
             Err(error_other(&format!(
                 "Invalid association ID received: {}", self.request_msg.association)))

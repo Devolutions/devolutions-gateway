@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use futures::{Async, AsyncSink, Future, Sink, Stream};
 use log::{debug, error};
 use native_tls::TlsConnector;
@@ -79,12 +80,16 @@ impl AsyncWrite for TcpStreamWrapper {
 
 pub struct TcpTransport {
     stream: Arc<Mutex<TcpStreamWrapper>>,
+    nb_bytes_read: Arc<AtomicU64>,
+    nb_bytes_written: Arc<AtomicU64>,
 }
 
 impl Clone for TcpTransport {
     fn clone(&self) -> Self {
         TcpTransport {
             stream: self.stream.clone(),
+            nb_bytes_read: self.nb_bytes_read.clone(),
+            nb_bytes_written: self.nb_bytes_written.clone(),
         }
     }
 }
@@ -93,13 +98,25 @@ impl TcpTransport {
     pub fn new(stream: TcpStream) -> Self {
         TcpTransport {
             stream: Arc::new(Mutex::new(TcpStreamWrapper::Plain(stream))),
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub fn new_tls(stream: TlsStream<TcpStream>) -> Self {
         TcpTransport {
             stream: Arc::new(Mutex::new(TcpStreamWrapper::Tls(stream))),
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    pub fn get_nb_bytes_read(&self) -> u64 {
+        self.nb_bytes_read.load(Ordering::Relaxed)
+    }
+
+    pub fn get_nb_bytes_written(&self) -> u64 {
+        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }
 
@@ -171,11 +188,11 @@ impl Transport for TcpTransport {
     }
 
     fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(TcpJetSink::new(self.stream.clone()))
+        Box::new(TcpJetSink::new(self.stream.clone(), self.nb_bytes_written.clone()))
     }
 
     fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(TcpJetStream::new(self.stream.clone()))
+        Box::new(TcpJetStream::new(self.stream.clone(), self.nb_bytes_read.clone()))
     }
 }
 
@@ -183,15 +200,15 @@ pub const TCP_READ_LEN: usize = 57343;
 
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
-    nb_bytes_read: u64,
+    nb_bytes_read: Arc<AtomicU64>,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl TcpJetStream {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>) -> Self {
+    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
         TcpJetStream {
             stream,
-            nb_bytes_read: 0,
+            nb_bytes_read,
             packet_interceptor: None,
         }
     }
@@ -221,8 +238,8 @@ impl Stream for TcpJetStream {
                     },
 
                     Ok(Async::Ready(len)) => {
-                        self.nb_bytes_read += len as u64;
-                        debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
+                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
+                        debug!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
                         if len < buffer.len() {
                             result.extend_from_slice(&buffer[0..len]);
                         } else {
@@ -275,7 +292,7 @@ impl JetStream for TcpJetStream {
     }
 
     fn nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read
+        self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
@@ -285,19 +302,15 @@ impl JetStream for TcpJetStream {
 
 struct TcpJetSink {
     stream: Arc<Mutex<TcpStreamWrapper>>,
-    nb_bytes_written: u64,
+    nb_bytes_written: Arc<AtomicU64>
 }
 
 impl TcpJetSink {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>) -> Self {
+    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
         TcpJetSink {
             stream,
-            nb_bytes_written: 0,
+            nb_bytes_written,
         }
-    }
-
-    fn _nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
     }
 }
 
@@ -310,15 +323,16 @@ impl Sink for TcpJetSink {
         mut item: <Self as Sink>::SinkItem,
     ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
-            debug!("{} bytes to write on {}", item.len(), stream.peer_addr().unwrap());
+            let peer_addr = stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string());
+            debug!("{} bytes to write on {}", item.len(), peer_addr);
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
-                        self.nb_bytes_written += len as u64;
+                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
-                        debug!("{} bytes written on {}", len, stream.peer_addr().unwrap())
+                        debug!("{} bytes written on {}", len, peer_addr)
                     } else {
-                        debug!("0 bytes written on {}", stream.peer_addr().unwrap())
+                        debug!("0 bytes written on {}", peer_addr)
                     }
 
                     if item.is_empty() {
@@ -359,6 +373,6 @@ impl JetSink for TcpJetSink {
     }
 
     fn nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
+        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }

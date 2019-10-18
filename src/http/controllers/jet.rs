@@ -7,7 +7,7 @@ use log::info;
 use tokio::runtime::TaskExecutor;
 use futures::future::{ok};
 
-use crate::jet::association::Association;
+use crate::jet::association::{Association, AssociationResponse};
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
@@ -29,6 +29,7 @@ pub struct JetController {
 impl JetController {
     pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
+        dispatch.add(Method::GET, "/association", ControllerData::get_associations);
         dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);
         dispatch.add(Method::POST, "/association/<association_id>/candidates", ControllerData::gather_association_candidates);
 
@@ -47,6 +48,24 @@ impl Controller for JetController {
 }
 
 impl ControllerData {
+    fn get_associations(&self, _req: &SyncRequest, res: &mut SyncResponse) {
+        res.status(StatusCode::BAD_REQUEST);
+
+        let associations_response: Vec<AssociationResponse>;
+
+        if let Ok(associations) = self.jet_associations.lock() {
+            associations_response = associations.values().map(|association| association.into()).collect();
+        } else {
+            res.status(StatusCode::INTERNAL_SERVER_ERROR);
+            return;
+        }
+
+        if let Ok(body) = serde_json::to_string(&associations_response) {
+            res.json_body(body);
+            res.status(StatusCode::OK);
+        }
+    }
+
     fn create_association(&self, req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
@@ -61,7 +80,7 @@ impl ControllerData {
                         let jet_associations = self.jet_associations.clone();
                         let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
                         self.executor_handle.spawn(timeout.then(move |_| {
-                            RemoveAssociation::new(jet_associations, uuid).then(move |res| {
+                            RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
                                 if let Ok(true) = res {
                                     info!(
                                         "No connect request received with association {}. Association removed!",
