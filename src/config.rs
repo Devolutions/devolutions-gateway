@@ -11,6 +11,7 @@ pub enum Protocol {
 
 #[derive(Clone)]
 struct ConfigTemp {
+    unrestricted: bool,
     api_key: Option<String>,
     listeners: Vec<String>,
     jet_instance: Option<String>,
@@ -28,6 +29,7 @@ pub struct ListenerConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    unrestricted: bool,
     api_key: Option<String>,
     listeners: Vec<ListenerConfig>,
     jet_instance: String,
@@ -38,6 +40,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn unrestricted(&self) -> bool {
+        self.unrestricted
+    }
+
     pub fn api_key(&self) -> Option<String> {
         self.api_key.clone()
     }
@@ -78,6 +84,10 @@ impl Config {
                 .help("The api key used by the server to authenticate client queries.")
                 .takes_value(true)
                 .empty_values(false))
+            .arg(Arg::with_name("unrestricted")
+                .long("unrestricted")
+                .help("This flag remove the api_key validation on some http routes")
+                .takes_value(false))
             .arg(Arg::with_name("listeners")
                 .short("l")
                 .long("listener")
@@ -176,6 +186,8 @@ identities_file example:
 
         let api_key = matches.value_of("api-key").map(std::string::ToString::to_string);
 
+        let unrestricted = matches.is_present("unrestricted");
+
         let listeners = matches.values_of("listeners").expect("At least one listener has to be specified.").into_iter().map(|listener| listener.to_string()).collect();
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
@@ -195,6 +207,7 @@ identities_file example:
             .map(std::string::ToString::to_string);
 
         let mut config_temp = ConfigTemp {
+            unrestricted,
             api_key,
             listeners,
             jet_instance,
@@ -218,6 +231,12 @@ impl ConfigTemp {
 
         if let Ok(val) = env::var("JET_API_KEY") {
             self.api_key = Some(val);
+        }
+
+        if let Ok(val) = env::var("JET_UNRESTRICTED") {
+            if let Ok(val) = val.parse::<bool>() {
+                self.unrestricted = val;
+            }
         }
     }
 }
@@ -255,6 +274,7 @@ impl From<ConfigTemp> for Config {
         }
 
         Config {
+            unrestricted: temp.unrestricted,
             api_key: temp.api_key,
             listeners,
             jet_instance: jet_instance,

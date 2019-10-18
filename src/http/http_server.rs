@@ -24,8 +24,14 @@ impl HttpServer {
                 info!("Loading http middlewares");
 
                 // Only the create association has to be authorized.
-                let auth_include_path = vec!["/jet/association/<association_id>", "/jet/association"];
-                let auth_exclude_path = vec!["/jet/association/<association_id>/<anything>"];
+                let mut auth_include_path = vec!["/jet/association"];
+                let mut auth_exclude_path = vec!["/jet/association/<association_id>/<anything>"];
+
+                if config.unrestricted() {
+                    auth_exclude_path.push("/jet/association/<association_id>");
+                } else {
+                    auth_include_path.push("/jet/association/<association_id>");
+                }
 
                 middlewares.apply(AuthMiddleware::new(config.clone()), auth_include_path, Some(auth_exclude_path))
             })
