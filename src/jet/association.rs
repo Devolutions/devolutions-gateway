@@ -1,11 +1,15 @@
+use chrono::serde::ts_seconds;
 use uuid::Uuid;
 use indexmap::IndexMap;
 use crate::jet::candidate::{Candidate, CandidateState};
 use serde_json::Value;
+use chrono::{Utc, DateTime};
+
 
 pub struct Association {
     id: Uuid,
     version: u8,
+    creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
 }
 
@@ -14,6 +18,7 @@ impl Association {
         Association {
             id: id,
             version: version,
+            creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
         }
     }
@@ -79,6 +84,8 @@ pub struct AssociationResponse {
     version: u8,
     bytes_sent: u64,
     bytes_recv: u64,
+    #[serde(with = "ts_seconds")]
+    creation_timestamp: DateTime<Utc>,
 }
 
 impl From<&Association> for AssociationResponse {
@@ -99,6 +106,7 @@ impl From<&Association> for AssociationResponse {
             version: association.version,
             bytes_sent: client_bytes_sent,
             bytes_recv: client_bytes_recv,
+            creation_timestamp: association.creation_timestamp
         }
     }
 }
