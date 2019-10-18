@@ -200,17 +200,15 @@ pub const TCP_READ_LEN: usize = 57343;
 
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
-    nb_bytes_read: u64,
-    nb_bytes: Arc<AtomicU64>,
+    nb_bytes_read: Arc<AtomicU64>,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl TcpJetStream {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes: Arc<AtomicU64>) -> Self {
+    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
         TcpJetStream {
             stream,
-            nb_bytes_read: 0,
-            nb_bytes,
+            nb_bytes_read,
             packet_interceptor: None,
         }
     }
@@ -240,8 +238,7 @@ impl Stream for TcpJetStream {
                     },
 
                     Ok(Async::Ready(len)) => {
-                        self.nb_bytes_read += len as u64;
-                        self.nb_bytes.fetch_add(len as u64, Ordering::SeqCst);
+                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
                         debug!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
                         if len < buffer.len() {
                             result.extend_from_slice(&buffer[0..len]);
@@ -295,7 +292,7 @@ impl JetStream for TcpJetStream {
     }
 
     fn nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read
+        self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
@@ -305,21 +302,15 @@ impl JetStream for TcpJetStream {
 
 struct TcpJetSink {
     stream: Arc<Mutex<TcpStreamWrapper>>,
-    nb_bytes_written: u64,
-    nb_bytes: Arc<AtomicU64>
+    nb_bytes_written: Arc<AtomicU64>
 }
 
 impl TcpJetSink {
-    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes: Arc<AtomicU64>) -> Self {
+    fn new(stream: Arc<Mutex<TcpStreamWrapper>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
         TcpJetSink {
             stream,
-            nb_bytes_written: 0,
-            nb_bytes,
+            nb_bytes_written,
         }
-    }
-
-    fn _nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
     }
 }
 
@@ -337,8 +328,7 @@ impl Sink for TcpJetSink {
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
-                        self.nb_bytes_written += len as u64;
-                        self.nb_bytes.fetch_add(len as u64, Ordering::SeqCst);
+                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
                         debug!("{} bytes written on {}", len, peer_addr)
                     } else {
@@ -383,6 +373,6 @@ impl JetSink for TcpJetSink {
     }
 
     fn nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
+        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }

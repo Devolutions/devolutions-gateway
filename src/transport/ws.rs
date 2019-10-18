@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use tungstenite::{WebSocket, ServerHandshake, HandshakeError, ClientHandshake};
 use hyper::upgrade::Upgraded;
 use std::sync::{Mutex, Arc};
@@ -124,12 +125,16 @@ impl AsyncWrite for WsStreamWrapper {
 
 pub struct WsTransport {
     stream: Arc<Mutex<WsStreamWrapper>>,
+    nb_bytes_read: Arc<AtomicU64>,
+    nb_bytes_written: Arc<AtomicU64>,
 }
 
 impl Clone for WsTransport {
     fn clone(&self) -> Self {
         WsTransport {
             stream: self.stream.clone(),
+            nb_bytes_read: self.nb_bytes_read.clone(),
+            nb_bytes_written: self.nb_bytes_written.clone(),
         }
     }
 }
@@ -138,27 +143,33 @@ impl WsTransport {
     pub fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
         WsTransport {
             stream: Arc::new(Mutex::new(WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)))),
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub fn new_tcp(stream: WebSocket<TcpStream>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
             stream: Arc::new(Mutex::new(WsStreamWrapper::Tcp((stream, addr)))),
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub fn new_tls(stream: WebSocket<TlsStream<TcpStream>>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
             stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)))),
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
     }
 
     pub fn get_nb_bytes_read(&self) -> u64 {
-        unimplemented!()
+        self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
     pub fn get_nb_bytes_written(&self) -> u64 {
-        unimplemented!()
+        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }
 
@@ -271,25 +282,25 @@ impl Transport for WsTransport {
     }
 
     fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(WsJetSink::new(self.stream.clone()))
+        Box::new(WsJetSink::new(self.stream.clone(), self.nb_bytes_written.clone()))
     }
 
     fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(WsJetStream::new(self.stream.clone()))
+        Box::new(WsJetStream::new(self.stream.clone(), self.nb_bytes_read.clone()))
     }
 }
 
 struct WsJetStream {
     stream: Arc<Mutex<WsStreamWrapper>>,
-    nb_bytes_read: u64,
+    nb_bytes_read: Arc<AtomicU64>,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl WsJetStream {
-    fn new(stream: Arc<Mutex<WsStreamWrapper>>) -> Self {
+    fn new(stream: Arc<Mutex<WsStreamWrapper>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
         WsJetStream {
             stream,
-            nb_bytes_read: 0,
+            nb_bytes_read,
             packet_interceptor: None,
         }
     }
@@ -318,7 +329,7 @@ impl Stream for WsJetStream {
                     },
 
                     Ok(Async::Ready(len)) => {
-                        self.nb_bytes_read += len as u64;
+                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
                         debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
                         if len < buffer.len() {
                             result.extend_from_slice(&buffer[0..len]);
@@ -455,7 +466,7 @@ impl JetStream for WsJetStream {
     }
 
     fn nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read
+        self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
@@ -465,19 +476,15 @@ impl JetStream for WsJetStream {
 
 struct WsJetSink {
     stream: Arc<Mutex<WsStreamWrapper>>,
-    nb_bytes_written: u64,
+    nb_bytes_written: Arc<AtomicU64>,
 }
 
 impl WsJetSink {
-    fn new(stream: Arc<Mutex<WsStreamWrapper>>) -> Self {
+    fn new(stream: Arc<Mutex<WsStreamWrapper>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
         WsJetSink {
             stream,
-            nb_bytes_written: 0,
+            nb_bytes_written,
         }
-    }
-
-    fn _nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
     }
 }
 
@@ -494,7 +501,7 @@ impl Sink for WsJetSink {
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
-                        self.nb_bytes_written += len as u64;
+                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
                         debug!("{} bytes written on {}", len, stream.peer_addr().unwrap())
                     } else {
@@ -539,7 +546,7 @@ impl JetSink for WsJetSink {
     }
 
     fn nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written
+        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }
 
