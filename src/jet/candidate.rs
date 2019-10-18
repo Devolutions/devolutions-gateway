@@ -108,18 +108,3 @@ impl From<CandidateState> for &str {
         }
     }
 }
-
-#[derive(Serialize, Deserialize)]
-pub struct CandidateResponse {
-    id: Uuid,
-    state: CandidateState,
-}
-
-impl From<&Candidate> for CandidateResponse {
-    fn from(candidate: &Candidate) -> Self {
-        CandidateResponse {
-            id: candidate.id,
-            state: candidate.state.clone(),
-        }
-    }
-}

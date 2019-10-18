@@ -1,6 +1,6 @@
 use uuid::Uuid;
 use indexmap::IndexMap;
-use crate::jet::candidate::{Candidate, CandidateState, CandidateResponse};
+use crate::jet::candidate::{Candidate, CandidateState};
 use serde_json::Value;
 
 pub struct Association {
@@ -79,7 +79,6 @@ pub struct AssociationResponse {
     version: u8,
     bytes_sent: u64,
     bytes_recv: u64,
-    candidate: Vec<CandidateResponse>,
 }
 
 impl From<&Association> for AssociationResponse {
@@ -100,7 +99,6 @@ impl From<&Association> for AssociationResponse {
             version: association.version,
             bytes_sent: client_bytes_sent,
             bytes_recv: client_bytes_recv,
-            candidate: association.candidates.values().map(|candidate| candidate.into()).collect()
         }
     }
 }
