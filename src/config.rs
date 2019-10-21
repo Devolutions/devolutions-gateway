@@ -1,4 +1,4 @@
-use std::{env, sync::Arc};
+use std::{env, error::Error, sync::Arc};
 
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
@@ -203,7 +203,11 @@ identities_file example:
 ]'"
                         "###)
                     .takes_value(true)
-                    .empty_values(false),
+                    .empty_values(false)
+                    .validator(|filename| match rdp::RdpIdentity::from_file(filename.as_str()) {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(e.description().to_string())
+                    }),
             );
 
         let matches = cli_app.get_matches();
@@ -233,7 +237,7 @@ identities_file example:
             .map(std::string::ToString::to_string);
         let rdp_identities = if let Some(filename) = identities_filename {
             Some(rdp::IdentitiesProxy::new(Arc::new(
-                rdp::RdpIdentity::from_file(filename.as_str()).expect("identities-file is invalid"),
+                rdp::RdpIdentity::from_file(filename.as_str()).unwrap(),
             )))
         } else {
             None
