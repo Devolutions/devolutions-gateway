@@ -37,8 +37,8 @@ slog-scope-futures = { git = "https://gitlab.com/Fotosmile/slog-scope-futures.gi
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
 x509-parser = "0.6.0"
-sspi = { path = "../sspi-rs/" }
-ironrdp = { path = "../IronRDP/ironrdp/" }
+sspi = "0.3.0"
+ironrdp = "0.2.0"
 hyper = "0.12.32"
 tungstenite = "0.8.1"
 sha1 = "0.6.0"
