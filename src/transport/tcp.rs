@@ -6,13 +6,13 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_rustls::{TlsConnector, TlsStream};
 use tokio_tcp::TcpStream;
+use tokio_rustls::{TlsStream, TlsConnector};
 use url::Url;
 
 use crate::interceptor::PacketInterceptor;
 use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
-use crate::utils::{danger_transport, url_to_socket_arr};
+use crate::utils::{url_to_socket_arr, danger_transport};
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -23,14 +23,14 @@ impl TcpStreamWrapper {
     fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
             TcpStreamWrapper::Plain(stream) => stream.peer_addr().ok(),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().peer_addr().ok(),
+            TcpStreamWrapper::Tls(stream) => stream.get_ref().0.peer_addr().ok(),
         }
     }
 
     pub fn shutdown(&self) -> std::io::Result<()> {
         match self {
             TcpStreamWrapper::Plain(stream) => TcpStream::shutdown(stream, std::net::Shutdown::Both),
-            TcpStreamWrapper::Tls(stream) => stream.get_ref().get_ref().shutdown(std::net::Shutdown::Both),
+            TcpStreamWrapper::Tls(stream) => stream.get_ref().0.shutdown(std::net::Shutdown::Both),
         }
     }
 
@@ -230,13 +230,14 @@ impl Stream for TcpJetStream {
                     Ok(Async::Ready(0)) => {
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                let peer_addr = stream.peer_addr();
-                                interceptor.on_new_packet(peer_addr, &result);
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
                             }
 
                             return Ok(Async::Ready(Some(result)));
                         }
-                    }
+
+                        return Ok(Async::Ready(None))
+                    },
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
@@ -249,8 +250,7 @@ impl Stream for TcpJetStream {
                         }
 
                         if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            let peer_addr = stream.peer_addr();
-                            interceptor.on_new_packet(peer_addr, &result);
+                            interceptor.on_new_packet(stream.peer_addr(), &result);
                         }
 
                         return Ok(Async::Ready(Some(result)));
@@ -260,30 +260,21 @@ impl Stream for TcpJetStream {
 
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                let peer_addr = stream.peer_addr();
-                                interceptor.on_new_packet(peer_addr, &result);
+                                interceptor.on_new_packet(stream.peer_addr(), &result);
                             }
 
                             return Ok(Async::Ready(Some(result)));
                         }
-                    }
+
+                        return Ok(Async::NotReady)
+                    },
 
                     Err(e) => {
                         error!("Can't read on socket: {}", e);
-
                         return Ok(Async::Ready(None));
                     }
-                };
-
-                if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                    let peer_addr = Some(stream.peer_addr()?);
-
-                    interceptor.on_new_packet(peer_addr, &result);
                 }
-
-                return Ok(Async::Ready(Some(result)));
             }
-
             Ok(Async::Ready(Some(result)))
         } else {
             Ok(Async::NotReady)
@@ -299,7 +290,6 @@ impl JetStream for TcpJetStream {
 
     fn peer_addr(&self) -> Option<SocketAddr> {
         let stream = self.stream.lock().unwrap();
-
         stream.peer_addr()
     }
 
