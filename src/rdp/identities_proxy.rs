@@ -3,7 +3,7 @@ use std::{fs::File, io, io::prelude::*, sync::Arc};
 use serde_derive::{Deserialize, Serialize};
 use sspi::{internal::credssp, AuthIdentity};
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FullCredentials {
     pub username: String,
     pub password: String,
@@ -30,7 +30,7 @@ impl From<FullCredentials> for ironrdp::rdp::Credentials {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RdpIdentity {
     pub proxy: AuthIdentity,
     pub target: FullCredentials,
@@ -52,7 +52,7 @@ impl RdpIdentity {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IdentitiesProxy {
     rdp_identities: Arc<Vec<RdpIdentity>>,
 }
