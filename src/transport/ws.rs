@@ -11,6 +11,7 @@ use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStre
 use url::Url;
 use slog_scope::{debug, error};
 use std::net::SocketAddr;
+use std::io::Cursor;
 use tungstenite::Message;
 use tungstenite::protocol::Role;
 use crate::utils::{danger_transport, url_to_socket_arr};
@@ -24,6 +25,37 @@ use tungstenite::handshake::MidHandshake;
 use tungstenite::handshake::server::NoCallback;
 use std::error::Error;
 
+pub struct WsStream {
+    inner: WsStreamWrapper,
+    message: Option<Cursor<Vec<u8>>>,
+}
+
+impl WsStream {
+    #[inline]
+    fn peer_addr(&self) -> Option<SocketAddr> {
+        self.inner.peer_addr()
+    }
+
+    #[inline]
+    pub fn shutdown(&mut self) -> std::io::Result<()> {
+        self.inner.shutdown()
+    }
+
+    #[inline]
+    pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
+        self.inner.async_shutdown()
+    }
+}
+
+impl From<WsStreamWrapper> for WsStream {
+    fn from(wrapper: WsStreamWrapper) -> Self {
+        WsStream {
+            inner: wrapper,
+            message: None,
+        }
+    }
+}
+
 pub enum WsStreamWrapper {
     Http((WebSocket<Upgraded>, Option<SocketAddr>)),
     Tcp((WebSocket<TcpStream>, Option<SocketAddr>)),
@@ -31,6 +63,7 @@ pub enum WsStreamWrapper {
 }
 
 impl WsStreamWrapper {
+    #[inline]
     fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
             WsStreamWrapper::Http((_stream, addr)) => addr.clone(),
@@ -39,6 +72,7 @@ impl WsStreamWrapper {
         }
     }
 
+    #[inline]
     pub fn shutdown(&mut self) -> std::io::Result<()> {
         match self {
             WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
@@ -47,6 +81,7 @@ impl WsStreamWrapper {
         }
     }
 
+    #[inline]
     pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self {
             WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
@@ -56,9 +91,18 @@ impl WsStreamWrapper {
     }
 }
 
-impl Read for WsStreamWrapper {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        let message_result = match *self {
+impl Read for WsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+
+        if let Some(message) = self.message.as_mut() {
+            let read_size = message.read(buf)?;
+            if message.position() == message.get_ref().len() as u64 {
+                self.message = None;
+            }
+            return Ok(read_size);
+        }
+
+        let message_result = match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) => {
                 stream.read_message()
             }
@@ -73,7 +117,12 @@ impl Read for WsStreamWrapper {
         match message_result {
             Ok(message) => {
                 if (message.is_binary() || message.is_text()) && !message.is_empty() {
-                    buf.write(message.into_data().as_mut_slice())
+                    let mut message = Cursor::new(message.into_data());
+                    let read_size = message.read(buf)?;
+                    if message.position() < message.get_ref().len() as u64 {
+                        self.message = Some(message);
+                    }
+                    Ok(read_size)
                 } else {
                     Err(io::Error::new(ErrorKind::WouldBlock, "No Data"))
                 }
@@ -85,9 +134,9 @@ impl Read for WsStreamWrapper {
     }
 }
 
-impl Write for WsStreamWrapper {
+impl Write for WsStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match *self {
+        match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) =>
                 stream.write_message(Message::Binary(buf.to_vec())).map(|_| buf.len()).map_err(|e| tungstenite_err_to_io_err(e)),
             WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) =>
@@ -97,7 +146,7 @@ impl Write for WsStreamWrapper {
         }
     }
     fn flush(&mut self) -> io::Result<()> {
-        match *self {
+        match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) =>
                 stream.write_pending().map(|_| ()).map_err(|e| tungstenite_err_to_io_err(e)),
             WsStreamWrapper::Tcp((ref mut stream, _)) =>
@@ -108,11 +157,11 @@ impl Write for WsStreamWrapper {
     }
 }
 
-impl AsyncRead for WsStreamWrapper {}
+impl AsyncRead for WsStream {}
 
-impl AsyncWrite for WsStreamWrapper {
+impl AsyncWrite for WsStream {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
-        match *self {
+        match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) =>
                 stream.close(None).map(|_| Async::Ready(())).map_err(|e| tungstenite_err_to_io_err(e)),
             WsStreamWrapper::Tcp((ref mut stream, _)) =>
@@ -124,7 +173,7 @@ impl AsyncWrite for WsStreamWrapper {
 }
 
 pub struct WsTransport {
-    stream: Arc<Mutex<WsStreamWrapper>>,
+    stream: Arc<Mutex<WsStream>>,
     nb_bytes_read: Arc<AtomicU64>,
     nb_bytes_written: Arc<AtomicU64>,
 }
@@ -142,7 +191,7 @@ impl Clone for WsTransport {
 impl WsTransport {
     pub fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)))),
+            stream: Arc::new(Mutex::new(WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)).into())),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -150,7 +199,7 @@ impl WsTransport {
 
     pub fn new_tcp(stream: WebSocket<TcpStream>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Tcp((stream, addr)))),
+            stream: Arc::new(Mutex::new(WsStreamWrapper::Tcp((stream, addr)).into())),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -158,7 +207,7 @@ impl WsTransport {
 
     pub fn new_tls(stream: WebSocket<TlsStream<TcpStream>>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)))),
+            stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)).into())),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -292,13 +341,13 @@ impl Transport for WsTransport {
 }
 
 struct WsJetStream {
-    stream: Arc<Mutex<WsStreamWrapper>>,
+    stream: Arc<Mutex<WsStream>>,
     nb_bytes_read: Arc<AtomicU64>,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
 }
 
 impl WsJetStream {
-    fn new(stream: Arc<Mutex<WsStreamWrapper>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
+    fn new(stream: Arc<Mutex<WsStream>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
         WsJetStream {
             stream,
             nb_bytes_read,
@@ -331,11 +380,9 @@ impl Stream for WsJetStream {
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
-                        debug!("{} bytes read on {}", len, stream.peer_addr().unwrap());
-                        if len < buffer.len() {
-                            result.extend_from_slice(&buffer[0..len]);
-                        } else {
-                            result.extend_from_slice(&buffer);
+
+                        result.extend_from_slice(&buffer[0..len]);
+                        if len == buffer.len() {
                             continue;
                         }
 
@@ -476,12 +523,12 @@ impl JetStream for WsJetStream {
 }
 
 struct WsJetSink {
-    stream: Arc<Mutex<WsStreamWrapper>>,
+    stream: Arc<Mutex<WsStream>>,
     nb_bytes_written: Arc<AtomicU64>,
 }
 
 impl WsJetSink {
-    fn new(stream: Arc<Mutex<WsStreamWrapper>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
+    fn new(stream: Arc<Mutex<WsStream>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
         WsJetSink {
             stream,
             nb_bytes_written,
