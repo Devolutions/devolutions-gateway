@@ -17,14 +17,13 @@ use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
 use log::trace;
 pub use http::StatusCode;
+use std::sync::Once;
+use std::env;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
 pub const JET_VERSION_V1: u8 = 1;
 pub const JET_VERSION_V2: u8 = 2;
-
-//pub const JET_MSG_MASK: u8 = 0x73;
-pub const JET_MSG_MASK: u8 = 0x00;
 
 const JET_HEADER_VERSION: &str = "Jet-Version";
 const JET_HEADER_METHOD: &str = "Jet-Method";
@@ -33,6 +32,23 @@ const JET_HEADER_TIMEOUT: &str = "Jet-Timeout";
 const JET_HEADER_INSTANCE: &str = "Jet-Instance";
 const JET_HEADER_HOST: &str = "Host";
 const JET_HEADER_CONNECTION: &str = "Connection";
+
+static mut JET_MSG_MASK: u8 = 0x73;
+static JET_MASK_INIT: Once = Once::new();
+
+pub fn get_mask_value() -> u8 {
+    unsafe {
+        JET_MASK_INIT.call_once(|| {
+            if let Ok(mask) = env::var("JET_MSG_MASK") {
+                let mask = mask.trim_start_matches("0x");
+                if let Ok(mask) = u8::from_str_radix(mask, 16) {
+                    JET_MSG_MASK = mask;
+                }
+            }
+        });
+        JET_MSG_MASK
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JetMessage {
@@ -112,7 +128,7 @@ impl JetMessage {
 
     pub fn write_to(&self, mut stream: impl io::Write) -> Result<(), Error> {
         let flags: u8 = 0;
-        let mask: u8 = JET_MSG_MASK;
+        let mask: u8 = get_mask_value();
 
         let mut v: Vec<u8> = Vec::new();
         let mut payload = match self {
