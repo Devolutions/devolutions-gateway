@@ -216,7 +216,9 @@ identities_file example:
 
         let unrestricted = matches.is_present("unrestricted");
 
-        let listeners = matches.values_of("listeners").expect("At least one listener has to be specified.").into_iter().map(|listener| listener.to_string()).collect();
+        let listeners = matches.values_of("listeners").map_or(Vec::new(), |listeners| {
+            listeners.into_iter().map(|listener| listener.to_string()).collect()
+        });
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
 
@@ -321,6 +323,10 @@ impl From<ConfigTemp> for Config {
                 url,
                 external_url
             });
+        }
+
+        if listeners.is_empty() {
+            panic!("At least one listener has to be specified.");
         }
 
         Config {
