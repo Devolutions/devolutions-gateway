@@ -278,6 +278,16 @@ impl ConfigTemp {
                 self.unrestricted = val;
             }
         }
+
+        if let Ok(val) = env::var("JET_LISTENERS") {
+            self.listeners = val.split(";").filter_map(|item: &str| {
+                if !item.is_empty() {
+                    Some(item.to_string())
+                } else {
+                    None
+                }
+            }).collect();
+        }
     }
 }
 
