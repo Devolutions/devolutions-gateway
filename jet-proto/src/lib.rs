@@ -178,6 +178,9 @@ impl JetMessage {
     }
 
     fn read_payload<R: Read>(stream: &mut R, header: &JetHeader) -> Result<String, Error> {
+        if header.msg_size < 8 {
+            return Err(Error::Size);
+        }
         let mut payload: Vec<u8> = vec![0; (header.msg_size - 8) as usize];
         stream.read_exact(&mut payload)?;
 
