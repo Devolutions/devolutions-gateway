@@ -1,13 +1,12 @@
 pub mod association;
 
-use std::{
-    io::{self, BufReader},
-    net::SocketAddr,
-};
+use std::{io::{self, BufReader}, net::SocketAddr, fs};
 
 use tokio::codec::{Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
+use crate::config::CertificateConfig;
+use std::io::Read;
 
 pub mod danger_transport {
     pub struct NoCertificateVerification {}
@@ -77,26 +76,50 @@ where
     Ok(payload[0].as_ref().to_vec())
 }
 
-pub fn load_certs() -> io::Result<Vec<rustls::Certificate>> {
-    let certfile = include_bytes!("cert/publicCert.pem");
-    let mut reader = BufReader::new(certfile.as_ref());
+pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
+    let certfile: Box<dyn Read> = if let Some(filename) = &config.certificate_file {
+        let certfile = fs::File::open(filename).expect(&format!("cannot open certificate file {}", filename));
+        Box::new(certfile)
+    } else {
+        let certfile = include_bytes!("cert/publicCert.pem");
+        Box::new(certfile.as_ref())
+    };
 
+    let mut reader = BufReader::new(certfile);
     rustls::internal::pemfile::certs(&mut reader)
         .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
 }
 
-pub fn load_private_key() -> io::Result<rustls::PrivateKey> {
-    let keyfile = include_bytes!("cert/private.pem");
+pub fn load_private_key(config: &CertificateConfig) -> io::Result<rustls::PrivateKey> {
+    let mut rsa_keys = {
+        let rsa_keyfile: Box<dyn Read> = if let Some(filename) = &config.private_key_file {
+            let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+            Box::new(keyfile)
+        } else {
+            let keyfile = include_bytes!("cert/private.pem");
+            Box::new(keyfile.as_ref())
+        };
 
-    let mut rsa_keys = rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))?;
+        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(rsa_keyfile))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))?
+    };
 
-    let mut pkcs8_keys = rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "File contains invalid pkcs8 private key (encrypted keys not supported)",
-        )
-    })?;
+    let mut pkcs8_keys = {
+        let pkcs8_keyfile: Box<dyn Read> = if let Some(filename) = &config.private_key_file {
+            let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+            Box::new(keyfile)
+        } else {
+            let keyfile = include_bytes!("cert/private.pem");
+            Box::new(keyfile.as_ref())
+        };
+
+        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(pkcs8_keyfile)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File contains invalid pkcs8 private key (encrypted keys not supported)",
+            )
+        })?
+    };
 
     // prefer to load pkcs8 keys
     if !pkcs8_keys.is_empty() {

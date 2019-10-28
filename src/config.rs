@@ -5,6 +5,8 @@ use url::Url;
 
 use crate::rdp;
 
+const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
+
 #[derive(Debug, Clone)]
 pub enum Protocol {
     WAYK,
@@ -23,12 +25,23 @@ struct ConfigTemp {
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
     log_file: Option<String>,
+
+    certificate: CertificateConfig,
+    http_listener_url: String
 }
 
 #[derive(Debug, Clone)]
 pub struct ListenerConfig {
     pub url: Url,
     pub external_url: Url,
+}
+
+#[derive(Debug, Clone)]
+pub struct CertificateConfig {
+    pub certificate_file: Option<String>,
+    pub certificate_data: Option<String>,
+    pub private_key_file: Option<String>,
+    pub private_key_data: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +55,9 @@ pub struct Config {
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
     log_file: Option<String>,
+
+    pub certificate: CertificateConfig,
+    pub http_listener_url: Url
 }
 
 impl Config {
@@ -82,6 +98,8 @@ impl Config {
     }
 
     pub fn init() -> Self {
+        let default_http_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
+
         let cli_app = App::new(crate_name!())
             .author("Devolutions")
             .version(concat!(crate_version!(), "\n"))
@@ -108,12 +126,38 @@ impl Config {
                 .takes_value(true)
                 .number_of_values(1)
             )
+            .arg(Arg::with_name("http-listener-url")
+                .long("http-listener-url")
+                .value_name("HTTP_LISTENER_URL")
+                .help("HTTP listener url.")
+                .takes_value(true)
+                .default_value(&default_http_listener_url))
             .arg(Arg::with_name("jet-instance")
                 .long("jet-instance")
                 .value_name("JET_INSTANCE")
                 .help("Specific name to reach that instance of JET.")
                 .takes_value(true)
             )
+            .arg(Arg::with_name("certificate-file")
+                .long("certificate-file")
+                .value_name("JET_CERTIFICATE_FILE")
+                .help("Path to the certificate file.")
+                .takes_value(true))
+            .arg(Arg::with_name("private-key-file")
+                .long("private-key-file")
+                .value_name("JET_PRIVATE_KEY_FILE")
+                .help("Path to the private key file.")
+                .takes_value(true))
+            .arg(Arg::with_name("certificate-data")
+                .long("certificate-data")
+                .value_name("JET_CERTIFICATE_DATA")
+                .help("Certificate data, pem format.")
+                .takes_value(true))
+            .arg(Arg::with_name("private-key-data")
+                .long("private-key-data")
+                .value_name("JET_PRIVATE_KEY_DATA")
+                .help("Private key data, pem format.")
+                .takes_value(true))
             .arg(
                 Arg::with_name("routing-url")
                     .short("r")
@@ -220,6 +264,8 @@ identities_file example:
             listeners.into_iter().map(|listener| listener.to_string()).collect()
         });
 
+        let http_listener_url = matches.value_of("http-listener-url").map(std::string::ToString::to_string).expect("");
+
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
 
         let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
@@ -247,16 +293,29 @@ identities_file example:
 
         let log_file = matches.value_of("log-file").map(String::from);
 
+        let certificate_file = matches.value_of("jet-certificate-file").map(String::from);
+        let certificate_data = matches.value_of("jet-certificate-data").map(String::from);
+        let private_key_file = matches.value_of("jet-private-key-file").map(String::from);
+        let private_key_data = matches.value_of("jet-private-key-data").map(String::from);
+
         let mut config_temp = ConfigTemp {
             unrestricted,
             api_key,
             listeners,
+            http_listener_url,
             jet_instance,
             routing_url,
             pcap_files_path,
             protocol,
             rdp_identities,
             log_file,
+
+            certificate: CertificateConfig {
+                certificate_file,
+                certificate_data,
+                private_key_file,
+                private_key_data
+            }
         };
 
         config_temp.apply_env_variables();
@@ -289,6 +348,18 @@ impl ConfigTemp {
                     None
                 }
             }).collect();
+        }
+
+        if let Ok(val) = env::var("JET_CERTIFICATE_FILE") {
+            self.certificate.certificate_file = Some(val);
+        }
+
+        if let Ok(val) = env::var("JET_PRIVATE_KEY_FILE") {
+            self.certificate.private_key_file = Some(val);
+        }
+
+        if let Ok(val) = env::var("JET_HTTP_LISTENER_URL") {
+            self.http_listener_url = val;
         }
     }
 }
@@ -329,16 +400,21 @@ impl From<ConfigTemp> for Config {
             panic!("At least one listener has to be specified.");
         }
 
+        let http_listener_url = temp.http_listener_url.parse::<Url>().expect(&format!("Http listener {} is an invalid URL", temp.http_listener_url));
+
         Config {
             unrestricted: temp.unrestricted,
             api_key: temp.api_key,
             listeners,
+            http_listener_url,
             jet_instance: jet_instance,
             routing_url: temp.routing_url,
             pcap_files_path: temp.pcap_files_path,
             protocol: temp.protocol,
             rdp_identities: temp.rdp_identities,
             log_file: temp.log_file,
+
+            certificate: temp.certificate,
         }
     }
 }
