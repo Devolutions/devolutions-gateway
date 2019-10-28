@@ -29,7 +29,7 @@ saphir = { version = "0.9.3", features = ["https", "request_handler"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-slog = { version = "2.5", features = ["max_level_trace","release_max_level_trace"] }
+slog = { version = "2.5", features = ["max_level_trace","release_max_level_warn"] }
 slog-term = "2.4"
 slog-async = "2.3"
 slog-scope = "4.1"
@@ -43,6 +43,8 @@ hyper = "0.12.32"
 tungstenite = "0.8.1"
 sha1 = "0.6.0"
 base64 = "0.9.1"
+slog-stdlog = "4.0"
+log = { version = "0.4", features = ["max_level_trace", "release_max_level_warn"]}
 
 indexmap = "1.0"
 
