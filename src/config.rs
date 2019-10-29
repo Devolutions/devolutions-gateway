@@ -354,8 +354,16 @@ impl ConfigTemp {
             self.certificate.certificate_file = Some(val);
         }
 
+        if let Ok(val) = env::var("JET_CERTIFICATE_DATA") {
+            self.certificate.certificate_data = Some(val);
+        }
+
         if let Ok(val) = env::var("JET_PRIVATE_KEY_FILE") {
             self.certificate.private_key_file = Some(val);
+        }
+
+        if let Ok(val) = env::var("JET_PRIVATE_KEY_DATA") {
+            self.certificate.private_key_data = Some(val);
         }
 
         if let Ok(val) = env::var("JET_HTTP_LISTENER_URL") {

@@ -6,7 +6,6 @@ use tokio::codec::{Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 use crate::config::CertificateConfig;
-use std::io::Read;
 
 pub mod danger_transport {
     pub struct NoCertificateVerification {}
@@ -77,57 +76,115 @@ where
 }
 
 pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
-    let certfile: Box<dyn Read> = if let Some(filename) = &config.certificate_file {
+    if let Some(filename) = &config.certificate_file {
         let certfile = fs::File::open(filename).expect(&format!("cannot open certificate file {}", filename));
-        Box::new(certfile)
+        let mut reader = BufReader::new(certfile);
+
+        rustls::internal::pemfile::certs(&mut reader)
+            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
+    } else if let Some(data) = &config.certificate_data {
+        load_certs_from_data(data).map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate data"))
     } else {
         let certfile = include_bytes!("cert/publicCert.pem");
-        Box::new(certfile.as_ref())
-    };
+        let mut reader = BufReader::new(certfile.as_ref());
 
-    let mut reader = BufReader::new(certfile);
-    rustls::internal::pemfile::certs(&mut reader)
-        .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
+        rustls::internal::pemfile::certs(&mut reader)
+            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
+    }
 }
 
 pub fn load_private_key(config: &CertificateConfig) -> io::Result<rustls::PrivateKey> {
-    let mut rsa_keys = {
-        let rsa_keyfile: Box<dyn Read> = if let Some(filename) = &config.private_key_file {
-            let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
-            Box::new(keyfile)
-        } else {
-            let keyfile = include_bytes!("cert/private.pem");
-            Box::new(keyfile.as_ref())
-        };
-
-        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(rsa_keyfile))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))?
-    };
-
-    let mut pkcs8_keys = {
-        let pkcs8_keyfile: Box<dyn Read> = if let Some(filename) = &config.private_key_file {
-            let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
-            Box::new(keyfile)
-        } else {
-            let keyfile = include_bytes!("cert/private.pem");
-            Box::new(keyfile.as_ref())
-        };
-
-        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(pkcs8_keyfile)).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "File contains invalid pkcs8 private key (encrypted keys not supported)",
-            )
-        })?
-    };
+    let mut pkcs8_keys = load_pkcs8_private_key(config)?;
 
     // prefer to load pkcs8 keys
     if !pkcs8_keys.is_empty() {
         Ok(pkcs8_keys.remove(0))
     } else {
+        let mut rsa_keys = load_rsa_private_key(config)?;
+
         assert!(!rsa_keys.is_empty());
         Ok(rsa_keys.remove(0))
     }
+}
+
+fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
+    if let Some(filename) = &config.private_key_file {
+        let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
+    } else if let Some(data) = &config.private_key_data {
+      load_rsa_private_key_from_data(data)
+          .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid rsa private key"))
+    } else {
+        let keyfile = include_bytes!("cert/private.pem");
+        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
+    }
+}
+
+fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
+    if let Some(filename) = &config.private_key_file {
+        let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File contains invalid pkcs8 private key (encrypted keys not supported)",
+            )
+        })
+    } else if let Some(data) = &config.private_key_data {
+        load_pkcs8_private_key_from_data(data)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid pkcs8 private key"))
+    }
+    else {
+        let keyfile = include_bytes!("cert/private.pem");
+        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File contains invalid pkcs8 private key (encrypted keys not supported)",
+            )
+        })
+    }
+}
+
+fn load_certs_from_data(data: &str) -> Result<Vec<rustls::Certificate>, ()> {
+    extract_der_data(data.to_string(), "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----", &|v| rustls::Certificate(v))
+}
+
+fn load_rsa_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
+    extract_der_data(data.to_string(), "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----", &|v| rustls::PrivateKey(v))
+}
+
+fn load_pkcs8_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
+    extract_der_data(data.to_string(), "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----", &|v| rustls::PrivateKey(v))
+}
+
+fn extract_der_data<A>(mut data: String,
+                       start_mark: &str,
+                       end_mark: &str,
+                       f: &dyn Fn(Vec<u8>) -> A)
+                       -> Result<Vec<A>, ()> {
+    let mut ders = Vec::new();
+
+    loop {
+        if let Some(start_index) = data.find(start_mark) {
+            let drain_index = start_index + start_mark.len();
+            data.drain(..drain_index);
+            if let Some(index) = data.find(end_mark) {
+                let base64_buf = &data[..index];
+                let der = base64::decode(&base64_buf).map_err(|_| ())?;
+                ders.push(f(der));
+
+                let drain_index = index + end_mark.len();
+                data.drain(..drain_index);
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    Ok(ders)
 }
 
 pub fn update_framed_codec<Io, OldCodec, NewCodec>(
