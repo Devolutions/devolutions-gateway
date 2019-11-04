@@ -9,8 +9,7 @@ use crate::http::controllers::jet::JetController;
 use crate::jet_client::JetAssociationsMap;
 use crate::config::Config;
 use crate::http::middlewares::auth::AuthMiddleware;
-
-pub const HTTP_SERVER_PORT: u32 = 10256;
+use saphir::server::SslConfig;
 
 pub struct HttpServer {
     pub server: SaphirServer,
@@ -45,7 +44,31 @@ impl HttpServer {
                     .add(jet)
                     .add(session)
             })
-            .configure_listener(|list_config| list_config.set_uri(&format!("http://0.0.0.0:{}", HTTP_SERVER_PORT)))
+            .configure_listener(|list_config| {
+                let listener_config = list_config.set_uri(&config.http_listener_url.to_string());
+
+                let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
+                    Some(SslConfig::FilePath(cert_path.into()))
+                } else if let Some(cert_data) = &config.certificate.certificate_data {
+                    Some(SslConfig::FileData(cert_data.into()))
+                } else {
+                    None
+                };
+
+                let key_config_opt = if let Some(key_path) = &config.certificate.private_key_file {
+                    Some(SslConfig::FilePath(key_path.into()))
+                } else if let Some(key_data) = &config.certificate.private_key_data {
+                    Some(SslConfig::FileData(key_data.into()))
+                } else {
+                    None
+                };
+
+                if let (Some(cert_config), Some(key_config)) = (cert_config_opt, key_config_opt) {
+                    listener_config.set_ssl_config(cert_config, key_config)
+                } else {
+                    listener_config
+                }
+            })
             .build();
 
         HttpServer {
