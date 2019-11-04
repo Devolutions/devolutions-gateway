@@ -74,23 +74,9 @@ impl ControllerData {
                 if let Ok(mut jet_associations) = self.jet_associations.lock() {
                     if !jet_associations.contains_key(&uuid) {
                         jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
+                        start_remove_association_future(self.executor_handle.clone(), self.jet_associations.clone(), uuid);
+
                         res.status(StatusCode::OK);
-
-                        // Start timeout to remove the association if no connect is received
-                        let jet_associations = self.jet_associations.clone();
-                        let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-                        self.executor_handle.spawn(timeout.then(move |_| {
-                            RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
-                                if let Ok(true) = res {
-                                    info!(
-                                        "No connect request received with association {}. Association removed!",
-                                        uuid
-                                    );
-                                }
-                                ok(())
-                            })
-                        }));
-
                     }
                 }
             }
@@ -103,23 +89,46 @@ impl ControllerData {
         if let Some(association_id) = req.captures().get("association_id") {
             if let Ok(uuid) = Uuid::parse_str(association_id) {
                 if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                    if let Some(association) = jet_associations.get_mut(&uuid) {
+                    let association = match jet_associations.get_mut(&uuid) {
+                        Some(association) => association,
+                        None => {
+                            // The create could be done on a JET and the gather on a different one. We create it as workaround for now.
+                            jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
+                            start_remove_association_future(self.executor_handle.clone(), self.jet_associations.clone(), uuid);
+                            jet_associations.get_mut(&uuid).expect("We just added the association, it should be there!")
+                        }
+                    };
 
-                        if association.get_candidates().len() == 0 {
-                            for listener in self.config.listeners() {
-                                if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches("/")) {
-                                    association.add_candidate(candidate);
-                                }
+                    if association.get_candidates().len() == 0 {
+                        for listener in self.config.listeners() {
+                            if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches("/")) {
+                                association.add_candidate(candidate);
                             }
                         }
-
-                        let body = association.gather_candidate();
-                        res.json_body(body.to_string());
-                        res.status(StatusCode::OK);
                     }
+
+                    let body = association.gather_candidate();
+                    res.json_body(body.to_string());
+                    res.status(StatusCode::OK);
                 }
             }
         }
     }
+}
+
+fn start_remove_association_future(executor_handle: TaskExecutor, jet_associations: JetAssociationsMap, uuid: Uuid) {
+    // Start timeout to remove the association if no connect is received
+    let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
+    executor_handle.spawn(timeout.then(move |_| {
+        RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
+            if let Ok(true) = res {
+                info!(
+                    "No connect request received with association {}. Association removed!",
+                    uuid
+                );
+            }
+            ok(())
+        })
+    }));
 }
 
