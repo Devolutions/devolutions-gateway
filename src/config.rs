@@ -1,4 +1,5 @@
 use std::{env, error::Error, sync::Arc};
+use log::warn;
 
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
@@ -335,8 +336,11 @@ impl ConfigTemp {
         }
 
         if let Ok(val) = env::var("JET_UNRESTRICTED") {
-            if let Ok(val) = val.parse::<bool>() {
+            if let Ok(val) = val.to_lowercase().parse::<bool>() {
                 self.unrestricted = val;
+            }
+            else {
+                warn!("JET_UNRESTRICTED env. variable is not a boolean value. 'true' or 'false' accepted.");
             }
         }
 
