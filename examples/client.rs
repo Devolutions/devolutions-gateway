@@ -5,7 +5,7 @@ use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
 use jet_proto::{JET_VERSION_V1, JetMessage};
 use std::env;
-use std::io::{self, Error, Read, Write};
+use std::io::{self, Error, Read, Write, Cursor};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::process;
@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::thread;
 use uuid::Uuid;
 use jet_proto::connect::JetConnectReq;
-use jet_proto::accept::JetAcceptReq;
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 
 type Port = u16;
 
@@ -84,6 +84,8 @@ fn main() {
         TcpStream::connect((host.as_str(), port)).unwrap_or_else(|error| program.print_fail(error.to_string()));
     let mut input_stream = stream.try_clone().unwrap();
 
+    let wait_accept_rsp = server_uuid.is_none();
+
     let handler = thread::spawn(move || {
         let mut client_buffer = [0u8; 1024];
         let mut jet_packet_received = false;
@@ -95,13 +97,20 @@ fn main() {
                         program.exit(0);
                     } else {
                         // Skip header because it is binary
-                        let buffer = if jet_packet_received {
-                            &client_buffer[0..n]
+                        if jet_packet_received {
+                            io::stdout().write_all(&client_buffer[0..n]).unwrap();
                         } else {
                             jet_packet_received = true;
-                            &client_buffer[8..n]
-                        };
-                        io::stdout().write_all(&buffer).unwrap();
+                            let mut cursor = Cursor::new(client_buffer.to_vec());
+                            let message = if wait_accept_rsp {
+                                JetMessage::read_accept_response(&mut cursor).unwrap()
+                            } else {
+                                JetMessage::read_connect_response(&mut cursor).unwrap()
+                            };
+
+                            println!("{:?}", message);
+                        }
+
                         io::stdout().flush().unwrap();
                     }
                 }
