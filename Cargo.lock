@@ -393,7 +393,6 @@ dependencies = [
  "ironrdp 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "jet-proto 0.1.0",
  "lazy_static 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "native-tls 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "packet 0.1.2 (git+https://github.com/fdubois1/rust-packet.git)",
  "pcap-file 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",

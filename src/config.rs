@@ -1,5 +1,5 @@
 use std::{env, error::Error, sync::Arc};
-use log::warn;
+use slog_scope::warn;
 
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
