@@ -250,8 +250,13 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
     let listener = TcpListener::bind(&socket_addr).unwrap();
     let server = listener.incoming().for_each(move |conn| {
         let mut logger = logger.clone();
+
         if let Ok(peer_addr) = conn.peer_addr() {
             logger = logger.new(o!( "client" => peer_addr.to_string()));
+        }
+
+        if let Ok(local_addr) = conn.local_addr() {
+            logger = logger.new(o!("listener" => local_addr.to_string()));
         }
 
         if let Some(ref url) = config.routing_url() {
@@ -372,7 +377,14 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
     Box::new(server.map_err(|_|())) as Box<dyn Future<Item=(), Error=()> + Send>
 }
 
-fn start_websocket_server(websocket_url: Url, config: Config, http_service: HttpService, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: slog::Logger) -> Box<dyn Future<Item=(), Error=()> + Send>  {
+fn start_websocket_server(websocket_url: Url,
+                          config: Config,
+                          http_service: HttpService,
+                          jet_associations: JetAssociationsMap,
+                          tls_acceptor: TlsAcceptor,
+                          executor_handle: TaskExecutor,
+                          mut logger: slog::Logger) -> Box<dyn Future<Item=(), Error=()> + Send>  {
+
     // Start websocket server if needed
     info!("Starting websocket server ...");
     let mut websocket_addr = String::new();
@@ -395,6 +407,10 @@ fn start_websocket_server(websocket_url: Url, config: Config, http_service: Http
         executor_handle: executor_handle.clone(),
         config: config,
     };
+
+    if let Ok(local_addr) = websocket_listener.local_addr() {
+        logger = logger.new(o!("listener" => local_addr.to_string()));
+    }
 
     let closure = |_| ();
     let ws_tls_acceptor = tls_acceptor.clone();
