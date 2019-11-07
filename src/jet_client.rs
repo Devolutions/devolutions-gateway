@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use std::{io, str};
 
-use futures::future::{err, ok};
+use futures::future::{err};
 use futures::{try_ready, Async, Future};
 use tokio::runtime::TaskExecutor;
-use tokio::timer::Delay;
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -14,7 +12,7 @@ use uuid::Uuid;
 use jet_proto::{StatusCode, JET_VERSION_V2};
 
 use jet_proto::{JET_VERSION_V1, JetMessage};
-use slog_scope::{debug, error, info};
+use slog_scope::{debug, error};
 
 use crate::config::Config;
 use crate::transport::JetTransport;
@@ -25,6 +23,7 @@ use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::jet::TransportType;
 use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
+use crate::http::controllers::jet::start_remove_association_future;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
@@ -177,8 +176,6 @@ impl Future for HandleAcceptJetMsg {
     type Error = io::Error;
 
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
-        let mut new_association = false;
-
         if self.response_msg.is_none() {
             if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
                 let request = &self.request_msg;
@@ -193,7 +190,6 @@ impl Future for HandleAcceptJetMsg {
                         association.add_candidate(candidate);
 
                         jet_associations.insert(uuid, association);
-                        new_association = true;
 
                         // Build response
                         self.response_msg = Some(JetMessage::JetAcceptRsp(JetAcceptRsp {
@@ -239,31 +235,17 @@ impl Future for HandleAcceptJetMsg {
             }
         }
 
-        // We have a response ==> Send response + timeout to remove the server if not used
-        let response_msg = self.response_msg.as_ref().unwrap();
+        // We have a response for sure ==> Send response
+        let response_msg = self.response_msg.as_ref().expect("We must have a response to send");
         let mut v = Vec::new();
         response_msg.write_to(&mut v)?;
         try_ready!(self.transport.poll_write(&v));
 
-        // Start timeout to remove the association if no connect is received
-        if new_association {
-            if let JetMessage::JetAcceptRsp(accept_rsp) = response_msg {
-                if accept_rsp.status_code == 200 {
-                    let association = accept_rsp.association;
-                    let jet_associations = self.jet_associations.clone();
-                    let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-                    self.executor_handle.spawn(timeout.then(move |_| {
-                        RemoveAssociation::new(jet_associations, association, None).then(move |res| {
-                            if let Ok(true) = res {
-                                info!(
-                                    "No connect request received with association {}. Association removed!",
-                                    association
-                                );
-                            }
-                            ok(())
-                        })
-                    }));
-                }
+        // Start timeout to remove the association if no connect is received. We start it only if a new association has just been added,
+        // possible only with version 1.
+        if let JetMessage::JetAcceptRsp(accept_rsp) = response_msg {
+            if accept_rsp.version == 1 && accept_rsp.status_code == StatusCode::OK {
+                start_remove_association_future(self.executor_handle.clone(), self.jet_associations.clone(), accept_rsp.association);
             }
         }
 

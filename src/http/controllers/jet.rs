@@ -116,7 +116,7 @@ impl ControllerData {
     }
 }
 
-fn start_remove_association_future(executor_handle: TaskExecutor, jet_associations: JetAssociationsMap, uuid: Uuid) {
+pub fn start_remove_association_future(executor_handle: TaskExecutor, jet_associations: JetAssociationsMap, uuid: Uuid) {
     // Start timeout to remove the association if no connect is received
     let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
     executor_handle.spawn(timeout.then(move |_| {
