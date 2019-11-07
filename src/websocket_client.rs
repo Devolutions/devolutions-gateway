@@ -15,6 +15,7 @@ use saphir::server::HttpService;
 use crate::jet::TransportType;
 use jet_proto::JET_VERSION_V2;
 use crate::utils::association::RemoveAssociation;
+use crate::jet::candidate::CandidateState;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -44,6 +45,7 @@ impl WebsocketService {
                                         if let Ok(mut jet_assc) = jet_associations_clone.lock() {
                                             if let Some(assc) = jet_assc.get_mut(&association_id) {
                                                 if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                                                    candidate.set_state(CandidateState::Accepted);
                                                     candidate.set_server_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
                                                 }
                                             }
@@ -79,6 +81,7 @@ impl WebsocketService {
                                             if let Some(assc) = jet_assc.get_mut(&association_id) {
                                                 if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                                                     if candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss {
+                                                        candidate.set_state(CandidateState::Connected);
                                                         candidate.set_client_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
 
                                                         // Start the proxy
