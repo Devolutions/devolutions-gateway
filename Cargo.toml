@@ -38,12 +38,13 @@ chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
 x509-parser = "0.6.0"
 sspi = "0.3.0"
-ironrdp = "0.2.0"
+ironrdp = "0.3"
 hyper = "0.12.32"
 tungstenite = "0.8.1"
 sha1 = "0.6.0"
 base64 = "0.9.1"
 slog-stdlog = "4.0"
+ring = "0.16.0"
 
 indexmap = "1.0"
 
