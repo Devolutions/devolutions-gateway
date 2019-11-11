@@ -1,8 +1,10 @@
+mod licensing;
+
 use std::io;
 
 use ironrdp::{
-    mcs::SendDataContext, ClientInfoPdu, ControlAction, McsPdu, PduParsing, ServerLicensePdu, ShareControlHeader,
-    ShareControlPdu, ShareDataHeader, ShareDataPdu,
+    mcs::SendDataContext, rdp::server_license::LicenseEncryptionData, ClientInfoPdu, ControlAction, McsPdu, PduParsing,
+    ShareControlHeader, ShareControlPdu, ShareDataHeader, ShareDataPdu,
 };
 use slog_scope::{debug, trace, warn};
 use tokio::codec::Framed;
@@ -14,6 +16,7 @@ use crate::{
     rdp::filter::{Filter, FilterConfig},
     transport::mcs::McsTransport,
 };
+use licensing::{process_challenge, process_license_request, process_upgrade_license, LicenseCredentials, LicenseData};
 
 type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 
@@ -21,6 +24,7 @@ pub struct PostMcs {
     sequence_state: SequenceState,
     filter: Option<FilterConfig>,
     originator_id: Option<u16>,
+    license_data: LicenseData,
 }
 
 impl PostMcs {
@@ -29,6 +33,13 @@ impl PostMcs {
             sequence_state: SequenceState::ClientInfo,
             filter: Some(filter),
             originator_id: None,
+            license_data: LicenseData {
+                encryption_data: None,
+                credentials: LicenseCredentials {
+                    username: String::from("hostname"),
+                    hostname: String::new(),
+                },
+            },
         }
     }
 }
@@ -47,8 +58,12 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
                 initiator_id,
                 channel_id,
             }) => {
-                let (next_sequence_state, pdu) =
+                let (next_sequence_state, pdu, credentials) =
                     process_send_data_request_pdu(pdu, self.sequence_state, filter, self.originator_id)?;
+
+                if let Some(credentials) = credentials {
+                    self.license_data.credentials = credentials;
+                }
 
                 (
                     next_sequence_state,
@@ -65,11 +80,20 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
                 initiator_id,
                 channel_id,
             }) => {
-                let (next_sequence_state, pdu, originator_id) =
-                    process_send_data_indication_pdu(pdu, self.sequence_state, filter)?;
+                let (next_sequence_state, pdu, indication_data) = process_send_data_indication_pdu(
+                    pdu,
+                    self.sequence_state,
+                    filter,
+                    self.license_data.encryption_data.clone(),
+                    &self.license_data.credentials,
+                )?;
 
-                if let Some(originator_id) = originator_id {
+                if let Some(originator_id) = indication_data.originator_id {
                     self.originator_id = Some(originator_id);
+                }
+
+                if let Some(encryption_data) = indication_data.encryption_data {
+                    self.license_data.encryption_data = Some(encryption_data);
                 }
 
                 (
@@ -120,7 +144,9 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
             | SequenceState::ClientControlCooperate
             | SequenceState::ClientRequestControl
             | SequenceState::ClientFontList => NextStream::Client,
-            SequenceState::Licensing
+            SequenceState::ServerLicenseRequest
+            | SequenceState::ServerUpgradeLicense
+            | SequenceState::ServerChallenge
             | SequenceState::ServerDemandActive
             | SequenceState::ServerSynchronize
             | SequenceState::ServerControlCooperate
@@ -133,11 +159,13 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
     }
     fn next_receiver(&self) -> NextStream {
         match self.sequence_state {
-            SequenceState::Licensing
+            SequenceState::ServerLicenseRequest
             | SequenceState::ClientSynchronize
             | SequenceState::ServerSynchronize
             | SequenceState::ServerControlCooperate
             | SequenceState::ServerGrantedControl
+            | SequenceState::ServerChallenge
+            | SequenceState::ServerUpgradeLicense
             | SequenceState::ServerFontMap => NextStream::Server,
             SequenceState::ServerDemandActive
             | SequenceState::ClientConfirmActive
@@ -160,7 +188,7 @@ fn process_send_data_request_pdu(
     sequence_state: SequenceState,
     filter_config: &FilterConfig,
     originator_id: Option<u16>,
-) -> io::Result<(SequenceState, Vec<u8>)> {
+) -> io::Result<(SequenceState, Vec<u8>, Option<LicenseCredentials>)> {
     match sequence_state {
         SequenceState::ClientInfo => {
             let mut client_info_pdu = ClientInfoPdu::from_buffer(pdu.as_slice())?;
@@ -172,7 +200,14 @@ fn process_send_data_request_pdu(
             let mut client_info_pdu_buffer = Vec::with_capacity(client_info_pdu.buffer_length());
             client_info_pdu.to_buffer(&mut client_info_pdu_buffer)?;
 
-            Ok((SequenceState::Licensing, client_info_pdu_buffer))
+            Ok((
+                SequenceState::ServerLicenseRequest,
+                client_info_pdu_buffer,
+                Some(LicenseCredentials {
+                    username: client_info_pdu.client_info.credentials.username,
+                    hostname: client_info_pdu.client_info.credentials.domain.unwrap_or_default(),
+                }),
+            ))
         }
         SequenceState::ClientConfirmActive
         | SequenceState::ClientSynchronize
@@ -237,7 +272,7 @@ fn process_send_data_request_pdu(
             let mut share_control_header_buffer = Vec::with_capacity(share_control_header.buffer_length());
             share_control_header.to_buffer(&mut share_control_header_buffer)?;
 
-            Ok((next_sequence_state, share_control_header_buffer))
+            Ok((next_sequence_state, share_control_header_buffer, None))
         }
         state => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -249,22 +284,22 @@ fn process_send_data_request_pdu(
     }
 }
 
+pub struct IndicationData {
+    originator_id: Option<u16>,
+    encryption_data: Option<LicenseEncryptionData>,
+}
+
 fn process_send_data_indication_pdu(
     pdu: Vec<u8>,
     sequence_state: SequenceState,
-
     filter_config: &FilterConfig,
-) -> io::Result<(SequenceState, Vec<u8>, Option<u16>)> {
+    encryption_data: Option<LicenseEncryptionData>,
+    credentials: &LicenseCredentials,
+) -> io::Result<(SequenceState, Vec<u8>, IndicationData)> {
     match sequence_state {
-        SequenceState::Licensing => {
-            let client_license_pdu = ServerLicensePdu::from_buffer(pdu.as_slice())?;
-            trace!("Got Client License PDU: {:?}", client_license_pdu);
-
-            let mut client_license_buffer = Vec::with_capacity(client_license_pdu.buffer_length());
-            client_license_pdu.to_buffer(&mut client_license_buffer)?;
-
-            Ok((SequenceState::ServerDemandActive, client_license_buffer, None))
-        }
+        SequenceState::ServerLicenseRequest => process_license_request(pdu, credentials),
+        SequenceState::ServerChallenge => process_challenge(pdu, encryption_data, credentials),
+        SequenceState::ServerUpgradeLicense => process_upgrade_license(pdu, encryption_data),
         SequenceState::ServerDemandActive
         | SequenceState::ServerSynchronize
         | SequenceState::ServerControlCooperate
@@ -322,7 +357,10 @@ fn process_send_data_indication_pdu(
             Ok((
                 next_sequence_state,
                 share_control_header_buffer,
-                Some(share_control_header.pdu_source),
+                IndicationData {
+                    originator_id: Some(share_control_header.pdu_source),
+                    encryption_data: None,
+                },
             ))
         }
         state => Err(io::Error::new(
@@ -336,9 +374,11 @@ fn process_send_data_indication_pdu(
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-enum SequenceState {
+pub enum SequenceState {
     ClientInfo,
-    Licensing,
+    ServerLicenseRequest,
+    ServerChallenge,
+    ServerUpgradeLicense,
     ServerDemandActive,
     ClientConfirmActive,
     ClientSynchronize,

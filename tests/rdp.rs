@@ -14,9 +14,15 @@ use bytes::BytesMut;
 use ironrdp::{
     gcc, mcs,
     nego::{Request, Response, ResponseData, ResponseFlags, SecurityProtocol},
-    rdp::{self, capability_sets},
+    rdp::{
+        self, capability_sets,
+        server_license::{
+            InitialMessageType, InitialServerLicenseMessage, LicenseErrorCode, LicenseHeader, LicensingErrorMessage,
+            LicensingStateTransition, PreambleFlags, PreambleType, PreambleVersion, PREAMBLE_SIZE,
+        },
+    },
     ClientConfirmActive, ClientInfoPdu, ConnectInitial, ConnectResponse, Data, McsPdu, PduParsing, SendDataContext,
-    ServerDemandActive, ServerLicensePdu, ShareControlHeader,
+    ServerDemandActive, ShareControlHeader,
 };
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
@@ -471,26 +477,25 @@ impl RdpServer {
     }
 
     fn write_server_license(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
-        let pdu = ServerLicensePdu {
-            security_header: rdp::BasicSecurityHeader {
-                flags: rdp::BasicSecurityHeaderFlags::LICENSE_PKT,
-            },
-            server_license: rdp::ServerLicense {
-                preamble: rdp::LicensePreamble {
-                    message_type: rdp::PreambleType::ErrorAlert,
-                    flags: rdp::PreambleFlags::empty(),
-                    version: rdp::PreambleVersion::V3,
-                },
-                error_message: rdp::LicensingErrorMessage {
-                    error_code: rdp::LicensingErrorCode::StatusValidClient,
-                    state_transition: rdp::LicensingStateTransition::NoTransition,
-                    error_info: rdp::LicensingBinaryBlob {
-                        blob_type: rdp::BlobType::Error,
-                        data: Vec::new(),
-                    },
-                },
-            },
+        let valid_client_message = LicensingErrorMessage {
+            error_code: LicenseErrorCode::StatusValidClient,
+            state_transition: LicensingStateTransition::NoTransition,
+            error_info: Vec::new(),
         };
+
+        let pdu = InitialServerLicenseMessage {
+            license_header: LicenseHeader {
+                security_header: rdp::BasicSecurityHeader {
+                    flags: rdp::BasicSecurityHeaderFlags::LICENSE_PKT,
+                },
+                preamble_message_type: PreambleType::ErrorAlert,
+                preamble_flags: PreambleFlags::empty(),
+                preamble_version: PreambleVersion::V3,
+                preamble_message_size: (PREAMBLE_SIZE + valid_client_message.buffer_length()) as u16,
+            },
+            message_type: InitialMessageType::StatusValidClient(valid_client_message),
+        };
+
         encode_and_write_send_data_context_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
 
