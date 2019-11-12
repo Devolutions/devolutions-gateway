@@ -106,6 +106,12 @@ impl Future for JetMsgReader {
     fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
         let mut buff = [0u8; 1024];
         let len = try_ready!(self.transport.poll_read(&mut buff));
+
+        if len == 0 {
+            // The transport is closed
+            return Err(error_other(&format!("Socket closed, no JetPacket received.")));
+        }
+
         let mut buf = buff.to_vec();
         buf.truncate(len);
         self.data_received.append(&mut buf);
