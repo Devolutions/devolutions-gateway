@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use futures::{sink::Send, stream::StreamFuture, try_ready, Future, Poll};
 use ironrdp::nego;
 
-use slog_scope::{debug, error, info};
+use slog_scope::{debug, error, trace};
 use sspi::{
     internal::credssp::{
         self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest,
@@ -81,7 +81,7 @@ impl Future for NlaWithClientFuture {
                             )
                         })
                         .poll());
-                    info!("TLS connection has been established with the client");
+                    debug!("TLS connection has been established with the client");
 
                     let client_transport =
                         TsRequestTransport::default().framed(tokio_rustls::TlsStream::Server(client_tls));
@@ -119,7 +119,7 @@ impl Future for NlaWithClientFuture {
                     let transport = try_ready!(early_user_auth_result_future.poll());
 
                     debug!("Success Early User Authorization Result PDU sent to the client");
-                    info!("NLA phase has been finished with the client");
+                    debug!("NLA phase has been finished with the client");
 
                     return Ok(Async::Ready((
                         NlaTransport::EarlyUserAuthResult(transport),
@@ -183,7 +183,7 @@ impl Future for NlaWithServerFuture {
                             )
                         })
                         .poll());
-                    info!("TLS connection has been established with the server");
+                    debug!("TLS connection has been established with the server");
 
                     let client_tls = tokio_rustls::TlsStream::Client(server_tls);
                     let client_public_key = utils::get_tls_peer_pubkey(&client_tls)?;
@@ -227,7 +227,7 @@ impl Future for NlaWithServerFuture {
                     match early_user_auth_result {
                         Some(EarlyUserAuthResult::Success) => {
                             debug!("Got Success Early User Authorization Result from the server");
-                            info!("NLA phase has been finished with the server");
+                            debug!("NLA phase has been finished with the server");
 
                             return Ok(Async::Ready(NlaTransport::EarlyUserAuthResult(transport)));
                         }
@@ -273,7 +273,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
     type Item = (TsRequestFutureTransport, RdpIdentity);
 
     fn process_pdu(&mut self, pdu: TsRequest) -> io::Result<Option<TsRequest>> {
-        debug!("Got client's TSRequest: {:x?}", pdu);
+        trace!("Got client's TSRequest: {:x?}", pdu);
 
         match self.sequence_state {
             SequenceState::CredSspSequence => {
@@ -281,7 +281,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
 
                 let (next_sequence_state, ts_request) = match response {
                     Ok(credssp::ServerState::ReplyNeeded(ts_request)) => {
-                        debug!("Sending TSRequest to the client: {:x?}", ts_request);
+                        trace!("Sending TSRequest to the client: {:x?}", ts_request);
 
                         (SequenceState::CredSspSequence, Some(ts_request))
                     }
@@ -309,7 +309,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                         (SequenceState::SendingError, Some(ts_request))
                     }
                 };
-                debug!("Sending TSRequest to the client: {:x?}", ts_request);
+                trace!("Sending TSRequest to the client: {:x?}", ts_request);
 
                 self.sequence_state = next_sequence_state;
 
@@ -326,7 +326,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         mut client: Option<TsRequestFutureTransport>,
         _server: Option<TsRequestFutureTransport>,
     ) -> Self::Item {
-        info!("Successfully processed CredSSP with the client");
+        debug!("Successfully processed CredSSP with the client");
 
         (
             client.take().expect(
@@ -378,7 +378,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
     type Item = TsRequestFutureTransport;
 
     fn process_pdu(&mut self, pdu: TsRequest) -> io::Result<Option<TsRequest>> {
-        debug!("Got server's TSRequest: {:x?}", pdu);
+        trace!("Got server's TSRequest: {:x?}", pdu);
         let response = self.cred_ssp_client.process(pdu)?;
 
         let ts_request = match response {
@@ -389,7 +389,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                 ts_request
             }
         };
-        debug!("Sending TSRequest to the server: {:x?}", ts_request);
+        trace!("Sending TSRequest to the server: {:x?}", ts_request);
 
         Ok(Some(ts_request))
     }
@@ -398,7 +398,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         _client: Option<TsRequestFutureTransport>,
         mut server: Option<TsRequestFutureTransport>,
     ) -> Self::Item {
-        info!("Successfully processed CredSSP with the server");
+        debug!("Successfully processed CredSSP with the server");
 
         server.take().expect(
             "In CredSSP Connection Sequence, the server's stream must exist in a return_item method, and the method cannot be fired multiple times",

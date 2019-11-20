@@ -1,7 +1,7 @@
 use std::io;
 
 use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
-use slog_scope::{debug, info};
+use slog_scope::debug;
 use tokio::codec::Framed;
 use tokio_tcp::TcpStream;
 
@@ -31,7 +31,7 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for Neg
             Some(NegoData::Cookie(cookie)) => (None, Some(cookie)),
             None => (None, None),
         };
-        info!(
+        debug!(
             "Processing negotiation request from the client (routing_token: {:?}, cookie: {:?}, protocol: {:?}, flags: {:?})",
             routing_token, cookie, request.protocol, request.flags,
         );
@@ -76,7 +76,7 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for Neg
         mut client: Option<Framed<TcpStream, NegotiationWithClientTransport>>,
         _server: Option<Framed<TcpStream, NegotiationWithClientTransport>>,
     ) -> Self::Item {
-        info!("Successfully negotiated with the client");
+        debug!("Successfully negotiated with the client");
 
         (
             client
@@ -117,7 +117,7 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
     fn process_pdu(&mut self, response: Response) -> io::Result<Option<Request>> {
         match response.response {
             Some(ResponseData::Response { protocol, flags }) => {
-                info!(
+                debug!(
                     "Received negotiation response from the server (protocol: {:?}, flags: {:?})",
                     protocol, flags,
                 );
@@ -146,7 +146,7 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
         _client: Option<Framed<TcpStream, NegotiationWithServerTransport>>,
         mut server: Option<Framed<TcpStream, NegotiationWithServerTransport>>,
     ) -> Self::Item {
-        info!("Successfully negotiated with the server");
+        debug!("Successfully negotiated with the server");
 
         (
             server

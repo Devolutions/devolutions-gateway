@@ -9,7 +9,7 @@ use crate::interceptor::PacketInterceptor;
 use futures::{Async, Stream, Sink, AsyncSink, Future};
 use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStream, JetSink};
 use url::Url;
-use slog_scope::{debug, error};
+use slog_scope::{trace, error};
 use std::net::SocketAddr;
 use std::io::Cursor;
 use tungstenite::Message;
@@ -545,15 +545,15 @@ impl Sink for WsJetSink {
         mut item: <Self as Sink>::SinkItem,
     ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
-            debug!("{} bytes to write on {}", item.len(), stream.peer_addr().unwrap());
+            trace!("{} bytes to write on {}", item.len(), stream.peer_addr().unwrap());
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
                         self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
-                        debug!("{} bytes written on {}", len, stream.peer_addr().unwrap())
+                        trace!("{} bytes written on {}", len, stream.peer_addr().unwrap())
                     } else {
-                        debug!("0 bytes written on {}", stream.peer_addr().unwrap())
+                        trace!("0 bytes written on {}", stream.peer_addr().unwrap())
                     }
 
                     if item.is_empty() {

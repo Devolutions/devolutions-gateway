@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use futures::{Async, AsyncSink, Future, Sink, Stream};
-use slog_scope::{debug, error};
+use slog_scope::{trace, error};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -241,7 +241,7 @@ impl Stream for TcpJetStream {
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
-                        debug!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
+                        trace!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
                         if len < buffer.len() {
                             result.extend_from_slice(&buffer[0..len]);
                         } else {
@@ -326,15 +326,15 @@ impl Sink for TcpJetSink {
     ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
             let peer_addr = stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string());
-            debug!("{} bytes to write on {}", item.len(), peer_addr);
+            trace!("{} bytes to write on {}", item.len(), peer_addr);
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
                         self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
-                        debug!("{} bytes written on {}", len, peer_addr)
+                        trace!("{} bytes written on {}", len, peer_addr)
                     } else {
-                        debug!("0 bytes written on {}", peer_addr)
+                        trace!("0 bytes written on {}", peer_addr)
                     }
 
                     if item.is_empty() {
