@@ -38,26 +38,25 @@ pub fn init(file_path: Option<&String>) -> io::Result<Logger> {
 
     let term_decorator = TermDecorator::new().build();
     let term_fmt = format_decorator(term_decorator).fuse();
-    let term_drain = LevelFilter::new(term_fmt, log_level).fuse();
 
-    let drain = if let Some(file_path) = file_path {
+    let async_drain = if let Some(file_path) = file_path {
         let outfile = OpenOptions::new().create(true).append(true).open(file_path)?;
         let file_decorator = PlainDecorator::new(outfile);
         let file_fmt = format_decorator(file_decorator).fuse();
-        let file_drain = LevelFilter::new(file_fmt, log_level).fuse();
 
-        Async::new(Duplicate(file_drain, term_drain).fuse())
+        Async::new(Duplicate(file_fmt, term_fmt).fuse())
             .chan_size(chan_size)
             .overflow_strategy(overflow_strategy)
             .build()
             .fuse()
     } else {
-        Async::new(term_drain)
+        Async::new(term_fmt)
             .chan_size(chan_size)
             .overflow_strategy(overflow_strategy)
             .build()
             .fuse()
     };
+    let drain = LevelFilter::new(async_drain, log_level).fuse();
     let logger = Logger::root(drain, o!());
 
     if log_level_result.is_err() {

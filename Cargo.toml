@@ -32,7 +32,7 @@ serde_json = "1.0"
 slog = { version = "2.5", features = ["max_level_trace","release_max_level_trace"] }
 slog-term = "2.4"
 slog-async = "2.3"
-slog-scope = "4.1"
+slog-scope = "4.3"
 slog-scope-futures = { git = "https://gitlab.com/Fotosmile/slog-scope-futures.git" }
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
