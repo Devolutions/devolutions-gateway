@@ -1,18 +1,20 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use futures::{Async, AsyncSink, Future, Sink, Stream};
-use slog_scope::{trace, error};
+use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
+use slog_scope::{error, trace};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io;
 use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_rustls::{TlsConnector, TlsStream};
 use tokio_tcp::TcpStream;
-use tokio_rustls::{TlsStream, TlsConnector};
 use url::Url;
 
 use crate::interceptor::PacketInterceptor;
 use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
-use crate::utils::{url_to_socket_arr, danger_transport};
+use crate::utils::{danger_transport, url_to_socket_arr};
+
+pub const TCP_READ_LEN: usize = 57343;
 
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
@@ -77,20 +79,11 @@ impl AsyncWrite for TcpStreamWrapper {
     }
 }
 
+#[derive(Clone)]
 pub struct TcpTransport {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: Arc<AtomicU64>,
     nb_bytes_written: Arc<AtomicU64>,
-}
-
-impl Clone for TcpTransport {
-    fn clone(&self) -> Self {
-        TcpTransport {
-            stream: self.stream.clone(),
-            nb_bytes_read: self.nb_bytes_read.clone(),
-            nb_bytes_written: self.nb_bytes_written.clone(),
-        }
-    }
 }
 
 impl TcpTransport {
@@ -123,7 +116,7 @@ impl Read for TcpTransport {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.read(&mut buf),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "The stream is not ready")),
         }
     }
 }
@@ -134,13 +127,13 @@ impl Write for TcpTransport {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.write(&buf),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "The stream is not ready")),
         }
     }
     fn flush(&mut self) -> io::Result<()> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.flush(),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "The stream is not ready")),
         }
     }
 }
@@ -149,19 +142,19 @@ impl AsyncWrite for TcpTransport {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self.stream.try_lock() {
             Ok(mut stream) => stream.async_shutdown(),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
+            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "The stream is not ready")),
         }
     }
 }
 
 impl Transport for TcpTransport {
     fn connect(url: &Url) -> JetFuture<Self>
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         let socket_addr = url_to_socket_arr(&url);
         match url.scheme() {
-            "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)) as JetFuture<Self>,
+            "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)),
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr);
 
@@ -180,11 +173,11 @@ impl Transport for TcpTransport {
                 });
                 let request =
                     tls_handshake.map(|stream| TcpTransport::new_tls(tokio_rustls::TlsStream::Client(stream)));
-                Box::new(request) as JetFuture<Self>
-            }
 
+                Box::new(request)
+            }
             scheme => {
-                panic!("Unsuported scheme: {}", scheme);
+                panic!("Unsupported scheme: {}", scheme);
             }
         }
     }
@@ -197,8 +190,6 @@ impl Transport for TcpTransport {
         Box::new(TcpJetStream::new(self.stream.clone(), self.nb_bytes_read.clone()))
     }
 }
-
-pub const TCP_READ_LEN: usize = 57343;
 
 struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
@@ -222,7 +213,7 @@ impl Stream for TcpJetStream {
     type Item = Vec<u8>;
     type Error = io::Error;
 
-    fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         if let Ok(ref mut stream) = self.stream.try_lock() {
             let mut result = Vec::new();
             while result.len() <= TCP_READ_LEN {
@@ -236,12 +227,18 @@ impl Stream for TcpJetStream {
                             return Ok(Async::Ready(Some(result)));
                         }
 
-                        return Ok(Async::Ready(None))
-                    },
+                        return Ok(Async::Ready(None));
+                    }
 
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
-                        trace!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
+                        trace!(
+                            "{} bytes read on {}",
+                            len,
+                            stream
+                                .peer_addr()
+                                .map_or("Unknown".to_string(), |addr| addr.to_string())
+                        );
 
                         if len < self.buffer.len() {
                             result.extend_from_slice(&self.buffer[0..len]);
@@ -259,7 +256,6 @@ impl Stream for TcpJetStream {
                     }
 
                     Ok(Async::NotReady) => {
-
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
                                 interceptor.on_new_packet(stream.peer_addr(), &result);
@@ -268,8 +264,8 @@ impl Stream for TcpJetStream {
                             return Ok(Async::Ready(Some(result)));
                         }
 
-                        return Ok(Async::NotReady)
-                    },
+                        return Ok(Async::NotReady);
+                    }
 
                     Err(e) => {
                         error!("Can't read on socket: {}", e);
@@ -288,11 +284,13 @@ impl Stream for TcpJetStream {
 impl JetStream for TcpJetStream {
     fn shutdown(&mut self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
+
         stream.shutdown()
     }
 
     fn peer_addr(&self) -> Option<SocketAddr> {
         let stream = self.stream.lock().unwrap();
+
         stream.peer_addr()
     }
 
@@ -307,7 +305,7 @@ impl JetStream for TcpJetStream {
 
 struct TcpJetSink {
     stream: Arc<Mutex<TcpStreamWrapper>>,
-    nb_bytes_written: Arc<AtomicU64>
+    nb_bytes_written: Arc<AtomicU64>,
 }
 
 impl TcpJetSink {
@@ -323,33 +321,41 @@ impl Sink for TcpJetSink {
     type SinkItem = Vec<u8>;
     type SinkError = io::Error;
 
-    fn start_send(
-        &mut self,
-        mut item: <Self as Sink>::SinkItem,
-    ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
+    fn start_send(&mut self, mut item: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
-            let peer_addr = stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string());
-            trace!("{} bytes to write on {}", item.len(), peer_addr);
+            trace!(
+                "{} bytes to write on {}",
+                item.len(),
+                stream
+                    .peer_addr()
+                    .map_or("Unknown".to_string(), |addr| addr.to_string())
+            );
             match stream.poll_write(&item) {
                 Ok(Async::Ready(len)) => {
                     if len > 0 {
                         self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
                         item.drain(0..len);
-                        trace!("{} bytes written on {}", len, peer_addr)
-                    } else {
-                        trace!("0 bytes written on {}", peer_addr)
                     }
+                    trace!(
+                        "{} bytes written on {}",
+                        len,
+                        stream
+                            .peer_addr()
+                            .map_or("Unknown".to_string(), |addr| addr.to_string())
+                    );
 
                     if item.is_empty() {
                         Ok(AsyncSink::Ready)
                     } else {
                         futures::task::current().notify();
+
                         Ok(AsyncSink::NotReady(item))
                     }
                 }
                 Ok(Async::NotReady) => Ok(AsyncSink::NotReady(item)),
                 Err(e) => {
                     error!("Can't write on socket: {}", e);
+
                     Ok(AsyncSink::Ready)
                 }
             }
@@ -358,7 +364,7 @@ impl Sink for TcpJetSink {
         }
     }
 
-    fn poll_complete(&mut self) -> Result<Async<()>, <Self as Sink>::SinkError> {
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
         if let Ok(mut stream) = self.stream.try_lock() {
             stream.poll_flush()
         } else {
@@ -366,7 +372,7 @@ impl Sink for TcpJetSink {
         }
     }
 
-    fn close(&mut self) -> Result<Async<()>, <Self as Sink>::SinkError> {
+    fn close(&mut self) -> Poll<(), Self::SinkError> {
         Ok(Async::Ready(()))
     }
 }
@@ -374,6 +380,7 @@ impl Sink for TcpJetSink {
 impl JetSink for TcpJetSink {
     fn shutdown(&mut self) -> std::io::Result<()> {
         let stream = self.stream.lock().unwrap();
+
         stream.shutdown()
     }
 
