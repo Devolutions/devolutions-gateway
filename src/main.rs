@@ -59,7 +59,7 @@ lazy_static! {
 }
 
 fn main() {
-    let config = Config::init();
+    let config = Arc::new(Config::init());
 
     let logger = logger::init(config.log_file()).expect("logging setup must not fail");
     let _logger_guard = slog_scope::set_global_logger(logger.clone());
@@ -90,7 +90,7 @@ fn main() {
     let executor_handle = runtime.executor();
 
     info!("Starting http server ...");
-    let http_server = HttpServer::new(&config, jet_associations.clone(), executor_handle.clone());
+    let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
     if let Err(e) = http_server.start(executor_handle.clone()) {
         error!("http_server failed to start: {}", e);
         return;
@@ -139,7 +139,7 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     }
 }
 
-fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=()> + Send> {
+fn start_tcp_server(url: Url, config: Arc<Config>, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=()> + Send> {
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
@@ -268,7 +268,7 @@ fn start_tcp_server(url: Url, config: Config, jet_associations: JetAssociationsM
 }
 
 fn start_websocket_server(websocket_url: Url,
-                          config: Config,
+                          config: Arc<Config>,
                           http_service: HttpService,
                           jet_associations: JetAssociationsMap,
                           tls_acceptor: TlsAcceptor,

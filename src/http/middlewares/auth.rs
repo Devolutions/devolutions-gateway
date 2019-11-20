@@ -1,13 +1,14 @@
+use std::sync::Arc;
 use saphir::*;
 use slog_scope::error;
 use crate::config::Config;
 
 pub struct AuthMiddleware {
-    config: Config
+    config: Arc<Config>
 }
 
 impl AuthMiddleware {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         AuthMiddleware {
             config
         }

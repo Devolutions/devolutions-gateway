@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::jet_client::JetAssociationsMap;
 use hyper::{Request, Body, Response, Method, StatusCode, header, Version, http};
 use futures::Future;
@@ -22,7 +23,7 @@ pub struct WebsocketService {
     pub http_service: HttpService,
     pub jet_associations: JetAssociationsMap,
     pub executor_handle: TaskExecutor,
-    pub config: Config,
+    pub config: Arc<Config>,
 }
 
 impl WebsocketService {
@@ -189,12 +190,12 @@ fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
 
 pub struct WsClient {
     routing_url: Url,
-    config: Config,
+    config: Arc<Config>,
     _executor_handle: TaskExecutor,
 }
 
 impl WsClient {
-    pub fn new(routing_url: Url, config: Config, executor_handle: TaskExecutor) -> Self {
+    pub fn new(routing_url: Url, config: Arc<Config>, executor_handle: TaskExecutor) -> Self {
         WsClient {
             routing_url,
             config,

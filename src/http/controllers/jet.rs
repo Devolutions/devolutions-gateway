@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use saphir::Method;
 use saphir::*;
 use uuid::Uuid;
@@ -18,7 +19,7 @@ use crate::http::controllers::utils::SyncResponseUtil;
 use std::collections::HashMap;
 
 struct ControllerData {
-    config: Config,
+    config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     executor_handle: TaskExecutor,
 }
@@ -28,7 +29,7 @@ pub struct JetController {
 }
 
 impl JetController {
-    pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
+    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
         dispatch.add(Method::GET, "/association", ControllerData::get_associations);
         dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);

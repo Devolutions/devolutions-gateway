@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, sync::atomic::Ordering};
+use std::{io, path::PathBuf, sync::{Arc, atomic::Ordering}};
 
 use futures::{Future, Stream};
 use slog_scope::{info, warn};
@@ -11,11 +11,11 @@ use crate::{
 };
 
 pub struct Proxy {
-    config: Config,
+    config: Arc<Config>,
 }
 
 impl Proxy {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Proxy { config }
     }
 

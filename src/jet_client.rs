@@ -30,13 +30,13 @@ pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
 
 pub struct JetClient {
-    config: Config,
+    config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     _executor_handle: TaskExecutor,
 }
 
 impl JetClient {
-    pub fn new(config: Config, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
+    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
         JetClient {
             config,
             jet_associations,
@@ -53,7 +53,7 @@ impl JetClient {
         Box::new(msg_reader.and_then(move |msg| {
             match msg {
                 JetMessage::JetAcceptReq(jet_accept_req) => {
-                    let handle_msg = HandleAcceptJetMsg::new(&config, transport.clone(), jet_accept_req, jet_associations.clone(), executor_handle);
+                    let handle_msg = HandleAcceptJetMsg::new(config, transport.clone(), jet_accept_req, jet_associations.clone(), executor_handle);
                     Box::new(handle_msg) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                 }
                 JetMessage::JetConnectReq(jet_connect_req) => {
@@ -150,7 +150,7 @@ impl Future for JetMsgReader {
 }
 
 struct HandleAcceptJetMsg {
-    config: Config,
+    config: Arc<Config>,
     transport: JetTransport,
     request_msg: JetAcceptReq,
     response_msg: Option<JetMessage>,
@@ -160,7 +160,7 @@ struct HandleAcceptJetMsg {
 
 impl HandleAcceptJetMsg {
     fn new(
-        config: &Config,
+        config: Arc<Config>,
         transport: JetTransport,
         msg: JetAcceptReq,
         jet_associations: JetAssociationsMap,
