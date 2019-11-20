@@ -204,6 +204,7 @@ struct TcpJetStream {
     stream: Arc<Mutex<TcpStreamWrapper>>,
     nb_bytes_read: Arc<AtomicU64>,
     packet_interceptor: Option<Box<dyn PacketInterceptor>>,
+    buffer: Vec<u8>,
 }
 
 impl TcpJetStream {
@@ -212,6 +213,7 @@ impl TcpJetStream {
             stream,
             nb_bytes_read,
             packet_interceptor: None,
+            buffer: vec![0; 8192],
         }
     }
 }
@@ -224,9 +226,7 @@ impl Stream for TcpJetStream {
         if let Ok(ref mut stream) = self.stream.try_lock() {
             let mut result = Vec::new();
             while result.len() <= TCP_READ_LEN {
-                let mut buffer = [0u8; 8192];
-                match stream.poll_read(&mut buffer) {
-
+                match stream.poll_read(&mut self.buffer) {
                     Ok(Async::Ready(0)) => {
                         if result.len() > 0 {
                             if let Some(interceptor) = self.packet_interceptor.as_mut() {
@@ -242,10 +242,12 @@ impl Stream for TcpJetStream {
                     Ok(Async::Ready(len)) => {
                         self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
                         trace!("{} bytes read on {}", len, stream.peer_addr().map_or("Unknown".to_string(), |addr| addr.to_string()));
-                        if len < buffer.len() {
-                            result.extend_from_slice(&buffer[0..len]);
+
+                        if len < self.buffer.len() {
+                            result.extend_from_slice(&self.buffer[0..len]);
                         } else {
-                            result.extend_from_slice(&buffer);
+                            result.extend_from_slice(&self.buffer);
+
                             continue;
                         }
 
@@ -271,6 +273,7 @@ impl Stream for TcpJetStream {
 
                     Err(e) => {
                         error!("Can't read on socket: {}", e);
+
                         return Ok(Async::Ready(None));
                     }
                 }
