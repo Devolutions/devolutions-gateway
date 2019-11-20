@@ -29,7 +29,7 @@ saphir = { version = "0.9.5", features = ["https", "request_handler"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-slog = { version = "2.5", features = ["max_level_trace","release_max_level_trace"] }
+slog = { version = "2.5", features = ["max_level_trace","release_max_level_debug"] }
 slog-term = "2.4"
 slog-async = "2.3"
 slog-scope = "4.3"

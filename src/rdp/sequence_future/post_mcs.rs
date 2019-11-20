@@ -4,7 +4,7 @@ use ironrdp::{
     mcs::SendDataContext, ClientInfoPdu, ControlAction, McsPdu, PduParsing, ServerLicensePdu, ShareControlHeader,
     ShareControlPdu, ShareDataHeader, ShareDataPdu,
 };
-use slog_scope::{debug, info, warn};
+use slog_scope::{debug, trace, warn};
 use tokio::codec::Framed;
 use tokio_rustls::TlsStream;
 use tokio_tcp::TcpStream;
@@ -101,7 +101,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
         mut client: Option<McsFutureTransport>,
         mut server: Option<McsFutureTransport>,
     ) -> Self::Item {
-        info!("Successfully processed RDP Connection Sequence");
+        debug!("Successfully processed RDP Connection Sequence");
 
         (
             client.take().expect(
@@ -164,10 +164,10 @@ fn process_send_data_request_pdu(
     match sequence_state {
         SequenceState::ClientInfo => {
             let mut client_info_pdu = ClientInfoPdu::from_buffer(pdu.as_slice())?;
-            debug!("Got Client Info PDU: {:?}", client_info_pdu);
+            trace!("Got Client Info PDU: {:?}", client_info_pdu);
 
             client_info_pdu.filter(filter_config);
-            debug!("Filtered Client Info PDU: {:?}", client_info_pdu);
+            trace!("Filtered Client Info PDU: {:?}", client_info_pdu);
 
             let mut client_info_pdu_buffer = Vec::with_capacity(client_info_pdu.buffer_length());
             client_info_pdu.to_buffer(&mut client_info_pdu_buffer)?;
@@ -193,12 +193,12 @@ fn process_send_data_request_pdu(
                         );
                     }
                     client_confirm_active.pdu.filter(filter_config);
-                    debug!("Got Client Confirm Active PDU: {:?}", client_confirm_active);
+                    trace!("Got Client Confirm Active PDU: {:?}", client_confirm_active);
 
                     SequenceState::ClientSynchronize
                 }
                 (_, ShareControlPdu::Data(ShareDataHeader { share_data_pdu, .. })) => {
-                    debug!("Got Client Finalization PDU: {:?}", share_data_pdu);
+                    trace!("Got Client Finalization PDU: {:?}", share_data_pdu);
 
                     match (sequence_state, share_data_pdu) {
                         (SequenceState::ClientSynchronize, ShareDataPdu::Synchronize(_)) => {
@@ -258,7 +258,7 @@ fn process_send_data_indication_pdu(
     match sequence_state {
         SequenceState::Licensing => {
             let client_license_pdu = ServerLicensePdu::from_buffer(pdu.as_slice())?;
-            debug!("Got Client License PDU: {:?}", client_license_pdu);
+            trace!("Got Client License PDU: {:?}", client_license_pdu);
 
             let mut client_license_buffer = Vec::with_capacity(client_license_pdu.buffer_length());
             client_license_pdu.to_buffer(&mut client_license_buffer)?;
@@ -275,12 +275,12 @@ fn process_send_data_indication_pdu(
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
                 (SequenceState::ServerDemandActive, ShareControlPdu::ServerDemandActive(server_demand_active)) => {
                     server_demand_active.pdu.filter(filter_config);
-                    debug!("Got Server Demand Active PDU: {:?}", server_demand_active);
+                    trace!("Got Server Demand Active PDU: {:?}", server_demand_active);
 
                     SequenceState::ClientConfirmActive
                 }
                 (_, ShareControlPdu::Data(ShareDataHeader { share_data_pdu, .. })) => {
-                    debug!("Got Server Finalization PDU: {:?}", share_data_pdu);
+                    trace!("Got Server Finalization PDU: {:?}", share_data_pdu);
 
                     match (sequence_state, share_data_pdu) {
                         (SequenceState::ServerSynchronize, ShareDataPdu::Synchronize(_)) => {
