@@ -39,7 +39,7 @@ impl RdpClient {
         let tls_acceptor = self.tls_acceptor;
         let tls_public_key = self.tls_public_key;
         let identities_proxy = if let Some(rdp_identities) = self.config.rdp_identities() {
-            rdp_identities
+            rdp_identities.clone()
         } else {
             error!("Identities file is not present");
 

@@ -15,7 +15,6 @@ pub enum Protocol {
     UNKNOWN,
 }
 
-#[derive(Clone)]
 struct ConfigTemp {
     unrestricted: bool,
     api_key: Option<String>,
@@ -66,36 +65,36 @@ impl Config {
         self.unrestricted
     }
 
-    pub fn api_key(&self) -> Option<String> {
-        self.api_key.clone()
+    pub fn api_key(&self) -> Option<&String> {
+        self.api_key.as_ref()
     }
 
     pub fn listeners(&self) -> &Vec<ListenerConfig> {
         &self.listeners
     }
 
-    pub fn jet_instance(&self) -> String {
-        self.jet_instance.clone()
+    pub fn jet_instance(&self) -> &String {
+        &self.jet_instance
     }
 
-    pub fn routing_url(&self) -> Option<String> {
-        self.routing_url.clone()
+    pub fn routing_url(&self) -> Option<&String> {
+        self.routing_url.as_ref()
     }
 
-    pub fn pcap_files_path(&self) -> Option<String> {
-        self.pcap_files_path.clone()
+    pub fn pcap_files_path(&self) -> Option<&String> {
+        self.pcap_files_path.as_ref()
     }
 
     pub fn protocol(&self) -> &Protocol {
         &self.protocol
     }
 
-    pub fn rdp_identities(&self) -> Option<rdp::IdentitiesProxy> {
-        self.rdp_identities.clone()
+    pub fn rdp_identities(&self) -> Option<&rdp::IdentitiesProxy> {
+        self.rdp_identities.as_ref()
     }
 
-    pub fn log_file(&self) -> Option<String> {
-        self.log_file.clone()
+    pub fn log_file(&self) -> Option<&String> {
+        self.log_file.as_ref()
     }
 
     pub fn init() -> Self {

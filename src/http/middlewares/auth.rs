@@ -38,7 +38,7 @@ impl Middleware for AuthMiddleware {
             match parse_auth_header(auth_str) {
                 Some((AuthHeaderType::Bearer, token)) => {
                     // API_KEY
-                    if api_key == token {
+                    if api_key == &token {
                         return RequestContinuation::Continue;
                     }
                 }

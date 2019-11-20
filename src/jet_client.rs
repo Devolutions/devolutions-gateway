@@ -202,7 +202,7 @@ impl Future for HandleAcceptJetMsg {
                             status_code: StatusCode::OK,
                             version: request.version,
                             association: uuid,
-                            instance: self.config.jet_instance(),
+                            instance: self.config.jet_instance().clone(),
                             timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                         }));
                     }
@@ -227,7 +227,7 @@ impl Future for HandleAcceptJetMsg {
                             status_code,
                             version: request.version,
                             association: Uuid::nil(),
-                            instance: self.config.jet_instance(),
+                            instance: self.config.jet_instance().clone(),
                             timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
                         }));
                     }

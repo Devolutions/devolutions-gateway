@@ -61,7 +61,7 @@ lazy_static! {
 fn main() {
     let config = Config::init();
 
-    let logger = logger::init(config.log_file().as_ref()).expect("logging setup must not fail");
+    let logger = logger::init(config.log_file()).expect("logging setup must not fail");
     let _logger_guard = slog_scope::set_global_logger(logger.clone());
     let _std_logger_guard = slog_stdlog::init().unwrap();
 
