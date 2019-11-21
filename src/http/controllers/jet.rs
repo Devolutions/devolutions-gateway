@@ -6,7 +6,6 @@ use jet_proto::JET_VERSION_V2;
 use std::time::{Duration, Instant};
 use slog_scope::info;
 use tokio::runtime::TaskExecutor;
-use futures::future::{ok};
 
 use crate::jet::association::{Association, AssociationResponse};
 use crate::config::Config;
@@ -127,10 +126,22 @@ impl ControllerData {
     }
 }
 
-pub fn start_remove_association_future(executor_handle: TaskExecutor, jet_associations: JetAssociationsMap, uuid: Uuid) {
+pub fn start_remove_association_future(
+    executor_handle: TaskExecutor,
+    jet_associations: JetAssociationsMap,
+    uuid: Uuid,
+) {
+    executor_handle.spawn(create_remove_association_future(jet_associations, uuid));
+}
+
+pub fn create_remove_association_future(
+    jet_associations: JetAssociationsMap,
+    uuid: Uuid,
+) -> impl Future<Item = (), Error = ()> + Send {
     // Start timeout to remove the association if no connect is received
     let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-    executor_handle.spawn(timeout.then(move |_| {
+
+    timeout.then(move |_| {
         RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
             if let Ok(true) = res {
                 info!(
@@ -138,8 +149,8 @@ pub fn start_remove_association_future(executor_handle: TaskExecutor, jet_associ
                     uuid
                 );
             }
-            ok(())
-        })
-    }));
-}
 
+            Ok(())
+        })
+    })
+}

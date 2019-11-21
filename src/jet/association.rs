@@ -93,18 +93,18 @@ pub struct AssociationResponse {
 impl AssociationResponse {
     pub fn from(association: &Association, with_detail: bool) -> Self {
         let (client_bytes_sent, client_bytes_recv) = association.candidates.iter().find_map(|(_, candidate)| {
-            if let Some(transport) = candidate.client_transport() {
-                let client_bytes_sent = transport.get_nb_bytes_read();
-                let client_bytes_recv = transport.get_nb_bytes_written();
-                if client_bytes_sent != 0 || client_bytes_recv != 0 {
-                    return Some((client_bytes_sent, client_bytes_recv))
+                match (candidate.client_nb_bytes_read(), candidate.client_nb_bytes_written()) {
+                    (Some(client_bytes_sent), Some(client_bytes_recv))
+                        if client_bytes_sent != 0 || client_bytes_recv != 0 =>
+                    {
+                        Some((client_bytes_sent, client_bytes_recv))
+                    }
+                    _ => None,
                 }
-            }
-            None
         }).unwrap_or((0, 0));
 
         let candidates: Option<Vec<CandidateResponse>> = if with_detail {
-            Some(association.candidates.iter().map(|(_, candidate)| candidate.clone().into()).collect())
+            Some(association.candidates.iter().map(|(_, candidate)| candidate.into()).collect())
         } else {
             None
         };

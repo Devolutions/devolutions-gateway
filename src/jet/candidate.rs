@@ -1,7 +1,15 @@
-use uuid::Uuid;
-use url::Url;
-use std::convert::TryInto;
+use std::{
+    convert::TryInto,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+
 use slog_scope::error;
+use url::Url;
+use uuid::Uuid;
+
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 
@@ -17,32 +25,36 @@ pub struct CandidateResponse {
     bytes_recv: u64,
 }
 
-impl From<Candidate> for CandidateResponse {
-    fn from(c: Candidate) -> Self {
-        let (bytes_sent, bytes_recv) =
-            c.client_transport.map(|transport|(transport.get_nb_bytes_read(), transport.get_nb_bytes_written()))
-                .unwrap_or((0, 0));
+impl From<&Candidate> for CandidateResponse {
+    fn from(c: &Candidate) -> Self {
+        let (bytes_sent, bytes_recv) = match (c.client_nb_bytes_read(), c.client_nb_bytes_written()) {
+                (Some(client_bytes_sent), Some(client_bytes_recv))  => {
+                    (client_bytes_sent, client_bytes_recv)
+                }
+                _ => (0, 0)
+            };
 
         CandidateResponse {
             id: c.id,
-            url: c.url,
-            state: c.state,
-            association_id: c.association_id,
-            transport_type: c.transport_type,
+            url: c.url.clone(),
+            state: c.state.clone(),
+            association_id: c.association_id.clone(),
+            transport_type: c.transport_type.clone(),
             bytes_sent,
             bytes_recv,
         }
     }
 }
-#[derive(Clone)]
+
 pub struct Candidate {
     id: Uuid,
     url: Option<Url>,
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
-    server_transport: Option<JetTransport>,
-    client_transport: Option<JetTransport>,
+    transport: Option<JetTransport>,
+    client_nb_bytes_read: Option<Arc<AtomicU64>>,
+    client_nb_bytes_written: Option<Arc<AtomicU64>>,
 }
 
 impl Candidate {
@@ -53,8 +65,9 @@ impl Candidate {
             state: CandidateState::Initial,
             association_id: Uuid::nil(),
             transport_type: TransportType::Tcp,
-            server_transport: None,
-            client_transport: None,
+            transport: None,
+            client_nb_bytes_read: None,
+            client_nb_bytes_written: None,
         }
     }
 
@@ -66,9 +79,10 @@ impl Candidate {
                     url: Some(url),
                     state: CandidateState::Initial,
                     association_id: Uuid::nil(),
-                    transport_type: transport_type,
-                    server_transport: None,
-                    client_transport: None,
+                    transport_type,
+                    transport: None,
+                    client_nb_bytes_read: None,
+                    client_nb_bytes_written: None,
                 });
             }
         } else {
@@ -81,21 +95,17 @@ impl Candidate {
     pub fn id(&self) -> Uuid {
         self.id.clone()
     }
+
     pub fn state(&self) -> CandidateState {
         self.state.clone()
     }
+
     pub fn transport_type(&self) -> TransportType {
         self.transport_type.clone()
     }
+
     pub fn url(&self) -> Option<Url> {
         self.url.clone()
-    }
-    pub fn client_transport(&self) -> Option<JetTransport> {
-        self.client_transport.clone()
-    }
-
-    pub fn server_transport(&self) -> Option<JetTransport> {
-        self.server_transport.clone()
     }
 
     pub fn association_id(&self) -> Uuid {
@@ -106,12 +116,28 @@ impl Candidate {
         self.association_id = association_id.clone();
     }
 
-    pub fn set_client_transport(&mut self, transport: JetTransport) {
-        self.client_transport = Some(transport);
+    pub fn set_transport(&mut self, transport: JetTransport) {
+        self.transport = Some(transport);
     }
 
-    pub fn set_server_transport(&mut self, transport: JetTransport) {
-        self.server_transport = Some(transport);
+    pub fn take_transport(&mut self) -> Option<JetTransport> {
+        self.transport.take()
+    }
+
+    pub fn set_client_nb_bytes_read(&mut self, client_nb_bytes_read: Arc<AtomicU64>) {
+        self.client_nb_bytes_read = Some(client_nb_bytes_read);
+    }
+
+    pub fn client_nb_bytes_read(&self) -> Option<u64> {
+        self.client_nb_bytes_read.clone().map(|v| v.load(Ordering::Relaxed))
+    }
+
+    pub fn set_client_nb_bytes_written(&mut self, client_nb_bytes_written: Arc<AtomicU64>) {
+        self.client_nb_bytes_written = Some(client_nb_bytes_written);
+    }
+
+    pub fn client_nb_bytes_written(&self) -> Option<u64> {
+        self.client_nb_bytes_written.clone().map(|v| v.load(Ordering::Relaxed))
     }
 
     pub fn set_state(&mut self, state: CandidateState) {

@@ -1,4 +1,8 @@
-use std::{io, path::PathBuf, sync::{Arc, atomic::Ordering}};
+use std::{
+    io,
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+};
 
 use futures::{Future, Stream};
 use slog_scope::{info, warn};
@@ -24,21 +28,17 @@ impl Proxy {
         server_transport: T,
         client_transport: U,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
-        let jet_sink_server = server_transport.message_sink();
-        let mut jet_stream_server = server_transport.message_stream();
-
-        let jet_sink_client = client_transport.message_sink();
-        let mut jet_stream_client = client_transport.message_stream();
+        let server_peer_addr = server_transport.peer_addr().unwrap();
+        let client_peer_addr = client_transport.peer_addr().unwrap();
+        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport();
+        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport();
 
         if let Some(pcap_files_path) = self.config.pcap_files_path() {
-            let server_peer_addr = jet_stream_server.peer_addr().unwrap();
-            let client_peer_addr = jet_stream_client.peer_addr().unwrap();
-
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 client_peer_addr.ip(),
                 client_peer_addr.port(),
-                server_peer_addr.ip().to_string(),
+                server_peer_addr.ip(),
                 server_peer_addr.port(),
                 chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
             );
@@ -76,43 +76,30 @@ impl Proxy {
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        Box::new(f1.and_then(|(mut jet_stream, mut jet_sink)| {
-            // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-            let _ = jet_stream.shutdown();
-            let _ = jet_sink.shutdown();
+        Box::new(
+            f1.join(f2)
+                 .and_then(move |(( server_read_half,  client_write_half), ( client_read_half,  server_write_half))| {
+                     let server_nb_bytes_read = server_read_half.nb_bytes_read();
+                     let client_nb_bytes_read = client_read_half.nb_bytes_read();
+                     let server_nb_bytes_written = server_write_half.nb_bytes_written();
+                     let client_nb_bytes_written = client_write_half.nb_bytes_written();
 
-            Ok((jet_stream, jet_sink))
-        })
-            .join(f2.and_then(|(mut jet_stream, mut jet_sink)| {
-                // Shutdown stream and the sink so the f2 will finish as well (and the join future will finish)
-                let _ = jet_stream.shutdown();
-                let _ = jet_sink.shutdown();
+                     info!(
+                         "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+                         server_nb_bytes_read,
+                         client_nb_bytes_written,
+                         client_nb_bytes_read,
+                         server_nb_bytes_written,
+                         server = &server_peer_addr,
+                         client = &client_peer_addr
+                     );
 
-                Ok((jet_stream, jet_sink))
-            }))
-            .and_then(|((jet_stream_1, jet_sink_1), (jet_stream_2, jet_sink_2))| {
-                let server_addr = jet_stream_1
-                    .peer_addr()
-                    .map(|addr| addr.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                let client_addr = jet_stream_2
-                    .peer_addr()
-                    .map(|addr| addr.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                info!(
-                    "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-                    jet_stream_1.nb_bytes_read(),
-                    jet_sink_1.nb_bytes_written(),
-                    jet_stream_2.nb_bytes_read(),
-                    jet_sink_2.nb_bytes_written(),
-                    server = &server_addr,
-                    client = &client_addr
-                );
-
-                Ok(())
-            }).then(|result| {
-            SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-            result
-        }))
+                     Ok(())
+                 })
+                 .then(|result| {
+                     SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+                     result
+                 }),
+        )
     }
 }

@@ -1,19 +1,23 @@
-use crate::interceptor::PacketInterceptor;
-use crate::transport::tcp::TcpTransport;
+use std::{
+    io::{Read, Write},
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+};
+
 use futures::{Async, Future, Sink, Stream};
-use std::io::{Read, Write};
-use std::net::SocketAddr;
-use tokio::io;
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio_tcp::TcpStream;
 use url::Url;
+
+use crate::interceptor::PacketInterceptor;
+use crate::transport::tcp::TcpTransport;
 use crate::transport::ws::WsTransport;
 
 pub mod mcs;
 pub mod tcp;
 pub mod tsrequest;
-pub mod x224;
 pub mod ws;
+pub mod x224;
 
 pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
@@ -23,8 +27,8 @@ pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
     where
         Self: Sized;
-    fn message_sink(&self) -> JetSinkType<Vec<u8>>;
-    fn message_stream(&self) -> JetStreamType<Vec<u8>>;
+    fn peer_addr(&self) -> Option<SocketAddr>;
+    fn split_transport(self) -> (JetStreamType<Vec<u8>>, JetSinkType<Vec<u8>>);
 }
 
 pub enum JetTransport {
@@ -37,26 +41,17 @@ impl JetTransport {
         JetTransport::Tcp(TcpTransport::new(stream))
     }
 
-    pub fn get_nb_bytes_read(&self) -> u64 {
+    pub fn clone_nb_bytes_read(&self) -> Arc<AtomicU64> {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.get_nb_bytes_read(),
-            JetTransport::Ws(ws_transport) => ws_transport.get_nb_bytes_read(),
+            JetTransport::Tcp(tcp_transport) => tcp_transport.clone_nb_bytes_read(),
+            JetTransport::Ws(ws_transport) => ws_transport.clone_nb_bytes_read(),
         }
     }
 
-    pub fn get_nb_bytes_written(&self) -> u64 {
+    pub fn clone_nb_bytes_written(&self) -> Arc<AtomicU64> {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.get_nb_bytes_written(),
-            JetTransport::Ws(ws_transport) => ws_transport.get_nb_bytes_written(),
-        }
-    }
-}
-
-impl Clone for JetTransport {
-    fn clone(&self) -> Self {
-        match self {
-            JetTransport::Tcp(tcp_transport) => JetTransport::Tcp(tcp_transport.clone()),
-            JetTransport::Ws(ws_transport) => JetTransport::Ws(ws_transport.clone()),
+            JetTransport::Tcp(tcp_transport) => tcp_transport.clone_nb_bytes_written(),
+            JetTransport::Ws(ws_transport) => ws_transport.clone_nb_bytes_written(),
         }
     }
 }
@@ -70,17 +65,17 @@ impl Transport for JetTransport {
         unimplemented!()
     }
 
-    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
+    fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.message_sink(),
-            JetTransport::Ws(ws_transport) => ws_transport.message_sink(),
+            JetTransport::Tcp(tcp_transport) => tcp_transport.peer_addr(),
+            JetTransport::Ws(ws_transport) => ws_transport.peer_addr(),
         }
     }
 
-    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
+    fn split_transport(self) -> (JetStreamType<Vec<u8>>, JetSinkType<Vec<u8>>) {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.message_stream(),
-            JetTransport::Ws(ws_transport) => ws_transport.message_stream(),
+            JetTransport::Tcp(tcp_transport) => tcp_transport.split_transport(),
+            JetTransport::Ws(ws_transport) => ws_transport.split_transport(),
         }
     }
 }
@@ -93,6 +88,7 @@ impl Read for JetTransport {
         }
     }
 }
+
 impl AsyncRead for JetTransport {}
 
 impl Write for JetTransport {
@@ -120,13 +116,10 @@ impl AsyncWrite for JetTransport {
 }
 
 pub trait JetStream: Stream {
-    fn shutdown(&mut self) -> std::io::Result<()>;
-    fn peer_addr(&self) -> Option<SocketAddr>;
     fn nb_bytes_read(&self) -> u64;
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
 }
 
 pub trait JetSink: Sink {
-    fn shutdown(&mut self) -> std::io::Result<()>;
     fn nb_bytes_written(&self) -> u64;
 }

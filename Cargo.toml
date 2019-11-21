@@ -16,7 +16,6 @@ lazy_static = "1.2.0"
 futures = "0.1"
 tokio = "0.1.22"
 tokio-tcp = "0.1.3"
-tokio-io = "0.1.12"
 rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
 tokio-rustls = "0.10.2"
 webpki = "0.21.0"
