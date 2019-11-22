@@ -1,6 +1,21 @@
-use std::io;
+#[cfg(test)]
+mod tests;
 
-use ironrdp::{parse_fast_path_header, PduParsing, TpktHeader};
+use std::{cmp::Ordering, collections::HashMap, io};
+
+use ironrdp::{
+    parse_fast_path_header,
+    rdp::vc::{self, dvc},
+    PduParsing, TpktHeader,
+};
+use slog_scope::{error, info};
+
+const DVC_CREATION_STATUS_OK: u32 = 0x0000_0000;
+
+pub enum PduSource {
+    Client,
+    Server,
+}
 
 pub struct RdpMessageReader;
 impl RdpMessageReader {
@@ -42,184 +57,219 @@ impl RdpMessageReader {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+struct DvcManager {
+    dynamic_channels: HashMap<u32, DynamicChannel>,
+}
 
-    const TPKT_CLIENT_CONNECTION_REQUEST_PACKET: [u8; 44] = [
-        0x03, 0x00, 0x00, 0x2c, 0x27, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x43, 0x6f, 0x6f, 0x6b, 0x69, 0x65, 0x3a,
-        0x20, 0x6d, 0x73, 0x74, 0x73, 0x68, 0x61, 0x73, 0x68, 0x3d, 0x65, 0x6c, 0x74, 0x6f, 0x6e, 0x73, 0x0d, 0x0a,
-        0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
-    ];
-    const TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET: [u8; 416] = [
-        0x03, 0x00, 0x01, 0xa0, 0x02, 0xf0, 0x80, 0x7f, 0x65, 0x82, 0x01, 0x94, 0x04, 0x01, 0x01, 0x04, 0x01, 0x01,
-        0x01, 0x01, 0xff, 0x30, 0x19, 0x02, 0x01, 0x22, 0x02, 0x01, 0x02, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01, 0x02,
-        0x01, 0x00, 0x02, 0x01, 0x01, 0x02, 0x02, 0xff, 0xff, 0x02, 0x01, 0x02, 0x30, 0x19, 0x02, 0x01, 0x01, 0x02,
-        0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01, 0x02, 0x02, 0x04, 0x20,
-        0x02, 0x01, 0x02, 0x30, 0x1c, 0x02, 0x02, 0xff, 0xff, 0x02, 0x02, 0xfc, 0x17, 0x02, 0x02, 0xff, 0xff, 0x02,
-        0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01, 0x02, 0x02, 0xff, 0xff, 0x02, 0x01, 0x02, 0x04, 0x82, 0x01,
-        0x33, 0x00, 0x05, 0x00, 0x14, 0x7c, 0x00, 0x01, 0x81, 0x2a, 0x00, 0x08, 0x00, 0x10, 0x00, 0x01, 0xc0, 0x00,
-        0x44, 0x75, 0x63, 0x61, 0x81, 0x1c, 0x01, 0xc0, 0xd8, 0x00, 0x04, 0x00, 0x08, 0x00, 0x00, 0x05, 0x00, 0x04,
-        0x01, 0xca, 0x03, 0xaa, 0x09, 0x04, 0x00, 0x00, 0xce, 0x0e, 0x00, 0x00, 0x45, 0x00, 0x4c, 0x00, 0x54, 0x00,
-        0x4f, 0x00, 0x4e, 0x00, 0x53, 0x00, 0x2d, 0x00, 0x44, 0x00, 0x45, 0x00, 0x56, 0x00, 0x32, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xca, 0x01, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x18, 0x00, 0x07, 0x00, 0x01, 0x00, 0x36, 0x00, 0x39, 0x00, 0x37, 0x00, 0x31, 0x00, 0x32, 0x00,
-        0x2d, 0x00, 0x37, 0x00, 0x38, 0x00, 0x33, 0x00, 0x2d, 0x00, 0x30, 0x00, 0x33, 0x00, 0x35, 0x00, 0x37, 0x00,
-        0x39, 0x00, 0x37, 0x00, 0x34, 0x00, 0x2d, 0x00, 0x34, 0x00, 0x32, 0x00, 0x37, 0x00, 0x31, 0x00, 0x34, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0xc0, 0x0c, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x02, 0xc0, 0x0c, 0x00, 0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xc0, 0x2c, 0x00, 0x03, 0x00,
-        0x00, 0x00, 0x72, 0x64, 0x70, 0x64, 0x72, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x80, 0x63, 0x6c, 0x69, 0x70,
-        0x72, 0x64, 0x72, 0x00, 0x00, 0x00, 0xa0, 0xc0, 0x72, 0x64, 0x70, 0x73, 0x6e, 0x64, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0xc0,
-    ];
-    const TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET: [u8; 12] =
-        [0x03, 0x00, 0x00, 0x0c, 0x02, 0xf0, 0x80, 0x04, 0x01, 0x00, 0x01, 0x00];
-    const TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET: [u8; 8] = [0x03, 0x00, 0x00, 0x08, 0x02, 0xf0, 0x80, 0x28];
-    const TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET: [u8; 94] = [
-        0x03, 0x00, 0x00, 0x5e, 0x02, 0xf0, 0x80, 0x64, 0x00, 0x06, 0x03, 0xeb, 0x70, 0x50, 0x01, 0x02, 0x00, 0x00,
-        0x48, 0x00, 0x00, 0x00, 0x91, 0xac, 0x0c, 0x8f, 0x64, 0x8c, 0x39, 0xf4, 0xe7, 0xff, 0x0a, 0x3b, 0x79, 0x11,
-        0x5c, 0x13, 0x51, 0x2a, 0xcb, 0x72, 0x8f, 0x9d, 0xb7, 0x42, 0x2e, 0xf7, 0x08, 0x4c, 0x8e, 0xae, 0x55, 0x99,
-        0x62, 0xd2, 0x81, 0x81, 0xe4, 0x66, 0xc8, 0x05, 0xea, 0xd4, 0x73, 0x06, 0x3f, 0xc8, 0x5f, 0xaf, 0x2a, 0xfd,
-        0xfc, 0xf1, 0x64, 0xb3, 0x3f, 0x0a, 0x15, 0x1d, 0xdb, 0x2c, 0x10, 0x9d, 0x30, 0x11, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-    ];
-    const FASTPATH_PACKET: [u8; 17] = [
-        0xc4, 0x11, 0x30, 0x35, 0x6b, 0x5b, 0xb5, 0x34, 0xc8, 0x47, 0x26, 0x18, 0x5e, 0x76, 0x0e, 0xde, 0x28,
-    ];
-
-    #[test]
-    fn correct_reads_single_tpkt_packet() {
-        let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        let mut data = packet.clone();
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(1, messages.len());
-        assert_eq!(packet, messages.first().unwrap().to_owned());
+impl DvcManager {
+    fn new() -> Self {
+        Self {
+            dynamic_channels: HashMap::new(),
+        }
     }
 
-    #[test]
-    fn correct_reads_single_fastpath_packet() {
-        let packet = FASTPATH_PACKET.to_vec();
-        let mut data = packet.clone();
+    fn process(&mut self, pdu_souce: PduSource, svc_data: &mut Vec<u8>) -> Result<Option<Vec<u8>>, vc::ChannelError> {
+        let svc_header = vc::ChannelPduHeader::from_buffer(svc_data.as_slice())?;
+        let dvc_data: Vec<u8> = svc_data.drain(svc_header.buffer_length()..).collect();
+        if svc_header.total_length as usize != dvc_data.len() {
+            return Err(vc::ChannelError::InvalidChannelTotalDataLength);
+        }
 
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(1, messages.len());
-        assert_eq!(packet, messages.first().unwrap().to_owned());
+        let dvc_pdu = match pdu_souce {
+            PduSource::Client => {
+                let client_dvc_pdu = dvc::ClientPdu::from_buffer(dvc_data.as_slice())?;
+                match client_dvc_pdu {
+                    dvc::ClientPdu::CapabilitiesResponse(caps_response) => {
+                        info!("DVC version client response - {:?}", caps_response.version);
+                        None
+                    }
+                    dvc::ClientPdu::CreateResponse(create_request) => {
+                        if DVC_CREATION_STATUS_OK != create_request.creation_status {
+                            // remove requested DVC if client could not create it
+                            let channel_name = self
+                                .dynamic_channels
+                                .remove(&create_request.channel_id)
+                                .map_or("unknown".to_string(), |channel| channel.name);
+
+                            info!("Closing of {} DVC with {} ID", channel_name, create_request.channel_id);
+                        }
+
+                        None
+                    }
+                    dvc::ClientPdu::DataFirst(mut data_first) => {
+                        match self.dynamic_channels.get_mut(&data_first.channel_id) {
+                            Some(channel) => channel.process_data_first_pdu(pdu_souce, &mut data_first),
+                            None => {
+                                error!("DVC with {} ID is not created", data_first.channel_id);
+                                None
+                            }
+                        }
+                    }
+                    dvc::ClientPdu::Data(mut data) => {
+                        let is_complete_message = svc_header
+                            .flags
+                            .contains(vc::ChannelControlFlags::FLAG_FIRST | vc::ChannelControlFlags::FLAG_LAST);
+
+                        match self.dynamic_channels.get_mut(&data.channel_id) {
+                            Some(channel) => channel.process_data_pdu(pdu_souce, &mut data, is_complete_message),
+                            None => {
+                                error!("DVC with {} ID is not created", data.channel_id);
+                                None
+                            }
+                        }
+                    }
+                    dvc::ClientPdu::CloseResponse(close_response) => {
+                        // remove DVC only here, because the client also can initiate DVC closing
+                        let channel_name = self
+                            .dynamic_channels
+                            .remove(&close_response.channel_id)
+                            .map_or("unknown".to_string(), |channel| channel.name);
+
+                        info!("Closing of {} DVC with {} ID", channel_name, close_response.channel_id);
+                        None
+                    }
+                }
+            }
+            PduSource::Server => {
+                let server_dvc_pdu = dvc::ServerPdu::from_buffer(dvc_data.as_slice())?;
+                match server_dvc_pdu {
+                    dvc::ServerPdu::CapabilitiesRequest(caps_request) => {
+                        info!("DVC version server request - {:?}", caps_request);
+                        None
+                    }
+                    dvc::ServerPdu::CreateRequest(create_request) => {
+                        self.dynamic_channels.insert(
+                            create_request.channel_id,
+                            DynamicChannel::new(create_request.channel_name.clone()),
+                        );
+                        info!(
+                            "Creating of {} DVC with {} ID",
+                            create_request.channel_name, create_request.channel_id
+                        );
+                        None
+                    }
+                    dvc::ServerPdu::DataFirst(mut data_first) => {
+                        match self.dynamic_channels.get_mut(&data_first.channel_id) {
+                            Some(channel) => channel.process_data_first_pdu(pdu_souce, &mut data_first),
+                            None => {
+                                error!("DVC with {} ID is not created", data_first.channel_id);
+                                None
+                            }
+                        }
+                    }
+                    dvc::ServerPdu::Data(mut data) => {
+                        let is_complete_message = svc_header
+                            .flags
+                            .contains(vc::ChannelControlFlags::FLAG_FIRST | vc::ChannelControlFlags::FLAG_LAST);
+
+                        match self.dynamic_channels.get_mut(&data.channel_id) {
+                            Some(channel) => channel.process_data_pdu(pdu_souce, &mut data, is_complete_message),
+                            None => {
+                                error!("DVC with {} ID is not created", data.channel_id);
+                                None
+                            }
+                        }
+                    }
+                    dvc::ServerPdu::CloseRequest(_) => {
+                        // nothing to do because the client must send a response
+                        None
+                    }
+                }
+            }
+        };
+
+        Ok(dvc_pdu)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct DynamicChannel {
+    name: String,
+    client_data: CompleteData,
+    server_data: CompleteData,
+}
+
+impl DynamicChannel {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            client_data: CompleteData::new(),
+            server_data: CompleteData::new(),
+        }
     }
 
-    #[test]
-    fn does_not_read_incomplete_tpkt_packet() {
-        let mut packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        packet.split_off(3);
-        let mut data = packet.clone();
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
+    fn process_data_first_pdu(&mut self, pdu_souce: PduSource, data_first: &mut dvc::DataFirstPdu) -> Option<Vec<u8>> {
+        match pdu_souce {
+            PduSource::Client => self.client_data.process_data_first_pdu(data_first),
+            PduSource::Server => self.server_data.process_data_first_pdu(data_first),
+        }
     }
 
-    #[test]
-    fn does_not_reads_incomplete_fastpath_packet() {
-        let mut packet = FASTPATH_PACKET.to_vec();
-        packet.split_off(3);
-        let mut data = packet.clone();
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
+    fn process_data_pdu(
+        &mut self,
+        pdu_souce: PduSource,
+        data: &mut dvc::DataPdu,
+        is_complete_message: bool,
+    ) -> Option<Vec<u8>> {
+        match pdu_souce {
+            PduSource::Client => self.client_data.process_data_pdu(data, is_complete_message),
+            PduSource::Server => self.server_data.process_data_pdu(data, is_complete_message),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct CompleteData {
+    total_length: u32,
+    data: Vec<u8>,
+}
+
+impl CompleteData {
+    fn new() -> Self {
+        Self {
+            total_length: 0,
+            data: Vec::new(),
+        }
     }
 
-    #[test]
-    fn does_not_read_incomplete_pocket_on_multiple_calls() {
-        let mut packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        packet.split_off(3);
-        let mut data = packet.clone();
+    fn process_data_first_pdu(&mut self, data_first: &mut dvc::DataFirstPdu) -> Option<Vec<u8>> {
+        if self.total_length != 0 || !self.data.is_empty() {
+            error!("Incomplete DVC message. It will be skipped.");
+            self.data.clear();
+        }
+        self.total_length = data_first.data_length;
+        self.data.append(&mut data_first.dvc_data);
 
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
+        None
     }
 
-    #[test]
-    fn reads_packet_on_second_call_after_incomplete_read() {
-        let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        let (packet_first_part, packet_second_part) = packet.split_at(3);
-        let mut data = packet_first_part.to_vec();
+    fn process_data_pdu(&mut self, data: &mut dvc::DataPdu, is_complete_message: bool) -> Option<Vec<u8>> {
+        if is_complete_message {
+            Some(data.dvc_data.clone())
+        } else {
+            // message is fragmented so need to reassemble it
+            let actual_data_length = self.data.len() + data.dvc_data.len();
 
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
+            match actual_data_length.cmp(&(self.total_length as usize)) {
+                Ordering::Less => {
+                    // this is one of the fragmented messages, just append it
+                    self.data.append(&mut data.dvc_data);
+                    None
+                }
+                Ordering::Equal => {
+                    // this is the last fragmented message, need to return the whole reassembled message
+                    self.total_length = 0;
+                    self.data.append(&mut data.dvc_data);
+                    Some(self.data.drain(..).collect())
+                }
+                Ordering::Greater => {
+                    error!("Actual DVC message size is grater than expected total DVC message size");
+                    self.total_length = 0;
+                    self.data.clear();
 
-        data.extend(packet_second_part);
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(1, messages.len());
-        assert_eq!(packet, messages.first().unwrap().to_owned());
-    }
-
-    #[test]
-    fn reads_multiple_packets_after_incomplete_call() {
-        let first_packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        let second_packet = FASTPATH_PACKET.to_vec();
-        let (first_packet_first_part, second_packet_second_part) = first_packet.split_at(3);
-        let mut data = first_packet_first_part.to_vec();
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert!(messages.is_empty());
-
-        data.extend(second_packet_second_part);
-        data.extend_from_slice(second_packet.as_ref());
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(2, messages.len());
-        assert_eq!(first_packet, messages.first().unwrap().to_owned());
-        assert_eq!(second_packet, messages.last().unwrap().to_owned());
-    }
-
-    #[test]
-    fn reads_bunch_of_packets() {
-        let packets = vec![
-            TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET.to_vec(),
-            FASTPATH_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET.to_vec(),
-        ];
-        let mut data = packets.iter().cloned().flatten().collect::<Vec<_>>();
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(packets, messages);
-    }
-
-    #[test]
-    fn reads_bunch_of_packets_with_last_incomplete_pockets() {
-        let mut incomplete_packet = TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET.to_vec();
-        incomplete_packet.split_off(3);
-        let mut packets = vec![
-            TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET.to_vec(),
-            FASTPATH_PACKET.to_vec(),
-            TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET.to_vec(),
-            incomplete_packet,
-        ];
-        let mut data = packets.iter().cloned().flatten().collect::<Vec<_>>();
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(packets.len() - 1, messages.len());
-        packets.pop();
-        assert_eq!(packets, messages);
-    }
-
-    #[test]
-    fn reads_windows_style_first_bunch_of_packets() {
-        let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-        let mut data = vec![0x00; 4];
-        data.extend_from_slice(packet.as_ref());
-
-        let messages = RdpMessageReader::get_messages(&mut data);
-        assert_eq!(1, messages.len());
-        assert_eq!(packet, messages.first().unwrap().to_owned());
+                    None
+                }
+            }
+        }
     }
 }
