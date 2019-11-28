@@ -2,6 +2,7 @@ use std::{
     io,
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
+    collections::HashMap,
 };
 
 use futures::{future::Either, Future, Stream};
@@ -10,7 +11,7 @@ use spsc_bip_buffer::bip_buffer_with_len;
 
 use crate::{
     config::{Config, Protocol},
-    interceptor::{pcap::PcapInterceptor, rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader},
+    interceptor::{pcap::PcapInterceptor, rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader, MessageReader},
     transport::{FinishForwardFuture, ForwardFutureResult, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
@@ -28,6 +29,32 @@ impl Proxy {
         &self,
         server_transport: T,
         client_transport: U,
+    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+        match self.config.protocol() {
+            Protocol::WAYK => {
+                info!("WaykMessageReader will be used to interpret application protocol.");
+                self.build_with_message_reader(server_transport, client_transport, WaykMessageReader)
+            }
+            Protocol::RDP => {
+                info!("RdpMessageReader will be used to interpret application protocol");
+                self.build_with_message_reader(
+                    server_transport,
+                    client_transport,
+                    RdpMessageReader::new(HashMap::new()),
+                )
+            }
+            Protocol::UNKNOWN => {
+                warn!("Protocol is unknown. Data received will not be split to get application message.");
+                self.build_with_message_reader(server_transport, client_transport, UnknownMessageReader)
+            }
+        }
+    }
+
+    pub fn build_with_message_reader<T: Transport, U: Transport, M: 'static + MessageReader>(
+        &self,
+        server_transport: T,
+        client_transport: U,
+        message_reader: M,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
@@ -55,20 +82,7 @@ impl Proxy {
                 path.to_str().expect("path to pcap files must be valid"),
             );
 
-            match self.config.protocol() {
-                Protocol::WAYK => {
-                    info!("WaykMessageReader will be used to interpret application protocol.");
-                    interceptor.set_message_reader(WaykMessageReader::get_messages);
-                }
-                Protocol::RDP => {
-                    info!("RdpMessageReader will be used to interpret application protocol");
-                    interceptor.set_message_reader(RdpMessageReader::get_messages);
-                }
-                Protocol::UNKNOWN => {
-                    warn!("Protocol is unknown. Data received will not be split to get application message.");
-                    interceptor.set_message_reader(UnknownMessageReader::get_messages);
-                }
-            }
+            interceptor.set_message_reader(message_reader);
 
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
             jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));

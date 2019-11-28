@@ -15,7 +15,7 @@ use ironrdp::{
     gcc, mcs,
     nego::{Request, Response, ResponseData, ResponseFlags, SecurityProtocol},
     rdp::{
-        self, capability_sets,
+        self, capability_sets, vc,
         server_license::{
             InitialMessageType, InitialServerLicenseMessage, LicenseErrorCode, LicenseHeader, LicensingErrorMessage,
             LicensingStateTransition, PreambleFlags, PreambleType, PreambleVersion, PREAMBLE_SIZE,
@@ -55,9 +55,13 @@ const MCS_IO_CHANNEL_ID: u16 = 1003;
 const MCS_STATIC_CHANNELS_START_ID: u16 = 1004;
 const SHARE_ID: u32 = 66_538;
 const SERVER_PDU_SOURCE: u16 = 0x03ea;
+const CHANNEL_INITIATOR_ID: u16 = 1002;
+const DRDYNVC_CHANNEL_ID: u16 = 1007;
+const GRAPHICS_DVC_ID: u32 = 0x06;
 
 const PUBLIC_CERT_PATH: &str = "src/cert/publicCert.pem";
 const PRIVATE_CERT_PATH: &str = "src/cert/private.pem";
+const GRAPHICS_CHANNEL_NAME: &str = "Microsoft::Windows::RDS::Graphics";
 
 fn run_client() -> Child {
     let mut client_command = Command::new(IRONRDP_CLIENT_PATH);
@@ -205,6 +209,8 @@ impl RdpServer {
         let client_pdu_source = self.capabilities_exchange(&mut rustls_stream, client_color_depth);
 
         self.finalization(&mut rustls_stream, client_pdu_source);
+
+        self.dvc_messages_exchange(&mut rustls_stream);
     }
 
     fn x224(&self, mut stream: &mut TcpStream) {
@@ -253,6 +259,14 @@ impl RdpServer {
         self.write_granted_control_pdu(&mut tls_stream);
         self.read_font_list(&mut tls_stream);
         self.write_font_map(&mut tls_stream);
+    }
+
+    fn dvc_messages_exchange(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        thread::sleep(Duration::from_millis(10));
+        self.write_dvc_caps_version(&mut tls_stream);
+        self.read_dvc_caps_version(&mut tls_stream);
+        self.write_dvc_create_request(&mut tls_stream);
+        self.read_dvc_create_response(&mut tls_stream);
     }
 
     fn read_negotiation_request(&self, stream: &mut TcpStream) {
@@ -339,7 +353,7 @@ impl RdpServer {
         assert_eq!(gcc_blocks.core.version, gcc::RdpVersion::V5Plus);
         assert_eq!(
             gcc_blocks.core.optional_data.early_capability_flags,
-            Some(gcc::ClientEarlyCapabilityFlags::empty())
+            Some(gcc::ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL)
         );
         assert_eq!(gcc_blocks.security, gcc::ClientSecurityData::no_security());
         assert!(gcc_blocks.cluster.is_none());
@@ -714,6 +728,60 @@ impl RdpServer {
         ));
         encode_and_write_finalization_pdu(pdu, MCS_INITIATOR_ID, MCS_IO_CHANNEL_ID, &mut tls_stream);
     }
+
+    fn write_dvc_caps_version(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        let caps_request_pdu = vc::dvc::ServerPdu::CapabilitiesRequest(vc::dvc::CapabilitiesRequestPdu::V1);
+        let mut caps_request_buffer = Vec::with_capacity(caps_request_pdu.buffer_length());
+        caps_request_pdu
+            .to_buffer(&mut caps_request_buffer)
+            .expect("failed to write dvc caps request");
+
+        write_dvc_pdu(caps_request_buffer, &mut tls_stream);
+    }
+
+    fn read_dvc_caps_version(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        let check_caps_response = |channel_data_buffer: Vec<u8>| {
+            match vc::dvc::ClientPdu::from_buffer(channel_data_buffer.as_slice()) {
+                Ok(vc::dvc::ClientPdu::CapabilitiesResponse(caps_response)) => {
+                    assert_eq!(vc::dvc::CapsVersion::V1, caps_response.version);
+                }
+                Ok(pdu) => panic!("Got unexpected DVC client PDU: {:?}", pdu),
+                Err(err) => panic!("failed to read dvc caps response: {:?}", err),
+            };
+        };
+
+        read_dvc_pdu(check_caps_response, &mut tls_stream);
+    }
+
+    fn write_dvc_create_request(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        let create_request_pdu = vc::dvc::ServerPdu::CreateRequest(vc::dvc::CreateRequestPdu {
+            channel_id_type: vc::dvc::FieldType::U8,
+            channel_id: GRAPHICS_DVC_ID,
+            channel_name: GRAPHICS_CHANNEL_NAME.to_string(),
+        });
+
+        let mut create_request_buffer = Vec::with_capacity(create_request_pdu.buffer_length());
+        create_request_pdu
+            .to_buffer(&mut create_request_buffer)
+            .expect("failed to write dvc create request");
+
+        write_dvc_pdu(create_request_buffer, &mut tls_stream);
+    }
+
+    fn read_dvc_create_response(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
+        let check_create_response = |channel_data_buffer: Vec<u8>| {
+            match vc::dvc::ClientPdu::from_buffer(channel_data_buffer.as_slice()) {
+                Ok(vc::dvc::ClientPdu::CreateResponse(create_response)) => {
+                    assert_eq!(GRAPHICS_DVC_ID, create_response.channel_id);
+                    assert_eq!(vc::dvc::DVC_CREATION_STATUS_OK, create_response.creation_status);
+                }
+                Ok(pdu) => panic!("Got unexpected DVC client PDU: {:?}", pdu),
+                Err(err) => panic!("failed to read dvc caps response: {:?}", err),
+            };
+        };
+
+        read_dvc_pdu(check_create_response, &mut tls_stream);
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -947,4 +1015,46 @@ fn auth_identity_to_credentials(auth_identity: sspi::AuthIdentity) -> ironrdp::r
         password: auth_identity.password,
         domain: auth_identity.domain,
     }
+}
+
+fn write_dvc_pdu(mut pdu: Vec<u8>, mut tls_stream: &mut (impl io::Write + io::Read)) {
+    let channel_header = vc::ChannelPduHeader {
+        total_length: pdu.len() as u32,
+        flags: vc::ChannelControlFlags::FLAG_FIRST | vc::ChannelControlFlags::FLAG_LAST,
+    };
+
+    let mut channel_buffer = Vec::with_capacity(channel_header.buffer_length() + pdu.len());
+    channel_header
+        .to_buffer(&mut channel_buffer)
+        .expect("failed to write channel header");
+
+    channel_buffer.append(&mut pdu);
+
+    let send_data_context_pdu = SendDataContext::new(channel_buffer, CHANNEL_INITIATOR_ID, DRDYNVC_CHANNEL_ID);
+
+    write_x224_data_pdu(McsPdu::SendDataIndication(send_data_context_pdu), &mut tls_stream);
+}
+
+fn read_dvc_pdu(check_dvc: impl Fn(Vec<u8>), mut tls_stream: &mut (impl io::Write + io::Read)) {
+    let mut buffer = read_stream_buffer(&mut tls_stream);
+    match read_x224_data_pdu::<McsPdu>(&mut buffer) {
+        McsPdu::SendDataRequest(data_context) => {
+            assert_eq!(CHANNEL_INITIATOR_ID, data_context.initiator_id);
+            assert_eq!(DRDYNVC_CHANNEL_ID, data_context.channel_id);
+
+            let mut channel_data_buffer = data_context.pdu;
+            let channel_header = vc::ChannelPduHeader::from_buffer(channel_data_buffer.as_slice())
+                .expect("failed to read channel header");
+
+            channel_data_buffer.drain(..channel_header.buffer_length());
+
+            assert_eq!(channel_header.total_length, channel_data_buffer.len() as u32);
+            assert!(channel_header
+                .flags
+                .contains(vc::ChannelControlFlags::FLAG_FIRST | vc::ChannelControlFlags::FLAG_LAST));
+
+            check_dvc(channel_data_buffer);
+        }
+        pdu => panic!("Got unexpected MCS PDU: {:?}", pdu),
+    };
 }
