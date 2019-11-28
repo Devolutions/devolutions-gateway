@@ -8,7 +8,16 @@ pub trait PacketInterceptor: Send + Sync {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
 }
 
-type MessageReader = dyn Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync;
+pub trait MessageReader: Send + Sync {
+    fn get_messages(&mut self, data: &mut Vec<u8>, source: PduSource) -> Vec<Vec<u8>>;
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum PduSource {
+    Client,
+    Server,
+}
+
 pub struct PeerInfo {
     pub addr: SocketAddr,
     pub sequence_number: u32,
@@ -26,8 +35,8 @@ impl PeerInfo {
 }
 
 pub struct UnknownMessageReader;
-impl UnknownMessageReader {
-    pub fn get_messages(data: &mut Vec<u8>) -> Vec<Vec<u8>> {
+impl MessageReader for UnknownMessageReader {
+    fn get_messages(&mut self, data: &mut Vec<u8>, _source: PduSource) -> Vec<Vec<u8>> {
         let mut result = Vec::new();
         result.push(data.clone());
         data.clear();
@@ -36,8 +45,8 @@ impl UnknownMessageReader {
 }
 
 pub struct WaykMessageReader;
-impl WaykMessageReader {
-    pub fn get_messages(data: &mut Vec<u8>) -> Vec<Vec<u8>> {
+impl MessageReader for WaykMessageReader {
+    fn get_messages(&mut self, data: &mut Vec<u8>, _source: PduSource) -> Vec<Vec<u8>> {
         let mut messages = Vec::new();
 
         loop {

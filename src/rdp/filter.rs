@@ -1,6 +1,6 @@
 use ironrdp::{
     gcc, nego,
-    rdp::{ClientInfoFlags, Credentials},
+    rdp::{capability_sets, ClientInfoFlags, Credentials},
     CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive,
 };
 
@@ -82,5 +82,12 @@ impl Filter for DemandActive {
             | CapabilitySet::DesktopComposition(_) => false,
             _ => true,
         });
+
+        if let Some(CapabilitySet::VirtualChannel(capset)) = self.capability_sets.iter_mut().find(|c| match c {
+            CapabilitySet::VirtualChannel(_) => true,
+            _ => false,
+        }) {
+            capset.flags = capability_sets::VirtualChannelFlags::NO_COMPRESSION;
+        }
     }
 }

@@ -1,6 +1,3 @@
-use crate::interceptor::MessageReader;
-use crate::interceptor::UnknownMessageReader;
-use crate::interceptor::{PacketInterceptor, PeerInfo};
 use packet::builder::Builder;
 use packet::ether::Builder as BuildEthernet;
 use packet::ether::Protocol;
@@ -12,6 +9,8 @@ use std::fs::File;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use crate::interceptor::{MessageReader, PacketInterceptor, PduSource, PeerInfo, UnknownMessageReader};
+
 const TCP_IP_PACKET_MAX_SIZE: usize = 16384;
 
 #[derive(Clone)]
@@ -19,7 +18,7 @@ pub struct PcapInterceptor {
     pcap_writer: Arc<Mutex<PcapWriter<File>>>,
     server_info: Arc<Mutex<PeerInfo>>,
     client_info: Arc<Mutex<PeerInfo>>,
-    message_reader: Arc<Box<MessageReader>>,
+    message_reader: Arc<Mutex<dyn MessageReader>>,
 }
 
 impl PcapInterceptor {
@@ -31,15 +30,12 @@ impl PcapInterceptor {
             server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
             client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
             pcap_writer: Arc::new(Mutex::new(pcap_writer)),
-            message_reader: Arc::new(Box::new(UnknownMessageReader::get_messages)),
+            message_reader: Arc::new(Mutex::new(UnknownMessageReader)),
         }
     }
 
-    pub fn set_message_reader<F: 'static + Fn(&mut Vec<u8>) -> Vec<Vec<u8>> + Send + Sync>(
-        &mut self,
-        message_reader: F,
-    ) {
-        self.message_reader = Arc::new(Box::new(message_reader));
+    pub fn set_message_reader<T: 'static + MessageReader>(&mut self, message_reader: T) {
+        self.message_reader = Arc::new(Mutex::new(message_reader));
     }
 }
 
@@ -49,12 +45,13 @@ impl PacketInterceptor for PcapInterceptor {
 
         let mut server_info = self.server_info.lock().unwrap();
         let mut client_info = self.client_info.lock().unwrap();
+        let mut message_reader = self.message_reader.lock().unwrap();
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         let (messages, source_addr, dest_addr, seq_number, ack_number) = if is_from_server {
             server_info.data.append(&mut data.to_vec());
             (
-                (self.message_reader)(&mut server_info.data),
+                message_reader.get_messages(&mut server_info.data, PduSource::Server),
                 server_info.addr,
                 client_info.addr,
                 &mut client_info.sequence_number,
@@ -63,7 +60,7 @@ impl PacketInterceptor for PcapInterceptor {
         } else {
             client_info.data.append(&mut data.to_vec());
             (
-                (self.message_reader)(&mut client_info.data),
+                message_reader.get_messages(&mut client_info.data, PduSource::Client),
                 client_info.addr,
                 server_info.addr,
                 &mut server_info.sequence_number,

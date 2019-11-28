@@ -7,17 +7,15 @@ use ironrdp::{
     ShareControlHeader, ShareControlPdu,
 };
 use slog_scope::{debug, trace, warn};
-use tokio::{codec::Framed, net::tcp::TcpStream};
+use tokio::net::tcp::TcpStream;
 use tokio_rustls::TlsStream;
 
-use super::{FutureState, NextStream, SequenceFutureProperties};
+use super::{FutureState, McsFutureTransport, NextStream, SequenceFutureProperties};
 use crate::{
     rdp::filter::{Filter, FilterConfig},
     transport::mcs::McsTransport,
 };
 use licensing::{process_challenge, process_license_request, process_upgrade_license, LicenseCredentials, LicenseData};
-
-type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 
 pub struct PostMcs {
     sequence_state: SequenceState,

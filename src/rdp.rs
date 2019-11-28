@@ -1,9 +1,13 @@
 mod connection_sequence_future;
+mod dvc_manager;
 mod filter;
 mod identities_proxy;
 mod sequence_future;
 
-pub use identities_proxy::{IdentitiesProxy, RdpIdentity};
+pub use self::{
+    dvc_manager::DvcManager,
+    identities_proxy::{IdentitiesProxy, RdpIdentity},
+};
 
 use std::{io, sync::Arc};
 
@@ -16,7 +20,7 @@ use url::Url;
 use self::{
     connection_sequence_future::ConnectionSequenceFuture, sequence_future::create_downgrade_dvc_capabilities_future,
 };
-use crate::{config::Config, transport::tcp::TcpTransport, utils, Proxy};
+use crate::{config::Config, interceptor::rdp::RdpMessageReader, transport::tcp::TcpTransport, utils, Proxy};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -71,13 +75,16 @@ impl RdpClient {
                         .get(DR_DYN_VC_CHANNEL_NAME)
                         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "DVC channel was not joined"))?;
 
-                    Ok(create_downgrade_dvc_capabilities_future(
-                        client_transport,
-                        server_transport,
-                        *drdynvc_channel_id,
+                    Ok((
+                        create_downgrade_dvc_capabilities_future(
+                            client_transport,
+                            server_transport,
+                            *drdynvc_channel_id,
+                        ),
+                        joined_static_channels,
                     ))
                 })
-                .and_then(|downgrade_dvc_capabilities_future| {
+                .and_then(|(downgrade_dvc_capabilities_future, joined_static_channels)| {
                     downgrade_dvc_capabilities_future
                         .map_err(|e| {
                             io::Error::new(
@@ -101,7 +108,11 @@ impl RdpClient {
                                 .join(write_all(server_tls, client_read_buf))
                                 .and_then(|((client_tls, _), (server_tls, _))| {
                                     Proxy::new(config_clone)
-                                        .build(TcpTransport::new_tls(server_tls), TcpTransport::new_tls(client_tls))
+                                        .build_with_message_reader(
+                                            TcpTransport::new_tls(server_tls),
+                                            TcpTransport::new_tls(client_tls),
+                                            RdpMessageReader::new(joined_static_channels),
+                                        )
                                         .map_err(move |e| {
                                             error!("Proxy error: {}", e);
                                             e
