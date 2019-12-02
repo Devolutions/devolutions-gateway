@@ -4,7 +4,7 @@ use jet_proto::Error;
 pub mod association;
 pub mod candidate;
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Serialize, Deserialize, Debug,Clone,PartialEq)]
 pub enum TransportType {
     Tcp,
     Tls,

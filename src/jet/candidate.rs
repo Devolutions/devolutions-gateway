@@ -5,6 +5,35 @@ use slog_scope::error;
 use crate::jet::TransportType;
 use crate::transport::JetTransport;
 
+#[derive(Serialize, Deserialize)]
+pub struct CandidateResponse {
+    id: Uuid,
+    #[serde(with = "url_serde")]
+    url: Option<Url>,
+    state: CandidateState,
+    association_id: Uuid,
+    transport_type: TransportType,
+    bytes_sent: u64,
+    bytes_recv: u64,
+}
+
+impl From<Candidate> for CandidateResponse {
+    fn from(c: Candidate) -> Self {
+        let (bytes_sent, bytes_recv) =
+            c.client_transport.map(|transport|(transport.get_nb_bytes_read(), transport.get_nb_bytes_written()))
+                .unwrap_or((0, 0));
+
+        CandidateResponse {
+            id: c.id,
+            url: c.url,
+            state: c.state,
+            association_id: c.association_id,
+            transport_type: c.transport_type,
+            bytes_sent,
+            bytes_recv,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct Candidate {
     id: Uuid,
