@@ -1,7 +1,7 @@
 use chrono::serde::ts_seconds;
 use uuid::Uuid;
 use indexmap::IndexMap;
-use crate::jet::candidate::{Candidate, CandidateState};
+use crate::jet::candidate::{Candidate, CandidateState, CandidateResponse};
 use serde_json::Value;
 use chrono::{Utc, DateTime};
 
@@ -84,12 +84,14 @@ pub struct AssociationResponse {
     version: u8,
     bytes_sent: u64,
     bytes_recv: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidates: Option<Vec<CandidateResponse>>,
     #[serde(with = "ts_seconds")]
     creation_timestamp: DateTime<Utc>,
 }
 
-impl From<&Association> for AssociationResponse {
-    fn from(association: &Association) -> Self {
+impl AssociationResponse {
+    pub fn from(association: &Association, with_detail: bool) -> Self {
         let (client_bytes_sent, client_bytes_recv) = association.candidates.iter().find_map(|(_, candidate)| {
             if let Some(transport) = candidate.client_transport() {
                 let client_bytes_sent = transport.get_nb_bytes_read();
@@ -101,12 +103,19 @@ impl From<&Association> for AssociationResponse {
             None
         }).unwrap_or((0, 0));
 
+        let candidates: Option<Vec<CandidateResponse>> = if with_detail {
+            Some(association.candidates.iter().map(|(_, candidate)| candidate.clone().into()).collect())
+        } else {
+            None
+        };
+
         AssociationResponse {
             id: association.id,
             version: association.version,
             bytes_sent: client_bytes_sent,
             bytes_recv: client_bytes_recv,
-            creation_timestamp: association.creation_timestamp
+            candidates,
+            creation_timestamp: association.creation_timestamp,
         }
     }
 }

@@ -15,6 +15,7 @@ use crate::jet::candidate::Candidate;
 use tokio::timer::Delay;
 use futures::Future;
 use crate::http::controllers::utils::SyncResponseUtil;
+use std::collections::HashMap;
 
 struct ControllerData {
     config: Config,
@@ -48,13 +49,22 @@ impl Controller for JetController {
 }
 
 impl ControllerData {
-    fn get_associations(&self, _req: &SyncRequest, res: &mut SyncResponse) {
+    fn get_associations(&self, req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
-        let associations_response: Vec<AssociationResponse>;
+        let mut with_detail = false;
 
+        if let Some(query) = req.uri().query() {
+            if let Ok(params) = ::serde_urlencoded::from_str::<HashMap<String, String>>(query) {
+                if let Some(detail) = params.get("detail") {
+                    with_detail = detail.parse::<bool>().unwrap_or(false);
+                }
+            }
+        }
+
+        let associations_response: Vec<AssociationResponse>;
         if let Ok(associations) = self.jet_associations.lock() {
-            associations_response = associations.values().map(|association| association.into()).collect();
+            associations_response = associations.values().map(|association| AssociationResponse::from(association, with_detail)).collect();
         } else {
             res.status(StatusCode::INTERNAL_SERVER_ERROR);
             return;
