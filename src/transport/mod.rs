@@ -1,17 +1,21 @@
 use std::{
     io::{Read, Write},
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-use futures::{Async, Future, Sink, Stream};
-use tokio::io::{self, AsyncRead, AsyncWrite};
-use tokio_tcp::TcpStream;
+use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
+use slog_scope::{error, trace};
+use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
+use tokio::io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
+use tokio::net::tcp::TcpStream;
 use url::Url;
 
 use crate::interceptor::PacketInterceptor;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::ws::WsTransport;
+use crate::transport::{tcp::TcpTransport, ws::WsTransport};
 
 pub mod mcs;
 pub mod tcp;
@@ -23,12 +27,19 @@ pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
 pub type JetSinkType<T> = Box<dyn JetSink<SinkItem = T, SinkError = io::Error> + Send>;
 
+pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
+const PART_LEN: usize = 16 * 1024;
+
 pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
     where
         Self: Sized;
     fn peer_addr(&self) -> Option<SocketAddr>;
-    fn split_transport(self) -> (JetStreamType<Vec<u8>>, JetSinkType<Vec<u8>>);
+    fn split_transport(
+        self,
+        buffer_writer: BipBufferWriter,
+        buffer_reader: BipBufferReader,
+    ) -> (JetStreamType<usize>, JetSinkType<usize>);
 }
 
 pub enum JetTransport {
@@ -72,10 +83,14 @@ impl Transport for JetTransport {
         }
     }
 
-    fn split_transport(self) -> (JetStreamType<Vec<u8>>, JetSinkType<Vec<u8>>) {
+    fn split_transport(
+        self,
+        buffer_writer: BipBufferWriter,
+        buffer_reader: BipBufferReader,
+    ) -> (JetStreamType<usize>, JetSinkType<usize>) {
         match self {
-            JetTransport::Tcp(tcp_transport) => tcp_transport.split_transport(),
-            JetTransport::Ws(ws_transport) => ws_transport.split_transport(),
+            JetTransport::Tcp(tcp_transport) => tcp_transport.split_transport(buffer_writer, buffer_reader),
+            JetTransport::Ws(ws_transport) => ws_transport.split_transport(buffer_writer, buffer_reader),
         }
     }
 }
@@ -122,4 +137,164 @@ pub trait JetStream: Stream {
 
 pub trait JetSink: Sink {
     fn nb_bytes_written(&self) -> u64;
+}
+
+struct JetStreamImpl<T: AsyncRead> {
+    stream: ReadHalf<T>,
+    nb_bytes_read: Arc<AtomicU64>,
+    packet_interceptor: Option<Box<dyn PacketInterceptor>>,
+    peer_addr: Option<SocketAddr>,
+    peer_addr_str: String,
+    buffer: BipBufferWriter,
+}
+
+impl<T: AsyncRead> JetStreamImpl<T> {
+    fn new(
+        stream: ReadHalf<T>,
+        nb_bytes_read: Arc<AtomicU64>,
+        peer_addr: Option<SocketAddr>,
+        buffer: BipBufferWriter,
+    ) -> Self {
+        Self {
+            stream,
+            nb_bytes_read,
+            packet_interceptor: None,
+            peer_addr,
+            peer_addr_str: peer_addr.clone().map_or("Unknown".to_string(), |addr| addr.to_string()),
+            buffer,
+        }
+    }
+}
+
+impl<T: AsyncRead> Stream for JetStreamImpl<T> {
+    type Item = usize;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        let peer_addr = &self.peer_addr_str;
+        let mut written = 0;
+        loop {
+            if let Some(mut reservation) = self.buffer.reserve(PART_LEN) {
+                match self.stream.poll_read(reservation.as_mut()) {
+                    Ok(Async::Ready(0)) => {
+                        if written > 0 {
+                            return Ok(Async::Ready(Some(written)));
+                        } else {
+                            return Ok(Async::Ready(None));
+                        }
+                    }
+                    Ok(Async::Ready(len)) => {
+                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
+                            interceptor.on_new_packet(self.peer_addr, &reservation[..len]);
+                        }
+
+                        written += len;
+                        reservation.truncate(len);
+                        reservation.send();
+                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
+
+                        trace!("{} bytes read on {}", len, peer_addr);
+                    }
+                    Ok(Async::NotReady) => {
+                        if written > 0 {
+                            return Ok(Async::Ready(Some(written)));
+                        } else {
+                            return Ok(Async::NotReady);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Can't read on socket: {}", e);
+
+                        return Ok(Async::Ready(None));
+                    }
+                }
+            } else {
+                if written > 0 {
+                    return Ok(Async::Ready(Some(written)));
+                } else {
+                    panic!("at least one byte must be written before the reserve call is not ready");
+                }
+            }
+        }
+    }
+}
+
+impl<T: AsyncRead> JetStream for JetStreamImpl<T> {
+    fn nb_bytes_read(&self) -> u64 {
+        self.nb_bytes_read.load(Ordering::Relaxed)
+    }
+
+    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
+        self.packet_interceptor = Some(interceptor);
+    }
+}
+
+struct JetSinkImpl<T: AsyncWrite> {
+    stream: WriteHalf<T>,
+    nb_bytes_written: Arc<AtomicU64>,
+    peer_addr_str: String,
+    buffer: BipBufferReader,
+}
+
+impl<T: AsyncWrite> JetSinkImpl<T> {
+    fn new(
+        stream: WriteHalf<T>,
+        nb_bytes_written: Arc<AtomicU64>,
+        peer_addr: Option<SocketAddr>,
+        buffer: BipBufferReader,
+    ) -> Self {
+        Self {
+            stream,
+            nb_bytes_written,
+            peer_addr_str: peer_addr.map_or("Unknown".to_string(), |addr| addr.to_string()),
+            buffer,
+        }
+    }
+}
+
+impl<T: AsyncWrite> Sink for JetSinkImpl<T> {
+    type SinkItem = usize;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, mut bytes_read: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
+        let peer_addr = &self.peer_addr_str;
+        trace!("{} bytes to write on {}", bytes_read, peer_addr);
+
+        loop {
+            match self.stream.poll_write(self.buffer.valid()) {
+                Ok(Async::Ready(len)) => {
+                    if len > 0 {
+                        self.buffer.consume(len);
+                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
+                        bytes_read -= len;
+                    }
+                    trace!("{} bytes written on {}", len, peer_addr);
+
+                    if bytes_read == 0 {
+                        return Ok(AsyncSink::Ready);
+                    }
+                }
+                Ok(Async::NotReady) => return Ok(AsyncSink::NotReady(bytes_read)),
+                Err(e) => {
+                    error!("Can't write on socket: {}", e);
+
+                    return Ok(AsyncSink::Ready);
+                }
+            }
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.stream.poll_flush()
+    }
+
+    fn close(&mut self) -> Poll<(), Self::SinkError> {
+        self.stream.shutdown()
+    }
+}
+
+impl<T: AsyncWrite> JetSink for JetSinkImpl<T> {
+    fn nb_bytes_written(&self) -> u64 {
+        self.nb_bytes_written.load(Ordering::Relaxed)
+    }
 }

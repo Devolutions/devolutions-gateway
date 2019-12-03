@@ -2,14 +2,14 @@ use std::error::Error;
 use std::io::Cursor;
 use std::io::{ErrorKind, Read, Write};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use futures::future;
-use futures::{Async, AsyncSink, Future, Poll, Sink, Stream};
+use futures::{Async, Future};
 use hyper::upgrade::Upgraded;
-use slog_scope::{error, trace};
-use tokio::io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
+use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
+use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::TlsStream;
@@ -21,9 +21,7 @@ use tungstenite::Message;
 use tungstenite::{ClientHandshake, HandshakeError, ServerHandshake, WebSocket};
 use url::Url;
 
-use crate::interceptor::PacketInterceptor;
-use crate::transport::tcp::TCP_READ_LEN;
-use crate::transport::{JetFuture, JetSink, JetSinkType, JetStream, JetStreamType, Transport};
+use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
 use crate::utils::{danger_transport, url_to_socket_arr};
 
 pub struct WsStream {
@@ -300,98 +298,28 @@ impl Transport for WsTransport {
         self.stream.peer_addr()
     }
 
-    fn split_transport(self) -> (JetStreamType<Vec<u8>>, JetSinkType<Vec<u8>>) {
+    fn split_transport(
+        self,
+        buffer_writer: BipBufferWriter,
+        buffer_reader: BipBufferReader,
+    ) -> (JetStreamType<usize>, JetSinkType<usize>) {
         let peer_addr = self.peer_addr();
         let (reader, writer) = self.stream.split();
 
-        let stream = Box::new(WsJetStream::new(reader, self.nb_bytes_read, peer_addr.clone()));
-        let sink = Box::new(WsJetSink::new(writer, self.nb_bytes_written, peer_addr));
+        let stream = Box::new(JetStreamImpl::new(
+            reader,
+            self.nb_bytes_read,
+            peer_addr.clone(),
+            buffer_writer,
+        ));
+        let sink = Box::new(JetSinkImpl::new(
+            writer,
+            self.nb_bytes_written,
+            peer_addr,
+            buffer_reader,
+        ));
 
         (stream, sink)
-    }
-}
-
-struct WsJetStream {
-    stream: ReadHalf<WsStream>,
-    nb_bytes_read: Arc<AtomicU64>,
-    packet_interceptor: Option<Box<dyn PacketInterceptor>>,
-    buffer: Vec<u8>,
-    peer_addr: Option<SocketAddr>,
-}
-
-impl WsJetStream {
-    fn new(stream: ReadHalf<WsStream>, nb_bytes_read: Arc<AtomicU64>, peer_addr: Option<SocketAddr>) -> Self {
-        WsJetStream {
-            stream,
-            nb_bytes_read,
-            packet_interceptor: None,
-            buffer: vec![0; 8192],
-            peer_addr,
-        }
-    }
-}
-
-impl Stream for WsJetStream {
-    type Item = Vec<u8>;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let mut result = Vec::new();
-        while result.len() <= TCP_READ_LEN {
-            match self.stream.poll_read(&mut self.buffer) {
-                Ok(Async::Ready(0)) => {
-                    if result.len() > 0 {
-                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            interceptor.on_new_packet(self.peer_addr, &result);
-                        }
-
-                        return Ok(Async::Ready(Some(result)));
-                    }
-
-                    return Ok(Async::Ready(None));
-                }
-
-                Ok(Async::Ready(len)) => {
-                    self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
-                    trace!(
-                        "{} bytes read on {}",
-                        len,
-                        self.peer_addr.map_or("Unknown".to_string(), |addr| addr.to_string())
-                    );
-
-                    result.extend_from_slice(&self.buffer[..len]);
-                    if len == self.buffer.len() {
-                        continue;
-                    }
-
-                    if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                        interceptor.on_new_packet(self.peer_addr, &result);
-                    }
-
-                    return Ok(Async::Ready(Some(result)));
-                }
-
-                Ok(Async::NotReady) => {
-                    if result.len() > 0 {
-                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            interceptor.on_new_packet(self.peer_addr, &result);
-                        }
-
-                        return Ok(Async::Ready(Some(result)));
-                    }
-
-                    return Ok(Async::NotReady);
-                }
-
-                Err(e) => {
-                    error!("Can't read on socket: {}", e);
-
-                    return Ok(Async::Ready(None));
-                }
-            }
-        }
-
-        Ok(Async::Ready(Some(result)))
     }
 }
 
@@ -409,9 +337,7 @@ impl Future for TcpWebSocketServerHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -430,9 +356,7 @@ impl Future for TlsWebSocketServerHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -451,9 +375,7 @@ impl Future for TcpWebSocketClientHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -472,85 +394,8 @@ impl Future for TlsWebSocketClientHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
-    }
-}
-
-impl JetStream for WsJetStream {
-    fn nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read.load(Ordering::Relaxed)
-    }
-
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
-        self.packet_interceptor = Some(interceptor);
-    }
-}
-
-struct WsJetSink {
-    stream: WriteHalf<WsStream>,
-    nb_bytes_written: Arc<AtomicU64>,
-    peer_addr: Option<SocketAddr>,
-}
-
-impl WsJetSink {
-    fn new(stream: WriteHalf<WsStream>, nb_bytes_written: Arc<AtomicU64>, peer_addr: Option<SocketAddr>) -> Self {
-        WsJetSink {
-            stream,
-            nb_bytes_written,
-            peer_addr,
-        }
-    }
-}
-
-impl Sink for WsJetSink {
-    type SinkItem = Vec<u8>;
-    type SinkError = io::Error;
-
-    fn start_send(
-        &mut self,
-        mut item: <Self as Sink>::SinkItem,
-    ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
-        trace!("{} bytes to write on {}", item.len(), self.peer_addr.as_ref().unwrap());
-        match self.stream.poll_write(&item) {
-            Ok(Async::Ready(len)) => {
-                if len > 0 {
-                    self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
-                    item.drain(..len);
-                }
-                trace!("{} bytes written on {}", len, self.peer_addr.as_ref().unwrap());
-
-                if item.is_empty() {
-                    Ok(AsyncSink::Ready)
-                } else {
-                    futures::task::current().notify();
-
-                    Ok(AsyncSink::NotReady(item))
-                }
-            }
-            Ok(Async::NotReady) => Ok(AsyncSink::NotReady(item)),
-            Err(e) => {
-                error!("Can't write on socket: {}", e);
-
-                Ok(AsyncSink::Ready)
-            }
-        }
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.stream.poll_flush()
-    }
-
-    fn close(&mut self) -> Poll<(), Self::SinkError> {
-        Ok(Async::Ready(()))
-    }
-}
-
-impl JetSink for WsJetSink {
-    fn nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written.load(Ordering::Relaxed)
     }
 }
 

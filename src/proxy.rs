@@ -6,11 +6,12 @@ use std::{
 
 use futures::{Future, Stream};
 use slog_scope::{info, warn};
+use spsc_bip_buffer::bip_buffer_with_len;
 
 use crate::{
     config::{Config, Protocol},
     interceptor::{pcap::PcapInterceptor, rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader},
-    transport::Transport,
+    transport::{Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
 
@@ -28,10 +29,13 @@ impl Proxy {
         server_transport: T,
         client_transport: U,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+        let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
+        let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
+
         let server_peer_addr = server_transport.peer_addr().unwrap();
         let client_peer_addr = client_transport.peer_addr().unwrap();
-        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport();
-        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport();
+        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
+        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
         if let Some(pcap_files_path) = self.config.pcap_files_path() {
             let filename = format!(
@@ -78,11 +82,11 @@ impl Proxy {
 
         Box::new(
             f1.join(f2)
-                 .and_then(move |(( server_read_half,  client_write_half), ( client_read_half,  server_write_half))| {
-                     let server_nb_bytes_read = server_read_half.nb_bytes_read();
-                     let client_nb_bytes_read = client_read_half.nb_bytes_read();
-                     let server_nb_bytes_written = server_write_half.nb_bytes_written();
-                     let client_nb_bytes_written = client_write_half.nb_bytes_written();
+                 .and_then(move |(( jet_stream_server,  jet_sink_client), ( jet_stream_client, jet_sink_server))| {
+                     let server_nb_bytes_read = jet_stream_server.nb_bytes_read();
+                     let client_nb_bytes_read = jet_stream_client.nb_bytes_read();
+                     let server_nb_bytes_written = jet_sink_server.nb_bytes_written();
+                     let client_nb_bytes_written = jet_sink_client.nb_bytes_written();
 
                      info!(
                          "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
