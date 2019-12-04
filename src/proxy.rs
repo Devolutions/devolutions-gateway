@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use futures::{Future, Stream};
+use futures::{future::Either, Future, Stream};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 
@@ -81,29 +81,44 @@ impl Proxy {
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
         Box::new(
-            f1.join(f2)
-                 .and_then(move |(( jet_stream_server,  jet_sink_client), ( jet_stream_client, jet_sink_server))| {
-                     let server_nb_bytes_read = jet_stream_server.nb_bytes_read();
-                     let client_nb_bytes_read = jet_stream_client.nb_bytes_read();
-                     let server_nb_bytes_written = jet_sink_server.nb_bytes_written();
-                     let client_nb_bytes_written = jet_sink_client.nb_bytes_written();
+            f1.select2(f2)
+                .map_err(|either| match either {
+                    Either::A((e, _)) => e,
+                    Either::B((e, _)) => e,
+                })
+                .and_then(move |either| {
+                    let (server_nb_bytes_read, client_nb_bytes_written, client_nb_bytes_read, server_nb_bytes_written) =
+                        match either {
+                            Either::A(((jet_stream_server, jet_sink_client), forward_future)) => (
+                                jet_stream_server.nb_bytes_read(),
+                                jet_sink_client.nb_bytes_written(),
+                                forward_future.stream_ref().unwrap().nb_bytes_read(),
+                                forward_future.sink_ref().unwrap().nb_bytes_written(),
+                            ),
+                            Either::B(((jet_stream_client, jet_sink_server), forward_future)) => (
+                                forward_future.stream_ref().unwrap().nb_bytes_read(),
+                                forward_future.sink_ref().unwrap().nb_bytes_written(),
+                                jet_stream_client.nb_bytes_read(),
+                                jet_sink_server.nb_bytes_written(),
+                            ),
+                        };
 
-                     info!(
-                         "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-                         server_nb_bytes_read,
-                         client_nb_bytes_written,
-                         client_nb_bytes_read,
-                         server_nb_bytes_written,
-                         server = &server_peer_addr,
-                         client = &client_peer_addr
-                     );
+                         info!(
+                             "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+                             server_nb_bytes_read,
+                             client_nb_bytes_written,
+                             client_nb_bytes_read,
+                             server_nb_bytes_written,
+                             server = &server_peer_addr,
+                             client = &client_peer_addr
+                         );
 
-                     Ok(())
-                 })
-                 .then(|result| {
-                     SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-                     result
-                 }),
+                    Ok(())
+                })
+                .then(|result| {
+                    SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+                    result
+                }),
         )
     }
 }
