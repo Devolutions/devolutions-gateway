@@ -20,7 +20,7 @@ struct ConfigTemp {
     api_key: Option<String>,
     listeners: Vec<String>,
     jet_instance: Option<String>,
-    routing_url: Option<String>,
+    routing_url: Option<Url>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
@@ -50,7 +50,7 @@ pub struct Config {
     api_key: Option<String>,
     listeners: Vec<ListenerConfig>,
     jet_instance: String,
-    routing_url: Option<String>,
+    routing_url: Option<Url>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
@@ -77,7 +77,7 @@ impl Config {
         &self.jet_instance
     }
 
-    pub fn routing_url(&self) -> Option<&String> {
+    pub fn routing_url(&self) -> Option<&Url> {
         self.routing_url.as_ref()
     }
 
@@ -166,7 +166,12 @@ impl Config {
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
                     .takes_value(true)
-                    .empty_values(false),
+                    .empty_values(false)
+                    .validator(|v| if Url::parse(&v).is_ok() {
+                        Ok(())
+                    } else {
+                        Err(String::from("Expected <scheme>://<ip>:<port>, got invalid value"))
+                    }),
             )
             .arg(
                 Arg::with_name("pcap-files-path")
@@ -268,7 +273,9 @@ identities_file example:
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
 
-        let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
+        let routing_url = matches
+            .value_of("routing-url")
+            .map(|v| Url::parse(&v).expect("must be checked in the clap validator"));
 
         let pcap_files_path = matches
             .value_of("pcap-files-path")

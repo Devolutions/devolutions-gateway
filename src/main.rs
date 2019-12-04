@@ -155,15 +155,14 @@ fn start_tcp_server(url: Url, config: Arc<Config>, jet_associations: JetAssociat
         }
 
         if let Some(ref url) = config.routing_url() {
-            let routing_url = Url::parse(&url).expect("routing_url is invalid.");
-            logger = logger.new(o!( "scheme" => routing_url.scheme().to_string()));
+            logger = logger.new(o!( "scheme" => url.scheme().to_string()));
         }
         set_socket_option(&conn, &logger);
 
-        let routing_url_opt = config.routing_url().map(|url| Url::parse(&url).expect("routing_url is invalid."));
+        let routing_url_opt = config.routing_url();
 
         let config_clone = config.clone();
-        let client_fut = if let Some(ref routing_url) = routing_url_opt {
+        let client_fut = if let Some(routing_url) = routing_url_opt {
             match routing_url.scheme() {
                 "tcp" => {
                     let transport = TcpTransport::new(conn);
