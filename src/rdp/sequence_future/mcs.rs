@@ -3,9 +3,8 @@ use std::{collections::HashMap, io, iter};
 use bytes::BytesMut;
 use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
 use slog_scope::{debug, trace};
-use tokio::codec::Framed;
+use tokio::{codec::Framed, net::tcp::TcpStream};
 use tokio_rustls::TlsStream;
-use tokio_tcp::TcpStream;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{

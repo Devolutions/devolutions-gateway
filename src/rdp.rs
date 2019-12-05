@@ -9,8 +9,8 @@ use std::{io, sync::Arc};
 
 use futures::Future;
 use slog_scope::{error, info};
+use tokio::net::tcp::TcpStream;
 use tokio_rustls::TlsAcceptor;
-use tokio_tcp::TcpStream;
 use url::Url;
 
 use self::connection_sequence_future::ConnectionSequenceFuture;

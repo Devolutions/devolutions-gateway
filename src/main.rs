@@ -35,7 +35,7 @@ use slog_scope_futures::future01::FutureExt;
 use tokio::runtime::Runtime;
 use tokio::runtime::TaskExecutor;
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use tokio_tcp::{TcpListener, TcpStream};
+use tokio::net::tcp::{TcpListener, TcpStream};
 use url::Url;
 use x509_parser::pem::pem_to_der;
 

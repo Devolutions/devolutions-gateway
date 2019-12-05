@@ -7,9 +7,8 @@ use ironrdp::{
     ShareControlHeader, ShareControlPdu, ShareDataHeader, ShareDataPdu,
 };
 use slog_scope::{debug, trace, warn};
-use tokio::codec::Framed;
+use tokio::{codec::Framed, net::tcp::TcpStream};
 use tokio_rustls::TlsStream;
-use tokio_tcp::TcpStream;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{
