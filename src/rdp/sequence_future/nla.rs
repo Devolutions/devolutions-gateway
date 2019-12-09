@@ -14,10 +14,10 @@ use sspi::{
 };
 use tokio::{
     codec::{Decoder, Encoder, Framed},
+    net::tcp::TcpStream,
     prelude::*,
 };
 use tokio_rustls::{Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
-use tokio_tcp::TcpStream;
 
 use crate::{
     io_try,

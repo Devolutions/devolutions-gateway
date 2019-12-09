@@ -1,29 +1,28 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use tungstenite::{WebSocket, ServerHandshake, HandshakeError, ClientHandshake};
-use hyper::upgrade::Upgraded;
-use std::sync::{Mutex, Arc};
-use std::io::{Read, Write, ErrorKind};
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio::io;
-use crate::interceptor::PacketInterceptor;
-use futures::{Async, Stream, Sink, AsyncSink, Future};
-use crate::transport::{Transport, JetStreamType, JetSinkType, JetFuture, JetStream, JetSink};
-use url::Url;
-use slog_scope::{trace, error};
-use std::net::SocketAddr;
+use std::error::Error;
 use std::io::Cursor;
-use tungstenite::Message;
-use tungstenite::protocol::Role;
-use crate::utils::{danger_transport, url_to_socket_arr};
-use crate::transport::tcp::TCP_READ_LEN;
+use std::io::{ErrorKind, Read, Write};
+use std::net::SocketAddr;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
+use futures::future;
+use futures::{Async, Future};
+use hyper::upgrade::Upgraded;
+use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
+use tokio::io::{self, AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::TlsStream;
 use tungstenite::handshake::client::{Request, Response};
-use futures::future;
-use tungstenite::handshake::MidHandshake;
 use tungstenite::handshake::server::NoCallback;
-use std::error::Error;
+use tungstenite::handshake::MidHandshake;
+use tungstenite::protocol::Role;
+use tungstenite::Message;
+use tungstenite::{ClientHandshake, HandshakeError, ServerHandshake, WebSocket};
+use url::Url;
+
+use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
+use crate::utils::{danger_transport, url_to_socket_arr};
 
 pub struct WsStream {
     inner: WsStreamWrapper,
@@ -34,11 +33,6 @@ impl WsStream {
     #[inline]
     fn peer_addr(&self) -> Option<SocketAddr> {
         self.inner.peer_addr()
-    }
-
-    #[inline]
-    pub fn shutdown(&mut self) -> std::io::Result<()> {
-        self.inner.shutdown()
     }
 
     #[inline]
@@ -73,15 +67,6 @@ impl WsStreamWrapper {
     }
 
     #[inline]
-    pub fn shutdown(&mut self) -> std::io::Result<()> {
-        match self {
-            WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
-            WsStreamWrapper::Tcp((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
-            WsStreamWrapper::Tls((stream, _)) => stream.close(None).map(|()| ()).map_err(|_| io::Error::new(io::ErrorKind::NotFound, "".to_string())),
-        }
-    }
-
-    #[inline]
     pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self {
             WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
@@ -93,7 +78,6 @@ impl WsStreamWrapper {
 
 impl Read for WsStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-
         if let Some(message) = self.message.as_mut() {
             let read_size = message.read(buf)?;
             if message.position() == message.get_ref().len() as u64 {
@@ -173,25 +157,15 @@ impl AsyncWrite for WsStream {
 }
 
 pub struct WsTransport {
-    stream: Arc<Mutex<WsStream>>,
+    stream: WsStream,
     nb_bytes_read: Arc<AtomicU64>,
     nb_bytes_written: Arc<AtomicU64>,
-}
-
-impl Clone for WsTransport {
-    fn clone(&self) -> Self {
-        WsTransport {
-            stream: self.stream.clone(),
-            nb_bytes_read: self.nb_bytes_read.clone(),
-            nb_bytes_written: self.nb_bytes_written.clone(),
-        }
-    }
 }
 
 impl WsTransport {
     pub fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)).into())),
+            stream: WsStreamWrapper::Http((WebSocket::from_raw_socket(upgraded, Role::Server, None), addr)).into(),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -199,7 +173,7 @@ impl WsTransport {
 
     pub fn new_tcp(stream: WebSocket<TcpStream>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Tcp((stream, addr)).into())),
+            stream: WsStreamWrapper::Tcp((stream, addr)).into(),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -207,27 +181,24 @@ impl WsTransport {
 
     pub fn new_tls(stream: WebSocket<TlsStream<TcpStream>>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
-            stream: Arc::new(Mutex::new(WsStreamWrapper::Tls((stream, addr)).into())),
+            stream: WsStreamWrapper::Tls((stream, addr)).into(),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
     }
 
-    pub fn get_nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read.load(Ordering::Relaxed)
+    pub fn clone_nb_bytes_read(&self) -> Arc<AtomicU64> {
+        self.nb_bytes_read.clone()
     }
 
-    pub fn get_nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written.load(Ordering::Relaxed)
+    pub fn clone_nb_bytes_written(&self) -> Arc<AtomicU64> {
+        self.nb_bytes_written.clone()
     }
 }
 
 impl Read for WsTransport {
     fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        match self.stream.try_lock() {
-            Ok(mut stream) => stream.read(&mut buf),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
-        }
+        self.stream.read(&mut buf)
     }
 }
 
@@ -235,25 +206,17 @@ impl AsyncRead for WsTransport {}
 
 impl Write for WsTransport {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.stream.try_lock() {
-            Ok(mut stream) => stream.write(&buf),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
-        }
+        self.stream.write(&buf)
     }
+
     fn flush(&mut self) -> io::Result<()> {
-        match self.stream.try_lock() {
-            Ok(mut stream) => stream.flush(),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
-        }
+        self.stream.flush()
     }
 }
 
 impl AsyncWrite for WsTransport {
     fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
-        match self.stream.try_lock() {
-            Ok(mut stream) => stream.async_shutdown(),
-            Err(_) => Err(io::Error::new(io::ErrorKind::WouldBlock, "".to_string())),
-        }
+        self.stream.async_shutdown()
     }
 }
 
@@ -326,95 +289,37 @@ impl Transport for WsTransport {
                 })) as JetFuture<Self>
             }
             scheme => {
-                panic!("Unsuported scheme: {}", scheme);
+                panic!("Unsupported scheme: {}", scheme);
             }
         }
     }
 
-    fn message_sink(&self) -> JetSinkType<Vec<u8>> {
-        Box::new(WsJetSink::new(self.stream.clone(), self.nb_bytes_written.clone()))
+    fn peer_addr(&self) -> Option<SocketAddr> {
+        self.stream.peer_addr()
     }
 
-    fn message_stream(&self) -> JetStreamType<Vec<u8>> {
-        Box::new(WsJetStream::new(self.stream.clone(), self.nb_bytes_read.clone()))
-    }
-}
+    fn split_transport(
+        self,
+        buffer_writer: BipBufferWriter,
+        buffer_reader: BipBufferReader,
+    ) -> (JetStreamType<usize>, JetSinkType<usize>) {
+        let peer_addr = self.peer_addr();
+        let (reader, writer) = self.stream.split();
 
-struct WsJetStream {
-    stream: Arc<Mutex<WsStream>>,
-    nb_bytes_read: Arc<AtomicU64>,
-    packet_interceptor: Option<Box<dyn PacketInterceptor>>,
-}
+        let stream = Box::new(JetStreamImpl::new(
+            reader,
+            self.nb_bytes_read,
+            peer_addr.clone(),
+            buffer_writer,
+        ));
+        let sink = Box::new(JetSinkImpl::new(
+            writer,
+            self.nb_bytes_written,
+            peer_addr,
+            buffer_reader,
+        ));
 
-impl WsJetStream {
-    fn new(stream: Arc<Mutex<WsStream>>, nb_bytes_read: Arc<AtomicU64>) -> Self {
-        WsJetStream {
-            stream,
-            nb_bytes_read,
-            packet_interceptor: None,
-        }
-    }
-}
-
-impl Stream for WsJetStream {
-    type Item = Vec<u8>;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Result<Async<Option<<Self as Stream>::Item>>, <Self as Stream>::Error> {
-        if let Ok(ref mut stream) = self.stream.try_lock() {
-            let mut result = Vec::new();
-            while result.len() <= TCP_READ_LEN {
-                let mut buffer = [0u8; 8192];
-                match stream.poll_read(&mut buffer) {
-                    Ok(Async::Ready(0)) => {
-                        if result.len() > 0 {
-                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                interceptor.on_new_packet(stream.peer_addr(), &result);
-                            }
-
-                            return Ok(Async::Ready(Some(result)));
-                        }
-
-                        return Ok(Async::Ready(None))
-                    },
-
-                    Ok(Async::Ready(len)) => {
-                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
-
-                        result.extend_from_slice(&buffer[0..len]);
-                        if len == buffer.len() {
-                            continue;
-                        }
-
-                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            interceptor.on_new_packet(stream.peer_addr(), &result);
-                        }
-
-                        return Ok(Async::Ready(Some(result)));
-                    }
-
-                    Ok(Async::NotReady) => {
-                        if result.len() > 0 {
-                            if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                                interceptor.on_new_packet(stream.peer_addr(), &result);
-                            }
-
-                            return Ok(Async::Ready(Some(result)));
-                        }
-
-                        return Ok(Async::NotReady)
-                    },
-
-                    Err(e) => {
-                        error!("Can't read on socket: {}", e);
-                        return Ok(Async::Ready(None));
-                    }
-                }
-            }
-            Ok(Async::Ready(Some(result)))
-        } else {
-            Ok(Async::NotReady)
-        }
+        (stream, sink)
     }
 }
 
@@ -432,9 +337,7 @@ impl Future for TcpWebSocketServerHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -453,9 +356,7 @@ impl Future for TlsWebSocketServerHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -474,9 +375,7 @@ impl Future for TcpWebSocketClientHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -495,109 +394,10 @@ impl Future for TlsWebSocketClientHandshake {
                 self.0 = Some(m);
                 Ok(Async::NotReady)
             }
-            Err(HandshakeError::Failure(e)) => {
-                Err(io::Error::new(io::ErrorKind::Other, e))
-            }
+            Err(HandshakeError::Failure(e)) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
-
-impl JetStream for WsJetStream {
-    fn shutdown(&mut self) -> std::io::Result<()> {
-        let mut stream = self.stream.lock().unwrap();
-        stream.shutdown()
-    }
-
-    fn peer_addr(&self) -> Option<SocketAddr> {
-        let stream = self.stream.lock().unwrap();
-        stream.peer_addr()
-    }
-
-    fn nb_bytes_read(&self) -> u64 {
-        self.nb_bytes_read.load(Ordering::Relaxed)
-    }
-
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
-        self.packet_interceptor = Some(interceptor);
-    }
-}
-
-struct WsJetSink {
-    stream: Arc<Mutex<WsStream>>,
-    nb_bytes_written: Arc<AtomicU64>,
-}
-
-impl WsJetSink {
-    fn new(stream: Arc<Mutex<WsStream>>, nb_bytes_written: Arc<AtomicU64>) -> Self {
-        WsJetSink {
-            stream,
-            nb_bytes_written,
-        }
-    }
-}
-
-impl Sink for WsJetSink {
-    type SinkItem = Vec<u8>;
-    type SinkError = io::Error;
-
-    fn start_send(
-        &mut self,
-        mut item: <Self as Sink>::SinkItem,
-    ) -> Result<AsyncSink<<Self as Sink>::SinkItem>, <Self as Sink>::SinkError> {
-        if let Ok(mut stream) = self.stream.try_lock() {
-            trace!("{} bytes to write on {}", item.len(), stream.peer_addr().unwrap());
-            match stream.poll_write(&item) {
-                Ok(Async::Ready(len)) => {
-                    if len > 0 {
-                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
-                        item.drain(0..len);
-                        trace!("{} bytes written on {}", len, stream.peer_addr().unwrap())
-                    } else {
-                        trace!("0 bytes written on {}", stream.peer_addr().unwrap())
-                    }
-
-                    if item.is_empty() {
-                        Ok(AsyncSink::Ready)
-                    } else {
-                        futures::task::current().notify();
-                        Ok(AsyncSink::NotReady(item))
-                    }
-                }
-                Ok(Async::NotReady) => Ok(AsyncSink::NotReady(item)),
-                Err(e) => {
-                    error!("Can't write on socket: {}", e);
-                    Ok(AsyncSink::Ready)
-                }
-            }
-        } else {
-            Ok(AsyncSink::NotReady(item))
-        }
-    }
-
-    fn poll_complete(&mut self) -> Result<Async<()>, <Self as Sink>::SinkError> {
-        if let Ok(mut stream) = self.stream.try_lock() {
-            stream.poll_flush()
-        } else {
-            Ok(Async::NotReady)
-        }
-    }
-
-    fn close(&mut self) -> Result<Async<()>, <Self as Sink>::SinkError> {
-        Ok(Async::Ready(()))
-    }
-}
-
-impl JetSink for WsJetSink {
-    fn shutdown(&mut self) -> std::io::Result<()> {
-        let mut stream = self.stream.lock().unwrap();
-        stream.shutdown()
-    }
-
-    fn nb_bytes_written(&self) -> u64 {
-        self.nb_bytes_written.load(Ordering::Relaxed)
-    }
-}
-
 
 fn tungstenite_err_to_io_err(err: tungstenite::Error) -> io::Error {
     match err {

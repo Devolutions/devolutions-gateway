@@ -3,7 +3,7 @@ use std::io;
 use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
 use slog_scope::debug;
 use tokio::codec::Framed;
-use tokio_tcp::TcpStream;
+use tokio::net::tcp::TcpStream;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::transport::x224::{NegotiationWithClientTransport, NegotiationWithServerTransport};

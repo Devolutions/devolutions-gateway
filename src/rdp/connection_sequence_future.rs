@@ -4,10 +4,10 @@ use futures::{try_ready, Future};
 use ironrdp::nego;
 use tokio::{
     codec::{Decoder, Framed},
+    net::tcp::{ConnectFuture, TcpStream},
     prelude::*,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use tokio_tcp::{ConnectFuture, TcpStream};
 
 use crate::{
     rdp::{

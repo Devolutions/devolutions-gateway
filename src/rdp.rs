@@ -5,12 +5,12 @@ mod sequence_future;
 
 pub use identities_proxy::{IdentitiesProxy, RdpIdentity};
 
-use std::io;
+use std::{io, sync::Arc};
 
 use futures::Future;
 use slog_scope::{error, info};
+use tokio::net::tcp::TcpStream;
 use tokio_rustls::TlsAcceptor;
-use tokio_tcp::TcpStream;
 use url::Url;
 
 use self::connection_sequence_future::ConnectionSequenceFuture;
@@ -19,13 +19,13 @@ use crate::{config::Config, transport::tcp::TcpTransport, Proxy};
 #[allow(unused)]
 pub struct RdpClient {
     routing_url: Url,
-    config: Config,
+    config: Arc<Config>,
     tls_public_key: Vec<u8>,
     tls_acceptor: TlsAcceptor,
 }
 
 impl RdpClient {
-    pub fn new(routing_url: Url, config: Config, tls_public_key: Vec<u8>, tls_acceptor: TlsAcceptor) -> Self {
+    pub fn new(routing_url: Url, config: Arc<Config>, tls_public_key: Vec<u8>, tls_acceptor: TlsAcceptor) -> Self {
         Self {
             routing_url,
             config,
@@ -39,7 +39,7 @@ impl RdpClient {
         let tls_acceptor = self.tls_acceptor;
         let tls_public_key = self.tls_public_key;
         let identities_proxy = if let Some(rdp_identities) = self.config.rdp_identities() {
-            rdp_identities
+            rdp_identities.clone()
         } else {
             error!("Identities file is not present");
 

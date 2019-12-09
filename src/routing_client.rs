@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, sync::Arc};
 
 use futures::Future;
 use tokio::runtime::TaskExecutor;
@@ -11,12 +11,12 @@ use crate::Proxy;
 
 pub struct Client {
     routing_url: Url,
-    config: Config,
+    config: Arc<Config>,
     _executor_handle: TaskExecutor,
 }
 
 impl Client {
-    pub fn new(routing_url: Url, config: Config, executor_handle: TaskExecutor) -> Self {
+    pub fn new(routing_url: Url, config: Arc<Config>, executor_handle: TaskExecutor) -> Self {
         Client {
             routing_url,
             config,

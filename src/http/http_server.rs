@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::sessions::SessionsController;
 use saphir::Server as SaphirServer;
@@ -17,7 +18,7 @@ pub struct HttpServer {
 }
 
 impl HttpServer {
-    pub fn new(config: &Config, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
+    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading http middlewares");

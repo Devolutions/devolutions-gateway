@@ -15,13 +15,12 @@ pub enum Protocol {
     UNKNOWN,
 }
 
-#[derive(Clone)]
 struct ConfigTemp {
     unrestricted: bool,
     api_key: Option<String>,
     listeners: Vec<String>,
     jet_instance: Option<String>,
-    routing_url: Option<String>,
+    routing_url: Option<Url>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
@@ -51,7 +50,7 @@ pub struct Config {
     api_key: Option<String>,
     listeners: Vec<ListenerConfig>,
     jet_instance: String,
-    routing_url: Option<String>,
+    routing_url: Option<Url>,
     pcap_files_path: Option<String>,
     protocol: Protocol,
     rdp_identities: Option<rdp::IdentitiesProxy>,
@@ -66,36 +65,36 @@ impl Config {
         self.unrestricted
     }
 
-    pub fn api_key(&self) -> Option<String> {
-        self.api_key.clone()
+    pub fn api_key(&self) -> Option<&String> {
+        self.api_key.as_ref()
     }
 
     pub fn listeners(&self) -> &Vec<ListenerConfig> {
         &self.listeners
     }
 
-    pub fn jet_instance(&self) -> String {
-        self.jet_instance.clone()
+    pub fn jet_instance(&self) -> &String {
+        &self.jet_instance
     }
 
-    pub fn routing_url(&self) -> Option<String> {
-        self.routing_url.clone()
+    pub fn routing_url(&self) -> Option<&Url> {
+        self.routing_url.as_ref()
     }
 
-    pub fn pcap_files_path(&self) -> Option<String> {
-        self.pcap_files_path.clone()
+    pub fn pcap_files_path(&self) -> Option<&String> {
+        self.pcap_files_path.as_ref()
     }
 
     pub fn protocol(&self) -> &Protocol {
         &self.protocol
     }
 
-    pub fn rdp_identities(&self) -> Option<rdp::IdentitiesProxy> {
-        self.rdp_identities.clone()
+    pub fn rdp_identities(&self) -> Option<&rdp::IdentitiesProxy> {
+        self.rdp_identities.as_ref()
     }
 
-    pub fn log_file(&self) -> Option<String> {
-        self.log_file.clone()
+    pub fn log_file(&self) -> Option<&String> {
+        self.log_file.as_ref()
     }
 
     pub fn init() -> Self {
@@ -167,7 +166,12 @@ impl Config {
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
                     .takes_value(true)
-                    .empty_values(false),
+                    .empty_values(false)
+                    .validator(|v| if Url::parse(&v).is_ok() {
+                        Ok(())
+                    } else {
+                        Err(String::from("Expected <scheme>://<ip>:<port>, got invalid value"))
+                    }),
             )
             .arg(
                 Arg::with_name("pcap-files-path")
@@ -269,7 +273,9 @@ identities_file example:
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
 
-        let routing_url = matches.value_of("routing-url").map(std::string::ToString::to_string);
+        let routing_url = matches
+            .value_of("routing-url")
+            .map(|v| Url::parse(&v).expect("must be checked in the clap validator"));
 
         let pcap_files_path = matches
             .value_of("pcap-files-path")
