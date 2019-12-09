@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
+use futures::{stream::Forward, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
@@ -137,6 +137,7 @@ pub trait JetStream: Stream {
 
 pub trait JetSink: Sink {
     fn nb_bytes_written(&self) -> u64;
+    fn finished(&mut self) -> bool;
 }
 
 struct JetStreamImpl<T: AsyncRead> {
@@ -297,4 +298,42 @@ impl<T: AsyncWrite> JetSink for JetSinkImpl<T> {
     fn nb_bytes_written(&self) -> u64 {
         self.nb_bytes_written.load(Ordering::Relaxed)
     }
+    fn finished(&mut self) -> bool {
+        self.buffer.valid().is_empty()
+    }
+}
+
+pub struct FinishForwardFuture(Forward<JetStreamType<usize>, JetSinkType<usize>>);
+
+impl FinishForwardFuture {
+    pub fn new(forward_future: Forward<JetStreamType<usize>, JetSinkType<usize>>) -> Self {
+        Self(forward_future)
+    }
+}
+
+impl Future for FinishForwardFuture {
+    type Item = ForwardFutureResult;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.0.poll()? {
+            // The Forward Future has returned NotReady because the Sink is not ready
+            // (not all bytes has been written yet)
+            Async::NotReady if !self.0.sink_mut().unwrap().finished() => Ok(Async::NotReady),
+            // Have read all possible bytes from the stream
+            Async::NotReady => Ok(Async::Ready(ForwardFutureResult {
+                nb_bytes_read: self.0.stream_ref().unwrap().nb_bytes_read(),
+                nb_bytes_written: self.0.sink_ref().unwrap().nb_bytes_written(),
+            })),
+            Async::Ready((stream, sink)) => Ok(Async::Ready(ForwardFutureResult {
+                nb_bytes_read: stream.nb_bytes_read(),
+                nb_bytes_written: sink.nb_bytes_written(),
+            })),
+        }
+    }
+}
+
+pub struct ForwardFutureResult {
+    pub nb_bytes_read: u64,
+    pub nb_bytes_written: u64,
 }

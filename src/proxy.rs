@@ -11,7 +11,7 @@ use spsc_bip_buffer::bip_buffer_with_len;
 use crate::{
     config::{Config, Protocol},
     interceptor::{pcap::PcapInterceptor, rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader},
-    transport::{Transport, BIP_BUFFER_LEN},
+    transport::{FinishForwardFuture, ForwardFutureResult, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
 
@@ -87,31 +87,39 @@ impl Proxy {
                     Either::B((e, _)) => e,
                 })
                 .and_then(move |either| {
-                    let (server_nb_bytes_read, client_nb_bytes_written, client_nb_bytes_read, server_nb_bytes_written) =
-                        match either {
-                            Either::A(((jet_stream_server, jet_sink_client), forward_future)) => (
-                                jet_stream_server.nb_bytes_read(),
-                                jet_sink_client.nb_bytes_written(),
-                                forward_future.stream_ref().unwrap().nb_bytes_read(),
-                                forward_future.sink_ref().unwrap().nb_bytes_written(),
-                            ),
-                            Either::B(((jet_stream_client, jet_sink_server), forward_future)) => (
-                                forward_future.stream_ref().unwrap().nb_bytes_read(),
-                                forward_future.sink_ref().unwrap().nb_bytes_written(),
-                                jet_stream_client.nb_bytes_read(),
-                                jet_sink_server.nb_bytes_written(),
-                            ),
+                        let finish_forward_future = match either {
+                            Either::A(((jet_stream_server, jet_sink_client), forward_future)) =>
+                            Either::A(FinishForwardFuture::new(forward_future).and_then(move |ForwardFutureResult { nb_bytes_read, nb_bytes_written}| {
+                                Ok((
+                                    jet_stream_server.nb_bytes_read(),
+                                    jet_sink_client.nb_bytes_written(),
+                                    nb_bytes_read,
+                                    nb_bytes_written,
+                                ))
+                            })),
+                            Either::B(((jet_stream_client, jet_sink_server), forward_future)) =>
+                            Either::B(FinishForwardFuture::new(forward_future).and_then(move |ForwardFutureResult { nb_bytes_read, nb_bytes_written}| {
+                                Ok((
+                                    nb_bytes_read,
+                                    nb_bytes_written,
+                                    jet_stream_client.nb_bytes_read(),
+                                    jet_sink_server.nb_bytes_written(),
+                                ))
+                            })),
                         };
 
-                         info!(
-                             "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-                             server_nb_bytes_read,
-                             client_nb_bytes_written,
-                             client_nb_bytes_read,
-                             server_nb_bytes_written,
-                             server = &server_peer_addr,
-                             client = &client_peer_addr
-                         );
+                        finish_forward_future
+                })
+                .and_then(move |(server_nb_bytes_read, client_nb_bytes_written, client_nb_bytes_read, server_nb_bytes_written) | {
+                     info!(
+                         "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
+                         server_nb_bytes_read,
+                         client_nb_bytes_written,
+                         client_nb_bytes_read,
+                         server_nb_bytes_written,
+                         server = &server_peer_addr,
+                         client = &client_peer_addr
+                     );
 
                     Ok(())
                 })
