@@ -47,6 +47,8 @@ impl Future for RemoveAssociation {
             // Jet association already removed or still connected
             Ok(Async::Ready(false))
         } else {
+            // We want to be called again.
+            futures::task::current().notify();
             Ok(Async::NotReady)
         }
     }
