@@ -5,7 +5,7 @@ use ironrdp::nego;
 use tokio::{
     codec::{Decoder, Framed},
     net::tcp::{ConnectFuture, TcpStream},
-    prelude::*,
+    prelude::{Async, Poll, Sink},
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
@@ -14,13 +14,14 @@ use crate::{
         filter::FilterConfig,
         identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
-            create_negotiation_request, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
+            create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
             NlaWithServerFuture, PostMcs, SendStateArgs, SequenceFuture, StaticChannels,
         },
     },
     transport::{
         mcs::McsTransport,
+        rdp::RdpTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
     utils,
@@ -202,7 +203,7 @@ impl ConnectionSequenceFuture {
             },
         )
     }
-    fn create_rdp_future(
+    fn create_post_mcs_future(
         &mut self,
         client_transport: McsFutureTransport,
         server_transport: McsFutureTransport,
@@ -213,6 +214,23 @@ impl ConnectionSequenceFuture {
                     .take()
                     .expect("the filter config must be set after the MCS initial"),
             ),
+            GetStateArgs {
+                client: Some(client_transport),
+                server: Some(server_transport),
+            },
+        )
+    }
+
+    fn create_finalization(
+        &mut self,
+        client_transport: McsFutureTransport,
+        server_transport: McsFutureTransport,
+    ) -> SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport> {
+        let client_transport = utils::update_framed_codec(client_transport, RdpTransport::default());
+        let server_transport = utils::update_framed_codec(server_transport, RdpTransport::default());
+
+        SequenceFuture::with_get_state(
+            Finalization::new(),
             GetStateArgs {
                 client: Some(client_transport),
                 server: Some(server_transport),
@@ -296,11 +314,18 @@ impl Future for ConnectionSequenceFuture {
                     self.joined_static_channels = Some(joined_static_channels);
 
                     self.state = ConnectionSequenceFutureState::PostMcs(Box::new(
-                        self.create_rdp_future(client_transport, server_transport),
+                        self.create_post_mcs_future(client_transport, server_transport),
                     ));
                 }
                 ConnectionSequenceFutureState::PostMcs(rdp_future) => {
                     let (client_transport, server_transport, _filter_config) = try_ready!(rdp_future.poll());
+
+                    self.state = ConnectionSequenceFutureState::Finalization(Box::new(
+                        self.create_finalization(client_transport, server_transport),
+                    ));
+                }
+                ConnectionSequenceFutureState::Finalization(finalization) => {
+                    let (client_transport, server_transport) = try_ready!(finalization.poll());
 
                     let client_tls = client_transport.into_inner();
                     let server_tls = server_transport.into_inner();
@@ -327,4 +352,5 @@ enum ConnectionSequenceFutureState {
     McsInitial(Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport>>),
     Mcs(Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport>>),
     PostMcs(Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, McsTransport>>),
+    Finalization(Box<SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport>>),
 }

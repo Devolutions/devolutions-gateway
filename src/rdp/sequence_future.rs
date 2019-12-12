@@ -1,9 +1,11 @@
+mod finalization;
 mod mcs;
 mod negotiation;
 mod nla;
 mod post_mcs;
 
 pub use self::{
+    finalization::Finalization,
     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},

@@ -3,8 +3,8 @@ mod licensing;
 use std::io;
 
 use ironrdp::{
-    mcs::SendDataContext, rdp::server_license::LicenseEncryptionData, ClientInfoPdu, ControlAction, McsPdu, PduParsing,
-    ShareControlHeader, ShareControlPdu, ShareDataHeader, ShareDataPdu,
+    mcs::SendDataContext, rdp::server_license::LicenseEncryptionData, ClientInfoPdu, McsPdu, PduParsing,
+    ShareControlHeader, ShareControlPdu,
 };
 use slog_scope::{debug, trace, warn};
 use tokio::{codec::Framed, net::tcp::TcpStream};
@@ -137,20 +137,11 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
     }
     fn next_sender(&self) -> NextStream {
         match self.sequence_state {
-            SequenceState::ClientInfo
-            | SequenceState::ClientConfirmActive
-            | SequenceState::ClientSynchronize
-            | SequenceState::ClientControlCooperate
-            | SequenceState::ClientRequestControl
-            | SequenceState::ClientFontList => NextStream::Client,
+            SequenceState::ClientInfo | SequenceState::ClientConfirmActive => NextStream::Client,
             SequenceState::ServerLicenseRequest
             | SequenceState::ServerUpgradeLicense
             | SequenceState::ServerChallenge
-            | SequenceState::ServerDemandActive
-            | SequenceState::ServerSynchronize
-            | SequenceState::ServerControlCooperate
-            | SequenceState::ServerGrantedControl
-            | SequenceState::ServerFontMap => NextStream::Server,
+            | SequenceState::ServerDemandActive => NextStream::Server,
             SequenceState::Finished => panic!(
                 "In RDP Connection Sequence, the future must not require a next sender in the Finished sequence state"
             ),
@@ -159,19 +150,10 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
     fn next_receiver(&self) -> NextStream {
         match self.sequence_state {
             SequenceState::ServerLicenseRequest
-            | SequenceState::ClientSynchronize
-            | SequenceState::ServerSynchronize
-            | SequenceState::ServerControlCooperate
-            | SequenceState::ServerGrantedControl
             | SequenceState::ServerChallenge
             | SequenceState::ServerUpgradeLicense
-            | SequenceState::ServerFontMap => NextStream::Server,
-            SequenceState::ServerDemandActive
-            | SequenceState::ClientConfirmActive
-            | SequenceState::ClientControlCooperate
-            | SequenceState::ClientRequestControl
-            | SequenceState::ClientFontList
-            | SequenceState::Finished => NextStream::Client,
+            | SequenceState::Finished => NextStream::Server,
+            SequenceState::ServerDemandActive | SequenceState::ClientConfirmActive => NextStream::Client,
             SequenceState::ClientInfo => {
                 unreachable!("The future must not require a next receiver in the first sequence state (ClientInfo)")
             }
@@ -208,11 +190,7 @@ fn process_send_data_request_pdu(
                 }),
             ))
         }
-        SequenceState::ClientConfirmActive
-        | SequenceState::ClientSynchronize
-        | SequenceState::ClientControlCooperate
-        | SequenceState::ClientRequestControl
-        | SequenceState::ClientFontList => {
+        SequenceState::ClientConfirmActive => {
             let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
 
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
@@ -229,41 +207,15 @@ fn process_send_data_request_pdu(
                     client_confirm_active.pdu.filter(filter_config);
                     trace!("Got Client Confirm Active PDU: {:?}", client_confirm_active);
 
-                    SequenceState::ClientSynchronize
-                }
-                (_, ShareControlPdu::Data(ShareDataHeader { share_data_pdu, .. })) => {
-                    trace!("Got Client Finalization PDU: {:?}", share_data_pdu);
-
-                    match (sequence_state, share_data_pdu) {
-                        (SequenceState::ClientSynchronize, ShareDataPdu::Synchronize(_)) => {
-                            SequenceState::ServerSynchronize
-                        }
-                        (SequenceState::ClientControlCooperate, ShareDataPdu::Control(control_pdu))
-                            if control_pdu.action == ControlAction::Cooperate =>
-                        {
-                            SequenceState::ServerControlCooperate
-                        }
-                        (SequenceState::ClientRequestControl, ShareDataPdu::Control(control_pdu))
-                            if control_pdu.action == ControlAction::RequestControl =>
-                        {
-                            SequenceState::ServerGrantedControl
-                        }
-                        (SequenceState::ClientFontList, ShareDataPdu::FontList(_)) => SequenceState::ServerFontMap,
-                        (state, _) => {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!(
-                                    "Got Client PDU in invalid sequence state ({:?}) during Finalization Sequence",
-                                    state
-                                ),
-                            ))
-                        }
-                    }
+                    SequenceState::Finished
                 }
                 (_, share_control_pdu) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Got invalid client's Share Control Header PDU: {:?}", share_control_pdu),
+                        format!(
+                            "Got invalid client's Share Control Header PDU: {:?}",
+                            share_control_pdu.as_short_name()
+                        ),
                     ))
                 }
             };
@@ -299,11 +251,7 @@ fn process_send_data_indication_pdu(
         SequenceState::ServerLicenseRequest => process_license_request(pdu, credentials),
         SequenceState::ServerChallenge => process_challenge(pdu, encryption_data, credentials),
         SequenceState::ServerUpgradeLicense => process_upgrade_license(pdu, encryption_data),
-        SequenceState::ServerDemandActive
-        | SequenceState::ServerSynchronize
-        | SequenceState::ServerControlCooperate
-        | SequenceState::ServerGrantedControl
-        | SequenceState::ServerFontMap => {
+        SequenceState::ServerDemandActive => {
             let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
 
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
@@ -313,39 +261,13 @@ fn process_send_data_indication_pdu(
 
                     SequenceState::ClientConfirmActive
                 }
-                (_, ShareControlPdu::Data(ShareDataHeader { share_data_pdu, .. })) => {
-                    trace!("Got Server Finalization PDU: {:?}", share_data_pdu);
-
-                    match (sequence_state, share_data_pdu) {
-                        (SequenceState::ServerSynchronize, ShareDataPdu::Synchronize(_)) => {
-                            SequenceState::ClientControlCooperate
-                        }
-                        (SequenceState::ServerControlCooperate, ShareDataPdu::Control(control_pdu))
-                            if control_pdu.action == ControlAction::Cooperate =>
-                        {
-                            SequenceState::ClientRequestControl
-                        }
-                        (SequenceState::ServerGrantedControl, ShareDataPdu::Control(control_pdu))
-                            if control_pdu.action == ControlAction::GrantedControl =>
-                        {
-                            SequenceState::ClientFontList
-                        }
-                        (SequenceState::ServerFontMap, ShareDataPdu::FontMap(_)) => SequenceState::Finished,
-                        (state, _) => {
-                            return Err(io::Error::new(
-                                io::ErrorKind::InvalidData,
-                                format!(
-                                    "Got Server PDU in invalid sequence state ({:?}) during Finalization Sequence",
-                                    state
-                                ),
-                            ))
-                        }
-                    }
-                }
                 (_, share_control_pdu) => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Got invalid server's Share Control Header PDU: {:?}", share_control_pdu),
+                        format!(
+                            "Got invalid server's Share Control Header PDU: {:?}",
+                            share_control_pdu.as_short_name()
+                        ),
                     ))
                 }
             };
@@ -380,13 +302,5 @@ pub enum SequenceState {
     ServerUpgradeLicense,
     ServerDemandActive,
     ClientConfirmActive,
-    ClientSynchronize,
-    ServerSynchronize,
-    ClientControlCooperate,
-    ServerControlCooperate,
-    ClientRequestControl,
-    ServerGrantedControl,
-    ClientFontList,
-    ServerFontMap,
     Finished,
 }

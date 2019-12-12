@@ -2,7 +2,10 @@ pub mod association;
 
 use std::{io::{self, BufReader}, net::SocketAddr, fs};
 
-use tokio::codec::{Framed, FramedParts};
+use tokio::{
+    codec::{Decoder, Encoder, Framed, FramedParts},
+    prelude::{AsyncRead, AsyncWrite},
+};
 use url::Url;
 use x509_parser::parse_x509_der;
 use crate::config::CertificateConfig;
@@ -190,11 +193,16 @@ fn extract_der_data<A>(mut data: String,
 pub fn update_framed_codec<Io, OldCodec, NewCodec>(
     framed: Framed<Io, OldCodec>,
     codec: NewCodec,
-) -> Framed<Io, NewCodec> {
-    let parts = framed.into_parts();
+) -> Framed<Io, NewCodec>
+where
+    Io: AsyncRead + AsyncWrite,
+    OldCodec: Decoder + Encoder,
+    NewCodec: Decoder + Encoder,
+{
+    let FramedParts { io, read_buf, .. } = framed.into_parts();
 
-    let mut new_parts = FramedParts::new(parts.io, codec);
-    new_parts.read_buf = parts.read_buf;
+    let mut new_parts = FramedParts::new(io, codec);
+    new_parts.read_buf = read_buf;
 
     Framed::from_parts(new_parts)
 }
