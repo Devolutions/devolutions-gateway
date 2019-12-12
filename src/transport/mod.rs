@@ -17,7 +17,9 @@ use url::Url;
 use crate::interceptor::PacketInterceptor;
 use crate::transport::{tcp::TcpTransport, ws::WsTransport};
 
+pub mod fast_path;
 pub mod mcs;
+pub mod rdp;
 pub mod tcp;
 pub mod tsrequest;
 pub mod ws;
