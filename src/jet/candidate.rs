@@ -38,7 +38,7 @@ impl From<&Candidate> for CandidateResponse {
             id: c.id,
             url: c.url.clone(),
             state: c.state.clone(),
-            association_id: c.association_id.clone(),
+            association_id: c.association_id,
             transport_type: c.transport_type.clone(),
             bytes_sent,
             bytes_recv,
@@ -93,7 +93,7 @@ impl Candidate {
     }
 
     pub fn id(&self) -> Uuid {
-        self.id.clone()
+        self.id
     }
 
     pub fn state(&self) -> CandidateState {
@@ -109,11 +109,11 @@ impl Candidate {
     }
 
     pub fn association_id(&self) -> Uuid {
-        self.association_id.clone()
+        self.association_id
     }
 
     pub fn set_association_id(&mut self, association_id: Uuid) {
-        self.association_id = association_id.clone();
+        self.association_id = association_id;
     }
 
     pub fn set_transport(&mut self, transport: JetTransport) {

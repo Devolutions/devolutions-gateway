@@ -109,7 +109,7 @@ impl ControllerData {
                         }
                     };
 
-                    if association.get_candidates().len() == 0 {
+                    if association.get_candidates().is_empty() {
                         for listener in self.config.listeners() {
                             if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches("/")) {
                                 association.add_candidate(candidate);

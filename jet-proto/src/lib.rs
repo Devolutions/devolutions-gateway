@@ -1,9 +1,3 @@
-extern crate byteorder;
-extern crate log;
-extern crate uuid;
-#[macro_use]
-extern crate hex_literal;
-
 pub mod accept;
 pub mod connect;
 pub mod utils;
@@ -73,7 +67,7 @@ impl JetMessage {
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut req = httparse::Request::new(&mut headers);
 
-        if let Ok(_) = req.parse(payload.as_bytes()) {
+        if req.parse(payload.as_bytes()).is_ok() {
             if let Some(path) = req.path.map(|path| path.to_lowercase()) {
                 if path.starts_with("/jet/accept") {
                     return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
@@ -103,7 +97,7 @@ impl JetMessage {
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
 
-        if let Ok(_) = rsp.parse(payload.as_bytes()) {
+        if rsp.parse(payload.as_bytes()).is_ok() {
             return Ok(JetMessage::JetAcceptRsp(JetAcceptRsp::from_response(&rsp)?));
         }
 
@@ -119,7 +113,7 @@ impl JetMessage {
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut rsp = httparse::Response::new(&mut headers);
 
-        if let Ok(_) = rsp.parse(payload.as_bytes()) {
+        if rsp.parse(payload.as_bytes()).is_ok() {
             return Ok(JetMessage::JetConnectRsp(JetConnectRsp::from_response(&rsp)?));
         }
 
@@ -157,7 +151,7 @@ impl JetMessage {
         stream.write_u16::<BigEndian>(size)?;
         stream.write_u8(flags)?;
         stream.write_u8(mask)?;
-        stream.write_all(&mut payload)?;
+        stream.write_all(&payload)?;
 
         Ok(())
     }
@@ -195,7 +189,7 @@ impl JetMessage {
 }
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split("/").skip(index + 1).next() {
+    if let Some(raw_uuid) = path.split('/').skip(index + 1).next() {
         Uuid::parse_str(raw_uuid).ok()
     } else {
         None
@@ -267,7 +261,7 @@ impl From<String> for Error {
 
 impl Error {
     pub fn from_http_status_code(status_code: u16) -> Self {
-        return match status_code {
+        match status_code {
             400 => Error::BadRequest,
             401 => Error::Unauthorized,
             403 => Error::Forbidden,
@@ -311,27 +305,28 @@ impl std::fmt::Display for Error {
     }
 }
 
-//GET /jet/accept/300f1c82-d33b-11e9-bb65-2a2ae2dbcce5/4c8f409a-c1a2-4cae-bda2-84c590fed618 HTTP/1.1
-//Host: jet101.wayk.net
-//Connection: Keep-Alive
-//Jet-Version: 2
-static TEST_JET_ACCEPT_REQ_V2: &'static [u8] = &hex!("
-4a 45 54 00 00 A8 00 00
-47 45 54 20 2f 6a 65 74 2f 61 63 63 65 70 74 2f
-33 30 30 66 31 63 38 32 2d 64 33 33 62 2d 31 31
-65 39 2d 62 62 36 35 2d 32 61 32 61 65 32 64 62
-63 63 65 35 2f 34 63 38 66 34 30 39 61 2d 63 31
-61 32 2d 34 63 61 65 2d 62 64 61 32 2d 38 34 63
-35 39 30 66 65 64 36 31 38 20 48 54 54 50 2f 31
-2e 31 0a 48 6f 73 74 3a 20 6a 65 74 31 30 31 2e
-77 61 79 6b 2e 6e 65 74 0a 43 6f 6e 6e 65 63 74
-69 6f 6e 3a 20 4b 65 65 70 2d 41 6c 69 76 65 0a
-4a 65 74 2d 56 65 72 73 69 6f 6e 3a 20 32 0a 0a
-");
-
 #[cfg(test)]
 mod test {
     use super::*;
+    use hex_literal::hex;
+
+    //GET /jet/accept/300f1c82-d33b-11e9-bb65-2a2ae2dbcce5/4c8f409a-c1a2-4cae-bda2-84c590fed618 HTTP/1.1
+    //Host: jet101.wayk.net
+    //Connection: Keep-Alive
+    //Jet-Version: 2
+    static TEST_JET_ACCEPT_REQ_V2: &[u8] = &hex!("
+    4a 45 54 00 00 A8 00 00
+    47 45 54 20 2f 6a 65 74 2f 61 63 63 65 70 74 2f
+    33 30 30 66 31 63 38 32 2d 64 33 33 62 2d 31 31
+    65 39 2d 62 62 36 35 2d 32 61 32 61 65 32 64 62
+    63 63 65 35 2f 34 63 38 66 34 30 39 61 2d 63 31
+    61 32 2d 34 63 61 65 2d 62 64 61 32 2d 38 34 63
+    35 39 30 66 65 64 36 31 38 20 48 54 54 50 2f 31
+    2e 31 0a 48 6f 73 74 3a 20 6a 65 74 31 30 31 2e
+    77 61 79 6b 2e 6e 65 74 0a 43 6f 6e 6e 65 63 74
+    69 6f 6e 3a 20 4b 65 65 70 2d 41 6c 69 76 65 0a
+    4a 65 74 2d 56 65 72 73 69 6f 6e 3a 20 32 0a 0a
+    ");
 
     #[test]
     fn test_accept_v2() {
