@@ -294,7 +294,7 @@ fn start_websocket_server(websocket_url: Url,
         http_service,
         jet_associations: jet_associations.clone(),
         executor_handle: executor_handle.clone(),
-        config: config,
+        config,
     };
 
     if let Ok(local_addr) = websocket_listener.local_addr() {

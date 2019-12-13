@@ -60,9 +60,9 @@ impl WsStreamWrapper {
     #[inline]
     fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
-            WsStreamWrapper::Http((_stream, addr)) => addr.clone(),
-            WsStreamWrapper::Tcp((_stream, addr)) => addr.clone(),
-            WsStreamWrapper::Tls((_stream, addr)) => addr.clone(),
+            WsStreamWrapper::Http((_stream, addr)) => *addr,
+            WsStreamWrapper::Tcp((_stream, addr)) => *addr,
+            WsStreamWrapper::Tls((_stream, addr)) => *addr,
         }
     }
 
@@ -309,7 +309,7 @@ impl Transport for WsTransport {
         let stream = Box::new(JetStreamImpl::new(
             reader,
             self.nb_bytes_read,
-            peer_addr.clone(),
+            peer_addr,
             buffer_writer,
         ));
         let sink = Box::new(JetSinkImpl::new(

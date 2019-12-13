@@ -35,7 +35,7 @@ impl JetAcceptReq {
     pub fn from_request(request: &httparse::Request) -> Result<Self, Error> {
         if request.is_get_method() {
 
-            let version_opt = request.get_header_value(JET_HEADER_VERSION).map_or(None, |version| version.parse::<u32>().ok());
+            let version_opt = request.get_header_value(JET_HEADER_VERSION).and_then(|version| version.parse::<u32>().ok());
             let host_opt = request.get_header_value(JET_HEADER_HOST);
 
             if let (Some(version), Some(host)) = (version_opt, host_opt) {
@@ -43,7 +43,7 @@ impl JetAcceptReq {
                     if path.starts_with("/jet/accept") {
                         if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3)) {
                             return Ok(JetAcceptReq {
-                                version: version,
+                                version,
                                 host: host.to_string(),
                                 association: association_id,
                                 candidate: candidate_id,
@@ -53,7 +53,7 @@ impl JetAcceptReq {
                         if let Some(jet_method) = request.get_header_value(JET_HEADER_METHOD) {
                             if jet_method.to_lowercase().eq("accept") {
                                 return Ok(JetAcceptReq {
-                                    version: version,
+                                    version,
                                     host: host.to_string(),
                                     association: Uuid::nil(),
                                     candidate: Uuid::nil(),
@@ -94,13 +94,13 @@ impl JetAcceptRsp {
     }
 
     pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
-        if let Some(status_code) = response.code.map_or(None, |code| StatusCode::from_u16(code).ok()) {
-            let version_opt = response.get_header_value(JET_HEADER_VERSION).map_or(None, |version| version.parse::<u32>().ok());
+        if let Some(status_code) = response.code.and_then(|code| StatusCode::from_u16(code).ok()) {
+            let version_opt = response.get_header_value(JET_HEADER_VERSION).and_then(|version| version.parse::<u32>().ok());
 
             match version_opt {
                 Some(1) => {
-                    let association_opt = response.get_header_value(JET_HEADER_ASSOCIATION).map_or(None, |association| Uuid::from_str(association).ok());
-                    let timeout_opt = response.get_header_value(JET_HEADER_TIMEOUT).map_or(None, |timeout| timeout.parse::<u32>().ok());
+                    let association_opt = response.get_header_value(JET_HEADER_ASSOCIATION).and_then(|association| Uuid::from_str(association).ok());
+                    let timeout_opt = response.get_header_value(JET_HEADER_TIMEOUT).and_then(|timeout| timeout.parse::<u32>().ok());
                     let instance_opt = response.get_header_value(JET_HEADER_INSTANCE);
 
                     if let (Some(association), Some(timeout), Some(instance)) = (association_opt, timeout_opt, instance_opt) {

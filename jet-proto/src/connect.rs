@@ -55,7 +55,7 @@ impl JetConnectReq {
                     if path.starts_with("/jet/connect") {
                         if let (Some(association_id), Some(candidate_id)) = (get_uuid_in_path(path, 2), get_uuid_in_path(path, 3)) {
                             return Ok(JetConnectReq {
-                                version: version,
+                                version,
                                 host: host.to_string(),
                                 association: association_id,
                                 candidate: candidate_id,
@@ -67,9 +67,9 @@ impl JetConnectReq {
                                 if let Some(jet_association) = request.get_header_value("jet-association") {
                                     if let Ok(association) = Uuid::from_str(jet_association) {
                                         return Ok(JetConnectReq {
-                                            version: version,
+                                            version,
                                             host: host.to_string(),
-                                            association: association,
+                                            association,
                                             candidate: Uuid::nil(),
                                         });
                                     }
@@ -92,21 +92,15 @@ pub struct JetConnectRsp {
 
 impl JetConnectRsp {
     pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
-        if self.version == 1 {
-            stream.write_fmt(format_args!("HTTP/1.1 {} {}\r\n", &self.status_code, self.status_code.as_str()))?;
-            stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
-            stream.write_fmt(format_args!("\r\n"))?;
-        } else { // version = 2
-            stream.write_fmt(format_args!("HTTP/1.1 {} {}\r\n", &self.status_code, self.status_code.as_str()))?;
-            stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
-            stream.write_fmt(format_args!("\r\n"))?;
-        }
+        stream.write_fmt(format_args!("HTTP/1.1 {} {}\r\n", &self.status_code, self.status_code.as_str()))?;
+        stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_VERSION, &self.version.to_string()))?;
+        stream.write_fmt(format_args!("\r\n"))?;
         Ok(())
     }
 
     pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
-        if let Some(status_code) = response.code.map_or(None, |code| StatusCode::from_u16(code).ok()) {
-            let version_opt = response.get_header_value(JET_HEADER_VERSION).map_or(None, |version| version.parse::<u32>().ok());
+        if let Some(status_code) = response.code.and_then(|code| StatusCode::from_u16(code).ok()) {
+            let version_opt = response.get_header_value(JET_HEADER_VERSION).and_then(|version| version.parse::<u32>().ok());
 
             match version_opt {
                 Some(1) => {

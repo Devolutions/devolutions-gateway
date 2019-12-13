@@ -114,7 +114,7 @@ impl Future for JetMsgReader {
 
         if len == 0 {
             // The transport is closed
-            return Err(error_other(&format!("Socket closed, no JetPacket received.")));
+            return Err(error_other("Socket closed, no JetPacket received."));
         }
 
         let mut buf = buff.to_vec();
@@ -208,7 +208,7 @@ impl HandleAcceptJetMsg {
                     let uuid = Uuid::new_v4();
                     let mut association = Association::new(uuid, JET_VERSION_V1);
                     association.add_candidate(candidate);
-                    self.association_uuid = Some(uuid.clone());
+                    self.association_uuid = Some(uuid);
 
                     jet_associations.insert(uuid, association);
 
@@ -242,7 +242,7 @@ impl HandleAcceptJetMsg {
             if request.version == 1 && status_code == StatusCode::OK {
                 self.remove_association_future = Some(Box::new(create_remove_association_future(
                     self.jet_associations.clone(),
-                    association.clone(),
+                    association,
                 )));
             }
 

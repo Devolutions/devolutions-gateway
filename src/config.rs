@@ -266,7 +266,7 @@ identities_file example:
         let unrestricted = matches.is_present("unrestricted");
 
         let listeners = matches.values_of("listeners").map_or(Vec::new(), |listeners| {
-            listeners.into_iter().map(|listener| listener.to_string()).collect()
+            listeners.map(|listener| listener.to_string()).collect()
         });
 
         let http_listener_url = matches.value_of("http-listener-url").map(std::string::ToString::to_string).expect("");
@@ -351,7 +351,7 @@ impl ConfigTemp {
         }
 
         if let Ok(val) = env::var("JET_LISTENERS") {
-            self.listeners = val.split(";").filter_map(|item: &str| {
+            self.listeners = val.split(';').filter_map(|item: &str| {
                 if !item.is_empty() {
                     Some(item.to_string())
                 } else {
@@ -392,7 +392,7 @@ impl From<ConfigTemp> for Config {
             let url;
             let external_url;
 
-            if let Some(pos) = listener.find(",") {
+            if let Some(pos) = listener.find(',') {
                 let url_str = &listener[0..pos];
                 url = listener[0..pos].parse::<Url>().expect(&format!("Listener {} is an invalid URL.", url_str));
 
@@ -425,7 +425,7 @@ impl From<ConfigTemp> for Config {
             api_key: temp.api_key,
             listeners,
             http_listener_url,
-            jet_instance: jet_instance,
+            jet_instance,
             routing_url: temp.routing_url,
             pcap_files_path: temp.pcap_files_path,
             protocol: temp.protocol,

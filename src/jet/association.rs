@@ -16,8 +16,8 @@ pub struct Association {
 impl Association {
     pub fn new(id: Uuid, version: u8) -> Self {
         Association {
-            id: id,
-            version: version,
+            id,
+            version,
             creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
         }
@@ -72,9 +72,7 @@ impl Association {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.candidates.iter().find(|(_, candidate)| {
-            candidate.state() == CandidateState::Connected
-        }).is_some()
+        self.candidates.iter().any(|(_, candidate)| { candidate.state() == CandidateState::Connected })
     }
 }
 
