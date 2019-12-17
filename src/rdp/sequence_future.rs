@@ -1,3 +1,4 @@
+mod dvc_capabilities;
 mod finalization;
 mod mcs;
 mod negotiation;
@@ -5,6 +6,7 @@ mod nla;
 mod post_mcs;
 
 pub use self::{
+    dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
     finalization::Finalization,
     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},

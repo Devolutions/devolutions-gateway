@@ -8,7 +8,10 @@ use tokio_rustls::TlsStream;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{
-    rdp::filter::{Filter, FilterConfig},
+    rdp::{
+        filter::{Filter, FilterConfig},
+        GLOBAL_CHANNEL_NAME, USER_CHANNEL_NAME,
+    },
     transport::{mcs::McsTransport, x224::DataTransport},
 };
 
@@ -16,9 +19,6 @@ pub type StaticChannels = HashMap<u16, String>;
 pub type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;
 
 type X224FutureTransport = Framed<TlsStream<TcpStream>, DataTransport>;
-
-pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
-pub const USER_CHANNEL_NAME: &str = "USER";
 
 pub struct McsFuture {
     sequence_state: McsSequenceState,

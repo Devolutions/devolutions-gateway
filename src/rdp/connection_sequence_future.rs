@@ -240,7 +240,11 @@ impl ConnectionSequenceFuture {
 }
 
 impl Future for ConnectionSequenceFuture {
-    type Item = (TlsStream<TcpStream>, TlsStream<TcpStream>, StaticChannels);
+    type Item = (
+        Framed<TlsStream<TcpStream>, RdpTransport>,
+        Framed<TlsStream<TcpStream>, RdpTransport>,
+        StaticChannels,
+    );
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -327,12 +331,9 @@ impl Future for ConnectionSequenceFuture {
                 ConnectionSequenceFutureState::Finalization(finalization) => {
                     let (client_transport, server_transport) = try_ready!(finalization.poll());
 
-                    let client_tls = client_transport.into_inner();
-                    let server_tls = server_transport.into_inner();
-
                     return Ok(Async::Ready((
-                        client_tls,
-                        server_tls,
+                        client_transport,
+                        server_transport,
                         self.joined_static_channels.take().expect(
                             "During RDP connection sequence, the joined static channels must exist in the RDP state",
                         ),

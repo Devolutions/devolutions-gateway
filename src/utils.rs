@@ -1,6 +1,12 @@
 pub mod association;
 
-use std::{io::{self, BufReader}, net::SocketAddr, fs};
+use std::{
+    collections::HashMap,
+    fs,
+    hash::Hash,
+    io::{self, BufReader},
+    net::SocketAddr,
+};
 
 use tokio::{
     codec::{Decoder, Encoder, Framed, FramedParts},
@@ -205,4 +211,17 @@ where
     new_parts.read_buf = read_buf;
 
     Framed::from_parts(new_parts)
+}
+
+
+pub fn swap_hashmap_kv<K, V>(hm: HashMap<K, V>) -> HashMap<V, K>
+where
+    V: Hash + Eq,
+{
+    let mut result = HashMap::with_capacity(hm.len());
+    for (k, v) in hm {
+        result.insert(v, k);
+    }
+
+    result
 }

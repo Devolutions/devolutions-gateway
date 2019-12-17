@@ -22,7 +22,7 @@ impl FilterConfig {
         Self {
             server_response_protocol,
             version: gcc::RdpVersion::V5Plus,
-            client_early_capability_flags: gcc::ClientEarlyCapabilityFlags::empty(),
+            client_early_capability_flags: gcc::ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL,
             server_early_capability_flags: gcc::ServerEarlyCapabilityFlags::empty(),
             encryption_methods: gcc::EncryptionMethod::empty(),
             target_credentials,
