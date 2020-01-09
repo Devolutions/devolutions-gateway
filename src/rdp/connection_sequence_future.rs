@@ -16,11 +16,11 @@ use crate::{
         sequence_future::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
-            NlaWithServerFuture, PostMcs, SendStateArgs, SequenceFuture, StaticChannels,
+            NlaWithServerFuture, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture, StaticChannels,
         },
     },
     transport::{
-        mcs::McsTransport,
+        mcs::{McsTransport, SendDataContextTransport},
         rdp::RdpTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
@@ -207,7 +207,7 @@ impl ConnectionSequenceFuture {
         &mut self,
         client_transport: McsFutureTransport,
         server_transport: McsFutureTransport,
-    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, McsTransport> {
+    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport> {
         SequenceFuture::with_get_state(
             PostMcs::new(
                 self.filter_config
@@ -215,16 +215,22 @@ impl ConnectionSequenceFuture {
                     .expect("the filter config must be set after the MCS initial"),
             ),
             GetStateArgs {
-                client: Some(client_transport),
-                server: Some(server_transport),
+                client: Some(utils::update_framed_codec(
+                    client_transport,
+                    SendDataContextTransport::default(),
+                )),
+                server: Some(utils::update_framed_codec(
+                    server_transport,
+                    SendDataContextTransport::default(),
+                )),
             },
         )
     }
 
     fn create_finalization(
         &mut self,
-        client_transport: McsFutureTransport,
-        server_transport: McsFutureTransport,
+        client_transport: PostMcsFutureTransport,
+        server_transport: PostMcsFutureTransport,
     ) -> SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport> {
         let client_transport = utils::update_framed_codec(client_transport, RdpTransport::default());
         let server_transport = utils::update_framed_codec(server_transport, RdpTransport::default());
@@ -352,6 +358,6 @@ enum ConnectionSequenceFutureState {
     NlaWithServer(Box<NlaWithServerFuture>),
     McsInitial(Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport>>),
     Mcs(Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport>>),
-    PostMcs(Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, McsTransport>>),
+    PostMcs(Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport>>),
     Finalization(Box<SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport>>),
 }

@@ -39,7 +39,7 @@ impl MessageReader for RdpMessageReader {
                     match self.static_channels.get(vc::DRDYNVC_CHANNEL_NAME) {
                         Some(drdynvc_channel_id) => {
                             if id == *drdynvc_channel_id {
-                                match self.dvc_manager.process(source, buffer.as_slice()) {
+                                match self.dvc_manager.process(source, buffer) {
                                     Ok(Some(message)) => messages.push(message),
                                     Ok(None) => continue,
                                     Err(err) => {
@@ -115,21 +115,22 @@ fn parse_tpkt_tpdu_message(mut tpkt_tpdu: &[u8]) -> Result<ParsedTpktPtdu, io::E
     let mcs_pdu = McsPdu::from_buffer(tpkt_tpdu)?;
 
     match mcs_pdu {
-        McsPdu::SendDataIndication(send_data_context) | McsPdu::SendDataRequest(send_data_context) => {
+        McsPdu::SendDataIndication(ref send_data_context) | McsPdu::SendDataRequest(ref send_data_context) => {
             Ok(ParsedTpktPtdu::VirtualChannel {
                 id: send_data_context.channel_id,
-                buffer: send_data_context.pdu,
+                buffer: &tpkt_tpdu[tpkt_tpdu.len() - send_data_context.pdu_length..],
             })
         }
         McsPdu::DisconnectProviderUltimatum(reason) => Ok(ParsedTpktPtdu::DisconnectionRequest(reason)),
         pdu => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Unexpected Mcs pdu: {:?}", pdu),
+            format!("Unexpected MCS PDU: {:?}", pdu),
         )),
     }
 }
 
-enum ParsedTpktPtdu {
-    VirtualChannel { id: u16, buffer: Vec<u8> },
+#[derive(Debug, Clone, PartialEq)]
+enum ParsedTpktPtdu<'a> {
+    VirtualChannel { id: u16, buffer: &'a [u8] },
     DisconnectionRequest(DisconnectUltimatumReason),
 }

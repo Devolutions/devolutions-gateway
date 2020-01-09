@@ -22,7 +22,12 @@ impl Drop for KillOnDrop {
     }
 }
 
-pub fn run_proxy(proxy_addr: &str, websocket_url: Option<&str>, routing_url: Option<&str>, identities_file: Option<&str>) -> KillOnDrop {
+pub fn run_proxy(
+    proxy_addr: &str,
+    websocket_url: Option<&str>,
+    routing_url: Option<&str>,
+    identities_file: Option<&str>,
+) -> KillOnDrop {
     let mut proxy_command = Command::new(bin());
 
     proxy_command

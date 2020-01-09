@@ -245,11 +245,13 @@ fn does_not_parse_unsuitable_tpkt_mcs_pdu() {
 fn parses_tpkt_channel_pdu() {
     let packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET;
 
-    let (channel_id, channel_message) = parse_tpkt_tpdu_message(packet.as_ref()).unwrap();
-
-    assert_eq!(DRDYNVC_CHANNEL_ID, channel_id);
-
-    assert_eq!(CHANNEL_DVC_CREATE_REQUEST_PACKET.as_ref(), channel_message.as_slice());
+    match parse_tpkt_tpdu_message(packet.as_ref()).unwrap() {
+        ParsedTpktPtdu::VirtualChannel { id, buffer } => {
+            assert_eq!(DRDYNVC_CHANNEL_ID, id);
+            assert_eq!(CHANNEL_DVC_CREATE_REQUEST_PACKET.as_ref(), buffer);
+        }
+        _ => panic!("Unexpected DisconnectionRequest"),
+    }
 }
 
 #[test]

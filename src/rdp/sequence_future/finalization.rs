@@ -41,9 +41,9 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for Finalizati
                 let mcs_pdu = McsPdu::from_buffer(data.as_ref())?;
 
                 match mcs_pdu {
-                    McsPdu::SendDataRequest(SendDataContext { pdu, .. })
-                    | McsPdu::SendDataIndication(SendDataContext { pdu, .. }) => {
-                        let share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
+                    McsPdu::SendDataRequest(SendDataContext { pdu_length, .. })
+                    | McsPdu::SendDataIndication(SendDataContext { pdu_length, .. }) => {
+                        let share_control_header = ShareControlHeader::from_buffer(&data[(data.len() - pdu_length)..])?;
 
                         if let ShareControlPdu::Data(ShareDataHeader { share_data_pdu, .. }) =
                             share_control_header.share_control_pdu

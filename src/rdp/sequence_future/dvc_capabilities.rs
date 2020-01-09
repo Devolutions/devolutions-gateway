@@ -1,5 +1,6 @@
 use std::io;
 
+use bytes::BytesMut;
 use ironrdp::{
     mcs::SendDataContext,
     rdp::vc::{
@@ -82,24 +83,27 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeD
                         )
                     }
                     mcs_pdu => {
-                        let (next_state, next_mcs_pdu) = match mcs_pdu {
-                            McsPdu::SendDataRequest(send_data_context) => {
-                                let (next_state, send_data_context) = handle_send_data_request(
-                                    send_data_context,
-                                    sequence_state,
-                                    self.dvc_manager.as_mut().unwrap(),
-                                )?;
+                        let (next_state, next_mcs_pdu, pdu_data) = match mcs_pdu {
+                            McsPdu::SendDataRequest(mut send_data_context) => {
+                                data.split_to(data.len() - send_data_context.pdu_length);
+                                let (next_state, pdu_data) =
+                                    handle_send_data_request(data, sequence_state, self.dvc_manager.as_mut().unwrap())?;
 
-                                (next_state, McsPdu::SendDataRequest(send_data_context))
+                                send_data_context.pdu_length = pdu_data.len();
+
+                                (next_state, McsPdu::SendDataRequest(send_data_context), pdu_data)
                             }
-                            McsPdu::SendDataIndication(send_data_context) => {
-                                let (next_state, send_data_context) = handle_send_data_indication(
-                                    send_data_context,
+                            McsPdu::SendDataIndication(mut send_data_context) => {
+                                data.split_to(data.len() - send_data_context.pdu_length);
+                                let (next_state, pdu_data) = handle_send_data_indication(
+                                    data,
                                     sequence_state,
                                     self.dvc_manager.as_mut().unwrap(),
                                 )?;
 
-                                (next_state, McsPdu::SendDataIndication(send_data_context))
+                                send_data_context.pdu_length = pdu_data.len();
+
+                                (next_state, McsPdu::SendDataIndication(send_data_context), pdu_data)
                             }
                             _ => {
                                 return Err(io::Error::new(
@@ -112,8 +116,10 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeD
                             }
                         };
 
-                        data.resize(next_mcs_pdu.buffer_length(), 0);
+                        let mut data = BytesMut::with_capacity(next_mcs_pdu.buffer_length() + pdu_data.len());
+                        data.resize(next_mcs_pdu.buffer_length() + pdu_data.len(), 0);
                         next_mcs_pdu.to_buffer(data.as_mut())?;
+                        (&mut data[next_mcs_pdu.buffer_length()..]).clone_from_slice(&pdu_data);
 
                         (SequenceState::DvcCapabilities(next_state), RdpPdu::Data(data))
                     }
@@ -199,16 +205,15 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeD
 }
 
 fn handle_send_data_request(
-    SendDataContext {
-        pdu,
-        initiator_id,
-        channel_id,
-    }: SendDataContext,
+    pdu: BytesMut,
     sequence_state: DvcCapabilitiesState,
     dvc_manager: &mut DvcManager,
-) -> io::Result<(DvcCapabilitiesState, SendDataContext)> {
-    let (next_state, dvc_pdu_buffer) = map_dvc_pdu(pdu, |dvc_data| {
-        match (sequence_state, dvc::ClientPdu::from_buffer(dvc_data)?) {
+) -> io::Result<(DvcCapabilitiesState, BytesMut)> {
+    let (next_state, dvc_pdu_buffer) = map_dvc_pdu(pdu, |mut dvc_data| {
+        match (
+            sequence_state,
+            dvc::ClientPdu::from_buffer(dvc_data.as_ref(), dvc_data.len())?,
+        ) {
             (
                 DvcCapabilitiesState::ClientDvcCapabilitiesResponse,
                 dvc::ClientPdu::CapabilitiesResponse(capabilities),
@@ -223,10 +228,12 @@ fn handle_send_data_request(
                     debug!("Downgrading client's DVC Capabilities Response PDU to V1");
                 }
 
-                Ok((
-                    DvcCapabilitiesState::ServerCreateRequest,
-                    dvc::ClientPdu::CapabilitiesResponse(response_v1),
-                ))
+                let caps_response_pdu = dvc::ClientPdu::CapabilitiesResponse(response_v1);
+
+                dvc_data.resize(caps_response_pdu.buffer_length(), 0);
+                caps_response_pdu.to_buffer(dvc_data.as_mut())?;
+
+                Ok((DvcCapabilitiesState::ServerCreateRequest, dvc_data))
             }
             (DvcCapabilitiesState::ClientCreateResponse, dvc::ClientPdu::CreateResponse(create_response_pdu)) => {
                 debug!("Got client's DVC Create Response PDU: {:?}", create_response_pdu);
@@ -238,16 +245,17 @@ fn handle_send_data_request(
                     _ => DvcCapabilitiesState::ServerCreateRequest,
                 };
 
-                Ok((next_state, dvc::ClientPdu::CreateResponse(create_response_pdu)))
+                Ok((next_state, dvc_data))
             }
             (DvcCapabilitiesState::ClientGfxCapabilitiesRequest, dvc::ClientPdu::Data(data_pdu)) => {
                 let channel_id_type = data_pdu.channel_id_type;
                 let channel_id = data_pdu.channel_id;
-                let mut dvc_data = dvc_manager
-                    .handle_data_pdu(PduSource::Client, data_pdu)
+                let complete_dvc_data = dvc_manager
+                    .handle_data_pdu(PduSource::Client, data_pdu, dvc_data.as_ref())
                     .expect("First GFX PDU must be complete data");
+
                 let gfx_capabilities = if let gfx::ClientPdu::CapabilitiesAdvertise(gfx_capabilities) =
-                    gfx::ClientPdu::from_buffer(dvc_data.as_slice()).map_err(map_graphics_pipeline_error)?
+                    gfx::ClientPdu::from_buffer(complete_dvc_data.as_slice()).map_err(map_graphics_pipeline_error)?
                 {
                     gfx_capabilities
                 } else {
@@ -266,19 +274,20 @@ fn handle_send_data_request(
                     },
                 ]));
 
-                dvc_data.clear();
+                let data_pdu = dvc::ClientPdu::Data(dvc::DataPdu {
+                    channel_id_type,
+                    channel_id,
+                    data_size: gfx_capabilities.buffer_length(),
+                });
+
+                dvc_data.resize(data_pdu.buffer_length() + gfx_capabilities.buffer_length(), 0);
+
+                data_pdu.to_buffer(dvc_data.as_mut())?;
                 gfx_capabilities
-                    .to_buffer(&mut dvc_data)
+                    .to_buffer(&mut dvc_data[data_pdu.buffer_length()..])
                     .map_err(|e| map_graphics_pipeline_error(gfx::GraphicsPipelineError::from(e)))?;
 
-                Ok((
-                    DvcCapabilitiesState::Finished,
-                    dvc::ClientPdu::Data(dvc::DataPdu {
-                        channel_id_type,
-                        channel_id,
-                        dvc_data,
-                    }),
-                ))
+                Ok((DvcCapabilitiesState::Finished, dvc_data))
             }
             (state, client_dvc_pdu) => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -291,48 +300,41 @@ fn handle_send_data_request(
         }
     })?;
 
-    Ok((
-        next_state,
-        SendDataContext {
-            pdu: dvc_pdu_buffer,
-            initiator_id,
-            channel_id,
-        },
-    ))
+    Ok((next_state, dvc_pdu_buffer))
 }
 
 fn handle_send_data_indication(
-    SendDataContext {
-        pdu,
-        initiator_id,
-        channel_id,
-    }: SendDataContext,
+    pdu: BytesMut,
     sequence_state: DvcCapabilitiesState,
     dvc_manager: &mut DvcManager,
-) -> io::Result<(DvcCapabilitiesState, SendDataContext)> {
-    let (next_state, dvc_pdu_buffer) = map_dvc_pdu(pdu, |dvc_data| {
-        match (sequence_state, dvc::ServerPdu::from_buffer(dvc_data)?) {
+) -> io::Result<(DvcCapabilitiesState, BytesMut)> {
+    let (next_state, dvc_pdu_buffer) = map_dvc_pdu(pdu, |mut dvc_data| {
+        match (
+            sequence_state,
+            dvc::ServerPdu::from_buffer(dvc_data.as_ref(), dvc_data.len())?,
+        ) {
             (DvcCapabilitiesState::ServerDvcCapabilitiesRequest, dvc::ServerPdu::CapabilitiesRequest(capabilities)) => {
                 debug!("Got server's DVC Capabilities Request PDU: {:?}", capabilities);
 
-                if capabilities != dvc::CapabilitiesRequestPdu::V1 {
+                let request_v1 = dvc::CapabilitiesRequestPdu::V1;
+
+                if capabilities != request_v1 {
                     debug!("Downgrading server's DVC Capabilities Request PDU to V1");
                 }
 
-                Ok((
-                    DvcCapabilitiesState::ClientDvcCapabilitiesResponse,
-                    dvc::ServerPdu::CapabilitiesRequest(dvc::CapabilitiesRequestPdu::V1),
-                ))
+                let caps_request_pdu = dvc::ServerPdu::CapabilitiesRequest(request_v1);
+
+                dvc_data.resize(caps_request_pdu.buffer_length(), 0);
+                caps_request_pdu.to_buffer(dvc_data.as_mut())?;
+
+                Ok((DvcCapabilitiesState::ClientDvcCapabilitiesResponse, dvc_data))
             }
             (DvcCapabilitiesState::ServerCreateRequest, dvc::ServerPdu::CreateRequest(create_request_pdu)) => {
                 debug!("Got server's DVC Create Request PDU: {:?}", create_request_pdu);
 
                 dvc_manager.handle_create_request_pdu(&create_request_pdu);
 
-                Ok((
-                    DvcCapabilitiesState::ClientCreateResponse,
-                    dvc::ServerPdu::CreateRequest(create_request_pdu),
-                ))
+                Ok((DvcCapabilitiesState::ClientCreateResponse, dvc_data))
             }
             (state, server_dvc_pdu) => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -345,42 +347,35 @@ fn handle_send_data_indication(
         }
     })?;
 
-    Ok((
-        next_state,
-        SendDataContext {
-            pdu: dvc_pdu_buffer,
-            initiator_id,
-            channel_id,
-        },
-    ))
+    Ok((next_state, dvc_pdu_buffer))
 }
 
-fn map_dvc_pdu<T, F>(mut pdu: Vec<u8>, f: F) -> io::Result<(DvcCapabilitiesState, Vec<u8>)>
+fn map_dvc_pdu<F>(mut pdu: BytesMut, f: F) -> io::Result<(DvcCapabilitiesState, BytesMut)>
 where
-    F: FnOnce(&[u8]) -> io::Result<(DvcCapabilitiesState, T)>,
-    T: PduParsing,
-    io::Error: From<T::Error>,
+    F: FnOnce(BytesMut) -> io::Result<(DvcCapabilitiesState, BytesMut)>,
 {
-    let mut svc_header = vc::ChannelPduHeader::from_buffer(pdu.as_slice())?;
-    let dvc_data = &pdu[svc_header.buffer_length()..];
+    let mut svc_header = vc::ChannelPduHeader::from_buffer(pdu.as_ref())?;
+    pdu.split_to(svc_header.buffer_length());
 
-    if svc_header.total_length as usize != dvc_data.len() {
+    if svc_header.total_length as usize != pdu.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
                 "Received invalid VC header total length: {} != {}",
                 svc_header.total_length,
-                dvc_data.len(),
+                pdu.len(),
             ),
         ));
     }
 
-    let (next_state, dvc_pdu) = f(dvc_data)?;
+    let (next_state, dvc_pdu_buffer) = f(pdu)?;
 
-    svc_header.total_length = dvc_pdu.buffer_length() as u32;
-    pdu.resize(dvc_pdu.buffer_length() + svc_header.buffer_length(), 0);
-    svc_header.to_buffer(&mut pdu[..])?;
-    dvc_pdu.to_buffer(&mut pdu[svc_header.buffer_length()..])?;
+    svc_header.total_length = dvc_pdu_buffer.len() as u32;
+
+    let mut pdu = BytesMut::with_capacity(svc_header.buffer_length() + dvc_pdu_buffer.len());
+    pdu.resize(svc_header.buffer_length() + dvc_pdu_buffer.len(), 0);
+    svc_header.to_buffer(pdu.as_mut())?;
+    (&mut pdu[svc_header.buffer_length()..]).clone_from_slice(&dvc_pdu_buffer);
 
     Ok((next_state, pdu))
 }

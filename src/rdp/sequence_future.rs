@@ -11,7 +11,7 @@ pub use self::{
     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
-    post_mcs::PostMcs,
+    post_mcs::{PostMcs, PostMcsFutureTransport},
 };
 
 use std::io;

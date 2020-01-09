@@ -4,9 +4,9 @@ use ironrdp::{
     dvc::gfx::{zgfx, ServerPdu},
     PduParsing,
 };
-use slog_scope::trace;
+use slog_scope::debug;
 
-use super::DynamicChannelDataHandler;
+use super::{CompleteDataResult, DynamicChannelDataHandler};
 use crate::interceptor::PduSource;
 
 pub struct Handler {
@@ -26,22 +26,29 @@ impl Handler {
 impl DynamicChannelDataHandler for Handler {
     fn process_complete_data(
         &mut self,
-        mut complete_data: Vec<u8>,
+        complete_data: CompleteDataResult,
         pdu_source: PduSource,
     ) -> Result<Vec<u8>, io::Error> {
         if let PduSource::Server = pdu_source {
+            let compressed_data = match &complete_data {
+                CompleteDataResult::Complete(v) => v,
+                CompleteDataResult::Parted(v) => v.as_slice(),
+            };
+
             self.decompressed_buffer.clear();
             self.decompressor
-                .decompress(complete_data.as_slice(), &mut self.decompressed_buffer)
+                .decompress(compressed_data, &mut self.decompressed_buffer)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decompress ZGFX: {:?}", e)))?;
             let gfx_pdu = ServerPdu::from_buffer(self.decompressed_buffer.as_slice())
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decode GFX PDU: {:?}", e)))?;
-            trace!("Got GFX PDU: {:x?}", gfx_pdu);
+            debug!("Got GFX PDU: {:?}", gfx_pdu);
 
-            complete_data.resize(self.decompressed_buffer.len(), 0);
-            complete_data.clone_from_slice(self.decompressed_buffer.as_slice());
+            Ok(self.decompressed_buffer.to_vec())
+        } else {
+            match complete_data {
+                CompleteDataResult::Parted(v) => Ok(v),
+                CompleteDataResult::Complete(v) => Ok(v.to_vec()),
+            }
         }
-
-        Ok(complete_data)
     }
 }
