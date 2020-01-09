@@ -1,6 +1,5 @@
 use std::io;
 
-use super::{IndicationData, SequenceState};
 use ironrdp::{
     rdp::{
         server_license::{
@@ -12,9 +11,10 @@ use ironrdp::{
     },
     PduParsing,
 };
-
 use ring::rand::SecureRandom;
 use slog_scope::{debug, info, trace, warn};
+
+use super::{IndicationData, SequenceState};
 
 pub struct LicenseCredentials {
     pub username: String,
@@ -27,10 +27,10 @@ pub struct LicenseData {
 }
 
 pub fn process_license_request(
-    pdu: Vec<u8>,
+    pdu: &[u8],
     credentials: &LicenseCredentials,
 ) -> io::Result<(SequenceState, Vec<u8>, IndicationData)> {
-    let initial_message = InitialServerLicenseMessage::from_buffer(pdu.as_slice()).map_err(|err| {
+    let initial_message = InitialServerLicenseMessage::from_buffer(pdu).map_err(|err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -114,11 +114,11 @@ pub fn process_license_request(
 }
 
 pub fn process_challenge(
-    pdu: Vec<u8>,
+    pdu: &[u8],
     encryption_data: Option<LicenseEncryptionData>,
     credentials: &LicenseCredentials,
 ) -> io::Result<(SequenceState, Vec<u8>, IndicationData)> {
-    let challenge = match ServerPlatformChallenge::from_buffer(pdu.as_slice()) {
+    let challenge = match ServerPlatformChallenge::from_buffer(pdu) {
         Err(ServerLicenseError::UnexpectedValidClientError(_)) => {
             warn!("The server has returned STATUS_VALID_CLIENT unexpectedly");
 
@@ -202,10 +202,10 @@ pub fn process_challenge(
 }
 
 pub fn process_upgrade_license(
-    pdu: Vec<u8>,
+    pdu: &[u8],
     encryption_data: Option<LicenseEncryptionData>,
 ) -> io::Result<(SequenceState, Vec<u8>, IndicationData)> {
-    let upgrade_license = match ServerUpgradeLicense::from_buffer(pdu.as_slice()) {
+    let upgrade_license = match ServerUpgradeLicense::from_buffer(pdu) {
         Err(ServerLicenseError::UnexpectedValidClientError(_)) => {
             warn!("The server has returned STATUS_VALID_CLIENT unexpectedly");
 

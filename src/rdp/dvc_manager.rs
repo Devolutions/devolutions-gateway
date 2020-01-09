@@ -15,7 +15,11 @@ use crate::interceptor::PduSource;
 pub const RDP8_GRAPHICS_PIPELINE_NAME: &str = "Microsoft::Windows::RDS::Graphics";
 
 trait DynamicChannelDataHandler: Send + Sync {
-    fn process_complete_data(&mut self, complete_data: Vec<u8>, pdu_source: PduSource) -> Result<Vec<u8>, io::Error>;
+    fn process_complete_data(
+        &mut self,
+        complete_data: CompleteDataResult,
+        pdu_source: PduSource,
+    ) -> Result<Vec<u8>, io::Error>;
 }
 
 pub struct DvcManager {
@@ -43,7 +47,7 @@ impl DvcManager {
 
         let dvc_pdu = match pdu_souce {
             PduSource::Client => {
-                let client_dvc_pdu = dvc::ClientPdu::from_buffer(dvc_data)?;
+                let client_dvc_pdu = dvc::ClientPdu::from_buffer(dvc_data, svc_header.total_length as usize)?;
                 match client_dvc_pdu {
                     dvc::ClientPdu::CapabilitiesResponse(caps_response) => {
                         info!("DVC version client response - {:?}", caps_response.version);
@@ -55,8 +59,10 @@ impl DvcManager {
 
                         None
                     }
-                    dvc::ClientPdu::DataFirst(data_first_pdu) => self.handle_data_first_pdu(pdu_souce, data_first_pdu),
-                    dvc::ClientPdu::Data(data_pdu) => self.handle_data_pdu(pdu_souce, data_pdu),
+                    dvc::ClientPdu::DataFirst(data_first_pdu) => {
+                        self.handle_data_first_pdu(pdu_souce, data_first_pdu, dvc_data)
+                    }
+                    dvc::ClientPdu::Data(data_pdu) => self.handle_data_pdu(pdu_souce, data_pdu, dvc_data),
                     dvc::ClientPdu::CloseResponse(close_response_pdu) => {
                         self.handle_close_response(&close_response_pdu);
 
@@ -65,7 +71,7 @@ impl DvcManager {
                 }
             }
             PduSource::Server => {
-                let server_dvc_pdu = dvc::ServerPdu::from_buffer(dvc_data)?;
+                let server_dvc_pdu = dvc::ServerPdu::from_buffer(dvc_data, svc_header.total_length as usize)?;
                 match server_dvc_pdu {
                     dvc::ServerPdu::CapabilitiesRequest(caps_request) => {
                         info!("DVC version server request - {:?}", caps_request);
@@ -77,8 +83,10 @@ impl DvcManager {
 
                         None
                     }
-                    dvc::ServerPdu::DataFirst(data_first_pdu) => self.handle_data_first_pdu(pdu_souce, data_first_pdu),
-                    dvc::ServerPdu::Data(data_pdu) => self.handle_data_pdu(pdu_souce, data_pdu),
+                    dvc::ServerPdu::DataFirst(data_first_pdu) => {
+                        self.handle_data_first_pdu(pdu_souce, data_first_pdu, dvc_data)
+                    }
+                    dvc::ServerPdu::Data(data_pdu) => self.handle_data_pdu(pdu_souce, data_pdu, dvc_data),
                     dvc::ServerPdu::CloseRequest(close_request_pdu) => {
                         self.handle_close_request(&close_request_pdu);
 
@@ -132,16 +140,30 @@ impl DvcManager {
         &mut self,
         pdu_source: PduSource,
         data_first_pdu: dvc::DataFirstPdu,
+        dvc_data: &[u8],
     ) -> Option<Vec<u8>> {
         match self.dynamic_channels.get_mut(&data_first_pdu.channel_id) {
-            Some(channel) => channel.process_data_first_pdu(pdu_source, data_first_pdu),
+            Some(channel) => {
+                let dvc_data = &dvc_data[data_first_pdu.buffer_length()..];
+
+                channel.process_data_first_pdu(pdu_source, data_first_pdu.total_data_size as usize, dvc_data)
+            }
             None => None,
         }
     }
 
-    pub fn handle_data_pdu(&mut self, pdu_source: PduSource, data_pdu: dvc::DataPdu) -> Option<Vec<u8>> {
+    pub fn handle_data_pdu(
+        &mut self,
+        pdu_source: PduSource,
+        data_pdu: dvc::DataPdu,
+        dvc_data: &[u8],
+    ) -> Option<Vec<u8>> {
         match self.dynamic_channels.get_mut(&data_pdu.channel_id) {
-            Some(channel) => channel.process_data_pdu(pdu_source, data_pdu),
+            Some(channel) => {
+                let dvc_data = &dvc_data[data_pdu.buffer_length()..];
+
+                channel.process_data_pdu(pdu_source, dvc_data)
+            }
             None => None,
         }
     }
@@ -189,16 +211,21 @@ impl DynamicChannel {
         }
     }
 
-    fn process_data_first_pdu(&mut self, pdu_souce: PduSource, data_first: dvc::DataFirstPdu) -> Option<Vec<u8>> {
+    fn process_data_first_pdu(
+        &mut self,
+        pdu_souce: PduSource,
+        total_length: usize,
+        data_first: &[u8],
+    ) -> Option<Vec<u8>> {
         let complete_data = match pdu_souce {
-            PduSource::Client => self.client_data.process_data_first_pdu(data_first),
-            PduSource::Server => self.server_data.process_data_first_pdu(data_first),
+            PduSource::Client => self.client_data.process_data_first_pdu(total_length, data_first),
+            PduSource::Server => self.server_data.process_data_first_pdu(total_length, data_first),
         };
 
         self.process_complete_data(pdu_souce, complete_data)
     }
 
-    fn process_data_pdu(&mut self, pdu_souce: PduSource, data: dvc::DataPdu) -> Option<Vec<u8>> {
+    fn process_data_pdu(&mut self, pdu_souce: PduSource, data: &[u8]) -> Option<Vec<u8>> {
         let complete_data = match pdu_souce {
             PduSource::Client => self.client_data.process_data_pdu(data),
             PduSource::Server => self.server_data.process_data_pdu(data),
@@ -207,25 +234,28 @@ impl DynamicChannel {
         self.process_complete_data(pdu_souce, complete_data)
     }
 
-    fn process_complete_data(&mut self, pdu_source: PduSource, complete_data: Option<Vec<u8>>) -> Option<Vec<u8>> {
-        if let Some(complete_data) = complete_data {
-            match self.handler.process_complete_data(complete_data, pdu_source) {
+    fn process_complete_data(
+        &mut self,
+        pdu_source: PduSource,
+        complete_data: Option<CompleteDataResult>,
+    ) -> Option<Vec<u8>> {
+        match complete_data {
+            Some(complete_data) => match self.handler.process_complete_data(complete_data, pdu_source) {
                 Ok(data) => Some(data),
                 Err(e) => {
                     error!("Unexpected DVC error: {}", e);
 
                     None
                 }
-            }
-        } else {
-            None
+            },
+            None => None,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
 struct CompleteData {
-    total_length: u32,
+    total_length: usize,
     data: Option<Vec<u8>>,
 }
 
@@ -237,46 +267,49 @@ impl CompleteData {
         }
     }
 
-    fn process_data_first_pdu(&mut self, data_first: dvc::DataFirstPdu) -> Option<Vec<u8>> {
+    fn process_data_first_pdu<'a>(
+        &mut self,
+        total_length: usize,
+        data_first: &'a [u8],
+    ) -> Option<CompleteDataResult<'a>> {
         if self.total_length != 0 || !self.data.is_none() {
             error!("Incomplete DVC message, it will be skipped");
 
             self.data = None;
         }
 
-        if data_first.data_length as usize == data_first.dvc_data.len() {
-            Some(data_first.dvc_data)
+        if total_length == data_first.len() {
+            Some(CompleteDataResult::Complete(data_first))
         } else {
-            self.total_length = data_first.data_length;
-            self.data = Some(data_first.dvc_data);
+            self.total_length = total_length;
+            self.data = Some(data_first.to_vec());
 
             None
         }
     }
 
-    fn process_data_pdu(&mut self, data: dvc::DataPdu) -> Option<Vec<u8>> {
+    fn process_data_pdu<'a>(&mut self, data: &'a [u8]) -> Option<CompleteDataResult<'a>> {
         if self.total_length == 0 && self.data.is_none() {
             // message is not fragmented
 
-            Some(data.dvc_data)
+            Some(CompleteDataResult::Complete(data))
         } else {
             // message is fragmented so need to reassemble it
-            let actual_data_length = self.data.as_ref().unwrap().len() + data.dvc_data.len();
+            let actual_data_length = self.data.as_ref().unwrap().len() + data.len();
 
-            match actual_data_length.cmp(&(self.total_length as usize)) {
+            match actual_data_length.cmp(&(self.total_length)) {
                 Ordering::Less => {
                     // this is one of the fragmented messages, just append it
-                    self.data.as_mut().unwrap().extend_from_slice(data.dvc_data.as_slice());
+                    self.data.as_mut().unwrap().extend_from_slice(data);
 
                     None
                 }
                 Ordering::Equal => {
                     // this is the last fragmented message, need to return the whole reassembled message
-
-                    self.data.as_mut().unwrap().extend_from_slice(data.dvc_data.as_slice());
+                    self.data.as_mut().unwrap().extend_from_slice(data);
                     self.total_length = 0;
 
-                    self.data.take()
+                    self.data.take().map(|v| CompleteDataResult::Parted(v))
                 }
                 Ordering::Greater => {
                     error!("Actual DVC message size is grater than expected total DVC message size");
@@ -291,10 +324,22 @@ impl CompleteData {
     }
 }
 
+enum CompleteDataResult<'a> {
+    Parted(Vec<u8>),
+    Complete(&'a [u8]),
+}
+
 struct DefaultHandler;
 
 impl DynamicChannelDataHandler for DefaultHandler {
-    fn process_complete_data(&mut self, complete_data: Vec<u8>, _pdu_source: PduSource) -> io::Result<Vec<u8>> {
-        Ok(complete_data)
+    fn process_complete_data(
+        &mut self,
+        complete_data: CompleteDataResult,
+        _pdu_source: PduSource,
+    ) -> io::Result<Vec<u8>> {
+        match complete_data {
+            CompleteDataResult::Parted(v) => Ok(v),
+            CompleteDataResult::Complete(v) => Ok(v.to_vec()),
+        }
     }
 }

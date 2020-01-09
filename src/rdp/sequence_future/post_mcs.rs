@@ -2,20 +2,23 @@ mod licensing;
 
 use std::io;
 
+use bytes::BytesMut;
 use ironrdp::{
     mcs::SendDataContext, rdp::server_license::LicenseEncryptionData, ClientInfoPdu, McsPdu, PduParsing,
     ShareControlHeader, ShareControlPdu,
 };
 use slog_scope::{debug, trace, warn};
-use tokio::net::tcp::TcpStream;
+use tokio::{codec::Framed, net::tcp::TcpStream};
 use tokio_rustls::TlsStream;
 
-use super::{FutureState, McsFutureTransport, NextStream, SequenceFutureProperties};
+use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{
     rdp::filter::{Filter, FilterConfig},
-    transport::mcs::McsTransport,
+    transport::mcs::SendDataContextTransport,
 };
 use licensing::{process_challenge, process_license_request, process_upgrade_license, LicenseCredentials, LicenseData};
+
+pub type PostMcsFutureTransport = Framed<TlsStream<TcpStream>, SendDataContextTransport>;
 
 pub struct PostMcs {
     sequence_state: SequenceState,
@@ -41,22 +44,22 @@ impl PostMcs {
     }
 }
 
-impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
-    type Item = (McsFutureTransport, McsFutureTransport, FilterConfig);
+impl SequenceFutureProperties<TlsStream<TcpStream>, SendDataContextTransport> for PostMcs {
+    type Item = (PostMcsFutureTransport, PostMcsFutureTransport, FilterConfig);
 
-    fn process_pdu(&mut self, mcs_pdu: McsPdu) -> io::Result<Option<McsPdu>> {
+    fn process_pdu(&mut self, (mcs_pdu, pdu_data): (McsPdu, BytesMut)) -> io::Result<Option<(McsPdu, Vec<u8>)>> {
         let filter = self.filter.as_ref().expect(
             "The filter must exist in the client's RDP Connection Sequence, and must be taken only in the Finished state",
         );
 
         let (next_sequence_state, result) = match mcs_pdu {
             McsPdu::SendDataRequest(SendDataContext {
-                pdu,
                 initiator_id,
                 channel_id,
+                ..
             }) => {
                 let (next_sequence_state, pdu, credentials) =
-                    process_send_data_request_pdu(pdu, self.sequence_state, filter, self.originator_id)?;
+                    process_send_data_request_pdu(pdu_data, self.sequence_state, filter, self.originator_id)?;
 
                 if let Some(credentials) = credentials {
                     self.license_data.credentials = credentials;
@@ -64,21 +67,24 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
 
                 (
                     next_sequence_state,
-                    McsPdu::SendDataRequest(SendDataContext {
+                    (
+                        McsPdu::SendDataRequest(SendDataContext {
+                            pdu_length: pdu.len(),
+                            initiator_id,
+                            channel_id,
+                        }),
                         pdu,
-                        initiator_id,
-                        channel_id,
-                    }),
+                    ),
                 )
             }
 
             McsPdu::SendDataIndication(SendDataContext {
-                pdu,
                 initiator_id,
                 channel_id,
+                ..
             }) => {
                 let (next_sequence_state, pdu, indication_data) = process_send_data_indication_pdu(
-                    pdu,
+                    pdu_data,
                     self.sequence_state,
                     filter,
                     self.license_data.encryption_data.clone(),
@@ -95,11 +101,14 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
 
                 (
                     next_sequence_state,
-                    McsPdu::SendDataIndication(SendDataContext {
+                    (
+                        McsPdu::SendDataIndication(SendDataContext {
+                            pdu_length: pdu.len(),
+                            initiator_id,
+                            channel_id,
+                        }),
                         pdu,
-                        initiator_id,
-                        channel_id,
-                    }),
+                    ),
                 )
             }
             _ => {
@@ -119,8 +128,8 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
     }
     fn return_item(
         &mut self,
-        mut client: Option<McsFutureTransport>,
-        mut server: Option<McsFutureTransport>,
+        mut client: Option<PostMcsFutureTransport>,
+        mut server: Option<PostMcsFutureTransport>,
     ) -> Self::Item {
         debug!("Successfully processed RDP Connection Sequence");
 
@@ -163,14 +172,14 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport> for PostMcs {
 }
 
 fn process_send_data_request_pdu(
-    pdu: Vec<u8>,
+    pdu_data: BytesMut,
     sequence_state: SequenceState,
     filter_config: &FilterConfig,
     originator_id: Option<u16>,
 ) -> io::Result<(SequenceState, Vec<u8>, Option<LicenseCredentials>)> {
     match sequence_state {
         SequenceState::ClientInfo => {
-            let mut client_info_pdu = ClientInfoPdu::from_buffer(pdu.as_slice())?;
+            let mut client_info_pdu = ClientInfoPdu::from_buffer(pdu_data.as_ref())?;
             trace!("Got Client Info PDU: {:?}", client_info_pdu);
 
             client_info_pdu.filter(filter_config);
@@ -189,7 +198,7 @@ fn process_send_data_request_pdu(
             ))
         }
         SequenceState::ClientConfirmActive => {
-            let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
+            let mut share_control_header = ShareControlHeader::from_buffer(pdu_data.as_ref())?;
 
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
                 (SequenceState::ClientConfirmActive, ShareControlPdu::ClientConfirmActive(client_confirm_active)) => {
@@ -239,18 +248,18 @@ pub struct IndicationData {
 }
 
 fn process_send_data_indication_pdu(
-    pdu: Vec<u8>,
+    pdu_data: BytesMut,
     sequence_state: SequenceState,
     filter_config: &FilterConfig,
     encryption_data: Option<LicenseEncryptionData>,
     credentials: &LicenseCredentials,
 ) -> io::Result<(SequenceState, Vec<u8>, IndicationData)> {
     match sequence_state {
-        SequenceState::ServerLicenseRequest => process_license_request(pdu, credentials),
-        SequenceState::ServerChallenge => process_challenge(pdu, encryption_data, credentials),
-        SequenceState::ServerUpgradeLicense => process_upgrade_license(pdu, encryption_data),
+        SequenceState::ServerLicenseRequest => process_license_request(pdu_data.as_ref(), credentials),
+        SequenceState::ServerChallenge => process_challenge(pdu_data.as_ref(), encryption_data, credentials),
+        SequenceState::ServerUpgradeLicense => process_upgrade_license(pdu_data.as_ref(), encryption_data),
         SequenceState::ServerDemandActive => {
-            let mut share_control_header = ShareControlHeader::from_buffer(pdu.as_slice())?;
+            let mut share_control_header = ShareControlHeader::from_buffer(pdu_data.as_ref())?;
 
             let next_sequence_state = match (sequence_state, &mut share_control_header.share_control_pdu) {
                 (SequenceState::ServerDemandActive, ShareControlPdu::ServerDemandActive(server_demand_active)) => {

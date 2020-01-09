@@ -1,6 +1,6 @@
 mod common;
 
-use jet_proto::{JetMessage};
+use jet_proto::JetMessage;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc::channel;
@@ -11,10 +11,10 @@ use uuid::Uuid;
 use common::run_proxy;
 use jet_proto::accept::JetAcceptReq;
 use jet_proto::connect::JetConnectReq;
-use std::str::FromStr;
 use reqwest::{Client, StatusCode};
-use url::Url;
 use serde_derive::{Deserialize, Serialize};
+use std::str::FromStr;
+use url::Url;
 
 const PROXY_ADDR: &str = "127.0.0.1:8080";
 const HTTP_URL: &str = "http://127.0.0.1:10256";
@@ -196,7 +196,9 @@ fn smoke_tcp_v2() {
     assert!(client.post(create_url).send().unwrap().status() == StatusCode::OK);
 
     // Candidate gathering
-    let gather_url = url.join(&format!("/jet/association/{}/candidates", association_id)).unwrap();
+    let gather_url = url
+        .join(&format!("/jet/association/{}/candidates", association_id))
+        .unwrap();
     let mut result = client.post(gather_url).send().unwrap();
     assert!(result.status() == StatusCode::OK);
     let association_info: AssociationInfo = result.json().unwrap();
@@ -367,5 +369,5 @@ struct CandidateInfo {
 #[derive(Debug, Serialize, Deserialize)]
 struct AssociationInfo {
     id: String,
-    candidates: Vec<CandidateInfo>
+    candidates: Vec<CandidateInfo>,
 }
