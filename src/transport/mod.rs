@@ -180,10 +180,10 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
             if let Some(mut reservation) = self.buffer.reserve(PART_LEN) {
                 match self.stream.poll_read(reservation.as_mut()) {
                     Ok(Async::Ready(0)) => {
-                        if written > 0 {
-                            return Ok(Async::Ready(Some(written)));
+                        return if written > 0 {
+                            Ok(Async::Ready(Some(written)))
                         } else {
-                            return Ok(Async::Ready(None));
+                            Ok(Async::Ready(None))
                         }
                     }
                     Ok(Async::Ready(len)) => {
@@ -199,10 +199,10 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                         trace!("{} bytes read on {}", len, peer_addr);
                     }
                     Ok(Async::NotReady) => {
-                        if written > 0 {
-                            return Ok(Async::Ready(Some(written)));
+                        return if written > 0 {
+                            Ok(Async::Ready(Some(written)))
                         } else {
-                            return Ok(Async::NotReady);
+                            Ok(Async::NotReady)
                         }
                     }
                     Err(e) => {
@@ -212,11 +212,13 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                     }
                 }
             } else {
-                if written > 0 {
-                    return Ok(Async::Ready(Some(written)));
+                return if written > 0 {
+                    Ok(Async::Ready(Some(written)))
                 } else {
-                    panic!("at least one byte must be written before the reserve call is not ready");
-                }
+                    error!("BipBuffer reader cannot read any byte. Closing Writer");
+
+                    Ok(Async::Ready(None))
+                };
             }
         }
     }
