@@ -42,9 +42,9 @@ const CHANNEL_ID: u32 = 0x03;
 
 #[test]
 fn dvc_manager_reads_dvc_caps_request_packet_without_error() {
-    let mut dvc_manager = DvcManager::new();
+    let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
     let result_message = dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_CAPS_REQUEST_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_CAPS_REQUEST_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
@@ -52,9 +52,9 @@ fn dvc_manager_reads_dvc_caps_request_packet_without_error() {
 
 #[test]
 fn dvc_manager_reads_dvc_caps_response_packet_without_error() {
-    let mut dvc_manager = DvcManager::new();
+    let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CAPS_RESPONSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CAPS_RESPONSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
@@ -62,9 +62,9 @@ fn dvc_manager_reads_dvc_caps_response_packet_without_error() {
 
 #[test]
 fn dvc_manager_reads_dvc_create_response_packet_without_error() {
-    let mut dvc_manager = DvcManager::new();
+    let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CREATE_RESPONSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CREATE_RESPONSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
@@ -72,9 +72,9 @@ fn dvc_manager_reads_dvc_create_response_packet_without_error() {
 
 #[test]
 fn dvc_manager_reads_dvc_close_request_packet_without_error() {
-    let mut dvc_manager = DvcManager::new();
+    let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
     let result_message = dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_CLOSE_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_CLOSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
@@ -82,11 +82,8 @@ fn dvc_manager_reads_dvc_close_request_packet_without_error() {
 
 #[test]
 fn dvc_manager_fails_reading_vc_packet_with_invalid_data_length() {
-    let mut dvc_manager = DvcManager::new();
-    match dvc_manager.process(
-        PduSource::Client,
-        &mut VC_PACKET_WITH_INVALID_TOTAL_DATA_LENGTH.to_vec(),
-    ) {
+    let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
+    match dvc_manager.process(PduSource::Client, VC_PACKET_WITH_INVALID_TOTAL_DATA_LENGTH.as_ref()) {
         Err(vc::ChannelError::InvalidChannelTotalDataLength) => (),
         res => panic!(
             "Expected ChannelError::InvalidChannelTotalDataLength error, got: {:?}",
@@ -99,7 +96,7 @@ fn dvc_manager_fails_reading_vc_packet_with_invalid_data_length() {
 fn dvc_manager_creates_dv_channel() {
     let mut dvc_manager = get_dvc_manager_with_got_create_request_pdu();
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CREATE_RESPONSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CREATE_RESPONSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
@@ -108,114 +105,111 @@ fn dvc_manager_creates_dv_channel() {
     assert_eq!(CHANNEL_NAME, channel_name);
 
     let channel = dvc_manager.pending_dynamic_channels.get(&CHANNEL_ID);
-    assert_eq!(None, channel);
+    assert!(channel.is_none());
 }
 
 #[test]
 fn dvc_manager_removes_channel_during_create_response() {
     let mut dvc_manager = get_dvc_manager_with_got_create_request_pdu();
     let result_message = dvc_manager
-        .process(
-            PduSource::Client,
-            &mut DRDYNVC_WITH_FAILED_CREATION_STATUS_PACKET.to_vec(),
-        )
+        .process(PduSource::Client, DRDYNVC_WITH_FAILED_CREATION_STATUS_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
 
     let channel = dvc_manager.pending_dynamic_channels.get(&CHANNEL_ID);
-    assert_eq!(None, channel);
+    assert!(channel.is_none());
 
     assert!(dvc_manager.dynamic_channels.is_empty());
 }
 
 #[test]
 fn dvc_manager_does_not_remove_channel_during_create_response() {
-    let mut dvc_manager = get_dvc_maneger_with_created_channel();
+    let mut dvc_manager = get_dvc_manager_with_created_channel();
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_ne!(None, channel);
+    assert!(channel.is_some());
 
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CREATE_RESPONSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CREATE_RESPONSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
 
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_ne!(None, channel);
+    assert!(channel.is_some());
 }
 
 #[test]
 fn dvc_manager_removes_dv_channel() {
-    let mut dvc_manager = get_dvc_maneger_with_created_channel();
+    let mut dvc_manager = get_dvc_manager_with_created_channel();
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_ne!(None, channel);
+    assert!(channel.is_some());
 
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CLOSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CLOSE_PACKET.as_ref())
         .unwrap();
 
     assert_eq!(None, result_message);
 
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_eq!(None, channel);
+    assert!(channel.is_none());
 }
 
 #[test]
 fn dvc_manager_reads_complete_message() {
-    let mut dvc_manager = get_dvc_maneger_with_created_channel();
+    let mut dvc_manager = get_dvc_manager_with_created_channel();
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_ne!(None, channel);
+    assert!(channel.is_some());
 
     let result_message = dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_COMPLETE_DATA_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_COMPLETE_DATA_PACKET.as_ref())
         .unwrap();
 
-    let expected_message = RAW_UNFRAGMENTED_DATA_BUFFER.to_vec();
-    assert_eq!(expected_message, result_message.unwrap());
+    assert_eq!(
+        RAW_UNFRAGMENTED_DATA_BUFFER.as_ref(),
+        result_message.unwrap().as_slice()
+    );
 }
 
 #[test]
 fn dvc_manager_reads_fragmented_message() {
-    let mut dvc_manager = get_dvc_maneger_with_created_channel();
+    let mut dvc_manager = get_dvc_manager_with_created_channel();
     let channel = dvc_manager.dynamic_channels.get(&CHANNEL_ID);
-    assert_ne!(None, channel);
+    assert!(channel.is_some());
 
     let result_message = dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_DATA_FIRST_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_DATA_FIRST_PACKET.as_ref())
         .unwrap();
     assert_eq!(None, result_message);
 
     let result_message = dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_DATA_LAST_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_DATA_LAST_PACKET.as_ref())
         .unwrap();
 
-    let expected_message = RAW_FRAGMENTED_DATA_BUFFER.to_vec();
-    assert_eq!(expected_message, result_message.unwrap());
+    assert_eq!(RAW_FRAGMENTED_DATA_BUFFER.as_ref(), result_message.unwrap().as_slice());
 }
 
-fn get_dvc_maneger_with_created_channel() -> DvcManager {
-    let mut dvc_manager = DvcManager::new();
+fn get_dvc_manager_with_created_channel() -> DvcManager {
+    let mut dvc_manager = DvcManager::with_allowed_channels(vec![CHANNEL_NAME.to_string()]);
     dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_CREATE_REQUEST_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_CREATE_REQUEST_PACKET.as_ref())
         .unwrap();
 
     dvc_manager
-        .process(PduSource::Client, &mut DRDYNVC_WITH_CREATE_RESPONSE_PACKET.to_vec())
+        .process(PduSource::Client, DRDYNVC_WITH_CREATE_RESPONSE_PACKET.as_ref())
         .unwrap();
 
     dvc_manager
 }
 
 fn get_dvc_manager_with_got_create_request_pdu() -> DvcManager {
-    let mut dvc_manager = DvcManager::new();
+    let mut dvc_manager = DvcManager::with_allowed_channels(vec![CHANNEL_NAME.to_string()]);
     dvc_manager
-        .process(PduSource::Server, &mut DRDYNVC_WITH_CREATE_REQUEST_PACKET.to_vec())
+        .process(PduSource::Server, DRDYNVC_WITH_CREATE_REQUEST_PACKET.as_ref())
         .unwrap();
 
     let channel = dvc_manager.pending_dynamic_channels.get(&CHANNEL_ID).unwrap();
-    let expected_channel = DynamicChannel::new(CHANNEL_NAME.to_string());
-    assert_eq!(expected_channel, *channel);
+    assert_eq!(CHANNEL_NAME, channel.name);
 
     assert!(dvc_manager.dynamic_channels.is_empty());
 
