@@ -1,8 +1,8 @@
 use std::{
+    collections::HashMap,
     io,
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
-    collections::HashMap,
 };
 
 use futures::{future::Either, Future, Stream};
@@ -11,7 +11,10 @@ use spsc_bip_buffer::bip_buffer_with_len;
 
 use crate::{
     config::{Config, Protocol},
-    interceptor::{pcap::PcapInterceptor, rdp::RdpMessageReader, UnknownMessageReader, WaykMessageReader, MessageReader},
+    interceptor::{
+        pcap::PcapInterceptor, rdp::RdpMessageReader, MessageReader, UnknownMessageReader, WaykMessageReader,
+    },
+    rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
     transport::{FinishForwardFuture, ForwardFutureResult, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
@@ -33,28 +36,31 @@ impl Proxy {
         match self.config.protocol() {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
-                self.build_with_message_reader(server_transport, client_transport, WaykMessageReader)
+                self.build_with_message_reader(server_transport, client_transport, Box::new(WaykMessageReader))
             }
             Protocol::RDP => {
                 info!("RdpMessageReader will be used to interpret application protocol");
                 self.build_with_message_reader(
                     server_transport,
                     client_transport,
-                    RdpMessageReader::new(HashMap::new()),
+                    Box::new(RdpMessageReader::new(
+                        HashMap::new(),
+                        DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
+                    )),
                 )
             }
             Protocol::UNKNOWN => {
                 warn!("Protocol is unknown. Data received will not be split to get application message.");
-                self.build_with_message_reader(server_transport, client_transport, UnknownMessageReader)
+                self.build_with_message_reader(server_transport, client_transport, Box::new(UnknownMessageReader))
             }
         }
     }
 
-    pub fn build_with_message_reader<T: Transport, U: Transport, M: 'static + MessageReader>(
+    pub fn build_with_message_reader<T: Transport, U: Transport>(
         &self,
         server_transport: T,
         client_transport: U,
-        message_reader: M,
+        message_reader: Box<dyn MessageReader>,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);

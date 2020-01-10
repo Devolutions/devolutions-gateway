@@ -5,7 +5,7 @@ mod identities_proxy;
 mod sequence_future;
 
 pub use self::{
-    dvc_manager::DvcManager,
+    dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
     identities_proxy::{IdentitiesProxy, RdpIdentity},
 };
 
@@ -13,7 +13,7 @@ use std::{io, sync::Arc};
 
 use futures::Future;
 use slog_scope::{error, info};
-use tokio::{codec::FramedParts, io::write_all, net::tcp::TcpStream};
+use tokio::net::tcp::TcpStream;
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
@@ -80,6 +80,7 @@ impl RdpClient {
                             client_transport,
                             server_transport,
                             *drdynvc_channel_id,
+                            DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
                         ),
                         joined_static_channels,
                     ))
@@ -92,31 +93,19 @@ impl RdpClient {
                                 format!("Failed to downgrade DVC capabilities: {}", e),
                             )
                         })
-                        .and_then(move |(client_transport, server_transport)| {
-                            let FramedParts {
-                                io: client_tls,
-                                read_buf: client_read_buf,
-                                ..
-                            } = client_transport.into_parts();
-                            let FramedParts {
-                                io: server_tls,
-                                read_buf: server_read_buf,
-                                ..
-                            } = server_transport.into_parts();
+                        .and_then(move |(client_transport, server_transport, dvc_manager)| {
+                            let client_tls = client_transport.into_inner();
+                            let server_tls = server_transport.into_inner();
 
-                            write_all(client_tls, server_read_buf)
-                                .join(write_all(server_tls, client_read_buf))
-                                .and_then(|((client_tls, _), (server_tls, _))| {
-                                    Proxy::new(config_clone)
-                                        .build_with_message_reader(
-                                            TcpTransport::new_tls(server_tls),
-                                            TcpTransport::new_tls(client_tls),
-                                            RdpMessageReader::new(joined_static_channels),
-                                        )
-                                        .map_err(move |e| {
-                                            error!("Proxy error: {}", e);
-                                            e
-                                        })
+                            Proxy::new(config_clone)
+                                .build_with_message_reader(
+                                    TcpTransport::new_tls(server_tls),
+                                    TcpTransport::new_tls(client_tls),
+                                    Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager)),
+                                )
+                                .map_err(move |e| {
+                                    error!("Proxy error: {}", e);
+                                    e
                                 })
                         })
                 });
