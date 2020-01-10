@@ -78,38 +78,34 @@ const DRDYNVC_CHANNEL_ID: u16 = 1007;
 
 #[test]
 fn correct_reads_single_tpkt_packet() {
-    let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-    let mut data = packet.clone();
+    let data = TPKT_CLIENT_CONNECTION_REQUEST_PACKET;
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert_eq!(1, messages.len());
-    assert_eq!(packet, messages.first().unwrap().to_owned());
+    assert_eq!(data.as_ref(), messages.first().unwrap().as_ref());
 }
 
 #[test]
 fn does_not_read_fastpath_packet() {
-    let packet = FASTPATH_PACKET.to_vec();
-    let mut data = packet.clone();
+    let data = FASTPATH_PACKET;
 
-    let (messages, fast_path_length) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, fast_path_length) = get_tpkt_tpdu_messages(&data);
     assert_eq!(FASTPATH_PACKET.len(), fast_path_length);
     assert!(messages.is_empty());
 }
 
 #[test]
 fn does_not_read_incomplete_tpkt_packet() {
-    let mut packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-    packet.split_off(3);
-    let mut data = packet.clone();
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let data = &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..3];
+
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert!(messages.is_empty());
 }
 
 #[test]
 fn does_not_read_incomplete_packet_on_multiple_calls() {
-    let mut packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-    packet.split_off(3);
-    let mut data = packet.clone();
+    let mut data = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
+    data.truncate(3);
 
     let (messages, _) = get_tpkt_tpdu_messages(&mut data);
     assert!(messages.is_empty());
@@ -120,7 +116,7 @@ fn does_not_read_incomplete_packet_on_multiple_calls() {
 
 #[test]
 fn reads_packet_on_second_call_after_incomplete_read() {
-    let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
+    let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET;
     let (packet_first_part, packet_second_part) = packet.split_at(3);
     let mut data = packet_first_part.to_vec();
 
@@ -130,89 +126,96 @@ fn reads_packet_on_second_call_after_incomplete_read() {
     data.extend(packet_second_part);
     let (messages, _) = get_tpkt_tpdu_messages(&mut data);
     assert_eq!(1, messages.len());
-    assert_eq!(packet, messages.first().unwrap().to_owned());
+    assert_eq!(packet.as_ref(), messages.first().unwrap().as_ref());
 }
 
 #[test]
 fn reads_multiple_packets_after_incomplete_call() {
-    let first_packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-    let second_packet = FASTPATH_PACKET.to_vec();
-    let third_packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
+    let first_packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET;
+    let second_packet = FASTPATH_PACKET;
+    let third_packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET;
     let (first_packet_first_part, second_packet_second_part) = first_packet.split_at(3);
     let mut data = first_packet_first_part.to_vec();
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, data_length) = get_tpkt_tpdu_messages(&data);
     assert!(messages.is_empty());
+    assert_eq!(0, data_length);
 
-    data.extend(second_packet_second_part);
+    data.extend_from_slice(second_packet_second_part);
     data.extend_from_slice(second_packet.as_ref());
     data.extend_from_slice(third_packet.as_ref());
-    let (messages, fast_path_length) = get_tpkt_tpdu_messages(&mut data);
-    
+    let (messages, data_length) = get_tpkt_tpdu_messages(&mut data);
+
     assert_eq!(2, messages.len());
-    assert_eq!(first_packet, messages.first().unwrap().to_owned());
-    assert_eq!(third_packet, messages.last().unwrap().to_owned());
-    assert_eq!(FASTPATH_PACKET.len(), fast_path_length);
+    assert_eq!(first_packet.as_ref(), messages.first().unwrap().as_ref());
+    assert_eq!(third_packet.as_ref(), messages.last().unwrap().as_ref());
+    assert_eq!(data.len(), data_length);
 }
 
 #[test]
 fn reads_bunch_of_packets() {
-    let mut packets = vec![
-        TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET.to_vec(),
-        FASTPATH_PACKET.to_vec(),
+    let packets_without_fastpath = [
+        &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET[..],
+        &TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET[..],
     ];
-    let mut data = packets.iter().cloned().flatten().collect::<Vec<_>>();
-    let (messages, fast_path_length) = get_tpkt_tpdu_messages(&mut data);
+    let data = [
+        &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET[..],
+        &TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET[..],
+        &FASTPATH_PACKET[..],
+    ]
+    .concat();
+    let (messages, data_length) = get_tpkt_tpdu_messages(&data);
 
-    assert_eq!(FASTPATH_PACKET.len(), fast_path_length);
+    assert_eq!(data.len(), data_length);
 
     // because fast-path is skipped
-    assert_eq!(packets.len() - 1, messages.len());
-    packets.pop();
-
-    assert_eq!(packets, messages);
+    assert_eq!(packets_without_fastpath.as_ref(), messages.as_slice());
 }
 
 #[test]
 fn reads_bunch_of_packets_with_last_incomplete_pockets() {
-    let mut incomplete_packet = TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET.to_vec();
-    incomplete_packet.split_off(3);
-    let mut packets = vec![
-        TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET.to_vec(),
-        TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET.to_vec(),
-        incomplete_packet,
+    let packets = [
+        &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET[..],
+        &TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET[..],
     ];
-    let mut data = packets.iter().cloned().flatten().collect::<Vec<_>>();
+    let data = [
+        &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_CONNECT_INITIAL_PACKET[..],
+        &TPKT_CLIENT_MCS_ERECT_DOMAIN_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET[..],
+        &TPKT_CLIENT_MCS_ATTACH_USER_CONFIRM_PACKET[..3],
+    ]
+    .concat();
 
-    let (messages, _)= get_tpkt_tpdu_messages(&mut data);
-    assert_eq!(packets.len() - 1, messages.len());
-    packets.pop();
-    assert_eq!(packets, messages);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
+    assert_eq!(packets.as_ref(), messages.as_slice());
 }
 
 #[test]
 fn reads_windows_style_first_bunch_of_packets() {
-    let packet = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
-    let mut data = vec![0x00; 4];
-    data.extend_from_slice(packet.as_ref());
+    let data = [&[0x00; 4][..], &TPKT_CLIENT_CONNECTION_REQUEST_PACKET[..]].concat();
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert_eq!(1, messages.len());
-    assert_eq!(packet, messages.first().unwrap().to_owned());
+    assert_eq!(
+        TPKT_CLIENT_CONNECTION_REQUEST_PACKET.as_ref(),
+        messages.first().unwrap().as_ref()
+    );
 }
 
 #[test]
 fn does_not_parse_fast_path_pdu() {
-    let packet = FASTPATH_PACKET.to_vec();
-    let mut data = packet.clone();
+    let packet = FASTPATH_PACKET;
 
-    match parse_tpkt_tpdu_message(&mut data) {
+    match parse_tpkt_tpdu_message(&packet) {
         Err(_) => (),
         res => panic!("Expected error, got: {:?}", res),
     }
@@ -220,11 +223,9 @@ fn does_not_parse_fast_path_pdu() {
 
 #[test]
 fn does_not_parse_invalid_tpkt_tpdu() {
-    let mut packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET.to_vec();
-    packet.split_off(3);
-    let mut data = packet.clone();
+    let packet = &TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET[3..];
 
-    match parse_tpkt_tpdu_message(&mut data) {
+    match parse_tpkt_tpdu_message(&packet) {
         Err(_) => (),
         res => panic!("Expected error, got: {:?}", res),
     }
@@ -232,10 +233,9 @@ fn does_not_parse_invalid_tpkt_tpdu() {
 
 #[test]
 fn does_not_parse_unsuitable_tpkt_mcs_pdu() {
-    let packet = TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET.to_vec();
-    let mut data = packet.clone();
+    let packet = TPKT_CLIENT_MCS_ATTACH_USER_REQUEST_PACKET;
 
-    match parse_tpkt_tpdu_message(&mut data) {
+    match parse_tpkt_tpdu_message(packet.as_ref()) {
         Err(_) => (),
         res => panic!("Expected error, got: {:?}", res),
     }
@@ -243,34 +243,34 @@ fn does_not_parse_unsuitable_tpkt_mcs_pdu() {
 
 #[test]
 fn parses_tpkt_channel_pdu() {
-    let packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET.to_vec();
-    let mut data = packet.clone();
+    let packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET;
 
-    let (channel_id, channel_message) = parse_tpkt_tpdu_message(&mut data).unwrap();
+    let (channel_id, channel_message) = parse_tpkt_tpdu_message(packet.as_ref()).unwrap();
 
     assert_eq!(DRDYNVC_CHANNEL_ID, channel_id);
 
-    let expected_channel_message = CHANNEL_DVC_CREATE_REQUEST_PACKET.to_vec();
-    assert_eq!(expected_channel_message, channel_message);
+    assert_eq!(CHANNEL_DVC_CREATE_REQUEST_PACKET.as_ref(), channel_message.as_slice());
 }
 
 #[test]
 fn message_reader_correct_reads_dvc_data_packet() {
     let mut channels = HashMap::new();
     channels.insert("drdynvc".to_string(), DRDYNVC_CHANNEL_ID);
-    let mut rdp_message_reader = RdpMessageReader::new(channels);
+    let mut rdp_message_reader = RdpMessageReader::new(
+        channels,
+        DvcManager::with_allowed_channels(vec!["Microsoft::Windows::RDS::Geometry::v08.01".to_string()]),
+    );
 
     let mut first_packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET.to_vec();
-    let mut messages = rdp_message_reader.get_messages(&mut first_packet, PduSource::Server);
+    let messages = rdp_message_reader.get_messages(&mut first_packet, PduSource::Server);
     assert!(messages.is_empty());
 
     let mut second_packet = TPKT_CLIENT_MCS_DATA_REQUEST_DVC_CREATE_RESPONSE_PACKET.to_vec();
-    messages = rdp_message_reader.get_messages(&mut second_packet, PduSource::Client);
+    let messages = rdp_message_reader.get_messages(&mut second_packet, PduSource::Client);
     assert!(messages.is_empty());
 
     let mut third_packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_DATA_PACKET.to_vec();
-    messages = rdp_message_reader.get_messages(&mut third_packet, PduSource::Server);
+    let messages = rdp_message_reader.get_messages(&mut third_packet, PduSource::Server);
 
-    let expected_dvc_message = DVC_DATA_PACKET.to_vec();
-    assert_eq!(expected_dvc_message, messages.first().unwrap().to_owned());
+    assert_eq!(DVC_DATA_PACKET.as_ref(), messages.first().unwrap().as_slice());
 }

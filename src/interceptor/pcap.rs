@@ -18,7 +18,7 @@ pub struct PcapInterceptor {
     pcap_writer: Arc<Mutex<PcapWriter<File>>>,
     server_info: Arc<Mutex<PeerInfo>>,
     client_info: Arc<Mutex<PeerInfo>>,
-    message_reader: Arc<Mutex<dyn MessageReader>>,
+    message_reader: Arc<Mutex<Box<dyn MessageReader>>>,
 }
 
 impl PcapInterceptor {
@@ -30,11 +30,11 @@ impl PcapInterceptor {
             server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
             client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
             pcap_writer: Arc::new(Mutex::new(pcap_writer)),
-            message_reader: Arc::new(Mutex::new(UnknownMessageReader)),
+            message_reader: Arc::new(Mutex::new(Box::new(UnknownMessageReader))),
         }
     }
 
-    pub fn set_message_reader<T: 'static + MessageReader>(&mut self, message_reader: T) {
+    pub fn set_message_reader(&mut self, message_reader: Box<dyn MessageReader>) {
         self.message_reader = Arc::new(Mutex::new(message_reader));
     }
 }
@@ -49,7 +49,7 @@ impl PacketInterceptor for PcapInterceptor {
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         let (messages, source_addr, dest_addr, seq_number, ack_number) = if is_from_server {
-            server_info.data.append(&mut data.to_vec());
+            server_info.data.extend_from_slice(data);
             (
                 message_reader.get_messages(&mut server_info.data, PduSource::Server),
                 server_info.addr,
@@ -58,7 +58,7 @@ impl PacketInterceptor for PcapInterceptor {
                 server_info.sequence_number,
             )
         } else {
-            client_info.data.append(&mut data.to_vec());
+            client_info.data.extend_from_slice( data);
             (
                 message_reader.get_messages(&mut client_info.data, PduSource::Client),
                 client_info.addr,
