@@ -89,8 +89,13 @@ fn get_tpkt_tpdu_messages(mut data: &[u8]) -> (Vec<&[u8]>, usize) {
                 // Fast-Path, need to skip
                 match parse_fast_path_header(data) {
                     Ok((_, len)) => {
-                        data = &data[len as usize..];
-                        messages_len += len as usize
+                        if data.len() >= len as usize {
+                            data = &data[len as usize..];
+
+                            messages_len += len as usize
+                        } else {
+                            break;
+                        }
                     }
                     Err(ironrdp::FastPathError::NullLength { bytes_read }) => {
                         data = &data[bytes_read..];
