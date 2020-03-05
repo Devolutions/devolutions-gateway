@@ -1,4 +1,4 @@
-use std::{env, error::Error, sync::Arc};
+use std::{env, sync::Arc};
 use slog_scope::warn;
 
 use clap::{crate_name, crate_version, App, Arg};
@@ -255,7 +255,7 @@ identities_file example:
                     .empty_values(false)
                     .validator(|filename| match rdp::RdpIdentity::from_file(filename.as_str()) {
                         Ok(_) => Ok(()),
-                        Err(e) => Err(e.description().to_string())
+                        Err(e) => Err(e.to_string())
                     }),
             );
 

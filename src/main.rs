@@ -17,7 +17,6 @@ mod utils;
 mod websocket_client;
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::io;
 use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -117,7 +116,7 @@ fn main() {
         futures.push(start_tcp_server(url, config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
     }
 
-    runtime.block_on(future::join_all(futures).map_err(|_| ())).unwrap();
+    runtime.block_on(future::join_all(futures)).expect("runtime");
     http_server.stop();
 }
 
@@ -317,7 +316,7 @@ fn start_websocket_server(websocket_url: Url,
 
         "wss" => {
             let incoming = websocket_listener.incoming().and_then(move |conn| {
-                ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description()))
+                ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
             });
             Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_rustls::server::TlsStream<tokio::net::tcp::TcpStream>| {
                 let remote_addr = stream.get_ref().0.peer_addr().ok();
@@ -331,7 +330,7 @@ fn start_websocket_server(websocket_url: Url,
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    info!("Websocket server started successfully. Listening on {}", websocket_addr);
+    info!("WebSocket server started successfully. Listening on {}", websocket_addr);
     Box::new(websocket_server.with_logger(logger))
 }
 

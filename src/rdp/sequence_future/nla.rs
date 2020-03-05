@@ -299,7 +299,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                         } else {
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
-                                String::from("Got invalid credentials from the client"),
+                                "Got invalid credentials from the client",
                             ));
                         }
                     }
