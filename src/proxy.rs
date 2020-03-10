@@ -7,8 +7,6 @@ use std::{
 use futures::{future::Either, Future, Stream};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
-use tokio::prelude::FutureExt;
-use std::time::Duration;
 use crate::{
     config::{Config, Protocol},
     interceptor::{
@@ -100,45 +98,55 @@ impl Proxy {
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        Box::new(f1.select2(f2)
-            .and_then(| either | {
-                let forward = match either {
-                    Either::A(((_, _), forward_future)) => {
-                        slog_scope::info!("Stream server -> Sink client: closed successfully");
-                        forward_future
-                    },
-                    Either::B(((_, _), forward_future)) => {
-                        slog_scope::info!("Stream client -> Sink server: closed successfully");
-                        forward_future
-                    },
-                };
-                Ok(forward.timeout(Duration::from_secs(1)))
-            })
-            .or_else(| either_e | {
-                let forward = match either_e {
-                    Either::A((e, forward_future)) => {
-                        slog_scope::info!("Stream server -> Sink client: {}", e);
-                        forward_future
-                    },
-                    Either::B((e, forward_future)) => {
-                        slog_scope::info!("Stream client -> Sink server: {}", e);
-                        forward_future
-                    },
-                };
-                Ok(forward.timeout(Duration::from_secs(1)))
-            })
-            .map_err(| e | {
-                slog_scope::info!("Remaining forward future failed: {}", e);
-                e
-            })
-            .and_then(| _ | {
-                slog_scope::info!("Remaining forward future completed successfully");
-                Ok(())
-            })
-            .then(|result| {
-                SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-                result
-            }),
-        )
+        use futures_03::compat::Future01CompatExt;
+        use futures_03::future::{FutureExt, TryFutureExt};
+
+        macro_rules! finish_remaining_forward {
+            ( $fut:ident ( $stream_name:literal => $sink_name:literal ) ) => {
+                use tokio::prelude::FutureExt;
+                match $fut.timeout(std::time::Duration::from_secs(1)).compat().await {
+                    Ok(_) => {
+                        slog_scope::info!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): terminated normally"));
+                    }
+                    Err(e) => {
+                        slog_scope::warn!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): {}"), e);
+                    }
+                }
+            }
+        }
+
+        let fut = async move {
+            match f1.select2(f2).compat().await {
+                Ok(either) => {
+                    match either {
+                        Either::A(((_, _), forward)) => {
+                            slog_scope::info!("Stream server -> Sink client: terminated normally");
+                            finish_remaining_forward!(forward ("client" => "server"));
+                        },
+                        Either::B(((_, _), forward)) => {
+                            slog_scope::info!("Stream client -> Sink server: terminated normally");
+                            finish_remaining_forward!(forward ("server" => "client"));
+                        },
+                    };
+                }
+                Err(either_e) => {
+                    match either_e {
+                        Either::A((e, forward)) => {
+                            slog_scope::warn!("Stream server -> Sink client: {}", e);
+                            finish_remaining_forward!(forward ("client" => "server"));
+                        },
+                        Either::B((e, forward)) => {
+                            slog_scope::warn!("Stream client -> Sink server: {}", e);
+                            finish_remaining_forward!(forward ("server" => "client"));
+                        },
+                    }
+                }
+            }
+
+            SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+        }.unit_error().boxed().compat().map_err(|_| io::Error::new(io::ErrorKind::Other, "select2 failed"));
+
+        Box::new(fut)
     }
 }
+
