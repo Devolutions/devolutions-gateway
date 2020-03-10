@@ -4,18 +4,16 @@ use std::{
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
 };
-
 use futures::{future::Either, Future, Stream};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
-
 use crate::{
     config::{Config, Protocol},
     interceptor::{
         pcap::PcapInterceptor, rdp::RdpMessageReader, MessageReader, UnknownMessageReader, WaykMessageReader,
     },
     rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
-    transport::{FinishForwardFuture, ForwardFutureResult, Transport, BIP_BUFFER_LEN},
+    transport::{Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
 
@@ -100,53 +98,55 @@ impl Proxy {
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        Box::new(
-            f1.select2(f2)
-                .map_err(|either| match either {
-                    Either::A((e, _)) => e,
-                    Either::B((e, _)) => e,
-                })
-                .and_then(move |either| {
-                        let finish_forward_future = match either {
-                            Either::A(((jet_stream_server, jet_sink_client), forward_future)) =>
-                            Either::A(FinishForwardFuture::new(forward_future).and_then(move |ForwardFutureResult { nb_bytes_read, nb_bytes_written}| {
-                                Ok((
-                                    jet_stream_server.nb_bytes_read(),
-                                    jet_sink_client.nb_bytes_written(),
-                                    nb_bytes_read,
-                                    nb_bytes_written,
-                                ))
-                            })),
-                            Either::B(((jet_stream_client, jet_sink_server), forward_future)) =>
-                            Either::B(FinishForwardFuture::new(forward_future).and_then(move |ForwardFutureResult { nb_bytes_read, nb_bytes_written}| {
-                                Ok((
-                                    nb_bytes_read,
-                                    nb_bytes_written,
-                                    jet_stream_client.nb_bytes_read(),
-                                    jet_sink_server.nb_bytes_written(),
-                                ))
-                            })),
-                        };
+        use futures_03::compat::Future01CompatExt;
+        use futures_03::future::{FutureExt, TryFutureExt};
 
-                        finish_forward_future
-                })
-                .and_then(move |(server_nb_bytes_read, client_nb_bytes_written, client_nb_bytes_read, server_nb_bytes_written) | {
-                     info!(
-                         "Proxy result : {} bytes read on {server} and {} bytes written on {client}. {} bytes read on {client} and {} bytes written on {server}",
-                         server_nb_bytes_read,
-                         client_nb_bytes_written,
-                         client_nb_bytes_read,
-                         server_nb_bytes_written,
-                         server = &server_peer_addr,
-                         client = &client_peer_addr
-                     );
+        macro_rules! finish_remaining_forward {
+            ( $fut:ident ( $stream_name:literal => $sink_name:literal ) ) => {
+                use tokio::prelude::FutureExt;
+                match $fut.timeout(std::time::Duration::from_secs(1)).compat().await {
+                    Ok(_) => {
+                        slog_scope::info!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): terminated normally"));
+                    }
+                    Err(e) => {
+                        slog_scope::warn!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): {}"), e);
+                    }
+                }
+            }
+        }
 
-                    Ok(())
-                })
-                .then(|result| {
-                    SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-                    result
-                }),
-        )
+        let fut = async move {
+            match f1.select2(f2).compat().await {
+                Ok(either) => {
+                    match either {
+                        Either::A(((_, _), forward)) => {
+                            slog_scope::info!("Stream server -> Sink client: terminated normally");
+                            finish_remaining_forward!(forward ("client" => "server"));
+                        },
+                        Either::B(((_, _), forward)) => {
+                            slog_scope::info!("Stream client -> Sink server: terminated normally");
+                            finish_remaining_forward!(forward ("server" => "client"));
+                        },
+                    };
+                }
+                Err(either_e) => {
+                    match either_e {
+                        Either::A((e, forward)) => {
+                            slog_scope::warn!("Stream server -> Sink client: {}", e);
+                            finish_remaining_forward!(forward ("client" => "server"));
+                        },
+                        Either::B((e, forward)) => {
+                            slog_scope::warn!("Stream client -> Sink server: {}", e);
+                            finish_remaining_forward!(forward ("server" => "client"));
+                        },
+                    }
+                }
+            }
+
+            SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+        }.unit_error().boxed().compat().map_err(|_| io::Error::new(io::ErrorKind::Other, "select2 failed"));
+
+        Box::new(fut)
     }
 }
+

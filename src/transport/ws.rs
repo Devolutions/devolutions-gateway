@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::io::Cursor;
 use std::io::{ErrorKind, Read, Write};
 use std::net::SocketAddr;
@@ -69,9 +68,9 @@ impl WsStreamWrapper {
     #[inline]
     pub fn async_shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
         match self {
-            WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
-            WsStreamWrapper::Tcp((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
-            WsStreamWrapper::Tls((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string())),
+            WsStreamWrapper::Http((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            WsStreamWrapper::Tcp((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            WsStreamWrapper::Tls((stream, _)) => stream.close(None).map(|()| Async::Ready(())).map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -230,7 +229,7 @@ impl Transport for WsTransport {
         match url.scheme() {
             "ws" =>
                 Box::new(futures::lazy(move || {
-                    TcpStream::connect(&socket_addr).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description())).and_then(|stream| {
+                    TcpStream::connect(&socket_addr).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).and_then(|stream| {
                         let peer_addr = stream.peer_addr().ok();
                         let client = tungstenite::client(
                             Request {
@@ -266,7 +265,7 @@ impl Transport for WsTransport {
                 Box::new(socket.and_then(move |socket| {
                     cx.connect(dns_name, socket)
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.description())).and_then(|stream| {
+                }).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).and_then(|stream| {
                     let peer_addr = stream.get_ref().0.peer_addr().ok();
                     let client = tungstenite::client(
                         Request {
@@ -402,6 +401,6 @@ impl Future for TlsWebSocketClientHandshake {
 fn tungstenite_err_to_io_err(err: tungstenite::Error) -> io::Error {
     match err {
         tungstenite::Error::Io(e) => e,
-        other => io::Error::new(io::ErrorKind::Other, other.description()),
+        other => io::Error::new(io::ErrorKind::Other, other),
     }
 }

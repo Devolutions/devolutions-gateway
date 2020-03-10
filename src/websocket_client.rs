@@ -153,11 +153,10 @@ fn handle_jet_connect(
                                                             candidate.association_id(),
                                                             Some(candidate.id()),
                                                         );
+
                                                         let proxy = Proxy::new(config)
                                                             .build(server_transport, client_transport)
-                                                            .then(move |_| {
-                                                                remove_association
-                                                            })
+                                                            .then(move |_| remove_association)
                                                             .map(|_| ());
 
                                                         executor_handle_clone.spawn(proxy);

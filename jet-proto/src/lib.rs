@@ -234,6 +234,8 @@ pub enum Error {
     Str(String),
 }
 
+impl std::error::Error for Error {}
+
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Error {
         Error::Io(error)
@@ -242,8 +244,7 @@ impl From<io::Error> for Error {
 
 impl From<Error> for io::Error {
     fn from(error: Error) -> io::Error {
-        let error_string = error.to_string();
-        io::Error::new(io::ErrorKind::Other, error_string.as_str())
+        io::Error::new(io::ErrorKind::Other, error)
     }
 }
 
