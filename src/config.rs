@@ -1,8 +1,9 @@
 use std::{env, sync::Arc};
-use slog_scope::warn;
 
+use slog_scope::warn;
 use clap::{crate_name, crate_version, App, Arg};
 use url::Url;
+use picky::{key::PublicKey, pem::Pem};
 
 use crate::rdp;
 
@@ -27,7 +28,10 @@ struct ConfigTemp {
     log_file: Option<String>,
 
     certificate: CertificateConfig,
-    http_listener_url: String
+    http_listener_url: String,
+
+    provisioner_public_key_pem: Option<String>,
+    provisioner_public_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +61,9 @@ pub struct Config {
     log_file: Option<String>,
 
     pub certificate: CertificateConfig,
-    pub http_listener_url: Url
+    pub http_listener_url: Url,
+
+    pub provisioner_public_key: Option<PublicKey>,
 }
 
 impl Config {
@@ -148,15 +154,25 @@ impl Config {
                 .value_name("JET_PRIVATE_KEY_FILE")
                 .help("Path to the private key file.")
                 .takes_value(true))
+            .arg(Arg::with_name("provisioner-public-key-file")
+                .long("provisioner-public-key-file")
+                .value_name("PICKY_PROVISIONER_PUBLIC_KEY_FILE")
+                .help("Path to the public key file.")
+                .takes_value(true))
             .arg(Arg::with_name("certificate-data")
                 .long("certificate-data")
                 .value_name("JET_CERTIFICATE_DATA")
-                .help("Certificate data, pem format.")
+                .help("Certificate data, base64-encoded X509 der.")
                 .takes_value(true))
             .arg(Arg::with_name("private-key-data")
                 .long("private-key-data")
                 .value_name("JET_PRIVATE_KEY_DATA")
-                .help("Private key data, pem format.")
+                .help("Private key data, base64-encoded pkcs10.")
+                .takes_value(true))
+            .arg(Arg::with_name("provisioner-public-key-data")
+                .long("provisioner-public-key-data")
+                .value_name("PICKY_PROVISIONER_PUBLIC_KEY_DATA")
+                .help("Public key data, base64-encoded pkcs10.")
                 .takes_value(true))
             .arg(
                 Arg::with_name("routing-url")
@@ -304,6 +320,10 @@ identities_file example:
         let certificate_data = matches.value_of("jet-certificate-data").map(String::from);
         let private_key_file = matches.value_of("jet-private-key-file").map(String::from);
         let private_key_data = matches.value_of("jet-private-key-data").map(String::from);
+        let provisioner_public_key_pem = matches.value_of("provisioner-public-key-data").map(| base64 | {
+           format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64)
+        });
+        let provisioner_public_key_path = matches.value_of("provisioner-public-key-file").map(String::from);
 
         let mut config_temp = ConfigTemp {
             unrestricted,
@@ -322,7 +342,10 @@ identities_file example:
                 certificate_data,
                 private_key_file,
                 private_key_data
-            }
+            },
+
+            provisioner_public_key_pem,
+            provisioner_public_key_path,
         };
 
         config_temp.apply_env_variables();
@@ -379,6 +402,14 @@ impl ConfigTemp {
         if let Ok(val) = env::var("JET_HTTP_LISTENER_URL") {
             self.http_listener_url = val;
         }
+
+        if let Ok(pem_str) = env::var("PICKY_PROVISIONER_PUBLIC_KEY_DATA") {
+            self.provisioner_public_key_pem = Some(pem_str);
+        }
+
+        if let Ok(path) = env::var("PICKY_PROVISIONER_PUBLIC_KEY_FILE") {
+            self.provisioner_public_key_path = Some(path);
+        }
     }
 }
 
@@ -420,6 +451,20 @@ impl From<ConfigTemp> for Config {
 
         let http_listener_url = temp.http_listener_url.parse::<Url>().expect(&format!("Http listener {} is an invalid URL", temp.http_listener_url));
 
+        let pem_str = if let Some(pem) = temp.provisioner_public_key_pem {
+            Some(pem)
+        } else if let Some(path) = temp.provisioner_public_key_path {
+            Some(std::fs::read_to_string(path).expect("couldn't read provisioner public path key file"))
+        } else {
+            None
+        };
+
+        let provisioner_public_key = pem_str.map(| pem_str| {
+            let pem = pem_str.parse::<Pem>().expect("couldn't parse provisioner public key pem");
+            let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
+            public_key
+        });
+
         Config {
             unrestricted: temp.unrestricted,
             api_key: temp.api_key,
@@ -433,6 +478,8 @@ impl From<ConfigTemp> for Config {
             log_file: temp.log_file,
 
             certificate: temp.certificate,
+
+            provisioner_public_key,
         }
     }
 }
