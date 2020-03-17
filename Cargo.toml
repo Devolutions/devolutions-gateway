@@ -9,6 +9,8 @@ authors = ["François Dubois <fdubois@devolutions.net>",
            "Vlad Aleksashyn <vlad.al.dp@gmail.com"]
 
 [dependencies]
+jet-proto = { path = "./jet-proto" }
+picky = { version = "4.6", features = ["jose"] }
 clap = "2.32"
 url = "1.7.1"
 url_serde = "0.2.0"
@@ -48,7 +50,6 @@ slog-stdlog = "4.0"
 ring = "0.16.0"
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "drop-code-in-send" }
 indexmap = "1.0"
-jet-proto = { path = "./jet-proto" }
 
 [patch.crates-io]
 rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
