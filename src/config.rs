@@ -156,7 +156,7 @@ impl Config {
                 .takes_value(true))
             .arg(Arg::with_name("provisioner-public-key-file")
                 .long("provisioner-public-key-file")
-                .value_name("PICKY_PROVISIONER_PUBLIC_KEY_FILE")
+                .value_name("JET_PROVISIONER_PUBLIC_KEY_FILE")
                 .help("Path to the public key file.")
                 .takes_value(true))
             .arg(Arg::with_name("certificate-data")
@@ -171,7 +171,7 @@ impl Config {
                 .takes_value(true))
             .arg(Arg::with_name("provisioner-public-key-data")
                 .long("provisioner-public-key-data")
-                .value_name("PICKY_PROVISIONER_PUBLIC_KEY_DATA")
+                .value_name("JET_PROVISIONER_PUBLIC_KEY_DATA")
                 .help("Public key data, base64-encoded pkcs10.")
                 .takes_value(true))
             .arg(
@@ -403,11 +403,11 @@ impl ConfigTemp {
             self.http_listener_url = val;
         }
 
-        if let Ok(pem_str) = env::var("PICKY_PROVISIONER_PUBLIC_KEY_DATA") {
+        if let Ok(pem_str) = env::var("JET_PROVISIONER_PUBLIC_KEY_DATA") {
             self.provisioner_public_key_pem = Some(pem_str);
         }
 
-        if let Ok(path) = env::var("PICKY_PROVISIONER_PUBLIC_KEY_FILE") {
+        if let Ok(path) = env::var("JET_PROVISIONER_PUBLIC_KEY_FILE") {
             self.provisioner_public_key_path = Some(path);
         }
     }
