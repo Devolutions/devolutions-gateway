@@ -5,6 +5,11 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 == 0.11.0 (unreleased)
 
 
+== 0.10.1 (2020-03-26)
+
+  * Exactly same as 0.10.0 (workaround to deploy a new version in prod without issue with ACI)
+
+
 == 0.10.0 (2020-03-23)
 
   * Add provisioner public key
