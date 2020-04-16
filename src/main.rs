@@ -1,32 +1,12 @@
-#[macro_use]
-extern crate serde_json;
-#[macro_use]
-extern crate serde_derive;
-
-mod config;
-mod http;
-mod interceptor;
-mod jet;
-mod jet_client;
-mod logger;
-mod proxy;
-mod rdp;
-mod routing_client;
-mod transport;
-mod utils;
-mod websocket_client;
-
 use std::collections::HashMap;
 use std::io;
 use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{future, future::ok, future::Either, Future, Stream};
 use hyper::service::{make_service_fn, service_fn};
-use lazy_static::lazy_static;
 use saphir::server::HttpService;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error};
@@ -38,24 +18,20 @@ use tokio::net::tcp::{TcpListener, TcpStream};
 use url::Url;
 use x509_parser::pem::pem_to_der;
 
-use crate::config::Config;
-use crate::http::http_server::HttpServer;
-use crate::jet_client::{JetAssociationsMap, JetClient};
-use crate::proxy::Proxy;
-use crate::rdp::RdpClient;
-use crate::routing_client::Client;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport};
-use crate::transport::JetTransport;
-use crate::utils::{get_pub_key_from_der, load_certs, load_private_key};
-use crate::websocket_client::{WebsocketService, WsClient};
+use devolutions_jet::config::Config;
+use devolutions_jet::http::http_server::HttpServer;
+use devolutions_jet::jet_client::{JetAssociationsMap, JetClient};
+use devolutions_jet::logger;
+use devolutions_jet::rdp::RdpClient;
+use devolutions_jet::routing_client::Client;
+use devolutions_jet::transport::tcp::TcpTransport;
+use devolutions_jet::transport::ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport};
+use devolutions_jet::transport::JetTransport;
+use devolutions_jet::utils::{get_pub_key_from_der, load_certs, load_private_key};
+use devolutions_jet::websocket_client::{WebsocketService, WsClient};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
-
-lazy_static! {
-    pub static ref SESSION_IN_PROGRESS_COUNT: AtomicU64 = AtomicU64::new(0);
-}
 
 fn main() {
     let config = Arc::new(Config::init());
