@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-jet"
-version = "0.11.0"
+version = "0.10.2"
 edition = "2018"
 readme = "README.md"
 license = "MIT/Apache-2.0"
@@ -27,7 +27,7 @@ bytes = "0.4"
 uuid = { version = "0.7.1", features = ["v4", "serde"] }
 pcap-file = "0.10.0"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
-saphir = { version = "0.9.5", features = ["https", "request_handler"] }
+saphir = { version = "1.0.0", default-features = false, features = ["https", "request_handler"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
