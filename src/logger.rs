@@ -57,7 +57,12 @@ pub fn init(file_path: Option<&String>) -> io::Result<Logger> {
             .fuse()
     };
     let drain = LevelFilter::new(async_drain, log_level).fuse();
-    let logger = Logger::root(drain, o!());
+    let logger = Logger::root(
+        drain,
+        o!("module" => slog::FnValue(move |info| {
+            format!("[{}]", info.module())
+        })),
+    );
 
     if log_level_result.is_err() {
         warn!(
