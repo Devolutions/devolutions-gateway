@@ -4,12 +4,15 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 
 == 0.11.0 (unreleased)
 
+== 0.10.5 (2020-05-11)
+  * Exactly same as 0.10.4 (just to be able to deploy again with Devops' tool).
+
 == 0.10.4 (2020-05-11)
   * Add module name in logs.
   * Add curl to Docker container.
 
 == 0.10.3 (2020-05-08)
-  * Exactly same as 0.10.2 (just to be able to deploy again with Devops' tool)
+  * Exactly same as 0.10.2 (just to be able to deploy again with Devops' tool).
 
 == 0.10.2 (2020-05-05)
   * Remove color from logs
