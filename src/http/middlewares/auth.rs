@@ -1,17 +1,15 @@
-use std::sync::Arc;
+use crate::config::Config;
 use saphir::*;
 use slog_scope::error;
-use crate::config::Config;
+use std::sync::Arc;
 
 pub struct AuthMiddleware {
-    config: Arc<Config>
+    config: Arc<Config>,
 }
 
 impl AuthMiddleware {
     pub fn new(config: Arc<Config>) -> Self {
-        AuthMiddleware {
-            config
-        }
+        AuthMiddleware { config }
     }
 }
 
@@ -50,7 +48,6 @@ impl Middleware for AuthMiddleware {
 
             res.status(StatusCode::UNAUTHORIZED);
             RequestContinuation::Stop
-
         } else {
             // API_KEY not defined, we accept everything
             RequestContinuation::Continue
@@ -59,25 +56,23 @@ impl Middleware for AuthMiddleware {
 }
 
 #[derive(PartialEq)]
-pub enum AuthHeaderType{
+pub enum AuthHeaderType {
     Basic,
     Bearer,
     Signature,
 }
 
-pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, String)>{
+pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, String)> {
     let auth_vec = auth_header.trim().split(' ').collect::<Vec<&str>>();
 
     if auth_vec.len() == 2 {
-        return match auth_vec[0].to_lowercase().as_ref(){
+        return match auth_vec[0].to_lowercase().as_ref() {
             "basic" => Some((AuthHeaderType::Basic, auth_vec[1].to_string())),
             "bearer" => Some((AuthHeaderType::Bearer, auth_vec[1].to_string())),
-            "signature" =>Some((AuthHeaderType::Signature, auth_vec[1].to_string())),
-            _ => None
+            "signature" => Some((AuthHeaderType::Signature, auth_vec[1].to_string())),
+            _ => None,
         };
     }
 
     None
 }
-
-

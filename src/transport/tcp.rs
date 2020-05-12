@@ -171,12 +171,7 @@ impl Transport for TcpTransport {
         let peer_addr = self.peer_addr();
         let (reader, writer) = self.stream.split();
 
-        let stream = Box::new(JetStreamImpl::new(
-            reader,
-            self.nb_bytes_read,
-            peer_addr,
-            buffer_writer,
-        ));
+        let stream = Box::new(JetStreamImpl::new(reader, self.nb_bytes_read, peer_addr, buffer_writer));
         let sink = Box::new(JetSinkImpl::new(
             writer,
             self.nb_bytes_written,

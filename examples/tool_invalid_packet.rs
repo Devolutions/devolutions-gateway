@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::process;
 

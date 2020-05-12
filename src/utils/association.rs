@@ -1,8 +1,8 @@
-use futures::{Future, Async};
-use slog_scope::debug;
-use uuid::Uuid;
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
+use futures::{Async, Future};
+use slog_scope::debug;
+use uuid::Uuid;
 
 pub const ACCEPT_REQUEST_TIMEOUT_SEC: u32 = 5 * 60;
 
@@ -17,7 +17,7 @@ impl RemoveAssociation {
         RemoveAssociation {
             jet_associations,
             association_id,
-            candidate_id
+            candidate_id,
         }
     }
 }
@@ -31,15 +31,14 @@ impl Future for RemoveAssociation {
             if let Some(association) = jet_associations.get_mut(&self.association_id) {
                 if let Some(candidate_id) = self.candidate_id {
                     if let Some(candidate) = association.get_candidate_mut(candidate_id) {
-                       candidate.set_state(CandidateState::Final);
+                        candidate.set_state(CandidateState::Final);
                     }
                 }
                 if !association.is_connected() {
                     debug!("Association is removed!");
                     let removed = jet_associations.remove(&self.association_id).is_some();
                     return Ok(Async::Ready(removed));
-                }
-                else {
+                } else {
                     debug!("Association still connected!");
                 }
             }

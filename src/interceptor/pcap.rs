@@ -58,7 +58,7 @@ impl PacketInterceptor for PcapInterceptor {
                 server_info.sequence_number,
             )
         } else {
-            client_info.data.extend_from_slice( data);
+            client_info.data.extend_from_slice(data);
             (
                 message_reader.get_messages(&mut client_info.data, PduSource::Client),
                 client_info.addr,

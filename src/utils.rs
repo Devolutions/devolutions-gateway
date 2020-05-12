@@ -8,13 +8,13 @@ use std::{
     net::SocketAddr,
 };
 
+use crate::config::CertificateConfig;
 use tokio::{
     codec::{Decoder, Encoder, Framed, FramedParts},
     prelude::{AsyncRead, AsyncWrite},
 };
 use url::Url;
 use x509_parser::parse_x509_der;
-use crate::config::CertificateConfig;
 
 pub mod danger_transport {
     pub struct NoCertificateVerification {}
@@ -92,7 +92,8 @@ pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certific
         rustls::internal::pemfile::certs(&mut reader)
             .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
     } else if let Some(data) = &config.certificate_data {
-        load_certs_from_data(data).map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate data"))
+        load_certs_from_data(data)
+            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate data"))
     } else {
         let certfile = include_bytes!("cert/publicCert.pem");
         let mut reader = BufReader::new(certfile.as_ref());
@@ -122,8 +123,8 @@ fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::Pr
         rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile))
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
     } else if let Some(data) = &config.private_key_data {
-      load_rsa_private_key_from_data(data)
-          .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid rsa private key"))
+        load_rsa_private_key_from_data(data)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid rsa private key"))
     } else {
         let keyfile = include_bytes!("cert/private.pem");
         rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
@@ -143,8 +144,7 @@ fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::
     } else if let Some(data) = &config.private_key_data {
         load_pkcs8_private_key_from_data(data)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid pkcs8 private key"))
-    }
-    else {
+    } else {
         let keyfile = include_bytes!("cert/private.pem");
         rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
             io::Error::new(
@@ -156,22 +156,38 @@ fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::
 }
 
 fn load_certs_from_data(data: &str) -> Result<Vec<rustls::Certificate>, ()> {
-    extract_der_data(data.to_string(), "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----", &|v| rustls::Certificate(v))
+    extract_der_data(
+        data.to_string(),
+        "-----BEGIN CERTIFICATE-----",
+        "-----END CERTIFICATE-----",
+        &|v| rustls::Certificate(v),
+    )
 }
 
 fn load_rsa_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
-    extract_der_data(data.to_string(), "-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----", &|v| rustls::PrivateKey(v))
+    extract_der_data(
+        data.to_string(),
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----END RSA PRIVATE KEY-----",
+        &|v| rustls::PrivateKey(v),
+    )
 }
 
 fn load_pkcs8_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
-    extract_der_data(data.to_string(), "-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----", &|v| rustls::PrivateKey(v))
+    extract_der_data(
+        data.to_string(),
+        "-----BEGIN PRIVATE KEY-----",
+        "-----END PRIVATE KEY-----",
+        &|v| rustls::PrivateKey(v),
+    )
 }
 
-fn extract_der_data<A>(mut data: String,
-                       start_mark: &str,
-                       end_mark: &str,
-                       f: &dyn Fn(Vec<u8>) -> A)
-                       -> Result<Vec<A>, ()> {
+fn extract_der_data<A>(
+    mut data: String,
+    start_mark: &str,
+    end_mark: &str,
+    f: &dyn Fn(Vec<u8>) -> A,
+) -> Result<Vec<A>, ()> {
     let mut ders = Vec::new();
 
     loop {
@@ -212,7 +228,6 @@ where
 
     Framed::from_parts(new_parts)
 }
-
 
 pub fn swap_hashmap_kv<K, V>(hm: HashMap<K, V>) -> HashMap<V, K>
 where

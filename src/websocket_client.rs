@@ -1,22 +1,22 @@
-use std::sync::Arc;
-use crate::jet_client::JetAssociationsMap;
-use hyper::{Request, Body, Response, Method, StatusCode, header, Version, http};
-use futures::{Future, future};
-use tokio::runtime::TaskExecutor;
-use uuid::Uuid;
-use crate::transport::{JetTransport, Transport};
-use crate::transport::ws::WsTransport;
-use std::net::SocketAddr;
 use crate::config::Config;
-use crate::Proxy;
-use slog_scope::{info, error};
-use url::Url;
-use std::io;
-use saphir::server::HttpService;
-use crate::jet::TransportType;
-use jet_proto::JET_VERSION_V2;
-use crate::utils::association::RemoveAssociation;
 use crate::jet::candidate::CandidateState;
+use crate::jet::TransportType;
+use crate::jet_client::JetAssociationsMap;
+use crate::transport::ws::WsTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::utils::association::RemoveAssociation;
+use crate::Proxy;
+use futures::{future, Future};
+use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
+use jet_proto::JET_VERSION_V2;
+use saphir::server::HttpService;
+use slog_scope::{error, info};
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::runtime::TaskExecutor;
+use url::Url;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct WebsocketService {
@@ -124,49 +124,52 @@ fn handle_jet_connect(
                             let res = process_req(&req);
 
                             let executor_handle_clone = executor_handle.clone();
-                            let fut = req
-                                .into_body()
-                                .on_upgrade()
-                                .map(move |upgraded| {
-                                    if let Ok(mut jet_assc) = jet_associations_clone.lock() {
-                                        if let Some(assc) = jet_assc.get_mut(&association_id) {
-                                            if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                                                if (candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss)
-                                                    && candidate.state() == CandidateState::Accepted {
+                            let fut =
+                                req.into_body()
+                                    .on_upgrade()
+                                    .map(move |upgraded| {
+                                        if let Ok(mut jet_assc) = jet_associations_clone.lock() {
+                                            if let Some(assc) = jet_assc.get_mut(&association_id) {
+                                                if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                                                    if (candidate.transport_type() == TransportType::Ws
+                                                        || candidate.transport_type() == TransportType::Wss)
+                                                        && candidate.state() == CandidateState::Accepted
                                                     {
-                                                        let server_transport = candidate
-                                                            .take_transport()
-                                                            .expect("Candidate cannot be created without a transport");
-                                                        let client_transport =
-                                                            JetTransport::Ws(WsTransport::new_http(upgraded, client_addr));
-                                                        candidate.set_state(CandidateState::Connected);
-                                                        candidate.set_client_nb_bytes_read(
-                                                            client_transport.clone_nb_bytes_read(),
-                                                        );
-                                                        candidate.set_client_nb_bytes_written(
-                                                            client_transport.clone_nb_bytes_written(),
-                                                        );
+                                                        {
+                                                            let server_transport = candidate.take_transport().expect(
+                                                                "Candidate cannot be created without a transport",
+                                                            );
+                                                            let client_transport = JetTransport::Ws(
+                                                                WsTransport::new_http(upgraded, client_addr),
+                                                            );
+                                                            candidate.set_state(CandidateState::Connected);
+                                                            candidate.set_client_nb_bytes_read(
+                                                                client_transport.clone_nb_bytes_read(),
+                                                            );
+                                                            candidate.set_client_nb_bytes_written(
+                                                                client_transport.clone_nb_bytes_written(),
+                                                            );
 
-                                                        // Start the proxy
-                                                        let remove_association = RemoveAssociation::new(
-                                                            jet_associations_clone.clone(),
-                                                            candidate.association_id(),
-                                                            Some(candidate.id()),
-                                                        );
+                                                            // Start the proxy
+                                                            let remove_association = RemoveAssociation::new(
+                                                                jet_associations_clone.clone(),
+                                                                candidate.association_id(),
+                                                                Some(candidate.id()),
+                                                            );
 
-                                                        let proxy = Proxy::new(config)
-                                                            .build(server_transport, client_transport)
-                                                            .then(move |_| remove_association)
-                                                            .map(|_| ());
+                                                            let proxy = Proxy::new(config)
+                                                                .build(server_transport, client_transport)
+                                                                .then(move |_| remove_association)
+                                                                .map(|_| ());
 
-                                                        executor_handle_clone.spawn(proxy);
+                                                            executor_handle_clone.spawn(proxy);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                })
-                                .map_err(|e| error!("upgrade error: {}", e));
+                                    })
+                                    .map_err(|e| error!("upgrade error: {}", e));
 
                             executor_handle.spawn(fut);
 
@@ -205,15 +208,18 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         }
     }
     let is_http_11 = req.version() == Version::HTTP_11;
-    let is_upgrade = req.headers()
+    let is_upgrade = req
+        .headers()
         .get(header::CONNECTION)
         .map_or(false, |v| connection_has(v, "upgrade"));
-    let is_websocket_upgrade = req.headers()
+    let is_websocket_upgrade = req
+        .headers()
         .get(header::UPGRADE)
         .and_then(|v| v.to_str().ok())
         .map_or(false, |v| v.eq_ignore_ascii_case("websocket"));
 
-    let is_websocket_version_13_or_higher = req.headers()
+    let is_websocket_version_13_or_higher = req
+        .headers()
         .get(header::SEC_WEBSOCKET_VERSION)
         .and_then(|v| v.to_str().ok())
         .map_or(false, |v| v.parse::<u32>().unwrap_or_else(|_| 0) >= 13);
@@ -270,7 +276,7 @@ impl WsClient {
     pub fn serve<T: 'static + Transport + Send>(
         self,
         client_transport: T,
-    ) -> Box<dyn Future<Item=(), Error=io::Error> + Send> {
+    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let server_conn = WsTransport::connect(&self.routing_url);
 
         Box::new(server_conn.and_then(move |server_transport| {

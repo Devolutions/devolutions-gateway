@@ -1,10 +1,9 @@
+use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
 use chrono::serde::ts_seconds;
-use uuid::Uuid;
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use crate::jet::candidate::{Candidate, CandidateState, CandidateResponse};
 use serde_json::Value;
-use chrono::{Utc, DateTime};
-
+use uuid::Uuid;
 
 pub struct Association {
     id: Uuid,
@@ -39,8 +38,7 @@ impl Association {
     pub fn get_candidate_by_index(&mut self, index: usize) -> Option<&mut Candidate> {
         if let Some((_, candidate)) = self.candidates.get_index_mut(index) {
             Some(candidate)
-        }
-        else {
+        } else {
             None
         }
     }
@@ -62,7 +60,10 @@ impl Association {
             }
         }
 
-        candidates.as_object_mut().unwrap().insert("candidates".into(), candidate_list.into());
+        candidates
+            .as_object_mut()
+            .unwrap()
+            .insert("candidates".into(), candidate_list.into());
 
         candidates
     }
@@ -72,7 +73,9 @@ impl Association {
     }
 
     pub fn is_connected(&self) -> bool {
-        self.candidates.iter().any(|(_, candidate)| { candidate.state() == CandidateState::Connected })
+        self.candidates
+            .iter()
+            .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 }
 
@@ -90,19 +93,29 @@ pub struct AssociationResponse {
 
 impl AssociationResponse {
     pub fn from(association: &Association, with_detail: bool) -> Self {
-        let (client_bytes_sent, client_bytes_recv) = association.candidates.iter().find_map(|(_, candidate)| {
-                match (candidate.client_nb_bytes_read(), candidate.client_nb_bytes_written()) {
+        let (client_bytes_sent, client_bytes_recv) = association
+            .candidates
+            .iter()
+            .find_map(
+                |(_, candidate)| match (candidate.client_nb_bytes_read(), candidate.client_nb_bytes_written()) {
                     (Some(client_bytes_sent), Some(client_bytes_recv))
                         if client_bytes_sent != 0 || client_bytes_recv != 0 =>
                     {
                         Some((client_bytes_sent, client_bytes_recv))
                     }
                     _ => None,
-                }
-        }).unwrap_or((0, 0));
+                },
+            )
+            .unwrap_or((0, 0));
 
         let candidates: Option<Vec<CandidateResponse>> = if with_detail {
-            Some(association.candidates.iter().map(|(_, candidate)| candidate.into()).collect())
+            Some(
+                association
+                    .candidates
+                    .iter()
+                    .map(|(_, candidate)| candidate.into())
+                    .collect(),
+            )
         } else {
             None
         };

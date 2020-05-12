@@ -24,6 +24,13 @@ jobs:
         fetchDepth: 1
 
       - script: |
+          echo "Check formatting"
+          cargo fmt --all -- --check
+          if ! [ $? -eq 0 ] ; then
+              echo "Bad formatting, please run 'cargo +stable fmt --all'"
+              exit 1
+          fi
+
           conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
           . activate.sh
           cargo build --release
