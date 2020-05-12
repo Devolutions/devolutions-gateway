@@ -4,6 +4,9 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 
 == 0.11.0 (unreleased)
 
+== 0.10.8 (2020-05-12)
+  * Don't panic if listeners future returns an error. Just print the error and close the application
+
 == 0.10.7 (2020-05-12)
   * Exactly same as 0.10.6 (just to be able to deploy again with Devops' tool).
 

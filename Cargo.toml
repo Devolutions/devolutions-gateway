@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-jet"
-version = "0.10.7"
+version = "0.10.8"
 edition = "2018"
 readme = "README.md"
 license = "MIT/Apache-2.0"
