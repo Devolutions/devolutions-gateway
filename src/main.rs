@@ -92,7 +92,10 @@ fn main() {
         futures.push(start_tcp_server(url, config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
     }
 
-    runtime.block_on(future::join_all(futures)).expect("runtime");
+    if let Err(e) = runtime.block_on(future::join_all(futures)) {
+        error!("Listeners failed: {}", e);
+    }
+
     http_server.stop();
 }
 
@@ -114,7 +117,14 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     }
 }
 
-fn start_tcp_server(url: Url, config: Arc<Config>, jet_associations: JetAssociationsMap, tls_acceptor: TlsAcceptor, executor_handle: TaskExecutor, logger: Logger) -> Box<dyn Future<Item=(), Error=()> + Send> {
+fn start_tcp_server(url: Url,
+                    config: Arc<Config>,
+                    jet_associations: JetAssociationsMap,
+                    tls_acceptor: TlsAcceptor,
+                    executor_handle: TaskExecutor,
+                    logger: Logger)
+    -> Box<dyn Future<Item=(), Error=String> + Send> {
+
     info!("Starting TCP jet server...");
     let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
@@ -238,7 +248,7 @@ fn start_tcp_server(url: Url, config: Arc<Config>, jet_associations: JetAssociat
     });
     info!("TCP jet server started successfully. Listening on {}", socket_addr);
 
-    Box::new(server.map_err(|_|()))
+    Box::new(server.map_err(|e| format!("TCP listener failed: {}", e)))
 }
 
 fn start_websocket_server(websocket_url: Url,
@@ -247,7 +257,7 @@ fn start_websocket_server(websocket_url: Url,
                           jet_associations: JetAssociationsMap,
                           tls_acceptor: TlsAcceptor,
                           executor_handle: TaskExecutor,
-                          mut logger: slog::Logger) -> Box<dyn Future<Item=(), Error=()> + Send>  {
+                          mut logger: slog::Logger) -> Box<dyn Future<Item=(), Error=String> + Send>  {
 
     // Start websocket server if needed
     info!("Starting websocket server ...");
@@ -276,7 +286,7 @@ fn start_websocket_server(websocket_url: Url,
         logger = logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let closure = |_| ();
+    let closure = |e| { format!("Websocket listener failed: {}", e)};
     let ws_tls_acceptor = tls_acceptor.clone();
     let websocket_server = match websocket_url.scheme() {
         "ws" => {
