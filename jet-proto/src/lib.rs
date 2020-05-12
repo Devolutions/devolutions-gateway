@@ -2,17 +2,17 @@ pub mod accept;
 pub mod connect;
 pub mod utils;
 
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read};
-use std::io::{self};
-use uuid::Uuid;
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
-use log::trace;
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 pub use http::StatusCode;
-use std::sync::Once;
+use log::trace;
 use std::env;
+use std::io::Read;
+use std::io::{self};
+use std::sync::Once;
+use uuid::Uuid;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
 pub const JET_MSG_HEADER_SIZE: u32 = 8;
@@ -49,7 +49,7 @@ pub enum JetMessage {
     JetAcceptReq(JetAcceptReq),
     JetAcceptRsp(JetAcceptRsp),
     JetConnectReq(JetConnectReq),
-    JetConnectRsp(JetConnectRsp)
+    JetConnectRsp(JetConnectRsp),
 }
 
 struct JetHeader {
@@ -165,10 +165,7 @@ impl JetMessage {
         let _ = stream.read_u8()?;
         let mask = stream.read_u8()?;
 
-        Ok(JetHeader {
-            msg_size,
-            mask
-        })
+        Ok(JetHeader { msg_size, mask })
     }
 
     fn read_payload<R: Read>(stream: &mut R, header: &JetHeader) -> Result<String, Error> {
@@ -181,7 +178,10 @@ impl JetMessage {
         apply_mask(header.mask, &mut payload);
 
         let payload = String::from_utf8(payload).map_err(|e| {
-            Error::Str(format!("Invalid JetMessage - Message can't be converted in String: {}", e))
+            Error::Str(format!(
+                "Invalid JetMessage - Message can't be converted in String: {}",
+                e
+            ))
         })?;
 
         Ok(payload)
@@ -201,7 +201,6 @@ fn apply_mask(mask: u8, payload: &mut [u8]) {
         *byte ^= mask;
     }
 }
-
 
 #[derive(Debug)]
 pub enum Error {
@@ -315,7 +314,8 @@ mod test {
     //Host: jet101.wayk.net
     //Connection: Keep-Alive
     //Jet-Version: 2
-    static TEST_JET_ACCEPT_REQ_V2: &[u8] = &hex!("
+    static TEST_JET_ACCEPT_REQ_V2: &[u8] = &hex!(
+        "
     4a 45 54 00 00 A8 00 00
     47 45 54 20 2f 6a 65 74 2f 61 63 63 65 70 74 2f
     33 30 30 66 31 63 38 32 2d 64 33 33 62 2d 31 31
@@ -327,18 +327,19 @@ mod test {
     77 61 79 6b 2e 6e 65 74 0a 43 6f 6e 6e 65 63 74
     69 6f 6e 3a 20 4b 65 65 70 2d 41 6c 69 76 65 0a
     4a 65 74 2d 56 65 72 73 69 6f 6e 3a 20 32 0a 0a
-    ");
+    "
+    );
 
     #[test]
     fn test_accept_v2() {
-        use std::str::FromStr;
         use std::io::Cursor;
+        use std::str::FromStr;
 
         let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
         let jet_message = JetMessage::read_request(&mut cursor).unwrap();
-        assert!(jet_message ==
-            JetMessage::JetAcceptReq(
-                JetAcceptReq {
+        assert!(
+            jet_message
+                == JetMessage::JetAcceptReq(JetAcceptReq {
                     association: Uuid::from_str("300f1c82-d33b-11e9-bb65-2a2ae2dbcce5").unwrap(),
                     candidate: Uuid::from_str("4c8f409a-c1a2-4cae-bda2-84c590fed618").unwrap(),
                     version: 2,

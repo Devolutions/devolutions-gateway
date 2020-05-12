@@ -3,17 +3,17 @@
 
 use byteorder::LittleEndian;
 use byteorder::WriteBytesExt;
-use jet_proto::{JET_VERSION_V1, JetMessage};
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use jet_proto::connect::JetConnectReq;
+use jet_proto::{JetMessage, JET_VERSION_V1};
 use std::env;
-use std::io::{self, Error, Read, Write, Cursor};
+use std::io::{self, Cursor, Error, Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::process;
 use std::str::FromStr;
 use std::thread;
 use uuid::Uuid;
-use jet_proto::connect::JetConnectReq;
-use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 
 type Port = u16;
 

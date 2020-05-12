@@ -28,11 +28,9 @@ pub struct CandidateResponse {
 impl From<&Candidate> for CandidateResponse {
     fn from(c: &Candidate) -> Self {
         let (bytes_sent, bytes_recv) = match (c.client_nb_bytes_read(), c.client_nb_bytes_written()) {
-                (Some(client_bytes_sent), Some(client_bytes_recv))  => {
-                    (client_bytes_sent, client_bytes_recv)
-                }
-                _ => (0, 0)
-            };
+            (Some(client_bytes_sent), Some(client_bytes_recv)) => (client_bytes_sent, client_bytes_recv),
+            _ => (0, 0),
+        };
 
         CandidateResponse {
             id: c.id,

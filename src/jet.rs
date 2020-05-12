@@ -1,10 +1,10 @@
-use std::convert::TryFrom;
 use jet_proto::Error;
+use std::convert::TryFrom;
 
 pub mod association;
 pub mod candidate;
 
-#[derive(Serialize, Deserialize, Debug,Clone,PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum TransportType {
     Tcp,
     Tls,

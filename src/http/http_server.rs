@@ -1,16 +1,16 @@
-use std::sync::Arc;
+use crate::config::Config;
 use crate::http::controllers::health::HealthController;
+use crate::http::controllers::jet::JetController;
 use crate::http::controllers::sessions::SessionsController;
+use crate::http::middlewares::auth::AuthMiddleware;
+use crate::jet_client::JetAssociationsMap;
+use saphir::server::SslConfig;
 use saphir::Server as SaphirServer;
 use saphir::ServerSpawn;
-use slog_scope::{info};
+use slog_scope::info;
+use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::runtime::TaskExecutor;
-use crate::http::controllers::jet::JetController;
-use crate::jet_client::JetAssociationsMap;
-use crate::config::Config;
-use crate::http::middlewares::auth::AuthMiddleware;
-use saphir::server::SslConfig;
 
 pub struct HttpServer {
     pub server: SaphirServer,
@@ -33,7 +33,11 @@ impl HttpServer {
                     auth_include_path.push("/jet/association/<association_id>");
                 }
 
-                middlewares.apply(AuthMiddleware::new(config.clone()), auth_include_path, Some(auth_exclude_path))
+                middlewares.apply(
+                    AuthMiddleware::new(config.clone()),
+                    auth_include_path,
+                    Some(auth_exclude_path),
+                )
             })
             .configure_router(|router| {
                 info!("Loading http controllers");
@@ -41,9 +45,7 @@ impl HttpServer {
                 let jet = JetController::new(config.clone(), jet_associations.clone(), executor.clone());
                 let session = SessionsController::new();
                 info!("Configuring http router");
-                router.add(health)
-                    .add(jet)
-                    .add(session)
+                router.add(health).add(jet).add(session)
             })
             .configure_listener(|list_config| {
                 let listener_config = list_config.set_uri(&config.http_listener_url.to_string());

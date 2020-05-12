@@ -11,10 +11,10 @@ use saphir::server::HttpService;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error};
 use slog_scope_futures::future01::FutureExt;
+use tokio::net::tcp::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::runtime::TaskExecutor;
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use tokio::net::tcp::{TcpListener, TcpStream};
 use url::Url;
 use x509_parser::pem::pem_to_der;
 
@@ -42,20 +42,26 @@ fn main() {
 
     let listeners = config.listeners();
 
-    let tcp_listeners: Vec<Url> = listeners.iter().filter_map(|listener| {
-        if listener.url.scheme() == "tcp" {
-            Some(listener.url.clone())
-        } else {
-            None
-        }
-    }).collect();
-    let websocket_listeners: Vec<Url> = listeners.iter().filter_map(|listener| {
-        if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
-            Some(listener.url.clone())
-        } else {
-            None
-        }
-    }).collect();
+    let tcp_listeners: Vec<Url> = listeners
+        .iter()
+        .filter_map(|listener| {
+            if listener.url.scheme() == "tcp" {
+                Some(listener.url.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    let websocket_listeners: Vec<Url> = listeners
+        .iter()
+        .filter_map(|listener| {
+            if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
+                Some(listener.url.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // Initialize the various data structures we're going to use in our server.
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
@@ -85,11 +91,26 @@ fn main() {
 
     let mut futures = Vec::with_capacity(websocket_listeners.len() + tcp_listeners.len());
     for url in websocket_listeners {
-        futures.push(start_websocket_server(url, config.clone(), http_service.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
+        futures.push(start_websocket_server(
+            url,
+            config.clone(),
+            http_service.clone(),
+            jet_associations.clone(),
+            tls_acceptor.clone(),
+            executor_handle.clone(),
+            logger.clone(),
+        ));
     }
 
     for url in tcp_listeners {
-        futures.push(start_tcp_server(url, config.clone(), jet_associations.clone(), tls_acceptor.clone(), executor_handle.clone(), logger.clone()));
+        futures.push(start_tcp_server(
+            url,
+            config.clone(),
+            jet_associations.clone(),
+            tls_acceptor.clone(),
+            executor_handle.clone(),
+            logger.clone(),
+        ));
     }
 
     if let Err(e) = runtime.block_on(future::join_all(futures)) {
@@ -117,16 +138,22 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     }
 }
 
-fn start_tcp_server(url: Url,
-                    config: Arc<Config>,
-                    jet_associations: JetAssociationsMap,
-                    tls_acceptor: TlsAcceptor,
-                    executor_handle: TaskExecutor,
-                    logger: Logger)
-    -> Box<dyn Future<Item=(), Error=String> + Send> {
-
+fn start_tcp_server(
+    url: Url,
+    config: Arc<Config>,
+    jet_associations: JetAssociationsMap,
+    tls_acceptor: TlsAcceptor,
+    executor_handle: TaskExecutor,
+    logger: Logger,
+) -> Box<dyn Future<Item = (), Error = String> + Send> {
     info!("Starting TCP jet server...");
-    let socket_addr = url.with_default_port(default_port).expect(&format!("Error in Url {}", url)).to_socket_addrs().unwrap().next().unwrap();
+    let socket_addr = url
+        .with_default_port(default_port)
+        .expect(&format!("Error in Url {}", url))
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
     let server = listener.incoming().for_each(move |conn| {
         let mut logger = logger.clone();
@@ -174,16 +201,19 @@ fn start_tcp_server(url: Url,
                     match accept {
                         Ok(stream) => {
                             let transport = WsTransport::new_tcp(stream, peer_addr);
-                            Box::new(WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport))
-                        },
+                            Box::new(
+                                WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport),
+                            )
+                        }
                         Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
                             Box::new(TcpWebSocketServerHandshake(Some(e)).and_then(move |stream| {
                                 let transport = WsTransport::new_tcp(stream, peer_addr);
                                 WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
-                            })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                            })) as Box<dyn Future<Item = (), Error = io::Error> + Send>
                         }
-                        Err(tungstenite::handshake::HandshakeError::Failure(e)) => Box::new(future::err(io::Error::new(io::ErrorKind::Other, e))
-                        )
+                        Err(tungstenite::handshake::HandshakeError::Failure(e)) => {
+                            Box::new(future::err(io::Error::new(io::ErrorKind::Other, e)))
+                        }
                     }
                 }
                 "wss" => {
@@ -199,18 +229,24 @@ fn start_tcp_server(url: Url,
                                 match accept {
                                     Ok(stream) => {
                                         let transport = WsTransport::new_tls(stream, peer_addr);
-                                        Box::new(WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport))
-                                    },
+                                        Box::new(
+                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone)
+                                                .serve(transport),
+                                        )
+                                    }
                                     Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
                                         Box::new(TlsWebSocketServerHandshake(Some(e)).and_then(move |stream| {
                                             let transport = WsTransport::new_tls(stream, peer_addr);
-                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
-                                        })) as Box<dyn Future<Item=(), Error=io::Error> + Send>
+                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone)
+                                                .serve(transport)
+                                        }))
+                                            as Box<dyn Future<Item = (), Error = io::Error> + Send>
                                     }
-                                    Err(tungstenite::handshake::HandshakeError::Failure(e)) => Box::new(future::err(io::Error::new(io::ErrorKind::Other, e))
-                                    )
+                                    Err(tungstenite::handshake::HandshakeError::Failure(e)) => {
+                                        Box::new(future::err(io::Error::new(io::ErrorKind::Other, e)))
+                                    }
                                 }
-                            })
+                            }),
                     )
                 }
                 "rdp" => {
@@ -224,8 +260,8 @@ fn start_tcp_server(url: Url,
                         tls_public_key.clone(),
                         tls_acceptor.clone(),
                     )
-                        .serve(conn)
-                },
+                    .serve(conn)
+                }
                 scheme => panic!("Unsupported routing url scheme {}", scheme),
             }
         } else {
@@ -242,7 +278,8 @@ fn start_tcp_server(url: Url,
 
                     Ok(())
                 })
-                .with_logger(logger));
+                .with_logger(logger),
+        );
 
         ok(())
     });
@@ -251,30 +288,37 @@ fn start_tcp_server(url: Url,
     Box::new(server.map_err(|e| format!("TCP listener failed: {}", e)))
 }
 
-fn start_websocket_server(websocket_url: Url,
-                          config: Arc<Config>,
-                          http_service: HttpService,
-                          jet_associations: JetAssociationsMap,
-                          tls_acceptor: TlsAcceptor,
-                          executor_handle: TaskExecutor,
-                          mut logger: slog::Logger) -> Box<dyn Future<Item=(), Error=String> + Send>  {
-
+fn start_websocket_server(
+    websocket_url: Url,
+    config: Arc<Config>,
+    http_service: HttpService,
+    jet_associations: JetAssociationsMap,
+    tls_acceptor: TlsAcceptor,
+    executor_handle: TaskExecutor,
+    mut logger: slog::Logger,
+) -> Box<dyn Future<Item = (), Error = String> + Send> {
     // Start websocket server if needed
     info!("Starting websocket server ...");
     let mut websocket_addr = String::new();
     websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
     websocket_addr.push_str(":");
-    websocket_addr.push_str(websocket_url
-        .port()
-        .map(|port| port.to_string())
-        .unwrap_or_else(|| {
-            match websocket_url.scheme() {
+    websocket_addr.push_str(
+        websocket_url
+            .port()
+            .map(|port| port.to_string())
+            .unwrap_or_else(|| match websocket_url.scheme() {
                 "wss" => "443".to_string(),
                 "ws" => "80".to_string(),
-                _ => "80".to_string()
-            }
-        }).as_str());
-    let websocket_listener = TcpListener::bind(&websocket_addr.parse::<SocketAddr>().expect("Websocket addr can't be parsed.")).unwrap();
+                _ => "80".to_string(),
+            })
+            .as_str(),
+    );
+    let websocket_listener = TcpListener::bind(
+        &websocket_addr
+            .parse::<SocketAddr>()
+            .expect("Websocket addr can't be parsed."),
+    )
+    .unwrap();
     let websocket_service = WebsocketService {
         http_service,
         jet_associations: jet_associations.clone(),
@@ -286,31 +330,35 @@ fn start_websocket_server(websocket_url: Url,
         logger = logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let closure = |e| { format!("Websocket listener failed: {}", e)};
+    let closure = |e| format!("Websocket listener failed: {}", e);
     let ws_tls_acceptor = tls_acceptor.clone();
     let websocket_server = match websocket_url.scheme() {
         "ws" => {
             let incoming = websocket_listener.incoming();
-            Either::A(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio::net::tcp::TcpStream| {
-                let remote_addr = stream.peer_addr().ok();
-                let mut ws_serve = websocket_service.clone();
-                service_fn(move |req| {
-                    ws_serve.handle(req, remote_addr.clone())
-                })
-            }))).map_err(closure)
+            Either::A(hyper::Server::builder(incoming).serve(make_service_fn(
+                move |stream: &tokio::net::tcp::TcpStream| {
+                    let remote_addr = stream.peer_addr().ok();
+                    let mut ws_serve = websocket_service.clone();
+                    service_fn(move |req| ws_serve.handle(req, remote_addr.clone()))
+                },
+            )))
+            .map_err(closure)
         }
 
         "wss" => {
             let incoming = websocket_listener.incoming().and_then(move |conn| {
-                ws_tls_acceptor.accept(conn).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                ws_tls_acceptor
+                    .accept(conn)
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
             });
-            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(move |stream: &tokio_rustls::server::TlsStream<tokio::net::tcp::TcpStream>| {
-                let remote_addr = stream.get_ref().0.peer_addr().ok();
-                let mut ws_serve = websocket_service.clone();
-                service_fn(move |req| {
-                    ws_serve.handle(req, remote_addr.clone())
-                })
-            }))).map_err(closure)
+            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(
+                move |stream: &tokio_rustls::server::TlsStream<tokio::net::tcp::TcpStream>| {
+                    let remote_addr = stream.get_ref().0.peer_addr().ok();
+                    let mut ws_serve = websocket_service.clone();
+                    service_fn(move |req| ws_serve.handle(req, remote_addr.clone()))
+                },
+            )))
+            .map_err(closure)
         }
 
         scheme => panic!("Not a websocket scheme {}", scheme),

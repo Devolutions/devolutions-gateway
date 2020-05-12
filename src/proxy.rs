@@ -1,12 +1,3 @@
-use std::{
-    collections::HashMap,
-    io,
-    path::PathBuf,
-    sync::{atomic::Ordering, Arc},
-};
-use futures::{future::Either, Future, Stream};
-use slog_scope::{info, warn};
-use spsc_bip_buffer::bip_buffer_with_len;
 use crate::{
     config::{Config, Protocol},
     interceptor::{
@@ -15,6 +6,15 @@ use crate::{
     rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
     transport::{Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
+};
+use futures::{future::Either, Future, Stream};
+use slog_scope::{info, warn};
+use spsc_bip_buffer::bip_buffer_with_len;
+use std::{
+    collections::HashMap,
+    io,
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
 };
 
 pub struct Proxy {
@@ -106,13 +106,28 @@ impl Proxy {
                 use tokio::prelude::FutureExt;
                 match $fut.timeout(std::time::Duration::from_secs(1)).compat().await {
                     Ok(_) => {
-                        slog_scope::info!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): terminated normally"));
+                        slog_scope::info!(concat!(
+                            "Stream ",
+                            $stream_name,
+                            " -> Sink ",
+                            $sink_name,
+                            " (remaining): terminated normally"
+                        ));
                     }
                     Err(e) => {
-                        slog_scope::warn!(concat!("Stream ", $stream_name, " -> Sink ", $sink_name, " (remaining): {}"), e);
+                        slog_scope::warn!(
+                            concat!(
+                                "Stream ",
+                                $stream_name,
+                                " -> Sink ",
+                                $sink_name,
+                                " (remaining): {}"
+                            ),
+                            e
+                        );
                     }
                 }
-            }
+            };
         }
 
         let fut = async move {
@@ -122,31 +137,32 @@ impl Proxy {
                         Either::A(((_, _), forward)) => {
                             slog_scope::info!("Stream server -> Sink client: terminated normally");
                             finish_remaining_forward!(forward ("client" => "server"));
-                        },
+                        }
                         Either::B(((_, _), forward)) => {
                             slog_scope::info!("Stream client -> Sink server: terminated normally");
                             finish_remaining_forward!(forward ("server" => "client"));
-                        },
+                        }
                     };
                 }
-                Err(either_e) => {
-                    match either_e {
-                        Either::A((e, forward)) => {
-                            slog_scope::warn!("Stream server -> Sink client: {}", e);
-                            finish_remaining_forward!(forward ("client" => "server"));
-                        },
-                        Either::B((e, forward)) => {
-                            slog_scope::warn!("Stream client -> Sink server: {}", e);
-                            finish_remaining_forward!(forward ("server" => "client"));
-                        },
+                Err(either_e) => match either_e {
+                    Either::A((e, forward)) => {
+                        slog_scope::warn!("Stream server -> Sink client: {}", e);
+                        finish_remaining_forward!(forward ("client" => "server"));
                     }
-                }
+                    Either::B((e, forward)) => {
+                        slog_scope::warn!("Stream client -> Sink server: {}", e);
+                        finish_remaining_forward!(forward ("server" => "client"));
+                    }
+                },
             }
 
             SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-        }.unit_error().boxed().compat().map_err(|_| io::Error::new(io::ErrorKind::Other, "select2 failed"));
+        }
+        .unit_error()
+        .boxed()
+        .compat()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "select2 failed"));
 
         Box::new(fut)
     }
 }
-

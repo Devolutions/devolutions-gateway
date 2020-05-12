@@ -1,9 +1,9 @@
 use std::{env, sync::Arc};
 
-use slog_scope::warn;
 use clap::{crate_name, crate_version, App, Arg};
-use url::Url;
 use picky::{key::PublicKey, pem::Pem};
+use slog_scope::warn;
+use url::Url;
 
 use crate::rdp;
 
@@ -285,7 +285,10 @@ identities_file example:
             listeners.map(|listener| listener.to_string()).collect()
         });
 
-        let http_listener_url = matches.value_of("http-listener-url").map(std::string::ToString::to_string).expect("");
+        let http_listener_url = matches
+            .value_of("http-listener-url")
+            .map(std::string::ToString::to_string)
+            .expect("");
 
         let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
 
@@ -320,9 +323,9 @@ identities_file example:
         let certificate_data = matches.value_of("jet-certificate-data").map(String::from);
         let private_key_file = matches.value_of("jet-private-key-file").map(String::from);
         let private_key_data = matches.value_of("jet-private-key-data").map(String::from);
-        let provisioner_public_key_pem = matches.value_of("provisioner-public-key-data").map(| base64 | {
-           format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64)
-        });
+        let provisioner_public_key_pem = matches
+            .value_of("provisioner-public-key-data")
+            .map(|base64| format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64));
         let provisioner_public_key_path = matches.value_of("provisioner-public-key-file").map(String::from);
 
         let mut config_temp = ConfigTemp {
@@ -341,7 +344,7 @@ identities_file example:
                 certificate_file,
                 certificate_data,
                 private_key_file,
-                private_key_data
+                private_key_data,
             },
 
             provisioner_public_key_pem,
@@ -356,7 +359,7 @@ identities_file example:
 
 impl ConfigTemp {
     fn apply_env_variables(&mut self) {
-        if let Ok(val) = env::var("JET_INSTANCE"){
+        if let Ok(val) = env::var("JET_INSTANCE") {
             self.jet_instance = Some(val);
         }
 
@@ -367,20 +370,24 @@ impl ConfigTemp {
         if let Ok(val) = env::var("JET_UNRESTRICTED") {
             if let Ok(val) = val.to_lowercase().parse::<bool>() {
                 self.unrestricted = val;
-            }
-            else {
+            } else {
                 warn!("JET_UNRESTRICTED env. variable is not a boolean value. 'true' or 'false' accepted.");
             }
         }
 
         if let Ok(val) = env::var("JET_LISTENERS") {
-            self.listeners = val.split(';').filter_map(|item: &str| {
-                if !item.is_empty() {
-                    Some(item.to_string())
-                } else {
-                    None
-                }
-            }).collect();
+            self.listeners = val
+                .split(';')
+                .filter_map(
+                    |item: &str| {
+                        if !item.is_empty() {
+                            Some(item.to_string())
+                        } else {
+                            None
+                        }
+                    },
+                )
+                .collect();
         }
 
         if let Ok(val) = env::var("JET_CERTIFICATE_FILE") {
@@ -425,31 +432,44 @@ impl From<ConfigTemp> for Config {
 
             if let Some(pos) = listener.find(',') {
                 let url_str = &listener[0..pos];
-                url = listener[0..pos].parse::<Url>().expect(&format!("Listener {} is an invalid URL.", url_str));
+                url = listener[0..pos]
+                    .parse::<Url>()
+                    .expect(&format!("Listener {} is an invalid URL.", url_str));
 
                 if listener.len() > pos + 1 {
-                    let external_str = listener[pos+1..].to_string();
+                    let external_str = listener[pos + 1..].to_string();
                     let external_str = external_str.replace("<jet_instance>", &jet_instance);
-                    external_url = external_str.parse::<Url>().expect(&format!("External_url {} is an invalid URL.", external_str));
+                    external_url = external_str
+                        .parse::<Url>()
+                        .expect(&format!("External_url {} is an invalid URL.", external_str));
                 } else {
                     panic!("External url has to be specified after the comma : {}", listener);
                 }
             } else {
-                url = listener.parse::<Url>().expect(&format!("Listener {} is an invalid URL.", listener));
-                external_url = format!("{}://{}:{}", url.scheme(), jet_instance, url.port_or_known_default().unwrap_or(8080)).parse::<Url>().expect(&format!("External_url can't be built based on listener {}", listener));
+                url = listener
+                    .parse::<Url>()
+                    .expect(&format!("Listener {} is an invalid URL.", listener));
+                external_url = format!(
+                    "{}://{}:{}",
+                    url.scheme(),
+                    jet_instance,
+                    url.port_or_known_default().unwrap_or(8080)
+                )
+                .parse::<Url>()
+                .expect(&format!("External_url can't be built based on listener {}", listener));
             }
 
-            listeners.push(ListenerConfig {
-                url,
-                external_url
-            });
+            listeners.push(ListenerConfig { url, external_url });
         }
 
         if listeners.is_empty() {
             panic!("At least one listener has to be specified.");
         }
 
-        let http_listener_url = temp.http_listener_url.parse::<Url>().expect(&format!("Http listener {} is an invalid URL", temp.http_listener_url));
+        let http_listener_url = temp
+            .http_listener_url
+            .parse::<Url>()
+            .expect(&format!("Http listener {} is an invalid URL", temp.http_listener_url));
 
         let pem_str = if let Some(pem) = temp.provisioner_public_key_pem {
             Some(pem)
@@ -459,8 +479,10 @@ impl From<ConfigTemp> for Config {
             None
         };
 
-        let provisioner_public_key = pem_str.map(| pem_str| {
-            let pem = pem_str.parse::<Pem>().expect("couldn't parse provisioner public key pem");
+        let provisioner_public_key = pem_str.map(|pem_str| {
+            let pem = pem_str
+                .parse::<Pem>()
+                .expect("couldn't parse provisioner public key pem");
             let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
             public_key
         });

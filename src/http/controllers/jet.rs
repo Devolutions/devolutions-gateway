@@ -1,21 +1,21 @@
-use std::sync::Arc;
+use jet_proto::JET_VERSION_V2;
 use saphir::Method;
 use saphir::*;
-use uuid::Uuid;
-use jet_proto::JET_VERSION_V2;
-use std::time::{Duration, Instant};
 use slog_scope::info;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::runtime::TaskExecutor;
+use uuid::Uuid;
 
-use crate::jet::association::{Association, AssociationResponse};
 use crate::config::Config;
+use crate::http::controllers::utils::SyncResponseUtil;
+use crate::jet::association::{Association, AssociationResponse};
+use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
 use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
-use crate::jet::candidate::Candidate;
-use tokio::timer::Delay;
 use futures::Future;
-use crate::http::controllers::utils::SyncResponseUtil;
 use std::collections::HashMap;
+use tokio::timer::Delay;
 
 struct ControllerData {
     config: Arc<Config>,
@@ -29,10 +29,22 @@ pub struct JetController {
 
 impl JetController {
     pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
-        let dispatch = ControllerDispatch::new(ControllerData {config, jet_associations, executor_handle});
+        let dispatch = ControllerDispatch::new(ControllerData {
+            config,
+            jet_associations,
+            executor_handle,
+        });
         dispatch.add(Method::GET, "/association", ControllerData::get_associations);
-        dispatch.add(Method::POST, "/association/<association_id>", ControllerData::create_association);
-        dispatch.add(Method::POST, "/association/<association_id>/candidates", ControllerData::gather_association_candidates);
+        dispatch.add(
+            Method::POST,
+            "/association/<association_id>",
+            ControllerData::create_association,
+        );
+        dispatch.add(
+            Method::POST,
+            "/association/<association_id>/candidates",
+            ControllerData::gather_association_candidates,
+        );
 
         JetController { dispatch }
     }
@@ -64,7 +76,10 @@ impl ControllerData {
 
         let associations_response: Vec<AssociationResponse>;
         if let Ok(associations) = self.jet_associations.lock() {
-            associations_response = associations.values().map(|association| AssociationResponse::from(association, with_detail)).collect();
+            associations_response = associations
+                .values()
+                .map(|association| AssociationResponse::from(association, with_detail))
+                .collect();
         } else {
             res.status(StatusCode::INTERNAL_SERVER_ERROR);
             return;
@@ -84,7 +99,11 @@ impl ControllerData {
                 if let Ok(mut jet_associations) = self.jet_associations.lock() {
                     if !jet_associations.contains_key(&uuid) {
                         jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
-                        start_remove_association_future(self.executor_handle.clone(), self.jet_associations.clone(), uuid);
+                        start_remove_association_future(
+                            self.executor_handle.clone(),
+                            self.jet_associations.clone(),
+                            uuid,
+                        );
 
                         res.status(StatusCode::OK);
                     }
@@ -104,14 +123,22 @@ impl ControllerData {
                         None => {
                             // The create could be done on a JET and the gather on a different one. We create it as workaround for now.
                             jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
-                            start_remove_association_future(self.executor_handle.clone(), self.jet_associations.clone(), uuid);
-                            jet_associations.get_mut(&uuid).expect("We just added the association, it should be there!")
+                            start_remove_association_future(
+                                self.executor_handle.clone(),
+                                self.jet_associations.clone(),
+                                uuid,
+                            );
+                            jet_associations
+                                .get_mut(&uuid)
+                                .expect("We just added the association, it should be there!")
                         }
                     };
 
                     if association.get_candidates().is_empty() {
                         for listener in self.config.listeners() {
-                            if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches("/")) {
+                            if let Some(candidate) =
+                                Candidate::new(&listener.external_url.to_string().trim_end_matches("/"))
+                            {
                                 association.add_candidate(candidate);
                             }
                         }
