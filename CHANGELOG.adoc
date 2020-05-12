@@ -4,6 +4,9 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 
 == 0.11.0 (unreleased)
 
+== 0.10.6 (2020-05-12)
+  * Exactly same as 0.10.5 (just to be able to deploy again with Devops' tool).
+
 == 0.10.5 (2020-05-11)
   * Exactly same as 0.10.4 (just to be able to deploy again with Devops' tool).
 
