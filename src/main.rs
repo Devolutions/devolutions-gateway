@@ -9,7 +9,7 @@ use futures::{future, future::ok, future::Either, Future, Stream};
 use hyper::service::{make_service_fn, service_fn};
 use saphir::server::HttpService;
 use slog::{o, Logger};
-use slog_scope::{error, info, slog_error};
+use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future01::FutureExt;
 use tokio::net::tcp::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
@@ -29,6 +29,8 @@ use devolutions_jet::transport::ws::{TcpWebSocketServerHandshake, TlsWebSocketSe
 use devolutions_jet::transport::JetTransport;
 use devolutions_jet::utils::{get_pub_key_from_der, load_certs, load_private_key};
 use devolutions_jet::websocket_client::{WebsocketService, WsClient};
+use tokio::io::Error;
+use tokio::prelude::{AsyncRead, AsyncWrite};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -137,6 +139,10 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
         slog_error!(logger, "set_recv_buffer_size on TcpStream failed: {}", e);
     }
 }
+
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
+
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
 
 fn start_tcp_server(
     url: Url,
@@ -330,39 +336,50 @@ fn start_websocket_server(
         logger = logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let closure = |e| format!("Websocket listener failed: {}", e);
     let ws_tls_acceptor = tls_acceptor.clone();
-    let websocket_server = match websocket_url.scheme() {
-        "ws" => {
-            let incoming = websocket_listener.incoming();
-            Either::A(hyper::Server::builder(incoming).serve(make_service_fn(
-                move |stream: &tokio::net::tcp::TcpStream| {
-                    let remote_addr = stream.peer_addr().ok();
-                    let mut ws_serve = websocket_service.clone();
-                    service_fn(move |req| ws_serve.handle(req, remote_addr.clone()))
-                },
-            )))
-            .map_err(closure)
-        }
+    let http = hyper::server::conn::Http::new();
 
-        "wss" => {
-            let incoming = websocket_listener.incoming().and_then(move |conn| {
-                ws_tls_acceptor
-                    .accept(conn)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            });
-            Either::B(hyper::Server::builder(incoming).serve(make_service_fn(
-                move |stream: &tokio_rustls::server::TlsStream<tokio::net::tcp::TcpStream>| {
-                    let remote_addr = stream.get_ref().0.peer_addr().ok();
-                    let mut ws_serve = websocket_service.clone();
-                    service_fn(move |req| ws_serve.handle(req, remote_addr.clone()))
-                },
-            )))
-            .map_err(closure)
-        }
+    let incoming = match websocket_url.scheme() {
+        "ws" => Either::A(websocket_listener.incoming().map(|tcp| {
+            let remote_addr = tcp.peer_addr().ok();
+            (
+                Box::new(tcp) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
+                remote_addr,
+            )
+        })),
+
+        "wss" => Either::B(websocket_listener.incoming().and_then(move |conn| {
+            ws_tls_acceptor
+                .accept(conn)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                .map(|tls| {
+                    let remote_addr = tls.get_ref().0.peer_addr().ok();
+                    (
+                        Box::new(tls) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
+                        remote_addr,
+                    )
+                })
+        })),
 
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
+
+    let websocket_server = incoming.then(|conn_res| Ok(conn_res)).for_each(move |conn_res| {
+        match conn_res {
+            Ok((conn, remote_addr)) => {
+                let mut ws_serve = websocket_service.clone();
+                let srvc = service_fn(move |req| ws_serve.handle(req, remote_addr));
+                websocket_service
+                    .executor_handle
+                    .spawn(http.serve_connection(conn, srvc).map_err(|_| ()));
+            }
+            Err(e) => {
+                warn!("incoming connection encountered an error: {}", e);
+            }
+        }
+
+        future::ok(())
+    });
 
     info!("WebSocket server started successfully. Listening on {}", websocket_addr);
     Box::new(websocket_server.with_logger(logger))
