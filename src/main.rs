@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::{future, future::ok, future::Either, Future, Stream};
-use hyper::service::{make_service_fn, service_fn};
+use hyper::service::service_fn;
 use saphir::server::HttpService;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
@@ -29,7 +29,6 @@ use devolutions_jet::transport::ws::{TcpWebSocketServerHandshake, TlsWebSocketSe
 use devolutions_jet::transport::JetTransport;
 use devolutions_jet::utils::{get_pub_key_from_der, load_certs, load_private_key};
 use devolutions_jet::websocket_client::{WebsocketService, WsClient};
-use tokio::io::Error;
 use tokio::prelude::{AsyncRead, AsyncWrite};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;

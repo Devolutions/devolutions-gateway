@@ -4,6 +4,9 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 
 == 0.11.0 (unreleased)
 
+== 0.10.9 (2020-05-13)
+  * Fix websocket listener. An error was returned by the tls acceptor. Ignore those errors.
+
 == 0.10.8 (2020-05-12)
   * Don't panic if listeners future returns an error. Just print the error and close the application
 
