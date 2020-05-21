@@ -2,7 +2,8 @@
 
 This document provides a list of notable changes introduced in Devolutions-Jet by release.
 
-== 0.11.0 (Unreleased)
+== 0.11.0 (2020-05-21)
+  * Fix websocket connection. Enable HTTP upgrade for the hyper connection.
 
 == 0.10.9 (2020-05-13)
   * Fix websocket listener. An error was returned by the tls acceptor. Ignore those errors.
@@ -32,7 +33,6 @@ This document provides a list of notable changes introduced in Devolutions-Jet b
 == 0.10.1 (2020-03-26)
 
   * Exactly same as 0.10.0 (workaround to deploy a new version in prod without issue with ACI)
-
 
 == 0.10.0 (2020-03-23)
 
