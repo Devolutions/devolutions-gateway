@@ -370,7 +370,7 @@ fn start_websocket_server(
                 let srvc = service_fn(move |req| ws_serve.handle(req, remote_addr));
                 websocket_service
                     .executor_handle
-                    .spawn(http.serve_connection(conn, srvc).map_err(|_| ()));
+                    .spawn(http.serve_connection(conn, srvc).with_upgrades().map_err(|_| ()));
             }
             Err(e) => {
                 warn!("incoming connection encountered an error: {}", e);
