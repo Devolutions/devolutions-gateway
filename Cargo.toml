@@ -36,6 +36,7 @@ slog = { version = "2.5", features = ["max_level_trace","release_max_level_debug
 slog-term = "2.4"
 slog-async = "2.3"
 slog-scope = "4.3"
+slog-envlogger = "2.2"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
