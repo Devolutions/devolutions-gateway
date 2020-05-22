@@ -134,18 +134,15 @@ impl Write for WsStream {
     }
     fn flush(&mut self) -> io::Result<()> {
         match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(tungstenite_err_to_io_err),
-            WsStreamWrapper::Tcp((ref mut stream, _)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(tungstenite_err_to_io_err),
-            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(tungstenite_err_to_io_err),
+            WsStreamWrapper::Http((ref mut stream, _)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tcp((ref mut stream, _)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
         }
     }
 }
@@ -276,21 +273,22 @@ impl Transport for WsTransport {
         Self: Sized,
     {
         let socket_addr = url_to_socket_arr(&url);
-        let owned_url = url.clone();
+
+        let request = match Request::builder().uri(url.as_str()).body(()) {
+            Ok(req) => req,
+            Err(e) => {
+                return Box::new(future::lazy(|| future::err(io::Error::new(io::ErrorKind::Other, e))))
+                    as JetFuture<Self>;
+            }
+        };
+
         match url.scheme() {
             "ws" => Box::new(futures::lazy(move || {
                 TcpStream::connect(&socket_addr)
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                     .and_then(|stream| {
                         let peer_addr = stream.peer_addr().ok();
-                        let client = tungstenite::client(
-                            Request {
-                                url: owned_url,
-                                extra_headers: None,
-                            },
-                            stream,
-                        );
-                        match client {
+                        match tungstenite::client(request, stream) {
                             Ok((stream, _)) => Box::new(future::lazy(move || {
                                 future::ok(WsTransport::new_tcp(stream, peer_addr))
                             })) as JetFuture<Self>,
@@ -313,7 +311,7 @@ impl Transport for WsTransport {
                 let mut client_config = rustls::ClientConfig::default();
                 client_config
                     .dangerous()
-                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
+                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification));
                 let config_ref = Arc::new(client_config);
                 let cx = TlsConnector::from(config_ref);
                 let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
@@ -327,14 +325,7 @@ impl Transport for WsTransport {
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                         .and_then(|stream| {
                             let peer_addr = stream.get_ref().0.peer_addr().ok();
-                            let client = tungstenite::client(
-                                Request {
-                                    url: owned_url,
-                                    extra_headers: None,
-                                },
-                                TlsStream::Client(stream),
-                            );
-                            match client {
+                            match tungstenite::client(request, TlsStream::Client(stream)) {
                                 Ok((stream, _)) => Box::new(future::lazy(move || {
                                     future::ok(WsTransport::new_tls(stream, peer_addr))
                                 })) as JetFuture<Self>,
