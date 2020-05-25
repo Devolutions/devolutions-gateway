@@ -25,7 +25,7 @@ use crate::utils::{danger_transport, url_to_socket_arr};
 
 pub struct WsStream {
     inner: WsStreamWrapper,
-    message: Option<Cursor<Vec<u8>>>,
+    previous_message: Option<Cursor<Vec<u8>>>,
 }
 
 impl WsStream {
@@ -44,7 +44,126 @@ impl From<WsStreamWrapper> for WsStream {
     fn from(wrapper: WsStreamWrapper) -> Self {
         WsStream {
             inner: wrapper,
-            message: None,
+            previous_message: None,
+        }
+    }
+}
+
+impl Read for WsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match &mut self.previous_message {
+            Some(message) => {
+                let remaining_len = (message.get_ref().len() as u64) - message.position();
+
+                let read_size = message.read(buf)?;
+
+                slog_scope::trace!(
+                    "Read an old message. remaining_len={}, buf_len={}, read_len={}",
+                    remaining_len,
+                    buf.len(),
+                    read_size
+                );
+
+                if message.position() == message.get_ref().len() as u64 {
+                    slog_scope::trace!("Old message is completely read");
+                    self.previous_message = None;
+                }
+
+                Ok(read_size)
+            }
+            None => {
+                let message_result = match self.inner {
+                    WsStreamWrapper::Http((ref mut stream, _)) => stream.read_message(),
+                    WsStreamWrapper::Tcp((ref mut stream, _)) => stream.read_message(),
+                    WsStreamWrapper::Tls((ref mut stream, _)) => stream.read_message(),
+                };
+
+                let message = message_result.map_err(tungstenite_err_to_io_err)?;
+
+                slog_scope::trace!(
+                    "New message received: {} - len={}",
+                    match message {
+                        Message::Text(_) => "Text",
+                        Message::Binary(_) => "Binary",
+                        Message::Ping(_) => "Ping",
+                        Message::Pong(_) => "Pong",
+                        Message::Close(_) => "Close",
+                    },
+                    message.len()
+                );
+
+                if (message.is_binary() || message.is_text()) && !message.is_empty() {
+                    let mut message = Cursor::new(message.into_data());
+                    let read_size = message.read(buf)?;
+                    if message.position() < message.get_ref().len() as u64 {
+                        slog_scope::trace!(
+                            "Message can't be totally read. buf_len={}, read_len={}",
+                            buf.len(),
+                            read_size
+                        );
+                        self.previous_message = Some(message);
+                    } else {
+                        slog_scope::trace!("Message completely read.");
+                    }
+
+                    Ok(read_size)
+                } else {
+                    Err(io::Error::new(ErrorKind::WouldBlock, "No Data"))
+                }
+            }
+        }
+    }
+}
+
+impl Write for WsStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.inner {
+            WsStreamWrapper::Http((ref mut stream, _)) => stream
+                .write_message(Message::Binary(buf.to_vec()))
+                .map(|_| buf.len())
+                .map_err(tungstenite_err_to_io_err),
+            WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => stream
+                .write_message(Message::Binary(buf.to_vec()))
+                .map(|_| buf.len())
+                .map_err(tungstenite_err_to_io_err),
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => stream
+                .write_message(Message::Binary(buf.to_vec()))
+                .map(|_| buf.len())
+                .map_err(tungstenite_err_to_io_err),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self.inner {
+            WsStreamWrapper::Http((ref mut stream, _)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tcp((ref mut stream, _)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => {
+                stream.write_pending().map(|_| ()).map_err(tungstenite_err_to_io_err)
+            }
+        }
+    }
+}
+
+impl AsyncRead for WsStream {}
+
+impl AsyncWrite for WsStream {
+    fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
+        match self.inner {
+            WsStreamWrapper::Http((ref mut stream, _)) => stream
+                .close(None)
+                .map(|_| Async::Ready(()))
+                .map_err(tungstenite_err_to_io_err),
+            WsStreamWrapper::Tcp((ref mut stream, _)) => stream
+                .close(None)
+                .map(|_| Async::Ready(()))
+                .map_err(tungstenite_err_to_io_err),
+            WsStreamWrapper::Tls((ref mut stream, _)) => stream
+                .close(None)
+                .map(|_| Async::Ready(()))
+                .map_err(tungstenite_err_to_io_err),
         }
     }
 }
@@ -80,96 +199,6 @@ impl WsStreamWrapper {
                 .close(None)
                 .map(|()| Async::Ready(()))
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-        }
-    }
-}
-
-impl Read for WsStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Some(message) = self.message.as_mut() {
-            let read_size = message.read(buf)?;
-            if message.position() == message.get_ref().len() as u64 {
-                self.message = None;
-            }
-            return Ok(read_size);
-        }
-
-        let message_result = match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream.read_message(),
-            WsStreamWrapper::Tcp((ref mut stream, _)) => stream.read_message(),
-            WsStreamWrapper::Tls((ref mut stream, _)) => stream.read_message(),
-        };
-
-        match message_result {
-            Ok(message) => {
-                if (message.is_binary() || message.is_text()) && !message.is_empty() {
-                    let mut message = Cursor::new(message.into_data());
-                    let read_size = message.read(buf)?;
-                    if message.position() < message.get_ref().len() as u64 {
-                        self.message = Some(message);
-                    }
-                    Ok(read_size)
-                } else {
-                    Err(io::Error::new(ErrorKind::WouldBlock, "No Data"))
-                }
-            }
-            Err(e) => Err(tungstenite_err_to_io_err(e)),
-        }
-    }
-}
-
-impl Write for WsStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tcp((ref mut stream, _)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => stream
-                .write_pending()
-                .map(|_| ())
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-        }
-    }
-}
-
-impl AsyncRead for WsStream {}
-
-impl AsyncWrite for WsStream {
-    fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
-        match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream
-                .close(None)
-                .map(|_| Async::Ready(()))
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tcp((ref mut stream, _)) => stream
-                .close(None)
-                .map(|_| Async::Ready(()))
-                .map_err(|e| tungstenite_err_to_io_err(e)),
-            WsStreamWrapper::Tls((ref mut stream, _)) => stream
-                .close(None)
-                .map(|_| Async::Ready(()))
-                .map_err(|e| tungstenite_err_to_io_err(e)),
         }
     }
 }
@@ -244,21 +273,22 @@ impl Transport for WsTransport {
         Self: Sized,
     {
         let socket_addr = url_to_socket_arr(&url);
-        let owned_url = url.clone();
+
+        let request = match Request::builder().uri(url.as_str()).body(()) {
+            Ok(req) => req,
+            Err(e) => {
+                return Box::new(future::lazy(|| future::err(io::Error::new(io::ErrorKind::Other, e))))
+                    as JetFuture<Self>;
+            }
+        };
+
         match url.scheme() {
             "ws" => Box::new(futures::lazy(move || {
                 TcpStream::connect(&socket_addr)
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                     .and_then(|stream| {
                         let peer_addr = stream.peer_addr().ok();
-                        let client = tungstenite::client(
-                            Request {
-                                url: owned_url,
-                                extra_headers: None,
-                            },
-                            stream,
-                        );
-                        match client {
+                        match tungstenite::client(request, stream) {
                             Ok((stream, _)) => Box::new(future::lazy(move || {
                                 future::ok(WsTransport::new_tcp(stream, peer_addr))
                             })) as JetFuture<Self>,
@@ -281,7 +311,7 @@ impl Transport for WsTransport {
                 let mut client_config = rustls::ClientConfig::default();
                 client_config
                     .dangerous()
-                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
+                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification));
                 let config_ref = Arc::new(client_config);
                 let cx = TlsConnector::from(config_ref);
                 let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
@@ -295,14 +325,7 @@ impl Transport for WsTransport {
                         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                         .and_then(|stream| {
                             let peer_addr = stream.get_ref().0.peer_addr().ok();
-                            let client = tungstenite::client(
-                                Request {
-                                    url: owned_url,
-                                    extra_headers: None,
-                                },
-                                TlsStream::Client(stream),
-                            );
-                            match client {
+                            match tungstenite::client(request, TlsStream::Client(stream)) {
                                 Ok((stream, _)) => Box::new(future::lazy(move || {
                                     future::ok(WsTransport::new_tls(stream, peer_addr))
                                 })) as JetFuture<Self>,

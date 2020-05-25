@@ -300,10 +300,11 @@ fn start_websocket_server(
     jet_associations: JetAssociationsMap,
     tls_acceptor: TlsAcceptor,
     executor_handle: TaskExecutor,
-    mut logger: slog::Logger,
+    logger: slog::Logger,
 ) -> Box<dyn Future<Item = (), Error = String> + Send> {
     // Start websocket server if needed
     info!("Starting websocket server ...");
+
     let mut websocket_addr = String::new();
     websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
     websocket_addr.push_str(":");
@@ -318,12 +319,14 @@ fn start_websocket_server(
             })
             .as_str(),
     );
+
     let websocket_listener = TcpListener::bind(
         &websocket_addr
             .parse::<SocketAddr>()
             .expect("Websocket addr can't be parsed."),
     )
     .unwrap();
+
     let websocket_service = WebsocketService {
         http_service,
         jet_associations: jet_associations.clone(),
@@ -331,25 +334,30 @@ fn start_websocket_server(
         config,
     };
 
+    let mut listener_logger = logger.clone();
     if let Ok(local_addr) = websocket_listener.local_addr() {
-        logger = logger.new(o!("listener" => local_addr.to_string()));
+        listener_logger = listener_logger.new(o!("listener" => local_addr.to_string()));
     }
 
     let ws_tls_acceptor = tls_acceptor.clone();
     let http = hyper::server::conn::Http::new();
 
     let incoming = match websocket_url.scheme() {
-        "ws" => Either::A(websocket_listener.incoming().map(|tcp| {
+        "ws" => Either::A(websocket_listener.incoming().map(move |tcp| {
             let remote_addr = tcp.peer_addr().ok();
+            set_socket_option(&tcp, &logger);
+
             (
                 Box::new(tcp) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
                 remote_addr,
             )
         })),
 
-        "wss" => Either::B(websocket_listener.incoming().and_then(move |conn| {
+        "wss" => Either::B(websocket_listener.incoming().and_then(move |tcp| {
+            set_socket_option(&tcp, &logger);
+
             ws_tls_acceptor
-                .accept(conn)
+                .accept(tcp)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 .map(|tls| {
                     let remote_addr = tls.get_ref().0.peer_addr().ok();
@@ -381,7 +389,7 @@ fn start_websocket_server(
     });
 
     info!("WebSocket server started successfully. Listening on {}", websocket_addr);
-    Box::new(websocket_server.with_logger(logger))
+    Box::new(websocket_server.with_logger(listener_logger))
 }
 
 fn default_port(url: &Url) -> Result<u16, ()> {

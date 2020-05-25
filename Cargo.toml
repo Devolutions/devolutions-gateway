@@ -36,6 +36,7 @@ slog = { version = "2.5", features = ["max_level_trace","release_max_level_debug
 slog-term = "2.4"
 slog-async = "2.3"
 slog-scope = "4.3"
+slog-envlogger = "2.2"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
 chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
@@ -43,7 +44,7 @@ x509-parser = "0.6.0"
 sspi = "0.3.0"
 ironrdp = "0.4"
 hyper = "0.12.32"
-tungstenite = "0.8.1"
+tungstenite = "0.10"
 sha1 = "0.6.0"
 base64 = "0.9.1"
 slog-stdlog = "4.0"

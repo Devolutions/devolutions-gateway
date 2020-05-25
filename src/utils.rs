@@ -17,7 +17,7 @@ use url::Url;
 use x509_parser::parse_x509_der;
 
 pub mod danger_transport {
-    pub struct NoCertificateVerification {}
+    pub struct NoCertificateVerification;
 
     impl rustls::ServerCertVerifier for NoCertificateVerification {
         fn verify_server_cert(
