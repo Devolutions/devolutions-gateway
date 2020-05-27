@@ -117,19 +117,39 @@ impl Read for WsStream {
 
 impl Write for WsStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(tungstenite_err_to_io_err),
-            WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(tungstenite_err_to_io_err),
-            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => stream
-                .write_message(Message::Binary(buf.to_vec()))
-                .map(|_| buf.len())
-                .map_err(tungstenite_err_to_io_err),
+        let message = Message::Binary(buf.to_vec());
+
+        let result = match self.inner {
+            WsStreamWrapper::Http((ref mut stream, _)) => {
+                stream.write_message(message).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => {
+                stream.write_message(message).map_err(tungstenite_err_to_io_err)
+            }
+            WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => {
+                stream.write_message(message).map_err(tungstenite_err_to_io_err)
+            }
+        };
+
+        match result {
+            Ok(()) => Ok(buf.len()),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                // tungstenite already buffers the message, so we need to return buf.len() anyway
+                // because otherwise bip buffer in JetSinkImpl's Sink implementation doesn't mark
+                // data as consumed even though it is. We should arrange for the current task (via
+                // `cx.waker()`) to receive a notification when the object becomes readable or is closed.
+                // This is normally done by returning io::Error with WouldBlock, but we can't because
+                // otherwise consumed part of the bip buffer isn't marked as consumed.
+                // Accordingly, if you need to wait an undetermined amount of time before receiving
+                // the remaining part of your message, the reason is probably right here.
+                // Our best bet is to couple tightly the bip buffer with the tungstenite websocket
+                // so that we can consume out of the bip buffer all the message now buffered in the tungstenite websocket
+                // while returning a WouldBlock for rescheduling.
+                // We may have a look at PollEvented (https://docs.rs/tokio/0.1.22/tokio/reactor/struct.PollEvented2.html)
+                // as well.
+                Ok(buf.len())
+            }
+            Err(e) => Err(e),
         }
     }
 
