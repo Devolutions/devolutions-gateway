@@ -180,7 +180,7 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
             if let Some(mut reservation) = self.buffer.reserve(PART_LEN) {
                 match self.stream.poll_read(reservation.as_mut()) {
                     Ok(Async::Ready(0)) => {
-                        reservation.truncate(0);
+                        reservation.cancel(); // equivalent to truncate(0)
                         return if written > 0 {
                             Ok(Async::Ready(Some(written)))
                         } else {
@@ -200,7 +200,7 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                         trace!("{} bytes read on {}", len, peer_addr);
                     }
                     Ok(Async::NotReady) => {
-                        reservation.truncate(0);
+                        reservation.cancel();
                         return if written > 0 {
                             Ok(Async::Ready(Some(written)))
                         } else {
@@ -208,7 +208,7 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                         };
                     }
                     Err(e) => {
-                        reservation.truncate(0);
+                        reservation.cancel();
                         error!("Can't read on socket: {}", e);
                         return Ok(Async::Ready(None));
                     }

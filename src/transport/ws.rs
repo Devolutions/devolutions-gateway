@@ -132,6 +132,7 @@ impl Write for WsStream {
                 .map_err(tungstenite_err_to_io_err),
         }
     }
+
     fn flush(&mut self) -> io::Result<()> {
         match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) => {
