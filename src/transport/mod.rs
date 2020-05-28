@@ -180,11 +180,12 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
             if let Some(mut reservation) = self.buffer.reserve(PART_LEN) {
                 match self.stream.poll_read(reservation.as_mut()) {
                     Ok(Async::Ready(0)) => {
+                        reservation.cancel(); // equivalent to truncate(0)
                         return if written > 0 {
                             Ok(Async::Ready(Some(written)))
                         } else {
                             Ok(Async::Ready(None))
-                        }
+                        };
                     }
                     Ok(Async::Ready(len)) => {
                         if let Some(interceptor) = self.packet_interceptor.as_mut() {
@@ -199,13 +200,15 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                         trace!("{} bytes read on {}", len, peer_addr);
                     }
                     Ok(Async::NotReady) => {
+                        reservation.cancel();
                         return if written > 0 {
                             Ok(Async::Ready(Some(written)))
                         } else {
                             Ok(Async::NotReady)
-                        }
+                        };
                     }
                     Err(e) => {
+                        reservation.cancel();
                         error!("Can't read on socket: {}", e);
                         return Ok(Async::Ready(None));
                     }
@@ -214,7 +217,7 @@ impl<T: AsyncRead> Stream for JetStreamImpl<T> {
                 return if written > 0 {
                     Ok(Async::Ready(Some(written)))
                 } else {
-                    error!("BipBuffer reader cannot read any byte. Closing Writer");
+                    error!("BipBuffer writer cannot write any byte. Closing Writer");
 
                     Ok(Async::Ready(None))
                 };

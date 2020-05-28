@@ -49,7 +49,7 @@ sha1 = "0.6.0"
 base64 = "0.9.1"
 slog-stdlog = "4.0"
 ring = "0.16.0"
-spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "drop-code-in-send" }
+spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
 indexmap = "1.0"
 
 [patch.crates-io]
