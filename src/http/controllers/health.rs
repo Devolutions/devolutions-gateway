@@ -1,15 +1,19 @@
+use crate::config::Config;
 use saphir::Method;
 use saphir::*;
+use std::sync::Arc;
 
-struct ControllerData {}
+struct ControllerData {
+    config: Arc<Config>,
+}
 
 pub struct HealthController {
     dispatch: ControllerDispatch<ControllerData>,
 }
 
 impl HealthController {
-    pub fn new() -> Self {
-        let dispatch = ControllerDispatch::new(ControllerData {});
+    pub fn new(config: Arc<Config>) -> Self {
+        let dispatch = ControllerDispatch::new(ControllerData { config });
         dispatch.add(Method::GET, "/", health);
 
         HealthController { dispatch }
@@ -26,6 +30,9 @@ impl Controller for HealthController {
     }
 }
 
-fn health(_: &ControllerData, _req: &SyncRequest, res: &mut SyncResponse) {
-    res.status(StatusCode::OK).body("I'm here and I'm alive, that's enough");
+fn health(controller: &ControllerData, _req: &SyncRequest, res: &mut SyncResponse) {
+    res.status(StatusCode::OK).body(format!(
+        "Jet instance \"{}\" is alive and healthy.",
+        controller.config.jet_instance()
+    ));
 }
