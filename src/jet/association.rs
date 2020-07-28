@@ -31,6 +31,10 @@ impl Association {
         self.candidates.insert(candidate.id(), candidate);
     }
 
+    pub fn get_candidate(&self, id: Uuid) -> Option<&Candidate> {
+        self.candidates.get(&id)
+    }
+
     pub fn get_candidate_mut(&mut self, id: Uuid) -> Option<&mut Candidate> {
         self.candidates.get_mut(&id)
     }
