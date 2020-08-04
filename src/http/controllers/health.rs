@@ -31,8 +31,10 @@ impl Controller for HealthController {
 }
 
 fn health(controller: &ControllerData, _req: &SyncRequest, res: &mut SyncResponse) {
-    res.status(StatusCode::OK).body(format!(
-        "Jet instance \"{}\" is alive and healthy.",
-        controller.config.jet_instance()
-    ));
+    build_health_response(res, controller.config.jet_instance());
+}
+
+pub fn build_health_response(res: &mut SyncResponse, jet_instance: &str) {
+    res.status(StatusCode::OK)
+        .body(format!("Jet instance \"{}\" is alive and healthy.", jet_instance));
 }
