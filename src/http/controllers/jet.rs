@@ -8,6 +8,7 @@ use tokio::runtime::TaskExecutor;
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::http::controllers::health::build_health_response;
 use crate::http::controllers::utils::SyncResponseUtil;
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
@@ -45,6 +46,7 @@ impl JetController {
             "/association/<association_id>/candidates",
             ControllerData::gather_association_candidates,
         );
+        dispatch.add(Method::GET, "/health", ControllerData::health);
 
         JetController { dispatch }
     }
@@ -150,6 +152,10 @@ impl ControllerData {
                 }
             }
         }
+    }
+
+    fn health(&self, _req: &SyncRequest, res: &mut SyncResponse) {
+        build_health_response(res, self.config.jet_instance());
     }
 }
 
