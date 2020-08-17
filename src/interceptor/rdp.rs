@@ -4,7 +4,8 @@ mod tests;
 use std::{collections::HashMap, io};
 
 use ironrdp::{
-    mcs::DisconnectUltimatumReason, nego::NegotiationError, parse_fast_path_header, rdp::vc, Data, McsPdu, PduParsing,
+    fast_path::{FastPathHeader, FastPathError},
+    mcs::DisconnectUltimatumReason, nego::NegotiationError, rdp::vc, Data, McsPdu, PduParsing,
     TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH,
 };
 use slog_scope::{error, info};
@@ -87,17 +88,17 @@ fn get_tpkt_tpdu_messages(mut data: &[u8]) -> (Vec<&[u8]>, usize) {
             }
             Err(NegotiationError::TpktVersionError) => {
                 // Fast-Path, need to skip
-                match parse_fast_path_header(data) {
-                    Ok((_, len)) => {
-                        if data.len() >= len as usize {
-                            data = &data[len as usize..];
+                match FastPathHeader::from_buffer(data) {
+                    Ok(FastPathHeader {data_length, ..}) => {
+                        if data.len() >= data_length as usize {
+                            data = &data[data_length as usize..];
 
-                            messages_len += len as usize
+                            messages_len += data_length as usize
                         } else {
                             break;
                         }
                     }
-                    Err(ironrdp::FastPathError::NullLength { bytes_read }) => {
+                    Err(FastPathError::NullLength { bytes_read }) => {
                         data = &data[bytes_read..];
                         messages_len += bytes_read
                     }
