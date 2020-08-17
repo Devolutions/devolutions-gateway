@@ -28,6 +28,7 @@ pub mod tcp;
 pub mod tsrequest;
 pub mod ws;
 pub mod x224;
+pub mod preconnection;
 
 pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
