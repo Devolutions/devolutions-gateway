@@ -4,6 +4,7 @@ mod mcs;
 mod negotiation;
 mod nla;
 mod post_mcs;
+mod preconnection_pdu_route_resolve;
 
 pub use self::{
     dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
