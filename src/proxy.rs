@@ -26,12 +26,13 @@ impl Proxy {
         Proxy { config }
     }
 
-    pub fn build<T: Transport, U: Transport>(
+    pub fn build_with_protocol<T: Transport, U: Transport>(
         &self,
         server_transport: T,
         client_transport: U,
+        protocol: &Protocol,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
-        match self.config.protocol() {
+        match protocol {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
                 self.build_with_message_reader(server_transport, client_transport, Box::new(WaykMessageReader))
@@ -52,6 +53,14 @@ impl Proxy {
                 self.build_with_message_reader(server_transport, client_transport, Box::new(UnknownMessageReader))
             }
         }
+    }
+
+    pub fn build<T: Transport, U: Transport>(
+        &self,
+        server_transport: T,
+        client_transport: U,
+    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+        self.build_with_protocol(server_transport, client_transport, self.config.protocol())
     }
 
     pub fn build_with_message_reader<T: Transport, U: Transport>(

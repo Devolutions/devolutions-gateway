@@ -17,6 +17,7 @@ use crate::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
             NlaWithServerFuture, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture, StaticChannels,
+            PreconnectionPduRouteResolveFeature, PreconnectionPduRoute,
         },
     },
     transport::{
@@ -38,6 +39,18 @@ pub struct ConnectionSequenceFuture {
     rdp_identity: Option<RdpIdentity>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
+}
+
+pub enum ConnectionResult {
+    RdpProxyConnection {
+        client: Framed<TlsStream<TcpStream>, RdpTransport>,
+        server: Framed<TlsStream<TcpStream>, RdpTransport>,
+        channels: StaticChannels,
+    },
+    TcpRedirect {
+        client: TcpStream,
+        route: PreconnectionPduRoute,
+    }
 }
 
 impl ConnectionSequenceFuture {
@@ -246,12 +259,7 @@ impl ConnectionSequenceFuture {
 }
 
 impl Future for ConnectionSequenceFuture {
-    #[allow(clippy::type_complexity)]
-    type Item = (
-        Framed<TlsStream<TcpStream>, RdpTransport>,
-        Framed<TlsStream<TcpStream>, RdpTransport>,
-        StaticChannels,
-    );
+    type Item = ConnectionResult;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -338,13 +346,13 @@ impl Future for ConnectionSequenceFuture {
                 ConnectionSequenceFutureState::Finalization(finalization) => {
                     let (client_transport, server_transport) = try_ready!(finalization.poll());
 
-                    return Ok(Async::Ready((
-                        client_transport,
-                        server_transport,
-                        self.joined_static_channels.take().expect(
+                    return Ok(Async::Ready(ConnectionResult::RdpProxyConnection {
+                        client: client_transport,
+                        server: server_transport,
+                        channels: self.joined_static_channels.take().expect(
                             "During RDP connection sequence, the joined static channels must exist in the RDP state",
                         ),
-                    )));
+                    }));
                 }
             }
         }

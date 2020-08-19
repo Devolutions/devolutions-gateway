@@ -20,7 +20,17 @@ use url::Url;
 use self::{
     connection_sequence_future::ConnectionSequenceFuture, sequence_future::create_downgrade_dvc_capabilities_future,
 };
-use crate::{config::Config, interceptor::rdp::RdpMessageReader, transport::tcp::TcpTransport, utils, Proxy};
+use crate::{
+    config::{Config, Protocol},
+    interceptor::rdp::RdpMessageReader,
+    transport::{
+        Transport,
+        tcp::TcpTransport
+    },
+    utils,
+    Proxy,
+    rdp::connection_sequence_future::ConnectionResult
+};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -66,48 +76,66 @@ impl RdpClient {
 
                     io::Error::new(io::ErrorKind::Other, e)
                 })
-                .and_then(move |(client_transport, server_transport, joined_static_channels)| {
-                    info!("RDP Connection Sequence finished");
+                .and_then(move |connection_result| {
+                    match connection_result {
+                        ConnectionResult::RdpProxyConnection {
+                            client: client_transport,
+                            server: server_transport,
+                            channels: joined_static_channels
+                        } => {
+                            info!("RDP Connection Sequence finished");
 
-                    let joined_static_channels = utils::swap_hashmap_kv(joined_static_channels);
+                            let joined_static_channels = utils::swap_hashmap_kv(joined_static_channels);
 
-                    let drdynvc_channel_id = joined_static_channels
-                        .get(DR_DYN_VC_CHANNEL_NAME)
-                        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "DVC channel was not joined"))?;
+                            let drdynvc_channel_id = joined_static_channels
+                                .get(DR_DYN_VC_CHANNEL_NAME)
+                                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "DVC channel was not joined"))?;
 
-                    Ok((
-                        create_downgrade_dvc_capabilities_future(
-                            client_transport,
-                            server_transport,
-                            *drdynvc_channel_id,
-                            DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
-                        ),
-                        joined_static_channels,
-                    ))
-                })
-                .and_then(|(downgrade_dvc_capabilities_future, joined_static_channels)| {
-                    downgrade_dvc_capabilities_future
-                        .map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("Failed to downgrade DVC capabilities: {}", e),
-                            )
-                        })
-                        .and_then(move |(client_transport, server_transport, dvc_manager)| {
-                            let client_tls = client_transport.into_inner();
-                            let server_tls = server_transport.into_inner();
+                            let downgrade_dvc_capabilities_future = create_downgrade_dvc_capabilities_future(
+                                client_transport,
+                                server_transport,
+                                *drdynvc_channel_id,
+                                DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
+                            );
 
-                            Proxy::new(config_clone)
-                                .build_with_message_reader(
-                                    TcpTransport::new_tls(server_tls),
-                                    TcpTransport::new_tls(client_tls),
-                                    Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager)),
-                                )
-                                .map_err(move |e| {
-                                    error!("Proxy error: {}", e);
-                                    e
+                            let future:  Box<dyn Future<Item = (), Error = io::Error> + Send> =
+                                Box::new(downgrade_dvc_capabilities_future
+                                .map_err(|e| {
+                                    io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!("Failed to downgrade DVC capabilities: {}", e),
+                                    )
                                 })
-                        })
+                                .and_then(move |(client_transport, server_transport, dvc_manager)| {
+                                    let client_tls = client_transport.into_inner();
+                                    let server_tls = server_transport.into_inner();
+
+                                    Proxy::new(config_clone)
+                                        .build_with_message_reader(
+                                            TcpTransport::new_tls(server_tls),
+                                            TcpTransport::new_tls(client_tls),
+                                            Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager)),
+                                        )
+                                        .map_err(move |e| {
+                                            error!("Proxy error: {}", e);
+                                            e
+                                        })
+                                }));
+                            Ok(future)
+                        },
+                        ConnectionResult::TcpRedirect { client, route } => {
+                            let server_conn = TcpTransport::connect(&route.dest_host);
+                            let client_transport = TcpTransport::new(client);
+
+                            let future:  Box<dyn Future<Item = (), Error = io::Error> + Send> =
+                                Box::new(server_conn.and_then(move |server_transport| {
+                                    Proxy::new(config_clone.clone()).build_with_protocol(server_transport, client_transport, &Protocol::UNKNOWN)
+                                }));
+                            Ok(future)
+                        },
+                    }
+                }).and_then(|future| {
+                    future
                 });
 
         Box::new(connection_sequence_future)

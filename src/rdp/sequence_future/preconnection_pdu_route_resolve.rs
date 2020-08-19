@@ -28,7 +28,7 @@ struct RoutingClaims {
 }
 
 pub struct PreconnectionPduRoute {
-    dest_host: Url,
+    pub dest_host: Url,
 }
 
 pub struct PreconnectionPduRouteResolveFeature {
