@@ -55,7 +55,7 @@ impl RdpClient {
     }
 
     pub fn serve(self, client: TcpStream) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
-        let config_clone = self.config.clone();
+        let config = self.config.clone();
         let tls_acceptor = self.tls_acceptor;
         let tls_public_key = self.tls_public_key;
         let identities_proxy = if let Some(rdp_identities) = self.config.rdp_identities() {
@@ -70,7 +70,7 @@ impl RdpClient {
         };
 
         let connection_sequence_future =
-            ConnectionSequenceFuture::new(client, tls_public_key, tls_acceptor, identities_proxy)
+            ConnectionSequenceFuture::new(client, tls_public_key, tls_acceptor, identities_proxy, config.clone())
                 .map_err(move |e| {
                     error!("RDP Connection Sequence failed: {}", e);
 
@@ -110,7 +110,7 @@ impl RdpClient {
                                     let client_tls = client_transport.into_inner();
                                     let server_tls = server_transport.into_inner();
 
-                                    Proxy::new(config_clone)
+                                    Proxy::new(config)
                                         .build_with_message_reader(
                                             TcpTransport::new_tls(server_tls),
                                             TcpTransport::new_tls(client_tls),
@@ -129,7 +129,7 @@ impl RdpClient {
 
                             let future:  Box<dyn Future<Item = (), Error = io::Error> + Send> =
                                 Box::new(server_conn.and_then(move |server_transport| {
-                                    Proxy::new(config_clone.clone()).build_with_protocol(server_transport, client_transport, &Protocol::UNKNOWN)
+                                    Proxy::new(config.clone()).build_with_protocol(server_transport, client_transport, &Protocol::UNKNOWN)
                                 }));
                             Ok(future)
                         },

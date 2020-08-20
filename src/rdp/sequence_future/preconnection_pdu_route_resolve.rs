@@ -16,7 +16,7 @@ use picky::jose::jwt::{Jwt, JwtDate, JwtValidator};
 use chrono::Utc;
 
 use crate::{
-    transport::preconnection::PreconnectionPduTransport,
+    transport::preconnection::{PreconnectionPduTransport, PreconnectionPduFutureResult},
     rdp::sequence_future::{FutureState, NextStream, SequenceFutureProperties},
     config::Config,
 };
@@ -49,55 +49,62 @@ impl PreconnectionPduRouteResolveFeature {
 impl SequenceFutureProperties<TcpStream, PreconnectionPduTransport> for PreconnectionPduRouteResolveFeature {
     type Item = (TcpStream, Option<PreconnectionPduRoute>);
 
-    fn process_pdu(&mut self, request: PreconnectionPdu) -> io::Result<Option<PreconnectionPdu>> {
-        request.payload.map_or(Ok(None), |jwt_token_base64| {
+    fn process_pdu(&mut self, request: PreconnectionPduFutureResult) -> io::Result<Option<PreconnectionPdu>> {
+        match request {
+            PreconnectionPduFutureResult::PreconnectionPduDetected(preconnection_pdu) => {
+                preconnection_pdu.payload.map_or(Ok(None), |jwt_token_base64| {
 
-            let current_timestamp = JwtDate::new(Utc::now().timestamp());
+                    let current_timestamp = JwtDate::new(Utc::now().timestamp());
 
-            let validator = if let Some(provisioner_key) = &self.config.provisioner_public_key {
-                JwtValidator::strict(provisioner_key, &current_timestamp)
-            } else {
-                warn!("Provisioner key is not specified; Skipping signature validation");
-                JwtValidator::dangerous()
-                    .current_date(&current_timestamp)
-                    .expiration_check_required()
-                    .not_before_check_required()
-            };
+                    let validator = if let Some(provisioner_key) = &self.config.provisioner_public_key {
+                        JwtValidator::strict(provisioner_key, &current_timestamp)
+                    } else {
+                        warn!("Provisioner key is not specified; Skipping signature validation");
+                        JwtValidator::dangerous()
+                            .current_date(&current_timestamp)
+                            .expiration_check_required()
+                            .not_before_check_required()
+                    };
 
-            let jwt_token = Jwt::<RoutingClaims>::decode(&jwt_token_base64, &validator).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to resolve route via JWT routing token: {}", e))
-            })?;
+                    let jwt_token = Jwt::<RoutingClaims>::decode(&jwt_token_base64, &validator).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to resolve route via JWT routing token: {}", e))
+                    })?;
 
-            let claims = jwt_token.view_claims();
+                    let claims = jwt_token.view_claims();
 
-            if &claims.jet_ap != "rdp" {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Non-rdp jwt-based routing via preconnection PDU is not supported"));
-            }
+                    if &claims.jet_ap != "rdp" {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "Non-rdp jwt-based routing via preconnection PDU is not supported"));
+                    }
 
 
-            let route_url_str = if claims.dst_hst.starts_with("tcp://") {
-                claims.dst_hst.clone().into()
-            } else {
-                let mut url_str = String::from("tcp://");
-                url_str.push_str(&claims.dst_hst);
-                url_str
-            };
+                    let route_url_str = if claims.dst_hst.starts_with("tcp://") {
+                        claims.dst_hst.clone().into()
+                    } else {
+                        let mut url_str = String::from("tcp://");
+                        url_str.push_str(&claims.dst_hst);
+                        url_str
+                    };
 
-            let dest_host = Url::parse(&route_url_str).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse routing url in JWT token: {}", e))
-            })?;
+                    let dest_host = Url::parse(&route_url_str).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to parse routing url in JWT token: {}", e))
+                    })?;
 
-            self.route = Some(PreconnectionPduRoute { dest_host });
+                    self.route = Some(PreconnectionPduRoute { dest_host });
 
-            // Response is not required at all
-            Ok(None)
-        })
+                    // Response is not required at all
+                    Ok(None)
+                })
+            },
+            PreconnectionPduFutureResult::DifferentProtocolDetected => {
+                Ok(None)
+            },
+        }
     }
 
     fn return_item(
