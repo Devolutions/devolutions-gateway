@@ -2,10 +2,13 @@
 
 This document provides a list of notable changes introduced in Devolutions-Jet by release.
 
-== 0.11.0 (unreleased)
+== 0.12.0 (2020-08-25)
+  * Add Jet V3 connection test support
+  * Add /jet/health route alias for /health (for simplified reverse proxy rules)
+
+== 0.11.0 (2020-05-28)
   * Fix websocket connection. Enable HTTP upgrade for the hyper connection.
   * Add jet instance name in health response.
-  * Add /jet/health route alias for /health (for simplified reverse proxy rules)
 
 == 0.10.9 (2020-05-13)
   * Fix websocket listener. An error was returned by the tls acceptor. Ignore those errors.
