@@ -14,7 +14,7 @@ use tokio::{
     prelude::{Async, Poll, Sink},
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use slog_scope::debug;
+use slog_scope::info;
 use bytes::BytesMut;
 
 use crate::{
@@ -62,7 +62,7 @@ pub enum ConnectionResult {
     TcpRedirect {
         client: TcpStream,
         route: PreconnectionPduRoute,
-        leftover_data: BytesMut,
+        leftover_request: BytesMut,
     }
 }
 
@@ -293,28 +293,25 @@ impl Future for ConnectionSequenceFuture {
         loop {
             match &mut self.state {
                 ConnectionSequenceFutureState::PreconnectionPduHandling(preconnection_pdu_future) => {
-                    match preconnection_pdu_future.poll() {
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Ok(Async::Ready(PreconnectionPduRouteResolveFeatureResult::RoutingRequest(client, route, leftover_data))) => {
-                            debug!("Detected tcp redirection");
+                    match preconnection_pdu_future.poll()? {
+                        Async::NotReady => return Ok(Async::NotReady),
+                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::RoutingRequest { client, route, leftover_request }) => {
+                            info!("Detected tcp redirection");
                             return Ok(Async::Ready(ConnectionResult::TcpRedirect {
                                 client,
                                 route,
-                                leftover_data
+                                leftover_request
                             }))
                         }
-                        Ok(Async::Ready(PreconnectionPduRouteResolveFeatureResult::NegotiationRequest(client, pdu))) => {
-                            debug!("Detected client negotiation");
+                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::NegotiationRequest { client, request }) => {
+                            info!("Detected client negotiation");
                             self.state = ConnectionSequenceFutureState::NegotiationWithClient(
-                                Box::new(self.create_negotiation_future(client, pdu))
+                                Box::new(self.create_negotiation_future(client, request))
                             );
                         }
-                        Err(e) => return Err(e),
                     }
-
                 }
                 ConnectionSequenceFutureState::NegotiationWithClient(negotiation_future) => {
-                    debug!("Polling nego future");
                     let (transport, request, response) = try_ready!(negotiation_future.poll());
                     self.request = Some(request);
 

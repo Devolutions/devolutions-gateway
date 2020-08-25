@@ -4,7 +4,7 @@ use bytes::BytesMut;
 use ironrdp::{nego::Request as NegotiationRequest, PreconnectionPdu, PduBufferParsing};
 
 use tokio::codec::{Decoder, Encoder};
-use slog_scope::debug;
+use slog_scope::error;
 
 use crate::transport::{
     preconnection::PreconnectionPduTransport,
@@ -12,7 +12,10 @@ use crate::transport::{
 };
 
 pub enum ConnectionAcceptTransportResult {
-    PreconnectionPdu(PreconnectionPdu, BytesMut),
+    PreconnectionPdu {
+        pdu: PreconnectionPdu,
+        leftover_request: BytesMut,
+    },
     NegotiationWithClient(NegotiationRequest),
 }
 
@@ -41,15 +44,17 @@ impl Decoder for ConnectionAcceptTransport {
                 Ok(Some(ConnectionAcceptTransportResult::NegotiationWithClient(data)))
             },
             Ok(None) => Ok(None),
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
-            Err(_) => {
-                if let Some(data) = self.preconnection_transport.decode(&mut buf)? {
-                    let buff = buf.split_off(data.buffer_length());
-                    debug!("Size BUF: {}", buff.len());
-                    Ok(Some(ConnectionAcceptTransportResult::PreconnectionPdu(data, buff)))
-                } else {
-                    Ok(None)
-                }
+            Err(negotiate_error) => {
+                self.preconnection_transport.decode(&mut buf).map(|parsing_result| {
+                    parsing_result.map(|pdu| {
+                        let leftover_request = buf.split_off(pdu.buffer_length());
+                        ConnectionAcceptTransportResult::PreconnectionPdu { pdu, leftover_request }
+                    })
+                }).map_err(|preconnection_pdu_error| {
+                    error!("NegotiationWithClient transport failed: {}", negotiate_error);
+                    error!("PreconnectionPdu transport failed: {}", preconnection_pdu_error);
+                    io::Error::new(io::ErrorKind::InvalidData, "Invalid connection sequence start")
+                })
             }
         }
     }

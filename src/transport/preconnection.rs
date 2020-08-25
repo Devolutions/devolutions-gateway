@@ -3,8 +3,6 @@ use std::io;
 use bytes::BytesMut;
 use ironrdp::{PreconnectionPdu, PreconnectionPduError, PduBufferParsing};
 use tokio::codec::{Decoder, Encoder};
-use slog_scope::debug;
-
 #[derive(Default)]
 pub struct PreconnectionPduTransport;
 
@@ -16,16 +14,18 @@ impl Decoder for PreconnectionPduTransport {
         let mut parsing_buffer = buf.as_ref();
         match PreconnectionPdu::from_buffer_consume(&mut parsing_buffer) {
             Ok(preconnection_pdu) => {
-                debug!("Found preconnection PDU");
                 buf.split_at(preconnection_pdu.buffer_length());
                 Ok(Some(preconnection_pdu))
             },
             Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                debug!("Querying more data...");
-                // Need more data
                 Ok(None)
             },
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse Preconnection PDU: {}", e))),
+            Err(e) => {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to parse Preconnection PDU: {}", e)
+                ))
+            },
         }
     }
 }

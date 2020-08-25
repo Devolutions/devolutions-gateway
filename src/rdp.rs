@@ -13,13 +13,19 @@ use std::{io, sync::Arc};
 
 use futures::Future;
 use slog_scope::{error, info, debug};
-use tokio::net::tcp::TcpStream;
+use tokio::{
+    net::tcp::TcpStream,
+    io::AsyncWrite,
+};
 use tokio_rustls::TlsAcceptor;
 use url::Url;
+use bytes::IntoBuf;
 
 use self::{
-    connection_sequence_future::ConnectionSequenceFuture, sequence_future::create_downgrade_dvc_capabilities_future,
+    connection_sequence_future::ConnectionSequenceFuture,
+    sequence_future::create_downgrade_dvc_capabilities_future,
 };
+
 use crate::{
     config::{Config, Protocol},
     interceptor::rdp::RdpMessageReader,
@@ -31,8 +37,6 @@ use crate::{
     Proxy,
     rdp::connection_sequence_future::ConnectionResult
 };
-use tokio::io::AsyncWrite;
-use bytes::IntoBuf;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -132,17 +136,17 @@ impl RdpClient {
                                 Box::new(future);
                             boxed_future
                         },
-                        ConnectionResult::TcpRedirect { client, route, leftover_data } => {
+                        ConnectionResult::TcpRedirect { client, route, leftover_request } => {
                             let server_conn = TcpTransport::connect(&route.dest_host);
                             let client_transport = TcpTransport::new(client);
 
                             debug!("Starting Tcp redirection specified by JWT token inside preconnection PDU");
 
-                            let mut leftover_data = leftover_data.into_buf();
+                            let mut leftover_request = leftover_request.into_buf();
                             let future: Box<dyn Future<Item = (), Error = io::Error> + Send> =
                                 Box::new(server_conn.and_then(move |mut server_transport| {
                                     server_transport
-                                        .write_buf(&mut leftover_data)
+                                        .write_buf(&mut leftover_request)
                                         .and_then(|_| Ok(server_transport))
                                 }).and_then(move |server_transport| {
                                     Proxy::new(config.clone()).build_with_protocol(
