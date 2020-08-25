@@ -8,30 +8,24 @@ use slog_scope::debug;
 #[derive(Default)]
 pub struct PreconnectionPduTransport;
 
-pub enum PreconnectionPduFutureResult {
-    PreconnectionPduDetected(PreconnectionPdu),
-    DifferentProtocolDetected
-}
-
 impl Decoder for PreconnectionPduTransport {
-    type Item = PreconnectionPduFutureResult;
+    type Item = PreconnectionPdu;
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let mut parsing_buffer = buf.as_ref();
         match PreconnectionPdu::from_buffer_consume(&mut parsing_buffer) {
             Ok(preconnection_pdu) => {
+                debug!("Found preconnection PDU");
                 buf.split_at(preconnection_pdu.buffer_length());
-                Ok(Some(PreconnectionPduFutureResult::PreconnectionPduDetected(preconnection_pdu)))
+                Ok(Some(preconnection_pdu))
             },
             Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                debug!("Querying more data...");
                 // Need more data
                 Ok(None)
             },
-            Err(e) => {
-                debug!("Preconnection PDU was not detected: {}", e);
-                Ok(Some(PreconnectionPduFutureResult::DifferentProtocolDetected))
-            },
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse Preconnection PDU: {}", e))),
         }
     }
 }

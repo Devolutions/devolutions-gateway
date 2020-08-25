@@ -13,7 +13,11 @@ pub use self::{
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
     post_mcs::{PostMcs, PostMcsFutureTransport},
-    preconnection_pdu_route_resolve::{PreconnectionPduRouteResolveFeature, PreconnectionPduRoute},
+    preconnection_pdu_route_resolve::{
+        PreconnectionPduRouteResolveFeature,
+        PreconnectionPduRoute,
+        PreconnectionPduRouteResolveFeatureResult
+    },
 };
 
 use std::io;

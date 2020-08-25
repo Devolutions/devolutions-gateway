@@ -4,13 +4,18 @@ use std::{
 };
 
 use futures::{try_ready, Future};
-use ironrdp::nego;
+use ironrdp::nego::{
+    self,
+    Request as NegotiationRequest,
+};
 use tokio::{
     codec::{Decoder, Framed},
     net::tcp::{ConnectFuture, TcpStream},
     prelude::{Async, Poll, Sink},
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
+use slog_scope::debug;
+use bytes::BytesMut;
 
 use crate::{
     rdp::{
@@ -20,18 +25,20 @@ use crate::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
             NlaWithServerFuture, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture, StaticChannels,
-            PreconnectionPduRouteResolveFeature, PreconnectionPduRoute,
+            PreconnectionPduRouteResolveFeature, PreconnectionPduRouteResolveFeatureResult, PreconnectionPduRoute,
+            ParseStateArgs
         },
     },
     transport::{
         mcs::{McsTransport, SendDataContextTransport},
         rdp::RdpTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
-        preconnection::PreconnectionPduTransport,
+        connection_accept::ConnectionAcceptTransport,
     },
     utils,
     config::Config,
 };
+
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
@@ -55,6 +62,7 @@ pub enum ConnectionResult {
     TcpRedirect {
         client: TcpStream,
         route: PreconnectionPduRoute,
+        leftover_data: BytesMut,
     }
 }
 
@@ -69,7 +77,7 @@ impl ConnectionSequenceFuture {
         Self {
             state: ConnectionSequenceFutureState::PreconnectionPduHandling(Box::new(SequenceFuture::with_get_state(PreconnectionPduRouteResolveFeature::new(config.clone()),
             GetStateArgs {
-                client: Some(PreconnectionPduTransport::default().framed(client)),
+                client: Some(ConnectionAcceptTransport::default().framed(client)),
                 server: None,
             }))),
             client_nla_transport: None,
@@ -87,12 +95,14 @@ impl ConnectionSequenceFuture {
     fn create_negotiation_future(
         &mut self,
         client: TcpStream,
+        negotiation_request: NegotiationRequest
     ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport> {
-        SequenceFuture::with_get_state(
+        SequenceFuture::with_parse_state(
             NegotiationWithClientFuture::new(),
-            GetStateArgs {
+            ParseStateArgs {
                 client: Some(NegotiationWithClientTransport::default().framed(client)),
                 server: None,
+                pdu: negotiation_request,
             },
         )
     }
@@ -285,15 +295,18 @@ impl Future for ConnectionSequenceFuture {
                 ConnectionSequenceFutureState::PreconnectionPduHandling(preconnection_pdu_future) => {
                     match preconnection_pdu_future.poll() {
                         Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Ok(Async::Ready((client, Some(route)))) => {
+                        Ok(Async::Ready(PreconnectionPduRouteResolveFeatureResult::RoutingRequest(client, route, leftover_data))) => {
+                            debug!("Detected tcp redirection");
                             return Ok(Async::Ready(ConnectionResult::TcpRedirect {
                                 client,
-                                route
+                                route,
+                                leftover_data
                             }))
                         }
-                        Ok(Async::Ready((client, None))) => {
+                        Ok(Async::Ready(PreconnectionPduRouteResolveFeatureResult::NegotiationRequest(client, pdu))) => {
+                            debug!("Detected client negotiation");
                             self.state = ConnectionSequenceFutureState::NegotiationWithClient(
-                                Box::new(self.create_negotiation_future(client))
+                                Box::new(self.create_negotiation_future(client, pdu))
                             );
                         }
                         Err(e) => return Err(e),
@@ -301,6 +314,7 @@ impl Future for ConnectionSequenceFuture {
 
                 }
                 ConnectionSequenceFutureState::NegotiationWithClient(negotiation_future) => {
+                    debug!("Polling nego future");
                     let (transport, request, response) = try_ready!(negotiation_future.poll());
                     self.request = Some(request);
 
@@ -395,7 +409,7 @@ impl Future for ConnectionSequenceFuture {
 }
 
 enum ConnectionSequenceFutureState {
-    PreconnectionPduHandling(Box<SequenceFuture<PreconnectionPduRouteResolveFeature, TcpStream, PreconnectionPduTransport>>),
+    PreconnectionPduHandling(Box<SequenceFuture<PreconnectionPduRouteResolveFeature, TcpStream, ConnectionAcceptTransport>>),
     NegotiationWithClient(Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport>>),
     NlaWithClient(Box<NlaWithClientFuture>),
     ConnectToServer(ConnectFuture),

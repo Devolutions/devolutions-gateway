@@ -5,18 +5,20 @@ use std::{
 };
 
 use slog_scope::{debug, warn};
-use tokio::codec::Framed;
-use tokio::net::tcp::TcpStream;
+use tokio::{
+    codec::Framed,
+    net::tcp::TcpStream,
+};
 use url::Url;
-
-use ironrdp::PreconnectionPdu;
-
+use ironrdp::nego::Request as NegotiationRequest;
 use picky::jose::jwt::{Jwt, JwtDate, JwtValidator};
-
 use chrono::Utc;
+use bytes::BytesMut;
 
 use crate::{
-    transport::preconnection::{PreconnectionPduTransport, PreconnectionPduFutureResult},
+    transport::{
+        connection_accept::{ConnectionAcceptTransport, ConnectionAcceptTransportResult},
+    },
     rdp::sequence_future::{FutureState, NextStream, SequenceFutureProperties},
     config::Config,
 };
@@ -28,11 +30,17 @@ struct RoutingClaims {
 }
 
 pub struct PreconnectionPduRoute {
-    pub dest_host: Url,
+    pub dest_host: Url
+}
+
+pub enum PreconnectionPduRouteResolveFeatureResult {
+    RoutingRequest(TcpStream, PreconnectionPduRoute, BytesMut),
+    NegotiationRequest(TcpStream, NegotiationRequest),
 }
 
 pub struct PreconnectionPduRouteResolveFeature {
-    route: Option<PreconnectionPduRoute>,
+    routing_info: Option<(PreconnectionPduRoute, BytesMut)>,
+    negotiation_pdu: Option<NegotiationRequest>,
 
     config: Arc<Config>,
 }
@@ -40,18 +48,20 @@ pub struct PreconnectionPduRouteResolveFeature {
 impl PreconnectionPduRouteResolveFeature {
     pub fn new(config: Arc<Config>) -> Self {
         Self {
-            route: None,
+            routing_info: None,
+            negotiation_pdu: None,
             config,
         }
     }
 }
 
-impl SequenceFutureProperties<TcpStream, PreconnectionPduTransport> for PreconnectionPduRouteResolveFeature {
-    type Item = (TcpStream, Option<PreconnectionPduRoute>);
+impl SequenceFutureProperties<TcpStream, ConnectionAcceptTransport> for PreconnectionPduRouteResolveFeature {
+    type Item = PreconnectionPduRouteResolveFeatureResult;
 
-    fn process_pdu(&mut self, request: PreconnectionPduFutureResult) -> io::Result<Option<PreconnectionPdu>> {
+    fn process_pdu(&mut self, request: ConnectionAcceptTransportResult) -> io::Result<Option<()>> {
+        debug!("Processing PDU...");
         match request {
-            PreconnectionPduFutureResult::PreconnectionPduDetected(preconnection_pdu) => {
+            ConnectionAcceptTransportResult::PreconnectionPdu(preconnection_pdu, leftover_data) => {
                 preconnection_pdu.payload.map_or(Ok(None), |jwt_token_base64| {
 
                     let current_timestamp = JwtDate::new(Utc::now().timestamp());
@@ -95,13 +105,13 @@ impl SequenceFutureProperties<TcpStream, PreconnectionPduTransport> for Preconne
                             format!("Failed to parse routing url in JWT token: {}", e))
                     })?;
 
-                    self.route = Some(PreconnectionPduRoute { dest_host });
-
+                    self.routing_info = Some((PreconnectionPduRoute { dest_host }, leftover_data));
                     // Response is not required at all
                     Ok(None)
                 })
             },
-            PreconnectionPduFutureResult::DifferentProtocolDetected => {
+            ConnectionAcceptTransportResult::NegotiationWithClient(pdu) => {
+                self.negotiation_pdu = Some(pdu);
                 Ok(None)
             },
         }
@@ -109,18 +119,26 @@ impl SequenceFutureProperties<TcpStream, PreconnectionPduTransport> for Preconne
 
     fn return_item(
         &mut self,
-        mut client: Option<Framed<TcpStream, PreconnectionPduTransport>>,
-        _server: Option<Framed<TcpStream, PreconnectionPduTransport>>,
+        mut client: Option<Framed<TcpStream, ConnectionAcceptTransport>>,
+        _server: Option<Framed<TcpStream, ConnectionAcceptTransport>>,
     ) -> Self::Item {
         debug!("Successfully processed Preconnection PDU");
-        (
-            client
-                .take()
-                .expect("The client's stream must exist in a return_item method for Preconnection PDU")
-                .into_inner(),
-            self.route
-                .take(),
-        )
+
+        let client = client
+            .take()
+            .expect("The client's stream must exist in a return_item method for Preconnection PDU")
+            .into_inner();
+
+        if self.routing_info.is_some() {
+            let (route, leftover_data) = self.routing_info.take().unwrap();
+            return PreconnectionPduRouteResolveFeatureResult::RoutingRequest(client, route, leftover_data);
+        }
+
+        let negotiation_pdu = self.negotiation_pdu
+            .take()
+            .expect("Invalid state: future parsing stage should set either negotiation pdu or preconnection pdu route");
+
+        PreconnectionPduRouteResolveFeatureResult::NegotiationRequest(client, negotiation_pdu)
     }
     fn next_sender(&self) -> NextStream {
         NextStream::Client
