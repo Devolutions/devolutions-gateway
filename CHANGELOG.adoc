@@ -2,6 +2,8 @@
 
 This document provides a list of notable changes introduced in Devolutions-Jet by release.
 
+== 0.13.0 (unreleased)
+
 == 0.12.0 (2020-08-25)
   * Add Jet V3 connection test support
   * Add /jet/health route alias for /health (for simplified reverse proxy rules)
