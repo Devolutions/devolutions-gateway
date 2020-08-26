@@ -87,7 +87,7 @@ impl Decoder for DataTransport {
         if buf.len() < data_pdu.buffer_length() {
             Ok(None)
         } else {
-            buf.split_to(data_pdu.buffer_length() - data_pdu.data_length);
+            buf.split_to(data_pdu.buffer_length());
             let data = buf.split_to(data_pdu.data_length);
 
             Ok(Some(data))
@@ -101,7 +101,7 @@ impl Encoder for DataTransport {
 
     fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let data_pdu = Data::new(item.len());
-        let item_len = data_pdu.buffer_length() - data_pdu.data_length;
+        let item_len = data_pdu.buffer_length();
         let len = buf.len();
         buf.resize(len + item_len, 0);
         data_pdu.to_buffer(&mut buf[len..]).map_err(map_negotiation_error)?;

@@ -89,11 +89,13 @@ fn get_tpkt_tpdu_messages(mut data: &[u8]) -> (Vec<&[u8]>, usize) {
             Err(NegotiationError::TpktVersionError) => {
                 // Fast-Path, need to skip
                 match FastPathHeader::from_buffer(data) {
-                    Ok(FastPathHeader {data_length, ..}) => {
-                        if data.len() >= data_length as usize {
-                            data = &data[data_length as usize..];
+                    Ok(header) => {
+                        let packet_length = header.buffer_length() + header.data_length;
 
-                            messages_len += data_length as usize
+                        if data.len() >= packet_length {
+                            data = &data[packet_length..];
+
+                            messages_len += packet_length
                         } else {
                             break;
                         }
