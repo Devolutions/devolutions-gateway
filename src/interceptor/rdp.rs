@@ -4,9 +4,11 @@ mod tests;
 use std::{collections::HashMap, io};
 
 use ironrdp::{
-    fast_path::{FastPathHeader, FastPathError},
-    mcs::DisconnectUltimatumReason, nego::NegotiationError, rdp::vc, Data, McsPdu, PduParsing,
-    TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH,
+    fast_path::{FastPathError, FastPathHeader},
+    mcs::DisconnectUltimatumReason,
+    nego::NegotiationError,
+    rdp::vc,
+    Data, McsPdu, PduParsing, TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH,
 };
 use slog_scope::{error, info};
 

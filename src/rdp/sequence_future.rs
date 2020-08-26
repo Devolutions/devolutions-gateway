@@ -14,9 +14,7 @@ pub use self::{
     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
     post_mcs::{PostMcs, PostMcsFutureTransport},
     preconnection_pdu_route_resolve::{
-        PreconnectionPduRouteResolveFeature,
-        PreconnectionPduRoute,
-        PreconnectionPduRouteResolveFeatureResult
+        PreconnectionPduRoute, PreconnectionPduRouteResolveFeature, PreconnectionPduRouteResolveFeatureResult,
     },
 };
 

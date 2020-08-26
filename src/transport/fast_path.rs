@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::BytesMut;
 use ironrdp::{
-    fast_path::{FastPathHeader, FastPathError},
+    fast_path::{FastPathError, FastPathHeader},
     PduParsing,
 };
 use tokio::codec::{Decoder, Encoder};

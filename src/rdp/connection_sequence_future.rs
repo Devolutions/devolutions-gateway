@@ -1,44 +1,37 @@
-use std::{
-    io,
-    sync::Arc,
-};
+use std::{io, sync::Arc};
 
+use bytes::BytesMut;
 use futures::{try_ready, Future};
-use ironrdp::nego::{
-    self,
-    Request as NegotiationRequest,
-};
+use ironrdp::nego::{self, Request as NegotiationRequest};
+use slog_scope::info;
 use tokio::{
     codec::{Decoder, Framed},
     net::tcp::{ConnectFuture, TcpStream},
     prelude::{Async, Poll, Sink},
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use slog_scope::info;
-use bytes::BytesMut;
 
 use crate::{
+    config::Config,
     rdp::{
         filter::FilterConfig,
         identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
-            NlaWithServerFuture, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture, StaticChannels,
-            PreconnectionPduRouteResolveFeature, PreconnectionPduRouteResolveFeatureResult, PreconnectionPduRoute,
-            ParseStateArgs
+            NlaWithServerFuture, ParseStateArgs, PostMcs, PostMcsFutureTransport, PreconnectionPduRoute,
+            PreconnectionPduRouteResolveFeature, PreconnectionPduRouteResolveFeatureResult, SendStateArgs,
+            SequenceFuture, StaticChannels,
         },
     },
     transport::{
+        connection_accept::ConnectionAcceptTransport,
         mcs::{McsTransport, SendDataContextTransport},
         rdp::RdpTransport,
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
-        connection_accept::ConnectionAcceptTransport,
     },
     utils,
-    config::Config,
 };
-
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
@@ -63,7 +56,7 @@ pub enum ConnectionResult {
         client: TcpStream,
         route: PreconnectionPduRoute,
         leftover_request: BytesMut,
-    }
+    },
 }
 
 impl ConnectionSequenceFuture {
@@ -75,11 +68,13 @@ impl ConnectionSequenceFuture {
         config: Arc<Config>,
     ) -> Self {
         Self {
-            state: ConnectionSequenceFutureState::PreconnectionPduHandling(Box::new(SequenceFuture::with_get_state(PreconnectionPduRouteResolveFeature::new(config.clone()),
-            GetStateArgs {
-                client: Some(ConnectionAcceptTransport::default().framed(client)),
-                server: None,
-            }))),
+            state: ConnectionSequenceFutureState::PreconnectionPduHandling(Box::new(SequenceFuture::with_get_state(
+                PreconnectionPduRouteResolveFeature::new(config),
+                GetStateArgs {
+                    client: Some(ConnectionAcceptTransport::default().framed(client)),
+                    server: None,
+                },
+            ))),
             client_nla_transport: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
@@ -95,7 +90,7 @@ impl ConnectionSequenceFuture {
     fn create_negotiation_future(
         &mut self,
         client: TcpStream,
-        negotiation_request: NegotiationRequest
+        negotiation_request: NegotiationRequest,
     ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport> {
         SequenceFuture::with_parse_state(
             NegotiationWithClientFuture::new(),
@@ -295,19 +290,26 @@ impl Future for ConnectionSequenceFuture {
                 ConnectionSequenceFutureState::PreconnectionPduHandling(preconnection_pdu_future) => {
                     match preconnection_pdu_future.poll()? {
                         Async::NotReady => return Ok(Async::NotReady),
-                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::RoutingRequest { client, route, leftover_request }) => {
+                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::RoutingRequest {
+                            client,
+                            route,
+                            leftover_request,
+                        }) => {
                             info!("Detected tcp redirection");
                             return Ok(Async::Ready(ConnectionResult::TcpRedirect {
                                 client,
                                 route,
-                                leftover_request
-                            }))
+                                leftover_request,
+                            }));
                         }
-                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::NegotiationRequest { client, request }) => {
+                        Async::Ready(PreconnectionPduRouteResolveFeatureResult::NegotiationRequest {
+                            client,
+                            request,
+                        }) => {
                             info!("Detected client negotiation");
-                            self.state = ConnectionSequenceFutureState::NegotiationWithClient(
-                                Box::new(self.create_negotiation_future(client, request))
-                            );
+                            self.state = ConnectionSequenceFutureState::NegotiationWithClient(Box::new(
+                                self.create_negotiation_future(client, request),
+                            ));
                         }
                     }
                 }
@@ -406,7 +408,9 @@ impl Future for ConnectionSequenceFuture {
 }
 
 enum ConnectionSequenceFutureState {
-    PreconnectionPduHandling(Box<SequenceFuture<PreconnectionPduRouteResolveFeature, TcpStream, ConnectionAcceptTransport>>),
+    PreconnectionPduHandling(
+        Box<SequenceFuture<PreconnectionPduRouteResolveFeature, TcpStream, ConnectionAcceptTransport>>,
+    ),
     NegotiationWithClient(Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport>>),
     NlaWithClient(Box<NlaWithClientFuture>),
     ConnectToServer(ConnectFuture),

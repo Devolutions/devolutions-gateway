@@ -1,7 +1,7 @@
 use std::io;
 
 use bytes::BytesMut;
-use ironrdp::{PreconnectionPdu, PreconnectionPduError, PduBufferParsing};
+use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use tokio::codec::{Decoder, Encoder};
 #[derive(Default)]
 pub struct PreconnectionPduTransport;
@@ -16,16 +16,12 @@ impl Decoder for PreconnectionPduTransport {
             Ok(preconnection_pdu) => {
                 buf.split_at(preconnection_pdu.buffer_length());
                 Ok(Some(preconnection_pdu))
-            },
-            Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                Ok(None)
-            },
-            Err(e) => {
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse Preconnection PDU: {}", e)
-                ))
-            },
+            }
+            Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to parse Preconnection PDU: {}", e),
+            )),
         }
     }
 }
@@ -40,7 +36,7 @@ impl Encoder for PreconnectionPduTransport {
         item.to_buffer_consume(&mut buffer.as_mut_slice()).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::Other,
-                format!("Failed to serialize Preconnection PDU: {}", e)
+                format!("Failed to serialize Preconnection PDU: {}", e),
             )
         })?;
         buf.extend_from_slice(&buffer);
