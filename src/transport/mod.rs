@@ -21,10 +21,8 @@ use crate::{
     transport::{tcp::TcpTransport, ws::WsTransport},
 };
 
-pub mod connection_accept;
 pub mod fast_path;
 pub mod mcs;
-pub mod preconnection;
 pub mod rdp;
 pub mod tcp;
 pub mod tsrequest;

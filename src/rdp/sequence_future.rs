@@ -4,7 +4,6 @@ mod mcs;
 mod negotiation;
 mod nla;
 mod post_mcs;
-mod preconnection_pdu_route_resolve;
 
 pub use self::{
     dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
@@ -13,9 +12,6 @@ pub use self::{
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
     post_mcs::{PostMcs, PostMcsFutureTransport},
-    preconnection_pdu_route_resolve::{
-        PreconnectionPduRoute, PreconnectionPduRouteResolveFeature, PreconnectionPduRouteResolveFeatureResult,
-    },
 };
 
 use std::io;
