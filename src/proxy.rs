@@ -89,7 +89,7 @@ impl Proxy {
             interceptor.set_message_reader(message_reader);
 
             jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
-            jet_stream_client.set_packet_interceptor(Box::new(interceptor.clone()));
+            jet_stream_client.set_packet_interceptor(Box::new(interceptor));
         }
 
         // Build future to forward all bytes
@@ -98,8 +98,10 @@ impl Proxy {
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        use futures_03::compat::Future01CompatExt;
-        use futures_03::future::{FutureExt, TryFutureExt};
+        use futures_03::{
+            compat::Future01CompatExt,
+            future::{FutureExt, TryFutureExt},
+        };
 
         macro_rules! finish_remaining_forward {
             ( $fut:ident ( $stream_name:literal => $sink_name:literal ) ) => {

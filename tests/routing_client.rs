@@ -1,11 +1,12 @@
 mod common;
 
-use std::io::{Read, Write};
-use std::net::SocketAddr;
-use std::net::{TcpListener, TcpStream};
-use std::sync::mpsc::channel;
-use std::thread;
-use std::time::Duration;
+use std::{
+    io::{Read, Write},
+    net::{SocketAddr, TcpListener, TcpStream},
+    sync::mpsc::channel,
+    thread,
+    time::Duration,
+};
 
 use common::run_proxy;
 

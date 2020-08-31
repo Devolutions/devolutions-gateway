@@ -10,12 +10,16 @@ use std::{
 use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use tokio::io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
-use tokio::net::tcp::TcpStream;
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf},
+    net::tcp::TcpStream,
+};
 use url::Url;
 
-use crate::interceptor::PacketInterceptor;
-use crate::transport::{tcp::TcpTransport, ws::WsTransport};
+use crate::{
+    interceptor::PacketInterceptor,
+    transport::{tcp::TcpTransport, ws::WsTransport},
+};
 
 pub mod fast_path;
 pub mod mcs;
@@ -44,6 +48,7 @@ pub trait Transport {
     ) -> (JetStreamType<usize>, JetSinkType<usize>);
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum JetTransport {
     Tcp(TcpTransport),
     Ws(WsTransport),
@@ -284,7 +289,7 @@ impl<T: AsyncWrite> Sink for JetSinkImpl<T> {
                 Ok(Async::NotReady) => return Ok(AsyncSink::NotReady(bytes_read)),
                 Err(e) => {
                     error!("Can't write on socket: {}", e);
-                    return Err(io::Error::from(e));
+                    return Err(e);
                 }
             }
         }

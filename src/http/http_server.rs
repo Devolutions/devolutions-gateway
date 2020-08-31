@@ -1,15 +1,14 @@
-use crate::config::Config;
-use crate::http::controllers::health::HealthController;
-use crate::http::controllers::jet::JetController;
-use crate::http::controllers::sessions::SessionsController;
-use crate::http::middlewares::auth::AuthMiddleware;
-use crate::jet_client::JetAssociationsMap;
-use saphir::server::SslConfig;
-use saphir::Server as SaphirServer;
-use saphir::ServerSpawn;
+use crate::{
+    config::Config,
+    http::{
+        controllers::{health::HealthController, jet::JetController, sessions::SessionsController},
+        middlewares::auth::AuthMiddleware,
+    },
+    jet_client::JetAssociationsMap,
+};
+use saphir::{server::SslConfig, Server as SaphirServer, ServerSpawn};
 use slog_scope::info;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::TaskExecutor;
 
 pub struct HttpServer {

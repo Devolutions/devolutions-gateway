@@ -1,34 +1,45 @@
-use std::collections::HashMap;
-use std::io;
-use std::io::ErrorKind;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    io,
+    io::ErrorKind,
+    net::{SocketAddr, ToSocketAddrs},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use futures::{future, future::ok, future::Either, Future, Stream};
+use futures::{
+    future,
+    future::{ok, Either},
+    Future, Stream,
+};
 use hyper::service::service_fn;
 use saphir::server::HttpService;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future01::FutureExt;
-use tokio::net::tcp::{TcpListener, TcpStream};
-use tokio::runtime::Runtime;
-use tokio::runtime::TaskExecutor;
+use tokio::{
+    net::tcp::{TcpListener, TcpStream},
+    runtime::{Runtime, TaskExecutor},
+};
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
 use x509_parser::pem::pem_to_der;
 
-use devolutions_jet::config::Config;
-use devolutions_jet::http::http_server::HttpServer;
-use devolutions_jet::jet_client::{JetAssociationsMap, JetClient};
-use devolutions_jet::logger;
-use devolutions_jet::rdp::RdpClient;
-use devolutions_jet::routing_client::Client;
-use devolutions_jet::transport::tcp::TcpTransport;
-use devolutions_jet::transport::ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport};
-use devolutions_jet::transport::JetTransport;
-use devolutions_jet::utils::{get_pub_key_from_der, load_certs, load_private_key};
-use devolutions_jet::websocket_client::{WebsocketService, WsClient};
+use devolutions_jet::{
+    config::Config,
+    http::http_server::HttpServer,
+    jet_client::{JetAssociationsMap, JetClient},
+    logger,
+    rdp::RdpClient,
+    routing_client::Client,
+    transport::{
+        tcp::TcpTransport,
+        ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport},
+        JetTransport,
+    },
+    utils::{get_pub_key_from_der, load_certs, load_private_key},
+    websocket_client::{WebsocketService, WsClient},
+};
 use tokio::prelude::{AsyncRead, AsyncWrite};
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
@@ -39,7 +50,7 @@ fn main() {
 
     let logger = logger::init(config.log_file()).expect("logging setup must not fail");
     let _logger_guard = slog_scope::set_global_logger(logger.clone());
-    let _std_logger_guard = slog_stdlog::init().unwrap();
+    slog_stdlog::init().unwrap();
 
     let listeners = config.listeners();
 
@@ -154,7 +165,7 @@ fn start_tcp_server(
     info!("Starting TCP jet server...");
     let socket_addr = url
         .with_default_port(default_port)
-        .expect(&format!("Error in Url {}", url))
+        .unwrap_or_else(|_| panic!("Error in Url {}", url))
         .to_socket_addrs()
         .unwrap()
         .next()
@@ -262,7 +273,7 @@ fn start_tcp_server(
                     RdpClient::new(
                         routing_url.clone(),
                         config.clone(),
-                        tls_public_key.clone(),
+                        tls_public_key,
                         tls_acceptor.clone(),
                     )
                     .serve(conn)
@@ -329,8 +340,8 @@ fn start_websocket_server(
 
     let websocket_service = WebsocketService {
         http_service,
-        jet_associations: jet_associations.clone(),
-        executor_handle: executor_handle.clone(),
+        jet_associations,
+        executor_handle,
         config,
     };
 
@@ -339,7 +350,6 @@ fn start_websocket_server(
         listener_logger = listener_logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let ws_tls_acceptor = tls_acceptor.clone();
     let http = hyper::server::conn::Http::new();
 
     let incoming = match websocket_url.scheme() {
@@ -356,7 +366,7 @@ fn start_websocket_server(
         "wss" => Either::B(websocket_listener.incoming().and_then(move |tcp| {
             set_socket_option(&tcp, &logger);
 
-            ws_tls_acceptor
+            tls_acceptor
                 .accept(tcp)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 .map(|tls| {
@@ -371,7 +381,7 @@ fn start_websocket_server(
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    let websocket_server = incoming.then(|conn_res| Ok(conn_res)).for_each(move |conn_res| {
+    let websocket_server = incoming.then(Ok).for_each(move |conn_res| {
         match conn_res {
             Ok((conn, remote_addr)) => {
                 let mut ws_serve = websocket_service.clone();

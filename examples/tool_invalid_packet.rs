@@ -1,7 +1,4 @@
-use std::env;
-use std::io::Write;
-use std::net::TcpStream;
-use std::process;
+use std::{env, io::Write, net::TcpStream, process};
 
 type Port = u16;
 
@@ -60,6 +57,6 @@ fn main() {
 
     loop {
         let mut stream = TcpStream::connect((host.as_str(), port)).unwrap();
-        stream.write_all("This is junk".as_bytes()).unwrap();
+        stream.write_all(b"This is junk").unwrap();
     }
 }

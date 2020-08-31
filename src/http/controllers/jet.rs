@@ -1,19 +1,23 @@
 use jet_proto::JET_VERSION_V2;
-use saphir::Method;
-use saphir::*;
+use saphir::{Method, *};
 use slog_scope::info;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::runtime::TaskExecutor;
 use uuid::Uuid;
 
-use crate::config::Config;
-use crate::http::controllers::health::build_health_response;
-use crate::http::controllers::utils::SyncResponseUtil;
-use crate::jet::association::{Association, AssociationResponse};
-use crate::jet::candidate::Candidate;
-use crate::jet_client::JetAssociationsMap;
-use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
+use crate::{
+    config::Config,
+    http::controllers::{health::build_health_response, utils::SyncResponseUtil},
+    jet::{
+        association::{Association, AssociationResponse},
+        candidate::Candidate,
+    },
+    jet_client::JetAssociationsMap,
+    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC},
+};
 use futures::Future;
 use std::collections::HashMap;
 use tokio::timer::Delay;
@@ -139,7 +143,7 @@ impl ControllerData {
                     if association.get_candidates().is_empty() {
                         for listener in self.config.listeners() {
                             if let Some(candidate) =
-                                Candidate::new(&listener.external_url.to_string().trim_end_matches("/"))
+                                Candidate::new(&listener.external_url.to_string().trim_end_matches('/'))
                             {
                                 association.add_candidate(candidate);
                             }

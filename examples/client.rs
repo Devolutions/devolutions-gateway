@@ -1,18 +1,20 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 
-use byteorder::LittleEndian;
-use byteorder::WriteBytesExt;
-use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
-use jet_proto::connect::JetConnectReq;
-use jet_proto::{JetMessage, JET_VERSION_V1};
-use std::env;
-use std::io::{self, Cursor, Error, Read, Write};
-use std::net::TcpListener;
-use std::net::TcpStream;
-use std::process;
-use std::str::FromStr;
-use std::thread;
+use byteorder::{LittleEndian, WriteBytesExt};
+use jet_proto::{
+    accept::{JetAcceptReq, JetAcceptRsp},
+    connect::JetConnectReq,
+    JetMessage, JET_VERSION_V1,
+};
+use std::{
+    env,
+    io::{self, Cursor, Error, Read, Write},
+    net::{TcpListener, TcpStream},
+    process,
+    str::FromStr,
+    thread,
+};
 use uuid::Uuid;
 
 type Port = u16;
@@ -125,14 +127,14 @@ fn main() {
     let jet_message = if let Some(uuid) = server_uuid {
         JetMessage::JetConnectReq(JetConnectReq {
             version: 1,
-            host: host,
+            host,
             association: uuid,
             candidate: Uuid::nil(),
         })
     } else {
         JetMessage::JetAcceptReq(JetAcceptReq {
             version: 1,
-            host: host,
+            host,
             association: Uuid::nil(),
             candidate: Uuid::nil(),
         })

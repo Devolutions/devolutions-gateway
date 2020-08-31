@@ -77,7 +77,7 @@ fn run_client() -> Child {
         client_command.args(&["--domain", domain]);
     }
 
-    client_command.spawn().expect("failed to run IronRDP client")
+    client_command.spawn().unwrap_or_else(|e| panic!("{:?}", e))
 }
 
 #[test]
@@ -409,13 +409,11 @@ impl RdpServer {
         };
         write_x224_data_pdu(connection_response, &mut tls_stream, None);
 
-        let channels = channel_names
+        channel_names
             .iter()
             .map(|v| v.to_string())
             .zip(channel_ids)
-            .collect::<HashMap<_, _>>();
-
-        channels
+            .collect::<HashMap<_, _>>()
     }
 
     fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
@@ -606,15 +604,16 @@ impl RdpServer {
             share_control_header.share_control_pdu
         {
             let size = pdu.capability_sets.len();
-            pdu.capability_sets.retain(|capability_set| match capability_set {
-                rdp::CapabilitySet::BitmapCacheHostSupport(_)
-                | rdp::CapabilitySet::Control(_)
-                | rdp::CapabilitySet::WindowActivation(_)
-                | rdp::CapabilitySet::Share(_)
-                | rdp::CapabilitySet::Font(_)
-                | rdp::CapabilitySet::LargePointer(_)
-                | rdp::CapabilitySet::DesktopComposition(_) => false,
-                _ => true,
+            pdu.capability_sets.retain(|capability_set| {
+                !matches!(capability_set,
+                    rdp::CapabilitySet::BitmapCacheHostSupport(_)
+                    | rdp::CapabilitySet::Control(_)
+                    | rdp::CapabilitySet::WindowActivation(_)
+                    | rdp::CapabilitySet::Share(_)
+                    | rdp::CapabilitySet::Font(_)
+                    | rdp::CapabilitySet::LargePointer(_)
+                    | rdp::CapabilitySet::DesktopComposition(_)
+                )
             });
             if size != pdu.capability_sets.len() {
                 panic!("The Jet did not filter qualitatively capability sets");

@@ -288,7 +288,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
                     Ok(credssp::ServerState::Finished(read_credentials)) => {
                         let rdp_identity = self.identities_proxy.identity_by_proxy(
                             read_credentials.username.as_str(),
-                            read_credentials.domain.as_ref().map(String::as_str),
+                            read_credentials.domain.as_deref(),
                         )?;
                         if rdp_identity.proxy.username == read_credentials.username
                             && rdp_identity.proxy.password == read_credentials.password
@@ -341,11 +341,11 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport> for Cred
         NextStream::Client
     }
     fn sequence_finished(&self, future_state: FutureState) -> bool {
-        match (future_state, self.sequence_state) {
+        matches!(
+            (future_state, self.sequence_state),
             (FutureState::ParseMessage, SequenceState::Finished)
-            | (FutureState::SendMessage, SequenceState::FinalMessage) => true,
-            _ => false,
-        }
+                | (FutureState::SendMessage, SequenceState::FinalMessage)
+        )
     }
 }
 
@@ -454,12 +454,14 @@ enum SequenceState {
     Finished,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum NlaWithClientFutureState {
     Tls(Accept<TcpStream>),
     CredSsp(Box<SequenceFuture<CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport>>),
     EarlyUserAuthResult(Send<EarlyUserAuthResultFutureTransport>),
 }
 
+#[allow(clippy::large_enum_variant)]
 enum NlaWithServerFutureState {
     Tls(Connect<TcpStream>),
     CredSsp(Box<SequenceFuture<CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport>>),

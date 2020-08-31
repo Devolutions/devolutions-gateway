@@ -86,7 +86,7 @@ where
 
 pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
     if let Some(filename) = &config.certificate_file {
-        let certfile = fs::File::open(filename).expect(&format!("cannot open certificate file {}", filename));
+        let certfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open certificate file {}", filename));
         let mut reader = BufReader::new(certfile);
 
         rustls::internal::pemfile::certs(&mut reader)
@@ -119,7 +119,7 @@ pub fn load_private_key(config: &CertificateConfig) -> io::Result<rustls::Privat
 
 fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
     if let Some(filename) = &config.private_key_file {
-        let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+        let keyfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open private key file {}", filename));
         rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile))
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
     } else if let Some(data) = &config.private_key_data {
@@ -134,7 +134,7 @@ fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::Pr
 
 fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
     if let Some(filename) = &config.private_key_file {
-        let keyfile = fs::File::open(filename).expect(&format!("cannot open private key file {}", filename));
+        let keyfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open private key file {}", filename));
         rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile)).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -190,20 +190,16 @@ fn extract_der_data<A>(
 ) -> Result<Vec<A>, ()> {
     let mut ders = Vec::new();
 
-    loop {
-        if let Some(start_index) = data.find(start_mark) {
-            let drain_index = start_index + start_mark.len();
-            data.drain(..drain_index);
-            if let Some(index) = data.find(end_mark) {
-                let base64_buf = &data[..index];
-                let der = base64::decode(&base64_buf).map_err(|_| ())?;
-                ders.push(f(der));
+    while let Some(start_index) = data.find(start_mark) {
+        let drain_index = start_index + start_mark.len();
+        data.drain(..drain_index);
+        if let Some(index) = data.find(end_mark) {
+            let base64_buf = &data[..index];
+            let der = base64::decode(&base64_buf).map_err(|_| ())?;
+            ders.push(f(der));
 
-                let drain_index = index + end_mark.len();
-                data.drain(..drain_index);
-            } else {
-                break;
-            }
+            let drain_index = index + end_mark.len();
+            data.drain(..drain_index);
         } else {
             break;
         }
@@ -229,6 +225,7 @@ where
     Framed::from_parts(new_parts)
 }
 
+#[allow(clippy::implicit_hasher)]
 pub fn swap_hashmap_kv<K, V>(hm: HashMap<K, V>) -> HashMap<V, K>
 where
     V: Hash + Eq,

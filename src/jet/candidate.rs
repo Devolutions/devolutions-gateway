@@ -10,8 +10,7 @@ use slog_scope::error;
 use url::Url;
 use uuid::Uuid;
 
-use crate::jet::TransportType;
-use crate::transport::JetTransport;
+use crate::{jet::TransportType, transport::JetTransport};
 
 #[derive(Serialize, Deserialize)]
 pub struct CandidateResponse {

@@ -285,7 +285,7 @@ fn handle_send_data_request(
                 data_pdu.to_buffer(dvc_data.as_mut())?;
                 gfx_capabilities
                     .to_buffer(&mut dvc_data[data_pdu.buffer_length()..])
-                    .map_err(|e| map_graphics_pipeline_error(gfx::GraphicsPipelineError::from(e)))?;
+                    .map_err(map_graphics_pipeline_error)?;
 
                 Ok((DvcCapabilitiesState::Finished, dvc_data))
             }

@@ -1,6 +1,5 @@
 use crate::config::Config;
-use saphir::Method;
-use saphir::*;
+use saphir::{Method, *};
 use std::sync::Arc;
 
 struct ControllerData {

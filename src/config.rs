@@ -434,21 +434,21 @@ impl From<ConfigTemp> for Config {
                 let url_str = &listener[0..pos];
                 url = listener[0..pos]
                     .parse::<Url>()
-                    .expect(&format!("Listener {} is an invalid URL.", url_str));
+                    .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", url_str));
 
                 if listener.len() > pos + 1 {
                     let external_str = listener[pos + 1..].to_string();
                     let external_str = external_str.replace("<jet_instance>", &jet_instance);
                     external_url = external_str
                         .parse::<Url>()
-                        .expect(&format!("External_url {} is an invalid URL.", external_str));
+                        .unwrap_or_else(|_| panic!("External_url {} is an invalid URL.", external_str));
                 } else {
                     panic!("External url has to be specified after the comma : {}", listener);
                 }
             } else {
                 url = listener
                     .parse::<Url>()
-                    .expect(&format!("Listener {} is an invalid URL.", listener));
+                    .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", listener));
                 external_url = format!(
                     "{}://{}:{}",
                     url.scheme(),
@@ -456,7 +456,7 @@ impl From<ConfigTemp> for Config {
                     url.port_or_known_default().unwrap_or(8080)
                 )
                 .parse::<Url>()
-                .expect(&format!("External_url can't be built based on listener {}", listener));
+                .unwrap_or_else(|_| panic!("External_url can't be built based on listener {}", listener));
             }
 
             listeners.push(ListenerConfig { url, external_url });
@@ -469,7 +469,7 @@ impl From<ConfigTemp> for Config {
         let http_listener_url = temp
             .http_listener_url
             .parse::<Url>()
-            .expect(&format!("Http listener {} is an invalid URL", temp.http_listener_url));
+            .unwrap_or_else(|e| panic!("Http listener URL is invalid: {}", e));
 
         let pem_str = if let Some(pem) = temp.provisioner_public_key_pem {
             Some(pem)
@@ -483,8 +483,7 @@ impl From<ConfigTemp> for Config {
             let pem = pem_str
                 .parse::<Pem>()
                 .expect("couldn't parse provisioner public key pem");
-            let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
-            public_key
+            PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key")
         });
 
         Config {
