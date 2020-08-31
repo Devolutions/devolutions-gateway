@@ -80,7 +80,10 @@ fn run_client() -> Child {
     client_command.spawn().unwrap_or_else(|e| panic!("{:?}", e))
 }
 
+// NOTE: The following test is disabled by default as it requires specific environment with
+// ironrdp_client executable in PATH variable
 #[test]
+#[ignore]
 fn rdp_with_nla_ntlm() {
     let mut identities_file = tempfile::NamedTempFile::new().expect("failed to create a named temporary file");
     let rdp_identities = vec![RdpIdentity::new(
