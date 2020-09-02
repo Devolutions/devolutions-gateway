@@ -1,6 +1,8 @@
-use std::env;
-use std::path::PathBuf;
-use std::process::{Child, Command};
+use std::{
+    env,
+    path::PathBuf,
+    process::{Child, Command},
+};
 
 fn bin() -> PathBuf {
     let mut me = env::current_exe().unwrap();

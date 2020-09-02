@@ -316,7 +316,7 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 }
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split("/").skip(index + 1).next() {
+    if let Some(raw_uuid) = path.split('/').nth(index + 1) {
         Uuid::parse_str(raw_uuid).ok()
     } else {
         None

@@ -1,13 +1,16 @@
-use packet::builder::Builder;
-use packet::ether::Builder as BuildEthernet;
-use packet::ether::Protocol;
-use packet::ip::v6::Builder as BuildV6;
-use packet::tcp::flag::Flags;
+use packet::{
+    builder::Builder,
+    ether::{Builder as BuildEthernet, Protocol},
+    ip::v6::Builder as BuildV6,
+    tcp::flag::Flags,
+};
 use pcap_file::PcapWriter;
 use slog_scope::{debug, error};
-use std::fs::File;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::{
+    fs::File,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 use crate::interceptor::{MessageReader, PacketInterceptor, PduSource, PeerInfo, UnknownMessageReader};
 

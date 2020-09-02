@@ -1,27 +1,32 @@
-use std::io::Cursor;
-use std::io::{ErrorKind, Read, Write};
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::{
+    io::{Cursor, ErrorKind, Read, Write},
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+};
 
-use futures::future;
-use futures::{Async, Future};
+use futures::{future, Async, Future};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use tokio::io::{self, AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
-use tokio_rustls::TlsStream;
-use tungstenite::handshake::client::{Request, Response};
-use tungstenite::handshake::server::NoCallback;
-use tungstenite::handshake::MidHandshake;
-use tungstenite::protocol::Role;
-use tungstenite::Message;
-use tungstenite::{ClientHandshake, HandshakeError, ServerHandshake, WebSocket};
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
+use tokio_rustls::{TlsConnector, TlsStream};
+use tungstenite::{
+    handshake::{
+        client::{Request, Response},
+        server::NoCallback,
+        MidHandshake,
+    },
+    protocol::Role,
+    ClientHandshake, HandshakeError, Message, ServerHandshake, WebSocket,
+};
 use url::Url;
 
-use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
-use crate::utils::{danger_transport, url_to_socket_arr};
+use crate::{
+    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
+    utils::{danger_transport, url_to_socket_arr},
+};
 
 pub struct WsStream {
     inner: WsStreamWrapper,
@@ -189,6 +194,7 @@ impl AsyncWrite for WsStream {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum WsStreamWrapper {
     Http((WebSocket<Upgraded>, Option<SocketAddr>)),
     Tcp((WebSocket<TcpStream>, Option<SocketAddr>)),

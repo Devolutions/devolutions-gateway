@@ -1,18 +1,24 @@
-use std::io::{Read, Write};
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::{
+    io::{Read, Write},
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use futures::{Async, Future};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use tokio::io::{self, AsyncRead, AsyncWrite};
-use tokio::net::tcp::TcpStream;
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite},
+    net::tcp::TcpStream,
+};
 use tokio_rustls::{TlsConnector, TlsStream};
 use url::Url;
 
-use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
-use crate::utils::{danger_transport, url_to_socket_arr};
+use crate::{
+    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
+    utils::{danger_transport, url_to_socket_arr},
+};
 
+#[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {
     Plain(TcpStream),
     Tls(TlsStream<TcpStream>),

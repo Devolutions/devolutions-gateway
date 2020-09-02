@@ -2,16 +2,21 @@ pub mod accept;
 pub mod connect;
 pub mod utils;
 
-use crate::accept::{JetAcceptReq, JetAcceptRsp};
-use crate::connect::{JetConnectReq, JetConnectRsp};
-use crate::utils::RequestHelper;
+use crate::{
+    accept::{JetAcceptReq, JetAcceptRsp},
+    connect::{JetConnectReq, JetConnectRsp},
+    utils::RequestHelper,
+};
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 pub use http::StatusCode;
 use log::trace;
-use std::env;
-use std::io::Read;
-use std::io::{self};
-use std::sync::Once;
+use std::{
+    env,
+    io::{
+        Read, {self},
+    },
+    sync::Once,
+};
 use uuid::Uuid;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
@@ -189,7 +194,7 @@ impl JetMessage {
 }
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split('/').skip(index + 1).next() {
+    if let Some(raw_uuid) = path.split('/').nth(index + 1) {
         Uuid::parse_str(raw_uuid).ok()
     } else {
         None
@@ -332,8 +337,7 @@ mod test {
 
     #[test]
     fn test_accept_v2() {
-        use std::io::Cursor;
-        use std::str::FromStr;
+        use std::{io::Cursor, str::FromStr};
 
         let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
         let jet_message = JetMessage::read_request(&mut cursor).unwrap();

@@ -272,7 +272,7 @@ impl CompleteData {
         total_length: usize,
         data_first: &'a [u8],
     ) -> Option<CompleteDataResult<'a>> {
-        if self.total_length != 0 || !self.data.is_none() {
+        if self.total_length != 0 || self.data.is_some() {
             error!("Incomplete DVC message, it will be skipped");
 
             self.data = None;
@@ -309,7 +309,7 @@ impl CompleteData {
                     self.data.as_mut().unwrap().extend_from_slice(data);
                     self.total_length = 0;
 
-                    self.data.take().map(|v| CompleteDataResult::Parted(v))
+                    self.data.take().map(CompleteDataResult::Parted)
                 }
                 Ordering::Greater => {
                     error!("Actual DVC message size is grater than expected total DVC message size");

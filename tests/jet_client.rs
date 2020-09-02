@@ -1,16 +1,17 @@
 mod common;
 
 use jet_proto::JetMessage;
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::sync::mpsc::channel;
-use std::thread;
-use std::time::Duration;
+use std::{
+    io::{Read, Write},
+    net::TcpStream,
+    sync::mpsc::channel,
+    thread,
+    time::Duration,
+};
 use uuid::Uuid;
 
 use common::run_proxy;
-use jet_proto::accept::JetAcceptReq;
-use jet_proto::connect::JetConnectReq;
+use jet_proto::{accept::JetAcceptReq, connect::JetConnectReq};
 use reqwest::{Client, StatusCode};
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -63,7 +64,7 @@ fn smoke_tcp_v1() {
                                         sender_uuid.send(rsp.association).unwrap();
                                     }
                                     _ => {
-                                        assert!(false, "Wrong message type received");
+                                        panic!("Wrong message type received");
                                     }
                                 }
                                 break;
@@ -133,7 +134,7 @@ fn smoke_tcp_v1() {
                                         assert!(rsp.version == 1);
                                     }
                                     _ => {
-                                        assert!(false, "Wrong message type received");
+                                        panic!("Wrong message type received");
                                     }
                                 }
                                 break;
@@ -245,7 +246,7 @@ fn smoke_tcp_v2() {
                                         sender_synchro.send(()).unwrap();
                                     }
                                     _ => {
-                                        assert!(false, "Wrong message type received");
+                                        panic!("Wrong message type received");
                                     }
                                 }
                                 break;
@@ -288,7 +289,7 @@ fn smoke_tcp_v2() {
         loop {
             match TcpStream::connect(proxy_addr) {
                 Ok(mut stream) => {
-                    let _ = receiver_synchro.recv().unwrap();
+                    receiver_synchro.recv().unwrap();
 
                     // Send request
                     let jet_message = JetMessage::JetConnectReq(JetConnectReq {
@@ -315,7 +316,7 @@ fn smoke_tcp_v2() {
                                         assert!(rsp.version == 2);
                                     }
                                     _ => {
-                                        assert!(false, "Wrong message type received");
+                                        panic!("Wrong message type received");
                                     }
                                 }
                                 break;

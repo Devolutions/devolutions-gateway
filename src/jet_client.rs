@@ -1,27 +1,35 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::{io, str};
+use std::{
+    collections::HashMap,
+    io, str,
+    sync::{Arc, Mutex},
+};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use futures::future::err;
-use futures::{try_ready, Async, Future, Poll};
-use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
-use jet_proto::connect::{JetConnectReq, JetConnectRsp};
-use jet_proto::{JetMessage, JET_VERSION_V1};
-use jet_proto::{StatusCode, JET_VERSION_V2};
+use futures::{future::err, try_ready, Async, Future, Poll};
+use jet_proto::{
+    accept::{JetAcceptReq, JetAcceptRsp},
+    connect::{JetConnectReq, JetConnectRsp},
+    JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
+};
 use slog_scope::{debug, error};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::runtime::TaskExecutor;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    runtime::TaskExecutor,
+};
 use uuid::Uuid;
 
-use crate::config::Config;
-use crate::http::controllers::jet::create_remove_association_future;
-use crate::jet::association::Association;
-use crate::jet::candidate::{Candidate, CandidateState};
-use crate::jet::TransportType;
-use crate::transport::JetTransport;
-use crate::utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC};
-use crate::Proxy;
+use crate::{
+    config::Config,
+    http::controllers::jet::create_remove_association_future,
+    jet::{
+        association::Association,
+        candidate::{Candidate, CandidateState},
+        TransportType,
+    },
+    transport::JetTransport,
+    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC},
+    Proxy,
+};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
@@ -44,7 +52,7 @@ impl JetClient {
         let msg_reader = JetMsgReader::new(transport);
         let jet_associations = self.jet_associations.clone();
         let executor_handle = self._executor_handle.clone();
-        let config = self.config.clone();
+        let config = self.config;
 
         Box::new(msg_reader.and_then(move |(transport, msg)| match msg {
             JetMessage::JetAcceptReq(jet_accept_req) => {
@@ -183,7 +191,7 @@ impl HandleAcceptJetMsg {
         executor_handle: TaskExecutor,
     ) -> Self {
         HandleAcceptJetMsg {
-            config: config.clone(),
+            config,
             transport: Some(transport),
             request_msg: msg,
             jet_associations,

@@ -72,21 +72,23 @@ impl Filter for ClientInfoPdu {
 
 impl Filter for DemandActive {
     fn filter(&mut self, _config: &FilterConfig) {
-        self.capability_sets.retain(|capability_set| match capability_set {
-            CapabilitySet::BitmapCacheHostSupport(_)
-            | CapabilitySet::Control(_)
-            | CapabilitySet::WindowActivation(_)
-            | CapabilitySet::Share(_)
-            | CapabilitySet::Font(_)
-            | CapabilitySet::LargePointer(_)
-            | CapabilitySet::DesktopComposition(_) => false,
-            _ => true,
+        self.capability_sets.retain(|capability_set| {
+            !matches!(capability_set,
+                CapabilitySet::BitmapCacheHostSupport(_)
+                | CapabilitySet::Control(_)
+                | CapabilitySet::WindowActivation(_)
+                | CapabilitySet::Share(_)
+                | CapabilitySet::Font(_)
+                | CapabilitySet::LargePointer(_)
+                | CapabilitySet::DesktopComposition(_)
+            )
         });
 
-        if let Some(CapabilitySet::VirtualChannel(capset)) = self.capability_sets.iter_mut().find(|c| match c {
-            CapabilitySet::VirtualChannel(_) => true,
-            _ => false,
-        }) {
+        if let Some(CapabilitySet::VirtualChannel(capset)) = self
+            .capability_sets
+            .iter_mut()
+            .find(|c| matches!(c, CapabilitySet::VirtualChannel(_)))
+        {
             capset.flags = capability_sets::VirtualChannelFlags::NO_COMPRESSION;
         }
     }

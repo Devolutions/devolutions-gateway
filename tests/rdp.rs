@@ -80,7 +80,10 @@ fn run_client() -> Child {
     client_command.spawn().expect("failed to run IronRDP client")
 }
 
+// NOTE: The following test is disabled by default as it requires specific environment with
+// ironrdp_client executable in PATH variable
 #[test]
+#[ignore]
 fn rdp_with_nla_ntlm() {
     let mut identities_file = tempfile::NamedTempFile::new().expect("failed to create a named temporary file");
     let rdp_identities = vec![RdpIdentity::new(
@@ -409,13 +412,11 @@ impl RdpServer {
         };
         write_x224_data_pdu(connection_response, &mut tls_stream, None);
 
-        let channels = channel_names
+        channel_names
             .iter()
             .map(|v| v.to_string())
             .zip(channel_ids)
-            .collect::<HashMap<_, _>>();
-
-        channels
+            .collect::<HashMap<_, _>>()
     }
 
     fn read_mcs_erect_domain_request(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
@@ -606,15 +607,16 @@ impl RdpServer {
             share_control_header.share_control_pdu
         {
             let size = pdu.capability_sets.len();
-            pdu.capability_sets.retain(|capability_set| match capability_set {
-                rdp::CapabilitySet::BitmapCacheHostSupport(_)
-                | rdp::CapabilitySet::Control(_)
-                | rdp::CapabilitySet::WindowActivation(_)
-                | rdp::CapabilitySet::Share(_)
-                | rdp::CapabilitySet::Font(_)
-                | rdp::CapabilitySet::LargePointer(_)
-                | rdp::CapabilitySet::DesktopComposition(_) => false,
-                _ => true,
+            pdu.capability_sets.retain(|capability_set| {
+                !matches!(capability_set,
+                    rdp::CapabilitySet::BitmapCacheHostSupport(_)
+                    | rdp::CapabilitySet::Control(_)
+                    | rdp::CapabilitySet::WindowActivation(_)
+                    | rdp::CapabilitySet::Share(_)
+                    | rdp::CapabilitySet::Font(_)
+                    | rdp::CapabilitySet::LargePointer(_)
+                    | rdp::CapabilitySet::DesktopComposition(_)
+                )
             });
             if size != pdu.capability_sets.len() {
                 panic!("The Jet did not filter qualitatively capability sets");

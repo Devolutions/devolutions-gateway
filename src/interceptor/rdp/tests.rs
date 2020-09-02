@@ -107,10 +107,10 @@ fn does_not_read_incomplete_packet_on_multiple_calls() {
     let mut data = TPKT_CLIENT_CONNECTION_REQUEST_PACKET.to_vec();
     data.truncate(3);
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert!(messages.is_empty());
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert!(messages.is_empty());
 }
 
@@ -120,11 +120,11 @@ fn reads_packet_on_second_call_after_incomplete_read() {
     let (packet_first_part, packet_second_part) = packet.split_at(3);
     let mut data = packet_first_part.to_vec();
 
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert!(messages.is_empty());
 
     data.extend(packet_second_part);
-    let (messages, _) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, _) = get_tpkt_tpdu_messages(&data);
     assert_eq!(1, messages.len());
     assert_eq!(packet.as_ref(), messages.first().unwrap().as_ref());
 }
@@ -144,7 +144,7 @@ fn reads_multiple_packets_after_incomplete_call() {
     data.extend_from_slice(second_packet_second_part);
     data.extend_from_slice(second_packet.as_ref());
     data.extend_from_slice(third_packet.as_ref());
-    let (messages, data_length) = get_tpkt_tpdu_messages(&mut data);
+    let (messages, data_length) = get_tpkt_tpdu_messages(&data);
 
     assert_eq!(2, messages.len());
     assert_eq!(first_packet.as_ref(), messages.first().unwrap().as_ref());

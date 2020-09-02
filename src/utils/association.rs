@@ -1,5 +1,4 @@
-use crate::jet::candidate::CandidateState;
-use crate::jet_client::JetAssociationsMap;
+use crate::{jet::candidate::CandidateState, jet_client::JetAssociationsMap};
 use futures::{Async, Future};
 use slog_scope::debug;
 use uuid::Uuid;

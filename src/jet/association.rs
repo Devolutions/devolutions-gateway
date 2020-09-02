@@ -1,6 +1,5 @@
 use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
-use chrono::serde::ts_seconds;
-use chrono::{DateTime, Utc};
+use chrono::{serde::ts_seconds, DateTime, Utc};
 use indexmap::IndexMap;
 use serde_json::Value;
 use uuid::Uuid;

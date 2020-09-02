@@ -119,7 +119,7 @@ fn map_negotiation_error(e: NegotiationError) -> io::Error {
         ),
         NegotiationError::TpktVersionError => io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Negotiation invalid tpkt header version"),
+            "Negotiation invalid tpkt header version".to_string(),
         ),
         NegotiationError::IOError(e) => e,
     }

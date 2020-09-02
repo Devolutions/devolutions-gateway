@@ -246,6 +246,7 @@ impl ConnectionSequenceFuture {
 }
 
 impl Future for ConnectionSequenceFuture {
+    #[allow(clippy::type_complexity)]
     type Item = (
         Framed<TlsStream<TcpStream>, RdpTransport>,
         Framed<TlsStream<TcpStream>, RdpTransport>,

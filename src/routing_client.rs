@@ -4,10 +4,11 @@ use futures::Future;
 use tokio::runtime::TaskExecutor;
 use url::Url;
 
-use crate::config::Config;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::Transport;
-use crate::Proxy;
+use crate::{
+    config::Config,
+    transport::{tcp::TcpTransport, Transport},
+    Proxy,
+};
 
 pub struct Client {
     routing_url: Url,

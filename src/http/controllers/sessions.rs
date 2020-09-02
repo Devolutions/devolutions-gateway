@@ -1,6 +1,5 @@
 use crate::SESSION_IN_PROGRESS_COUNT;
-use saphir::Method;
-use saphir::*;
+use saphir::{Method, *};
 use std::sync::atomic::Ordering;
 
 struct ControllerData {}
@@ -15,6 +14,12 @@ impl SessionsController {
         dispatch.add(Method::GET, "/count", sessions_count);
 
         SessionsController { dispatch }
+    }
+}
+
+impl Default for SessionsController {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
