@@ -38,8 +38,8 @@ pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
 pub const DR_DYN_VC_CHANNEL_NAME: &str = "drdynvc";
 
-#[allow(unused)]
 pub struct RdpClient {
+    #[allow(unused)]
     routing_url: Url,
     config: Arc<Config>,
     tls_public_key: Vec<u8>,
