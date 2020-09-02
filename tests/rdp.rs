@@ -77,7 +77,7 @@ fn run_client() -> Child {
         client_command.args(&["--domain", domain]);
     }
 
-    client_command.spawn().unwrap_or_else(|e| panic!("{:?}", e))
+    client_command.spawn().expect("failed to run IronRDP client")
 }
 
 // NOTE: The following test is disabled by default as it requires specific environment with
