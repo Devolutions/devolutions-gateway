@@ -1,7 +1,10 @@
 use std::io;
 
 use bytes::BytesMut;
-use ironrdp::{parse_fast_path_header, FastPathError};
+use ironrdp::{
+    fast_path::{FastPathError, FastPathHeader},
+    PduParsing,
+};
 use tokio::codec::{Decoder, Encoder};
 
 #[derive(Default)]
@@ -12,12 +15,14 @@ impl Decoder for FastPathTransport {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        match parse_fast_path_header(buf.as_ref()) {
-            Ok((_, len)) => {
-                if buf.len() < usize::from(len) {
+        match FastPathHeader::from_buffer(buf.as_ref()) {
+            Ok(header) => {
+                let packet_length = header.buffer_length() + header.data_length;
+
+                if buf.len() < packet_length {
                     Ok(None)
                 } else {
-                    let fast_path = buf.split_to(usize::from(len));
+                    let fast_path = buf.split_to(packet_length);
 
                     Ok(Some(fast_path))
                 }
@@ -29,6 +34,7 @@ impl Decoder for FastPathTransport {
             }
             Err(FastPathError::IOError(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
             Err(FastPathError::IOError(e)) => Err(e),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}", e))),
         }
     }
 }

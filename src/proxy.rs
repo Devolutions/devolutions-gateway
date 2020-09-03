@@ -34,22 +34,22 @@ impl Proxy {
         match self.config.protocol() {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
-                self.build_with_message_reader(server_transport, client_transport, Box::new(WaykMessageReader))
+                self.build_with_message_reader(server_transport, client_transport, Some(Box::new(WaykMessageReader)))
             }
             Protocol::RDP => {
                 info!("RdpMessageReader will be used to interpret application protocol");
                 self.build_with_message_reader(
                     server_transport,
                     client_transport,
-                    Box::new(RdpMessageReader::new(
+                    Some(Box::new(RdpMessageReader::new(
                         HashMap::new(),
                         DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
-                    )),
+                    ))),
                 )
             }
             Protocol::UNKNOWN => {
                 warn!("Protocol is unknown. Data received will not be split to get application message.");
-                self.build_with_message_reader(server_transport, client_transport, Box::new(UnknownMessageReader))
+                self.build_with_message_reader(server_transport, client_transport, Some(Box::new(UnknownMessageReader)))
             }
         }
     }
@@ -58,7 +58,7 @@ impl Proxy {
         &self,
         server_transport: T,
         client_transport: U,
-        message_reader: Box<dyn MessageReader>,
+        message_reader: Option<Box<dyn MessageReader>>,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
@@ -68,7 +68,7 @@ impl Proxy {
         let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
         let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
-        if let Some(pcap_files_path) = self.config.pcap_files_path() {
+        if let (Some(pcap_files_path), Some(message_reader)) = (self.config.pcap_files_path(), message_reader) {
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 client_peer_addr.ip(),

@@ -23,10 +23,18 @@ FLAGS:
     -v, --version
             Prints version information
 
-
 OPTIONS:
         --api-key <JET_API_KEY>
             The api key used by the server to authenticate client queries.
+
+        --certificate-data <JET_CERTIFICATE_DATA>
+            Certificate data, base64-encoded X509 der.
+
+        --certificate-file <JET_CERTIFICATE_FILE>
+            Path to the certificate file.
+
+        --http-listener-url <HTTP_LISTENER_URL>
+            HTTP listener url. [default: http://0.0.0.0:10256]
 
     -i, --identities-file <IDENTITIES_FILE>
 
@@ -77,12 +85,24 @@ OPTIONS:
             A file with logs
 
     -f, --pcap-files-path <PCAP_FILES_PATH>
-            Path to the pcap files. If not set, no pcap files will be created. Wayk Now and RDP protocols can be saved.
+            Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.
+
+        --private-key-data <JET_PRIVATE_KEY_DATA>
+            Private key data, base64-encoded pkcs10.
+
+        --private-key-file <JET_PRIVATE_KEY_FILE>
+            Path to the private key file.
 
     -p, --protocol <PROTOCOL_NAME>
             Specify the application protocol used. Useful when pcap file is saved and you want to avoid application
             message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not
             split between 2 tcp packets. [possible values: wayk, rdp]
+        --provisioner-public-key-data <JET_PROVISIONER_PUBLIC_KEY_DATA>
+            Public key data, base64-encoded pkcs10.
+
+        --provisioner-public-key-file <JET_PROVISIONER_PUBLIC_KEY_FILE>
+            Path to the public key file.
+
     -r, --routing-url <ROUTING_URL>
             An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported :
             tcp and tls. If it is not specified, the JET protocol will be used.
@@ -106,6 +126,52 @@ OPTIONS:
 
 1. On the same host where devolutions-jet is running, open wayk and connect to 127.0.0.1:8080
     * The connection should start. A dummy certificate will be shown. You can accept it and the Wayk connection should start.
+
+### RDP routing (WIP)
+
+The devolutions-jet can redirect RDP traffic. Validation is performed using a JWT (Json Web Token).
+The key used to sign the JWT should be known by the jet. You can provide the jet with the public
+key to use using `--provisioner-public-key-file` with a path to a PEM file; or `--provisioner-public-key-data`
+with a base64-encoded pkcs10 value. *Validation is currently skipped if the key is missing*.
+
+### Use JWT token for RDP connection in MSTSC
+
+    1. Open MSTSC
+
+    2. Enter a JET address in the "computer" field
+
+    3. Press the "Save As..." button under the "Connection settings" panel to save ".RDP" file to you PC
+
+    4. Open saved ".RDP" file with a text editor
+
+    5. Append string "pcb:s:"  to the end of the file (e.g: pcb:s:eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOj...)
+
+    6. Save file
+
+    7. In MSTSC press "Open..." and select your edited file
+
+    8. Done. You can start the connection
+
+### Use JWT token for RDP connection in FreeRdp
+
+Using FreeRDP, token can be provided using `/pcb` argument with `xfreerdp`.
+(e.g: /pcb:eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOj...)
+
+### JWT token generation for testing
+
+This feature should be facilitated by a provider (such as the [WaykDen](https://github.com/Devolutions/WaykDen-ps))
+generating JWTs for you.
+However, you can easily generate a JWT for testing purposes by using CLI
+utilities such as [smallstep CLI's tool](https://github.com/smallstep/cli).
+Check out the [installation](https://github.com/smallstep/cli#installation) section.
+You can also use the interactive Debugger from [jwt.io](https://jwt.io/).
+
+For a JWT valid 10 minutes from now using `<private key>` (path to the provider key)
+to be used for connecting at the `<target address>` you can type:
+```
+echo "{ \"dst_hst\": \"<target address>\", \"jet_ap\": \"rdp\" }" | step-cli crypto jwt sign - -nbf $(date "+%s") -exp $(date -d "10 minutes" "+%s") -subtle -key <private key>
+```
+(don't forget to replace `<target address>` and `<private key>` by your values)
 
 ## Troubleshooting
 

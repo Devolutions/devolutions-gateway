@@ -430,7 +430,7 @@ dependencies = [
  "futures 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.12.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "indexmap 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ironrdp 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ironrdp 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "jet-proto 0.1.0",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "native-tls 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -453,7 +453,7 @@ dependencies = [
  "slog-scope-futures 0.1.1 (git+https://github.com/Devolutions/slog-scope-futures.git)",
  "slog-stdlog 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "slog-term 2.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "spsc-bip-buffer 0.2.2-pre (git+https://github.com/Devolutions/spsc-bip-buffer.git)",
+ "spsc-bip-buffer 0.2.2-pre (git+https://github.com/Devolutions/spsc-bip-buffer.git?branch=master)",
  "sspi 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.22 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "ironrdp"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bit_field 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2169,7 +2169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "spsc-bip-buffer"
 version = "0.2.2-pre"
-source = "git+https://github.com/Devolutions/spsc-bip-buffer.git#32342b38984d28abb2f61125900ca2b3e94e777f"
+source = "git+https://github.com/Devolutions/spsc-bip-buffer.git?branch=master#32342b38984d28abb2f61125900ca2b3e94e777f"
 dependencies = [
  "cache_line_size 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -2965,7 +2965,7 @@ dependencies = [
 "checksum indexmap 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "712d7b3ea5827fcb9d4fda14bf4da5f136f0db2ae9c8f4bd4e2d1c6fde4e6db2"
 "checksum input_buffer 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "19a8a95243d5a0398cae618ec29477c6e3cb631152be5c19481f80bc71559754"
 "checksum iovec 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "b2b3ea6ff95e175473f8ffe6a7eb7c00d054240321b84c57051175fe3c1e075e"
-"checksum ironrdp 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5440922a9a6741998cd3a9cf48079d716e0cf5bad269e710ebaf8a935bb94072"
+"checksum ironrdp 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "29ee9d3fe3fb868e554fa58830dfb30d8e2a9d293e14a418de25be575415cd2f"
 "checksum itoa 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "501266b7edd0174f8530248f87f99c88fbe60ca4ef3dd486835b8d8d53136f7f"
 "checksum js-sys 0.3.32 (registry+https://github.com/rust-lang/crates.io-index)" = "1c840fdb2167497b0bd0db43d6dfe61e91637fa72f9d061f8bd17ddc44ba6414"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
@@ -3096,7 +3096,7 @@ dependencies = [
 "checksum snafu-derive 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "bdc75da2e0323f297402fd9c8fdba709bb04e4c627cbe31d19a2c91fc8d9f0e2"
 "checksum sourcefile 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "4bf77cb82ba8453b42b6ae1d692e4cdc92f9a47beaf89a847c8be83f4e328ad3"
 "checksum spin 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
-"checksum spsc-bip-buffer 0.2.2-pre (git+https://github.com/Devolutions/spsc-bip-buffer.git)" = "<none>"
+"checksum spsc-bip-buffer 0.2.2-pre (git+https://github.com/Devolutions/spsc-bip-buffer.git?branch=master)" = "<none>"
 "checksum sspi 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9c0727b7a04f374dfd22ca01b7ccbd758a1edf26de276006ae272dd8367109c4"
 "checksum static_assertions 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "7f3eb36b47e512f8f1c9e3d10c2c1965bc992bd9cdb024fa581e2194501c83d3"
 "checksum static_assertions 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"

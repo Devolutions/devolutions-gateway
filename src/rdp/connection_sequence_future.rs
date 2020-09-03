@@ -16,7 +16,8 @@ use crate::{
         sequence_future::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
-            NlaWithServerFuture, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture, StaticChannels,
+            NlaWithServerFuture, ParseStateArgs, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture,
+            StaticChannels,
         },
     },
     transport::{
@@ -40,21 +41,24 @@ pub struct ConnectionSequenceFuture {
     joined_static_channels: Option<StaticChannels>,
 }
 
+pub struct RdpProxyConnection {
+    pub client: Framed<TlsStream<TcpStream>, RdpTransport>,
+    pub server: Framed<TlsStream<TcpStream>, RdpTransport>,
+    pub channels: StaticChannels,
+}
+
 impl ConnectionSequenceFuture {
     pub fn new(
         client: TcpStream,
+        connection_request: nego::Request,
         tls_proxy_pubkey: Vec<u8>,
         tls_acceptor: TlsAcceptor,
         identities_proxy: IdentitiesProxy,
     ) -> Self {
         Self {
-            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(SequenceFuture::with_get_state(
-                NegotiationWithClientFuture::new(),
-                GetStateArgs {
-                    client: Some(NegotiationWithClientTransport::default().framed(client)),
-                    server: None,
-                },
-            ))),
+            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(
+                Self::create_negotiation_with_client_future(client, connection_request),
+            )),
             client_nla_transport: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
@@ -65,6 +69,20 @@ impl ConnectionSequenceFuture {
             filter_config: None,
             joined_static_channels: None,
         }
+    }
+
+    fn create_negotiation_with_client_future(
+        client: TcpStream,
+        negotiation_request: nego::Request,
+    ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport> {
+        SequenceFuture::with_parse_state(
+            NegotiationWithClientFuture::new(),
+            ParseStateArgs {
+                client: Some(NegotiationWithClientTransport::default().framed(client)),
+                server: None,
+                pdu: negotiation_request,
+            },
+        )
     }
 
     fn create_nla_client_future(
@@ -246,12 +264,7 @@ impl ConnectionSequenceFuture {
 }
 
 impl Future for ConnectionSequenceFuture {
-    #[allow(clippy::type_complexity)]
-    type Item = (
-        Framed<TlsStream<TcpStream>, RdpTransport>,
-        Framed<TlsStream<TcpStream>, RdpTransport>,
-        StaticChannels,
-    );
+    type Item = RdpProxyConnection;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -338,13 +351,13 @@ impl Future for ConnectionSequenceFuture {
                 ConnectionSequenceFutureState::Finalization(finalization) => {
                     let (client_transport, server_transport) = try_ready!(finalization.poll());
 
-                    return Ok(Async::Ready((
-                        client_transport,
-                        server_transport,
-                        self.joined_static_channels.take().expect(
+                    return Ok(Async::Ready(RdpProxyConnection {
+                        client: client_transport,
+                        server: server_transport,
+                        channels: self.joined_static_channels.take().expect(
                             "During RDP connection sequence, the joined static channels must exist in the RDP state",
                         ),
-                    )));
+                    }));
                 }
             }
         }
