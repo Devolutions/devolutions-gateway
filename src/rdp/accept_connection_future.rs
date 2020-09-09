@@ -1,12 +1,10 @@
-use std::io;
-
+use crate::{rdp::preconnection_pdu::decode_preconnection_pdu, transport::x224::NegotiationWithClientTransport};
 use bytes::BytesMut;
 use futures::{try_ready, Async, Future, Poll};
 use ironrdp::{nego, PduBufferParsing, PreconnectionPdu};
 use slog_scope::error;
+use std::io;
 use tokio::{codec::Decoder, io::AsyncRead, net::tcp::TcpStream};
-
-use crate::{rdp::preconnection_pdu::decode_preconnection_pdu, transport::x224::NegotiationWithClientTransport};
 
 const MAX_CONNECTION_PACKET_SIZE: usize = 4096;
 
@@ -57,21 +55,24 @@ impl Future for AcceptConnectionFuture {
                 ClientConnectionPacket::NegotiationWithClient(request),
             ))),
             Ok(None) => Ok(Async::NotReady),
-            Err(negotiate_error) => decode_preconnection_pdu(&mut self.buffer)
-                .map(|parsing_result| {
-                    parsing_result.map_or(Async::NotReady, |pdu| {
-                        let leftover_request = self.buffer.split_off(pdu.buffer_length());
-                        Async::Ready((
-                            self.client.take().unwrap(),
-                            ClientConnectionPacket::PreconnectionPdu { pdu, leftover_request },
-                        ))
-                    })
-                })
-                .map_err(|preconnection_pdu_error| {
+            Err(negotiate_error) => match decode_preconnection_pdu(&mut self.buffer) {
+                Ok(Some(pdu)) => {
+                    let leftover_request = self.buffer.split_off(pdu.buffer_length());
+                    Ok(Async::Ready((
+                        self.client.take().unwrap(),
+                        ClientConnectionPacket::PreconnectionPdu { pdu, leftover_request },
+                    )))
+                }
+                Ok(None) => Ok(Async::NotReady),
+                Err(preconnection_pdu_error) => {
                     error!("NegotiationWithClient transport failed: {}", negotiate_error);
                     error!("PreconnectionPdu transport failed: {}", preconnection_pdu_error);
-                    io::Error::new(io::ErrorKind::InvalidData, "Invalid connection sequence start")
-                }),
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Invalid connection sequence start",
+                    ))
+                }
+            },
         }
     }
 }

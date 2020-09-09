@@ -2,8 +2,10 @@ use crate::config::Config;
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
-use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
-use slog_scope::warn;
+use picky::jose::{
+    jwe::Jwe,
+    jwt::{JwtDate, JwtSig, JwtValidator},
+};
 use std::{io, sync::Arc};
 use url::Url;
 
@@ -44,21 +46,39 @@ pub struct PreconnectionPduRoute {
 }
 
 pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<PreconnectionPduRoute, io::Error> {
-    let jwt_token_base64 = pdu
+    let encrypted_jwt = pdu
         .payload
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Empty preconnection PDU"))?;
 
+    let delegation_key = config
+        .delegation_private_key
+        .as_ref()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Delegation key is missing"))?;
+
+    let jwe_token = Jwe::decode(&encrypted_jwt, &delegation_key).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to resolve route via JWT routing token: {}", e),
+        )
+    })?;
+
+    let signed_jwt = std::str::from_utf8(&jwe_token.payload).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to resolve route via JWT routing token: {}", e),
+        )
+    })?;
+
     let now = JwtDate::new_with_leeway(Utc::now().timestamp(), 30);
     let validator = JwtValidator::strict(&now);
 
-    let jwt_token = if let Some(provisioner_key) = &config.provisioner_public_key {
-        JwtSig::<RoutingClaims>::decode(&jwt_token_base64, &provisioner_key, &validator)
-    } else {
-        warn!("Provisioner key is not specified; Skipping signature validation");
-        JwtSig::<RoutingClaims>::decode_dangerous(&jwt_token_base64, &validator)
-    }
-    .map_err(|e| {
+    let provisioner_key = config
+        .provisioner_public_key
+        .as_ref()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
+
+    let jwt_token = JwtSig::<RoutingClaims>::decode(&signed_jwt, &provisioner_key, &validator).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Failed to resolve route via JWT routing token: {}", e),

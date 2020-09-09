@@ -1,7 +1,10 @@
 use crate::rdp;
 use clap::{crate_name, crate_version, App, Arg};
-use picky::{key::PublicKey, pem::Pem};
-use std::{env, sync::Arc};
+use picky::{
+    key::{PrivateKey, PublicKey},
+    pem::Pem,
+};
+use std::env;
 use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
@@ -18,6 +21,8 @@ const ARG_PRIVATE_KEY_FILE: &str = "private-key-file";
 const ARG_PRIVATE_KEY_DATA: &str = "private-key-data";
 const ARG_PROVISIONER_PUBLIC_KEY_FILE: &str = "provisioner-public-key-file";
 const ARG_PROVISIONER_PUBLIC_KEY_DATA: &str = "provisioner-public-key-data";
+const ARG_DELEGATION_PRIVATE_KEY_FILE: &str = "delegation-private-key-file";
+const ARG_DELEGATION_PRIVATE_KEY_DATA: &str = "delegation-private-key-data";
 const ARG_ROUTING_URL: &str = "routing-url";
 const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
 const ARG_PROTOCOL: &str = "protocol";
@@ -60,6 +65,7 @@ pub struct Config {
     pub certificate: CertificateConfig,
     pub http_listener_url: Url,
     pub provisioner_public_key: Option<PublicKey>,
+    pub delegation_private_key: Option<PrivateKey>,
 }
 
 impl Config {
@@ -178,6 +184,22 @@ impl Config {
                     .takes_value(true)
             )
             .arg(
+                Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
+                    .long("delegation-private-key-file")
+                    .value_name("FILE")
+                    .env("JET_DELEGATION_PRIVATE_KEY_FILE")
+                    .help("Path to the private key file.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_DATA)
+                    .long("delegation-private-key-data")
+                    .value_name("DATA")
+                    .env("JET_DELEGATION_PRIVATE_KEY_DATA")
+                    .help("Private key data, base64-encoded PKCS10.")
+                    .takes_value(true)
+            )
+            .arg(
                 Arg::with_name(ARG_ROUTING_URL)
                     .short("r")
                     .long("routing-url")
@@ -279,7 +301,7 @@ identities_file example:
                     )
                     .takes_value(true)
                     .empty_values(false)
-                    .validator(|filename| match rdp::RdpIdentity::from_file(filename.as_str()) {
+                    .validator(|filename| match rdp::IdentitiesProxy::from_file(filename.as_str()) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e.to_string())
                     }),
@@ -317,13 +339,8 @@ identities_file example:
             _ => Protocol::UNKNOWN,
         };
 
-        let identities_filename = matches
-            .value_of(ARG_IDENTITIES_FILE)
-            .map(std::string::ToString::to_string);
-        let rdp_identities = if let Some(filename) = identities_filename {
-            Some(rdp::IdentitiesProxy::new(Arc::new(
-                rdp::RdpIdentity::from_file(filename.as_str()).unwrap(),
-            )))
+        let rdp_identities = if let Some(filename) = matches.value_of(ARG_IDENTITIES_FILE) {
+            Some(rdp::IdentitiesProxy::from_file(filename).unwrap())
         } else {
             None
         };
@@ -340,7 +357,7 @@ identities_file example:
         let provisioner_public_key_pem = matches
             .value_of(ARG_PROVISIONER_PUBLIC_KEY_DATA)
             .map(|base64| format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64));
-        let provisioner_public_key_path = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE).map(String::from);
+        let provisioner_public_key_path = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE);
 
         let pem_str = if let Some(pem) = provisioner_public_key_pem {
             Some(pem)
@@ -355,6 +372,28 @@ identities_file example:
                 .parse::<Pem>()
                 .expect("couldn't parse provisioner public key pem");
             PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key")
+        });
+
+        // delegation key
+
+        let delegation_private_key_pem = matches
+            .value_of(ARG_DELEGATION_PRIVATE_KEY_DATA)
+            .map(|base64| format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64));
+        let delegation_private_key_path = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE);
+
+        let pem_str = if let Some(pem) = delegation_private_key_pem {
+            Some(pem)
+        } else if let Some(path) = delegation_private_key_path {
+            Some(std::fs::read_to_string(path).expect("couldn't read delegation private path key file"))
+        } else {
+            None
+        };
+
+        let delegation_private_key = pem_str.map(|pem_str| {
+            let pem = pem_str
+                .parse::<Pem>()
+                .expect("couldn't parse delegation private key pem");
+            PrivateKey::from_pem(&pem).expect("couldn't parse delegation private key")
         });
 
         // listeners parsing
@@ -419,6 +458,7 @@ identities_file example:
                 private_key_data,
             },
             provisioner_public_key,
+            delegation_private_key,
         }
     }
 }
