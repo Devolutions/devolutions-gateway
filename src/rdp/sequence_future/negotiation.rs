@@ -1,11 +1,9 @@
-use std::io;
-
-use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
-use slog_scope::debug;
-use tokio::{codec::Framed, net::tcp::TcpStream};
-
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::transport::x224::{NegotiationWithClientTransport, NegotiationWithServerTransport};
+use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
+use slog_scope::debug;
+use std::io;
+use tokio::{codec::Framed, net::tcp::TcpStream};
 
 pub struct NegotiationWithClientFuture {
     request: Option<Request>,
@@ -169,6 +167,5 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for Neg
 
 pub fn create_negotiation_request(username: String, mut request: Request) -> io::Result<Request> {
     request.nego_data = Some(NegoData::Cookie(username));
-
     Ok(request)
 }
