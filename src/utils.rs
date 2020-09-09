@@ -58,11 +58,11 @@ where
 {
     let der = get_der_cert_from_stream(&stream)?;
 
-    get_pub_key_from_der(der)
+    get_pub_key_from_der(&der)
 }
 
-pub fn get_pub_key_from_der(cert: Vec<u8>) -> io::Result<Vec<u8>> {
-    let res = parse_x509_der(&cert[..])
+pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
+    let res = parse_x509_der(cert)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
     let public_key = res.1.tbs_certificate.subject_pki.subject_public_key;
 

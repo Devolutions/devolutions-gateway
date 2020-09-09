@@ -15,7 +15,7 @@ impl AuthMiddleware {
 
 impl Middleware for AuthMiddleware {
     fn resolve(&self, req: &mut SyncRequest, res: &mut SyncResponse) -> RequestContinuation {
-        if let Some(api_key) = self.config.api_key() {
+        if let Some(api_key) = &self.config.api_key {
             let auth_header = match req.headers_map().get(header::AUTHORIZATION) {
                 Some(h) => h.clone(),
                 None => {

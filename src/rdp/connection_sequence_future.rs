@@ -102,6 +102,7 @@ impl ConnectionSequenceFuture {
                 .expect("TLS acceptor must be set in the constructor"),
         )
     }
+
     fn create_connect_server_future(&self) -> io::Result<ConnectFuture> {
         let destination = self
             .rdp_identity
@@ -118,6 +119,7 @@ impl ConnectionSequenceFuture {
 
         Ok(TcpStream::connect(&destination_addr))
     }
+
     fn create_server_negotiation_future(
         &mut self,
         server: TcpStream,
@@ -161,6 +163,7 @@ impl ConnectionSequenceFuture {
 
         NlaWithServerFuture::new(server, request_flags, server_response_protocol, target_identity, true)
     }
+
     fn create_mcs_initial_future(
         &mut self,
         server_nla_transport: NlaTransport,

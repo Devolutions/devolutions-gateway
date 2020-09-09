@@ -141,7 +141,7 @@ impl ControllerData {
                     };
 
                     if association.get_candidates().is_empty() {
-                        for listener in self.config.listeners() {
+                        for listener in &self.config.listeners {
                             if let Some(candidate) =
                                 Candidate::new(&listener.external_url.to_string().trim_end_matches('/'))
                             {
@@ -159,7 +159,7 @@ impl ControllerData {
     }
 
     fn health(&self, _req: &SyncRequest, res: &mut SyncResponse) {
-        build_health_response(res, self.config.jet_instance());
+        build_health_response(res, &self.config.jet_instance);
     }
 }
 

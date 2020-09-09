@@ -20,13 +20,13 @@ impl HttpServer {
     pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
-                info!("Loading http middlewares");
+                info!("Loading HTTP middlewares");
 
-                // Only the create association has to be authorized.
+                // Only the "create association" should requires authorization.
                 let mut auth_include_path = vec!["/jet/association"];
                 let mut auth_exclude_path = vec!["/jet/association/<association_id>/<anything>"];
 
-                if config.unrestricted() {
+                if config.unrestricted {
                     auth_exclude_path.push("/jet/association/<association_id>");
                 } else {
                     auth_include_path.push("/jet/association/<association_id>");
@@ -39,11 +39,11 @@ impl HttpServer {
                 )
             })
             .configure_router(|router| {
-                info!("Loading http controllers");
+                info!("Loading HTTP controllers");
                 let health = HealthController::new(config.clone());
                 let jet = JetController::new(config.clone(), jet_associations.clone(), executor.clone());
                 let session = SessionsController::new();
-                info!("Configuring http router");
+                info!("Configuring HTTP router");
                 router.add(health).add(jet).add(session)
             })
             .configure_listener(|list_config| {
