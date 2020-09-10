@@ -1,20 +1,31 @@
 #!/bin/bash
 
-if [ "$#" -ne 4 ]; then
+if [ "$#" -ne 8 ]; then
     echo "Illegal number of parameters."
-    echo "Usage: $0 <TARGET_HOST> <VALIDITY_DURATION_MINS> <PROVIDER_PRIVATE_KEY> <JET_PUBLIC_KEY>"
+    echo "Usage: $0 <VALIDITY_DURATION_MINS> \
+<PROVIDER_PRIVATE_KEY> <JET_PUBLIC_KEY> \
+<PRX_USR> <PRX_PWD> \
+<DST_USR> <DST_PWD> <DST_HST>"
     exit
 fi
 
-target_host="$1"
-valid_for_mins="$2"
-provider_key_path="$3"
-jet_public_key_path="$4"
+valid_for_mins="$1"
+provider_key_path="$2"
+jet_public_key_path="$3"
+prx_usr="$4"
+prx_pwd="$5"
+dst_usr="$6"
+dst_pwd="$7"
+dst_hst="$8"
 
 claims="{
-    \"dst_hst\": \"${target_host}\",
     \"jet_ap\": \"rdp\",
-    \"jet_cm\": \"fwd\"
+    \"jet_cm\": \"fwd\",
+    \"prx_usr\": \"${prx_usr}\",
+    \"prx_pwd\": \"${prx_pwd}\",
+    \"dst_usr\": \"${dst_usr}\",
+    \"dst_pwd\": \"${dst_pwd}\",
+    \"dst_hst\": \"${dst_hst}\"
 }"
 
 echo "$claims" | step-cli crypto jwt sign - \
@@ -25,4 +36,5 @@ echo "$claims" | step-cli crypto jwt sign - \
     | step-cli crypto jwe encrypt \
     -alg RSA-OAEP-256 \
     -enc A256GCM \
-    -key "$jet_public_key_path"
+    -key "$jet_public_key_path" \
+    | step-cli crypto jose format
