@@ -13,7 +13,7 @@ use uuid::Uuid;
 use common::run_proxy;
 use jet_proto::{accept::JetAcceptReq, connect::JetConnectReq};
 use reqwest::{Client, StatusCode};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use std::str::FromStr;
 use url::Url;
 
@@ -361,13 +361,13 @@ fn smoke_tcp_v2() {
     thread::sleep(Duration::from_millis(100));
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct CandidateInfo {
     id: String,
     url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct AssociationInfo {
     id: String,
     candidates: Vec<CandidateInfo>,

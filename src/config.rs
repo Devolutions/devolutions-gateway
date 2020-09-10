@@ -1,37 +1,39 @@
-use std::{env, sync::Arc};
-
-use clap::{crate_name, crate_version, App, Arg};
-use picky::{key::PublicKey, pem::Pem};
-use slog_scope::warn;
-use url::Url;
-
 use crate::rdp;
+use clap::{crate_name, crate_version, App, Arg};
+use picky::{
+    key::{PrivateKey, PublicKey},
+    pem::Pem,
+};
+use std::env;
+use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
 
-#[derive(Debug, Clone)]
+const ARG_RDP: &str = "rdp";
+const ARG_API_KEY: &str = "api-key";
+const ARG_UNRESTRICTED: &str = "unrestricted";
+const ARG_LISTENERS: &str = "listeners";
+const ARG_HTTP_LISTENER_URL: &str = "http-listener-url";
+const ARG_INSTANCE: &str = "instance";
+const ARG_CERTIFICATE_FILE: &str = "certificate-file";
+const ARG_CERTIFICATE_DATA: &str = "certificate-data";
+const ARG_PRIVATE_KEY_FILE: &str = "private-key-file";
+const ARG_PRIVATE_KEY_DATA: &str = "private-key-data";
+const ARG_PROVISIONER_PUBLIC_KEY_FILE: &str = "provisioner-public-key-file";
+const ARG_PROVISIONER_PUBLIC_KEY_DATA: &str = "provisioner-public-key-data";
+const ARG_DELEGATION_PRIVATE_KEY_FILE: &str = "delegation-private-key-file";
+const ARG_DELEGATION_PRIVATE_KEY_DATA: &str = "delegation-private-key-data";
+const ARG_ROUTING_URL: &str = "routing-url";
+const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
+const ARG_PROTOCOL: &str = "protocol";
+const ARG_LOG_FILE: &str = "log-file";
+const ARG_IDENTITIES_FILE: &str = "identities-file";
+
+#[derive(Debug, Clone, Copy)]
 pub enum Protocol {
     WAYK,
     RDP,
     UNKNOWN,
-}
-
-struct ConfigTemp {
-    unrestricted: bool,
-    api_key: Option<String>,
-    listeners: Vec<String>,
-    jet_instance: Option<String>,
-    routing_url: Option<Url>,
-    pcap_files_path: Option<String>,
-    protocol: Protocol,
-    rdp_identities: Option<rdp::IdentitiesProxy>,
-    log_file: Option<String>,
-
-    certificate: CertificateConfig,
-    http_listener_url: String,
-
-    provisioner_public_key_pem: Option<String>,
-    provisioner_public_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -50,137 +52,163 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    unrestricted: bool,
-    api_key: Option<String>,
-    listeners: Vec<ListenerConfig>,
-    jet_instance: String,
-    routing_url: Option<Url>,
-    pcap_files_path: Option<String>,
-    protocol: Protocol,
-    rdp_identities: Option<rdp::IdentitiesProxy>,
-    log_file: Option<String>,
-
+    pub unrestricted: bool,
+    pub api_key: Option<String>,
+    pub listeners: Vec<ListenerConfig>,
+    pub jet_instance: String,
+    pub routing_url: Option<Url>,
+    pub pcap_files_path: Option<String>,
+    pub protocol: Protocol,
+    pub rdp_identities: Option<rdp::IdentitiesProxy>,
+    pub log_file: Option<String>,
+    pub rdp: bool, // temporary
     pub certificate: CertificateConfig,
     pub http_listener_url: Url,
-
     pub provisioner_public_key: Option<PublicKey>,
+    pub delegation_private_key: Option<PrivateKey>,
 }
 
 impl Config {
-    pub fn unrestricted(&self) -> bool {
-        self.unrestricted
-    }
-
-    pub fn api_key(&self) -> Option<&String> {
-        self.api_key.as_ref()
-    }
-
-    pub fn listeners(&self) -> &Vec<ListenerConfig> {
-        &self.listeners
-    }
-
-    pub fn jet_instance(&self) -> &String {
-        &self.jet_instance
-    }
-
-    pub fn routing_url(&self) -> Option<&Url> {
-        self.routing_url.as_ref()
-    }
-
-    pub fn pcap_files_path(&self) -> Option<&String> {
-        self.pcap_files_path.as_ref()
-    }
-
-    pub fn protocol(&self) -> &Protocol {
-        &self.protocol
-    }
-
-    pub fn rdp_identities(&self) -> Option<&rdp::IdentitiesProxy> {
-        self.rdp_identities.as_ref()
-    }
-
-    pub fn log_file(&self) -> Option<&String> {
-        self.log_file.as_ref()
-    }
-
     pub fn init() -> Self {
         let default_http_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
 
         let cli_app = App::new(crate_name!())
-            .author("Devolutions")
+            .author("Devolutions Inc.")
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
-            .about("Devolutions-Jet proxy")
-            .arg(Arg::with_name("api-key")
-                .long("api-key")
-                .value_name("JET_API_KEY")
-                .help("The api key used by the server to authenticate client queries.")
-                .takes_value(true)
-                .empty_values(false))
-            .arg(Arg::with_name("unrestricted")
-                .long("unrestricted")
-                .help("This flag remove the api_key validation on some http routes")
-                .takes_value(false))
-            .arg(Arg::with_name("listeners")
-                .short("l")
-                .long("listener")
-                .value_name("LISTENER_URL")
-                .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
-                .long_help("An URL on which the server will listen on. The external URL returned as candidate can be specified after the listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
-                If it is not specified, the external url will be <scheme>://<jet_instance>:<port> where <jet_instance> is the value of the jet-instance parameter.")
-                .multiple(true)
-                .takes_value(true)
-                .number_of_values(1)
-            )
-            .arg(Arg::with_name("http-listener-url")
-                .long("http-listener-url")
-                .value_name("HTTP_LISTENER_URL")
-                .help("HTTP listener url.")
-                .takes_value(true)
-                .default_value(&default_http_listener_url))
-            .arg(Arg::with_name("jet-instance")
-                .long("jet-instance")
-                .value_name("JET_INSTANCE")
-                .help("Specific name to reach that instance of JET.")
-                .takes_value(true)
-            )
-            .arg(Arg::with_name("certificate-file")
-                .long("certificate-file")
-                .value_name("JET_CERTIFICATE_FILE")
-                .help("Path to the certificate file.")
-                .takes_value(true))
-            .arg(Arg::with_name("private-key-file")
-                .long("private-key-file")
-                .value_name("JET_PRIVATE_KEY_FILE")
-                .help("Path to the private key file.")
-                .takes_value(true))
-            .arg(Arg::with_name("provisioner-public-key-file")
-                .long("provisioner-public-key-file")
-                .value_name("JET_PROVISIONER_PUBLIC_KEY_FILE")
-                .help("Path to the public key file.")
-                .takes_value(true))
-            .arg(Arg::with_name("certificate-data")
-                .long("certificate-data")
-                .value_name("JET_CERTIFICATE_DATA")
-                .help("Certificate data, base64-encoded X509 der.")
-                .takes_value(true))
-            .arg(Arg::with_name("private-key-data")
-                .long("private-key-data")
-                .value_name("JET_PRIVATE_KEY_DATA")
-                .help("Private key data, base64-encoded pkcs10.")
-                .takes_value(true))
-            .arg(Arg::with_name("provisioner-public-key-data")
-                .long("provisioner-public-key-data")
-                .value_name("JET_PROVISIONER_PUBLIC_KEY_DATA")
-                .help("Public key data, base64-encoded pkcs10.")
-                .takes_value(true))
+            .about("Devolutions-Jet Proxy")
             .arg(
-                Arg::with_name("routing-url")
+                Arg::with_name(ARG_RDP)
+                    .long("rdp")
+                    .takes_value(false)
+                    .required(false)
+                    .help("Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)")
+            )
+            .arg(
+                Arg::with_name(ARG_API_KEY)
+                    .long("api-key")
+                    .value_name("KEY")
+                    .env("JET_API_KEY")
+                    .help("The API key used by the server to authenticate client queries.")
+                    .takes_value(true)
+                    .empty_values(false)
+            )
+            .arg(
+                Arg::with_name(ARG_UNRESTRICTED)
+                    .long("unrestricted")
+                    .env("JET_UNRESTRICTED")
+                    .help("Remove API key validation on some HTTP routes")
+                    .takes_value(false)
+            )
+            .arg(
+                Arg::with_name(ARG_LISTENERS)
+                    .short("l")
+                    .long("listener")
+                    .value_name("URL")
+                    .env("JET_LISTENERS")
+                    .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
+                    .long_help(
+                        "An URL on which the server will listen on. The external URL returned as candidate can be specified after the listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
+                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port> where <jet_instance> is the value of the jet-instance parameter."
+                    )
+                    .multiple(true)
+                    .use_delimiter(true)
+                    .value_delimiter(";")
+                    .takes_value(true)
+                    .number_of_values(1)
+            )
+            .arg(
+                Arg::with_name(ARG_HTTP_LISTENER_URL)
+                    .long("http-listener-url")
+                    .value_name("URL")
+                    .env("JET_HTTP_LISTENER_URL")
+                    .help("HTTP listener URL.")
+                    .takes_value(true)
+                    .default_value(&default_http_listener_url)
+            )
+            .arg(
+                Arg::with_name(ARG_INSTANCE)
+                    .long("instance")
+                    .value_name("NAME")
+                    .env("JET_INSTANCE")
+                    .help("Specific name to reach that instance of JET.")
+                    .takes_value(true)
+                    .required(true)
+            )
+            .arg(
+                Arg::with_name(ARG_CERTIFICATE_FILE)
+                    .long("certificate-file")
+                    .value_name("FILE")
+                    .env("JET_CERTIFICATE_FILE")
+                    .help("Path to the certificate file.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_CERTIFICATE_DATA)
+                    .long("certificate-data")
+                    .value_name("DATA")
+                    .env("JET_CERTIFICATE_DATA")
+                    .help("Certificate data, base64-encoded X509 DER.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_PRIVATE_KEY_FILE)
+                    .long("private-key-file")
+                    .value_name("FILE")
+                    .env("JET_PRIVATE_KEY_FILE")
+                    .help("Path to the private key file.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_PRIVATE_KEY_DATA)
+                    .long("private-key-data")
+                    .value_name("DATA")
+                    .env("JET_PRIVATE_KEY_DATA")
+                    .help("Private key data, base64-encoded PKCS10.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_FILE)
+                    .long("provisioner-public-key-file")
+                    .value_name("FILE")
+                    .env("JET_PROVISIONER_PUBLIC_KEY_FILE")
+                    .help("Path to the public key file.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_DATA)
+                    .long("provisioner-public-key-data")
+                    .value_name("DATA")
+                    .env("JET_PROVISIONER_PUBLIC_KEY_DATA")
+                    .help("Public key data, base64-encoded PKCS10.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
+                    .long("delegation-private-key-file")
+                    .value_name("FILE")
+                    .env("JET_DELEGATION_PRIVATE_KEY_FILE")
+                    .help("Path to the private key file.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_DATA)
+                    .long("delegation-private-key-data")
+                    .value_name("DATA")
+                    .env("JET_DELEGATION_PRIVATE_KEY_DATA")
+                    .help("Private key data, base64-encoded PKCS10.")
+                    .takes_value(true)
+            )
+            .arg(
+                Arg::with_name(ARG_ROUTING_URL)
                     .short("r")
                     .long("routing-url")
-                    .value_name("ROUTING_URL")
+                    .value_name("URL")
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
-                    .long_help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>. Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.")
+                    .long_help(
+                        "An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.\
+                         Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used."
+                    )
                     .takes_value(true)
                     .empty_values(false)
                     .validator(|v| if Url::parse(&v).is_ok() {
@@ -190,10 +218,9 @@ impl Config {
                     }),
             )
             .arg(
-                Arg::with_name("pcap-files-path")
-                    .short("f")
+                Arg::with_name(ARG_PCAP_FILES_PATH)
                     .long("pcap-files-path")
-                    .value_name("PCAP_FILES_PATH")
+                    .value_name("PATH")
                     .help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
                     .long_help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
                     .takes_value(true)
@@ -203,21 +230,27 @@ impl Config {
                     } else {
                         Err(String::from("The value does not exist or is not a path"))
                     })
-                ,
             )
             .arg(
-                Arg::with_name("protocol")
+                Arg::with_name(ARG_PROTOCOL)
                     .short("p")
                     .long("protocol")
                     .value_name("PROTOCOL_NAME")
-                    .help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet.")
-                    .long_help("Specify the application protocol used. Useful when pcap file is saved and you want to avoid application message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not split between 2 tcp packets.")
+                    .help(
+                        "Specify the application protocol used. Useful when pcap file is saved\
+                         and you want to avoid application message in two different tcp packet."
+                    )
+                    .long_help(
+                        "Specify the application protocol used. Useful when pcap file is saved and you want to\
+                         avoid application message in two different tcp packet. If protocol is unknown, we can't\
+                         be sure that application packet is not split between 2 tcp packets."
+                    )
                     .takes_value(true)
                     .possible_values(&["wayk", "rdp"])
                     .empty_values(false)
             )
             .arg(
-                Arg::with_name("log-file")
+                Arg::with_name(ARG_LOG_FILE)
                     .long("log-file")
                     .value_name("LOG_FILE")
                     .help("A file with logs")
@@ -225,14 +258,13 @@ impl Config {
                     .empty_values(false)
             )
             .arg(
-                Arg::with_name("identities-file")
+                Arg::with_name(ARG_IDENTITIES_FILE)
                     .short("i")
                     .long("identities-file")
-                    .value_name("IDENTITIES_FILE")
-                    .required_if("protocol", "rdp")
+                    .value_name("FILE")
                     .help("A JSON-file with a list of identities: proxy credentials, target credentials, and target destination")
-                    .long_help(r###"
-JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
+                    .long_help(
+                        r#"JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
 Every credential must consist of 'username' and 'password' fields with a string,
 and optional field 'domain', which also a string if it is present (otherwise - null).
 The proxy object must be present with a 'proxy' name, the target object with a 'target' name.
@@ -265,11 +297,11 @@ identities_file example:
         },
         "destination":"192.168.1.3:3389"
     }
-]'"
-                        "###)
+]'"#
+                    )
                     .takes_value(true)
                     .empty_values(false)
-                    .validator(|filename| match rdp::RdpIdentity::from_file(filename.as_str()) {
+                    .validator(|filename| match rdp::IdentitiesProxy::from_file(filename.as_str()) {
                         Ok(_) => Ok(()),
                         Err(e) => Err(e.to_string())
                     }),
@@ -277,156 +309,97 @@ identities_file example:
 
         let matches = cli_app.get_matches();
 
-        let api_key = matches.value_of("api-key").map(std::string::ToString::to_string);
+        let api_key = matches.value_of(ARG_API_KEY).map(std::string::ToString::to_string);
 
-        let unrestricted = matches.is_present("unrestricted");
-
-        let listeners = matches.values_of("listeners").map_or(Vec::new(), |listeners| {
-            listeners.map(|listener| listener.to_string()).collect()
-        });
+        let unrestricted = matches.is_present(ARG_UNRESTRICTED);
+        let rdp = matches.is_present(ARG_RDP);
 
         let http_listener_url = matches
-            .value_of("http-listener-url")
-            .map(std::string::ToString::to_string)
-            .expect("");
+            .value_of(ARG_HTTP_LISTENER_URL)
+            .unwrap()
+            .parse::<Url>()
+            .unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
 
-        let jet_instance = matches.value_of("jet-instance").map(std::string::ToString::to_string);
+        let jet_instance = matches
+            .value_of(ARG_INSTANCE)
+            .unwrap() // enforced by clap
+            .to_string();
 
         let routing_url = matches
-            .value_of("routing-url")
+            .value_of(ARG_ROUTING_URL)
             .map(|v| Url::parse(&v).expect("must be checked in the clap validator"));
 
         let pcap_files_path = matches
-            .value_of("pcap-files-path")
+            .value_of(ARG_PCAP_FILES_PATH)
             .map(std::string::ToString::to_string);
 
-        let protocol = match matches.value_of("protocol") {
+        let protocol = match matches.value_of(ARG_PROTOCOL) {
             Some("wayk") => Protocol::WAYK,
             Some("rdp") => Protocol::RDP,
             _ => Protocol::UNKNOWN,
         };
 
-        let identities_filename = matches
-            .value_of("identities-file")
-            .map(std::string::ToString::to_string);
-        let rdp_identities = if let Some(filename) = identities_filename {
-            Some(rdp::IdentitiesProxy::new(Arc::new(
-                rdp::RdpIdentity::from_file(filename.as_str()).unwrap(),
-            )))
+        let rdp_identities = if let Some(filename) = matches.value_of(ARG_IDENTITIES_FILE) {
+            Some(rdp::IdentitiesProxy::from_file(filename).unwrap())
         } else {
             None
         };
 
-        let log_file = matches.value_of("log-file").map(String::from);
+        let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
 
-        let certificate_file = matches.value_of("jet-certificate-file").map(String::from);
-        let certificate_data = matches.value_of("jet-certificate-data").map(String::from);
-        let private_key_file = matches.value_of("jet-private-key-file").map(String::from);
-        let private_key_data = matches.value_of("jet-private-key-data").map(String::from);
+        let certificate_file = matches.value_of(ARG_CERTIFICATE_FILE).map(String::from);
+        let certificate_data = matches.value_of(ARG_CERTIFICATE_DATA).map(String::from);
+        let private_key_file = matches.value_of(ARG_PRIVATE_KEY_FILE).map(String::from);
+        let private_key_data = matches.value_of(ARG_PRIVATE_KEY_DATA).map(String::from);
+
+        // provisioner key
+
         let provisioner_public_key_pem = matches
-            .value_of("provisioner-public-key-data")
+            .value_of(ARG_PROVISIONER_PUBLIC_KEY_DATA)
             .map(|base64| format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64));
-        let provisioner_public_key_path = matches.value_of("provisioner-public-key-file").map(String::from);
+        let provisioner_public_key_path = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE);
 
-        let mut config_temp = ConfigTemp {
-            unrestricted,
-            api_key,
-            listeners,
-            http_listener_url,
-            jet_instance,
-            routing_url,
-            pcap_files_path,
-            protocol,
-            rdp_identities,
-            log_file,
-
-            certificate: CertificateConfig {
-                certificate_file,
-                certificate_data,
-                private_key_file,
-                private_key_data,
-            },
-
-            provisioner_public_key_pem,
-            provisioner_public_key_path,
+        let pem_str = if let Some(pem) = provisioner_public_key_pem {
+            Some(pem)
+        } else if let Some(path) = provisioner_public_key_path {
+            Some(std::fs::read_to_string(path).expect("couldn't read provisioner public path key file"))
+        } else {
+            None
         };
 
-        config_temp.apply_env_variables();
+        let provisioner_public_key = pem_str.map(|pem_str| {
+            let pem = pem_str
+                .parse::<Pem>()
+                .expect("couldn't parse provisioner public key pem");
+            PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key")
+        });
 
-        config_temp.into()
-    }
-}
+        // delegation key
 
-impl ConfigTemp {
-    fn apply_env_variables(&mut self) {
-        if let Ok(val) = env::var("JET_INSTANCE") {
-            self.jet_instance = Some(val);
-        }
+        let delegation_private_key_pem = matches
+            .value_of(ARG_DELEGATION_PRIVATE_KEY_DATA)
+            .map(|base64| format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", base64));
+        let delegation_private_key_path = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE);
 
-        if let Ok(val) = env::var("JET_API_KEY") {
-            self.api_key = Some(val);
-        }
+        let pem_str = if let Some(pem) = delegation_private_key_pem {
+            Some(pem)
+        } else if let Some(path) = delegation_private_key_path {
+            Some(std::fs::read_to_string(path).expect("couldn't read delegation private path key file"))
+        } else {
+            None
+        };
 
-        if let Ok(val) = env::var("JET_UNRESTRICTED") {
-            if let Ok(val) = val.to_lowercase().parse::<bool>() {
-                self.unrestricted = val;
-            } else {
-                warn!("JET_UNRESTRICTED env. variable is not a boolean value. 'true' or 'false' accepted.");
-            }
-        }
+        let delegation_private_key = pem_str.map(|pem_str| {
+            let pem = pem_str
+                .parse::<Pem>()
+                .expect("couldn't parse delegation private key pem");
+            PrivateKey::from_pem(&pem).expect("couldn't parse delegation private key")
+        });
 
-        if let Ok(val) = env::var("JET_LISTENERS") {
-            self.listeners = val
-                .split(';')
-                .filter_map(
-                    |item: &str| {
-                        if !item.is_empty() {
-                            Some(item.to_string())
-                        } else {
-                            None
-                        }
-                    },
-                )
-                .collect();
-        }
+        // listeners parsing
 
-        if let Ok(val) = env::var("JET_CERTIFICATE_FILE") {
-            self.certificate.certificate_file = Some(val);
-        }
-
-        if let Ok(val) = env::var("JET_CERTIFICATE_DATA") {
-            self.certificate.certificate_data = Some(val);
-        }
-
-        if let Ok(val) = env::var("JET_PRIVATE_KEY_FILE") {
-            self.certificate.private_key_file = Some(val);
-        }
-
-        if let Ok(val) = env::var("JET_PRIVATE_KEY_DATA") {
-            self.certificate.private_key_data = Some(val);
-        }
-
-        if let Ok(val) = env::var("JET_HTTP_LISTENER_URL") {
-            self.http_listener_url = val;
-        }
-
-        if let Ok(pem_str) = env::var("JET_PROVISIONER_PUBLIC_KEY_DATA") {
-            self.provisioner_public_key_pem = Some(pem_str);
-        }
-
-        if let Ok(path) = env::var("JET_PROVISIONER_PUBLIC_KEY_FILE") {
-            self.provisioner_public_key_path = Some(path);
-        }
-    }
-}
-
-impl From<ConfigTemp> for Config {
-    fn from(temp: ConfigTemp) -> Self {
         let mut listeners = Vec::new();
-
-        let jet_instance = temp.jet_instance.expect("JET_INSTANCE is mandatory. It has to be added on the command line or defined by JET_INSTANCE environment variable.");
-
-        for listener in &temp.listeners {
+        for listener in matches.values_of(ARG_LISTENERS).unwrap_or_else(Default::default) {
             let url;
             let external_url;
 
@@ -466,41 +439,26 @@ impl From<ConfigTemp> for Config {
             panic!("At least one listener has to be specified.");
         }
 
-        let http_listener_url = temp
-            .http_listener_url
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("Http listener URL is invalid: {}", e));
-
-        let pem_str = if let Some(pem) = temp.provisioner_public_key_pem {
-            Some(pem)
-        } else if let Some(path) = temp.provisioner_public_key_path {
-            Some(std::fs::read_to_string(path).expect("couldn't read provisioner public path key file"))
-        } else {
-            None
-        };
-
-        let provisioner_public_key = pem_str.map(|pem_str| {
-            let pem = pem_str
-                .parse::<Pem>()
-                .expect("couldn't parse provisioner public key pem");
-            PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key")
-        });
-
         Config {
-            unrestricted: temp.unrestricted,
-            api_key: temp.api_key,
+            unrestricted,
+            api_key,
             listeners,
             http_listener_url,
             jet_instance,
-            routing_url: temp.routing_url,
-            pcap_files_path: temp.pcap_files_path,
-            protocol: temp.protocol,
-            rdp_identities: temp.rdp_identities,
-            log_file: temp.log_file,
-
-            certificate: temp.certificate,
-
+            routing_url,
+            pcap_files_path,
+            protocol,
+            rdp_identities,
+            log_file,
+            rdp,
+            certificate: CertificateConfig {
+                certificate_file,
+                certificate_data,
+                private_key_file,
+                private_key_data,
+            },
             provisioner_public_key,
+            delegation_private_key,
         }
     }
 }

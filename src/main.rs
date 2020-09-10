@@ -1,30 +1,3 @@
-use std::{
-    collections::HashMap,
-    io,
-    io::ErrorKind,
-    net::{SocketAddr, ToSocketAddrs},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use futures::{
-    future,
-    future::{ok, Either},
-    Future, Stream,
-};
-use hyper::service::service_fn;
-use saphir::server::HttpService;
-use slog::{o, Logger};
-use slog_scope::{error, info, slog_error, warn};
-use slog_scope_futures::future01::FutureExt;
-use tokio::{
-    net::tcp::{TcpListener, TcpStream},
-    runtime::{Runtime, TaskExecutor},
-};
-use tokio_rustls::{TlsAcceptor, TlsStream};
-use url::Url;
-use x509_parser::pem::pem_to_der;
-
 use devolutions_jet::{
     config::Config,
     http::http_server::HttpServer,
@@ -40,7 +13,31 @@ use devolutions_jet::{
     utils::{get_pub_key_from_der, load_certs, load_private_key},
     websocket_client::{WebsocketService, WsClient},
 };
-use tokio::prelude::{AsyncRead, AsyncWrite};
+use futures::{
+    future,
+    future::{ok, Either},
+    Future, Stream,
+};
+use hyper::service::service_fn;
+use saphir::server::HttpService;
+use slog::{o, Logger};
+use slog_scope::{error, info, slog_error, warn};
+use slog_scope_futures::future01::FutureExt;
+use std::{
+    collections::HashMap,
+    io,
+    io::ErrorKind,
+    net::{SocketAddr, ToSocketAddrs},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::{
+    net::tcp::{TcpListener, TcpStream},
+    prelude::{AsyncRead, AsyncWrite},
+    runtime::{Runtime, TaskExecutor},
+};
+use tokio_rustls::{TlsAcceptor, TlsStream};
+use url::Url;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
@@ -48,13 +45,12 @@ const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
 fn main() {
     let config = Arc::new(Config::init());
 
-    let logger = logger::init(config.log_file()).expect("logging setup must not fail");
+    let logger = logger::init(config.log_file.as_deref()).expect("logging setup must not fail");
     let _logger_guard = slog_scope::set_global_logger(logger.clone());
     slog_stdlog::init().unwrap();
 
-    let listeners = config.listeners();
-
-    let tcp_listeners: Vec<Url> = listeners
+    let tcp_listeners: Vec<Url> = config
+        .listeners
         .iter()
         .filter_map(|listener| {
             if listener.url.scheme() == "tcp" {
@@ -64,7 +60,8 @@ fn main() {
             }
         })
         .collect();
-    let websocket_listeners: Vec<Url> = listeners
+    let websocket_listeners: Vec<Url> = config
+        .listeners
         .iter()
         .filter_map(|listener| {
             if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
@@ -82,21 +79,21 @@ fn main() {
         Runtime::new().expect("This should never fails, a runtime is needed by the entire implementation");
     let executor_handle = runtime.executor();
 
-    info!("Starting http server ...");
+    info!("Starting HTTP server ...");
     let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
     if let Err(e) = http_server.start(executor_handle.clone()) {
-        error!("http_server failed to start: {}", e);
+        error!("HTTP server failed to start: {}", e);
         return;
     }
-    info!("Http server successfully started");
+    info!("HTTP server successfully started");
     let http_service = http_server.server.get_request_handler().clone();
 
     // Create the TLS acceptor.
-    let certs = load_certs(&config.certificate).expect("Could not load a certificate src/cert/publicCert.pem");
-    let priv_key = load_private_key(&config.certificate).expect("Could not load a certificate src/cert/private.pem");
-
     let client_no_auth = rustls::NoClientAuth::new();
     let mut server_config = rustls::ServerConfig::new(client_no_auth);
+    let certs = load_certs(&config.certificate).expect("could not load certs");
+    let tls_public_key = get_pub_key_from_der(&certs[0].0).expect("could not parse TLS public key");
+    let priv_key = load_private_key(&config.certificate).expect("could not load private key");
     server_config.set_single_cert(certs, priv_key).unwrap();
     let config_ref = Arc::new(server_config);
     let tls_acceptor = TlsAcceptor::from(config_ref);
@@ -120,6 +117,7 @@ fn main() {
             config.clone(),
             jet_associations.clone(),
             tls_acceptor.clone(),
+            tls_public_key.clone(),
             executor_handle.clone(),
             logger.clone(),
         ));
@@ -159,46 +157,47 @@ fn start_tcp_server(
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     tls_acceptor: TlsAcceptor,
+    tls_public_key: Vec<u8>,
     executor_handle: TaskExecutor,
     logger: Logger,
 ) -> Box<dyn Future<Item = (), Error = String> + Send> {
     info!("Starting TCP jet server...");
+
     let socket_addr = url
         .with_default_port(default_port)
-        .unwrap_or_else(|_| panic!("Error in Url {}", url))
+        .expect("invalid URL")
         .to_socket_addrs()
         .unwrap()
         .next()
         .unwrap();
     let listener = TcpListener::bind(&socket_addr).unwrap();
+
     let server = listener.incoming().for_each(move |conn| {
+        // Configure logger
         let mut logger = logger.clone();
-
         if let Ok(peer_addr) = conn.peer_addr() {
-            logger = logger.new(o!( "client" => peer_addr.to_string()));
+            logger = logger.new(o!("client" => peer_addr.to_string()));
         }
-
         if let Ok(local_addr) = conn.local_addr() {
             logger = logger.new(o!("listener" => local_addr.to_string()));
         }
-
-        if let Some(ref url) = config.routing_url() {
-            logger = logger.new(o!( "scheme" => url.scheme().to_string()));
+        if let Some(url) = &config.routing_url {
+            logger = logger.new(o!("scheme" => url.scheme().to_string()));
         }
+
         set_socket_option(&conn, &logger);
 
-        let routing_url_opt = config.routing_url();
-
-        let config_clone = config.clone();
-        let client_fut = if let Some(routing_url) = routing_url_opt {
+        let client_fut = if let Some(routing_url) = &config.routing_url {
             match routing_url.scheme() {
                 "tcp" => {
                     let transport = TcpTransport::new(conn);
-                    Client::new(routing_url.clone(), config_clone, executor_handle.clone()).serve(transport)
+                    Client::new(routing_url.clone(), config.clone(), executor_handle.clone()).serve(transport)
                 }
                 "tls" => {
                     let routing_url_clone = routing_url.clone();
                     let executor_handle_clone = executor_handle.clone();
+                    let config_clone = config.clone();
+
                     Box::new(
                         tls_acceptor
                             .accept(conn)
@@ -214,14 +213,17 @@ fn start_tcp_server(
                     let executor_handle_clone = executor_handle.clone();
                     let peer_addr = conn.peer_addr().ok();
                     let accept = tungstenite::accept(conn);
+
                     match accept {
                         Ok(stream) => {
                             let transport = WsTransport::new_tcp(stream, peer_addr);
                             Box::new(
-                                WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport),
+                                WsClient::new(routing_url_clone, config.clone(), executor_handle_clone)
+                                    .serve(transport),
                             )
                         }
                         Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
+                            let config_clone = config.clone();
                             Box::new(TcpWebSocketServerHandshake(Some(e)).and_then(move |stream| {
                                 let transport = WsTransport::new_tcp(stream, peer_addr);
                                 WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
@@ -235,6 +237,8 @@ fn start_tcp_server(
                 "wss" => {
                     let routing_url_clone = routing_url.clone();
                     let executor_handle_clone = executor_handle.clone();
+                    let config_clone = config.clone();
+
                     Box::new(
                         tls_acceptor
                             .accept(conn)
@@ -265,25 +269,16 @@ fn start_tcp_server(
                             }),
                     )
                 }
-                "rdp" => {
-                    let certificate = include_bytes!("cert/publicCert.pem");
-                    let pem = pem_to_der(certificate).expect("Could not convert pem to der file");
-                    let tls_public_key = get_pub_key_from_der(pem.1.contents).expect("Could not parse pem file");
-
-                    RdpClient::new(
-                        routing_url.clone(),
-                        config.clone(),
-                        tls_public_key,
-                        tls_acceptor.clone(),
-                    )
-                    .serve(conn)
-                }
-                scheme => panic!("Unsupported routing url scheme {}", scheme),
+                "rdp" => RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
+                scheme => panic!("Unsupported routing URL scheme {}", scheme),
             }
+        } else if config.rdp {
+            RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn)
         } else {
-            JetClient::new(config_clone, jet_associations.clone(), executor_handle.clone())
+            JetClient::new(config.clone(), jet_associations.clone(), executor_handle.clone())
                 .serve(JetTransport::new_tcp(conn))
         };
+
         executor_handle.spawn(
             client_fut
                 .then(move |res| {
@@ -299,7 +294,8 @@ fn start_tcp_server(
 
         ok(())
     });
-    info!("TCP jet server started successfully. Listening on {}", socket_addr);
+
+    info!("TCP jet server started successfully. Now listening on {}", socket_addr);
 
     Box::new(server.map_err(|e| format!("TCP listener failed: {}", e)))
 }

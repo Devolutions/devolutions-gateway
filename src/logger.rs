@@ -40,7 +40,7 @@ impl<D1: Drain<Ok = (), Err = Never>, D2: Drain<Ok = (), Err = Never>> Drain for
     }
 }
 
-pub fn init(file_path: Option<&String>) -> io::Result<Logger> {
+pub fn init(file_path: Option<&str>) -> io::Result<Logger> {
     let term_decorator = TermDecorator::new().build();
     let term_fmt = format_decorator(term_decorator);
 

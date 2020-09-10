@@ -361,7 +361,6 @@ impl Transport for WsTransport {
                                         future::ok(WsTransport::new_tls(stream, peer_addr))
                                     })) as JetFuture<Self>
                                 }
-
                                 Err(tungstenite::handshake::HandshakeError::Failure(e)) => {
                                     Box::new(future::lazy(|| future::err(io::Error::new(io::ErrorKind::Other, e))))
                                         as JetFuture<Self>

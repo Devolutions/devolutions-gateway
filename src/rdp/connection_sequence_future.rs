@@ -102,6 +102,7 @@ impl ConnectionSequenceFuture {
                 .expect("TLS acceptor must be set in the constructor"),
         )
     }
+
     fn create_connect_server_future(&self) -> io::Result<ConnectFuture> {
         let destination = self
             .rdp_identity
@@ -118,6 +119,7 @@ impl ConnectionSequenceFuture {
 
         Ok(TcpStream::connect(&destination_addr))
     }
+
     fn create_server_negotiation_future(
         &mut self,
         server: TcpStream,
@@ -152,7 +154,9 @@ impl ConnectionSequenceFuture {
     ) -> io::Result<NlaWithServerFuture> {
         let target_identity = self.rdp_identity
             .as_ref()
-            .expect("The RDP identity must be set after the client negotiation and be taken by reference in the server negotiation state").target.clone().into();
+            .expect("The RDP identity must be set after the client negotiation and be taken by reference in the server negotiation state")
+            .target
+            .clone();
         let request_flags = self
             .request
             .as_ref()
@@ -161,6 +165,7 @@ impl ConnectionSequenceFuture {
 
         NlaWithServerFuture::new(server, request_flags, server_response_protocol, target_identity, true)
     }
+
     fn create_mcs_initial_future(
         &mut self,
         server_nla_transport: NlaTransport,
@@ -185,16 +190,21 @@ impl ConnectionSequenceFuture {
         let response_protocol = self
             .response_protocol
             .expect("Response protocol must be set in NegotiationWithServer future");
+
         let target = self
             .rdp_identity
             .as_ref()
             .expect("the RDP identity must be set after the server NLA")
             .target
-            .clone()
-            .into();
+            .clone();
+        let target_converted = ironrdp::rdp::Credentials {
+            username: target.username,
+            password: target.password,
+            domain: target.domain,
+        };
 
         SequenceFuture::with_get_state(
-            McsInitialFuture::new(FilterConfig::new(response_protocol, target)),
+            McsInitialFuture::new(FilterConfig::new(response_protocol, target_converted)),
             GetStateArgs {
                 client: Some(client_transport),
                 server: Some(server_transport),

@@ -31,7 +31,7 @@ impl Proxy {
         server_transport: T,
         client_transport: U,
     ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
-        match self.config.protocol() {
+        match self.config.protocol {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
                 self.build_with_message_reader(server_transport, client_transport, Some(Box::new(WaykMessageReader)))
@@ -68,7 +68,7 @@ impl Proxy {
         let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
         let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
-        if let (Some(pcap_files_path), Some(message_reader)) = (self.config.pcap_files_path(), message_reader) {
+        if let (Some(pcap_files_path), Some(message_reader)) = (self.config.pcap_files_path.as_ref(), message_reader) {
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 client_peer_addr.ip(),
