@@ -231,6 +231,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
 
         Ok(Some(result))
     }
+
     fn return_item(
         &mut self,
         mut client: Option<X224FutureTransport>,
@@ -256,18 +257,22 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
         debug!("Static channels to join: {:?}", static_channels);
 
         (
-        client.take().expect(
-            "In MCS initial PDUs processing, the client's stream must exist in a return_item method, and the method cannot be fired multiple times",
-        ),
-        server.take().expect(
-            "In MCS initial PDUs processing, the server's stream must exist in a return_item method, and the method cannot be fired multiple times",
-        ),
+            client.take().expect(
+                "In MCS initial PDUs processing, the client's stream must exist in a return_item method,\
+                 and the method cannot be fired multiple times",
+            ),
+            server.take().expect(
+                "In MCS initial PDUs processing, the server's stream must exist in a return_item method,\
+                 and the method cannot be fired multiple times",
+            ),
             self.filter_config.take().expect(
-                "In MCS initial PDUs processing, the filter config must exist in a return_item method, and the method cannot be fired multiple times",
+                "In MCS initial PDUs processing, the filter config must exist in a return_item method,\
+                 and the method cannot be fired multiple times",
             ),
             static_channels,
         )
     }
+
     fn next_sender(&self) -> NextStream {
         match self.sequence_state {
             McsInitialSequenceState::ConnectInitial => NextStream::Client,
@@ -277,6 +282,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
             ),
         }
     }
+
     fn next_receiver(&self) -> NextStream {
         match self.sequence_state {
             McsInitialSequenceState::ConnectResponse => NextStream::Server,
@@ -286,6 +292,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport> for McsInitia
             }
         }
     }
+
     fn sequence_finished(&self, future_state: FutureState) -> bool {
         future_state == FutureState::SendMessage && self.sequence_state == McsInitialSequenceState::Finished
     }

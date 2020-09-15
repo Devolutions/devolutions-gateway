@@ -1,4 +1,3 @@
-use crate::rdp;
 use clap::{crate_name, crate_version, App, Arg};
 use picky::{
     key::{PrivateKey, PublicKey},
@@ -27,7 +26,6 @@ const ARG_ROUTING_URL: &str = "routing-url";
 const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
-const ARG_IDENTITIES_FILE: &str = "identities-file";
 
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
@@ -59,7 +57,6 @@ pub struct Config {
     pub routing_url: Option<Url>,
     pub pcap_files_path: Option<String>,
     pub protocol: Protocol,
-    pub rdp_identities: Option<rdp::IdentitiesProxy>,
     pub log_file: Option<String>,
     pub rdp: bool, // temporary
     pub certificate: CertificateConfig,
@@ -82,7 +79,7 @@ impl Config {
                     .long("rdp")
                     .takes_value(false)
                     .required(false)
-                    .help("Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)")
+                    .help("Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)"),
             )
             .arg(
                 Arg::with_name(ARG_API_KEY)
@@ -91,14 +88,14 @@ impl Config {
                     .env("JET_API_KEY")
                     .help("The API key used by the server to authenticate client queries.")
                     .takes_value(true)
-                    .empty_values(false)
+                    .empty_values(false),
             )
             .arg(
                 Arg::with_name(ARG_UNRESTRICTED)
                     .long("unrestricted")
                     .env("JET_UNRESTRICTED")
                     .help("Remove API key validation on some HTTP routes")
-                    .takes_value(false)
+                    .takes_value(false),
             )
             .arg(
                 Arg::with_name(ARG_LISTENERS)
@@ -106,16 +103,22 @@ impl Config {
                     .long("listener")
                     .value_name("URL")
                     .env("JET_LISTENERS")
-                    .help("An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. Supported scheme: tcp, ws, wss")
+                    .help(
+                        "An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>.\
+                         Supported schemes: tcp, ws, wss",
+                    )
                     .long_help(
-                        "An URL on which the server will listen on. The external URL returned as candidate can be specified after the listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
-                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port> where <jet_instance> is the value of the jet-instance parameter."
+                        "An URL on which the server will listen on.\
+                         The external URL returned as candidate can be specified after the listener,\
+                         separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
+                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port>\
+                         where <jet_instance> is the value of the jet-instance parameter.",
                     )
                     .multiple(true)
                     .use_delimiter(true)
                     .value_delimiter(";")
                     .takes_value(true)
-                    .number_of_values(1)
+                    .number_of_values(1),
             )
             .arg(
                 Arg::with_name(ARG_HTTP_LISTENER_URL)
@@ -124,7 +127,7 @@ impl Config {
                     .env("JET_HTTP_LISTENER_URL")
                     .help("HTTP listener URL.")
                     .takes_value(true)
-                    .default_value(&default_http_listener_url)
+                    .default_value(&default_http_listener_url),
             )
             .arg(
                 Arg::with_name(ARG_INSTANCE)
@@ -133,7 +136,7 @@ impl Config {
                     .env("JET_INSTANCE")
                     .help("Specific name to reach that instance of JET.")
                     .takes_value(true)
-                    .required(true)
+                    .required(true),
             )
             .arg(
                 Arg::with_name(ARG_CERTIFICATE_FILE)
@@ -141,7 +144,7 @@ impl Config {
                     .value_name("FILE")
                     .env("JET_CERTIFICATE_FILE")
                     .help("Path to the certificate file.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_CERTIFICATE_DATA)
@@ -149,7 +152,7 @@ impl Config {
                     .value_name("DATA")
                     .env("JET_CERTIFICATE_DATA")
                     .help("Certificate data, base64-encoded X509 DER.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_PRIVATE_KEY_FILE)
@@ -157,7 +160,7 @@ impl Config {
                     .value_name("FILE")
                     .env("JET_PRIVATE_KEY_FILE")
                     .help("Path to the private key file.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_PRIVATE_KEY_DATA)
@@ -165,7 +168,7 @@ impl Config {
                     .value_name("DATA")
                     .env("JET_PRIVATE_KEY_DATA")
                     .help("Private key data, base64-encoded PKCS10.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_FILE)
@@ -173,7 +176,7 @@ impl Config {
                     .value_name("FILE")
                     .env("JET_PROVISIONER_PUBLIC_KEY_FILE")
                     .help("Path to the public key file.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_DATA)
@@ -181,7 +184,7 @@ impl Config {
                     .value_name("DATA")
                     .env("JET_PROVISIONER_PUBLIC_KEY_DATA")
                     .help("Public key data, base64-encoded PKCS10.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
@@ -189,7 +192,7 @@ impl Config {
                     .value_name("FILE")
                     .env("JET_DELEGATION_PRIVATE_KEY_FILE")
                     .help("Path to the private key file.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_DATA)
@@ -197,7 +200,7 @@ impl Config {
                     .value_name("DATA")
                     .env("JET_DELEGATION_PRIVATE_KEY_DATA")
                     .help("Private key data, base64-encoded PKCS10.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_ROUTING_URL)
@@ -207,29 +210,39 @@ impl Config {
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help(
                         "An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.\
-                         Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used."
+                         Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.",
                     )
                     .takes_value(true)
                     .empty_values(false)
-                    .validator(|v| if Url::parse(&v).is_ok() {
-                        Ok(())
-                    } else {
-                        Err(String::from("Expected <scheme>://<ip>:<port>, got invalid value"))
+                    .validator(|v| {
+                        if Url::parse(&v).is_ok() {
+                            Ok(())
+                        } else {
+                            Err(String::from("Expected <scheme>://<ip>:<port>, got invalid value"))
+                        }
                     }),
             )
             .arg(
                 Arg::with_name(ARG_PCAP_FILES_PATH)
                     .long("pcap-files-path")
                     .value_name("PATH")
-                    .help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
-                    .long_help("Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.")
+                    .help(
+                        "Path to the pcap files. If not set, no pcap files will be created.\
+                         WaykNow and RDP protocols can be saved.",
+                    )
+                    .long_help(
+                        "Path to the pcap files. If not set, no pcap files will be created.\
+                         WaykNow and RDP protocols can be saved.",
+                    )
                     .takes_value(true)
                     .empty_values(false)
-                    .validator(|v| if std::path::PathBuf::from(v).is_dir() {
-                        Ok(())
-                    } else {
-                        Err(String::from("The value does not exist or is not a path"))
-                    })
+                    .validator(|v| {
+                        if std::path::PathBuf::from(v).is_dir() {
+                            Ok(())
+                        } else {
+                            Err(String::from("The value does not exist or is not a path"))
+                        }
+                    }),
             )
             .arg(
                 Arg::with_name(ARG_PROTOCOL)
@@ -238,16 +251,16 @@ impl Config {
                     .value_name("PROTOCOL_NAME")
                     .help(
                         "Specify the application protocol used. Useful when pcap file is saved\
-                         and you want to avoid application message in two different tcp packet."
+                         and you want to avoid application message in two different tcp packet.",
                     )
                     .long_help(
                         "Specify the application protocol used. Useful when pcap file is saved and you want to\
                          avoid application message in two different tcp packet. If protocol is unknown, we can't\
-                         be sure that application packet is not split between 2 tcp packets."
+                         be sure that application packet is not split between 2 tcp packets.",
                     )
                     .takes_value(true)
                     .possible_values(&["wayk", "rdp"])
-                    .empty_values(false)
+                    .empty_values(false),
             )
             .arg(
                 Arg::with_name(ARG_LOG_FILE)
@@ -255,56 +268,7 @@ impl Config {
                     .value_name("LOG_FILE")
                     .help("A file with logs")
                     .takes_value(true)
-                    .empty_values(false)
-            )
-            .arg(
-                Arg::with_name(ARG_IDENTITIES_FILE)
-                    .short("i")
-                    .long("identities-file")
-                    .value_name("FILE")
-                    .help("A JSON-file with a list of identities: proxy credentials, target credentials, and target destination")
-                    .long_help(
-                        r#"JSON-file with a list of identities: proxy credentials, target credentials, and target destination.
-Every credential must consist of 'username' and 'password' fields with a string,
-and optional field 'domain', which also a string if it is present (otherwise - null).
-The proxy object must be present with a 'proxy' name, the target object with a 'target' name.
-The target destination must be a string with a target URL and be named 'destination'.
-identities_file example:
-'[
-    {
-        "proxy":{
-            "username":"ProxyUser1",
-            "password":"ProxyPassword1",
-            "domain":null
-        },
-        "target":{
-            "username":"TargetUser1",
-            "password":"TargetPassword1",
-            "domain":null
-        },
-        "destination":"192.168.1.2:3389"
-    },
-    {
-        "proxy":{
-            "username":"ProxyUser2",
-            "password":"ProxyPassword2",
-            "domain":"ProxyDomain2"
-        },
-        "target":{
-            "username":"TargetUser1",
-            "password":"TargetPassword2",
-            "domain":"TargetDomain2"
-        },
-        "destination":"192.168.1.3:3389"
-    }
-]'"#
-                    )
-                    .takes_value(true)
-                    .empty_values(false)
-                    .validator(|filename| match rdp::IdentitiesProxy::from_file(filename.as_str()) {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(e.to_string())
-                    }),
+                    .empty_values(false),
             );
 
         let matches = cli_app.get_matches();
@@ -337,12 +301,6 @@ identities_file example:
             Some("wayk") => Protocol::WAYK,
             Some("rdp") => Protocol::RDP,
             _ => Protocol::UNKNOWN,
-        };
-
-        let rdp_identities = if let Some(filename) = matches.value_of(ARG_IDENTITIES_FILE) {
-            Some(rdp::IdentitiesProxy::from_file(filename).unwrap())
-        } else {
-            None
         };
 
         let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
@@ -429,7 +387,7 @@ identities_file example:
                     url.port_or_known_default().unwrap_or(8080)
                 )
                 .parse::<Url>()
-                .unwrap_or_else(|_| panic!("External_url can't be built based on listener {}", listener));
+                .unwrap_or_else(|_| panic!("External url can't be built based on listener {}", listener));
             }
 
             listeners.push(ListenerConfig { url, external_url });
@@ -448,7 +406,6 @@ identities_file example:
             routing_url,
             pcap_files_path,
             protocol,
-            rdp_identities,
             log_file,
             rdp,
             certificate: CertificateConfig {

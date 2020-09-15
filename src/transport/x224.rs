@@ -1,10 +1,9 @@
-use std::io;
-
 use bytes::BytesMut;
 use ironrdp::{
     nego::{NegotiationError, Request, Response},
     Data, PduParsing,
 };
+use std::io;
 use tokio::codec::{Decoder, Encoder};
 
 macro_rules! negotiation_try {
@@ -117,10 +116,9 @@ fn map_negotiation_error(e: NegotiationError) -> io::Error {
             io::ErrorKind::Other,
             format!("Negotiation Response error (code: {:?})", e),
         ),
-        NegotiationError::TpktVersionError => io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Negotiation invalid tpkt header version".to_string(),
-        ),
+        NegotiationError::TpktVersionError => {
+            io::Error::new(io::ErrorKind::InvalidData, "Negotiation invalid tpkt header version")
+        }
         NegotiationError::IOError(e) => e,
     }
 }

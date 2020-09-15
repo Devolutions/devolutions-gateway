@@ -1,24 +1,13 @@
-use std::io;
-
-use futures::{try_ready, Future};
-use ironrdp::nego;
-use tokio::{
-    codec::{Decoder, Framed},
-    net::tcp::{ConnectFuture, TcpStream},
-    prelude::{Async, Poll, Sink},
-};
-use tokio_rustls::{TlsAcceptor, TlsStream};
-
 use crate::{
     rdp::{
         filter::FilterConfig,
-        identities_proxy::{IdentitiesProxy, RdpIdentity},
         sequence_future::{
             create_negotiation_request, Finalization, GetStateArgs, McsFuture, McsFutureTransport, McsInitialFuture,
             NegotiationWithClientFuture, NegotiationWithServerFuture, NlaTransport, NlaWithClientFuture,
             NlaWithServerFuture, ParseStateArgs, PostMcs, PostMcsFutureTransport, SendStateArgs, SequenceFuture,
             StaticChannels,
         },
+        RdpIdentity,
     },
     transport::{
         mcs::{McsTransport, SendDataContextTransport},
@@ -27,16 +16,25 @@ use crate::{
     },
     utils,
 };
+use futures::{try_ready, Future};
+use ironrdp::nego;
+use std::io;
+use tokio::{
+    codec::{Decoder, Framed},
+    net::tcp::{ConnectFuture, TcpStream},
+    prelude::{Async, Poll, Sink},
+};
+use tokio_rustls::{TlsAcceptor, TlsStream};
+use utils::url_to_socket_arr;
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
     client_nla_transport: Option<NlaTransport>,
     tls_proxy_pubkey: Option<Vec<u8>>,
     tls_acceptor: Option<TlsAcceptor>,
-    identities_proxy: IdentitiesProxy,
+    identity: RdpIdentity,
     request: Option<nego::Request>,
     response_protocol: Option<nego::SecurityProtocol>,
-    rdp_identity: Option<RdpIdentity>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
 }
@@ -53,7 +51,7 @@ impl ConnectionSequenceFuture {
         connection_request: nego::Request,
         tls_proxy_pubkey: Vec<u8>,
         tls_acceptor: TlsAcceptor,
-        identities_proxy: IdentitiesProxy,
+        identity: RdpIdentity,
     ) -> Self {
         Self {
             state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(
@@ -62,10 +60,9 @@ impl ConnectionSequenceFuture {
             client_nla_transport: None,
             tls_proxy_pubkey: Some(tls_proxy_pubkey),
             tls_acceptor: Some(tls_acceptor),
-            identities_proxy,
+            identity,
             request: None,
             response_protocol: None,
-            rdp_identity: None,
             filter_config: None,
             joined_static_channels: None,
         }
@@ -96,28 +93,11 @@ impl ConnectionSequenceFuture {
             self.tls_proxy_pubkey
                 .take()
                 .expect("TLS proxy public key must be set in the constructor"),
-            self.identities_proxy.clone(),
+            self.identity.clone(),
             self.tls_acceptor
                 .take()
                 .expect("TLS acceptor must be set in the constructor"),
         )
-    }
-
-    fn create_connect_server_future(&self) -> io::Result<ConnectFuture> {
-        let destination = self
-            .rdp_identity
-            .as_ref()
-            .expect("The RDP identity must be set after the client negotiation")
-            .destination
-            .clone();
-        let destination_addr = destination.parse().map_err(move |e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Invalid target destination ({}): {}", destination, e),
-            )
-        })?;
-
-        Ok(TcpStream::connect(&destination_addr))
     }
 
     fn create_server_negotiation_future(
@@ -126,12 +106,8 @@ impl ConnectionSequenceFuture {
     ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>> {
         let server_transport = NegotiationWithServerTransport::default().framed(server);
 
-        let target_username = self.rdp_identity
-            .as_ref()
-            .expect("The RDP identity must be set after the client negotiation and be taken by reference in the connect server state")
-            .target
-            .username
-            .clone();
+        let target_username = self.identity.target.username.clone();
+
         let pdu = create_negotiation_request(
             target_username,
             self.request
@@ -147,16 +123,13 @@ impl ConnectionSequenceFuture {
             },
         ))
     }
+
     fn create_nla_server_future(
         &self,
         server: TcpStream,
         server_response_protocol: nego::SecurityProtocol,
     ) -> io::Result<NlaWithServerFuture> {
-        let target_identity = self.rdp_identity
-            .as_ref()
-            .expect("The RDP identity must be set after the client negotiation and be taken by reference in the server negotiation state")
-            .target
-            .clone();
+        let target_identity = self.identity.target.clone();
         let request_flags = self
             .request
             .as_ref()
@@ -191,12 +164,7 @@ impl ConnectionSequenceFuture {
             .response_protocol
             .expect("Response protocol must be set in NegotiationWithServer future");
 
-        let target = self
-            .rdp_identity
-            .as_ref()
-            .expect("the RDP identity must be set after the server NLA")
-            .target
-            .clone();
+        let target = self.identity.target.clone();
         let target_converted = ironrdp::rdp::Credentials {
             username: target.username,
             password: target.password,
@@ -211,6 +179,7 @@ impl ConnectionSequenceFuture {
             },
         )
     }
+
     fn create_mcs_future(
         &mut self,
         client_mcs_initial_transport: Framed<TlsStream<TcpStream>, DataTransport>,
@@ -231,6 +200,7 @@ impl ConnectionSequenceFuture {
             },
         )
     }
+
     fn create_post_mcs_future(
         &mut self,
         client_transport: McsFutureTransport,
@@ -298,11 +268,11 @@ impl Future for ConnectionSequenceFuture {
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithClient(nla_future) => {
-                    let (client_transport, rdp_identity) = try_ready!(nla_future.poll());
+                    let client_transport = try_ready!(nla_future.poll());
                     self.client_nla_transport = Some(client_transport);
-                    self.rdp_identity = Some(rdp_identity);
 
-                    self.state = ConnectionSequenceFutureState::ConnectToServer(self.create_connect_server_future()?);
+                    let stream = TcpStream::connect(&url_to_socket_arr(&self.identity.dest_host));
+                    self.state = ConnectionSequenceFutureState::ConnectToServer(stream);
                 }
                 ConnectionSequenceFutureState::ConnectToServer(connect_future) => {
                     let server = try_ready!(connect_future.poll());

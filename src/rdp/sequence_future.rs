@@ -70,6 +70,7 @@ where
             future_state: FutureState::GetMessage,
         }
     }
+
     pub fn with_parse_state(future: F, args: ParseStateArgs<T, U>) -> Self {
         Self {
             future,
@@ -80,6 +81,7 @@ where
             future_state: FutureState::ParseMessage,
         }
     }
+
     pub fn with_send_state(future: F, args: SendStateArgs<T, U>) -> Self {
         Self {
             future,

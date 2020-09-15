@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::{config::Config, rdp::RdpIdentity};
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
@@ -6,7 +6,8 @@ use picky::jose::{
     jwe::Jwe,
     jwt::{JwtDate, JwtSig, JwtValidator},
 };
-use std::{io, sync::Arc};
+use sspi::AuthIdentity;
+use std::io;
 use url::Url;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
@@ -14,7 +15,7 @@ const DEFAULT_RDP_PORT: u16 = 3389;
 const EXPECTED_JET_AP_VALUE: &str = "rdp";
 const EXPECTED_JET_CM_VALUE: &str = "fwd"; // currently only "forward-only" connection mode is supported
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug)]
 pub struct CredsClaims {
     // Proxy credentials (client <-> jet)
     prx_usr: String,
@@ -25,10 +26,10 @@ pub struct CredsClaims {
     dst_pwd: String,
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug)]
 struct RoutingClaims {
     #[serde(flatten)]
-    creds: Option<CredsClaims>,
+    creds: CredsClaims,
 
     /// Destination Host <host>:<port>
     dst_hst: String,
@@ -40,12 +41,7 @@ struct RoutingClaims {
     jet_ap: String,
 }
 
-pub struct PreconnectionPduRoute {
-    pub dest_host: Url,
-    pub creds: Option<CredsClaims>,
-}
-
-pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<PreconnectionPduRoute, io::Error> {
+pub fn validate_identity(pdu: &PreconnectionPdu, config: &Config) -> Result<RdpIdentity, io::Error> {
     let encrypted_jwt = pdu
         .payload
         .as_ref()
@@ -123,9 +119,18 @@ pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<Prec
         })?;
     }
 
-    Ok(PreconnectionPduRoute {
+    Ok(RdpIdentity {
+        proxy: AuthIdentity {
+            username: claims.creds.prx_usr,
+            password: claims.creds.prx_pwd,
+            domain: None,
+        },
+        target: AuthIdentity {
+            username: claims.creds.dst_usr,
+            password: claims.creds.dst_pwd,
+            domain: None,
+        },
         dest_host,
-        creds: claims.creds,
     })
 }
 
