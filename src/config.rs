@@ -13,7 +13,7 @@ const ARG_API_KEY: &str = "api-key";
 const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
 const ARG_HTTP_LISTENER_URL: &str = "http-listener-url";
-const ARG_INSTANCE: &str = "instance";
+const ARG_JET_INSTANCE: &str = "jet-instance";
 const ARG_CERTIFICATE_FILE: &str = "certificate-file";
 const ARG_CERTIFICATE_DATA: &str = "certificate-data";
 const ARG_PRIVATE_KEY_FILE: &str = "private-key-file";
@@ -130,8 +130,8 @@ impl Config {
                     .default_value(&default_http_listener_url),
             )
             .arg(
-                Arg::with_name(ARG_INSTANCE)
-                    .long("instance")
+                Arg::with_name(ARG_JET_INSTANCE)
+                    .long("jet-instance")
                     .value_name("NAME")
                     .env("JET_INSTANCE")
                     .help("Specific name to reach that instance of JET.")
@@ -285,7 +285,7 @@ impl Config {
             .unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
 
         let jet_instance = matches
-            .value_of(ARG_INSTANCE)
+            .value_of(ARG_JET_INSTANCE)
             .unwrap() // enforced by clap
             .to_string();
 
