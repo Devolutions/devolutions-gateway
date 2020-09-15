@@ -220,15 +220,7 @@ fn handle_send_data_request(
             ) => {
                 debug!("Got client's DVC Capabilities Response PDU: {:?}", capabilities);
 
-                let response_v1 = dvc::CapabilitiesResponsePdu {
-                    version: dvc::CapsVersion::V1,
-                };
-
-                if capabilities != response_v1 {
-                    debug!("Downgrading client's DVC Capabilities Response PDU to V1");
-                }
-
-                let caps_response_pdu = dvc::ClientPdu::CapabilitiesResponse(response_v1);
+                let caps_response_pdu = dvc::ClientPdu::CapabilitiesResponse(capabilities);
 
                 dvc_data.resize(caps_response_pdu.buffer_length(), 0);
                 caps_response_pdu.to_buffer(dvc_data.as_mut())?;
@@ -316,13 +308,7 @@ fn handle_send_data_indication(
             (DvcCapabilitiesState::ServerDvcCapabilitiesRequest, dvc::ServerPdu::CapabilitiesRequest(capabilities)) => {
                 debug!("Got server's DVC Capabilities Request PDU: {:?}", capabilities);
 
-                let request_v1 = dvc::CapabilitiesRequestPdu::V1;
-
-                if capabilities != request_v1 {
-                    debug!("Downgrading server's DVC Capabilities Request PDU to V1");
-                }
-
-                let caps_request_pdu = dvc::ServerPdu::CapabilitiesRequest(request_v1);
+                let caps_request_pdu = dvc::ServerPdu::CapabilitiesRequest(capabilities);
 
                 dvc_data.resize(caps_request_pdu.buffer_length(), 0);
                 caps_request_pdu.to_buffer(dvc_data.as_mut())?;
