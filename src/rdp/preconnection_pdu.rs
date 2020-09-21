@@ -15,6 +15,11 @@ const DEFAULT_RDP_PORT: u16 = 3389;
 const EXPECTED_JET_AP_VALUE: &str = "rdp";
 const EXPECTED_JET_CM_VALUE: &str = "fwd"; // currently only "forward-only" connection mode is supported
 
+pub enum TokenRoutingMode {
+    RdpTcp(Url),
+    RdpTls(RdpIdentity),
+}
+
 #[derive(Deserialize, Debug)]
 pub struct CredsClaims {
     // Proxy credentials (client <-> jet)
@@ -29,7 +34,7 @@ pub struct CredsClaims {
 #[derive(Deserialize, Debug)]
 struct RoutingClaims {
     #[serde(flatten)]
-    creds: CredsClaims,
+    creds: Option<CredsClaims>,
 
     /// Destination Host <host>:<port>
     dst_hst: String,
@@ -41,7 +46,7 @@ struct RoutingClaims {
     jet_ap: String,
 }
 
-pub fn validate_identity(pdu: &PreconnectionPdu, config: &Config) -> Result<RdpIdentity, io::Error> {
+pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<TokenRoutingMode, io::Error> {
     let encrypted_jwt = pdu
         .payload
         .as_ref()
@@ -74,7 +79,7 @@ pub fn validate_identity(pdu: &PreconnectionPdu, config: &Config) -> Result<RdpI
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
-    let jwt_token = JwtSig::<RoutingClaims>::decode(&signed_jwt, &provisioner_key, &validator).map_err(|e| {
+    let jwt_token = JwtSig::<RoutingClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Failed to resolve route via JWT routing token: {}", e),
@@ -119,19 +124,22 @@ pub fn validate_identity(pdu: &PreconnectionPdu, config: &Config) -> Result<RdpI
         })?;
     }
 
-    Ok(RdpIdentity {
-        proxy: AuthIdentity {
-            username: claims.creds.prx_usr,
-            password: claims.creds.prx_pwd,
-            domain: None,
-        },
-        target: AuthIdentity {
-            username: claims.creds.dst_usr,
-            password: claims.creds.dst_pwd,
-            domain: None,
-        },
-        dest_host,
-    })
+    match claims.creds {
+        Some(creds) => Ok(TokenRoutingMode::RdpTls(RdpIdentity {
+            proxy: AuthIdentity {
+                username: creds.prx_usr,
+                password: creds.prx_pwd,
+                domain: None,
+            },
+            target: AuthIdentity {
+                username: creds.dst_usr,
+                password: creds.dst_pwd,
+                domain: None,
+            },
+            dest_host,
+        })),
+        None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
+    }
 }
 
 pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<PreconnectionPdu>, io::Error> {

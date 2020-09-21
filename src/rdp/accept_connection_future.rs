@@ -1,32 +1,53 @@
-use crate::{rdp::preconnection_pdu::decode_preconnection_pdu, transport::x224::NegotiationWithClientTransport};
+use crate::{
+    config::Config,
+    rdp::{
+        preconnection_pdu::{decode_preconnection_pdu, TokenRoutingMode},
+        RdpIdentity,
+    },
+    transport::x224::NegotiationWithClientTransport,
+};
 use bytes::BytesMut;
 use futures::{try_ready, Async, Future, Poll};
-use ironrdp::{nego, PduBufferParsing, PreconnectionPdu};
-use std::io;
+use ironrdp::{nego, PduBufferParsing};
+use url::Url;
+use std::{io, sync::Arc};
 use tokio::{codec::Decoder, io::AsyncRead, net::tcp::TcpStream};
 
 const MAX_CONNECTION_PACKET_SIZE: usize = 4096;
+
+pub enum AcceptConnectionMode {
+    RdpTcp {
+        url: Url,
+        leftover_request: BytesMut,
+    },
+    RdpTls {
+        identity: RdpIdentity,
+        request: nego::Request,
+    },
+}
 
 pub struct AcceptConnectionFuture {
     nego_transport: NegotiationWithClientTransport,
     client: Option<TcpStream>,
     buffer: BytesMut,
-    pdu: Option<PreconnectionPdu>,
+    rdp_identity: Option<RdpIdentity>,
+    config: Arc<Config>,
 }
 
 impl AcceptConnectionFuture {
-    pub fn new(client: TcpStream) -> Self {
+    pub fn new(client: TcpStream, config: Arc<Config>) -> Self {
         Self {
             nego_transport: NegotiationWithClientTransport::default(),
             client: Some(client),
             buffer: BytesMut::default(),
-            pdu: None,
+            rdp_identity: None,
+            config,
         }
     }
 }
 
 impl Future for AcceptConnectionFuture {
-    type Item = (TcpStream, PreconnectionPdu, nego::Request);
+    type Item = (TcpStream, AcceptConnectionMode);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -42,12 +63,23 @@ impl Future for AcceptConnectionFuture {
         self.buffer.extend_from_slice(&received[..read_bytes]);
 
         loop {
-            match self.pdu.take() {
+            match self.rdp_identity.take() {
                 None => match decode_preconnection_pdu(&mut self.buffer) {
                     Ok(Some(pdu)) => {
                         let leftover_request = self.buffer.split_off(pdu.buffer_length());
-                        self.buffer = leftover_request;
-                        self.pdu = Some(pdu);
+                        let mode = crate::rdp::preconnection_pdu::resolve_routing_mode(&pdu, &self.config)?;
+                        match mode {
+                            TokenRoutingMode::RdpTcp(url) => {
+                                return Ok(Async::Ready((
+                                    self.client.take().unwrap(),
+                                    AcceptConnectionMode::RdpTcp { url, leftover_request },
+                                )));
+                            }
+                            TokenRoutingMode::RdpTls(identity) => {
+                                self.buffer = leftover_request;
+                                self.rdp_identity = Some(identity);
+                            }
+                        }
                     }
                     Ok(None) => return Ok(Async::NotReady),
                     Err(e) => {
@@ -61,12 +93,15 @@ impl Future for AcceptConnectionFuture {
                         ))
                     }
                 },
-                Some(pdu) => match self.nego_transport.decode(&mut self.buffer) {
+                Some(identity) => match self.nego_transport.decode(&mut self.buffer) {
                     Ok(Some(request)) => {
-                        return Ok(Async::Ready((self.client.take().unwrap(), pdu, request)));
+                        return Ok(Async::Ready((
+                            self.client.take().unwrap(),
+                            AcceptConnectionMode::RdpTls { identity, request },
+                        )));
                     }
                     Ok(None) => {
-                        self.pdu = Some(pdu);
+                        self.rdp_identity = Some(identity);
                         return Ok(Async::NotReady);
                     }
                     Err(e) => {

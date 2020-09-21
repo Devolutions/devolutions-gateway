@@ -21,10 +21,6 @@ dst_hst="$8"
 claims="{
     \"jet_ap\": \"rdp\",
     \"jet_cm\": \"fwd\",
-    \"prx_usr\": \"${prx_usr}\",
-    \"prx_pwd\": \"${prx_pwd}\",
-    \"dst_usr\": \"${dst_usr}\",
-    \"dst_pwd\": \"${dst_pwd}\",
     \"dst_hst\": \"${dst_hst}\"
 }"
 
