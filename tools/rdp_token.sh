@@ -24,11 +24,12 @@ claims="{
     \"dst_hst\": \"${dst_hst}\"
 }"
 
-echo "$claims" | step-cli crypto jwt sign - \
+printf "$claims" | step-cli crypto jwt sign - \
     -nbf $(date "+%s") \
     -exp $(date -d "$valid_for_mins minutes" "+%s") \
     -subtle \
     -key "$provider_key_path" \
+    | tr -d '\n' \
     | step-cli crypto jwe encrypt \
     -alg RSA-OAEP-256 \
     -enc A256GCM \
