@@ -511,13 +511,13 @@ dependencies = [
  "futures 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.12.35 (registry+https://github.com/rust-lang/crates.io-index)",
  "indexmap 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "ironrdp 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ironrdp 0.4.1 (git+https://github.com/Devolutions/IronRDP?rev=ecfdf9dd111a5f30)",
  "jet-proto 0.1.0",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "native-tls 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "packet 0.1.2 (git+https://github.com/fdubois1/rust-packet.git)",
  "pcap-file 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "picky 6.0.0-beta3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "picky 6.0.0-beta4 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest 0.9.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "ring 0.16.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustls 0.16.0 (git+https://github.com/vaffeine/rustls.git?branch=sni_jet_workaround)",
@@ -1049,7 +1049,7 @@ dependencies = [
 [[package]]
 name = "ironrdp"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/Devolutions/IronRDP?rev=ecfdf9dd111a5f30#ecfdf9dd111a5f305fe1884b9d576a8a0b79fbea"
 dependencies = [
  "bit_field 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1574,7 +1574,7 @@ dependencies = [
 
 [[package]]
 name = "picky"
-version = "6.0.0-beta3"
+version = "6.0.0-beta4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "aes-gcm 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3194,7 +3194,7 @@ dependencies = [
 "checksum indexmap 1.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "712d7b3ea5827fcb9d4fda14bf4da5f136f0db2ae9c8f4bd4e2d1c6fde4e6db2"
 "checksum input_buffer 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "19a8a95243d5a0398cae618ec29477c6e3cb631152be5c19481f80bc71559754"
 "checksum iovec 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "b2b3ea6ff95e175473f8ffe6a7eb7c00d054240321b84c57051175fe3c1e075e"
-"checksum ironrdp 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "29ee9d3fe3fb868e554fa58830dfb30d8e2a9d293e14a418de25be575415cd2f"
+"checksum ironrdp 0.4.1 (git+https://github.com/Devolutions/IronRDP?rev=ecfdf9dd111a5f30)" = "<none>"
 "checksum itoa 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)" = "501266b7edd0174f8530248f87f99c88fbe60ca4ef3dd486835b8d8d53136f7f"
 "checksum js-sys 0.3.32 (registry+https://github.com/rust-lang/crates.io-index)" = "1c840fdb2167497b0bd0db43d6dfe61e91637fa72f9d061f8bd17ddc44ba6414"
 "checksum keccak 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
@@ -3251,7 +3251,7 @@ dependencies = [
 "checksum phf_codegen 0.7.24 (registry+https://github.com/rust-lang/crates.io-index)" = "b03e85129e324ad4166b06b2c7491ae27fe3ec353af72e72cd1654c7225d517e"
 "checksum phf_generator 0.7.24 (registry+https://github.com/rust-lang/crates.io-index)" = "09364cc93c159b8b06b1f4dd8a4398984503483891b0c26b867cf431fb132662"
 "checksum phf_shared 0.7.24 (registry+https://github.com/rust-lang/crates.io-index)" = "234f71a15de2288bcb7e3b6515828d22af7ec8598ee6d24c3b526fa0a80b67a0"
-"checksum picky 6.0.0-beta3 (registry+https://github.com/rust-lang/crates.io-index)" = "2ffe458bdecf0b8426bf7beecd2241afa187d76aa6b74ca1badb8cd600eacba6"
+"checksum picky 6.0.0-beta4 (registry+https://github.com/rust-lang/crates.io-index)" = "33aad4442a7f63f42d575e7745da1bedf64884c185bacc0033b7a3416c79fc81"
 "checksum picky-asn1 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "462cc017444f8183daf4765fb682023c1c5ce68a649df4a5ce2830ef3f653a6d"
 "checksum picky-asn1 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b0718a593406db1ad8be482278f79215a0901e978925462159d8598cacb004ea"
 "checksum picky-asn1-der 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1870d13b5ce802665d715a6a0b551ad48f27d0f5689a5951697cf00cab64f09a"

@@ -408,9 +408,9 @@ dependencies = [
 
 [[package]]
 name = "picky"
-version = "6.0.0-beta3"
+version = "6.0.0-beta4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ffe458bdecf0b8426bf7beecd2241afa187d76aa6b74ca1badb8cd600eacba6"
+checksum = "33aad4442a7f63f42d575e7745da1bedf64884c185bacc0033b7a3416c79fc81"
 dependencies = [
  "aes-gcm",
  "base64",

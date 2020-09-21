@@ -10,7 +10,7 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 
 [dependencies]
 jet-proto = { path = "./jet-proto" }
-picky = { version = "6.0.0-beta3", default-features = false, features = ["jose"] }
+picky = { version = "6.0.0-beta4", default-features = false, features = ["jose"] }
 clap = "2.32"
 url = "1.7.1"
 url_serde = "0.2.0"
@@ -42,7 +42,7 @@ chrono = { version = "0.4", features = ["serde"] }
 failure = "0.1"
 x509-parser = "0.6.0"
 sspi = "0.3.0"
-ironrdp = "0.4.1"
+ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ecfdf9dd111a5f30" }
 hyper = "0.12.32"
 tungstenite = "0.10"
 sha1 = "0.6.0"

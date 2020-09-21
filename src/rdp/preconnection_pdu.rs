@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::{config::Config, rdp::RdpIdentity};
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
@@ -6,7 +6,8 @@ use picky::jose::{
     jwe::Jwe,
     jwt::{JwtDate, JwtSig, JwtValidator},
 };
-use std::{io, sync::Arc};
+use sspi::AuthIdentity;
+use std::io;
 use url::Url;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
@@ -14,7 +15,12 @@ const DEFAULT_RDP_PORT: u16 = 3389;
 const EXPECTED_JET_AP_VALUE: &str = "rdp";
 const EXPECTED_JET_CM_VALUE: &str = "fwd"; // currently only "forward-only" connection mode is supported
 
-#[derive(Deserialize, Debug, PartialEq)]
+pub enum TokenRoutingMode {
+    RdpTcp(Url),
+    RdpTls(RdpIdentity),
+}
+
+#[derive(Deserialize, Debug)]
 pub struct CredsClaims {
     // Proxy credentials (client <-> jet)
     prx_usr: String,
@@ -25,7 +31,7 @@ pub struct CredsClaims {
     dst_pwd: String,
 }
 
-#[derive(Deserialize, Debug, PartialEq)]
+#[derive(Deserialize, Debug)]
 struct RoutingClaims {
     #[serde(flatten)]
     creds: Option<CredsClaims>,
@@ -40,12 +46,7 @@ struct RoutingClaims {
     jet_ap: String,
 }
 
-pub struct PreconnectionPduRoute {
-    pub dest_host: Url,
-    pub creds: Option<CredsClaims>,
-}
-
-pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<PreconnectionPduRoute, io::Error> {
+pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<TokenRoutingMode, io::Error> {
     let encrypted_jwt = pdu
         .payload
         .as_ref()
@@ -78,7 +79,7 @@ pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<Prec
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
-    let jwt_token = JwtSig::<RoutingClaims>::decode(&signed_jwt, &provisioner_key, &validator).map_err(|e| {
+    let jwt_token = JwtSig::<RoutingClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Failed to resolve route via JWT routing token: {}", e),
@@ -123,10 +124,22 @@ pub fn resolve_route(pdu: &PreconnectionPdu, config: Arc<Config>) -> Result<Prec
         })?;
     }
 
-    Ok(PreconnectionPduRoute {
-        dest_host,
-        creds: claims.creds,
-    })
+    match claims.creds {
+        Some(creds) => Ok(TokenRoutingMode::RdpTls(RdpIdentity {
+            proxy: AuthIdentity {
+                username: creds.prx_usr,
+                password: creds.prx_pwd,
+                domain: None,
+            },
+            target: AuthIdentity {
+                username: creds.dst_usr,
+                password: creds.dst_pwd,
+                domain: None,
+            },
+            dest_host,
+        })),
+        None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
+    }
 }
 
 pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<PreconnectionPdu>, io::Error> {
