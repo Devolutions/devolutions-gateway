@@ -9,9 +9,9 @@ use crate::{
 use bytes::BytesMut;
 use futures::{try_ready, Async, Future, Poll};
 use ironrdp::{nego, PduBufferParsing};
-use url::Url;
 use std::{io, sync::Arc};
 use tokio::{codec::Decoder, io::AsyncRead, net::tcp::TcpStream};
+use url::Url;
 
 const MAX_CONNECTION_PACKET_SIZE: usize = 4096;
 
