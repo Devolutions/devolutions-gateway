@@ -104,14 +104,14 @@ impl Config {
                     .value_name("URL")
                     .env("JET_LISTENERS")
                     .help(
-                        "An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>.\
+                        "An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. \
                          Supported schemes: tcp, ws, wss",
                     )
                     .long_help(
-                        "An URL on which the server will listen on.\
-                         The external URL returned as candidate can be specified after the listener,\
-                         separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port>\
-                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port>\
+                        "An URL on which the server will listen on. \
+                         The external URL returned as candidate can be specified after the listener, \
+                         separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port> \
+                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port> \
                          where <jet_instance> is the value of the jet-instance parameter.",
                     )
                     .multiple(true)
@@ -209,8 +209,10 @@ impl Config {
                     .value_name("URL")
                     .help("An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.")
                     .long_help(
-                        "An address on which the server will route all packets. Format: <scheme>://<ip>:<port>.\
-                         Scheme supported : tcp and tls. If it is not specified, the JET protocol will be used.",
+                        "An address on which the server will route all packets.\n\
+                         Format: <scheme>://<ip>:<port>.\n\
+                         Supported schemes: tcp, tls.\n\
+                         If it is not specified, the JET protocol will be used.",
                     )
                     .takes_value(true)
                     .empty_values(false)
@@ -227,11 +229,11 @@ impl Config {
                     .long("pcap-files-path")
                     .value_name("PATH")
                     .help(
-                        "Path to the pcap files. If not set, no pcap files will be created.\
+                        "Path to the pcap files. If not set, no pcap files will be created. \
                          WaykNow and RDP protocols can be saved.",
                     )
                     .long_help(
-                        "Path to the pcap files. If not set, no pcap files will be created.\
+                        "Path to the pcap files. If not set, no pcap files will be created. \
                          WaykNow and RDP protocols can be saved.",
                     )
                     .takes_value(true)
@@ -250,12 +252,12 @@ impl Config {
                     .long("protocol")
                     .value_name("PROTOCOL_NAME")
                     .help(
-                        "Specify the application protocol used. Useful when pcap file is saved\
+                        "Specify the application protocol used. Useful when pcap file is saved \
                          and you want to avoid application message in two different tcp packet.",
                     )
                     .long_help(
-                        "Specify the application protocol used. Useful when pcap file is saved and you want to\
-                         avoid application message in two different tcp packet. If protocol is unknown, we can't\
+                        "Specify the application protocol used. Useful when pcap file is saved and you want to \
+                         avoid application message in two different tcp packet. If protocol is unknown, we can't \
                          be sure that application packet is not split between 2 tcp packets.",
                     )
                     .takes_value(true)
