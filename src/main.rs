@@ -30,6 +30,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     sync::{Arc, Mutex},
     time::Duration,
+    sync::mpsc
 };
 use tokio::{
     net::tcp::{TcpListener, TcpStream},
@@ -38,9 +39,48 @@ use tokio::{
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
+use ceviche::controller::*;
+use ceviche::{Service, ServiceEvent};
+
+mod service;
+use service::GatewayService;
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
+
+enum CustomServiceEvent {}
+
+fn gateway_service_main(
+    rx: mpsc::Receiver<ServiceEvent<CustomServiceEvent>>,
+    _tx: mpsc::Sender<ServiceEvent<CustomServiceEvent>>,
+    args: Vec<String>,
+    standalone_mode: bool,
+) -> u32 {
+    let service = GatewayService::load().expect("unable to load service");
+    //init_logging(&service, standalone_mode);
+    info!("{} service started", service.get_service_name());
+    info!("args: {:?}", args);
+
+    service.start();
+
+    loop {
+        if let Ok(control_code) = rx.recv() {
+            info!("Received control code: {}", control_code);
+            match control_code {
+                ServiceEvent::Stop => {
+                    service.stop();
+                    break
+                }
+                _ => (),
+            }
+        }
+    }
+
+    info!("{} service stopping", service.get_service_name());
+    0
+}
+
+Service!("gateway", gateway_service_main);
 
 fn main() {
     let config = Arc::new(Config::init());
