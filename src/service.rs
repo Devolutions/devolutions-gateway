@@ -40,6 +40,14 @@ use tokio::{
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
 
+pub struct GatewayContext {
+    pub tcp_listeners: Vec<Url>,
+    pub websocket_listeners: Vec<Url>,
+    pub jet_associations: JetAssociationsMap,
+    pub http_server: HttpServer,
+    pub http_service: HttpService,
+}
+
 pub struct GatewayService {
     pub config: Arc<Config>,
     pub logger: Logger,
@@ -96,13 +104,9 @@ impl GatewayService {
 
     }
 
-    pub fn run(&mut self) {
+    pub fn create(&self) -> Option<GatewayContext> {
         let config = &self.config;
-        let logger = &self.logger;
 
-        let runtime = &mut self.runtime;
-        let executor_handle = runtime.executor();
-    
         let tcp_listeners: Vec<Url> = config
             .listeners
             .iter()
@@ -114,6 +118,7 @@ impl GatewayService {
                 }
             })
             .collect();
+
         let websocket_listeners: Vec<Url> = config
             .listeners
             .iter()
@@ -125,18 +130,36 @@ impl GatewayService {
                 }
             })
             .collect();
-    
-        // Initialize the various data structures we're going to use in our server.
+
         let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
-    
-        info!("Starting HTTP server ...");
+
+        let executor_handle = self.runtime.executor();
+
         let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
         if let Err(e) = http_server.start(executor_handle.clone()) {
             error!("HTTP server failed to start: {}", e);
-            return;
+            return None;
         }
-        info!("HTTP server successfully started");
+
         let http_service = http_server.server.get_request_handler().clone();
+
+        Some(GatewayContext {
+            tcp_listeners: tcp_listeners,
+            websocket_listeners: websocket_listeners,
+            jet_associations: jet_associations,
+            http_server: http_server,
+            http_service: http_service,
+        })
+    }
+
+    pub fn run(&mut self) {
+        let context = self.create().unwrap();
+
+        let config = &self.config;
+        let logger = &self.logger;
+
+        let runtime = &mut self.runtime;
+        let executor_handle = runtime.executor();
     
         // Create the TLS acceptor.
         let client_no_auth = rustls::NoClientAuth::new();
@@ -148,24 +171,25 @@ impl GatewayService {
         let config_ref = Arc::new(server_config);
         let tls_acceptor = TlsAcceptor::from(config_ref);
     
-        let mut futures = Vec::with_capacity(websocket_listeners.len() + tcp_listeners.len());
-        for url in websocket_listeners {
+        let mut futures = Vec::new();
+
+        for url in &context.websocket_listeners {
             futures.push(start_websocket_server(
-                url,
+                url.clone(),
                 config.clone(),
-                http_service.clone(),
-                jet_associations.clone(),
+                context.http_service.clone(),
+                context.jet_associations.clone(),
                 tls_acceptor.clone(),
                 executor_handle.clone(),
                 logger.clone(),
             ));
         }
     
-        for url in tcp_listeners {
+        for url in &context.tcp_listeners {
             futures.push(start_tcp_server(
-                url,
+                url.clone(),
                 config.clone(),
-                jet_associations.clone(),
+                context.jet_associations.clone(),
                 tls_acceptor.clone(),
                 tls_public_key.clone(),
                 executor_handle.clone(),
@@ -177,7 +201,7 @@ impl GatewayService {
             error!("Listeners failed: {}", e);
         }
     
-        http_server.stop();
+        context.http_server.stop();
     }
 }
 
