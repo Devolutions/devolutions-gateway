@@ -46,6 +46,7 @@ pub struct GatewayContext {
     pub jet_associations: JetAssociationsMap,
     pub http_server: HttpServer,
     pub http_service: HttpService,
+    pub futures: Vec<Box<dyn Future<Error = String, Item = ()> + Send>>,
 }
 
 pub struct GatewayService {
@@ -143,24 +144,6 @@ impl GatewayService {
 
         let http_service = http_server.server.get_request_handler().clone();
 
-        Some(GatewayContext {
-            tcp_listeners: tcp_listeners,
-            websocket_listeners: websocket_listeners,
-            jet_associations: jet_associations,
-            http_server: http_server,
-            http_service: http_service,
-        })
-    }
-
-    pub fn run(&mut self) {
-        let context = self.create().unwrap();
-
-        let config = &self.config;
-        let logger = &self.logger;
-
-        let runtime = &mut self.runtime;
-        let executor_handle = runtime.executor();
-    
         // Create the TLS acceptor.
         let client_no_auth = rustls::NoClientAuth::new();
         let mut server_config = rustls::ServerConfig::new(client_no_auth);
@@ -170,34 +153,49 @@ impl GatewayService {
         server_config.set_single_cert(certs, priv_key).unwrap();
         let config_ref = Arc::new(server_config);
         let tls_acceptor = TlsAcceptor::from(config_ref);
+
+        let logger = &self.logger;
     
         let mut futures = Vec::new();
 
-        for url in &context.websocket_listeners {
+        for url in &websocket_listeners {
             futures.push(start_websocket_server(
                 url.clone(),
                 config.clone(),
-                context.http_service.clone(),
-                context.jet_associations.clone(),
+                http_service.clone(),
+                jet_associations.clone(),
                 tls_acceptor.clone(),
                 executor_handle.clone(),
                 logger.clone(),
             ));
         }
     
-        for url in &context.tcp_listeners {
+        for url in &tcp_listeners {
             futures.push(start_tcp_server(
                 url.clone(),
                 config.clone(),
-                context.jet_associations.clone(),
+                jet_associations.clone(),
                 tls_acceptor.clone(),
                 tls_public_key.clone(),
                 executor_handle.clone(),
                 logger.clone(),
             ));
         }
+
+        Some(GatewayContext {
+            tcp_listeners: tcp_listeners,
+            websocket_listeners: websocket_listeners,
+            jet_associations: jet_associations,
+            http_server: http_server,
+            http_service: http_service,
+            futures: futures,
+        })
+    }
+
+    pub fn run(&mut self) {
+        let context = self.create().expect("failed to create gateway context");
     
-        if let Err(e) = runtime.block_on(future::join_all(futures)) {
+        if let Err(e) = self.runtime.block_on(future::join_all(context.futures)) {
             error!("Listeners failed: {}", e);
         }
     

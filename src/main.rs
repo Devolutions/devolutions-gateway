@@ -11,11 +11,11 @@ use ceviche::{Service, ServiceEvent};
 mod service;
 use service::GatewayService;
 
-enum CustomServiceEvent {}
+enum GatewayServiceEvent {}
 
 fn gateway_service_main(
-    rx: mpsc::Receiver<ServiceEvent<CustomServiceEvent>>,
-    _tx: mpsc::Sender<ServiceEvent<CustomServiceEvent>>,
+    rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
+    _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
     args: Vec<String>,
     standalone_mode: bool,
 ) -> u32 {
