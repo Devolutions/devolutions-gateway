@@ -1,25 +1,23 @@
-
-use slog_scope::{info};
-
-use std::{
-    sync::mpsc
-};
-
-use ceviche::controller::*;
-use ceviche::{Service, ServiceEvent};
-
 mod service;
-use service::GatewayService;
 
+use ceviche::{controller::*, Service, ServiceEvent};
+use futures::{Future, Stream};
+use service::GatewayService;
+use slog_scope::info;
+use std::sync::mpsc;
+
+#[allow(dead_code)] // TODO
 enum GatewayServiceEvent {}
 
+#[allow(dead_code)] // TODO
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
     args: Vec<String>,
-    standalone_mode: bool,
+    _standalone_mode: bool,
 ) -> u32 {
-    let service = GatewayService::load().expect("unable to load service");
+    let mut service = GatewayService::load().expect("unable to load service");
+
     //init_logging(&service, standalone_mode);
     info!("{} service started", service.get_service_name());
     info!("args: {:?}", args);
@@ -29,17 +27,16 @@ fn gateway_service_main(
     loop {
         if let Ok(control_code) = rx.recv() {
             info!("Received control code: {}", control_code);
-            match control_code {
-                ServiceEvent::Stop => {
-                    service.stop();
-                    break
-                }
-                _ => (),
+
+            if let ServiceEvent::Stop = control_code {
+                service.stop();
+                break;
             }
         }
     }
 
     info!("{} service stopping", service.get_service_name());
+
     0
 }
 
@@ -47,5 +44,34 @@ Service!("gateway", gateway_service_main);
 
 fn main() {
     let mut service = GatewayService::load().expect("unable to load service");
-    service.run();
+
+    service.start();
+
+    // future waiting for some stop signals (CTRL-C…)
+    let signals_fut = build_signals_fut();
+    let mut runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
+    runtime
+        .block_on(signals_fut)
+        .expect("couldn't block waiting for signals");
+
+    service.stop();
+}
+
+#[cfg(unix)]
+fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
+    use tokio_signal::unix::{Signal, SIGINT, SIGQUIT, SIGTERM};
+
+    let fut = futures::future::select_all(vec![
+        Signal::new(SIGTERM).flatten_stream().into_future(),
+        Signal::new(SIGQUIT).flatten_stream().into_future(),
+        Signal::new(SIGINT).flatten_stream().into_future(),
+    ]);
+
+    Box::new(fut.map(|_| ()).map_err(|_| ()))
+}
+
+#[cfg(not(unix))]
+fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
+    let fut = futures::future::select_all(vec![tokio_signal::ctrl_c().flatten_stream().into_future()]);
+    Box::new(fut.map(|_| ()).map_err(|_| ()))
 }

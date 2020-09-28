@@ -1,4 +1,3 @@
-
 use devolutions_jet::{
     config::Config,
     http::http_server::HttpServer,
@@ -22,7 +21,7 @@ use futures::{
 use hyper::service::service_fn;
 use saphir::server::HttpService;
 use slog::{o, Logger};
-use slog_scope::{error, info, slog_error, warn, GlobalLoggerGuard};
+use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future01::FutureExt;
 use std::{
     collections::HashMap,
@@ -30,199 +29,225 @@ use std::{
     io::ErrorKind,
     net::{SocketAddr, ToSocketAddrs},
     sync::{Arc, Mutex},
-    time::Duration
+    time::Duration,
 };
 use tokio::{
     net::tcp::{TcpListener, TcpStream},
     prelude::{AsyncRead, AsyncWrite},
     runtime::{Runtime, TaskExecutor},
+    sync::oneshot,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
 
-pub struct GatewayContext {
-    pub tcp_listeners: Vec<Url>,
-    pub websocket_listeners: Vec<Url>,
-    pub jet_associations: JetAssociationsMap,
-    pub http_server: HttpServer,
-    pub http_service: HttpService,
-    pub futures: Vec<Box<dyn Future<Error = String, Item = ()> + Send>>,
+pub struct StopAllTasksEvent;
+
+#[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
+pub enum GatewayState {
+    Stopped,
+    Running {
+        http_server: HttpServer,
+        runtime: Runtime,
+        stop_tasks_sender: oneshot::Sender<StopAllTasksEvent>,
+    },
+}
+
+impl Default for GatewayState {
+    fn default() -> Self {
+        Self::Stopped
+    }
 }
 
 pub struct GatewayService {
-    pub config: Arc<Config>,
-    pub logger: Logger,
-    pub service_name: String,
-    pub display_name: String,
-    pub description: String,
-
-    logger_guard: GlobalLoggerGuard,
-    runtime: Runtime,
+    config: Arc<Config>,
+    logger: Logger,
+    service_name: String,
+    display_name: String,
+    description: String,
+    state: GatewayState,
 }
 
 impl GatewayService {
-    pub fn load() -> Option<Self> {    
+    pub fn load() -> Option<Self> {
         let config = Arc::new(Config::init());
-        let logger = logger::init(config.log_file.as_deref()).expect("logging setup must not fail");
-        let logger_guard = slog_scope::set_global_logger(logger.clone());
-        slog_stdlog::init().unwrap();
+        let logger = logger::init(config.log_file.as_deref()).expect("failed to setup logger");
+        let _logger_guard = slog_scope::set_global_logger(logger.clone());
+        slog_stdlog::init().expect("failed to init logger");
 
         let service_name = "devolutions-gateway";
         let display_name = "Devolutions Gateway";
         let description = "Devolutions Gateway service";
 
-        let mut runtime = Runtime::new().expect("failed to create runtime");
-    
         Some(GatewayService {
-            config: config,
-            logger: logger,
+            config,
+            logger,
             service_name: service_name.to_string(),
             display_name: display_name.to_string(),
             description: description.to_string(),
-
-            logger_guard: logger_guard,
-            runtime: runtime,
+            state: GatewayState::Stopped,
         })
     }
 
+    #[allow(dead_code)] // FIXME: to use
     pub fn get_service_name(&self) -> &str {
         self.service_name.as_str()
     }
 
+    #[allow(dead_code)] // FIXME: to use
     pub fn get_display_name(&self) -> &str {
         self.display_name.as_str()
     }
 
+    #[allow(dead_code)] // FIXME: to use
     pub fn get_description(&self) -> &str {
         self.description.as_str()
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
+        let runtime = Runtime::new().expect("failed to create runtime");
 
-    }
+        let config = self.config.clone();
+        let logger = self.logger.clone();
+        let executor_handle = runtime.executor();
+        let context =
+            create_context(config, logger, executor_handle.clone()).expect("failed to create gateway context");
 
-    pub fn stop(&self) {
-
-    }
-
-    pub fn create(&self) -> Option<GatewayContext> {
-        let config = &self.config;
-
-        let tcp_listeners: Vec<Url> = config
-            .listeners
-            .iter()
-            .filter_map(|listener| {
-                if listener.url.scheme() == "tcp" {
-                    Some(listener.url.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let websocket_listeners: Vec<Url> = config
-            .listeners
-            .iter()
-            .filter_map(|listener| {
-                if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
-                    Some(listener.url.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
-
-        let executor_handle = self.runtime.executor();
-        let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
-        let http_service = http_server.server.get_request_handler().clone();
-
-        // Create the TLS acceptor.
-        let client_no_auth = rustls::NoClientAuth::new();
-        let mut server_config = rustls::ServerConfig::new(client_no_auth);
-        let certs = load_certs(&config.certificate).expect("could not load certs");
-        let tls_public_key = get_pub_key_from_der(&certs[0].0).expect("could not parse TLS public key");
-        let priv_key = load_private_key(&config.certificate).expect("could not load private key");
-        server_config.set_single_cert(certs, priv_key).unwrap();
-        let config_ref = Arc::new(server_config);
-        let tls_acceptor = TlsAcceptor::from(config_ref);
-
-        let logger = &self.logger;
-    
-        let mut futures = Vec::new();
-
-        for url in &websocket_listeners {
-            futures.push(start_websocket_server(
-                url.clone(),
-                config.clone(),
-                http_service.clone(),
-                jet_associations.clone(),
-                tls_acceptor.clone(),
-                executor_handle.clone(),
-                logger.clone(),
-            ));
-        }
-    
-        for url in &tcp_listeners {
-            futures.push(start_tcp_server(
-                url.clone(),
-                config.clone(),
-                jet_associations.clone(),
-                tls_acceptor.clone(),
-                tls_public_key.clone(),
-                executor_handle.clone(),
-                logger.clone(),
-            ));
-        }
-
-        Some(GatewayContext {
-            tcp_listeners: tcp_listeners,
-            websocket_listeners: websocket_listeners,
-            jet_associations: jet_associations,
-            http_server: http_server,
-            http_service: http_service,
-            futures: futures,
-        })
-    }
-
-    pub fn run(&mut self) {
-        let context = self.create().expect("failed to create gateway context");
-
-        let executor_handle = self.runtime.executor();
+        // start http server
         if let Err(e) = context.http_server.start(executor_handle.clone()) {
             error!("HTTP server failed to start: {}", e);
         }
 
-        //if let Err(e) = self.runtime.block_on(future::join_all(context.futures)) {
-        //    error!("Listeners failed: {}", e);
-        //}
+        // future joining all jet tasks
+        let all_tasks = future::join_all(context.futures).map_err(|e| {
+            error!("Listeners failed: {}", e);
+        });
 
-        #[cfg(unix)]
-        use tokio_signal::unix::{SIGINT, Signal, SIGQUIT, SIGTERM};
-    
-        #[cfg(unix)]
-        let signals = futures::future::select_all(vec![
-            Signal::new(SIGTERM).flatten_stream().into_future(),
-            Signal::new(SIGQUIT).flatten_stream().into_future(),
-            Signal::new(SIGINT).flatten_stream().into_future()
-        ]);
-    
-        #[cfg(not(unix))]
-        let signals = futures::future::select_all(vec![
-            tokio_signal::ctrl_c().flatten_stream().into_future()
-        ]);
+        // oneshot channel to stop our tasks using a select future
+        let (sender, receiver) = oneshot::channel::<StopAllTasksEvent>();
 
-        let mut ctrl_runtime = Runtime::new().expect("failed to create runtime");
-    
-        if ctrl_runtime.block_on(signals).is_err() {
-            error!("runtime execution error");
-        }
+        let select_fut = receiver
+            .map_err(|e| error!("Receiver error: {}", e))
+            .select2(all_tasks)
+            .map(|_| ())
+            .map_err(|_| ());
 
-        info!("Stopping gateway service");
-    
-        context.http_server.stop();
+        executor_handle.spawn(select_fut);
+
+        self.state = GatewayState::Running {
+            http_server: context.http_server,
+            runtime,
+            stop_tasks_sender: sender,
+        };
     }
+
+    pub fn stop(&mut self) {
+        match std::mem::take(&mut self.state) {
+            GatewayState::Stopped => {
+                info!("Attempted to stop gateway service, but it isn't started");
+            }
+            GatewayState::Running {
+                http_server,
+                runtime,
+                stop_tasks_sender,
+            } => {
+                info!("Stopping gateway service");
+
+                // stop http server
+                http_server.stop();
+
+                // stop all tasks using our sender
+                if stop_tasks_sender.send(StopAllTasksEvent).is_err() {
+                    error!("Failed to send stop event; will force runtime shutdown now");
+                    runtime.shutdown_now().wait().unwrap();
+                } else {
+                    info!("Waiting for graceful shutdown");
+                    runtime.shutdown_on_idle().wait().unwrap();
+                }
+
+                self.state = GatewayState::Stopped;
+            }
+        }
+    }
+}
+
+pub struct GatewayContext {
+    pub http_server: HttpServer,
+    pub futures: Vec<Box<dyn Future<Error = String, Item = ()> + Send>>,
+}
+
+pub fn create_context(
+    config: Arc<Config>,
+    logger: slog::Logger,
+    executor_handle: TaskExecutor,
+) -> Result<GatewayContext, &'static str> {
+    let tcp_listeners: Vec<Url> = config
+        .listeners
+        .iter()
+        .filter_map(|listener| {
+            if listener.url.scheme() == "tcp" {
+                Some(listener.url.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let websocket_listeners: Vec<Url> = config
+        .listeners
+        .iter()
+        .filter_map(|listener| {
+            if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
+                Some(listener.url.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
+
+    let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
+    let http_service = http_server.server.get_request_handler().clone();
+
+    // Create the TLS acceptor.
+    let client_no_auth = rustls::NoClientAuth::new();
+    let mut server_config = rustls::ServerConfig::new(client_no_auth);
+    let certs = load_certs(&config.certificate).map_err(|_| "could not load certs")?;
+    let tls_public_key = get_pub_key_from_der(&certs[0].0).map_err(|_| "could not parse TLS public key")?;
+    let priv_key = load_private_key(&config.certificate).map_err(|_| "could not load private key")?;
+    server_config
+        .set_single_cert(certs, priv_key)
+        .map_err(|_| "couldn't set server config cert")?;
+    let config_ref = Arc::new(server_config);
+    let tls_acceptor = TlsAcceptor::from(config_ref);
+
+    let mut futures = Vec::new();
+
+    for url in &websocket_listeners {
+        futures.push(start_websocket_server(
+            url.clone(),
+            config.clone(),
+            http_service.clone(),
+            jet_associations.clone(),
+            tls_acceptor.clone(),
+            executor_handle.clone(),
+            logger.clone(),
+        ));
+    }
+
+    for url in &tcp_listeners {
+        futures.push(start_tcp_server(
+            url.clone(),
+            config.clone(),
+            jet_associations.clone(),
+            tls_acceptor.clone(),
+            tls_public_key.clone(),
+            executor_handle.clone(),
+            logger.clone(),
+        ));
+    }
+
+    Ok(GatewayContext { http_server, futures })
 }
 
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;

@@ -4,9 +4,7 @@
 #[cfg(target_os = "windows")]
 extern crate embed_resource;
 
-use std::env;
-use std::fs::File;
-use std::io::Write;
+use std::{env, fs::File, io::Write};
 
 #[cfg(target_os = "windows")]
 fn generate_version_rc() -> String {
@@ -26,8 +24,8 @@ fn generate_version_rc() -> String {
     let vs_file_version = version_commas.clone();
     let vs_product_version = version_commas.clone();
 
-    let version_rc = format!(r#"
-#include <winresrc.h>
+    let version_rc = format!(
+        r#"#include <winresrc.h>
 VS_VERSION_INFO VERSIONINFO
     FILEVERSION {vs_file_version}
     PRODUCTVERSION {vs_product_version}
@@ -70,13 +68,15 @@ END
         legal_copyright = legal_copyright,
         original_filename = original_filename,
         product_name = product_name,
-        product_version = product_version);
+        product_version = product_version
+    );
 
     version_rc
 }
 
 fn main() {
-    #[cfg(target_os = "windows")] {
+    #[cfg(target_os = "windows")]
+    {
         let out_dir = env::var("OUT_DIR").unwrap();
         let version_rc_file = format!("{}/version.rc", out_dir);
         let version_rc_data = generate_version_rc();
