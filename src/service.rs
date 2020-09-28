@@ -65,13 +65,14 @@ pub struct GatewayService {
     display_name: String,
     description: String,
     state: GatewayState,
+    _logger_guard: slog_scope::GlobalLoggerGuard,
 }
 
 impl GatewayService {
     pub fn load() -> Option<Self> {
         let config = Arc::new(Config::init());
         let logger = logger::init(config.log_file.as_deref()).expect("failed to setup logger");
-        let _logger_guard = slog_scope::set_global_logger(logger.clone());
+        let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("failed to init logger");
 
         let service_name = "devolutions-gateway";
@@ -85,6 +86,7 @@ impl GatewayService {
             display_name: display_name.to_string(),
             description: description.to_string(),
             state: GatewayState::Stopped,
+            _logger_guard: logger_guard,
         })
     }
 
