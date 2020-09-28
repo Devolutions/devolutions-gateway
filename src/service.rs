@@ -135,13 +135,7 @@ impl GatewayService {
         let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
 
         let executor_handle = self.runtime.executor();
-
         let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
-        if let Err(e) = http_server.start(executor_handle.clone()) {
-            error!("HTTP server failed to start: {}", e);
-            return None;
-        }
-
         let http_service = http_server.server.get_request_handler().clone();
 
         // Create the TLS acceptor.
@@ -194,6 +188,11 @@ impl GatewayService {
 
     pub fn run(&mut self) {
         let context = self.create().expect("failed to create gateway context");
+
+        let executor_handle = self.runtime.executor();
+        if let Err(e) = context.http_server.start(executor_handle.clone()) {
+            error!("HTTP server failed to start: {}", e);
+        }
 
         //if let Err(e) = self.runtime.block_on(future::join_all(context.futures)) {
         //    error!("Listeners failed: {}", e);
