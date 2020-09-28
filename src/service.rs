@@ -194,10 +194,33 @@ impl GatewayService {
 
     pub fn run(&mut self) {
         let context = self.create().expect("failed to create gateway context");
+
+        //if let Err(e) = self.runtime.block_on(future::join_all(context.futures)) {
+        //    error!("Listeners failed: {}", e);
+        //}
+
+        #[cfg(unix)]
+        use tokio_signal::unix::{SIGINT, Signal, SIGQUIT, SIGTERM};
     
-        if let Err(e) = self.runtime.block_on(future::join_all(context.futures)) {
-            error!("Listeners failed: {}", e);
+        #[cfg(unix)]
+        let signals = futures::future::select_all(vec![
+            Signal::new(SIGTERM).flatten_stream().into_future(),
+            Signal::new(SIGQUIT).flatten_stream().into_future(),
+            Signal::new(SIGINT).flatten_stream().into_future()
+        ]);
+    
+        #[cfg(not(unix))]
+        let signals = futures::future::select_all(vec![
+            tokio_signal::ctrl_c().flatten_stream().into_future()
+        ]);
+
+        let mut ctrl_runtime = Runtime::new().expect("failed to create runtime");
+    
+        if ctrl_runtime.block_on(signals).is_err() {
+            error!("runtime execution error");
         }
+
+        info!("Stopping gateway service");
     
         context.http_server.stop();
     }
