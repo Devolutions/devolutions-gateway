@@ -1,7 +1,9 @@
+mod config;
 mod service;
 
 use ceviche::{controller::*, Service, ServiceEvent};
 use futures::{Future, Stream};
+use config::Config;
 use service::GatewayService;
 use slog_scope::info;
 use std::sync::mpsc;
@@ -18,7 +20,6 @@ fn gateway_service_main(
 ) -> u32 {
     let mut service = GatewayService::load().expect("unable to load service");
 
-    //init_logging(&service, standalone_mode);
     info!("{} service started", service.get_service_name());
     info!("args: {:?}", args);
 
@@ -43,18 +44,27 @@ fn gateway_service_main(
 Service!("gateway", gateway_service_main);
 
 fn main() {
-    let mut service = GatewayService::load().expect("unable to load service");
+    let config = Config::init();
 
-    service.start();
+    if config.console_mode {
+        let mut service = GatewayService::load().expect("unable to load service");
 
-    // future waiting for some stop signals (CTRL-C…)
-    let signals_fut = build_signals_fut();
-    let mut runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
-    runtime
-        .block_on(signals_fut)
-        .expect("couldn't block waiting for signals");
+        service.start();
+    
+        // future waiting for some stop signals (CTRL-C…)
+        let signals_fut = build_signals_fut();
+        let mut runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
+        runtime
+            .block_on(signals_fut)
+            .expect("couldn't block waiting for signals");
+    
+        service.stop();
+    } else {
+        let mut controller = Controller::new(config.service_name.as_str(),
+            config.display_name.as_str(), config.description.as_str());
 
-    service.stop();
+        controller.register(service_main_wrapper).expect("failed to register service");
+    }
 }
 
 #[cfg(unix)]

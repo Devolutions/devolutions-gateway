@@ -26,6 +26,11 @@ const ARG_ROUTING_URL: &str = "routing-url";
 const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
+const ARG_CONSOLE_MODE: &str = "console";
+
+const SERVICE_NAME: &str = "devolutions-gateway";
+const DISPLAY_NAME: &str = "Devolutions Gateway";
+const DESCRIPTION: &str = "Devolutions Gateway service";
 
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
@@ -50,6 +55,10 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub console_mode: bool,
+    pub service_name: String,
+    pub display_name: String,
+    pub description: String,
     pub unrestricted: bool,
     pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
@@ -271,9 +280,24 @@ impl Config {
                     .help("A file with logs")
                     .takes_value(true)
                     .empty_values(false),
+            )
+            .arg(
+                Arg::with_name(ARG_CONSOLE_MODE)
+                    .long("console")
+                    .takes_value(false)
+                    .required(false)
+                    .help("Enable console mode (as opposed to a system service)"),
             );
 
         let matches = cli_app.get_matches();
+
+        let console_mode = matches.is_present(ARG_CONSOLE_MODE);
+
+        let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
+
+        let service_name = SERVICE_NAME.to_string();
+        let display_name = DISPLAY_NAME.to_string();
+        let description = DESCRIPTION.to_string();
 
         let api_key = matches.value_of(ARG_API_KEY).map(std::string::ToString::to_string);
 
@@ -304,8 +328,6 @@ impl Config {
             Some("rdp") => Protocol::RDP,
             _ => Protocol::UNKNOWN,
         };
-
-        let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
 
         let certificate_file = matches.value_of(ARG_CERTIFICATE_FILE).map(String::from);
         let certificate_data = matches.value_of(ARG_CERTIFICATE_DATA).map(String::from);
@@ -400,6 +422,10 @@ impl Config {
         }
 
         Config {
+            console_mode,
+            service_name,
+            display_name,
+            description,
             unrestricted,
             api_key,
             listeners,

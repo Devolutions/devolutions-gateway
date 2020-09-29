@@ -61,9 +61,6 @@ impl Default for GatewayState {
 pub struct GatewayService {
     config: Arc<Config>,
     logger: Logger,
-    service_name: String,
-    display_name: String,
-    description: String,
     state: GatewayState,
     _logger_guard: slog_scope::GlobalLoggerGuard,
 }
@@ -75,34 +72,32 @@ impl GatewayService {
         let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("failed to init logger");
 
-        let service_name = "devolutions-gateway";
-        let display_name = "Devolutions Gateway";
-        let description = "Devolutions Gateway service";
-
         Some(GatewayService {
             config,
             logger,
-            service_name: service_name.to_string(),
-            display_name: display_name.to_string(),
-            description: description.to_string(),
             state: GatewayState::Stopped,
             _logger_guard: logger_guard,
         })
     }
 
-    #[allow(dead_code)] // FIXME: to use
+    #[allow(dead_code)]
+    pub fn console_mode(&self) -> bool {
+        self.config.console_mode
+    }
+
+    #[allow(dead_code)]
     pub fn get_service_name(&self) -> &str {
-        self.service_name.as_str()
+        self.config.service_name.as_str()
     }
 
-    #[allow(dead_code)] // FIXME: to use
+    #[allow(dead_code)]
     pub fn get_display_name(&self) -> &str {
-        self.display_name.as_str()
+        self.config.display_name.as_str()
     }
 
-    #[allow(dead_code)] // FIXME: to use
+    #[allow(dead_code)]
     pub fn get_description(&self) -> &str {
-        self.description.as_str()
+        self.config.description.as_str()
     }
 
     pub fn start(&mut self) {
