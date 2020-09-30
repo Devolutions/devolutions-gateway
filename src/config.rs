@@ -4,7 +4,11 @@ use picky::{
     pem::Pem,
 };
 use std::env;
+use std::path::{Path,PathBuf};
+use std::fs::File;
+use std::io::BufReader;
 use url::Url;
+use serde::{Serialize, Deserialize};
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
 
@@ -31,6 +35,7 @@ const ARG_CONSOLE_MODE: &str = "console";
 const SERVICE_NAME: &str = "devolutions-gateway";
 const DISPLAY_NAME: &str = "Devolutions Gateway";
 const DESCRIPTION: &str = "Devolutions Gateway service";
+const COMPANY_NAME: &str = "Devolutions";
 
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
@@ -59,6 +64,7 @@ pub struct Config {
     pub service_name: String,
     pub display_name: String,
     pub description: String,
+    pub company_name: String,
     pub unrestricted: bool,
     pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
@@ -74,6 +80,45 @@ pub struct Config {
     pub delegation_private_key: Option<PrivateKey>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ConfigFile {
+    #[serde(rename = "JetInstance")]
+    pub jet_instance: String,
+    #[serde(rename = "HttpListenerUrl")]
+    pub http_listener_url: Option<String>,
+    #[serde(rename = "JetListeners")]
+    pub jet_listener_urls: Vec<String>,
+}
+
+pub fn get_working_dir() -> PathBuf {
+    let mut working_dir = PathBuf::new();
+
+    if cfg!(target_os = "windows") {
+        let program_data_env = env::var("ProgramData").unwrap();
+        working_dir.push(Path::new(program_data_env.as_str()));
+        working_dir.push("Devolutions");
+        working_dir.push("Gateway");
+    } else if cfg!(target_os = "macos") {
+        working_dir.push("/Library/Application Support");
+        working_dir.push("Devolutions");
+        working_dir.push("Gateway");
+    } else {
+        working_dir.push("/etc");
+        working_dir.push("devolutions");
+        working_dir.push("gateway");
+    }
+
+    working_dir
+}
+
+pub fn get_config_file() -> Option<ConfigFile> {
+    let mut config_path = get_working_dir();
+    config_path.push("config.json");
+    let file = File::open(config_path.as_path()).ok()?;
+    let result = serde_json::from_reader(BufReader::new(file));
+    result.ok()
+}
+
 impl Config {
     pub fn init() -> Self {
         let default_http_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
@@ -82,7 +127,7 @@ impl Config {
             .author("Devolutions Inc.")
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
-            .about("Devolutions-Jet Proxy")
+            .about(DISPLAY_NAME)
             .arg(
                 Arg::with_name(ARG_RDP)
                     .long("rdp")
@@ -295,9 +340,14 @@ impl Config {
 
         let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
 
+        if let Some(config_file) = get_config_file() {
+            // TODO
+        }
+
         let service_name = SERVICE_NAME.to_string();
         let display_name = DISPLAY_NAME.to_string();
         let description = DESCRIPTION.to_string();
+        let company_name = COMPANY_NAME.to_string();
 
         let api_key = matches.value_of(ARG_API_KEY).map(std::string::ToString::to_string);
 
@@ -426,6 +476,7 @@ impl Config {
             service_name,
             display_name,
             description,
+            company_name,
             unrestricted,
             api_key,
             listeners,
