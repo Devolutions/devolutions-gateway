@@ -8,10 +8,10 @@ use service::GatewayService;
 use slog_scope::info;
 use std::sync::mpsc;
 
-#[allow(dead_code)] // TODO
+#[allow(dead_code)]
 enum GatewayServiceEvent {}
 
-#[allow(dead_code)] // TODO
+#[allow(dead_code)]
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
@@ -44,10 +44,10 @@ fn gateway_service_main(
 Service!("gateway", gateway_service_main);
 
 fn main() {
-    let config = Config::init();
+    let config = Config::load().unwrap_or_else(|| Config::init());
 
     if config.console_mode {
-        let mut service = GatewayService::load().expect("unable to load service");
+        let mut service = GatewayService::load().expect("error loading service");
 
         service.start();
     
