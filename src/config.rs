@@ -155,7 +155,7 @@ pub fn get_program_data_file_path(filename: &str) -> PathBuf {
     if file_path.is_absolute() {
         file_path
     } else {
-        get_working_dir().with_file_name(file_path.file_name().unwrap())
+        get_working_dir().join(file_path.file_name().unwrap())
     }
 }
 
@@ -211,15 +211,23 @@ impl Config {
 
         let certificate_file = config_file.certificate_file.as_ref()
                                     .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let certificate_data = certificate_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
         let private_key_file = config_file.private_key_file.as_ref()
                                     .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let private_key_data = private_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
         let provisioner_public_key_file = config_file.provisioner_public_key_file.as_ref()
                                     .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
 
+        let provisioner_public_key_pem = provisioner_public_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let provisioner_public_key = provisioner_public_key_pem.map(|pem| pem.parse::<Pem>().unwrap()).as_ref().map(|pem| PublicKey::from_pem(pem).unwrap());
+
         let delegation_private_key_file = config_file.delegation_private_key_file.as_ref()
                                     .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        
+        let delegation_private_key_pem = delegation_private_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let delegation_private_key = delegation_private_key_pem.map(|pem| pem.parse::<Pem>().unwrap()).as_ref().map(|pem| PrivateKey::from_pem(pem).unwrap());
 
         Some(Config {
             console_mode: true,
@@ -237,24 +245,16 @@ impl Config {
             pcap_files_path: None,
             protocol: Protocol::UNKNOWN,
             log_file: Some(log_file),
-            rdp: false,
+            rdp: true,
             certificate: CertificateConfig {
                 certificate_file: certificate_file,
-                certificate_data: None,
+                certificate_data: certificate_data,
                 private_key_file: private_key_file,
-                private_key_data: None,
+                private_key_data: private_key_data,
             },
-            provisioner_public_key: None,
-            delegation_private_key: None,
+            provisioner_public_key: provisioner_public_key,
+            delegation_private_key: delegation_private_key,
         })
-    }
-
-    pub fn get_farm_name(&self) -> &str {
-        self.farm_name.as_str()
-    }
-
-    pub fn get_gateway_hostname(&self) -> &str {
-        self.jet_instance.as_str()
     }
 
     pub fn init() -> Self {
