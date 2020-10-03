@@ -111,6 +111,14 @@ pub struct ConfigFile {
     pub hostname: Option<String>,
     #[serde(rename = "GatewayListeners")]
     pub listeners: Vec<GatewayListener>,
+    #[serde(rename = "CertificateFile")]
+    pub certificate_file: Option<String>,
+    #[serde(rename = "PrivateKeyFile")]
+    pub private_key_file: Option<String>,
+    #[serde(rename = "ProvisionerPublicKeyFile")]
+    pub provisioner_public_key_file: Option<String>,
+    #[serde(rename = "DelegationPrivateKeyFile")]
+    pub delegation_private_key_file: Option<String>,
 }
 
 pub fn get_working_dir() -> PathBuf {
@@ -140,6 +148,15 @@ pub fn get_config_file() -> Option<ConfigFile> {
     let file = File::open(config_path.as_path()).ok()?;
     let result = serde_json::from_reader(BufReader::new(file));
     result.ok()
+}
+
+pub fn get_program_data_file_path(filename: &str) -> PathBuf {
+    let file_path = PathBuf::from(filename);
+    if file_path.is_absolute() {
+        file_path
+    } else {
+        get_working_dir().with_file_name(file_path.file_name().unwrap())
+    }
 }
 
 fn get_default_hostname() -> Option<String> {
@@ -190,9 +207,19 @@ impl Config {
             panic!("At least one relay listener has to be specified");
         }
 
-        let mut log_path = get_working_dir();
-        log_path.push("gateway.log");
-        let log_file = log_path.to_str().unwrap().to_string();
+        let log_file = get_program_data_file_path("gateway.log").to_str().unwrap().to_string();
+
+        let certificate_file = config_file.certificate_file.as_ref()
+                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let private_key_file = config_file.private_key_file.as_ref()
+                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let provisioner_public_key_file = config_file.provisioner_public_key_file.as_ref()
+                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let delegation_private_key_file = config_file.delegation_private_key_file.as_ref()
+                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
 
         Some(Config {
             console_mode: true,
@@ -212,9 +239,9 @@ impl Config {
             log_file: Some(log_file),
             rdp: false,
             certificate: CertificateConfig {
-                certificate_file: None,
+                certificate_file: certificate_file,
                 certificate_data: None,
-                private_key_file: None,
+                private_key_file: private_key_file,
                 private_key_data: None,
             },
             provisioner_public_key: None,
