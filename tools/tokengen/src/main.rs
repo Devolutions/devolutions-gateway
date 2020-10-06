@@ -20,8 +20,6 @@ struct App {
     validity_duration: String,
     #[clap(long)]
     provider_private_key: PathBuf,
-    #[clap(long)]
-    jet_public_key: PathBuf,
     #[clap(subcommand)]
     subcmd: SubCommand,
 }
@@ -32,8 +30,12 @@ enum SubCommand {
     RdpTls(RdpTlsIdentity),
 }
 
-#[derive(Clap, Serialize)]
+#[derive(Clone, Clap, Serialize)]
 struct RdpTlsIdentity {
+    #[serde(skip_serializing)]
+    #[clap(long)]
+    jet_public_key: PathBuf,
+
     #[clap(long)]
     prx_usr: String,
     #[clap(long)]
@@ -44,7 +46,7 @@ struct RdpTlsIdentity {
     dst_pwd: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct RoutingClaims {
     exp: i64,
     nbf: i64,
@@ -61,10 +63,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let private_key_str = std::fs::read_to_string(&app.provider_private_key)?;
     let private_key_pem = private_key_str.parse::<Pem>()?;
     let private_key = PrivateKey::from_pem(&private_key_pem)?;
-
-    let public_key_str = std::fs::read_to_string(&app.jet_public_key)?;
-    let public_key_pem = public_key_str.parse::<Pem>()?;
-    let public_key = PublicKey::from_pem(&public_key_pem)?;
 
     let validity_duration = parse_duration(&app.validity_duration)?;
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
@@ -84,10 +82,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
     };
 
-    let signed = JwtSig::new(JwsAlg::RS256, claims).encode(&private_key)?;
-    let encrypted = Jwe::new(JweAlg::RsaOaep256, JweEnc::Aes256Gcm, signed.into_bytes()).encode(&public_key)?;
+    let signed = JwtSig::new(JwsAlg::RS256, claims.clone()).encode(&private_key)?;
 
-    println!("{}", encrypted);
+    let result = if let Some(RdpTlsIdentity { jet_public_key, .. }) = claims.identity {
+        let public_key_str = std::fs::read_to_string(&jet_public_key)?;
+        let public_key_pem = public_key_str.parse::<Pem>()?;
+        let public_key = PublicKey::from_pem(&public_key_pem)?;
+        Jwe::new(JweAlg::RsaOaep256, JweEnc::Aes256Gcm, signed.into_bytes()).encode(&public_key)?
+    } else {
+        signed
+    };
+
+    println!("{}", result);
 
     Ok(())
 }
