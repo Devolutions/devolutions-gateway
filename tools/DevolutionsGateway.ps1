@@ -1,25 +1,52 @@
 
 $script:CompanyDir = "Devolutions"
 $script:ProgramDir = "Gateway"
+$script:ServiceName = "devolutions-gateway"
 $script:GatewayDataPath = [System.Environment]::ExpandEnvironmentVariables("%ProgramData%\${CompanyDir}\${ProgramDir}")
+$script:GatewayFilesPath = [System.Environment]::ExpandEnvironmentVariables("%ProgramFiles%\${CompanyDir}\${ProgramDir}")
 
 function Register-GatewayService
 {
-    $ServiceName = "devolutions-gateway"
+    [CmdletBinding()]
+    param(
+    )
+
     $DisplayName = "Devolutions Gateway"
     $Description = "Devolutions Gateway service"
 
-    $Executable = "DevolutionsGateway.exe"
+    $StartupType = 'Automatic'
+    $ServiceExecutable = "DevolutionsGateway.exe"
+    $BinaryPathName = Join-Path $GatewayFilesPath $ServiceExecutable
 
     $params = @{
         Name = $ServiceName
         DisplayName = $DisplayName
         Description = $Description
-        WorkingDir = "%ProgramData%\${CompanyDir}\${ProgramDir}"
-        BinaryPathName = "%ProgramFiles%\${CompanyDir}\${ProgramDir}\${Executable}"
+        StartupType = $StartupType
+        BinaryPathName = $BinaryPathName
     }
 
     New-Service @params
+}
+
+function Unregister-GatewayService
+{
+    [CmdletBinding()]
+    param(
+        [switch] $Force
+    )
+
+    $Service = Get-Service | Where-Object { $_.Name -Like $ServiceName }
+
+    if ($Service) {
+        Stop-Service -Name $ServiceName
+
+        if (Get-Command 'Remove-Service' -ErrorAction SilentlyContinue) {
+            Remove-Service -Name $ServiceName
+        } else { # Windows PowerShell 5.1
+            & 'sc.exe' 'delete' $ServiceName | Out-Null
+        }
+    }
 }
 
 function New-JetKeyPair
@@ -41,7 +68,7 @@ function New-JetKeyPair
         $PrivateKeyFile = Join-Path $GatewayDataPath "private.key"
     }
 
-    if (-Not (Test-Path $Path $GatewayDataPath)) {
+    if (-Not (Test-Path -Path $GatewayDataPath)) {
         New-Item -Path $GatewayDataPath -ItemType 'Directory' -Force | Out-Null
     }
 
