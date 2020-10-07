@@ -37,7 +37,7 @@ function New-JetToken
     $raw_token = [PSCustomObject]@{
         jet_ap = 'rdp'
         jet_cm = 'fwd'
-        dst_host = $DestinationHost
+        dst_hst = $DestinationHost
     } | ConvertTo-Json | Out-String
 
     Write-Host $raw_token
@@ -50,11 +50,10 @@ function New-JetToken
 
     $jwt = $raw_token | & 'step' 'crypto' 'jwt' 'sign' '-' '-nbf' $nbf '-exp' $exp '-subtle' '-key' $PrivateKeyFile
 
-    Write-Host "|$jwt|"
-    $jwe = "$jwt" | & 'step' 'crypto' 'jwe' 'encrypt' '-alg' 'RSA-OAEP-256' '-enc' 'A256GCM' '-key' $PublicKeyFile
-    Write-Host "|$jwe|"
-    $jwe = "$jwe" | & 'step' 'crypto' 'jose' 'format'
-    Write-Host "|$jwe|"
+    Write-Host $jwt
+
+    #$jwe = "$jwt" | & 'step' 'crypto' 'jwe' 'encrypt' '-alg' 'RSA-OAEP-256' '-enc' 'A256GCM' '-key' $PublicKeyFile
+    #$jwe = "$jwe" | & 'step' 'crypto' 'jose' 'format'
 }
 
-New-JetToken -DestinationHost 'DFORD-PC'
+New-JetToken -DestinationHost '192.168.25.158'
