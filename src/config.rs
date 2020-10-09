@@ -1,9 +1,14 @@
+use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
 use picky::{
     key::{PrivateKey, PublicKey},
     pem::Pem,
 };
+use serde::{Deserialize, Serialize};
 use std::env;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
@@ -26,6 +31,25 @@ const ARG_ROUTING_URL: &str = "routing-url";
 const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
+const ARG_SERVICE_MODE: &str = "service";
+
+const SERVICE_NAME: &str = "devolutions-gateway";
+const DISPLAY_NAME: &str = "Devolutions Gateway";
+const DESCRIPTION: &str = "Devolutions Gateway service";
+const COMPANY_NAME: &str = "Devolutions";
+
+cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        const COMPANY_DIR: &str = "Devolutions";
+        const PROGRAM_DIR: &str = "Gateway";
+    } else if #[cfg(target_os = "macos")] {
+        const COMPANY_DIR: &str = "Devolutions";
+        const PROGRAM_DIR: &str = "Gateway";
+    } else {
+        const COMPANY_DIR: &str = "devolutions";
+        const PROGRAM_DIR: &str = "gateway";
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
@@ -50,9 +74,15 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub service_mode: bool,
+    pub service_name: String,
+    pub display_name: String,
+    pub description: String,
+    pub company_name: String,
     pub unrestricted: bool,
     pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
+    pub farm_name: String,
     pub jet_instance: String,
     pub routing_url: Option<Url>,
     pub pcap_files_path: Option<String>,
@@ -65,7 +95,209 @@ pub struct Config {
     pub delegation_private_key: Option<PrivateKey>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GatewayListener {
+    #[serde(rename = "InternalUrl")]
+    pub internal_url: String,
+    #[serde(rename = "ExternalUrl")]
+    pub external_url: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConfigFile {
+    #[serde(rename = "GatewayFarmName")]
+    pub farm_name: Option<String>,
+    #[serde(rename = "GatewayHostname")]
+    pub hostname: Option<String>,
+    #[serde(rename = "GatewayListeners")]
+    pub listeners: Vec<GatewayListener>,
+    #[serde(rename = "CertificateFile")]
+    pub certificate_file: Option<String>,
+    #[serde(rename = "PrivateKeyFile")]
+    pub private_key_file: Option<String>,
+    #[serde(rename = "ProvisionerPublicKeyFile")]
+    pub provisioner_public_key_file: Option<String>,
+    #[serde(rename = "DelegationPrivateKeyFile")]
+    pub delegation_private_key_file: Option<String>,
+}
+
+pub fn get_working_dir() -> PathBuf {
+    let mut working_dir = PathBuf::new();
+
+    if cfg!(target_os = "windows") {
+        let program_data_env = env::var("ProgramData").unwrap();
+        working_dir.push(Path::new(program_data_env.as_str()));
+        working_dir.push(COMPANY_DIR);
+        working_dir.push(PROGRAM_DIR);
+    } else if cfg!(target_os = "macos") {
+        working_dir.push("/Library/Application Support");
+        working_dir.push(COMPANY_DIR);
+        working_dir.push(PROGRAM_DIR);
+    } else {
+        working_dir.push("/etc");
+        working_dir.push(COMPANY_DIR);
+        working_dir.push(PROGRAM_DIR);
+    }
+
+    working_dir
+}
+
+pub fn get_config_file() -> Option<ConfigFile> {
+    let mut config_path = get_working_dir();
+    config_path.push("config.json");
+    let file = File::open(config_path.as_path()).ok()?;
+    let result = serde_json::from_reader(BufReader::new(file));
+    result.ok()
+}
+
+pub fn get_program_data_file_path(filename: &str) -> PathBuf {
+    let file_path = PathBuf::from(filename);
+    if file_path.is_absolute() {
+        file_path
+    } else {
+        get_working_dir().join(file_path.file_name().unwrap())
+    }
+}
+
+fn get_default_hostname() -> Option<String> {
+    hostname::get().ok()?.into_string().ok()
+}
+
 impl Config {
+    pub fn load() -> Option<Self> {
+        let args: Vec<String> = env::args().collect();
+
+        let service_mode = args.contains(&"--service".to_string());
+
+        let config_file = get_config_file()?;
+
+        let default_hostname = get_default_hostname().unwrap_or("localhost".to_string());
+        let gateway_hostname = config_file.hostname.unwrap_or(default_hostname.clone());
+        let farm_name = config_file.farm_name.unwrap_or(gateway_hostname.clone());
+
+        let mut listeners = Vec::new();
+        for listener in config_file.listeners {
+            let mut internal_url = listener.internal_url.parse::<Url>().expect("invalid internal URL");
+            let mut external_url = listener.external_url.parse::<Url>().expect("invalid external URL");
+
+            if internal_url.host_str() == Some("*") {
+                let _ = internal_url.set_host(Some("0.0.0.0"));
+            }
+
+            if external_url.host_str() == Some("*") {
+                let _ = external_url.set_host(Some(gateway_hostname.as_str()));
+            }
+
+            listeners.push(ListenerConfig {
+                url: internal_url,
+                external_url: external_url,
+            });
+        }
+
+        let http_listeners: Vec<ListenerConfig> = listeners
+            .iter()
+            .filter(|listener| match listener.url.scheme() {
+                "http" => true,
+                "https" => true,
+                _ => false,
+            })
+            .map(|listener| listener.clone())
+            .collect();
+
+        let http_listener_url = http_listeners
+            .get(0)
+            .expect("Expected at least one HTTP listener")
+            .url
+            .clone();
+
+        let relay_listeners: Vec<ListenerConfig> = listeners
+            .iter()
+            .filter(|listener| match listener.url.scheme() {
+                "ws" => true,
+                "wss" => true,
+                "tcp" => true,
+                "rdp" => true,
+                _ => false,
+            })
+            .map(|listener| listener.clone())
+            .collect();
+
+        if relay_listeners.is_empty() {
+            panic!("At least one relay listener has to be specified");
+        }
+
+        let log_file = get_program_data_file_path("gateway.log").to_str().unwrap().to_string();
+
+        let certificate_file = config_file
+            .certificate_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let certificate_data = certificate_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+
+        let private_key_file = config_file
+            .private_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let private_key_data = private_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+
+        let provisioner_public_key_file = config_file
+            .provisioner_public_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let provisioner_public_key_pem = provisioner_public_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let provisioner_public_key = provisioner_public_key_pem
+            .map(|pem| pem.parse::<Pem>().unwrap())
+            .as_ref()
+            .map(|pem| PublicKey::from_pem(pem).unwrap());
+
+        let delegation_private_key_file = config_file
+            .delegation_private_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let delegation_private_key_pem = delegation_private_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let delegation_private_key = delegation_private_key_pem
+            .map(|pem| pem.parse::<Pem>().unwrap())
+            .as_ref()
+            .map(|pem| PrivateKey::from_pem(pem).unwrap());
+
+        Some(Config {
+            service_mode: service_mode,
+            service_name: SERVICE_NAME.to_string(),
+            display_name: DISPLAY_NAME.to_string(),
+            description: DESCRIPTION.to_string(),
+            company_name: COMPANY_NAME.to_string(),
+            unrestricted: true,
+            api_key: None,
+            listeners: relay_listeners,
+            http_listener_url: http_listener_url,
+            farm_name: farm_name,
+            jet_instance: gateway_hostname,
+            routing_url: None,
+            pcap_files_path: None,
+            protocol: Protocol::UNKNOWN,
+            log_file: Some(log_file),
+            rdp: true,
+            certificate: CertificateConfig {
+                certificate_file: certificate_file,
+                certificate_data: certificate_data,
+                private_key_file: private_key_file,
+                private_key_data: private_key_data,
+            },
+            provisioner_public_key: provisioner_public_key,
+            delegation_private_key: delegation_private_key,
+        })
+    }
+
     pub fn init() -> Self {
         let default_http_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
 
@@ -73,7 +305,7 @@ impl Config {
             .author("Devolutions Inc.")
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
-            .about("Devolutions-Jet Proxy")
+            .about(DISPLAY_NAME)
             .arg(
                 Arg::with_name(ARG_RDP)
                     .long("rdp")
@@ -271,9 +503,25 @@ impl Config {
                     .help("A file with logs")
                     .takes_value(true)
                     .empty_values(false),
+            )
+            .arg(
+                Arg::with_name(ARG_SERVICE_MODE)
+                    .long("service")
+                    .takes_value(false)
+                    .required(false)
+                    .help("Enable service mode"),
             );
 
         let matches = cli_app.get_matches();
+
+        let service_mode = matches.is_present(ARG_SERVICE_MODE);
+
+        let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
+
+        let service_name = SERVICE_NAME.to_string();
+        let display_name = DISPLAY_NAME.to_string();
+        let description = DESCRIPTION.to_string();
+        let company_name = COMPANY_NAME.to_string();
 
         let api_key = matches.value_of(ARG_API_KEY).map(std::string::ToString::to_string);
 
@@ -291,6 +539,8 @@ impl Config {
             .unwrap() // enforced by clap
             .to_string();
 
+        let farm_name = jet_instance.clone();
+
         let routing_url = matches
             .value_of(ARG_ROUTING_URL)
             .map(|v| Url::parse(&v).expect("must be checked in the clap validator"));
@@ -304,8 +554,6 @@ impl Config {
             Some("rdp") => Protocol::RDP,
             _ => Protocol::UNKNOWN,
         };
-
-        let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
 
         let certificate_file = matches.value_of(ARG_CERTIFICATE_FILE).map(String::from);
         let certificate_data = matches.value_of(ARG_CERTIFICATE_DATA).map(String::from);
@@ -400,10 +648,16 @@ impl Config {
         }
 
         Config {
+            service_mode,
+            service_name,
+            display_name,
+            description,
+            company_name,
             unrestricted,
             api_key,
             listeners,
             http_listener_url,
+            farm_name: farm_name,
             jet_instance,
             routing_url,
             pcap_files_path,

@@ -3,10 +3,6 @@ extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
 
-use std::sync::atomic::AtomicU64;
-
-use lazy_static::lazy_static;
-
 pub mod config;
 pub mod http;
 pub mod interceptor;
@@ -21,6 +17,9 @@ pub mod utils;
 pub mod websocket_client;
 
 pub use proxy::Proxy;
+
+use lazy_static::lazy_static;
+use std::sync::atomic::AtomicU64;
 
 lazy_static! {
     pub static ref SESSION_IN_PROGRESS_COUNT: AtomicU64 = AtomicU64::new(0);

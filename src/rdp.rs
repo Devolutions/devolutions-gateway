@@ -78,7 +78,7 @@ impl RdpClient {
         let tls_public_key = self.tls_public_key;
 
         Box::new(
-            AcceptConnectionFuture::new(client, self.config.clone())
+            AcceptConnectionFuture::new(client, self.config)
                 .map_err(|e| {
                     error!("Accept connection failed: {}", e);
                     e
