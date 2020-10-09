@@ -81,11 +81,6 @@ impl GatewayService {
     }
 
     #[allow(dead_code)]
-    pub fn console_mode(&self) -> bool {
-        self.config.console_mode
-    }
-
-    #[allow(dead_code)]
     pub fn get_service_name(&self) -> &str {
         self.config.service_name.as_str()
     }

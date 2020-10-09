@@ -16,7 +16,7 @@ function Register-GatewayService
 
     $StartupType = 'Automatic'
     $ServiceExecutable = "DevolutionsGateway.exe"
-    $BinaryPathName = Join-Path $GatewayFilesPath $ServiceExecutable
+    $BinaryPathName = "$(Join-Path $GatewayFilesPath $ServiceExecutable) --service"
 
     $params = @{
         Name = $ServiceName

@@ -31,7 +31,7 @@ const ARG_ROUTING_URL: &str = "routing-url";
 const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
-const ARG_CONSOLE_MODE: &str = "console";
+const ARG_SERVICE_MODE: &str = "service";
 
 const SERVICE_NAME: &str = "devolutions-gateway";
 const DISPLAY_NAME: &str = "Devolutions Gateway";
@@ -74,7 +74,7 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub console_mode: bool,
+    pub service_mode: bool,
     pub service_name: String,
     pub display_name: String,
     pub description: String,
@@ -165,6 +165,10 @@ fn get_default_hostname() -> Option<String> {
 
 impl Config {
     pub fn load() -> Option<Self> {
+        let args: Vec<String> = env::args().collect();
+
+        let service_mode = args.contains(&"--service".to_string());
+
         let config_file = get_config_file()?;
 
         let default_hostname = get_default_hostname().unwrap_or("localhost".to_string());
@@ -230,7 +234,7 @@ impl Config {
         let delegation_private_key = delegation_private_key_pem.map(|pem| pem.parse::<Pem>().unwrap()).as_ref().map(|pem| PrivateKey::from_pem(pem).unwrap());
 
         Some(Config {
-            console_mode: true,
+            service_mode: service_mode,
             service_name: SERVICE_NAME.to_string(),
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
@@ -464,16 +468,16 @@ impl Config {
                     .empty_values(false),
             )
             .arg(
-                Arg::with_name(ARG_CONSOLE_MODE)
-                    .long("console")
+                Arg::with_name(ARG_SERVICE_MODE)
+                    .long("service")
                     .takes_value(false)
                     .required(false)
-                    .help("Enable console mode (as opposed to a system service)"),
+                    .help("Enable service mode"),
             );
 
         let matches = cli_app.get_matches();
 
-        let console_mode = matches.is_present(ARG_CONSOLE_MODE);
+        let service_mode = matches.is_present(ARG_SERVICE_MODE);
 
         let log_file = matches.value_of(ARG_LOG_FILE).map(String::from);
 
@@ -607,7 +611,7 @@ impl Config {
         }
 
         Config {
-            console_mode,
+            service_mode,
             service_name,
             display_name,
             description,
