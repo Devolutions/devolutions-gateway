@@ -1,15 +1,15 @@
+use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
 use picky::{
     key::{PrivateKey, PublicKey},
     pem::Pem,
 };
+use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use url::Url;
-use cfg_if::cfg_if;
-use serde::{Serialize, Deserialize};
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
 
@@ -188,24 +188,39 @@ impl Config {
                 let _ = external_url.set_host(Some(gateway_hostname.as_str()));
             }
 
-            listeners.push(ListenerConfig { url: internal_url, external_url: external_url } );
+            listeners.push(ListenerConfig {
+                url: internal_url,
+                external_url: external_url,
+            });
         }
 
-        let http_listeners: Vec<ListenerConfig> = listeners.iter().filter(|listener| match listener.url.scheme() {
-            "http" => true,
-            "https" => true,
-            _ => false
-        }).map(|listener| listener.clone()).collect();
+        let http_listeners: Vec<ListenerConfig> = listeners
+            .iter()
+            .filter(|listener| match listener.url.scheme() {
+                "http" => true,
+                "https" => true,
+                _ => false,
+            })
+            .map(|listener| listener.clone())
+            .collect();
 
-        let http_listener_url = http_listeners.get(0).expect("Expected at least one HTTP listener").url.clone();
+        let http_listener_url = http_listeners
+            .get(0)
+            .expect("Expected at least one HTTP listener")
+            .url
+            .clone();
 
-        let relay_listeners: Vec<ListenerConfig> = listeners.iter().filter(|listener| match listener.url.scheme() {
-            "ws" => true,
-            "wss" => true,
-            "tcp" => true,
-            "rdp" => true,
-            _ => false
-        }).map(|listener| listener.clone()).collect();
+        let relay_listeners: Vec<ListenerConfig> = listeners
+            .iter()
+            .filter(|listener| match listener.url.scheme() {
+                "ws" => true,
+                "wss" => true,
+                "tcp" => true,
+                "rdp" => true,
+                _ => false,
+            })
+            .map(|listener| listener.clone())
+            .collect();
 
         if relay_listeners.is_empty() {
             panic!("At least one relay listener has to be specified");
@@ -213,25 +228,47 @@ impl Config {
 
         let log_file = get_program_data_file_path("gateway.log").to_str().unwrap().to_string();
 
-        let certificate_file = config_file.certificate_file.as_ref()
-                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-        let certificate_data = certificate_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let certificate_file = config_file
+            .certificate_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let certificate_data = certificate_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
-        let private_key_file = config_file.private_key_file.as_ref()
-                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-        let private_key_data = private_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let private_key_file = config_file
+            .private_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let private_key_data = private_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
-        let provisioner_public_key_file = config_file.provisioner_public_key_file.as_ref()
-                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let provisioner_public_key_file = config_file
+            .provisioner_public_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
 
-        let provisioner_public_key_pem = provisioner_public_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
-        let provisioner_public_key = provisioner_public_key_pem.map(|pem| pem.parse::<Pem>().unwrap()).as_ref().map(|pem| PublicKey::from_pem(pem).unwrap());
+        let provisioner_public_key_pem = provisioner_public_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let provisioner_public_key = provisioner_public_key_pem
+            .map(|pem| pem.parse::<Pem>().unwrap())
+            .as_ref()
+            .map(|pem| PublicKey::from_pem(pem).unwrap());
 
-        let delegation_private_key_file = config_file.delegation_private_key_file.as_ref()
-                                    .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-        
-        let delegation_private_key_pem = delegation_private_key_file.as_ref().map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
-        let delegation_private_key = delegation_private_key_pem.map(|pem| pem.parse::<Pem>().unwrap()).as_ref().map(|pem| PrivateKey::from_pem(pem).unwrap());
+        let delegation_private_key_file = config_file
+            .delegation_private_key_file
+            .as_ref()
+            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+
+        let delegation_private_key_pem = delegation_private_key_file
+            .as_ref()
+            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
+        let delegation_private_key = delegation_private_key_pem
+            .map(|pem| pem.parse::<Pem>().unwrap())
+            .as_ref()
+            .map(|pem| PrivateKey::from_pem(pem).unwrap());
 
         Some(Config {
             service_mode: service_mode,

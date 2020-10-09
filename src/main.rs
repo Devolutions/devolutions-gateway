@@ -2,8 +2,8 @@ mod config;
 mod service;
 
 use ceviche::{controller::*, Service, ServiceEvent};
-use futures::{Future, Stream};
 use config::Config;
+use futures::{Future, Stream};
 use service::GatewayService;
 use slog_scope::info;
 use std::sync::mpsc;
@@ -50,20 +50,25 @@ fn main() {
         let mut service = GatewayService::load().expect("error loading service");
 
         service.start();
-    
+
         // future waiting for some stop signals (CTRL-C…)
         let signals_fut = build_signals_fut();
         let mut runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
         runtime
             .block_on(signals_fut)
             .expect("couldn't block waiting for signals");
-    
+
         service.stop();
     } else {
-        let mut controller = Controller::new(config.service_name.as_str(),
-            config.display_name.as_str(), config.description.as_str());
+        let mut controller = Controller::new(
+            config.service_name.as_str(),
+            config.display_name.as_str(),
+            config.description.as_str(),
+        );
 
-        controller.register(service_main_wrapper).expect("failed to register service");
+        controller
+            .register(service_main_wrapper)
+            .expect("failed to register service");
     }
 }
 
