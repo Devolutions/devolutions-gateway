@@ -93,28 +93,44 @@ impl Future for AcceptConnectionFuture {
                         ))
                     }
                 },
-                Some(identity) => match self.nego_transport.decode(&mut self.buffer) {
-                    Ok(Some(request)) => {
-                        return Ok(Async::Ready((
-                            self.client.take().unwrap(),
-                            AcceptConnectionMode::RdpTls { identity, request },
-                        )));
+                Some(identity) => {
+                    if self.buffer.is_empty() {
+                        let mut nego_data_buffer = [0; MAX_CONNECTION_PACKET_SIZE];
+
+                        let read_bytes = try_ready!(self
+                            .client
+                            .as_mut()
+                            .ok_or_else(|| io::Error::new(
+                                io::ErrorKind::Other,
+                                "Invalid state, TCP stream is missing"
+                            ))?
+                            .poll_read(&mut nego_data_buffer));
+
+                        self.buffer.extend_from_slice(&nego_data_buffer[..read_bytes]);
                     }
-                    Ok(None) => {
-                        self.rdp_identity = Some(identity);
-                        return Ok(Async::NotReady);
+                    match self.nego_transport.decode(&mut self.buffer) {
+                        Ok(Some(request)) => {
+                            return Ok(Async::Ready((
+                                self.client.take().unwrap(),
+                                AcceptConnectionMode::RdpTls { identity, request },
+                            )));
+                        }
+                        Ok(None) => {
+                            self.rdp_identity = Some(identity);
+                            return Ok(Async::NotReady);
+                        }
+                        Err(e) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!(
+                                    "Invalid connection sequence start,\
+                                expected negotiation Request but got something else: {}",
+                                    e
+                                ),
+                            ))
+                        }
                     }
-                    Err(e) => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!(
-                                "Invalid connection sequence start,\
-                                 expected negotiation Request but got something else: {}",
-                                e
-                            ),
-                        ))
-                    }
-                },
+                }
             }
         }
     }
