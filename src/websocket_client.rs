@@ -287,7 +287,7 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         .headers()
         .get(header::SEC_WEBSOCKET_VERSION)
         .and_then(|v| v.to_str().ok())
-        .map_or(false, |v| v.parse::<u32>().unwrap_or_else(|_| 0) >= 13);
+        .map_or(false, |v| v.parse::<u32>().unwrap_or(0) >= 13);
 
     if !is_http_11 || !is_upgrade || !is_websocket_upgrade || !is_websocket_version_13_or_higher {
         return Response::builder()
