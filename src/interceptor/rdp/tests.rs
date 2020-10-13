@@ -260,7 +260,9 @@ fn message_reader_correct_reads_dvc_data_packet() {
     channels.insert("drdynvc".to_string(), DRDYNVC_CHANNEL_ID);
     let mut rdp_message_reader = RdpMessageReader::new(
         channels,
-        DvcManager::with_allowed_channels(vec!["Microsoft::Windows::RDS::Geometry::v08.01".to_string()]),
+        Some(DvcManager::with_allowed_channels(vec![
+            "Microsoft::Windows::RDS::Geometry::v08.01".to_string(),
+        ])),
     );
 
     let mut first_packet = TPKT_SERVER_MCS_DATA_INDICATION_DVC_CREATE_REQUEST_PACKET.to_vec();

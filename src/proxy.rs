@@ -43,7 +43,9 @@ impl Proxy {
                     client_transport,
                     Some(Box::new(RdpMessageReader::new(
                         HashMap::new(),
-                        DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
+                        Some(DvcManager::with_allowed_channels(vec![
+                            RDP8_GRAPHICS_PIPELINE_NAME.to_string()
+                        ])),
                     ))),
                 )
             }
