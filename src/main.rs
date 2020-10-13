@@ -314,7 +314,7 @@ fn start_websocket_server(
 
     let mut websocket_addr = String::new();
     websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
-    websocket_addr.push_str(":");
+    websocket_addr.push(':');
     websocket_addr.push_str(
         websocket_url
             .port()
