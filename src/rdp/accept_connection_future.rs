@@ -111,7 +111,6 @@ impl Future for AcceptConnectionFuture {
                         }
                         Ok(None) => {
                             self.rdp_identity = Some(identity);
-                            self.buffer.clear();
                             return Ok(Async::NotReady);
                         }
                         Err(e) => {
