@@ -75,7 +75,7 @@ impl Proxy {
                 client_peer_addr.port(),
                 server_peer_addr.ip(),
                 server_peer_addr.port(),
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+                chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
             );
             let mut path = PathBuf::from(pcap_files_path);
             path.push(filename);
