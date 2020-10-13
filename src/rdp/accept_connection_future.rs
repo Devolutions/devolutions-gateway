@@ -44,6 +44,18 @@ impl AcceptConnectionFuture {
             config,
         }
     }
+
+    fn read_bytes_into_buffer(&mut self) -> Result<futures::Async<()>, io::Error> {
+        let mut received = [0u8; MAX_CONNECTION_PACKET_SIZE];
+        let read_bytes = try_ready!(self
+            .client
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?
+            .poll_read(&mut received));
+
+        self.buffer.extend_from_slice(&received[..read_bytes]);
+        Ok(futures::Async::Ready(()))
+    }
 }
 
 impl Future for AcceptConnectionFuture {
@@ -52,15 +64,7 @@ impl Future for AcceptConnectionFuture {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // Read more data to parse
-        let mut received = [0u8; MAX_CONNECTION_PACKET_SIZE];
-
-        let read_bytes = try_ready!(self
-            .client
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?
-            .poll_read(&mut received));
-
-        self.buffer.extend_from_slice(&received[..read_bytes]);
+        let _ = self.read_bytes_into_buffer()?;
 
         loop {
             match self.rdp_identity.take() {
@@ -95,19 +99,9 @@ impl Future for AcceptConnectionFuture {
                 },
                 Some(identity) => {
                     if self.buffer.is_empty() {
-                        let mut nego_data_buffer = [0; MAX_CONNECTION_PACKET_SIZE];
-
-                        let read_bytes = try_ready!(self
-                            .client
-                            .as_mut()
-                            .ok_or_else(|| io::Error::new(
-                                io::ErrorKind::Other,
-                                "Invalid state, TCP stream is missing"
-                            ))?
-                            .poll_read(&mut nego_data_buffer));
-
-                        self.buffer.extend_from_slice(&nego_data_buffer[..read_bytes]);
+                        let _ = self.read_bytes_into_buffer()?;
                     }
+
                     match self.nego_transport.decode(&mut self.buffer) {
                         Ok(Some(request)) => {
                             return Ok(Async::Ready((
@@ -117,6 +111,7 @@ impl Future for AcceptConnectionFuture {
                         }
                         Ok(None) => {
                             self.rdp_identity = Some(identity);
+                            self.buffer.clear();
                             return Ok(Async::NotReady);
                         }
                         Err(e) => {
