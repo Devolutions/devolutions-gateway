@@ -10,7 +10,7 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 
 [dependencies]
 jet-proto = { path = "./jet-proto" }
-picky = { version = "6.0.0-beta4", default-features = false, features = ["jose"] }
+picky = { version = "6.0.0", default-features = false, features = ["jose"] }
 ceviche = "0.4"
 ctrlc = "3.1"
 clap = "2.32"
