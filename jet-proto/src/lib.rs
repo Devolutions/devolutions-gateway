@@ -1,5 +1,6 @@
 pub mod accept;
 pub mod connect;
+pub mod test;
 pub mod utils;
 
 use crate::{
@@ -12,11 +13,10 @@ pub use http::StatusCode;
 use log::trace;
 use std::{
     env,
-    io::{
-        Read, {self},
-    },
+    io::{self, Read},
     sync::Once,
 };
+use test::{JetTestReq, JetTestRsp};
 use uuid::Uuid;
 
 pub const JET_MSG_SIGNATURE: u32 = 0x0054_454A;
@@ -51,6 +51,8 @@ pub fn get_mask_value() -> u8 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JetMessage {
+    JetTestReq(JetTestReq),
+    JetTestRsp(JetTestRsp),
     JetAcceptReq(JetAcceptReq),
     JetAcceptRsp(JetAcceptRsp),
     JetConnectReq(JetConnectReq),
@@ -78,6 +80,8 @@ impl JetMessage {
                     return Ok(JetMessage::JetAcceptReq(JetAcceptReq::from_request(&req)?));
                 } else if path.starts_with("/jet/connect") {
                     return Ok(JetMessage::JetConnectReq(JetConnectReq::from_request(&req)?));
+                } else if path.starts_with("/jet/test") {
+                    return Ok(JetMessage::JetTestReq(JetTestReq::from_request(&req)?));
                 } else if path.eq("/") {
                     if let Some(jet_method) = req.get_header_value("jet-method") {
                         if jet_method.to_lowercase().eq("accept") {
@@ -131,6 +135,14 @@ impl JetMessage {
 
         let mut v: Vec<u8> = Vec::new();
         let mut payload = match self {
+            JetMessage::JetTestReq(req) => {
+                req.to_payload(&mut v)?;
+                &mut v
+            }
+            JetMessage::JetTestRsp(rsp) => {
+                rsp.to_payload(&mut v)?;
+                &mut v
+            }
             JetMessage::JetAcceptReq(req) => {
                 req.to_payload(&mut v)?;
                 &mut v
@@ -311,7 +323,7 @@ impl std::fmt::Display for Error {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use hex_literal::hex;
 
