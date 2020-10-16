@@ -35,21 +35,14 @@ use tokio::{
     net::tcp::{TcpListener, TcpStream},
     prelude::{AsyncRead, AsyncWrite},
     runtime::{Runtime, TaskExecutor},
-    sync::oneshot,
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
 
-pub struct StopAllTasksEvent;
-
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 pub enum GatewayState {
     Stopped,
-    Running {
-        http_server: HttpServer,
-        runtime: Runtime,
-        stop_tasks_sender: oneshot::Sender<StopAllTasksEvent>,
-    },
+    Running { http_server: HttpServer, runtime: Runtime },
 }
 
 impl Default for GatewayState {
@@ -114,21 +107,11 @@ impl GatewayService {
             error!("Listeners failed: {}", e);
         });
 
-        // oneshot channel to stop our tasks using a select future
-        let (sender, receiver) = oneshot::channel::<StopAllTasksEvent>();
-
-        let select_fut = receiver
-            .map_err(|e| error!("Receiver error: {}", e))
-            .select2(all_tasks)
-            .map(|_| ())
-            .map_err(|_| ());
-
-        executor_handle.spawn(select_fut);
+        executor_handle.spawn(all_tasks.map(|_| ()).map_err(|_| ()));
 
         self.state = GatewayState::Running {
             http_server: context.http_server,
             runtime,
-            stop_tasks_sender: sender,
         };
     }
 
@@ -137,24 +120,14 @@ impl GatewayService {
             GatewayState::Stopped => {
                 info!("Attempted to stop gateway service, but it isn't started");
             }
-            GatewayState::Running {
-                http_server,
-                runtime,
-                stop_tasks_sender,
-            } => {
+            GatewayState::Running { http_server, runtime } => {
                 info!("Stopping gateway service");
 
                 // stop http server
                 http_server.stop();
 
-                // stop all tasks using our sender
-                if stop_tasks_sender.send(StopAllTasksEvent).is_err() {
-                    error!("Failed to send stop event; will force runtime shutdown now");
-                    runtime.shutdown_now().wait().unwrap();
-                } else {
-                    info!("Waiting for graceful shutdown");
-                    runtime.shutdown_on_idle().wait().unwrap();
-                }
+                // stop runtime now
+                runtime.shutdown_now().wait().unwrap();
 
                 self.state = GatewayState::Stopped;
             }
