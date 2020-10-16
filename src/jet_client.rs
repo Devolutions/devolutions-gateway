@@ -6,11 +6,10 @@ use std::{
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use futures::{future::err, try_ready, Async, Future, Poll};
-use jet_proto::test::JetTestReq;
 use jet_proto::{
     accept::{JetAcceptReq, JetAcceptRsp},
     connect::{JetConnectReq, JetConnectRsp},
-    test::JetTestRsp,
+    test::{JetTestReq, JetTestRsp},
     JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
 };
 use slog_scope::{debug, error};

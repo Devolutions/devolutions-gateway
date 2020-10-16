@@ -5,7 +5,7 @@ use std::{
     fs,
     hash::Hash,
     io::{self, BufReader},
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
 };
 
 use crate::config::CertificateConfig;
@@ -32,11 +32,11 @@ pub mod danger_transport {
     }
 }
 
-pub fn url_to_socket_arr(url: &Url) -> SocketAddr {
-    let host = url.host_str().unwrap();
-    let port = url.port().unwrap();
-
-    format!("{}:{}", host, port).parse::<SocketAddr>().unwrap()
+/// FIXME: we need to upgrade to tokio 0.3 in order to make resolving async
+pub fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
+    let host = url.host_str()?;
+    let port = url.port()?;
+    format!("{}:{}", host, port).to_socket_addrs().ok()?.next()
 }
 
 #[macro_export]
