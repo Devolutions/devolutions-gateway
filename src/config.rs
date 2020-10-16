@@ -5,10 +5,12 @@ use picky::{
     pem::Pem,
 };
 use serde::{Deserialize, Serialize};
-use std::env;
-use std::fs::File;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    fs::File,
+    io::BufReader,
+    path::{Path, PathBuf},
+};
 use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
@@ -165,9 +167,7 @@ fn get_default_hostname() -> Option<String> {
 
 impl Config {
     pub fn load() -> Option<Self> {
-        let args: Vec<String> = env::args().collect();
-
-        let service_mode = args.contains(&"--service".to_string());
+        let service_mode = env::args().any(|arg| arg == "--service");
 
         let config_file = get_config_file()?;
 
