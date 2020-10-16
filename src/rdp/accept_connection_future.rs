@@ -60,7 +60,7 @@ impl AcceptConnectionFuture {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Connection sequence is too long".to_string(),
-            ))
+            ));
         }
 
         Ok(futures::Async::Ready(()))
@@ -101,7 +101,7 @@ impl Future for AcceptConnectionFuture {
                     }
                     Ok(None) => {
                         more_data_required = true;
-                    },
+                    }
                     Err(e) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
