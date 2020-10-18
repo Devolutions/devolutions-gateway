@@ -107,11 +107,11 @@ pub struct GatewayListener {
 
 #[derive(Serialize, Deserialize)]
 pub struct ConfigFile {
-    #[serde(rename = "GatewayFarmName")]
+    #[serde(rename = "FarmName")]
     pub farm_name: Option<String>,
-    #[serde(rename = "GatewayHostname")]
+    #[serde(rename = "Hostname")]
     pub hostname: Option<String>,
-    #[serde(rename = "GatewayListeners")]
+    #[serde(rename = "Listeners")]
     pub listeners: Vec<GatewayListener>,
     #[serde(rename = "CertificateFile")]
     pub certificate_file: Option<String>,
@@ -123,30 +123,34 @@ pub struct ConfigFile {
     pub delegation_private_key_file: Option<String>,
 }
 
-pub fn get_working_dir() -> PathBuf {
-    let mut working_dir = PathBuf::new();
+pub fn get_config_path() -> PathBuf {
+    let mut config_path = PathBuf::new();
+
+    if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
+        config_path = Path::new(&config_path_env).to_path_buf();
+    }
 
     if cfg!(target_os = "windows") {
         let program_data_env = env::var("ProgramData").unwrap();
-        working_dir.push(Path::new(program_data_env.as_str()));
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push(Path::new(program_data_env.as_str()));
+        config_path.push(COMPANY_DIR);
+        config_path.push(PROGRAM_DIR);
     } else if cfg!(target_os = "macos") {
-        working_dir.push("/Library/Application Support");
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push("/Library/Application Support");
+        config_path.push(COMPANY_DIR);
+        config_path.push(PROGRAM_DIR);
     } else {
-        working_dir.push("/etc");
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push("/etc");
+        config_path.push(COMPANY_DIR);
+        config_path.push(PROGRAM_DIR);
     }
 
-    working_dir
+    config_path
 }
 
 pub fn get_config_file() -> Option<ConfigFile> {
-    let mut config_path = get_working_dir();
-    config_path.push("config.json");
+    let mut config_path = get_config_path();
+    config_path.push("gateway.json");
     let file = File::open(config_path.as_path()).ok()?;
     let result = serde_json::from_reader(BufReader::new(file));
     result.ok()
@@ -157,7 +161,7 @@ pub fn get_program_data_file_path(filename: &str) -> PathBuf {
     if file_path.is_absolute() {
         file_path
     } else {
-        get_working_dir().join(file_path.file_name().unwrap())
+        get_config_path().join(file_path.file_name().unwrap())
     }
 }
 
