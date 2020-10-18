@@ -44,12 +44,15 @@ cfg_if! {
     if #[cfg(target_os = "windows")] {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Gateway";
+        const APPLICATION_DIR: &str = "Devolutions\\Gateway";
     } else if #[cfg(target_os = "macos")] {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Gateway";
+        const APPLICATION_DIR: &str = "Devolutions Gateway";
     } else {
         const COMPANY_DIR: &str = "devolutions";
         const PROGRAM_DIR: &str = "gateway";
+        const APPLICATION_DIR: &str = "devolutions-gateway";
     }
 }
 
@@ -113,6 +116,8 @@ pub struct ConfigFile {
     pub hostname: Option<String>,
     #[serde(rename = "Listeners")]
     pub listeners: Vec<GatewayListener>,
+    #[serde(rename = "ApplicationProtocols")]
+    pub application_protocols: Option<Vec<String>>,
     #[serde(rename = "CertificateFile")]
     pub certificate_file: Option<String>,
     #[serde(rename = "PrivateKeyFile")]
@@ -121,6 +126,14 @@ pub struct ConfigFile {
     pub provisioner_public_key_file: Option<String>,
     #[serde(rename = "DelegationPrivateKeyFile")]
     pub delegation_private_key_file: Option<String>,
+
+    // unstable options (subject to change)
+    #[serde(rename = "ApiKey")]
+    pub api_key: Option<String>,
+    #[serde(rename = "LogFile")]
+    pub log_file: Option<String>,
+    #[serde(rename = "CapturePath")]
+    pub capture_path: Option<String>,
 }
 
 pub fn get_config_path() -> PathBuf {
@@ -137,12 +150,10 @@ pub fn get_config_path() -> PathBuf {
         config_path.push(PROGRAM_DIR);
     } else if cfg!(target_os = "macos") {
         config_path.push("/Library/Application Support");
-        config_path.push(COMPANY_DIR);
-        config_path.push(PROGRAM_DIR);
+        config_path.push(APPLICATION_DIR);
     } else {
         config_path.push("/etc");
-        config_path.push(COMPANY_DIR);
-        config_path.push(PROGRAM_DIR);
+        config_path.push(APPLICATION_DIR);
     }
 
     config_path
@@ -230,7 +241,11 @@ impl Config {
             panic!("At least one relay listener has to be specified");
         }
 
-        let log_file = get_program_data_file_path("gateway.log").to_str().unwrap().to_string();
+        let application_protocols = config_file.application_protocols.unwrap_or(Vec::new());
+        let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
+
+        let gateway_log_file = config_file.log_file.unwrap_or("gateway.log".to_string());
+        let log_file = get_program_data_file_path(gateway_log_file.as_str()).to_str().unwrap().to_string();
 
         let certificate_file = config_file
             .certificate_file
@@ -274,23 +289,28 @@ impl Config {
             .as_ref()
             .map(|pem| PrivateKey::from_pem(pem).unwrap());
 
+        // unstable options (subject to change)
+        let api_key = config_file.api_key;
+        let unrestricted = api_key.is_none();
+        let capture_path = config_file.capture_path;
+
         Some(Config {
             service_mode: service_mode,
             service_name: SERVICE_NAME.to_string(),
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
             company_name: COMPANY_NAME.to_string(),
-            unrestricted: true,
-            api_key: None,
+            unrestricted: unrestricted,
+            api_key: api_key,
             listeners: relay_listeners,
             http_listener_url: http_listener_url,
             farm_name: farm_name,
             jet_instance: gateway_hostname,
             routing_url: None,
-            pcap_files_path: None,
+            pcap_files_path: capture_path,
             protocol: Protocol::UNKNOWN,
             log_file: Some(log_file),
-            rdp: true,
+            rdp: enable_rdp_support,
             certificate: CertificateConfig {
                 certificate_file: certificate_file,
                 certificate_data: certificate_data,
