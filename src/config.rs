@@ -44,12 +44,15 @@ cfg_if! {
     if #[cfg(target_os = "windows")] {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Gateway";
+        const APPLICATION_DIR: &str = "Devolutions\\Gateway";
     } else if #[cfg(target_os = "macos")] {
         const COMPANY_DIR: &str = "Devolutions";
         const PROGRAM_DIR: &str = "Gateway";
+        const APPLICATION_DIR: &str = "Devolutions Gateway";
     } else {
         const COMPANY_DIR: &str = "devolutions";
         const PROGRAM_DIR: &str = "gateway";
+        const APPLICATION_DIR: &str = "devolutions-gateway";
     }
 }
 
@@ -105,14 +108,56 @@ pub struct GatewayListener {
     pub external_url: String,
 }
 
+impl GatewayListener {
+    pub fn to_listener_config(&self, hostname: &str) -> Option<ListenerConfig> {
+        let mut internal_url = self.internal_url.parse::<Url>().ok()?;
+        let mut external_url = self.external_url.parse::<Url>().ok()?;
+
+        if internal_url.host_str() == Some("*") {
+            let _ = internal_url.set_host(Some("0.0.0.0"));
+        }
+
+        if external_url.host_str() == Some("*") {
+            let _ = external_url.set_host(Some(hostname));
+        }
+
+        Some(ListenerConfig {
+            url: internal_url,
+            external_url: external_url,
+        })
+    }
+}
+
+fn url_map_scheme_ws_to_http(url: &mut Url) {
+    let scheme = url.scheme().to_string();
+    let scheme = match scheme.as_str() {
+        "ws" => "http",
+        "wss" => "https",
+        scheme => scheme,
+    };
+    let _ = url.set_scheme(scheme);
+}
+
+fn url_map_scheme_http_to_ws(url: &mut Url) {
+    let scheme = url.scheme().to_string();
+    let scheme = match scheme.as_str() {
+        "http" => "ws",
+        "https" => "wss",
+        scheme => scheme,
+    };
+    let _ = url.set_scheme(scheme);
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ConfigFile {
-    #[serde(rename = "GatewayFarmName")]
+    #[serde(rename = "FarmName")]
     pub farm_name: Option<String>,
-    #[serde(rename = "GatewayHostname")]
+    #[serde(rename = "Hostname")]
     pub hostname: Option<String>,
-    #[serde(rename = "GatewayListeners")]
+    #[serde(rename = "Listeners")]
     pub listeners: Vec<GatewayListener>,
+    #[serde(rename = "ApplicationProtocols")]
+    pub application_protocols: Option<Vec<String>>,
     #[serde(rename = "CertificateFile")]
     pub certificate_file: Option<String>,
     #[serde(rename = "PrivateKeyFile")]
@@ -121,32 +166,46 @@ pub struct ConfigFile {
     pub provisioner_public_key_file: Option<String>,
     #[serde(rename = "DelegationPrivateKeyFile")]
     pub delegation_private_key_file: Option<String>,
+
+    // unstable options (subject to change)
+    #[serde(rename = "ApiKey")]
+    pub api_key: Option<String>,
+    #[serde(rename = "LogFile")]
+    pub log_file: Option<String>,
+    #[serde(rename = "CapturePath")]
+    pub capture_path: Option<String>,
+    #[serde(rename = "Unrestricted")]
+    pub unrestricted: Option<bool>,
+    #[serde(rename = "ApiListener")]
+    pub api_listener: Option<String>,
 }
 
-pub fn get_working_dir() -> PathBuf {
-    let mut working_dir = PathBuf::new();
+pub fn get_config_path() -> PathBuf {
+    let mut config_path = PathBuf::new();
+
+    if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
+        config_path = Path::new(&config_path_env).to_path_buf();
+    }
 
     if cfg!(target_os = "windows") {
         let program_data_env = env::var("ProgramData").unwrap();
-        working_dir.push(Path::new(program_data_env.as_str()));
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push(Path::new(program_data_env.as_str()));
+        config_path.push(COMPANY_DIR);
+        config_path.push(PROGRAM_DIR);
     } else if cfg!(target_os = "macos") {
-        working_dir.push("/Library/Application Support");
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push("/Library/Application Support");
+        config_path.push(APPLICATION_DIR);
     } else {
-        working_dir.push("/etc");
-        working_dir.push(COMPANY_DIR);
-        working_dir.push(PROGRAM_DIR);
+        config_path.push("/etc");
+        config_path.push(APPLICATION_DIR);
     }
 
-    working_dir
+    config_path
 }
 
 pub fn get_config_file() -> Option<ConfigFile> {
-    let mut config_path = get_working_dir();
-    config_path.push("config.json");
+    let mut config_path = get_config_path();
+    config_path.push("gateway.json");
     let file = File::open(config_path.as_path()).ok()?;
     let result = serde_json::from_reader(BufReader::new(file));
     result.ok()
@@ -157,7 +216,7 @@ pub fn get_program_data_file_path(filename: &str) -> PathBuf {
     if file_path.is_absolute() {
         file_path
     } else {
-        get_working_dir().join(file_path.file_name().unwrap())
+        get_config_path().join(file_path.file_name().unwrap())
     }
 }
 
@@ -172,26 +231,26 @@ impl Config {
         let config_file = get_config_file()?;
 
         let default_hostname = get_default_hostname().unwrap_or("localhost".to_string());
-        let gateway_hostname = config_file.hostname.unwrap_or(default_hostname.clone());
-        let farm_name = config_file.farm_name.unwrap_or(gateway_hostname.clone());
+        let hostname = config_file.hostname.unwrap_or(default_hostname.clone());
+        let farm_name = config_file.farm_name.unwrap_or(hostname.clone());
 
         let mut listeners = Vec::new();
         for listener in config_file.listeners {
-            let mut internal_url = listener.internal_url.parse::<Url>().expect("invalid internal URL");
-            let mut external_url = listener.external_url.parse::<Url>().expect("invalid external URL");
-
-            if internal_url.host_str() == Some("*") {
-                let _ = internal_url.set_host(Some("0.0.0.0"));
+            if let Some(listener_config) = listener.to_listener_config(hostname.as_str()) {
+                listeners.push(listener_config);
+            } else {
+                eprintln!(
+                    "Invalid Listener: InternalUrl: {} ExternalUrl: {}",
+                    listener.internal_url.to_string(),
+                    listener.external_url.to_string()
+                );
             }
+        }
 
-            if external_url.host_str() == Some("*") {
-                let _ = external_url.set_host(Some(gateway_hostname.as_str()));
-            }
-
-            listeners.push(ListenerConfig {
-                url: internal_url,
-                external_url: external_url,
-            });
+        for listener in listeners.iter_mut() {
+            // normalize all listeners to http/https
+            url_map_scheme_ws_to_http(&mut listener.url);
+            url_map_scheme_ws_to_http(&mut listener.external_url);
         }
 
         let http_listeners: Vec<ListenerConfig> = listeners
@@ -204,29 +263,25 @@ impl Config {
             .map(|listener| listener.clone())
             .collect();
 
-        let http_listener_url = http_listeners
-            .get(0)
-            .expect("Expected at least one HTTP listener")
-            .url
-            .clone();
-
-        let relay_listeners: Vec<ListenerConfig> = listeners
-            .iter()
-            .filter(|listener| match listener.url.scheme() {
-                "ws" => true,
-                "wss" => true,
-                "tcp" => true,
-                "rdp" => true,
-                _ => false,
-            })
-            .map(|listener| listener.clone())
-            .collect();
-
-        if relay_listeners.is_empty() {
-            panic!("At least one relay listener has to be specified");
+        if http_listeners.len() < 1 {
+            eprintln!("At least one HTTP listener is required");
+            return None;
         }
 
-        let log_file = get_program_data_file_path("gateway.log").to_str().unwrap().to_string();
+        for listener in listeners.iter_mut() {
+            // normalize all listeners to ws/wss
+            url_map_scheme_http_to_ws(&mut listener.url);
+            url_map_scheme_http_to_ws(&mut listener.external_url);
+        }
+
+        let application_protocols = config_file.application_protocols.unwrap_or(Vec::new());
+        let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
+
+        let gateway_log_file = config_file.log_file.unwrap_or("gateway.log".to_string());
+        let log_file = get_program_data_file_path(gateway_log_file.as_str())
+            .to_str()
+            .unwrap()
+            .to_string();
 
         let certificate_file = config_file
             .certificate_file
@@ -270,23 +325,38 @@ impl Config {
             .as_ref()
             .map(|pem| PrivateKey::from_pem(pem).unwrap());
 
+        // unstable options (subject to change)
+        let api_key = config_file.api_key;
+        let unrestricted = config_file.unrestricted.unwrap_or(true);
+        let capture_path = config_file.capture_path;
+
+        // We always create a dummy API listener because Saphir needs one.
+        // However, this API listener is unable to process WebSocket traffic.
+        // Create the API listener as a dummy listener to make Saphir happy,
+        // but in fact we just ignore it and use only our gateway listeners.
+        let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
+        let api_listener_url = config_file.api_listener.unwrap_or(default_api_listener_url);
+        let http_listener_url = api_listener_url
+            .parse::<Url>()
+            .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
+
         Some(Config {
             service_mode: service_mode,
             service_name: SERVICE_NAME.to_string(),
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
             company_name: COMPANY_NAME.to_string(),
-            unrestricted: true,
-            api_key: None,
-            listeners: relay_listeners,
+            unrestricted: unrestricted,
+            api_key: api_key,
+            listeners: listeners,
             http_listener_url: http_listener_url,
             farm_name: farm_name,
-            jet_instance: gateway_hostname,
+            jet_instance: hostname,
             routing_url: None,
-            pcap_files_path: None,
+            pcap_files_path: capture_path,
             protocol: Protocol::UNKNOWN,
             log_file: Some(log_file),
-            rdp: true,
+            rdp: enable_rdp_support,
             certificate: CertificateConfig {
                 certificate_file: certificate_file,
                 certificate_data: certificate_data,
