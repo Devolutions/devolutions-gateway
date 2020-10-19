@@ -239,9 +239,11 @@ impl Config {
             if let Some(listener_config) = listener.to_listener_config(hostname.as_str()) {
                 listeners.push(listener_config);
             } else {
-                eprintln!("Invalid Listener: InternalUrl: {} ExternalUrl: {}",
+                eprintln!(
+                    "Invalid Listener: InternalUrl: {} ExternalUrl: {}",
                     listener.internal_url.to_string(),
-                    listener.external_url.to_string());
+                    listener.external_url.to_string()
+                );
             }
         }
 
@@ -276,7 +278,10 @@ impl Config {
         let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
 
         let gateway_log_file = config_file.log_file.unwrap_or("gateway.log".to_string());
-        let log_file = get_program_data_file_path(gateway_log_file.as_str()).to_str().unwrap().to_string();
+        let log_file = get_program_data_file_path(gateway_log_file.as_str())
+            .to_str()
+            .unwrap()
+            .to_string();
 
         let certificate_file = config_file
             .certificate_file
@@ -331,7 +336,8 @@ impl Config {
         // but in fact we just ignore it and use only our gateway listeners.
         let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
         let api_listener_url = config_file.api_listener.unwrap_or(default_api_listener_url);
-        let http_listener_url = api_listener_url.parse::<Url>()
+        let http_listener_url = api_listener_url
+            .parse::<Url>()
             .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
         Some(Config {
