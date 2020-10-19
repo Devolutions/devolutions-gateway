@@ -108,6 +108,46 @@ pub struct GatewayListener {
     pub external_url: String,
 }
 
+impl GatewayListener {
+    pub fn to_listener_config(&self, hostname: &str) -> Option<ListenerConfig> {
+        let mut internal_url = self.internal_url.parse::<Url>().ok()?;
+        let mut external_url = self.external_url.parse::<Url>().ok()?;
+
+        if internal_url.host_str() == Some("*") {
+            let _ = internal_url.set_host(Some("0.0.0.0"));
+        }
+
+        if external_url.host_str() == Some("*") {
+            let _ = external_url.set_host(Some(hostname));
+        }
+
+        Some(ListenerConfig {
+            url: internal_url,
+            external_url: external_url,
+        })
+    }
+}
+
+fn url_map_scheme_ws_to_http(url: &mut Url) {
+    let scheme = url.scheme().to_string();
+    let scheme = match scheme.as_str() {
+        "ws" => "http",
+        "wss" => "https",
+        scheme => scheme,
+    };
+    let _ = url.set_scheme(scheme);
+}
+
+fn url_map_scheme_http_to_ws(url: &mut Url) {
+    let scheme = url.scheme().to_string();
+    let scheme = match scheme.as_str() {
+        "http" => "ws",
+        "https" => "wss",
+        scheme => scheme,
+    };
+    let _ = url.set_scheme(scheme);
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ConfigFile {
     #[serde(rename = "FarmName")]
@@ -134,6 +174,8 @@ pub struct ConfigFile {
     pub log_file: Option<String>,
     #[serde(rename = "CapturePath")]
     pub capture_path: Option<String>,
+    #[serde(rename = "Unrestricted")]
+    pub unrestricted: Option<bool>,
 }
 
 pub fn get_config_path() -> PathBuf {
@@ -187,26 +229,24 @@ impl Config {
         let config_file = get_config_file()?;
 
         let default_hostname = get_default_hostname().unwrap_or("localhost".to_string());
-        let gateway_hostname = config_file.hostname.unwrap_or(default_hostname.clone());
-        let farm_name = config_file.farm_name.unwrap_or(gateway_hostname.clone());
+        let hostname = config_file.hostname.unwrap_or(default_hostname.clone());
+        let farm_name = config_file.farm_name.unwrap_or(hostname.clone());
 
         let mut listeners = Vec::new();
         for listener in config_file.listeners {
-            let mut internal_url = listener.internal_url.parse::<Url>().expect("invalid internal URL");
-            let mut external_url = listener.external_url.parse::<Url>().expect("invalid external URL");
-
-            if internal_url.host_str() == Some("*") {
-                let _ = internal_url.set_host(Some("0.0.0.0"));
+            if let Some(listener_config) = listener.to_listener_config(hostname.as_str()) {
+                listeners.push(listener_config);
+            } else {
+                eprintln!("Invalid Listener: InternalUrl: {} ExternalUrl: {}",
+                    listener.internal_url.to_string(),
+                    listener.external_url.to_string());
             }
+        }
 
-            if external_url.host_str() == Some("*") {
-                let _ = external_url.set_host(Some(gateway_hostname.as_str()));
-            }
-
-            listeners.push(ListenerConfig {
-                url: internal_url,
-                external_url: external_url,
-            });
+        for listener in listeners.iter_mut() {
+            // normalize all listeners to http/https
+            url_map_scheme_ws_to_http(&mut listener.url);
+            url_map_scheme_ws_to_http(&mut listener.external_url);
         }
 
         let http_listeners: Vec<ListenerConfig> = listeners
@@ -219,26 +259,17 @@ impl Config {
             .map(|listener| listener.clone())
             .collect();
 
-        let http_listener_url = http_listeners
-            .get(0)
-            .expect("Expected at least one HTTP listener")
-            .url
-            .clone();
+        if http_listeners.len() < 1 {
+            eprintln!("At least one HTTP listener is required");
+            return None;
+        }
 
-        let relay_listeners: Vec<ListenerConfig> = listeners
-            .iter()
-            .filter(|listener| match listener.url.scheme() {
-                "ws" => true,
-                "wss" => true,
-                "tcp" => true,
-                "rdp" => true,
-                _ => false,
-            })
-            .map(|listener| listener.clone())
-            .collect();
+        let http_listener_url = http_listeners.get(0).unwrap().url.clone();
 
-        if relay_listeners.is_empty() {
-            panic!("At least one relay listener has to be specified");
+        for listener in listeners.iter_mut() {
+            // normalize all listeners to ws/wss
+            url_map_scheme_http_to_ws(&mut listener.url);
+            url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
         let application_protocols = config_file.application_protocols.unwrap_or(Vec::new());
@@ -291,7 +322,7 @@ impl Config {
 
         // unstable options (subject to change)
         let api_key = config_file.api_key;
-        let unrestricted = api_key.is_none();
+        let unrestricted = config_file.unrestricted.unwrap_or(true);
         let capture_path = config_file.capture_path;
 
         Some(Config {
@@ -302,10 +333,10 @@ impl Config {
             company_name: COMPANY_NAME.to_string(),
             unrestricted: unrestricted,
             api_key: api_key,
-            listeners: relay_listeners,
+            listeners: listeners,
             http_listener_url: http_listener_url,
             farm_name: farm_name,
-            jet_instance: gateway_hostname,
+            jet_instance: hostname,
             routing_url: None,
             pcap_files_path: capture_path,
             protocol: Protocol::UNKNOWN,
