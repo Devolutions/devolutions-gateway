@@ -176,6 +176,8 @@ pub struct ConfigFile {
     pub capture_path: Option<String>,
     #[serde(rename = "Unrestricted")]
     pub unrestricted: Option<bool>,
+    #[serde(rename = "ApiListener")]
+    pub api_listener: Option<String>,
 }
 
 pub fn get_config_path() -> PathBuf {
@@ -264,8 +266,6 @@ impl Config {
             return None;
         }
 
-        let http_listener_url = http_listeners.get(0).unwrap().url.clone();
-
         for listener in listeners.iter_mut() {
             // normalize all listeners to ws/wss
             url_map_scheme_http_to_ws(&mut listener.url);
@@ -324,6 +324,15 @@ impl Config {
         let api_key = config_file.api_key;
         let unrestricted = config_file.unrestricted.unwrap_or(true);
         let capture_path = config_file.capture_path;
+
+        // We always create a dummy API listener because Saphir needs one.
+        // However, this API listener is unable to process WebSocket traffic.
+        // Create the API listener as a dummy listener to make Saphir happy,
+        // but in fact we just ignore it and use only our gateway listeners.
+        let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
+        let api_listener_url = config_file.api_listener.unwrap_or(default_api_listener_url);
+        let http_listener_url = api_listener_url.parse::<Url>()
+            .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
         Some(Config {
             service_mode: service_mode,
