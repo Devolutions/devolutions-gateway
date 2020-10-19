@@ -10,7 +10,10 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    http::controllers::{health::build_health_response, utils::SyncResponseUtil},
+    http::{
+        controllers::{health::build_health_response, utils::SyncResponseUtil},
+        middlewares::auth::{parse_auth_header, AuthHeaderType},
+    },
     jet::{
         association::{Association, AssociationResponse},
         candidate::Candidate,
@@ -121,6 +124,18 @@ impl ControllerData {
     fn gather_association_candidates(&self, req: &SyncRequest, res: &mut SyncResponse) {
         res.status(StatusCode::BAD_REQUEST);
 
+        // check the session token is signed by our provider if unrestricted mode is not set
+        if !self.config.unrestricted {
+            match validate_session_token(self.config.as_ref(), req) {
+                Ok(()) => {}
+                Err(e) => {
+                    slog_scope::error!("Couldn't validate session token: {}", e);
+                    res.status(StatusCode::FORBIDDEN);
+                    return;
+                }
+            }
+        }
+
         if let Some(association_id) = req.captures().get("association_id") {
             if let Ok(uuid) = Uuid::parse_str(association_id) {
                 if let Ok(mut jet_associations) = self.jet_associations.lock() {
@@ -190,4 +205,28 @@ pub fn create_remove_association_future(
             Ok(())
         })
     })
+}
+
+fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<(), String> {
+    let key = config
+        .provisioner_public_key
+        .as_ref()
+        .ok_or_else(|| "Provisioner public key is missing".to_string())?;
+
+    let auth_header = req
+        .headers_map()
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| "Authorization header not present in request.".to_string())?;
+
+    let auth_str = auth_header.to_str().map_err(|e| e.to_string())?;
+
+    match parse_auth_header(auth_str) {
+        Some((AuthHeaderType::Bearer, token)) => {
+            use picky::jose::jwt::{JwtSig, JwtValidator};
+            JwtSig::<serde_json::Value>::decode(&token, key, &JwtValidator::no_check())
+                .map_err(|e| format!("Invalid session token: {}", e))?;
+            Ok(())
+        }
+        _ => Err("Invalid authorization type".to_string()),
+    }
 }
