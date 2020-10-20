@@ -5,7 +5,7 @@ use std::{
     net::{self, TcpStream},
     str,
     sync::{mpsc, Arc, Barrier},
-    thread, time,
+    thread,
 };
 
 use structopt::StructOpt;

@@ -1,3 +1,4 @@
+use gcc::ClientEarlyCapabilityFlags;
 use ironrdp::{
     gcc, nego,
     rdp::{capability_sets, ClientInfoFlags, Credentials},
@@ -22,7 +23,7 @@ impl FilterConfig {
         Self {
             server_response_protocol,
             version: gcc::RdpVersion::V5Plus,
-            client_early_capability_flags: gcc::ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL,
+            client_early_capability_flags: ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL,
             server_early_capability_flags: gcc::ServerEarlyCapabilityFlags::empty(),
             encryption_methods: gcc::EncryptionMethod::empty(),
             target_credentials,
@@ -35,7 +36,11 @@ impl Filter for ConnectInitial {
         let mut gcc_blocks = &mut self.conference_create_request.gcc_blocks;
         gcc_blocks.core.version = config.version;
         if let Some(ref mut early_capability_flags) = gcc_blocks.core.optional_data.early_capability_flags {
-            *early_capability_flags = config.client_early_capability_flags;
+            let mut filtered_capability_flags = config.client_early_capability_flags;
+            if !early_capability_flags.contains(gcc::ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL) {
+                filtered_capability_flags.remove(gcc::ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL);
+            }
+            *early_capability_flags = filtered_capability_flags;
         }
         if let Some(ref mut server_selected_protocol) = gcc_blocks.core.optional_data.server_selected_protocol {
             *server_selected_protocol = config.server_response_protocol;

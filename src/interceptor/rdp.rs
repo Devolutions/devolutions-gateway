@@ -10,6 +10,7 @@ use ironrdp::{
     rdp::vc,
     Data, McsPdu, PduParsing, TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH,
 };
+
 use slog_scope::{error, info};
 
 use crate::{
@@ -19,11 +20,11 @@ use crate::{
 
 pub struct RdpMessageReader {
     static_channels: HashMap<String, u16>,
-    dvc_manager: DvcManager,
+    dvc_manager: Option<DvcManager>,
 }
 
 impl RdpMessageReader {
-    pub fn new(static_channels: HashMap<String, u16>, dvc_manager: DvcManager) -> Self {
+    pub fn new(static_channels: HashMap<String, u16>, dvc_manager: Option<DvcManager>) -> Self {
         Self {
             static_channels,
             dvc_manager,
@@ -39,19 +40,20 @@ impl MessageReader for RdpMessageReader {
         for message in tpkt_tpdu_messages.iter() {
             match parse_tpkt_tpdu_message(message) {
                 Ok(ParsedTpktPtdu::VirtualChannel { id, buffer }) => {
-                    match self.static_channels.get(vc::DRDYNVC_CHANNEL_NAME) {
-                        Some(drdynvc_channel_id) => {
-                            if id == *drdynvc_channel_id {
-                                match self.dvc_manager.process(source, buffer) {
-                                    Ok(Some(message)) => messages.push(message),
-                                    Ok(None) => continue,
-                                    Err(err) => {
-                                        error!("Error during DVC message parsing: {}", err);
-                                    }
+                    if let Some(drdynvc_channel_id) = self.static_channels.get(vc::DRDYNVC_CHANNEL_NAME) {
+                        if id == *drdynvc_channel_id {
+                            let dvc_manager = self
+                                .dvc_manager
+                                .as_mut()
+                                .expect("Can't process drdynvc channel message: DVC manager is missing");
+                            match dvc_manager.process(source, buffer) {
+                                Ok(Some(message)) => messages.push(message),
+                                Ok(None) => continue,
+                                Err(err) => {
+                                    error!("Error during DVC message parsing: {}", err);
                                 }
                             }
                         }
-                        None => unreachable!("drdynvc channel must be created"),
                     }
                 }
                 Ok(ParsedTpktPtdu::DisconnectionRequest(reason)) => {
@@ -66,7 +68,7 @@ impl MessageReader for RdpMessageReader {
         }
 
         data.drain(..messages_len);
-
+        info!("messages - {:?}", messages);
         messages
     }
 }

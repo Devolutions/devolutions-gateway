@@ -11,11 +11,11 @@ use crate::{
 };
 use accept_connection_future::AcceptConnectionMode;
 use bytes::IntoBuf;
-use futures::Future;
+use futures::{future, Future};
 use slog_scope::{error, info};
 use sspi::{internal::credssp, AuthIdentity};
 use std::{io, sync::Arc};
-use tokio::{io::AsyncWrite, net::tcp::TcpStream};
+use tokio::{io::AsyncWrite, net::tcp::TcpStream, prelude::future::Either};
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
@@ -123,58 +123,60 @@ impl RdpClient {
                                     let joined_static_channels = proxy_connection.channels;
 
                                     info!("RDP Connection Sequence finished");
+                                    let joined_static_channels = utils::swap_hashmap_kv(joined_static_channels);
 
-                                    futures::lazy(move || {
-                                        let joined_static_channels = utils::swap_hashmap_kv(joined_static_channels);
-
-                                        let drdynvc_channel_id =
-                                            *joined_static_channels.get(DR_DYN_VC_CHANNEL_NAME).ok_or_else(|| {
-                                                io::Error::new(io::ErrorKind::Other, "DVC channel was not joined")
-                                            })?;
-
-                                        Ok((joined_static_channels, drdynvc_channel_id))
-                                    })
-                                    .and_then(move |(joined_static_channels, drdynvc_channel_id)| {
-                                        create_downgrade_dvc_capabilities_future(
+                                    info!("matching channels");
+                                    match joined_static_channels.get(DR_DYN_VC_CHANNEL_NAME) {
+                                        Some(drdynvc_channel_id) => {
+                                            let create_downgrade_dvc_future = create_downgrade_dvc_capabilities_future(
+                                                client_transport,
+                                                server_transport,
+                                                *drdynvc_channel_id,
+                                                DvcManager::with_allowed_channels(vec![
+                                                    RDP8_GRAPHICS_PIPELINE_NAME.to_string()
+                                                ]),
+                                            )
+                                            .map(|(client_transport, server_transport, dvc_manager)| {
+                                                (
+                                                    client_transport,
+                                                    server_transport,
+                                                    Some(dvc_manager),
+                                                    joined_static_channels,
+                                                )
+                                            })
+                                            .map_err(|e| {
+                                                io::Error::new(
+                                                    io::ErrorKind::Other,
+                                                    format!("Failed to downgrade DVC capabilities: {}", e),
+                                                )
+                                            });
+                                            Either::A(create_downgrade_dvc_future)
+                                        }
+                                        None => Either::B(future::ok((
                                             client_transport,
                                             server_transport,
-                                            drdynvc_channel_id,
-                                            DvcManager::with_allowed_channels(vec![
-                                                RDP8_GRAPHICS_PIPELINE_NAME.to_string()
-                                            ]),
-                                        )
-                                        .and_then(|dvc_future_result| Ok((dvc_future_result, joined_static_channels)))
-                                    })
-                                    .map_err(|e| {
-                                        io::Error::new(
-                                            io::ErrorKind::Other,
-                                            format!("Failed to downgrade DVC capabilities: {}", e),
-                                        )
-                                    })
-                                    .and_then(
-                                        move |(dvc_future_result, joined_static_channels)| {
-                                            let (client_transport, server_transport, dvc_manager) = dvc_future_result;
+                                            None,
+                                            joined_static_channels,
+                                        ))),
+                                    }
+                                })
+                                .and_then(move |future| {
+                                    let (client_transport, server_transport, dvc_manager, joined_static_channels) =
+                                        future;
+                                    let client_tls = client_transport.into_inner();
+                                    let server_tls = server_transport.into_inner();
 
-                                            let client_tls = client_transport.into_inner();
-                                            let server_tls = server_transport.into_inner();
-
-                                            Proxy::new(config)
-                                                .build_with_message_reader(
-                                                    TcpTransport::new_tls(server_tls),
-                                                    TcpTransport::new_tls(client_tls),
-                                                    Some(Box::new(RdpMessageReader::new(
-                                                        joined_static_channels,
-                                                        dvc_manager,
-                                                    ))),
-                                                )
-                                                .map_err(move |e| {
-                                                    error!("Proxy error: {}", e);
-                                                    e
-                                                })
-                                        },
-                                    )
+                                    Proxy::new(config)
+                                        .build_with_message_reader(
+                                            TcpTransport::new_tls(server_tls),
+                                            TcpTransport::new_tls(client_tls),
+                                            Some(Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager))),
+                                        )
+                                        .map_err(move |e| {
+                                            error!("Proxy error: {}", e);
+                                            e
+                                        })
                                 });
-
                         let boxed_future: Box<dyn Future<Item = (), Error = io::Error> + Send> = Box::new(future);
                         boxed_future
                     }

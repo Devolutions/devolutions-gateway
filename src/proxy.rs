@@ -43,7 +43,9 @@ impl Proxy {
                     client_transport,
                     Some(Box::new(RdpMessageReader::new(
                         HashMap::new(),
-                        DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
+                        Some(DvcManager::with_allowed_channels(vec![
+                            RDP8_GRAPHICS_PIPELINE_NAME.to_string()
+                        ])),
                     ))),
                 )
             }
@@ -75,7 +77,7 @@ impl Proxy {
                 client_peer_addr.port(),
                 server_peer_addr.ip(),
                 server_peer_addr.port(),
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+                chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
             );
             let mut path = PathBuf::from(pcap_files_path);
             path.push(filename);
