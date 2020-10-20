@@ -122,55 +122,68 @@ impl ControllerData {
     }
 
     fn gather_association_candidates(&self, req: &SyncRequest, res: &mut SyncResponse) {
-        res.status(StatusCode::BAD_REQUEST);
+        let association_id = match req
+            .captures()
+            .get("association_id")
+            .and_then(|id| Uuid::parse_str(id).ok())
+        {
+            Some(id) => id,
+            None => {
+                res.status(StatusCode::BAD_REQUEST);
+                return;
+            }
+        };
 
         // check the session token is signed by our provider if unrestricted mode is not set
         if !self.config.unrestricted {
             match validate_session_token(self.config.as_ref(), req) {
-                Ok(()) => {}
                 Err(e) => {
                     slog_scope::error!("Couldn't validate session token: {}", e);
+                    res.status(StatusCode::UNAUTHORIZED);
+                    return;
+                }
+                Ok(expected_id) if expected_id != association_id => {
+                    slog_scope::error!(
+                        "Invalid session token: expected {}, got {}",
+                        expected_id,
+                        association_id
+                    );
                     res.status(StatusCode::FORBIDDEN);
                     return;
                 }
+                Ok(_) => { /* alright */ }
             }
         }
 
-        if let Some(association_id) = req.captures().get("association_id") {
-            if let Ok(uuid) = Uuid::parse_str(association_id) {
-                if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                    let association = match jet_associations.get_mut(&uuid) {
-                        Some(association) => association,
-                        None => {
-                            // The create could be done on a JET and the gather on a different one. We create it as workaround for now.
-                            jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
-                            start_remove_association_future(
-                                self.executor_handle.clone(),
-                                self.jet_associations.clone(),
-                                uuid,
-                            );
-                            jet_associations
-                                .get_mut(&uuid)
-                                .expect("We just added the association, it should be there!")
-                        }
-                    };
+        let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
 
-                    if association.get_candidates().is_empty() {
-                        for listener in &self.config.listeners {
-                            if let Some(candidate) =
-                                Candidate::new(&listener.external_url.to_string().trim_end_matches('/'))
-                            {
-                                association.add_candidate(candidate);
-                            }
-                        }
-                    }
+        let association = match jet_associations.get_mut(&association_id) {
+            Some(association) => association,
+            None => {
+                // The create could be done on a JET and the gather on a different one. We create it as workaround for now.
+                jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
+                start_remove_association_future(
+                    self.executor_handle.clone(),
+                    self.jet_associations.clone(),
+                    association_id,
+                );
+                jet_associations
+                    .get_mut(&association_id)
+                    .expect("We just added the association, it should be there!")
+            }
+        };
 
-                    let body = association.gather_candidate();
-                    res.json_body(body.to_string());
-                    res.status(StatusCode::OK);
+        if association.get_candidates().is_empty() {
+            for listener in &self.config.listeners {
+                if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches('/')) {
+                    association.add_candidate(candidate);
                 }
             }
         }
+
+        let body = association.gather_candidate();
+        res.json_body(body.to_string());
+        res.status(StatusCode::OK);
     }
 
     fn health(&self, _req: &SyncRequest, res: &mut SyncResponse) {
@@ -207,7 +220,12 @@ pub fn create_remove_association_future(
     })
 }
 
-fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<(), String> {
+fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<Uuid, String> {
+    #[derive(Deserialize)]
+    struct PartialSessionToken {
+        den_session_id: Uuid,
+    }
+
     let key = config
         .provisioner_public_key
         .as_ref()
@@ -223,9 +241,9 @@ fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<(), Stri
     match parse_auth_header(auth_str) {
         Some((AuthHeaderType::Bearer, token)) => {
             use picky::jose::jwt::{JwtSig, JwtValidator};
-            JwtSig::<serde_json::Value>::decode(&token, key, &JwtValidator::no_check())
+            let jwt = JwtSig::<PartialSessionToken>::decode(&token, key, &JwtValidator::no_check())
                 .map_err(|e| format!("Invalid session token: {}", e))?;
-            Ok(())
+            Ok(jwt.claims.den_session_id)
         }
         _ => Err("Invalid authorization type".to_string()),
     }
