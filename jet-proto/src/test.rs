@@ -81,7 +81,7 @@ impl JetTestRsp {
     pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
         let code = response
             .code
-            .ok_or_else(|| format!("Invalid test response, status code is missing"))?;
+            .ok_or_else(|| "Invalid test response, status code is missing".to_string())?;
         let status_code =
             StatusCode::from_u16(code).map_err(|e| format!("Invalid test response status code: {}", e))?;
         match response

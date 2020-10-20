@@ -44,7 +44,7 @@ fn gateway_service_main(
 Service!("gateway", gateway_service_main);
 
 fn main() {
-    let config = Config::load().unwrap_or_else(|| Config::init());
+    let config = Config::load().unwrap_or_else(Config::init);
 
     if !config.service_mode {
         let mut service = GatewayService::load().expect("error loading service");

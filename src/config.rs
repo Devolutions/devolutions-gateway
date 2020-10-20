@@ -230,9 +230,9 @@ impl Config {
 
         let config_file = get_config_file()?;
 
-        let default_hostname = get_default_hostname().unwrap_or("localhost".to_string());
-        let hostname = config_file.hostname.unwrap_or(default_hostname.clone());
-        let farm_name = config_file.farm_name.unwrap_or(hostname.clone());
+        let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
+        let hostname = config_file.hostname.unwrap_or(default_hostname);
+        let farm_name = config_file.farm_name.unwrap_or_else(|| hostname.clone());
 
         let mut listeners = Vec::new();
         for listener in config_file.listeners {
@@ -260,10 +260,10 @@ impl Config {
                 "https" => true,
                 _ => false,
             })
-            .map(|listener| listener.clone())
+            .cloned()
             .collect();
 
-        if http_listeners.len() < 1 {
+        if http_listeners.is_empty() {
             eprintln!("At least one HTTP listener is required");
             return None;
         }
@@ -274,10 +274,10 @@ impl Config {
             url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
-        let application_protocols = config_file.application_protocols.unwrap_or(Vec::new());
+        let application_protocols = config_file.application_protocols.unwrap_or_default();
         let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
 
-        let gateway_log_file = config_file.log_file.unwrap_or("gateway.log".to_string());
+        let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_string());
         let log_file = get_program_data_file_path(gateway_log_file.as_str())
             .to_str()
             .unwrap()
