@@ -25,7 +25,7 @@ use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{danger_transport, url_to_socket_arr},
+    utils::{danger_transport, resolve_url_to_socket_arr},
 };
 
 pub struct WsStream {
@@ -299,7 +299,14 @@ impl Transport for WsTransport {
     where
         Self: Sized,
     {
-        let socket_addr = url_to_socket_arr(&url);
+        let socket_addr = if let Some(addr) = resolve_url_to_socket_arr(&url) {
+            addr
+        } else {
+            return Box::new(futures::future::err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("couldn't resolve {}", url),
+            )));
+        };
 
         let request = match Request::builder().uri(url.as_str()).body(()) {
             Ok(req) => req,

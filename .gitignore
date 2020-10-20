@@ -1,3 +1,6 @@
 target/
 .DS_Store
 .idea/
+.vscode/
+# we don't want Cargo.lock for jet-proto (not a binary), also TODO: maybe we should use a workspace?
+jet-proto/Cargo.lock

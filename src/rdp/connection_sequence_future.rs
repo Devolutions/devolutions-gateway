@@ -25,7 +25,7 @@ use tokio::{
     prelude::{Async, Poll, Sink},
 };
 use tokio_rustls::{TlsAcceptor, TlsStream};
-use utils::url_to_socket_arr;
+use utils::resolve_url_to_socket_arr;
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
@@ -271,7 +271,14 @@ impl Future for ConnectionSequenceFuture {
                     let client_transport = try_ready!(nla_future.poll());
                     self.client_nla_transport = Some(client_transport);
 
-                    let stream = TcpStream::connect(&url_to_socket_arr(&self.identity.dest_host));
+                    let socket_addr = resolve_url_to_socket_arr(&self.identity.dest_host).ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            format!("couldn't resolve {}", self.identity.dest_host),
+                        )
+                    })?;
+
+                    let stream = TcpStream::connect(&socket_addr);
                     self.state = ConnectionSequenceFutureState::ConnectToServer(stream);
                 }
                 ConnectionSequenceFutureState::ConnectToServer(connect_future) => {

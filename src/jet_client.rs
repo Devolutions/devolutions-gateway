@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io, str,
+    io,
     sync::{Arc, Mutex},
 };
 
@@ -9,6 +9,7 @@ use futures::{future::err, try_ready, Async, Future, Poll};
 use jet_proto::{
     accept::{JetAcceptReq, JetAcceptRsp},
     connect::{JetConnectReq, JetConnectRsp},
+    test::{JetTestReq, JetTestRsp},
     JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
 };
 use slog_scope::{debug, error};
@@ -55,6 +56,10 @@ impl JetClient {
         let config = self.config;
 
         Box::new(msg_reader.and_then(move |(transport, msg)| match msg {
+            JetMessage::JetTestReq(jet_test_req) => {
+                let handle_msg = HandleTestJetMsg::new(transport, jet_test_req);
+                Box::new(handle_msg) as Box<dyn Future<Item = (), Error = io::Error> + Send>
+            }
             JetMessage::JetAcceptReq(jet_accept_req) => {
                 let handle_msg = HandleAcceptJetMsg::new(
                     config,
@@ -86,11 +91,14 @@ impl JetClient {
             JetMessage::JetConnectRsp(_) => {
                 Box::new(err(error_other("Jet-Accept response can't be handled by the server.")))
             }
+            JetMessage::JetTestRsp(_) => {
+                Box::new(err(error_other("Jet-Test response can't be handled by the server.")))
+            }
         }))
     }
 }
 
-fn error_other(desc: &str) -> io::Error {
+fn error_other<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
@@ -133,7 +141,7 @@ impl Future for JetMsgReader {
             let mut slice = self.data_received.as_slice();
             let signature = slice.read_u32::<LittleEndian>()?; // signature
             if signature != jet_proto::JET_MSG_SIGNATURE {
-                return Err(error_other(&format!("Invalid JetPacket - Signature = {}.", signature)));
+                return Err(error_other(format!("Invalid JetPacket - Signature = {}.", signature)));
             }
 
             let msg_len = slice.read_u16::<BigEndian>()?;
@@ -473,7 +481,7 @@ impl Future for HandleConnectJetMsg {
                     candidate_id,
                 }))
             }
-            _ => Err(error_other(&format!(
+            _ => Err(error_other(format!(
                 "Invalid association ID received: {}",
                 self.request_msg.association
             ))),
@@ -486,4 +494,41 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: JetTransport,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
+}
+
+struct HandleTestJetMsg {
+    transport: JetTransport,
+    request: JetTestReq,
+    response: Option<Vec<u8>>,
+}
+
+impl HandleTestJetMsg {
+    fn new(transport: JetTransport, request: JetTestReq) -> Self {
+        Self {
+            transport,
+            request,
+            response: None,
+        }
+    }
+}
+
+impl Future for HandleTestJetMsg {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if self.response.is_none() {
+            let response_msg = JetMessage::JetTestRsp(JetTestRsp {
+                status_code: StatusCode::OK,
+                version: self.request.version,
+            });
+            let mut response_msg_buffer = Vec::with_capacity(512);
+            response_msg.write_to(&mut response_msg_buffer)?;
+            self.response = Some(response_msg_buffer);
+        }
+
+        let response = self.response.as_ref().unwrap(); // set above
+        try_ready!(self.transport.poll_write(&response));
+        Ok(Async::Ready(()))
+    }
 }

@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{danger_transport, url_to_socket_arr},
+    utils::{danger_transport, resolve_url_to_socket_arr},
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -135,7 +135,15 @@ impl Transport for TcpTransport {
     where
         Self: Sized,
     {
-        let socket_addr = url_to_socket_arr(&url);
+        let socket_addr = if let Some(addr) = resolve_url_to_socket_arr(&url) {
+            addr
+        } else {
+            return Box::new(futures::future::err(io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                format!("couldn't resolve {}", url),
+            )));
+        };
+
         match url.scheme() {
             "tcp" => Box::new(TcpStream::connect(&socket_addr).map(TcpTransport::new)),
             "tls" => {
