@@ -15,14 +15,14 @@ fn generate_version_rc() -> String {
 
     let version_number = env::var("CARGO_PKG_VERSION").unwrap() + ".0";
     let version_commas = version_number.replace(".", ",");
-    let file_description = output_name.clone();
+    let file_description = output_name;
     let file_version = version_number.clone();
     let internal_name = filename.clone();
-    let original_filename = filename.clone();
-    let product_name = output_name.clone();
-    let product_version = version_number.clone();
+    let original_filename = filename;
+    let product_name = output_name;
+    let product_version = version_number;
     let vs_file_version = version_commas.clone();
-    let vs_product_version = version_commas.clone();
+    let vs_product_version = version_commas;
 
     let version_rc = format!(
         r#"#include <winresrc.h>
@@ -81,7 +81,7 @@ fn main() {
         let version_rc_file = format!("{}/version.rc", out_dir);
         let version_rc_data = generate_version_rc();
         let mut file = File::create(&version_rc_file).expect("cannot create version.rc file");
-        file.write(version_rc_data.as_bytes()).unwrap();
+        file.write_all(version_rc_data.as_bytes()).unwrap();
         embed_resource::compile(&version_rc_file);
     }
 }

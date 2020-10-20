@@ -157,7 +157,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Received a non encrypted JWT containing credentials. This is bad."),
+            "Received a non encrypted JWT containing credentials. This is bad.".to_string(),
         )),
     }
 }
