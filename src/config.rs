@@ -123,7 +123,7 @@ impl GatewayListener {
 
         Some(ListenerConfig {
             url: internal_url,
-            external_url: external_url,
+            external_url,
         })
     }
 }
@@ -341,16 +341,15 @@ impl Config {
             .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
         Some(Config {
-            service_mode: service_mode,
+            service_mode,
             service_name: SERVICE_NAME.to_string(),
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
             company_name: COMPANY_NAME.to_string(),
-            unrestricted: unrestricted,
-            api_key: api_key,
-            listeners: listeners,
-            http_listener_url: http_listener_url,
-            farm_name: farm_name,
+            unrestricted,
+            api_key,
+            listeners,
+            farm_name,
             jet_instance: hostname,
             routing_url: None,
             pcap_files_path: capture_path,
@@ -358,13 +357,14 @@ impl Config {
             log_file: Some(log_file),
             rdp: enable_rdp_support,
             certificate: CertificateConfig {
-                certificate_file: certificate_file,
-                certificate_data: certificate_data,
-                private_key_file: private_key_file,
-                private_key_data: private_key_data,
+                certificate_file,
+                certificate_data,
+                private_key_file,
+                private_key_data,
             },
-            provisioner_public_key: provisioner_public_key,
-            delegation_private_key: delegation_private_key,
+            http_listener_url,
+            provisioner_public_key,
+            delegation_private_key,
         })
     }
 
