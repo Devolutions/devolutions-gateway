@@ -101,24 +101,50 @@ impl ControllerData {
     }
 
     fn create_association(&self, req: &SyncRequest, res: &mut SyncResponse) {
-        res.status(StatusCode::BAD_REQUEST);
+        let association_id = match req
+            .captures()
+            .get("association_id")
+            .and_then(|id| Uuid::parse_str(id).ok())
+        {
+            Some(id) => id,
+            None => {
+                res.status(StatusCode::BAD_REQUEST);
+                return;
+            }
+        };
 
-        if let Some(association_id) = req.captures().get("association_id") {
-            if let Ok(uuid) = Uuid::parse_str(association_id) {
-                if let Ok(mut jet_associations) = self.jet_associations.lock() {
-                    if !jet_associations.contains_key(&uuid) {
-                        jet_associations.insert(uuid, Association::new(uuid, JET_VERSION_V2));
-                        start_remove_association_future(
-                            self.executor_handle.clone(),
-                            self.jet_associations.clone(),
-                            uuid,
-                        );
-
-                        res.status(StatusCode::OK);
-                    }
+        // check the session token is signed by our provider if unrestricted mode is not set
+        if !self.config.unrestricted {
+            match validate_session_token(self.config.as_ref(), req) {
+                Err(e) => {
+                    slog_scope::error!("Couldn't validate session token: {}", e);
+                    res.status(StatusCode::UNAUTHORIZED);
+                    return;
                 }
+                Ok(expected_id) if expected_id != association_id => {
+                    slog_scope::error!(
+                        "Invalid session token: expected {}, got {}",
+                        expected_id,
+                        association_id
+                    );
+                    res.status(StatusCode::FORBIDDEN);
+                    return;
+                }
+                Ok(_) => { /* alright */ }
             }
         }
+
+        // create association
+        let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
+
+        jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
+        start_remove_association_future(
+            self.executor_handle.clone(),
+            self.jet_associations.clone(),
+            association_id,
+        );
+
+        res.status(StatusCode::OK);
     }
 
     fn gather_association_candidates(&self, req: &SyncRequest, res: &mut SyncResponse) {
@@ -155,23 +181,21 @@ impl ControllerData {
             }
         }
 
+        // create association
         let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
 
-        let association = match jet_associations.get_mut(&association_id) {
-            Some(association) => association,
-            None => {
-                // The create could be done on a JET and the gather on a different one. We create it as workaround for now.
-                jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-                start_remove_association_future(
-                    self.executor_handle.clone(),
-                    self.jet_associations.clone(),
-                    association_id,
-                );
-                jet_associations
-                    .get_mut(&association_id)
-                    .expect("We just added the association, it should be there!")
-            }
-        };
+        if !jet_associations.contains_key(&association_id) {
+            jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
+            start_remove_association_future(
+                self.executor_handle.clone(),
+                self.jet_associations.clone(),
+                association_id,
+            );
+        }
+
+        let association = jet_associations
+            .get_mut(&association_id)
+            .expect("presence is checked above");
 
         if association.get_candidates().is_empty() {
             for listener in &self.config.listeners {
