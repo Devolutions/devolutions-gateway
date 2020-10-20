@@ -330,6 +330,11 @@ impl Config {
         let unrestricted = config_file.unrestricted.unwrap_or(true);
         let capture_path = config_file.capture_path;
 
+        // early fail if we start as restricted without provisioner key
+        if !unrestricted && provisioner_public_key.is_none() {
+            panic!("provisioner public key is missing in unrestricted mode");
+        }
+
         // We always create a dummy API listener because Saphir needs one.
         // However, this API listener is unable to process WebSocket traffic.
         // Create the API listener as a dummy listener to make Saphir happy,
@@ -349,7 +354,6 @@ impl Config {
             unrestricted,
             api_key,
             listeners,
-            http_listener_url,
             farm_name,
             jet_instance: hostname,
             routing_url: None,
@@ -363,6 +367,7 @@ impl Config {
                 private_key_file,
                 private_key_data,
             },
+            http_listener_url,
             provisioner_public_key,
             delegation_private_key,
         })
@@ -478,7 +483,8 @@ impl Config {
                     .value_name("FILE")
                     .env("JET_PROVISIONER_PUBLIC_KEY_FILE")
                     .help("Path to the public key file.")
-                    .takes_value(true),
+                    .takes_value(true)
+                    .required_unless_one(&["provisioner-public-key-data", "unrestricted"]),
             )
             .arg(
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_DATA)
@@ -486,7 +492,8 @@ impl Config {
                     .value_name("DATA")
                     .env("JET_PROVISIONER_PUBLIC_KEY_DATA")
                     .help("Public key data, base64-encoded PKCS10.")
-                    .takes_value(true),
+                    .takes_value(true)
+                    .required_unless_one(&["provisioner-public-key-file", "unrestricted"]),
             )
             .arg(
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
