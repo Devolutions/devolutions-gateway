@@ -1228,7 +1228,7 @@ dependencies = [
 [[package]]
 name = "ironrdp"
 version = "0.4.1"
-source = "git+https://github.com/Devolutions/IronRDP?branch=freerdp-fixes#c06e8e8e346277208fd051d2741032a8f5d61724"
+source = "git+https://github.com/Devolutions/IronRDP?rev=ca53209c84c55b41#ca53209c84c55b4198981ca3686d255a689917ac"
 dependencies = [
  "bit_field",
  "bitflags",
