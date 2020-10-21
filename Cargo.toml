@@ -19,12 +19,10 @@ url = "1.7.1"
 url_serde = "0.2.0"
 hostname = "^0.3"
 lazy_static = "1.2.0"
-futures = "0.1"
-futures_03 = { version = "0.3", package = "futures", features = ["compat"] }
-tokio = "0.1"
-tokio-signal = "0.2"
+tokio = { version = "0.2", features = ["signal"] }
+futures = { version = "0.3", features = ["compat"] }
+tokio-rustls = "0.20"
 rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
-tokio-rustls = "0.10.2"
 webpki = "0.21.0"
 native-tls = "0.2"
 byteorder = "1.2.7"

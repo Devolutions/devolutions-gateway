@@ -1,4 +1,4 @@
-pub mod association;
+//pub mod association;
 
 use std::{
     collections::HashMap,
@@ -9,10 +9,12 @@ use std::{
 };
 
 use crate::config::CertificateConfig;
+/*
 use tokio::{
     codec::{Decoder, Encoder, Framed, FramedParts},
     prelude::{AsyncRead, AsyncWrite},
 };
+ */
 use url::Url;
 use x509_parser::parse_x509_der;
 
@@ -33,12 +35,13 @@ pub mod danger_transport {
 }
 
 /// FIXME: we need to upgrade to tokio 0.3 in order to make resolving async
+/*
 pub fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
     format!("{}:{}", host, port).to_socket_addrs().ok()?.next()
 }
-
+*/
 #[macro_export]
 macro_rules! io_try {
     ($e:expr) => {
@@ -51,7 +54,7 @@ macro_rules! io_try {
         }
     };
 }
-
+/*
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
 where
     S: io::Read + io::Write,
@@ -60,7 +63,7 @@ where
 
     get_pub_key_from_der(&der)
 }
-
+*/
 pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
     let res = parse_x509_der(cert)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
@@ -68,7 +71,7 @@ pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
 
     Ok(public_key.data.to_vec())
 }
-
+/*
 fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
 where
     S: io::Read + io::Write,
@@ -83,7 +86,7 @@ where
 
     Ok(payload[0].as_ref().to_vec())
 }
-
+*/
 pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
     if let Some(filename) = &config.certificate_file {
         let certfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open certificate file {}", filename));
@@ -207,7 +210,7 @@ fn extract_der_data<A>(
 
     Ok(ders)
 }
-
+/*
 pub fn update_framed_codec<Io, OldCodec, NewCodec>(
     framed: Framed<Io, OldCodec>,
     codec: NewCodec,
@@ -224,7 +227,7 @@ where
 
     Framed::from_parts(new_parts)
 }
-
+*/
 #[allow(clippy::implicit_hasher)]
 pub fn swap_hashmap_kv<K, V>(hm: HashMap<K, V>) -> HashMap<V, K>
 where

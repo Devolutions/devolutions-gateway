@@ -1,30 +1,37 @@
 pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
+/*
 use self::{
     accept_connection_future::AcceptConnectionFuture, connection_sequence_future::ConnectionSequenceFuture,
     sequence_future::create_downgrade_dvc_capabilities_future,
 };
+*/
 use crate::{
     config::Config,
     interceptor::rdp::RdpMessageReader,
-    transport::{tcp::TcpTransport, Transport},
-    utils, Proxy,
+    //transport::{tcp::TcpTransport, Transport},
+    //utils, Proxy,
 };
+/*
 use accept_connection_future::AcceptConnectionMode;
 use bytes::IntoBuf;
 use futures::{future, Future};
 use slog_scope::{error, info};
+*/
 use sspi::{internal::credssp, AuthIdentity};
+
 use std::{io, sync::Arc};
-use tokio::{io::AsyncWrite, net::tcp::TcpStream, prelude::future::Either};
-use tokio_rustls::TlsAcceptor;
+// use tokio::{io::AsyncWrite, net::tcp::TcpStream, prelude::future::Either};
+// use tokio_rustls::TlsAcceptor;
 use url::Url;
 
-mod accept_connection_future;
-mod connection_sequence_future;
+// mod accept_connection_future;
+// mod connection_sequence_future;
+
 mod dvc_manager;
 mod filter;
 mod preconnection_pdu;
-mod sequence_future;
+
+//mod sequence_future;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -56,7 +63,7 @@ impl credssp::CredentialsProxy for RdpIdentity {
         Ok(credentials)
     }
 }
-
+/*
 pub struct RdpClient {
     config: Arc<Config>,
     tls_public_key: Vec<u8>,
@@ -184,3 +191,4 @@ impl RdpClient {
         )
     }
 }
+ */

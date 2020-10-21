@@ -1,12 +1,13 @@
 mod config;
-mod service;
+//mod service;
 
 use ceviche::{controller::*, Service, ServiceEvent};
 use config::Config;
-use futures::{Future, Stream};
-use service::GatewayService;
+// use service::GatewayService;
 use slog_scope::info;
 use std::sync::mpsc;
+
+/*
 
 #[allow(dead_code)]
 enum GatewayServiceEvent {}
@@ -89,4 +90,8 @@ fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
 fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
     let fut = futures::future::select_all(vec![tokio_signal::ctrl_c().flatten_stream().into_future()]);
     Box::new(fut.map(|_| ()).map_err(|_| ()))
+}
+ */
+pub fn main() {
+    panic!("Not implemented!");
 }
