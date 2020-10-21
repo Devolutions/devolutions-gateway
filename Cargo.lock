@@ -629,6 +629,7 @@ dependencies = [
  "tempfile",
  "tokio 0.2.22",
  "tokio-rustls 0.20.0",
+ "tokio-util",
  "tungstenite",
  "url 1.7.2",
  "url_serde",
@@ -923,7 +924,6 @@ version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a894a0acddba51a2d49a6f4263b1e64b8c579ece8af50fa86503d52cd1eea34"
 dependencies = [
- "futures 0.1.29",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -2984,6 +2984,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d34ca54d84bf2b5b4d7d31e901a8464f7b60ac145a284fba25ceb801f2ddccd"
 dependencies = [
  "bytes 0.5.3",
+ "iovec",
  "lazy_static",
  "libc",
  "mio",
@@ -3000,6 +3001,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7137dbb0abee577362ccdc7df21605cfcbb949243aeab47dac9ea6ef7d830e21"
 dependencies = [
  "bytes 0.5.3",
+ "futures-core",
  "pin-project-lite",
 ]
 
@@ -3212,6 +3214,20 @@ dependencies = [
  "tokio-codec",
  "tokio-io",
  "tokio-reactor",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24793699f4665ba0416ed287dc794fe6b11a4aa5e4e95b58624f45f6c46b97d4"
+dependencies = [
+ "bytes 0.5.3",
+ "futures-core",
+ "futures-sink",
+ "log",
+ "pin-project-lite",
+ "tokio 0.3.0",
 ]
 
 [[package]]

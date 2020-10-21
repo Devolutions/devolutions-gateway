@@ -5,18 +5,21 @@ use std::{
     fs,
     hash::Hash,
     io::{self, BufReader},
-    net::{SocketAddr, ToSocketAddrs},
+    net::SocketAddr,
+};
+
+use url::Url;
+use x509_parser::parse_x509_der;
+use tokio::{
+    prelude::*,
+    net::lookup_host,
+};
+use tokio_util::codec::{
+    Decoder, Encoder, Framed, FramedParts,
 };
 
 use crate::config::CertificateConfig;
-/*
-use tokio::{
-    codec::{Decoder, Encoder, Framed, FramedParts},
-    prelude::{AsyncRead, AsyncWrite},
-};
- */
-use url::Url;
-use x509_parser::parse_x509_der;
+
 
 pub mod danger_transport {
     pub struct NoCertificateVerification;
@@ -34,14 +37,15 @@ pub mod danger_transport {
     }
 }
 
-/// FIXME: we need to upgrade to tokio 0.3 in order to make resolving async
-/*
-pub fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
+async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
-    format!("{}:{}", host, port).to_socket_addrs().ok()?.next()
+    lookup_host(format!("{}:{}", host, port)).await
+        .ok()
+        .map(|mut it| it.next())
+        .flatten()
 }
-*/
+
 #[macro_export]
 macro_rules! io_try {
     ($e:expr) => {
@@ -54,7 +58,7 @@ macro_rules! io_try {
         }
     };
 }
-/*
+
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
 where
     S: io::Read + io::Write,
@@ -63,7 +67,7 @@ where
 
     get_pub_key_from_der(&der)
 }
-*/
+
 pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
     let res = parse_x509_der(cert)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
@@ -71,22 +75,25 @@ pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
 
     Ok(public_key.data.to_vec())
 }
-/*
+
 fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
 where
     S: io::Read + io::Write,
 {
-    use rustls::internal::msgs::handshake::CertificatePayload;
-
-    let payload: CertificatePayload = stream
-        .get_ref()
-        .1
+    let (_, session) = stream.get_ref();
+    let payload = session
         .get_peer_certificates()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate."))?;
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate.")
+        })?;
 
-    Ok(payload[0].as_ref().to_vec())
+    let cert = payload.first().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates")
+    })?;
+
+    Ok(cert.as_ref().to_vec())
 }
-*/
+
 pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
     if let Some(filename) = &config.certificate_file {
         let certfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open certificate file {}", filename));
@@ -210,15 +217,15 @@ fn extract_der_data<A>(
 
     Ok(ders)
 }
-/*
-pub fn update_framed_codec<Io, OldCodec, NewCodec>(
+
+pub fn update_framed_codec<Io, OldCodec, NewCodec, OldDecodedType, NewDecodedType>(
     framed: Framed<Io, OldCodec>,
     codec: NewCodec,
 ) -> Framed<Io, NewCodec>
 where
     Io: AsyncRead + AsyncWrite,
-    OldCodec: Decoder + Encoder,
-    NewCodec: Decoder + Encoder,
+    OldCodec: Decoder + Encoder<OldDecodedType>,
+    NewCodec: Decoder + Encoder<NewDecodedType>,
 {
     let FramedParts { io, read_buf, .. } = framed.into_parts();
 
@@ -227,7 +234,7 @@ where
 
     Framed::from_parts(new_parts)
 }
-*/
+
 #[allow(clippy::implicit_hasher)]
 pub fn swap_hashmap_kv<K, V>(hm: HashMap<K, V>) -> HashMap<V, K>
 where

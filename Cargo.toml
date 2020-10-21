@@ -19,8 +19,9 @@ url = "1.7.1"
 url_serde = "0.2.0"
 hostname = "^0.3"
 lazy_static = "1.2.0"
-tokio = { version = "0.2", features = ["signal"] }
-futures = { version = "0.3", features = ["compat"] }
+tokio = { version = "0.2", features = ["signal", "net"] }
+tokio-util = { version = "0.4", features = ["codec"] }
+futures = "0.3"
 tokio-rustls = "0.20"
 rustls = { git = "https://github.com/vaffeine/rustls.git", branch = "sni_jet_workaround", features = ["dangerous_configuration"] }
 webpki = "0.21.0"
