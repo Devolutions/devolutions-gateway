@@ -48,7 +48,7 @@ struct RoutingClaims {
 
 pub fn is_encrypted(token: &str) -> bool {
     let num_dots = token.chars().fold(0, |acc, c| if c == '.' { acc + 1 } else { acc });
-    num_dots == 5
+    num_dots == 4
 }
 
 pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<TokenRoutingMode, io::Error> {
