@@ -35,13 +35,13 @@ jobs:
           . activate.sh
           cargo build --release
           mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-          cp $(Build.Repository.LocalPath)/target/release/devolutions-jet $(Build.ArtifactStagingDirectory)/linux/x86_64/
-        displayName: Building devolutions-jet
+          cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/
+        displayName: Building devolutions-gateway
 
       - task: PublishBuildArtifacts@1
         inputs:
           pathToPublish: $(Build.ArtifactStagingDirectory)
-          artifactName: devolutions-jet
+          artifactName: devolutions-gateway
 
   - job: windows64
     pool:
@@ -62,13 +62,13 @@ jobs:
           .\activate.ps1
           cargo build --release
           mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-          cp $(Build.Repository.LocalPath)/target/release/devolutions-jet.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/
-        displayName: Building devolutions-jet
+          cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/
+        displayName: Building devolutions-gateway
         env:
           RUSTFLAGS: '-C target-feature=+crt-static'
 
       - task: PublishBuildArtifacts@1
         inputs:
           pathToPublish: $(Build.ArtifactStagingDirectory)
-          artifactName: devolutions-jet
+          artifactName: devolutions-gateway
 

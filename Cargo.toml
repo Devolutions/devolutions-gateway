@@ -1,5 +1,5 @@
 [package]
-name = "devolutions-jet"
+name = "devolutions-gateway"
 version = "0.13.0"
 edition = "2018"
 readme = "README.md"

@@ -7,9 +7,9 @@ RUN apt-get update
 RUN apt-get install -y --no-install-recommends ca-certificates curl
 RUN rm -rf /var/lib/apt/lists/*
 
-COPY devolutions-jet .
+COPY devolutions-gateway .
 
 EXPOSE 8080
 EXPOSE 10256
 
-ENTRYPOINT [ "./devolutions-jet" ]
+ENTRYPOINT [ "./devolutions-gateway" ]

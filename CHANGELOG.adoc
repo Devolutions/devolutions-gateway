@@ -1,6 +1,6 @@
-= Devolutions-Jet changelog
+= Devolutions-Gateway changelog
 
-This document provides a list of notable changes introduced in Devolutions-Jet by release.
+This document provides a list of notable changes introduced in Devolutions-Gateway by release.
 
 == 0.13.0 (unreleased)
 

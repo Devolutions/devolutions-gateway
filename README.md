@@ -1,11 +1,11 @@
-# devolutions-jet
+# devolutions-gateway
 
 [![Build Status](https://travis-ci.com/vaffeine/devolutions-jet.svg?token=FxErzCAno8oL7CSUGoD1&branch=rdp)](https://travis-ci.com/vaffeine/devolutions-jet)
 [![codecov](https://codecov.io/gh/vaffeine/devolutions-jet/branch/rdp/graph/badge.svg?token=eXgEoo0BnD)](https://codecov.io/gh/vaffeine/devolutions-jet)
 
 A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
 
-Use `cargo run` to build and run devolutions-jet locally with default options.
+Use `cargo run` to build and run devolutions-gateway locally with default options.
 
 ## Command-line Interface
 
@@ -90,7 +90,7 @@ OPTIONS:
 1. Run Wayk Now on 2 hosts to be able to open a Wayk session between those 2 hosts.
     * Download Wayk Now [here](https://wayk.devolutions.net/home/download)
 
-1. Start devolutions-jet and specify the routing URL where x.x.x.x is the IP of your Wayk server host. You can easily get the host IP in the source ID drop down list in Wayk Now.
+1. Start devolutions-gateway and specify the routing URL where x.x.x.x is the IP of your Wayk server host. You can easily get the host IP in the source ID drop down list in Wayk Now.
     ```
     $ cargo run -- -r tls://x.x.x.x:4489
     ```
@@ -99,7 +99,7 @@ OPTIONS:
         $ cargo run -- -r tls://x.x.x.x:4489 --pcap-files-path c:\waykTraffic\ -p wayk
         ```
 
-1. On the same host where devolutions-jet is running, open wayk and connect to 127.0.0.1:8080
+1. On the same host where devolutions-gateway is running, open wayk and connect to 127.0.0.1:8080
     * The connection should start. A dummy certificate will be shown. You can accept it and the Wayk connection should start.
 
 ### RDP routing
