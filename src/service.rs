@@ -60,7 +60,7 @@ pub struct GatewayService {
 
 impl GatewayService {
     pub fn load() -> Option<Self> {
-        let config = Arc::new(Config::load().unwrap_or_else(Config::init));
+        let config = Arc::new(Config::init());
         let logger = logger::init(config.log_file.as_deref()).expect("failed to setup logger");
         let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("failed to init logger");
