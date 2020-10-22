@@ -115,7 +115,7 @@ impl Default for Config {
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
             company_name: COMPANY_NAME.to_string(),
-            unrestricted: true,     // TODO: Should be false by default in a future version
+            unrestricted: true, // TODO: Should be false by default in a future version
             api_key: None,
             listeners: Vec::new(),
             farm_name: default_hostname.clone(),
@@ -219,7 +219,6 @@ pub struct ConfigFile {
 }
 
 fn get_config_path() -> PathBuf {
-
     if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
         Path::new(&config_path_env).to_path_buf()
     } else {
@@ -328,7 +327,7 @@ impl Config {
                     .value_name("URL")
                     .env("JET_HTTP_LISTENER_URL")
                     .help("HTTP listener URL.")
-                    .takes_value(true)
+                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_JET_INSTANCE)
@@ -501,7 +500,9 @@ impl Config {
         }
 
         if let Some(http_listener_url) = matches.value_of(ARG_HTTP_LISTENER_URL) {
-            config.http_listener_url = http_listener_url.parse::<Url>().unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
+            config.http_listener_url = http_listener_url
+                .parse::<Url>()
+                .unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
         }
 
         if let Some(jet_instance) = matches.value_of(ARG_JET_INSTANCE) {
@@ -510,7 +511,11 @@ impl Config {
         }
 
         if let Some(routing_url) = matches.value_of(ARG_ROUTING_URL) {
-            config.routing_url = Some(routing_url.parse::<Url>().expect("must be checked in the clap validator"));
+            config.routing_url = Some(
+                routing_url
+                    .parse::<Url>()
+                    .expect("must be checked in the clap validator"),
+            );
         }
 
         if let Some(pcap_files_path) = matches.value_of(ARG_PCAP_FILES_PATH) {
@@ -549,7 +554,9 @@ impl Config {
         };
 
         if let Some(pem_str) = pem_opt {
-            let pem = pem_str.parse::<Pem>().expect("couldn't parse provisioner public key pem");
+            let pem = pem_str
+                .parse::<Pem>()
+                .expect("couldn't parse provisioner public key pem");
             let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
             config.provisioner_public_key = Some(public_key);
         }
