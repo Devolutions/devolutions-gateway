@@ -5,9 +5,9 @@ LABEL maintainer "Devolutions Inc."
 
 WORKDIR "C:\\wayk"
 
-COPY devolutions-jet.exe .
+COPY devolutions-gateway.exe .
 
 EXPOSE 8080
 EXPOSE 10256
 
-ENTRYPOINT ["c:\\wayk\\devolutions-jet.exe"]
+ENTRYPOINT ["c:\\wayk\\devolutions-gateway.exe"]

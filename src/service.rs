@@ -1,4 +1,4 @@
-use devolutions_jet::{
+use devolutions_gateway::{
     config::Config,
     http::http_server::HttpServer,
     jet_client::{JetAssociationsMap, JetClient},

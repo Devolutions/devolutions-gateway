@@ -10,7 +10,7 @@ fn bin() -> PathBuf {
     if me.ends_with("deps") {
         me.pop();
     }
-    me.push("devolutions-jet");
+    me.push("devolutions-gateway");
 
     me
 }
@@ -52,7 +52,7 @@ pub fn run_proxy(
 
     let proxy = proxy_command.spawn().unwrap();
 
-    println!("Devolutions-Jet is running... (command={:?})", proxy_command);
+    println!("Devolutions-Gateway is running... (command={:?})", proxy_command);
 
     KillOnDrop(proxy)
 }

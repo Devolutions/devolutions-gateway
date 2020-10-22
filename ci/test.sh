@@ -7,5 +7,5 @@ cargo build
 cargo build --release
 cargo build --examples
 
-cargo test -p jet-proto -p devolutions-jet
-cargo test -p jet-proto -p devolutions-jet --release
+cargo test -p jet-proto -p devolutions-gateway
+cargo test -p jet-proto -p devolutions-gateway --release
