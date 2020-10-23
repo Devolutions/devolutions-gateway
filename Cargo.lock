@@ -2987,6 +2987,7 @@ dependencies = [
  "iovec",
  "lazy_static",
  "libc",
+ "memchr",
  "mio",
  "mio-uds",
  "pin-project-lite",
