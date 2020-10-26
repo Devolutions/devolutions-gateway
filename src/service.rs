@@ -360,7 +360,7 @@ fn start_tcp_server(
                 "rdp" => RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
                 scheme => panic!("Unsupported routing URL scheme {}", scheme),
             }
-        } else if config.rdp {
+        } else if config.is_rdp_supported() {
             RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn)
         } else {
             JetClient::new(config.clone(), jet_associations.clone(), executor_handle.clone())

@@ -15,8 +15,8 @@ use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
 
-const ARG_RDP: &str = "rdp";
 const ARG_API_KEY: &str = "api-key";
+const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
 const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
 const ARG_HTTP_LISTENER_URL: &str = "http-listener-url";
@@ -94,7 +94,7 @@ pub struct Config {
     pub pcap_files_path: Option<String>,
     pub protocol: Protocol,
     pub log_file: Option<String>,
-    pub rdp: bool, // temporary
+    pub application_protocols: Vec<String>,
     pub certificate: CertificateConfig,
     pub http_listener_url: Url,
     pub provisioner_public_key: Option<PublicKey>,
@@ -125,7 +125,7 @@ impl Default for Config {
             pcap_files_path: None,
             protocol: Protocol::UNKNOWN,
             log_file: None,
-            rdp: false,
+            application_protocols: Vec::new(),
             certificate: CertificateConfig {
                 certificate_file: None,
                 certificate_data: None,
@@ -277,13 +277,6 @@ impl Config {
             .version_short("v")
             .about(DISPLAY_NAME)
             .arg(
-                Arg::with_name(ARG_RDP)
-                    .long("rdp")
-                    .takes_value(false)
-                    .required(false)
-                    .help("Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)"),
-            )
-            .arg(
                 Arg::with_name(ARG_API_KEY)
                     .long("api-key")
                     .value_name("KEY")
@@ -345,6 +338,17 @@ impl Config {
                     .env("DGATEWAY_HOSTNAME")
                     .help("Specific name to reach that instance of Devolutions Gateway.")
                     .takes_value(true),
+            )
+            .arg(
+                Arg::with_name(ARG_APPLICATION_PROTOCOLS)
+                    .long("application-protocols")
+                    .value_name("PROTOCOLS")
+                    .env("DGATEWAY_APPLICATION_PROTOCOLS")
+                    .help("Protocols supported in sessions")
+                    .takes_value(true)
+                    .multiple(true)
+                    .use_delimiter(true)
+                    .possible_values(&["wayk", "rdp"]),
             )
             .arg(
                 Arg::with_name(ARG_CERTIFICATE_FILE)
@@ -504,9 +508,6 @@ impl Config {
         if matches.is_present(ARG_UNRESTRICTED) {
             config.unrestricted = true;
         }
-        if matches.is_present(ARG_RDP) {
-            config.rdp = true;
-        }
 
         if let Some(http_listener_url) = matches.value_of(ARG_HTTP_LISTENER_URL) {
             config.http_listener_url = http_listener_url
@@ -520,6 +521,10 @@ impl Config {
 
         if let Some(hostname) = matches.value_of(ARG_HOSTNAME) {
             config.hostname = hostname.to_owned();
+        }
+
+        if let Some(protocols) = matches.values_of(ARG_APPLICATION_PROTOCOLS) {
+            config.application_protocols = protocols.map(|protocol| protocol.to_string()).collect();
         }
 
         if let Some(routing_url) = matches.value_of(ARG_ROUTING_URL) {
@@ -695,7 +700,6 @@ impl Config {
         }
 
         let application_protocols = config_file.application_protocols.unwrap_or_default();
-        let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
 
         let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_string());
         let log_file = get_program_data_file_path(gateway_log_file.as_str())
@@ -768,7 +772,7 @@ impl Config {
             hostname: hostname,
             pcap_files_path: capture_path,
             log_file: Some(log_file),
-            rdp: enable_rdp_support,
+            application_protocols,
             certificate: CertificateConfig {
                 certificate_file,
                 certificate_data,
@@ -780,5 +784,10 @@ impl Config {
             delegation_private_key,
             ..Default::default()
         })
+    }
+
+    #[allow(dead_code)]
+    pub fn is_rdp_supported(&self) -> bool {
+        self.application_protocols.contains(&"rdp".to_string())
     }
 }
