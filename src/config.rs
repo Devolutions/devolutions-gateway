@@ -66,7 +66,7 @@ pub enum Protocol {
 
 #[derive(Debug, Clone)]
 pub struct ListenerConfig {
-    pub url: Url,
+    pub internal_url: Url,
     pub external_url: Url,
 }
 
@@ -161,7 +161,7 @@ impl GatewayListener {
         }
 
         Some(ListenerConfig {
-            url: internal_url,
+            internal_url: internal_url,
             external_url,
         })
     }
@@ -280,7 +280,7 @@ impl Config {
                 Arg::with_name(ARG_API_KEY)
                     .long("api-key")
                     .value_name("KEY")
-                    .env("JET_API_KEY")
+                    .env("DGATEWAY_API_KEY")
                     .help("The API key used by the server to authenticate client queries.")
                     .takes_value(true)
                     .empty_values(false),
@@ -288,7 +288,7 @@ impl Config {
             .arg(
                 Arg::with_name(ARG_UNRESTRICTED)
                     .long("unrestricted")
-                    .env("JET_UNRESTRICTED")
+                    .env("DGATEWAY_UNRESTRICTED")
                     .help("Remove API key validation on some HTTP routes")
                     .takes_value(false),
             )
@@ -297,7 +297,7 @@ impl Config {
                     .short("l")
                     .long("listener")
                     .value_name("URL")
-                    .env("JET_LISTENERS")
+                    .env("DGATEWAY_LISTENERS")
                     .help(
                         "An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. \
                          Supported schemes: tcp, ws, wss",
@@ -306,8 +306,8 @@ impl Config {
                         "An URL on which the server will listen on. \
                          The external URL returned as candidate can be specified after the listener, \
                          separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port> \
-                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port> \
-                         where <jet_instance> is the value of the jet-instance parameter.",
+                         If it is not specified, the external url will be <scheme>://<hostname>:<port> \
+                         where <hostname> is the value of the hostname parameter.",
                     )
                     .multiple(true)
                     .use_delimiter(true)
@@ -394,7 +394,7 @@ impl Config {
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_DATA)
                     .long("provisioner-public-key-data")
                     .value_name("DATA")
-                    .env("JET_PROVISIONER_PUBLIC_KEY_DATA")
+                    .env("DGATEWAY_PROVISIONER_PUBLIC_KEY_DATA")
                     .help("Public key data, base64-encoded PKCS10.")
                     .takes_value(true),
             )
@@ -402,7 +402,7 @@ impl Config {
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
                     .long("delegation-private-key-file")
                     .value_name("FILE")
-                    .env("JET_DELEGATION_PRIVATE_KEY_FILE")
+                    .env("DGATEWAY_DELEGATION_PRIVATE_KEY_FILE")
                     .help("Path to the private key file.")
                     .takes_value(true),
             )
@@ -410,7 +410,7 @@ impl Config {
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_DATA)
                     .long("delegation-private-key-data")
                     .value_name("DATA")
-                    .env("JET_DELEGATION_PRIVATE_KEY_DATA")
+                    .env("DGATEWAY_DELEGATION_PRIVATE_KEY_DATA")
                     .help("Private key data, base64-encoded PKCS10.")
                     .takes_value(true),
             )
@@ -615,39 +615,49 @@ impl Config {
 
         let mut listeners = Vec::new();
         for listener in matches.values_of(ARG_LISTENERS).unwrap_or_else(Default::default) {
-            let url;
-            let external_url;
+            let mut internal_url;
+            let mut external_url;
 
             if let Some(pos) = listener.find(',') {
                 let url_str = &listener[0..pos];
-                url = listener[0..pos]
+                internal_url = listener[0..pos]
                     .parse::<Url>()
                     .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", url_str));
 
+                if internal_url.host_str() == Some("*") {
+                    let _ = internal_url.set_host(Some("0.0.0.0"));
+                }
+
                 if listener.len() > pos + 1 {
                     let external_str = listener[pos + 1..].to_string();
-                    let external_str = external_str.replace("<jet_instance>", &config.hostname);
                     external_url = external_str
                         .parse::<Url>()
                         .unwrap_or_else(|_| panic!("External_url {} is an invalid URL.", external_str));
+
+                    if external_url.host_str() == Some("*") {
+                        let _ = external_url.set_host(Some(&config.hostname));
+                    }
                 } else {
                     panic!("External url has to be specified after the comma : {}", listener);
                 }
             } else {
-                url = listener
+                internal_url = listener
                     .parse::<Url>()
                     .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", listener));
                 external_url = format!(
                     "{}://{}:{}",
-                    url.scheme(),
+                    internal_url.scheme(),
                     config.hostname,
-                    url.port_or_known_default().unwrap_or(8080)
+                    internal_url.port_or_known_default().unwrap_or(8080)
                 )
                 .parse::<Url>()
                 .unwrap_or_else(|_| panic!("External url can't be built based on listener {}", listener));
             }
 
-            listeners.push(ListenerConfig { url, external_url });
+            listeners.push(ListenerConfig {
+                internal_url,
+                external_url,
+            });
         }
 
         if !listeners.is_empty() {
@@ -689,13 +699,13 @@ impl Config {
 
         for listener in listeners.iter_mut() {
             // normalize all listeners to http/https
-            url_map_scheme_ws_to_http(&mut listener.url);
+            url_map_scheme_ws_to_http(&mut listener.internal_url);
             url_map_scheme_ws_to_http(&mut listener.external_url);
         }
 
         let http_listeners: Vec<ListenerConfig> = listeners
             .iter()
-            .filter(|listener| match listener.url.scheme() {
+            .filter(|listener| match listener.internal_url.scheme() {
                 "http" => true,
                 "https" => true,
                 _ => false,
@@ -710,7 +720,7 @@ impl Config {
 
         for listener in listeners.iter_mut() {
             // normalize all listeners to ws/wss
-            url_map_scheme_http_to_ws(&mut listener.url);
+            url_map_scheme_http_to_ws(&mut listener.internal_url);
             url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 

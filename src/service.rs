@@ -149,8 +149,8 @@ pub fn create_context(
         .listeners
         .iter()
         .filter_map(|listener| {
-            if listener.url.scheme() == "tcp" {
-                Some(listener.url.clone())
+            if listener.internal_url.scheme() == "tcp" {
+                Some(listener.internal_url.clone())
             } else {
                 None
             }
@@ -161,8 +161,8 @@ pub fn create_context(
         .listeners
         .iter()
         .filter_map(|listener| {
-            if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
-                Some(listener.url.clone())
+            if listener.internal_url.scheme() == "ws" || listener.internal_url.scheme() == "wss" {
+                Some(listener.internal_url.clone())
             } else {
                 None
             }
