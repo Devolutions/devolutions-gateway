@@ -46,8 +46,8 @@ impl HttpServer {
                 info!("Configuring HTTP router");
                 router.add(health).add(jet).add(session)
             })
-            .configure_listener(|list_config| {
-                let listener_config = list_config.set_uri(&config.http_listener_url.to_string());
+            .configure_listener(|listener| {
+                let listener_config = listener.set_uri(&config.api_listener.to_string());
 
                 let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
                     Some(SslConfig::FilePath(cert_path.into()))
