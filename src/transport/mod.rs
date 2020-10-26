@@ -8,17 +8,17 @@ use std::{
     rc::Rc,
     pin::Pin,
     task::{Context, Poll},
+    future::Future,
     cell::RefCell,
     ops::DerefMut,
 };
 use futures::{
-    Future, Sink, Stream, pin_mut
+    Sink, Stream
 };
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::{
-    io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf},
-    net::TcpStream
+    io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf, ReadBuf}
 };
 use url::Url;
 
@@ -32,7 +32,7 @@ pub mod fast_path;
 pub mod mcs;
 pub mod rdp;
 */
-//pub mod tcp;
+pub mod tcp;
 /*
 pub mod tsrequest;
 pub mod ws;
@@ -47,9 +47,7 @@ pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
 const PART_LEN: usize = 16 * 1024;
 
 pub trait Transport {
-    fn connect(addr: &Url) -> JetFuture<Self>
-    where
-        Self: Sized;
+    fn connect(addr: &Url) -> JetFuture<Self> where Self: Sized;
     fn peer_addr(&self) -> Option<SocketAddr>;
     fn split_transport(
         self,
@@ -189,14 +187,16 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut written = 0;
+        // TODO: figure out is this possible to avoid RefCell
         let mut stream = self.stream.borrow_mut();
         let mut buffer = self.buffer.borrow_mut();
         let mut packet_interceptor = self.packet_interceptor.borrow_mut();
 
         loop {
             if let Some(mut reservation) = buffer.reserve(PART_LEN) {
-                match Pin::new(stream.deref_mut()).poll_read(cx, reservation.as_mut()) {
-                    Poll::Ready(Ok(0)) => {
+                let mut read_buffer = ReadBuf::new(reservation.as_mut());
+                match Pin::new(stream.deref_mut()).poll_read(cx, &mut read_buffer) {
+                    Poll::Ready(Ok(())) if read_buffer.filled().is_empty() => {
                         reservation.cancel(); // equivalent to truncate(0)
                         return if written > 0 {
                             Poll::Ready(Some(Ok(written)))
@@ -204,7 +204,8 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
                             Poll::Ready(None)
                         };
                     }
-                    Poll::Ready(Ok(len)) => {
+                    Poll::Ready(Ok(())) => {
+                        let len = read_buffer.filled().len();
                         if let Some(interceptor) = packet_interceptor.deref_mut() {
                             interceptor.on_new_packet(self.peer_addr, &reservation[..len]);
                         }

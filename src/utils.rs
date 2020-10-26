@@ -17,11 +17,14 @@ use tokio::{
 use tokio_util::codec::{
     Decoder, Encoder, Framed, FramedParts,
 };
+use tokio_rustls::rustls;
 
 use crate::config::CertificateConfig;
 
 
 pub mod danger_transport {
+    use tokio_rustls::rustls;
+
     pub struct NoCertificateVerification;
 
     impl rustls::ServerCertVerifier for NoCertificateVerification {
@@ -37,7 +40,7 @@ pub mod danger_transport {
     }
 }
 
-async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
+pub async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
     lookup_host(format!("{}:{}", host, port)).await

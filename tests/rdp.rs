@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use tokio_rustls::rustls;
 use bytes::BytesMut;
 use ironrdp::{
     gcc, mcs,
