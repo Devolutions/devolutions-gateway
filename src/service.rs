@@ -149,8 +149,8 @@ pub fn create_context(
         .listeners
         .iter()
         .filter_map(|listener| {
-            if listener.url.scheme() == "tcp" {
-                Some(listener.url.clone())
+            if listener.internal_url.scheme() == "tcp" {
+                Some(listener.internal_url.clone())
             } else {
                 None
             }
@@ -161,8 +161,8 @@ pub fn create_context(
         .listeners
         .iter()
         .filter_map(|listener| {
-            if listener.url.scheme() == "ws" || listener.url.scheme() == "wss" {
-                Some(listener.url.clone())
+            if listener.internal_url.scheme() == "ws" || listener.internal_url.scheme() == "wss" {
+                Some(listener.internal_url.clone())
             } else {
                 None
             }
@@ -360,7 +360,7 @@ fn start_tcp_server(
                 "rdp" => RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
                 scheme => panic!("Unsupported routing URL scheme {}", scheme),
             }
-        } else if config.rdp {
+        } else if config.is_rdp_supported() {
             RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn)
         } else {
             JetClient::new(config.clone(), jet_associations.clone(), executor_handle.clone())

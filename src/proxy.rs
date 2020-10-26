@@ -70,7 +70,7 @@ impl Proxy {
         let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
         let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
-        if let (Some(pcap_files_path), Some(message_reader)) = (self.config.pcap_files_path.as_ref(), message_reader) {
+        if let (Some(capture_path), Some(message_reader)) = (self.config.capture_path.as_ref(), message_reader) {
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 client_peer_addr.ip(),
@@ -79,7 +79,7 @@ impl Proxy {
                 server_peer_addr.port(),
                 chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
             );
-            let mut path = PathBuf::from(pcap_files_path);
+            let mut path = PathBuf::from(capture_path);
             path.push(filename);
 
             let mut interceptor = PcapInterceptor::new(

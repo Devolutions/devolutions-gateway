@@ -15,12 +15,13 @@ use url::Url;
 
 const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
 
-const ARG_RDP: &str = "rdp";
 const ARG_API_KEY: &str = "api-key";
+const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
 const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
-const ARG_HTTP_LISTENER_URL: &str = "http-listener-url";
-const ARG_JET_INSTANCE: &str = "jet-instance";
+const ARG_API_LISTENER: &str = "api-listener";
+const ARG_HOSTNAME: &str = "hostname";
+const ARG_FARM_NAME: &str = "farm-name";
 const ARG_CERTIFICATE_FILE: &str = "certificate-file";
 const ARG_CERTIFICATE_DATA: &str = "certificate-data";
 const ARG_PRIVATE_KEY_FILE: &str = "private-key-file";
@@ -30,7 +31,7 @@ const ARG_PROVISIONER_PUBLIC_KEY_DATA: &str = "provisioner-public-key-data";
 const ARG_DELEGATION_PRIVATE_KEY_FILE: &str = "delegation-private-key-file";
 const ARG_DELEGATION_PRIVATE_KEY_DATA: &str = "delegation-private-key-data";
 const ARG_ROUTING_URL: &str = "routing-url";
-const ARG_PCAP_FILES_PATH: &str = "pcap-files-path";
+const ARG_CAPTURE_PATH: &str = "capture-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
 const ARG_SERVICE_MODE: &str = "service";
@@ -65,11 +66,11 @@ pub enum Protocol {
 
 #[derive(Debug, Clone)]
 pub struct ListenerConfig {
-    pub url: Url,
+    pub internal_url: Url,
     pub external_url: Url,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct CertificateConfig {
     pub certificate_file: Option<String>,
     pub certificate_data: Option<String>,
@@ -88,14 +89,14 @@ pub struct Config {
     pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
     pub farm_name: String,
-    pub jet_instance: String,
+    pub hostname: String,
     pub routing_url: Option<Url>,
-    pub pcap_files_path: Option<String>,
+    pub capture_path: Option<String>,
     pub protocol: Protocol,
     pub log_file: Option<String>,
-    pub rdp: bool, // temporary
+    pub application_protocols: Vec<String>,
     pub certificate: CertificateConfig,
-    pub http_listener_url: Url,
+    pub api_listener: Url,
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
 }
@@ -105,7 +106,7 @@ impl Default for Config {
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
 
         let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
-        let http_listener_url = default_api_listener_url
+        let api_listener = default_api_listener_url
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
@@ -119,19 +120,19 @@ impl Default for Config {
             api_key: None,
             listeners: Vec::new(),
             farm_name: default_hostname.clone(),
-            jet_instance: default_hostname,
+            hostname: default_hostname,
             routing_url: None,
-            pcap_files_path: None,
+            capture_path: None,
             protocol: Protocol::UNKNOWN,
             log_file: None,
-            rdp: false,
+            application_protocols: Vec::new(),
             certificate: CertificateConfig {
                 certificate_file: None,
                 certificate_data: None,
                 private_key_file: None,
                 private_key_data: None,
             },
-            http_listener_url,
+            api_listener,
             provisioner_public_key: None,
             delegation_private_key: None,
         }
@@ -160,7 +161,7 @@ impl GatewayListener {
         }
 
         Some(ListenerConfig {
-            url: internal_url,
+            internal_url: internal_url,
             external_url,
         })
     }
@@ -276,17 +277,10 @@ impl Config {
             .version_short("v")
             .about(DISPLAY_NAME)
             .arg(
-                Arg::with_name(ARG_RDP)
-                    .long("rdp")
-                    .takes_value(false)
-                    .required(false)
-                    .help("Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)"),
-            )
-            .arg(
                 Arg::with_name(ARG_API_KEY)
                     .long("api-key")
                     .value_name("KEY")
-                    .env("JET_API_KEY")
+                    .env("DGATEWAY_API_KEY")
                     .help("The API key used by the server to authenticate client queries.")
                     .takes_value(true)
                     .empty_values(false),
@@ -294,7 +288,7 @@ impl Config {
             .arg(
                 Arg::with_name(ARG_UNRESTRICTED)
                     .long("unrestricted")
-                    .env("JET_UNRESTRICTED")
+                    .env("DGATEWAY_UNRESTRICTED")
                     .help("Remove API key validation on some HTTP routes")
                     .takes_value(false),
             )
@@ -303,7 +297,7 @@ impl Config {
                     .short("l")
                     .long("listener")
                     .value_name("URL")
-                    .env("JET_LISTENERS")
+                    .env("DGATEWAY_LISTENERS")
                     .help(
                         "An URL on which the server will listen on. Format: <scheme>://<local_iface_ip>:<port>. \
                          Supported schemes: tcp, ws, wss",
@@ -312,8 +306,8 @@ impl Config {
                         "An URL on which the server will listen on. \
                          The external URL returned as candidate can be specified after the listener, \
                          separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port> \
-                         If it is not specified, the external url will be <scheme>://<jet_instance>:<port> \
-                         where <jet_instance> is the value of the jet-instance parameter.",
+                         If it is not specified, the external url will be <scheme>://<hostname>:<port> \
+                         where <hostname> is the value of the hostname parameter.",
                     )
                     .multiple(true)
                     .use_delimiter(true)
@@ -322,26 +316,45 @@ impl Config {
                     .number_of_values(1),
             )
             .arg(
-                Arg::with_name(ARG_HTTP_LISTENER_URL)
-                    .long("http-listener-url")
+                Arg::with_name(ARG_API_LISTENER)
+                    .long("api-listener")
                     .value_name("URL")
-                    .env("JET_HTTP_LISTENER_URL")
-                    .help("HTTP listener URL.")
+                    .env("DGATEWAY_API_LISTENER")
+                    .help("API HTTP listener URL.")
                     .takes_value(true),
             )
             .arg(
-                Arg::with_name(ARG_JET_INSTANCE)
-                    .long("jet-instance")
-                    .value_name("NAME")
-                    .env("JET_INSTANCE")
-                    .help("Specific name to reach that instance of JET.")
+                Arg::with_name(ARG_FARM_NAME)
+                    .long("farm-name")
+                    .value_name("FARM-NAME")
+                    .env("DGATEWAY_FARM_NAME")
+                    .help("Farm name")
                     .takes_value(true),
+            )
+            .arg(
+                Arg::with_name(ARG_HOSTNAME)
+                    .long("hostname")
+                    .value_name("HOSTNAME")
+                    .env("DGATEWAY_HOSTNAME")
+                    .help("Specific name to reach that instance of Devolutions Gateway.")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name(ARG_APPLICATION_PROTOCOLS)
+                    .long("application-protocols")
+                    .value_name("PROTOCOLS")
+                    .env("DGATEWAY_APPLICATION_PROTOCOLS")
+                    .help("Protocols supported in sessions")
+                    .takes_value(true)
+                    .multiple(true)
+                    .use_delimiter(true)
+                    .possible_values(&["wayk", "rdp"]),
             )
             .arg(
                 Arg::with_name(ARG_CERTIFICATE_FILE)
                     .long("certificate-file")
                     .value_name("FILE")
-                    .env("JET_CERTIFICATE_FILE")
+                    .env("DGATEWAY_CERTIFICATE_FILE")
                     .help("Path to the certificate file.")
                     .takes_value(true),
             )
@@ -349,7 +362,7 @@ impl Config {
                 Arg::with_name(ARG_CERTIFICATE_DATA)
                     .long("certificate-data")
                     .value_name("DATA")
-                    .env("JET_CERTIFICATE_DATA")
+                    .env("DGATEWAY_CERTIFICATE_DATA")
                     .help("Certificate data, base64-encoded X509 DER.")
                     .takes_value(true),
             )
@@ -357,7 +370,7 @@ impl Config {
                 Arg::with_name(ARG_PRIVATE_KEY_FILE)
                     .long("private-key-file")
                     .value_name("FILE")
-                    .env("JET_PRIVATE_KEY_FILE")
+                    .env("DGATEWAY_PRIVATE_KEY_FILE")
                     .help("Path to the private key file.")
                     .takes_value(true),
             )
@@ -365,7 +378,7 @@ impl Config {
                 Arg::with_name(ARG_PRIVATE_KEY_DATA)
                     .long("private-key-data")
                     .value_name("DATA")
-                    .env("JET_PRIVATE_KEY_DATA")
+                    .env("DGATEWAY_PRIVATE_KEY_DATA")
                     .help("Private key data, base64-encoded PKCS10.")
                     .takes_value(true),
             )
@@ -373,7 +386,7 @@ impl Config {
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_FILE)
                     .long("provisioner-public-key-file")
                     .value_name("FILE")
-                    .env("JET_PROVISIONER_PUBLIC_KEY_FILE")
+                    .env("DGATEWAY_PROVISIONER_PUBLIC_KEY_FILE")
                     .help("Path to the public key file.")
                     .takes_value(true),
             )
@@ -381,7 +394,7 @@ impl Config {
                 Arg::with_name(ARG_PROVISIONER_PUBLIC_KEY_DATA)
                     .long("provisioner-public-key-data")
                     .value_name("DATA")
-                    .env("JET_PROVISIONER_PUBLIC_KEY_DATA")
+                    .env("DGATEWAY_PROVISIONER_PUBLIC_KEY_DATA")
                     .help("Public key data, base64-encoded PKCS10.")
                     .takes_value(true),
             )
@@ -389,7 +402,7 @@ impl Config {
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_FILE)
                     .long("delegation-private-key-file")
                     .value_name("FILE")
-                    .env("JET_DELEGATION_PRIVATE_KEY_FILE")
+                    .env("DGATEWAY_DELEGATION_PRIVATE_KEY_FILE")
                     .help("Path to the private key file.")
                     .takes_value(true),
             )
@@ -397,7 +410,7 @@ impl Config {
                 Arg::with_name(ARG_DELEGATION_PRIVATE_KEY_DATA)
                     .long("delegation-private-key-data")
                     .value_name("DATA")
-                    .env("JET_DELEGATION_PRIVATE_KEY_DATA")
+                    .env("DGATEWAY_DELEGATION_PRIVATE_KEY_DATA")
                     .help("Private key data, base64-encoded PKCS10.")
                     .takes_value(true),
             )
@@ -424,8 +437,8 @@ impl Config {
                     }),
             )
             .arg(
-                Arg::with_name(ARG_PCAP_FILES_PATH)
-                    .long("pcap-files-path")
+                Arg::with_name(ARG_CAPTURE_PATH)
+                    .long("capture-path")
                     .value_name("PATH")
                     .help(
                         "Path to the pcap files. If not set, no pcap files will be created. \
@@ -435,6 +448,7 @@ impl Config {
                         "Path to the pcap files. If not set, no pcap files will be created. \
                          WaykNow and RDP protocols can be saved.",
                     )
+                    .env("DGATEWAY_CAPTURE_PATH")
                     .takes_value(true)
                     .empty_values(false)
                     .validator(|v| {
@@ -495,19 +509,23 @@ impl Config {
         if matches.is_present(ARG_UNRESTRICTED) {
             config.unrestricted = true;
         }
-        if matches.is_present(ARG_RDP) {
-            config.rdp = true;
-        }
 
-        if let Some(http_listener_url) = matches.value_of(ARG_HTTP_LISTENER_URL) {
-            config.http_listener_url = http_listener_url
+        if let Some(api_listener) = matches.value_of(ARG_API_LISTENER) {
+            config.api_listener = api_listener
                 .parse::<Url>()
-                .unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
+                .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
         }
 
-        if let Some(jet_instance) = matches.value_of(ARG_JET_INSTANCE) {
-            config.jet_instance = jet_instance.to_owned();
-            config.farm_name = jet_instance.to_owned();
+        if let Some(farm_name) = matches.value_of(ARG_FARM_NAME) {
+            config.farm_name = farm_name.to_owned();
+        }
+
+        if let Some(hostname) = matches.value_of(ARG_HOSTNAME) {
+            config.hostname = hostname.to_owned();
+        }
+
+        if let Some(protocols) = matches.values_of(ARG_APPLICATION_PROTOCOLS) {
+            config.application_protocols = protocols.map(|protocol| protocol.to_string()).collect();
         }
 
         if let Some(routing_url) = matches.value_of(ARG_ROUTING_URL) {
@@ -518,8 +536,8 @@ impl Config {
             );
         }
 
-        if let Some(pcap_files_path) = matches.value_of(ARG_PCAP_FILES_PATH) {
-            config.pcap_files_path = Some(pcap_files_path.to_owned());
+        if let Some(capture_path) = matches.value_of(ARG_CAPTURE_PATH) {
+            config.capture_path = Some(capture_path.to_owned());
         }
 
         if let Some(protocol) = matches.value_of(ARG_PROTOCOL) {
@@ -531,13 +549,25 @@ impl Config {
         };
 
         if let Some(certificate_file) = matches.value_of(ARG_CERTIFICATE_FILE) {
-            config.certificate.certificate_file = Some(certificate_file.to_owned());
+            config.certificate.certificate_file = Some(
+                get_program_data_file_path(certificate_file)
+                    .as_path()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
         }
         if let Some(certificate_data) = matches.value_of(ARG_CERTIFICATE_DATA) {
             config.certificate.certificate_data = Some(certificate_data.to_owned());
         }
         if let Some(private_key_file) = matches.value_of(ARG_PRIVATE_KEY_FILE) {
-            config.certificate.private_key_file = Some(private_key_file.to_owned());
+            config.certificate.private_key_file = Some(
+                get_program_data_file_path(private_key_file)
+                    .as_path()
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            );
         }
         if let Some(private_key_data) = matches.value_of(ARG_PRIVATE_KEY_DATA) {
             config.certificate.private_key_data = Some(private_key_data.to_owned());
@@ -547,8 +577,9 @@ impl Config {
 
         let pem_opt = if let Some(pem_str) = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_DATA) {
             Some(format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", pem_str))
-        } else if let Some(pem_path) = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE) {
-            Some(std::fs::read_to_string(pem_path).expect("couldn't read provisioner public path key file"))
+        } else if let Some(file) = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE) {
+            let file_path = get_program_data_file_path(file).as_path().to_str().unwrap().to_string();
+            Some(std::fs::read_to_string(file_path).expect("couldn't read provisioner public path key file"))
         } else {
             None
         };
@@ -565,8 +596,9 @@ impl Config {
 
         let delegation_private_key_pem_opt = if let Some(pem_str) = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_DATA) {
             Some(format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", pem_str))
-        } else if let Some(pem_path) = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE) {
-            Some(std::fs::read_to_string(pem_path).expect("couldn't read delegation private path key file"))
+        } else if let Some(file) = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE) {
+            let file_path = get_program_data_file_path(file).as_path().to_str().unwrap().to_string();
+            Some(std::fs::read_to_string(file_path).expect("couldn't read delegation private path key file"))
         } else {
             None
         };
@@ -583,39 +615,49 @@ impl Config {
 
         let mut listeners = Vec::new();
         for listener in matches.values_of(ARG_LISTENERS).unwrap_or_else(Default::default) {
-            let url;
-            let external_url;
+            let mut internal_url;
+            let mut external_url;
 
             if let Some(pos) = listener.find(',') {
                 let url_str = &listener[0..pos];
-                url = listener[0..pos]
+                internal_url = listener[0..pos]
                     .parse::<Url>()
                     .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", url_str));
 
+                if internal_url.host_str() == Some("*") {
+                    let _ = internal_url.set_host(Some("0.0.0.0"));
+                }
+
                 if listener.len() > pos + 1 {
                     let external_str = listener[pos + 1..].to_string();
-                    let external_str = external_str.replace("<jet_instance>", &config.jet_instance);
                     external_url = external_str
                         .parse::<Url>()
                         .unwrap_or_else(|_| panic!("External_url {} is an invalid URL.", external_str));
+
+                    if external_url.host_str() == Some("*") {
+                        let _ = external_url.set_host(Some(&config.hostname));
+                    }
                 } else {
                     panic!("External url has to be specified after the comma : {}", listener);
                 }
             } else {
-                url = listener
+                internal_url = listener
                     .parse::<Url>()
                     .unwrap_or_else(|_| panic!("Listener {} is an invalid URL.", listener));
                 external_url = format!(
                     "{}://{}:{}",
-                    url.scheme(),
-                    config.jet_instance,
-                    url.port_or_known_default().unwrap_or(8080)
+                    internal_url.scheme(),
+                    config.hostname,
+                    internal_url.port_or_known_default().unwrap_or(8080)
                 )
                 .parse::<Url>()
                 .unwrap_or_else(|_| panic!("External url can't be built based on listener {}", listener));
             }
 
-            listeners.push(ListenerConfig { url, external_url });
+            listeners.push(ListenerConfig {
+                internal_url,
+                external_url,
+            });
         }
 
         if !listeners.is_empty() {
@@ -657,13 +699,13 @@ impl Config {
 
         for listener in listeners.iter_mut() {
             // normalize all listeners to http/https
-            url_map_scheme_ws_to_http(&mut listener.url);
+            url_map_scheme_ws_to_http(&mut listener.internal_url);
             url_map_scheme_ws_to_http(&mut listener.external_url);
         }
 
         let http_listeners: Vec<ListenerConfig> = listeners
             .iter()
-            .filter(|listener| match listener.url.scheme() {
+            .filter(|listener| match listener.internal_url.scheme() {
                 "http" => true,
                 "https" => true,
                 _ => false,
@@ -678,12 +720,11 @@ impl Config {
 
         for listener in listeners.iter_mut() {
             // normalize all listeners to ws/wss
-            url_map_scheme_http_to_ws(&mut listener.url);
+            url_map_scheme_http_to_ws(&mut listener.internal_url);
             url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
         let application_protocols = config_file.application_protocols.unwrap_or_default();
-        let enable_rdp_support = application_protocols.contains(&"rdp".to_string());
 
         let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_string());
         let log_file = get_program_data_file_path(gateway_log_file.as_str())
@@ -695,17 +736,11 @@ impl Config {
             .certificate_file
             .as_ref()
             .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-        let certificate_data = certificate_file
-            .as_ref()
-            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
         let private_key_file = config_file
             .private_key_file
             .as_ref()
             .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-        let private_key_data = private_key_file
-            .as_ref()
-            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
 
         let provisioner_public_key_file = config_file
             .provisioner_public_key_file
@@ -744,7 +779,7 @@ impl Config {
         // but in fact we just ignore it and use only our gateway listeners.
         let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
         let api_listener_url = config_file.api_listener.unwrap_or(default_api_listener_url);
-        let http_listener_url = api_listener_url
+        let api_listener = api_listener_url
             .parse::<Url>()
             .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
@@ -753,20 +788,24 @@ impl Config {
             api_key,
             listeners,
             farm_name,
-            jet_instance: hostname,
-            pcap_files_path: capture_path,
+            hostname,
+            capture_path,
             log_file: Some(log_file),
-            rdp: enable_rdp_support,
+            application_protocols,
             certificate: CertificateConfig {
                 certificate_file,
-                certificate_data,
                 private_key_file,
-                private_key_data,
+                ..Default::default()
             },
-            http_listener_url,
+            api_listener,
             provisioner_public_key,
             delegation_private_key,
             ..Default::default()
         })
+    }
+
+    #[allow(dead_code)]
+    pub fn is_rdp_supported(&self) -> bool {
+        self.application_protocols.contains(&"rdp".to_string())
     }
 }
