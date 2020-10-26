@@ -267,7 +267,7 @@ impl HandleAcceptJetMsg {
                 status_code,
                 version: request.version,
                 association,
-                instance: self.config.jet_instance.clone(),
+                instance: self.config.hostname.clone(),
                 timeout: ACCEPT_REQUEST_TIMEOUT_SEC,
             });
             let mut response_msg_buffer = Vec::with_capacity(512);

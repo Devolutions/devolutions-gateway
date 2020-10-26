@@ -211,7 +211,7 @@ impl ControllerData {
     }
 
     fn health(&self, _req: &SyncRequest, res: &mut SyncResponse) {
-        build_health_response(res, &self.config.jet_instance);
+        build_health_response(res, &self.config.hostname);
     }
 }
 

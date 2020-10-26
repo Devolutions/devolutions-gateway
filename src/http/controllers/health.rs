@@ -30,10 +30,10 @@ impl Controller for HealthController {
 }
 
 fn health(controller: &ControllerData, _req: &SyncRequest, res: &mut SyncResponse) {
-    build_health_response(res, &controller.config.jet_instance);
+    build_health_response(res, &controller.config.hostname);
 }
 
-pub fn build_health_response(res: &mut SyncResponse, jet_instance: &str) {
+pub fn build_health_response(res: &mut SyncResponse, hostname: &str) {
     res.status(StatusCode::OK)
-        .body(format!("Jet instance \"{}\" is alive and healthy.", jet_instance));
+        .body(format!("Devolutions Gateway \"{}\" is alive and healthy.", hostname));
 }

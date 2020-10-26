@@ -20,7 +20,8 @@ const ARG_API_KEY: &str = "api-key";
 const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
 const ARG_HTTP_LISTENER_URL: &str = "http-listener-url";
-const ARG_JET_INSTANCE: &str = "jet-instance";
+const ARG_HOSTNAME: &str = "hostname";
+const ARG_FARM_NAME: &str = "farm-name";
 const ARG_CERTIFICATE_FILE: &str = "certificate-file";
 const ARG_CERTIFICATE_DATA: &str = "certificate-data";
 const ARG_PRIVATE_KEY_FILE: &str = "private-key-file";
@@ -88,7 +89,7 @@ pub struct Config {
     pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
     pub farm_name: String,
-    pub jet_instance: String,
+    pub hostname: String,
     pub routing_url: Option<Url>,
     pub pcap_files_path: Option<String>,
     pub protocol: Protocol,
@@ -119,7 +120,7 @@ impl Default for Config {
             api_key: None,
             listeners: Vec::new(),
             farm_name: default_hostname.clone(),
-            jet_instance: default_hostname,
+            hostname: default_hostname,
             routing_url: None,
             pcap_files_path: None,
             protocol: Protocol::UNKNOWN,
@@ -330,11 +331,19 @@ impl Config {
                     .takes_value(true),
             )
             .arg(
-                Arg::with_name(ARG_JET_INSTANCE)
-                    .long("jet-instance")
-                    .value_name("NAME")
-                    .env("JET_INSTANCE")
-                    .help("Specific name to reach that instance of JET.")
+                Arg::with_name(ARG_FARM_NAME)
+                    .long("farm-name")
+                    .value_name("FARM-NAME")
+                    .env("DGATEWAY_FARM_NAME")
+                    .help("Farm name")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name(ARG_HOSTNAME)
+                    .long("hostname")
+                    .value_name("HOSTNAME")
+                    .env("DGATEWAY_HOSTNAME")
+                    .help("Specific name to reach that instance of Devolutions Gateway.")
                     .takes_value(true),
             )
             .arg(
@@ -505,9 +514,12 @@ impl Config {
                 .unwrap_or_else(|e| panic!("HTTP listener URL is invalid: {}", e));
         }
 
-        if let Some(jet_instance) = matches.value_of(ARG_JET_INSTANCE) {
-            config.jet_instance = jet_instance.to_owned();
-            config.farm_name = jet_instance.to_owned();
+        if let Some(farm_name) = matches.value_of(ARG_FARM_NAME) {
+            config.farm_name = farm_name.to_owned();
+        }
+
+        if let Some(hostname) = matches.value_of(ARG_HOSTNAME) {
+            config.hostname = hostname.to_owned();
         }
 
         if let Some(routing_url) = matches.value_of(ARG_ROUTING_URL) {
@@ -594,7 +606,7 @@ impl Config {
 
                 if listener.len() > pos + 1 {
                     let external_str = listener[pos + 1..].to_string();
-                    let external_str = external_str.replace("<jet_instance>", &config.jet_instance);
+                    let external_str = external_str.replace("<jet_instance>", &config.hostname);
                     external_url = external_str
                         .parse::<Url>()
                         .unwrap_or_else(|_| panic!("External_url {} is an invalid URL.", external_str));
@@ -608,7 +620,7 @@ impl Config {
                 external_url = format!(
                     "{}://{}:{}",
                     url.scheme(),
-                    config.jet_instance,
+                    config.hostname,
                     url.port_or_known_default().unwrap_or(8080)
                 )
                 .parse::<Url>()
@@ -753,7 +765,7 @@ impl Config {
             api_key,
             listeners,
             farm_name,
-            jet_instance: hostname,
+            hostname: hostname,
             pcap_files_path: capture_path,
             log_file: Some(log_file),
             rdp: enable_rdp_support,
