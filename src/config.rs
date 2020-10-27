@@ -250,8 +250,15 @@ fn get_config_file_path() -> PathBuf {
 
 fn load_config_file(file_path: PathBuf) -> Option<ConfigFile> {
     let file = File::open(file_path.as_path()).ok()?;
-    let result = serde_json::from_reader(BufReader::new(file));
-    result.ok()
+
+    match serde_json::from_reader(BufReader::new(file)) {
+        Ok(config_file) => Some(config_file),
+        Err(e) => panic!(
+            "A configuration file has been provided ({}), but it can't be used: {}",
+            file_path.to_str().unwrap_or("unknown file path"),
+            e
+        ),
+    }
 }
 
 pub fn get_program_data_file_path(filename: &str) -> PathBuf {
