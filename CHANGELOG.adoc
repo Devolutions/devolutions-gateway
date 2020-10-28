@@ -2,7 +2,12 @@
 
 This document provides a list of notable changes introduced in Devolutions-Gateway by release.
 
-== 0.13.0 (unreleased)
+== 0.14.0 (unreleased)
+
+== 0.13.0 (2020-10-27)
+  * Support file to configure the Devolutions-Gateway (gateway.json)
+  * Update CLI parameters to match parameters defined in file
+  * WAYK-2211: candidate gathering jet token restriction
 
 == 0.12.0 (2020-08-25)
   * Add Jet V3 connection test support
