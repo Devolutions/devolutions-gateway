@@ -621,7 +621,7 @@ dependencies = [
  "failure",
  "futures 0.3.7",
  "hostname",
- "hyper 0.12.35",
+ "hyper 0.13.8",
  "indexmap",
  "ironrdp",
  "jet-proto",
@@ -649,9 +649,10 @@ dependencies = [
  "sspi",
  "tempfile",
  "tokio 0.3.1",
+ "tokio-compat-02",
  "tokio-rustls 0.20.0",
+ "tokio-tungstenite",
  "tokio-util 0.4.0",
- "tungstenite",
  "url 1.7.2",
  "url_serde",
  "uuid",
@@ -2047,7 +2048,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
- "sha-1 0.9.1",
+ "sha-1",
  "sha2 0.9.1",
  "sha3",
  "thiserror",
@@ -2790,18 +2791,6 @@ dependencies = [
 
 [[package]]
 name = "sha-1"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7d94d0bede923b3cea61f3f1ff57ff8cdfd77b400fb8f9998949e0cf04163df"
-dependencies = [
- "block-buffer 0.7.3",
- "digest 0.8.1",
- "fake-simd",
- "opaque-debug 0.2.3",
-]
-
-[[package]]
-name = "sha-1"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170a36ea86c864a3f16dd2687712dd6646f7019f301e57537c7f4dc9f5916770"
@@ -3295,6 +3284,7 @@ dependencies = [
  "lazy_static",
  "memchr",
  "mio 0.6.22",
+ "num_cpus",
  "pin-project-lite",
  "slab",
 ]
@@ -3339,6 +3329,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-compat-02"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb4cec419b8b6f06c32e74aae6d8c5e79646d038a38e5ea2b36045f2c3296e22"
+dependencies = [
+ "bytes 0.5.6",
+ "once_cell",
+ "pin-project-lite",
+ "tokio 0.2.22",
+ "tokio 0.3.1",
+]
+
+[[package]]
 name = "tokio-current-thread"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3378,6 +3381,16 @@ dependencies = [
  "bytes 0.4.12",
  "futures 0.1.30",
  "log",
+]
+
+[[package]]
+name = "tokio-native-tls"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "501c8252b73bd01379aaae1521523c2629ff1bc6ea46c29e0baff515cee60f1b"
+dependencies = [
+ "native-tls",
+ "tokio 0.3.1",
 ]
 
 [[package]]
@@ -3504,6 +3517,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.11.0"
+source = "git+https://github.com/snapview/tokio-tungstenite?rev=3c6d4280d77fdff3e25f68ad703d94e89f38dae2#3c6d4280d77fdff3e25f68ad703d94e89f38dae2"
+dependencies = [
+ "futures-util",
+ "log",
+ "native-tls",
+ "pin-project 1.0.1",
+ "tokio 0.3.1",
+ "tokio-native-tls",
+ "tungstenite",
+]
+
+[[package]]
 name = "tokio-udp"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3620,11 +3647,11 @@ dependencies = [
 
 [[package]]
 name = "tungstenite"
-version = "0.10.1"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfea31758bf674f990918962e8e5f07071a3161bd7c4138ed23e416e1ac4264e"
+checksum = "f0308d80d86700c5878b9ef6321f020f29b1bb9d5ff3cab25e75e23f3a492a23"
 dependencies = [
- "base64 0.11.0",
+ "base64 0.12.3",
  "byteorder",
  "bytes 0.5.6",
  "http 0.2.1",
@@ -3633,7 +3660,7 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.7.3",
- "sha-1 0.8.2",
+ "sha-1",
  "url 2.1.1",
  "utf-8",
 ]
