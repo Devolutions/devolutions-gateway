@@ -1,10 +1,10 @@
-use bytes::BytesMut;
+use bytes::{BytesMut,Buf};
 use ironrdp::{
     nego::{NegotiationError, Request, Response},
     Data, PduParsing,
 };
 use std::io;
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 macro_rules! negotiation_try {
     ($e:expr) => {
@@ -27,17 +27,16 @@ impl Decoder for NegotiationWithClientTransport {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let connection_request = negotiation_try!(Request::from_buffer(buf.as_ref()));
-        buf.split_to(connection_request.buffer_length());
+        buf.advance(connection_request.buffer_length());
 
         Ok(Some(connection_request))
     }
 }
 
-impl Encoder for NegotiationWithClientTransport {
-    type Item = Response;
+impl Encoder<Response> for NegotiationWithClientTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Response, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let item_len = item.buffer_length();
         let len = buf.len();
         buf.resize(len + item_len, 0);
@@ -55,17 +54,16 @@ impl Decoder for NegotiationWithServerTransport {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let connection_response = negotiation_try!(Response::from_buffer(buf.as_ref()));
-        buf.split_to(connection_response.buffer_length());
+        buf.advance(connection_response.buffer_length());
 
         Ok(Some(connection_response))
     }
 }
 
-impl Encoder for NegotiationWithServerTransport {
-    type Item = Request;
+impl Encoder<Request> for NegotiationWithServerTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: Request, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let item_len = item.buffer_length();
         let len = buf.len();
         buf.resize(len + item_len, 0);
@@ -86,7 +84,7 @@ impl Decoder for DataTransport {
         if buf.len() < data_pdu.buffer_length() {
             Ok(None)
         } else {
-            buf.split_to(data_pdu.buffer_length());
+            buf.advance(data_pdu.buffer_length());
             let data = buf.split_to(data_pdu.data_length);
 
             Ok(Some(data))
@@ -94,11 +92,10 @@ impl Decoder for DataTransport {
     }
 }
 
-impl Encoder for DataTransport {
-    type Item = BytesMut;
+impl Encoder<BytesMut> for DataTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: BytesMut, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let data_pdu = Data::new(item.len());
         let item_len = data_pdu.buffer_length();
         let len = buf.len();

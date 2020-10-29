@@ -39,13 +39,11 @@ use tokio::io::Error;
 pub mod tcp;
 pub mod ws;
 
-/*
 pub mod fast_path;
-pub mod mcs;
-pub mod rdp;
 pub mod tsrequest;
 pub mod x224;
-*/
+pub mod mcs;
+pub mod rdp;
 
 pub type JetFuture<T> = Box<dyn Future<Output = Result<T, io::Error>> + Send>;
 pub type JetStreamType<T> = Box<dyn JetStream<Item = Result<T, io::Error>> + Send>;

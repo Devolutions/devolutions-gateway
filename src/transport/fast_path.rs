@@ -1,11 +1,11 @@
 use std::io;
 
-use bytes::BytesMut;
+use bytes::{BytesMut, Buf};
 use ironrdp::{
     fast_path::{FastPathError, FastPathHeader},
     PduParsing,
 };
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Default)]
 pub struct FastPathTransport;
@@ -28,7 +28,7 @@ impl Decoder for FastPathTransport {
                 }
             }
             Err(FastPathError::NullLength { bytes_read }) => {
-                buf.split_to(bytes_read);
+                buf.advance(bytes_read);
 
                 Ok(None)
             }
@@ -39,11 +39,10 @@ impl Decoder for FastPathTransport {
     }
 }
 
-impl Encoder for FastPathTransport {
-    type Item = BytesMut;
+impl Encoder<BytesMut> for FastPathTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: BytesMut, buf: &mut BytesMut) -> Result<(), Self::Error> {
         buf.extend_from_slice(item.as_ref());
 
         Ok(())

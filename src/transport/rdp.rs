@@ -1,7 +1,7 @@
 use std::io;
 
 use bytes::BytesMut;
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 use crate::transport::{fast_path, x224};
 
@@ -31,11 +31,10 @@ impl Decoder for RdpTransport {
     }
 }
 
-impl Encoder for RdpTransport {
-    type Item = RdpPdu;
+impl Encoder<RdpPdu> for RdpTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: RdpPdu, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             RdpPdu::Data(data) => self.data_transport.encode(data, &mut buf),
             RdpPdu::FastPathBytes(data) => self.fast_path_transport.encode(data, &mut buf),
