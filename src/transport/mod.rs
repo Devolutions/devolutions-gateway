@@ -18,14 +18,23 @@ use futures::{
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::{
-    io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf, ReadBuf}
+    io::{
+        self,
+        AsyncRead,
+        AsyncWrite,
+        ReadHalf,
+        WriteHalf,
+        ReadBuf,
+    },
+    net::TcpStream,
 };
 use url::Url;
 
 use crate::{
     interceptor::PacketInterceptor,
-    //transport::{tcp::TcpTransport, ws::WsTransport},
+    transport::{tcp::TcpTransport, ws::WsTransport},
 };
+use tokio::io::Error;
 
 pub mod tcp;
 pub mod ws;
@@ -54,7 +63,7 @@ pub trait Transport {
         buffer_reader: BipBufferReader,
     ) -> (JetStreamType<usize>, JetSinkType<usize>);
 }
-/*
+
 #[allow(clippy::large_enum_variant)]
 pub enum JetTransport {
     Tcp(TcpTransport),
@@ -86,8 +95,7 @@ impl Transport for JetTransport {
     where
         Self: Sized,
     {
-        // TODO
-        unimplemented!()
+        unimplemented!("JetTransport::connect is not implemented yet for JetTransport")
     }
 
     fn peer_addr(&self) -> Option<SocketAddr> {
@@ -109,41 +117,40 @@ impl Transport for JetTransport {
     }
 }
 
-impl Read for JetTransport {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.read(&mut buf),
-            JetTransport::Ws(ref mut ws_transport) => ws_transport.read(&mut buf),
-        }
-    }
-}
-
-impl AsyncRead for JetTransport {}
-
-impl Write for JetTransport {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.write(&buf),
-            JetTransport::Ws(ref mut ws_transport) => ws_transport.write(&buf),
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => Write::flush(tcp_transport),
-            JetTransport::Ws(ref mut ws_transport) => Write::flush(ws_transport),
+impl AsyncRead for JetTransport {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>)
+        -> Poll<Result<(), io::Error>>
+    {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_read(cx, buf),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_read(cx, buf),
         }
     }
 }
 
 impl AsyncWrite for JetTransport {
-    fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => AsyncWrite::shutdown(tcp_transport),
-            JetTransport::Ws(ref mut ws_transport) => AsyncWrite::shutdown(ws_transport),
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_write(cx, buf),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_flush(cx),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_shutdown(cx),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_shutdown(cx),
         }
     }
 }
-*/
+
 pub trait JetStream: Stream {
     fn nb_bytes_read(&self) -> u64;
     fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
