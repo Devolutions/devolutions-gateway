@@ -45,9 +45,9 @@ pub mod x224;
 pub mod mcs;
 pub mod rdp;
 
-pub type JetFuture<T> = Box<dyn Future<Output = Result<T, io::Error>> + Send>;
-pub type JetStreamType<T> = Box<dyn JetStream<Item = Result<T, io::Error>> + Send>;
-pub type JetSinkType<T> = Box<dyn JetSink<T, Error = io::Error> + Send>;
+pub type JetFuture<T> = Pin<Box<dyn Future<Output = Result<T, io::Error>> + Send>>;
+pub type JetStreamType<T> = Pin<Box<dyn JetStream<Item = Result<T, io::Error>> + Send>>;
+pub type JetSinkType<T> = Pin<Box<dyn JetSink<T, Error = io::Error> + Send>>;
 
 pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
 const PART_LEN: usize = 16 * 1024;
@@ -150,13 +150,13 @@ impl AsyncWrite for JetTransport {
 }
 
 pub trait JetStream: Stream {
-    fn nb_bytes_read(&self) -> u64;
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
+    fn nb_bytes_read(self: Pin<&Self>) -> u64;
+    fn set_packet_interceptor(self: Pin<&mut Self>, interceptor: Box<dyn PacketInterceptor>);
 }
 
 pub trait JetSink<SinkItem>: Sink<SinkItem> {
-    fn nb_bytes_written(&self) -> u64;
-    fn finished(&mut self) -> bool;
+    fn nb_bytes_written(self: Pin<&Self>) -> u64;
+    fn finished(self: Pin<&mut Self>) -> bool;
 }
 
 struct JetStreamImpl<T: AsyncRead> {
@@ -249,11 +249,11 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
 }
 
 impl<T: AsyncRead + Unpin> JetStream for JetStreamImpl<T> {
-    fn nb_bytes_read(&self) -> u64 {
+    fn nb_bytes_read(self: Pin<&Self>) -> u64 {
         self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
+    fn set_packet_interceptor(mut self: Pin<&mut Self>, interceptor: Box<dyn PacketInterceptor>) {
         self.packet_interceptor = RefCell::new(Some(interceptor));
     }
 }
@@ -336,10 +336,10 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
 }
 
 impl<T: AsyncWrite> JetSink<usize> for JetSinkImpl<T> {
-    fn nb_bytes_written(&self) -> u64 {
+    fn nb_bytes_written(self: Pin<&Self>) -> u64 {
         self.nb_bytes_written.load(Ordering::Relaxed)
     }
-    fn finished(&mut self) -> bool {
+    fn finished(mut self: Pin<&mut Self>) -> bool {
         let mut buffer = self.buffer.borrow_mut();
         buffer.valid().is_empty()
     }

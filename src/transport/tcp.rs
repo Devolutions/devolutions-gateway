@@ -197,7 +197,7 @@ impl TcpTransport {
 impl Transport for TcpTransport {
     fn connect(addr: &Url) -> JetFuture<Self> {
         // TODO: figure out how to do that without cloning
-        Box::new(Self::create_connect_impl_future(addr.clone()))
+        Box::pin(Self::create_connect_impl_future(addr.clone()))
     }
 
     fn peer_addr(&self) -> Option<SocketAddr> {
@@ -212,8 +212,13 @@ impl Transport for TcpTransport {
         let peer_addr = self.peer_addr();
         let (reader, writer) = tokio::io::split(self.stream);
 
-        let stream = Box::new(JetStreamImpl::new(reader, self.nb_bytes_read, peer_addr, buffer_writer));
-        let sink = Box::new(JetSinkImpl::new(
+        let stream = Box::pin(JetStreamImpl::new(
+            reader,
+            self.nb_bytes_read,
+            peer_addr,
+            buffer_writer
+        ));
+        let sink = Box::pin(JetSinkImpl::new(
             writer,
             self.nb_bytes_written,
             peer_addr,

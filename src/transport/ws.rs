@@ -399,7 +399,7 @@ impl AsyncWrite for WsTransport {
 
 impl Transport for WsTransport {
     fn connect(url: &Url) -> JetFuture<Self> where Self: Sized, {
-        Box::new(Self::async_connect(url.clone()))
+        Box::pin(Self::async_connect(url.clone()))
     }
 
     fn peer_addr(&self) -> Option<SocketAddr> {
@@ -414,8 +414,8 @@ impl Transport for WsTransport {
         let peer_addr = self.peer_addr();
         let (reader, writer) = tokio::io::split(self.stream);
 
-        let stream = Box::new(JetStreamImpl::new(reader, self.nb_bytes_read, peer_addr, buffer_writer));
-        let sink = Box::new(JetSinkImpl::new(
+        let stream = Box::pin(JetStreamImpl::new(reader, self.nb_bytes_read, peer_addr, buffer_writer));
+        let sink = Box::pin(JetSinkImpl::new(
             writer,
             self.nb_bytes_written,
             peer_addr,

@@ -1,3 +1,5 @@
+#![recursion_limit="1024"]
+
 #[macro_use]
 extern crate serde_json;
 #[macro_use]
@@ -9,7 +11,7 @@ pub mod interceptor;
 //pub mod jet;
 //pub mod jet_client;
 pub mod logger;
-//pub mod proxy;
+pub mod proxy;
 pub mod rdp;
 //pub mod routing_client;
 pub mod transport;
