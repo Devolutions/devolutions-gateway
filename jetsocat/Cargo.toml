@@ -1,0 +1,25 @@
+[package]
+name = "jetsocat"
+version = "0.1.0"
+authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
+edition = "2018"
+
+[dependencies]
+
+# cli
+seahorse = "1.1"
+
+# async
+tokio-tungstenite = { version = "0.11", git = "https://github.com/snapview/tokio-tungstenite", features = ["tls"] }
+tokio = { version = "0.3", features = ["io-std", "net", "rt", "sync", "process"] }
+futures-util = "0.3"
+futures-channel = "0.3"
+
+# logging
+slog = "2.5"
+slog-async = "2.5"
+slog-term = "2.6"
+
+# error handling
+anyhow = "1"
+
