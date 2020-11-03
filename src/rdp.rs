@@ -31,7 +31,7 @@ mod dvc_manager;
 mod filter;
 mod preconnection_pdu;
 
-//mod sequence_future;
+mod sequence_future;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
