@@ -24,11 +24,9 @@ use std::{
 
 use futures::{
     SinkExt,
-    sink::Send,
     Future,
     Stream,
     ready,
-    pin_mut,
 };
 use tokio::io::{
     AsyncRead,
@@ -36,51 +34,54 @@ use tokio::io::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
+type SendFuture<'a, T, U> =
+    Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + 'a>;
 
-pub trait SequenceFutureProperties<T, U, P>
+pub trait SequenceFutureProperties<'a, T, U, R>
 where
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
-    U: Decoder + Encoder<P> + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    U: Decoder + Encoder<R> + Unpin + 'a,
+    R: 'a,
 {
     type Item;
 
-    fn process_pdu(&mut self, pdu: <U as Decoder>::Item) -> io::Result<Option<P>>;
+    fn process_pdu(&mut self, pdu: <U as Decoder>::Item) -> io::Result<Option<R>>;
     fn return_item(&mut self, client: Option<Framed<T, U>>, server: Option<Framed<T, U>>) -> Self::Item;
     fn next_sender(&self) -> NextStream;
     fn next_receiver(&self) -> NextStream;
     fn sequence_finished(&self, future_state: FutureState) -> bool;
 }
 
-pub struct SequenceFuture<F, T, U, P>
+pub struct SequenceFuture<'a, F, T, U, R>
 where
-    F: SequenceFutureProperties<T, U, P> + Unpin + 'static,
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
-    U: Decoder + Encoder<P> + Unpin + 'static,
-    P: Unpin + 'static,
-    <U as Decoder>::Item: Unpin + 'static,
+    F: SequenceFutureProperties<'a, T, U, R> + Unpin,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    U: Decoder + Encoder<R> + Unpin + 'a,
+    R: Unpin + 'a,
+    <U as Decoder>::Item: Unpin + 'a,
     io::Error: From<<U as Decoder>::Error>,
-    io::Error: From<<U as Encoder<P>>::Error>,
+    io::Error: From<<U as Encoder<R>>::Error>,
 {
     future: F,
     client: Option<Framed<T, U>>,
     server: Option<Framed<T, U>>,
-    send_future: Option<Pin<Box<dyn Future<Output = Result<Framed<T, U>, io::Error>>>>>,
+    send_future: Option<Pin<SendFuture<'a, T, U>>>,
     pdu: Option<<U as Decoder>::Item>,
     future_state: FutureState,
-    phantom_data: PhantomData<P>,
+    phantom_data: PhantomData<R>,
 }
 
-impl<F, T, U, P> SequenceFuture<F, T, U, P>
+impl<'a, F, T, U, R> SequenceFuture<'a, F, T, U, R>
 where
-    F: SequenceFutureProperties<T, U, P> + Unpin,
-    T: AsyncRead + AsyncWrite + Unpin,
-    U: Decoder + Encoder<P> + Unpin,
-    P: Unpin,
-    <U as Decoder>::Item: Unpin + 'static,
+    F: SequenceFutureProperties<'a, T, U, R> + Unpin + 'a,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    U: Decoder + Encoder<R> + Unpin + 'a,
+    R: Unpin + 'a,
+    <U as Decoder>::Item: Unpin +'a,
     io::Error: From<<U as Decoder>::Error>,
-    io::Error: From<<U as Encoder<P>>::Error>,
+    io::Error: From<<U as Encoder<R>>::Error>,
 {
-    pub fn with_get_state(future: F, args: GetStateArgs<T, U, P>) -> Self {
+    pub fn with_get_state(future: F, args: GetStateArgs<T, U, R>) -> Self {
         Self {
             future,
             client: args.client,
@@ -88,11 +89,11 @@ where
             send_future: None,
             pdu: None,
             future_state: FutureState::GetMessage,
-            phantom_data: PhantomData::default(),
+            phantom_data: PhantomData,
         }
     }
 
-    pub fn with_parse_state(future: F, args: ParseStateArgs<T, U, P>) -> Self {
+    pub fn with_parse_state(future: F, args: ParseStateArgs<T, U, R>) -> Self {
         Self {
             future,
             client: args.client,
@@ -100,11 +101,11 @@ where
             send_future: None,
             pdu: Some(args.pdu),
             future_state: FutureState::ParseMessage,
-            phantom_data: PhantomData::default(),
+            phantom_data: PhantomData,
         }
     }
 
-    pub fn with_send_state(future: F, args: SendStateArgs<T, U, P>) -> Self {
+    pub fn with_send_state(future: F, args: SendStateArgs<'a, T, U, R>) -> Self {
         Self {
             future,
             client: None,
@@ -112,7 +113,7 @@ where
             send_future: Some(Box::pin(args.send_future)),
             pdu: None,
             future_state: FutureState::SendMessage,
-            phantom_data: PhantomData::default(),
+            phantom_data: PhantomData,
         }
     }
 
@@ -131,21 +132,21 @@ where
         }
     }
 
-    async fn make_send_future(mut receiver: Framed<T, U>, item: P) -> Result<Framed<T, U>, io::Error> {
+    async fn make_send_future(mut receiver: Framed<T, U>, item: R) -> Result<Framed<T, U>, io::Error> {
         Pin::new(&mut receiver).send(item).await?;
         Ok(receiver)
     }
 }
 
-impl<F, T, U, P> Future for SequenceFuture<F, T, U, P>
+impl<'a, F, T, U, R> Future for SequenceFuture<'a, F, T, U, R>
 where
-    F: SequenceFutureProperties<T, U, P> + Unpin + 'static,
-    T: AsyncRead + AsyncWrite + Unpin + 'static,
-    U: Decoder + Encoder<P> + Unpin + 'static,
-    <U as Decoder>::Item: Unpin + 'static,
-    P: Unpin,
+    F: SequenceFutureProperties<'a, T, U, R> + Unpin + 'a,
+    T: AsyncRead + AsyncWrite + Unpin + 'a,
+    U: Decoder + Encoder<R> + Unpin + 'a,
+    <U as Decoder>::Item: Unpin + 'a,
+    R: Unpin + 'a,
     io::Error: From<<U as Decoder>::Error>,
-    io::Error: From<<U as Encoder<P>>::Error>,
+    io::Error: From<<U as Encoder<R>>::Error>,
 {
     type Output = Result<F::Item, io::Error>;
 
@@ -153,7 +154,7 @@ where
         loop {
             match self.future_state {
                 FutureState::GetMessage => {
-                    let (client, server, mut prev_pdu, future) = match self.deref_mut() {
+                    let (client, server, prev_pdu, future) = match self.deref_mut() {
                         Self {client, server, pdu, future, ..} => {
                             (client, server, pdu, future)
                         }
@@ -184,7 +185,7 @@ where
                         .take()
                         .expect("next_pdu must be present in the Parse message future state");
                     if let Some(next_pdu) = self.future.process_pdu(pdu)? {
-                        let mut next_sender = match self.future.next_receiver() {
+                        let next_sender = match self.future.next_receiver() {
                             NextStream::Client => self
                                 .client
                                 .take()
@@ -199,7 +200,7 @@ where
                     };
                 }
                 FutureState::SendMessage => {
-                    let (client, server, future, mut send_future) = match self.deref_mut() {
+                    let (client, server, future, send_future) = match self.deref_mut() {
                         Self {client, server, future, send_future, ..} => {
                             (client, server, future, send_future)
                         }
@@ -220,13 +221,13 @@ where
                     self.send_future = None;
                 }
                 FutureState::Finished => {
-                    let (mut client, mut server, mut future) = match self.deref_mut() {
+                    let (client, server, future) = match self.deref_mut() {
                         Self {client, server, future, ..} => {
                             (client, server, future)
                         }
                     };
 
-                    return Poll::Ready(Ok(future.return_item(client.take(), client.take())));
+                    return Poll::Ready(Ok(future.return_item(client.take(), server.take())));
                 }
             };
             self.future_state = self.next_future_state();
@@ -269,11 +270,11 @@ where
     pub phantom_data: PhantomData<P>,
 }
 
-pub struct SendStateArgs<T, U, P>
+pub struct SendStateArgs<'a, T, U, P>
 where
     T: AsyncRead + AsyncWrite + Unpin,
     U: Decoder + Encoder<P> + Unpin,
 {
-    pub send_future: Pin<Box<dyn Future<Output = Result<Framed<T, U>, io::Error>>>>,
+    pub send_future: Pin<SendFuture<'a, T, U>>,
     pub phantom_data: PhantomData<P>,
 }
