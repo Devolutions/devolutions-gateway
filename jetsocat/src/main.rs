@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use seahorse::{App, Command, Context};
 use slog::*;
 use std::env;
@@ -35,7 +36,7 @@ fn setup_logger(filename: &str) -> slog::Logger {
         .write(true)
         .truncate(true)
         .open(filename)
-        .unwrap();
+        .expect("couldn't create log file");
 
     let decorator = slog_term::PlainDecorator::new(file);
     let drain = slog_term::CompactFormat::new(decorator).build().fuse();
@@ -52,17 +53,17 @@ fn setup_logger(filename: &str) -> slog::Logger {
 }
 
 pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) {
-    let rt = runtime::Builder::new_current_thread()
+    match runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .expect("tokio runtime build");
-
-    match rt.block_on(f) {
+        .context("runtime build failed")
+        .and_then(|rt| rt.block_on(f))
+    {
         Ok(()) => info!(log, "Terminated successfuly"),
         Err(e) => {
             error!(log, "Failure: {}", e);
             eprintln!("{}", e);
-        },
+        }
     };
 }
 
@@ -70,10 +71,7 @@ fn connect_command() -> Command {
     Command::new("connect")
         .description("Connect to a jet association and pipe stdin / stdout")
         .alias("c")
-        .usage(format!(
-            "{} connect ws://URL | wss://URL",
-            env!("CARGO_PKG_NAME")
-        ))
+        .usage(format!("{} connect ws://URL | wss://URL", env!("CARGO_PKG_NAME")))
         .action(connect_action)
 }
 
@@ -87,10 +85,7 @@ fn accept_command() -> Command {
     Command::new("accept")
         .description("Accept a jet association and pipe with powershell")
         .alias("a")
-        .usage(format!(
-            "{} accept ws://URL | wss://URL",
-            env!("CARGO_PKG_NAME")
-        ))
+        .usage(format!("{} accept ws://URL | wss://URL", env!("CARGO_PKG_NAME")))
         .action(accept_action)
 }
 
