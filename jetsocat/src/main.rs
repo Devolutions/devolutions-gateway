@@ -9,7 +9,7 @@ fn main() {
     let args: Vec<String> = if let Ok(args_str) = std::env::var("JETSOCAT_ARGS") {
         env::args()
             .take(1)
-            .chain(args_str.split(" ").map(|s| s.to_owned()))
+            .chain(parse_env_variable_as_args(&args_str))
             .collect()
     } else {
         env::args().collect()
@@ -25,6 +25,43 @@ fn main() {
         .command(listen_command());
 
     app.run(args);
+}
+
+fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut arg = String::new();
+    let mut iter = env_var_str.chars();
+
+    loop {
+        match iter.next() {
+            Some('"') => loop {
+                // read until next "
+                match iter.next() {
+                    Some('"') | None => break,
+                    Some(c) => arg.push(c),
+                }
+            },
+            Some('\'') => loop {
+                // read until next '
+                match iter.next() {
+                    Some('\'') | None => break,
+                    Some(c) => arg.push(c),
+                }
+            },
+            Some(' ') => {
+                // push current arg
+                args.push(std::mem::take(&mut arg));
+            }
+            Some(c) => arg.push(c),
+            None => break,
+        }
+    }
+
+    if !arg.is_empty() {
+        args.push(arg);
+    }
+
+    args
 }
 
 fn setup_logger(filename: &str) -> slog::Logger {
@@ -98,7 +135,7 @@ pub fn accept_action(c: &Context) {
 fn listen_command() -> Command {
     Command::new("listen")
         .description("Listen for an incoming connection and pipe with powershell (testing purpose only)")
-        .alias("a")
+        .alias("l")
         .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
         .action(listen_action)
 }
