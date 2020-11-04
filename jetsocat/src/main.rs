@@ -45,6 +45,7 @@ fn setup_logger(filename: &str) -> slog::Logger {
     let logger_cloned = logger.clone();
     panic::set_hook(Box::new(move |panic_info| {
         slog::error!(logger_cloned, "{}", panic_info);
+        eprintln!("{}", panic_info);
     }));
 
     logger
@@ -58,7 +59,10 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) {
 
     match rt.block_on(f) {
         Ok(()) => info!(log, "Terminated successfuly"),
-        Err(e) => error!(log, "Failure: {}", e),
+        Err(e) => {
+            error!(log, "Failure: {}", e);
+            eprintln!("{}", e);
+        },
     };
 }
 
