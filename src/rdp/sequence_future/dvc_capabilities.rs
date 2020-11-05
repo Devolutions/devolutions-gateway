@@ -1,4 +1,7 @@
-use std::io;
+use std::{
+    io,
+    marker::PhantomData,
+};
 
 use bytes::BytesMut;
 use ironrdp::{
@@ -7,10 +10,12 @@ use ironrdp::{
         self,
         dvc::{self, gfx},
     },
-    McsPdu, PduParsing,
+    McsPdu,
+    PduParsing,
 };
 use slog_scope::debug;
-use tokio::{codec::Framed, net::tcp::TcpStream};
+use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 use tokio_rustls::TlsStream;
 
 use super::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
@@ -22,17 +27,18 @@ use crate::{
 
 type DvcCapabilitiesTransport = Framed<TlsStream<TcpStream>, RdpTransport>;
 
-pub fn create_downgrade_dvc_capabilities_future(
+pub fn create_downgrade_dvc_capabilities_future<'a>(
     client_transport: Framed<TlsStream<TcpStream>, RdpTransport>,
     server_transport: Framed<TlsStream<TcpStream>, RdpTransport>,
     drdynvc_channel_id: u16,
     dvc_manager: DvcManager,
-) -> SequenceFuture<DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport> {
+) -> SequenceFuture<'a, DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport, RdpPdu> {
     SequenceFuture::with_get_state(
         DowngradeDvcCapabilitiesFuture::new(drdynvc_channel_id, dvc_manager),
         GetStateArgs {
             client: Some(client_transport),
             server: Some(server_transport),
+            phantom_data: PhantomData,
         },
     )
 }
@@ -53,7 +59,7 @@ impl DowngradeDvcCapabilitiesFuture {
     }
 }
 
-impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeDvcCapabilitiesFuture {
+impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, RdpTransport, RdpPdu> for DowngradeDvcCapabilitiesFuture {
     type Item = (DvcCapabilitiesTransport, DvcCapabilitiesTransport, DvcManager);
 
     fn process_pdu(&mut self, rdp_pdu: RdpPdu) -> io::Result<Option<RdpPdu>> {
