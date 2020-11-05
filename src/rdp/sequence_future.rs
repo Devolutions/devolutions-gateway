@@ -2,17 +2,17 @@ mod dvc_capabilities;
 mod finalization;
 mod mcs;
 mod negotiation;
-//mod nla;
+mod nla;
 mod post_mcs;
 
-// pub use self::{
-//     dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
-//     finalization::Finalization,
-//     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
-//     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
-//     nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
-//     post_mcs::{PostMcs, PostMcsFutureTransport},
-// };
+pub use self::{
+    dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
+    finalization::Finalization,
+    mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
+    negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
+    nla::{NlaTransport, NlaWithClientFuture, /*NlaWithServerFuture*/},
+    post_mcs::{PostMcs, PostMcsFutureTransport},
+};
 
 use std::{
     io,
@@ -34,8 +34,7 @@ use tokio::io::{
 };
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-type SendFuture<'a, T, U> =
-    Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + 'a>;
+type SendFuture<'a, T, U> = Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + 'a>;
 
 pub trait SequenceFutureProperties<'a, T, U, R>
 where

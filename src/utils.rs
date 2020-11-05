@@ -62,12 +62,8 @@ macro_rules! io_try {
     };
 }
 
-pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
-where
-    S: io::Read + io::Write,
-{
+pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
     let der = get_der_cert_from_stream(&stream)?;
-
     get_pub_key_from_der(&der)
 }
 
@@ -79,10 +75,7 @@ pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
     Ok(public_key.data.to_vec())
 }
 
-fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
-where
-    S: io::Read + io::Write,
-{
+fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
     let (_, session) = stream.get_ref();
     let payload = session
         .get_peer_certificates()
