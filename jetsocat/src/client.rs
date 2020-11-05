@@ -1,55 +1,33 @@
 use anyhow::Result;
 use futures_channel::mpsc;
-use futures_util::{future, pin_mut, StreamExt};
 use slog::*;
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
 
 pub async fn connect(addr: String, log: Logger) -> Result<()> {
-    use tokio::io::AsyncWriteExt as _;
+    use crate::io::{read_and_send, ws_stream_to_writer};
+    use futures_util::StreamExt as _;
+    use futures_util::{future, pin_mut};
+    use tokio_tungstenite::connect_async;
 
-    let log = log.new(o!("connect" => addr.clone()));
-
-    info!(log, "Connecting");
-    let (ws_stream, _) = connect_async(addr).await?;
+    let connect_log = log.new(o!("connect" => addr.clone()));
+    info!(connect_log, "Connecting");
+    let (ws_stream, rsp) = connect_async(addr).await?;
+    debug!(connect_log, "Connected: {:?}", rsp);
     let (write, read) = ws_stream.split();
 
     // stdin -> ws
-    let (stdin_tx, stdin_rx) = futures_channel::mpsc::unbounded();
-    tokio::spawn(read_stdin(stdin_tx, log.clone()));
+    let stdin_log = connect_log.new(o!("stdin" => "→ ws"));
+    let (stdin_tx, stdin_rx) = mpsc::unbounded();
+    tokio::spawn(read_and_send(tokio::io::stdin(), stdin_tx, stdin_log));
     let stdin_to_ws = stdin_rx.map(Ok).forward(write);
 
-    // ws -> stdout
-    let ws_to_stdout = read.for_each(|msg| async {
-        let msg = msg.unwrap();
-        let data = msg.into_data();
-        tokio::io::stdout().write_all(&data).await.unwrap();
-    });
+    // stdout <- ws
+    let ws_log = connect_log.new(o!("stdout" => "← ws"));
+    let ws_to_stdout = ws_stream_to_writer(read, tokio::io::stdout(), ws_log);
 
-    info!(log, "Connected and ready");
+    info!(connect_log, "Connected and ready");
     pin_mut!(stdin_to_ws, ws_to_stdout);
     future::select(stdin_to_ws, ws_to_stdout).await;
-
-    Ok(())
-}
-
-async fn read_stdin(tx: mpsc::UnboundedSender<Message>, log: Logger) -> Result<()> {
-    use tokio::io::AsyncReadExt as _;
-
-    let mut stdin = tokio::io::stdin();
-    loop {
-        let mut buf = vec![0; 1024];
-        let n = match stdin.read(&mut buf).await {
-            Err(e) => {
-                error!(log, "Couldn't read from stdin: {}", e);
-                break;
-            }
-            Ok(0) => break,
-            Ok(n) => n,
-        };
-        buf.truncate(n);
-        tx.unbounded_send(Message::binary(buf))?;
-    }
+    info!(connect_log, "Ended");
 
     Ok(())
 }
