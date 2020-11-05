@@ -1,5 +1,6 @@
 use anyhow::Context as _;
-use seahorse::{App, Command, Context};
+use jetsocat::pipe::PipeCmd;
+use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::*;
 use std::env;
 use std::future::Future;
@@ -19,12 +20,23 @@ fn main() {
         .description(env!("CARGO_PKG_DESCRIPTION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("CARGO_PKG_VERSION"))
-        .usage(format!("{} [command]", env!("CARGO_PKG_NAME")))
+        .usage(generate_usage())
         .command(connect_command())
         .command(accept_command())
         .command(listen_command());
 
     app.run(args);
+}
+
+fn generate_usage() -> String {
+    format!(
+        "{command} [action]\n\
+        \n\
+        \tExample: unauthenticated powershell\n\
+        \n\
+        \t  {command} listen 127.0.0.1:5002 --cmd 'pwsh -sshs -NoLogo -NoProfile'",
+        command = env!("CARGO_PKG_NAME")
+    )
 }
 
 fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
@@ -82,7 +94,7 @@ fn setup_logger(filename: &str) -> slog::Logger {
 
     let logger_cloned = logger.clone();
     panic::set_hook(Box::new(move |panic_info| {
-        slog::error!(logger_cloned, "{}", panic_info);
+        slog::crit!(logger_cloned, "{}", panic_info);
         eprintln!("{}", panic_info);
     }));
 
@@ -104,6 +116,8 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) {
     };
 }
 
+// client side
+
 fn connect_command() -> Command {
     Command::new("connect")
         .description("Connect to a jet association and pipe stdin / stdout")
@@ -118,30 +132,60 @@ pub fn connect_action(c: &Context) {
     run(log.clone(), jetsocat::client::connect(addr, log));
 }
 
+// server side
+
+fn apply_server_side_flags(cmd: Command) -> Command {
+    cmd.flag(
+        Flag::new("sh-c", FlagType::String).description("Start specified command line using `sh -c` (even on Windows)"),
+    )
+    .flag(
+        Flag::new("cmd", FlagType::String)
+            .description("Start specified command line using `cmd /C` on windows or `sh -c` otherwise"),
+    )
+}
+
+fn get_server_side_args(c: &Context) -> (String, PipeCmd) {
+    let addr = c.args.first().expect("addr is missing").clone();
+
+    let pipe = if let Ok(command_string) = c.string_flag("sh-c") {
+        PipeCmd::ShC(command_string)
+    } else if let Ok(command_string) = c.string_flag("cmd") {
+        PipeCmd::Cmd(command_string)
+    } else {
+        panic!("command is missing (--sh-c OR --cmd)");
+    };
+
+    (addr, pipe)
+}
+
 fn accept_command() -> Command {
-    Command::new("accept")
+    let cmd = Command::new("accept")
         .description("Accept a jet association and pipe with powershell")
         .alias("a")
-        .usage(format!("{} accept ws://URL | wss://URL", env!("CARGO_PKG_NAME")))
-        .action(accept_action)
+        .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
+        .action(accept_action);
+
+    apply_server_side_flags(cmd)
 }
 
 pub fn accept_action(c: &Context) {
-    let addr = c.args.first().expect("addr is missing").clone();
+    let (addr, pipe) = get_server_side_args(c);
     let log = setup_logger("accept.log");
-    run(log.clone(), jetsocat::server::accept(addr, log));
+    run(log.clone(), jetsocat::server::accept(addr, pipe, log));
 }
 
 fn listen_command() -> Command {
-    Command::new("listen")
+    let cmd = Command::new("listen")
         .description("Listen for an incoming connection and pipe with powershell (testing purpose only)")
         .alias("l")
         .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
-        .action(listen_action)
+        .action(listen_action);
+
+    apply_server_side_flags(cmd)
 }
 
 pub fn listen_action(c: &Context) {
-    let addr = c.args.first().expect("addr is missing").clone();
+    let (addr, pipe) = get_server_side_args(c);
     let log = setup_logger("listen.log");
-    run(log.clone(), jetsocat::server::listen(addr, log));
+    run(log.clone(), jetsocat::server::listen(addr, pipe, log));
 }

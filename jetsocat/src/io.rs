@@ -1,5 +1,5 @@
 use futures_channel::mpsc;
-use slog::trace;
+use slog::{debug, trace};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 
 pub async fn read_and_send<R>(
@@ -38,7 +38,13 @@ where
 
     while let Some(msg) = stream.next().await {
         let data = msg?.into_data();
-        trace!(logger, "{}", String::from_utf8_lossy(&data));
+
+        if data.is_empty() {
+            debug!(logger, "Empty message");
+        } else {
+            trace!(logger, "{}", String::from_utf8_lossy(&data));
+        }
+
         writer.write_all(&data).await?;
     }
 

@@ -3,6 +3,7 @@ name = "jetsocat"
 version = "0.1.0"
 authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
 edition = "2018"
+description = "WebSocket toolkit for jet protocol related operations"
 
 [features]
 default = []

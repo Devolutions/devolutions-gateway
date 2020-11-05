@@ -20,13 +20,14 @@ pub async fn connect(addr: String, log: Logger) -> Result<()> {
     tokio::spawn(read_and_send(tokio::io::stdin(), stdin_tx, stdin_log));
     let stdin_to_ws = stdin_rx.map(Ok).forward(write);
 
-    // ws -> stdout
+    // stdout <- ws
     let ws_log = connect_log.new(o!("stdout" => "← ws"));
     let ws_to_stdout = ws_stream_to_writer(read, tokio::io::stdout(), ws_log);
 
     info!(connect_log, "Connected and ready");
     pin_mut!(stdin_to_ws, ws_to_stdout);
     future::select(stdin_to_ws, ws_to_stdout).await;
+    info!(connect_log, "Ended");
 
     Ok(())
 }
