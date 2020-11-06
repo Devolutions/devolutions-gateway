@@ -15,7 +15,7 @@ verbose = ["slog/max_level_trace"]
 seahorse = "1.1"
 
 # async
-tokio-tungstenite = { version = "0.11", git = "https://github.com/snapview/tokio-tungstenite", features = ["tls"] }
+tokio-tungstenite = { version = "0.12", features = ["tls"] }
 tokio = { version = "0.3", features = ["io-std", "net", "rt", "sync", "process"] }
 futures-util = "0.3"
 futures-channel = "0.3"
