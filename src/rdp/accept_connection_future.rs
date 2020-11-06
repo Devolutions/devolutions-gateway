@@ -1,3 +1,22 @@
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+    ops::DerefMut,
+};
+use bytes::BytesMut;
+use futures::ready;
+use ironrdp::{nego, PduBufferParsing};
+use std::{io, sync::Arc};
+use tokio::{
+    io::{
+        ReadBuf,
+        AsyncRead,
+    },
+    net::TcpStream
+};
+use tokio_util::codec::Decoder;
+use url::Url;
 use crate::{
     config::Config,
     rdp::{
@@ -6,12 +25,6 @@ use crate::{
     },
     transport::x224::NegotiationWithClientTransport,
 };
-use bytes::BytesMut;
-use futures::{try_ready, Async, Future, Poll};
-use ironrdp::{nego, PduBufferParsing};
-use std::{io, sync::Arc};
-use tokio::{codec::Decoder, io::AsyncRead, net::tcp::TcpStream};
-use url::Url;
 
 const READ_BUFFER_SIZE: usize = 4 * 1024;
 const MAX_FUTURE_BUFFER_SIZE: usize = 64 * 1024;
@@ -46,36 +59,38 @@ impl AcceptConnectionFuture {
         }
     }
 
-    fn read_bytes_into_buffer(&mut self) -> Result<futures::Async<()>, io::Error> {
+    fn read_bytes_into_buffer(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         let mut received = [0u8; READ_BUFFER_SIZE];
-        let read_bytes = try_ready!(self
+        let pinned_client = Pin::new(self
             .client
             .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?
-            .poll_read(&mut received));
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?);
 
+        let mut read_buf = ReadBuf::new(&mut received);
+        ready!(pinned_client.poll_read(cx, &mut read_buf))?;
+
+        let read_bytes = read_buf.filled().len();
         self.buffer.extend_from_slice(&received[..read_bytes]);
 
         if self.buffer.len() > MAX_FUTURE_BUFFER_SIZE {
-            return Err(io::Error::new(
+            return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Connection sequence is too long".to_string(),
-            ));
+            )));
         }
 
-        Ok(futures::Async::Ready(()))
+        Poll::Ready(Ok(()))
     }
 }
 
 impl Future for AcceptConnectionFuture {
-    type Item = (TcpStream, AcceptConnectionMode);
-    type Error = io::Error;
+    type Output = Result<(TcpStream, AcceptConnectionMode), io::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut more_data_required = true;
         loop {
             if more_data_required {
-                try_ready!(self.read_bytes_into_buffer());
+                ready!(self.as_mut().read_bytes_into_buffer(cx))?;
             }
 
             match self.rdp_identity.take() {
@@ -85,7 +100,7 @@ impl Future for AcceptConnectionFuture {
                         let mode = crate::rdp::preconnection_pdu::resolve_routing_mode(&pdu, &self.config)?;
                         match mode {
                             TokenRoutingMode::RdpTcp(url) => {
-                                return Ok(Async::Ready((
+                                return Poll::Ready(Ok((
                                     self.client.take().unwrap(),
                                     AcceptConnectionMode::RdpTcp { url, leftover_request },
                                 )));
@@ -103,38 +118,44 @@ impl Future for AcceptConnectionFuture {
                         more_data_required = true;
                     }
                     Err(e) => {
-                        return Err(io::Error::new(
+                        return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::InvalidData,
                             format!(
                                 "Invalid connection sequence start,\
                                  expected PreconnectionPdu but got something else: {}",
                                 e
                             ),
-                        ))
+                        )));
                     }
                 },
                 Some(identity) => {
-                    match self.nego_transport.decode(&mut self.buffer) {
+                    let (nego_transport, mut buffer, client, mut rdp_identity) = match self.deref_mut() {
+                        Self { nego_transport,buffer, client, rdp_identity, ..} => {
+                            (nego_transport, buffer, client, rdp_identity)
+                        }
+                    };
+
+                    match nego_transport.decode(&mut buffer) {
                         Ok(Some(request)) => {
-                            return Ok(Async::Ready((
-                                self.client.take().unwrap(),
+                            return Poll::Ready(Ok((
+                                client.take().unwrap(),
                                 AcceptConnectionMode::RdpTls { identity, request },
                             )));
                         }
                         Ok(None) => {
                             // Read more data, keep the same state
-                            self.rdp_identity = Some(identity);
+                            *rdp_identity = Some(identity);
                             more_data_required = true;
                         }
                         Err(e) => {
-                            return Err(io::Error::new(
+                            return Poll::Ready(Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
                                 format!(
                                     "Invalid connection sequence start,\
                                 expected negotiation Request but got something else: {}",
                                     e
                                 ),
-                            ))
+                            )));
                         }
                     }
                 }
