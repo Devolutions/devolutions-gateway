@@ -10,7 +10,7 @@ pub use self::{
     finalization::Finalization,
     mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
     negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
-    nla::{NlaTransport, NlaWithClientFuture, /*NlaWithServerFuture*/},
+    nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
     post_mcs::{PostMcs, PostMcsFutureTransport},
 };
 
