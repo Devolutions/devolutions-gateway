@@ -18,7 +18,7 @@ pub mod transport;
 pub mod utils;
 //pub mod websocket_client;
 
-//pub use proxy::Proxy;
+pub use proxy::Proxy;
 
 use lazy_static::lazy_static;
 use std::sync::atomic::AtomicU64;
