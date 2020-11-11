@@ -6,9 +6,9 @@ extern crate serde_json;
 extern crate serde_derive;
 
 pub mod config;
-//pub mod http;
+pub mod http;
 pub mod interceptor;
-//pub mod jet;
+pub mod jet;
 //pub mod jet_client;
 pub mod logger;
 pub mod proxy;

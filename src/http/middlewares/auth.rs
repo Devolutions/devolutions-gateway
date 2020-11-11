@@ -1,7 +1,14 @@
 use crate::config::Config;
-use saphir::*;
 use slog_scope::error;
 use std::sync::Arc;
+use futures::future::BoxFuture;
+use saphir::{
+    middleware::MiddlewareChain,
+    error::SaphirError,
+    http_context::{HttpContext, State},
+    http::{self, StatusCode},
+    response::Builder as ResponseBuilder,
+};
 
 pub struct AuthMiddleware {
     config: Arc<Config>,
@@ -13,46 +20,60 @@ impl AuthMiddleware {
     }
 }
 
-impl Middleware for AuthMiddleware {
-    fn resolve(&self, req: &mut SyncRequest, res: &mut SyncResponse) -> RequestContinuation {
-        if let Some(api_key) = &self.config.api_key {
-            let auth_header = match req.headers_map().get(header::AUTHORIZATION) {
-                Some(h) => h.clone(),
-                None => {
-                    error!("Authorization header not present in request.");
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return RequestContinuation::Stop;
-                }
-            };
+async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &dyn MiddlewareChain) -> Result<HttpContext, SaphirError> {
+    if let Some(api_key) = &config.api_key {
+        let auth_header = ctx.state
+            .request()
+            .expect("Invalid middleware state")
+            .headers()
+            .get(http::header::AUTHORIZATION);
 
-            let auth_str = match auth_header.to_str() {
-                Ok(s) => s,
-                Err(_) => {
-                    error!("Authorization header wrong format");
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return RequestContinuation::Stop;
-                }
-            };
+        let auth_header = match auth_header {
+            Some(header) => header.clone(),
+            None => {
+                error!("Authorization header not present in request.");
+                let response = ResponseBuilder::new()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .build()?;
 
-            match parse_auth_header(auth_str) {
-                Some((AuthHeaderType::Bearer, token)) => {
-                    // API_KEY
-                    if api_key == &token {
-                        return RequestContinuation::Continue;
-                    }
-                }
-                _ => {
-                    error!("Invalid authorization type");
-                }
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
             }
+        };
 
-            res.status(StatusCode::UNAUTHORIZED);
-            RequestContinuation::Stop
-        } else {
-            // API_KEY not defined, we accept everything
-            RequestContinuation::Continue
+        let auth_str = match auth_header.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                error!("Authorization header wrong format");
+                let response = ResponseBuilder::new()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .build()?;
+
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
+            }
+        };
+
+        if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_str) {
+            // API_KEY
+            if api_key == &token {
+                return chain.next(ctx).await;
+            }
         }
+
+        error!("Invalid authorization type");
+        let response = ResponseBuilder::new()
+            .status(StatusCode::UNAUTHORIZED)
+            .build()?;
+
+        let mut ctx = ctx.clone_with_empty_state();
+        ctx.state = State::After(Box::new(response));
+        return Ok(ctx);
     }
+
+    Ok(chain.next(ctx).await?)
 }
 
 #[derive(PartialEq)]
