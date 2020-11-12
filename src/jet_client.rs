@@ -5,7 +5,7 @@ use std::{
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use futures::{future::err, try_ready, Async, Future, Poll};
+// use futures::{future::err, try_ready, Async, Future, Poll};
 use jet_proto::{
     accept::{JetAcceptReq, JetAcceptRsp},
     connect::{JetConnectReq, JetConnectRsp},
@@ -15,25 +15,24 @@ use jet_proto::{
 use slog_scope::{debug, error};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    runtime::TaskExecutor,
 };
 use uuid::Uuid;
 
 use crate::{
     config::Config,
-    http::controllers::jet::create_remove_association_future,
+    http::controllers::jet::remove_association,
     jet::{
         association::Association,
         candidate::{Candidate, CandidateState},
         TransportType,
     },
     transport::JetTransport,
-    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC},
+    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
     Proxy,
 };
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
-
+/*
 pub struct JetClient {
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
@@ -532,3 +531,4 @@ impl Future for HandleTestJetMsg {
         Ok(Async::Ready(()))
     }
 }
+*/

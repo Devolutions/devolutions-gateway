@@ -21,8 +21,12 @@ impl HealthController {
 impl HealthController {
     #[get("/")]
     async fn get_health(&self) -> (u16, String) {
-        let hostname = &self.config.hostname;
-        let response_body = format!("Devolutions Gateway \"{}\" is alive and healthy.", hostname);
-        (StatusCode::OK.as_u16(), response_body)
+        build_health_response(&self.config)
     }
+}
+
+pub fn build_health_response(config: &Config) -> (u16, String) {
+    let hostname = &config.hostname;
+    let response_body = format!("Devolutions Gateway \"{}\" is alive and healthy.", hostname);
+    (StatusCode::OK.as_u16(), response_body)
 }

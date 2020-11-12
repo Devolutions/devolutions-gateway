@@ -9,7 +9,7 @@ pub mod config;
 pub mod http;
 pub mod interceptor;
 pub mod jet;
-//pub mod jet_client;
+pub mod jet_client;
 pub mod logger;
 pub mod proxy;
 pub mod rdp;

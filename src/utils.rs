@@ -1,4 +1,4 @@
-//pub mod association;
+pub mod association;
 
 use std::{
     collections::HashMap,
