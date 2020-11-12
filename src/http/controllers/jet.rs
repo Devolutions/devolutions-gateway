@@ -34,7 +34,7 @@ use bytes::Bytes;
 
 
 
-struct JetController {
+pub struct JetController {
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
 }

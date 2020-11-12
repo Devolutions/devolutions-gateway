@@ -1,13 +1,17 @@
 use crate::config::Config;
 use slog_scope::error;
 use std::sync::Arc;
-use futures::future::BoxFuture;
+use futures::future::{
+    BoxFuture,
+    FutureExt,
+};
 use saphir::{
-    middleware::MiddlewareChain,
+    middleware::{MiddlewareChain, Middleware},
     error::SaphirError,
     http_context::{HttpContext, State},
     http::{self, StatusCode},
     response::Builder as ResponseBuilder,
+    macros::middleware,
 };
 
 pub struct AuthMiddleware {
@@ -16,11 +20,17 @@ pub struct AuthMiddleware {
 
 impl AuthMiddleware {
     pub fn new(config: Arc<Config>) -> Self {
-        AuthMiddleware { config }
+        Self { config }
     }
 }
 
-async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &dyn MiddlewareChain) -> Result<HttpContext, SaphirError> {
+impl Middleware for AuthMiddleware {
+    fn next(&'static self, ctx: HttpContext, chain: &'static dyn MiddlewareChain) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
+        auth_middleware(self.config.clone(), ctx, chain).boxed()
+    }
+}
+
+async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &'static dyn MiddlewareChain) -> Result<HttpContext, SaphirError> {
     if let Some(api_key) = &config.api_key {
         let auth_header = ctx.state
             .request()

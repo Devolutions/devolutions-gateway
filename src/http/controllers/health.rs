@@ -7,7 +7,7 @@ use saphir::{
 };
 use std::sync::Arc;
 
-struct HealthController {
+pub struct HealthController {
     config: Arc<Config>
 }
 

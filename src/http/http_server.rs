@@ -6,18 +6,21 @@ use crate::{
     },
     jet_client::JetAssociationsMap,
 };
-use saphir::{server::SslConfig, Server as SaphirServer, ServerSpawn};
+use saphir::{
+    server::{SslConfig, Server as SaphirServer}
+};
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
-use tokio::runtime::TaskExecutor;
+use tokio::task::JoinHandle;
+use saphir::error::SaphirError;
 
 pub struct HttpServer {
-    pub server: SaphirServer,
-    server_handle: Mutex<Option<ServerSpawn>>,
+    pub server: Mutex<Option<SaphirServer>>,
+    server_handle: Mutex<Option<JoinHandle<Result<(), SaphirError>>>>,
 }
 
 impl HttpServer {
-    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor: TaskExecutor) -> HttpServer {
+    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> HttpServer {
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading HTTP middlewares");
@@ -41,13 +44,18 @@ impl HttpServer {
             .configure_router(|router| {
                 info!("Loading HTTP controllers");
                 let health = HealthController::new(config.clone());
-                let jet = JetController::new(config.clone(), jet_associations.clone(), executor.clone());
-                let session = SessionsController::new();
+                let jet = JetController::new(config.clone(), jet_associations.clone());
+                let session = SessionsController::default();
                 info!("Configuring HTTP router");
-                router.add(health).add(jet).add(session)
+                router
+                    .controller(health)
+                    .controller(jet)
+                    .controller(session)
             })
             .configure_listener(|listener| {
-                let listener_config = listener.set_uri(&config.api_listener.to_string());
+                let server_name = &config.api_listener.host_str()
+                    .expect("API listener should be specified");
+                let listener_config = listener.server_name(server_name);
 
                 let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
                     Some(SslConfig::FilePath(cert_path.into()))
@@ -74,20 +82,23 @@ impl HttpServer {
             .build();
 
         HttpServer {
-            server: http_server,
+            server: Mutex::new(Some(http_server)),
             server_handle: Mutex::new(None),
         }
     }
 
-    pub fn start(&self, executor: TaskExecutor) -> Result<(), String> {
+    pub fn start(&self) {
+        let server = {
+            let mut guard = self.server.lock().unwrap();
+            guard.take().expect("Start server can't be called twice")
+        };
         let mut handle = self.server_handle.lock().unwrap();
-        *handle = Some(self.server.spawn(executor).map_err(|e| e.to_string())?);
-        Ok(())
+        handle.replace(tokio::spawn(server.run()));
     }
 
     pub fn stop(&self) {
         if let Some(handle) = self.server_handle.lock().unwrap().take() {
-            handle.terminate();
+            handle.abort();
         }
     }
 }
