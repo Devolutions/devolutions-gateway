@@ -1,6 +1,6 @@
 use std::io;
 
-use bytes::{BytesMut, Buf};
+use bytes::{Buf, BytesMut};
 use ironrdp::{
     fast_path::{FastPathError, FastPathHeader},
     PduParsing,

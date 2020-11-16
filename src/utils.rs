@@ -8,19 +8,13 @@ use std::{
     net::SocketAddr,
 };
 
+use tokio::{net::lookup_host, prelude::*};
+use tokio_rustls::rustls;
+use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
-use tokio::{
-    prelude::*,
-    net::lookup_host,
-};
-use tokio_util::codec::{
-    Decoder, Encoder, Framed, FramedParts,
-};
-use tokio_rustls::rustls;
 
 use crate::config::CertificateConfig;
-
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
@@ -43,7 +37,8 @@ pub mod danger_transport {
 pub async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
-    lookup_host(format!("{}:{}", host, port)).await
+    lookup_host(format!("{}:{}", host, port))
+        .await
         .ok()
         .map(|mut it| it.next())
         .flatten()
@@ -86,13 +81,11 @@ where
     let (_, session) = stream.get_ref();
     let payload = session
         .get_peer_certificates()
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate.")
-        })?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate."))?;
 
-    let cert = payload.first().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates")
-    })?;
+    let cert = payload
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates"))?;
 
     Ok(cert.as_ref().to_vec())
 }
