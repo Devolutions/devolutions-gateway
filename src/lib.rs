@@ -14,6 +14,7 @@ pub mod logger;
 pub mod proxy;
 pub mod rdp;
 //pub mod routing_client;
+mod routing_client;
 pub mod transport;
 pub mod utils;
 //pub mod websocket_client;
