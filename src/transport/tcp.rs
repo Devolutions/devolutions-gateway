@@ -1,8 +1,8 @@
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
-    task::{Poll, Context},
     pin::Pin,
+    sync::{atomic::AtomicU64, Arc},
+    task::{Context, Poll},
 };
 
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
@@ -10,20 +10,14 @@ use tokio::{
     io::{self, AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-use tokio_rustls::{
-    rustls,
-    TlsConnector,
-    TlsStream,
-};
+use tokio_rustls::{rustls, TlsConnector, TlsStream};
 use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
     utils::{danger_transport, resolve_url_to_socket_arr},
 };
-use futures::{
-    FutureExt,
-};
+use futures::FutureExt;
 
 #[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {
@@ -39,9 +33,7 @@ impl TcpStreamWrapper {
         }
     }
 
-    pub fn async_shutdown(mut self: Pin<&mut Self>,
-                          cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
+    pub fn async_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
             TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
             TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
@@ -56,12 +48,8 @@ impl AsyncRead for TcpStreamWrapper {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
-            TcpStreamWrapper::Plain(ref mut stream) => {
-                Pin::new(stream).poll_read(cx, buf)
-            }
-            TcpStreamWrapper::Tls(ref mut stream) => {
-                Pin::new(stream).poll_read(cx, buf)
-            }
+            TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
+            TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
         }
     }
 }
@@ -69,34 +57,22 @@ impl AsyncRead for TcpStreamWrapper {
 impl AsyncWrite for TcpStreamWrapper {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
         match self.get_mut() {
-            TcpStreamWrapper::Plain(ref mut stream) => {
-                Pin::new(stream).poll_write(cx, buf)
-            }
-            TcpStreamWrapper::Tls(ref mut stream) => {
-                Pin::new(stream).poll_write(cx, buf)
-            }
+            TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
+            TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
-            TcpStreamWrapper::Plain(ref mut stream) => {
-                Pin::new(stream).poll_flush(cx)
-            }
-            TcpStreamWrapper::Tls(ref mut stream) => {
-                Pin::new(stream).poll_flush(cx)
-            }
+            TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_flush(cx),
+            TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
-            TcpStreamWrapper::Plain(ref mut stream) => {
-                Pin::new(stream).poll_shutdown(cx)
-            }
-            TcpStreamWrapper::Tls(ref mut stream) => {
-                Pin::new(stream).poll_shutdown(cx)
-            }
+            TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
+            TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }
 }
@@ -158,15 +134,13 @@ impl AsyncWrite for TcpTransport {
 }
 
 impl TcpTransport {
-    async fn create_connect_impl_future(url: Url) -> Result<TcpTransport, std::io::Error>
-    {
-        let socket_addr = resolve_url_to_socket_arr(&url).await
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
-                    format!("couldn't resolve {}", url)
-                )
-            })?;
+    async fn create_connect_impl_future(url: Url) -> Result<TcpTransport, std::io::Error> {
+        let socket_addr = resolve_url_to_socket_arr(&url).await.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("couldn't resolve {}", url),
+            )
+        })?;
 
         match url.scheme() {
             "tcp" => TcpStream::connect(&socket_addr).await.map(TcpTransport::new),
@@ -182,7 +156,9 @@ impl TcpTransport {
                 let tls_connector = TlsConnector::from(config_ref);
                 let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
 
-                let tls_handshake = tls_connector.connect(dns_name, socket).await
+                let tls_handshake = tls_connector
+                    .connect(dns_name, socket)
+                    .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
                 Ok(TcpTransport::new_tls(TlsStream::Client(tls_handshake)))
@@ -212,12 +188,7 @@ impl Transport for TcpTransport {
         let peer_addr = self.peer_addr();
         let (reader, writer) = tokio::io::split(self.stream);
 
-        let stream = Box::pin(JetStreamImpl::new(
-            reader,
-            self.nb_bytes_read,
-            peer_addr,
-            buffer_writer
-        ));
+        let stream = Box::pin(JetStreamImpl::new(reader, self.nb_bytes_read, peer_addr, buffer_writer));
         let sink = Box::pin(JetSinkImpl::new(
             writer,
             self.nb_bytes_written,

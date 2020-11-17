@@ -1,4 +1,4 @@
-use bytes::{BytesMut,Buf};
+use bytes::{Buf, BytesMut};
 use ironrdp::{
     nego::{NegotiationError, Request, Response},
     Data, PduParsing,

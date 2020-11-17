@@ -16,22 +16,14 @@ pub use self::{
 
 use std::{
     io,
-    pin::Pin,
-    task::{Context, Poll},
     marker::PhantomData,
     ops::DerefMut,
+    pin::Pin,
+    task::{Context, Poll},
 };
 
-use futures::{
-    SinkExt,
-    Future,
-    Stream,
-    ready,
-};
-use tokio::io::{
-    AsyncRead,
-    AsyncWrite,
-};
+use futures::{ready, Future, SinkExt, Stream};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 type SendFuture<'a, T, U> = Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + 'a>;
@@ -76,7 +68,7 @@ where
     T: AsyncRead + AsyncWrite + Unpin + 'a,
     U: Decoder + Encoder<R> + Unpin + 'a,
     R: Unpin + 'a,
-    <U as Decoder>::Item: Unpin +'a,
+    <U as Decoder>::Item: Unpin + 'a,
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder<R>>::Error>,
 {
@@ -154,9 +146,13 @@ where
             match self.future_state {
                 FutureState::GetMessage => {
                     let (client, server, prev_pdu, future) = match self.deref_mut() {
-                        Self {client, server, pdu, future, ..} => {
-                            (client, server, pdu, future)
-                        }
+                        Self {
+                            client,
+                            server,
+                            pdu,
+                            future,
+                            ..
+                        } => (client, server, pdu, future),
                     };
 
                     let sender = match future.next_sender() {
@@ -200,9 +196,13 @@ where
                 }
                 FutureState::SendMessage => {
                     let (client, server, future, send_future) = match self.deref_mut() {
-                        Self {client, server, future, send_future, ..} => {
-                            (client, server, future, send_future)
-                        }
+                        Self {
+                            client,
+                            server,
+                            future,
+                            send_future,
+                            ..
+                        } => (client, server, future, send_future),
                     };
 
                     let receiver = ready!(send_future
@@ -210,7 +210,6 @@ where
                         .expect("Send message state cannot be fired without send_future")
                         .as_mut()
                         .poll(cx))?;
-
 
                     let next_receiver = match future.next_receiver() {
                         NextStream::Client => client,
@@ -221,9 +220,9 @@ where
                 }
                 FutureState::Finished => {
                     let (client, server, future) = match self.deref_mut() {
-                        Self {client, server, future, ..} => {
-                            (client, server, future)
-                        }
+                        Self {
+                            client, server, future, ..
+                        } => (client, server, future),
                     };
 
                     return Poll::Ready(Ok(future.return_item(client.take(), server.take())));
