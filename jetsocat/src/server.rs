@@ -12,7 +12,7 @@ pub async fn accept(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()
 
     pipe_with_ws(ws_stream, pipe, accept_log)
         .await
-        .with_context(|| "Failed to pipe pwsh")?;
+        .with_context(|| "Failed to pipe")?;
 
     Ok(())
 }
@@ -34,7 +34,7 @@ pub async fn listen(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()
 
     pipe_with_ws(ws_stream, pipe, peer_log)
         .await
-        .with_context(|| "Failed to pipe pwsh")?;
+        .with_context(|| "Failed to pipe")?;
 
     Ok(())
 }
