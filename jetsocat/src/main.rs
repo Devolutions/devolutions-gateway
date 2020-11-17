@@ -1,9 +1,11 @@
+use anyhow::anyhow;
 use anyhow::Context as _;
 use jetsocat::pipe::PipeCmd;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::*;
 use std::env;
 use std::future::Future;
+use std::path::PathBuf;
 use tokio::runtime;
 
 fn main() {
@@ -76,20 +78,29 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
     args
 }
 
-fn setup_logger(filename: &str) -> slog::Logger {
+fn setup_logger(logging: Logging) -> slog::Logger {
     use std::fs::OpenOptions;
     use std::panic;
 
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(filename)
-        .expect("couldn't create log file");
+    let drain = match logging {
+        Logging::Disabled => {
+            let decorator = slog_term::TermDecorator::new().build();
+            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            slog_async::Async::new(drain).build().fuse()
+        }
+        Logging::Enabled { filepath } => {
+            let file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(filepath)
+                .expect("couldn't create log file");
+            let decorator = slog_term::PlainDecorator::new(file);
+            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            slog_async::Async::new(drain).build().fuse()
+        }
+    };
 
-    let decorator = slog_term::PlainDecorator::new(file);
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
     let logger = slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")));
 
     let logger_cloned = logger.clone();
@@ -119,20 +130,117 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) {
 // client side
 
 fn connect_command() -> Command {
-    Command::new("connect")
+    let cmd = Command::new("connect")
         .description("Connect to a jet association and pipe stdin / stdout")
         .alias("c")
         .usage(format!("{} connect ws://URL | wss://URL", env!("CARGO_PKG_NAME")))
-        .action(connect_action)
+        .action(connect_action);
+
+    apply_common_flags(cmd)
 }
 
 pub fn connect_action(c: &Context) {
-    let addr = c.args.first().expect("addr is missing").clone();
-    let log = setup_logger("connect.log");
-    run(log.clone(), jetsocat::client::connect(addr, log));
+    match CommonArgs::parse(c) {
+        Ok(args) => {
+            let log = setup_logger(args.logging);
+            run(log.clone(), jetsocat::client::connect(args.addr, log));
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+        }
+    }
 }
 
 // server side
+
+fn accept_command() -> Command {
+    let cmd = Command::new("accept")
+        .description("Accept a jet association and pipe with powershell")
+        .alias("a")
+        .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
+        .action(accept_action);
+
+    apply_common_flags(apply_server_side_flags(cmd))
+}
+
+pub fn accept_action(c: &Context) {
+    match ServerArgs::parse(c) {
+        Ok(args) => {
+            let log = setup_logger(args.common.logging);
+            run(log.clone(), jetsocat::server::accept(args.common.addr, args.pipe, log));
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+        }
+    }
+}
+
+fn listen_command() -> Command {
+    let cmd = Command::new("listen")
+        .description("Listen for an incoming connection and pipe with powershell (testing purpose only)")
+        .alias("l")
+        .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
+        .action(listen_action);
+
+    apply_common_flags(apply_server_side_flags(cmd))
+}
+
+pub fn listen_action(c: &Context) {
+    match ServerArgs::parse(c) {
+        Ok(args) => {
+            let log = setup_logger(args.common.logging);
+            run(log.clone(), jetsocat::server::listen(args.common.addr, args.pipe, log));
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+        }
+    }
+}
+
+// args parsing
+
+fn apply_common_flags(cmd: Command) -> Command {
+    cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
+        .flag(Flag::new("no-log", FlagType::Bool).description("Disable logging"))
+}
+
+enum Logging {
+    Disabled,
+    Enabled { filepath: PathBuf },
+}
+
+struct CommonArgs {
+    addr: String,
+    logging: Logging,
+}
+
+impl CommonArgs {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
+        let addr = c.args.first().context("Address is missing")?.clone();
+
+        let logging = if c.bool_flag("no-log") {
+            Logging::Disabled
+        } else if let Ok(filepath) = c.string_flag("log-file") {
+            let filepath = PathBuf::from(filepath);
+            Logging::Enabled { filepath }
+        } else if let Some(mut filepath) = dirs::data_dir() {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .context("Couldn't retrieve duration since UNIX epoch")?;
+            filepath.push("jetsocat");
+            std::fs::create_dir_all(&filepath).context("couldn't create jetsocat folder")?;
+            filepath.push(format!("{}", now.as_secs()));
+            filepath.set_extension("log");
+            Logging::Enabled { filepath }
+        } else {
+            eprintln!("Couldn't retrieve data directory for log files. Enabling --no-log flag implicitly.");
+            Logging::Disabled
+        };
+
+        Ok(Self { addr, logging })
+    }
+}
 
 fn apply_server_side_flags(cmd: Command) -> Command {
     cmd.flag(
@@ -144,48 +252,23 @@ fn apply_server_side_flags(cmd: Command) -> Command {
     )
 }
 
-fn get_server_side_args(c: &Context) -> (String, PipeCmd) {
-    let addr = c.args.first().expect("addr is missing").clone();
-
-    let pipe = if let Ok(command_string) = c.string_flag("sh-c") {
-        PipeCmd::ShC(command_string)
-    } else if let Ok(command_string) = c.string_flag("cmd") {
-        PipeCmd::Cmd(command_string)
-    } else {
-        panic!("command is missing (--sh-c OR --cmd)");
-    };
-
-    (addr, pipe)
+struct ServerArgs {
+    common: CommonArgs,
+    pipe: PipeCmd,
 }
 
-fn accept_command() -> Command {
-    let cmd = Command::new("accept")
-        .description("Accept a jet association and pipe with powershell")
-        .alias("a")
-        .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
-        .action(accept_action);
+impl ServerArgs {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(c)?;
 
-    apply_server_side_flags(cmd)
-}
+        let pipe = if let Ok(command_string) = c.string_flag("sh-c") {
+            PipeCmd::ShC(command_string)
+        } else if let Ok(command_string) = c.string_flag("cmd") {
+            PipeCmd::Cmd(command_string)
+        } else {
+            return Err(anyhow!("Command is missing (--sh-c OR --cmd)"));
+        };
 
-pub fn accept_action(c: &Context) {
-    let (addr, pipe) = get_server_side_args(c);
-    let log = setup_logger("accept.log");
-    run(log.clone(), jetsocat::server::accept(addr, pipe, log));
-}
-
-fn listen_command() -> Command {
-    let cmd = Command::new("listen")
-        .description("Listen for an incoming connection and pipe with powershell (testing purpose only)")
-        .alias("l")
-        .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
-        .action(listen_action);
-
-    apply_server_side_flags(cmd)
-}
-
-pub fn listen_action(c: &Context) {
-    let (addr, pipe) = get_server_side_args(c);
-    let log = setup_logger("listen.log");
-    run(log.clone(), jetsocat::server::listen(addr, pipe, log));
+        Ok(ServerArgs { common, pipe })
+    }
 }
