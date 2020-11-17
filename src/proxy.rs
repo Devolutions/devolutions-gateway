@@ -19,12 +19,6 @@ use std::{
     task::{Context, Poll},
 };
 
-use std::{
-    ops::{Deref, DerefMut},
-    pin::Pin,
-    task::{Context, Poll},
-};
-
 pub struct Proxy {
     config: Arc<Config>,
 }

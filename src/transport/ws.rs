@@ -21,7 +21,6 @@ use tokio_rustls::{client::TlsStream, rustls, TlsConnector};
 use tokio_tungstenite::{
     tungstenite::{self, handshake::client::Request, protocol::Role},
     WebSocketStream,
-    WebSocketStream,
 };
 use url::Url;
 
