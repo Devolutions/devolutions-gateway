@@ -1,22 +1,3 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-    ops::DerefMut,
-};
-use bytes::BytesMut;
-use futures::ready;
-use ironrdp::{nego, PduBufferParsing};
-use std::{io, sync::Arc};
-use tokio::{
-    io::{
-        ReadBuf,
-        AsyncRead,
-    },
-    net::TcpStream
-};
-use tokio_util::codec::Decoder;
-use url::Url;
 use crate::{
     config::Config,
     rdp::{
@@ -25,6 +6,23 @@ use crate::{
     },
     transport::x224::NegotiationWithClientTransport,
 };
+use bytes::BytesMut;
+use futures::ready;
+use ironrdp::{nego, PduBufferParsing};
+use std::{
+    future::Future,
+    io,
+    ops::DerefMut,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tokio::{
+    io::{AsyncRead, ReadBuf},
+    net::TcpStream,
+};
+use tokio_util::codec::Decoder;
+use url::Url;
 
 const READ_BUFFER_SIZE: usize = 4 * 1024;
 const MAX_FUTURE_BUFFER_SIZE: usize = 64 * 1024;
@@ -61,10 +59,11 @@ impl AcceptConnectionFuture {
 
     fn read_bytes_into_buffer(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
         let mut received = [0u8; READ_BUFFER_SIZE];
-        let pinned_client = Pin::new(self
-            .client
-            .as_mut()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?);
+        let pinned_client = Pin::new(
+            self.client
+                .as_mut()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Invalid state, TCP stream is missing"))?,
+        );
 
         let mut read_buf = ReadBuf::new(&mut received);
         ready!(pinned_client.poll_read(cx, &mut read_buf))?;
@@ -130,9 +129,13 @@ impl Future for AcceptConnectionFuture {
                 },
                 Some(identity) => {
                     let (nego_transport, mut buffer, client, mut rdp_identity) = match self.deref_mut() {
-                        Self { nego_transport,buffer, client, rdp_identity, ..} => {
-                            (nego_transport, buffer, client, rdp_identity)
-                        }
+                        Self {
+                            nego_transport,
+                            buffer,
+                            client,
+                            rdp_identity,
+                            ..
+                        } => (nego_transport, buffer, client, rdp_identity),
                     };
 
                     match nego_transport.decode(&mut buffer) {

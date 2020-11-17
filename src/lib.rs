@@ -1,4 +1,4 @@
-#![recursion_limit="1024"]
+#![recursion_limit = "1024"]
 
 #[macro_use]
 extern crate serde_json;
@@ -16,7 +16,7 @@ pub mod rdp;
 //pub mod routing_client;
 pub mod transport;
 pub mod utils;
-//pub mod websocket_client;
+pub mod websocket_client;
 
 pub use proxy::Proxy;
 

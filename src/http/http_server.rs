@@ -7,12 +7,12 @@ use crate::{
     jet_client::JetAssociationsMap,
 };
 use saphir::{
-    server::{SslConfig, Server as SaphirServer}
+    error::SaphirError,
+    server::{Server as SaphirServer, SslConfig},
 };
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
-use saphir::error::SaphirError;
 
 pub struct HttpServer {
     pub server: Mutex<Option<SaphirServer>>,
@@ -47,13 +47,12 @@ impl HttpServer {
                 let jet = JetController::new(config.clone(), jet_associations.clone());
                 let session = SessionsController::default();
                 info!("Configuring HTTP router");
-                router
-                    .controller(health)
-                    .controller(jet)
-                    .controller(session)
+                router.controller(health).controller(jet).controller(session)
             })
             .configure_listener(|listener| {
-                let server_name = &config.api_listener.host_str()
+                let server_name = &config
+                    .api_listener
+                    .host_str()
                     .expect("API listener should be specified");
                 let listener_config = listener.server_name(server_name);
 

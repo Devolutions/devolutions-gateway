@@ -1,11 +1,11 @@
-use std::{
-    task::{Poll, Context},
-    pin::Pin,
-    time::Duration,
-};
 use crate::{jet::candidate::CandidateState, jet_client::JetAssociationsMap};
 use futures::Future;
 use slog_scope::debug;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 use uuid::Uuid;
 
 pub const ACCEPT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);

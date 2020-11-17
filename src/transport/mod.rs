@@ -1,31 +1,22 @@
-use std::{
-    io::{Read, Write},
-    net::SocketAddr,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc
-    },
-    rc::Rc,
-    pin::Pin,
-    task::{Context, Poll},
-    future::Future,
-    cell::RefCell,
-    ops::DerefMut,
-};
-use futures::{
-    Sink, Stream
-};
+use futures::{Sink, Stream};
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use tokio::{
-    io::{
-        self,
-        AsyncRead,
-        AsyncWrite,
-        ReadHalf,
-        WriteHalf,
-        ReadBuf,
+use std::{
+    cell::RefCell,
+    future::Future,
+    io::{Read, Write},
+    net::SocketAddr,
+    ops::DerefMut,
+    pin::Pin,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
     },
+    task::{Context, Poll},
+};
+use tokio::{
+    io::{self, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
     net::TcpStream,
 };
 use url::Url;
@@ -40,10 +31,10 @@ pub mod tcp;
 pub mod ws;
 
 pub mod fast_path;
-pub mod tsrequest;
-pub mod x224;
 pub mod mcs;
 pub mod rdp;
+pub mod tsrequest;
+pub mod x224;
 
 pub type JetFuture<T> = Pin<Box<dyn Future<Output = Result<T, io::Error>> + Send>>;
 pub type JetStreamType<T> = Pin<Box<dyn JetStream<Item = Result<T, io::Error>> + Send>>;
@@ -53,7 +44,9 @@ pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
 const PART_LEN: usize = 16 * 1024;
 
 pub trait Transport {
-    fn connect(addr: &Url) -> JetFuture<Self> where Self: Sized;
+    fn connect(addr: &Url) -> JetFuture<Self>
+    where
+        Self: Sized;
     fn peer_addr(&self) -> Option<SocketAddr>;
     fn split_transport(
         self,
@@ -116,9 +109,7 @@ impl Transport for JetTransport {
 }
 
 impl AsyncRead for JetTransport {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>)
-        -> Poll<Result<(), io::Error>>
-    {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<Result<(), io::Error>> {
         match self.get_mut() {
             JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_read(cx, buf),
             JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_read(cx, buf),
@@ -244,7 +235,7 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
                     Poll::Ready(None)
                 };
             }
-        };
+        }
     }
 }
 

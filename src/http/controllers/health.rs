@@ -1,14 +1,14 @@
 use crate::config::Config;
 use saphir::{
-    macros::controller,
-    http::{StatusCode, Method},
+    body::Json,
     controller::Controller,
-    body::Json
+    http::{Method, StatusCode},
+    macros::controller,
 };
 use std::sync::Arc;
 
 pub struct HealthController {
-    config: Arc<Config>
+    config: Arc<Config>,
 }
 
 impl HealthController {
@@ -17,7 +17,7 @@ impl HealthController {
     }
 }
 
-#[controller(name="health")]
+#[controller(name = "health")]
 impl HealthController {
     #[get("/")]
     async fn get_health(&self) -> (u16, String) {

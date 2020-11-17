@@ -1,33 +1,24 @@
-use std::{
-    collections::HashMap,
-    io,
-    path::PathBuf,
-    sync::{atomic::Ordering, Arc},
-};
-use futures::{
-    select,
-    Future,
-    Stream,
-    StreamExt,
-    Sink,
-    FutureExt,
-    TryFutureExt
-};
-use slog_scope::{info, warn};
-use spsc_bip_buffer::bip_buffer_with_len;
 use crate::{
     config::{Config, Protocol},
     interceptor::{
         pcap::PcapInterceptor, rdp::RdpMessageReader, MessageReader, UnknownMessageReader, WaykMessageReader,
     },
     rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
-    transport::{Transport, BIP_BUFFER_LEN},
+    transport::{JetSinkType, JetStreamType, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
-use crate::transport::{JetStreamType, JetSinkType};
-use winapi::_core::task::{Context, Poll};
-use winapi::_core::pin::Pin;
-use winapi::_core::ops::{DerefMut, Deref};
+use futures::{select, Future, FutureExt, Sink, Stream, StreamExt, TryFutureExt};
+use slog_scope::{info, warn};
+use spsc_bip_buffer::bip_buffer_with_len;
+use std::{
+    collections::HashMap,
+    io,
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+    pin::Pin,
+    sync::{atomic::Ordering, Arc},
+    task::{Context, Poll},
+};
 
 pub struct Proxy {
     config: Arc<Config>,
@@ -46,11 +37,8 @@ impl Proxy {
         match self.config.protocol {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
-                self.build_with_message_reader(
-                    server_transport,
-                    client_transport,
-                    Some(Box::new(WaykMessageReader))
-                ).await
+                self.build_with_message_reader(server_transport, client_transport, Some(Box::new(WaykMessageReader)))
+                    .await
             }
             Protocol::RDP => {
                 info!("RdpMessageReader will be used to interpret application protocol");
@@ -63,15 +51,13 @@ impl Proxy {
                             RDP8_GRAPHICS_PIPELINE_NAME.to_string()
                         ])),
                     ))),
-                ).await
+                )
+                .await
             }
             Protocol::UNKNOWN => {
                 warn!("Protocol is unknown. Data received will not be split to get application message.");
-                self.build_with_message_reader(
-                    server_transport,
-                    client_transport,
-                    Some(Box::new(UnknownMessageReader))
-                ).await
+                self.build_with_message_reader(server_transport, client_transport, Some(Box::new(UnknownMessageReader)))
+                    .await
             }
         }
     }
@@ -87,10 +73,8 @@ impl Proxy {
 
         let server_peer_addr = server_transport.peer_addr().unwrap();
         let client_peer_addr = client_transport.peer_addr().unwrap();
-        let (mut jet_stream_server, jet_sink_server) =
-            server_transport.split_transport(server_writer, server_reader);
-        let (mut jet_stream_client, jet_sink_client) =
-            client_transport.split_transport(client_writer, client_reader);
+        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
+        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
         if let (Some(capture_path), Some(message_reader)) = (self.config.capture_path.as_ref(), message_reader) {
             let filename = format!(
@@ -112,7 +96,9 @@ impl Proxy {
 
             interceptor.set_message_reader(message_reader);
 
-            jet_stream_server.as_mut().set_packet_interceptor(Box::new(interceptor.clone()));
+            jet_stream_server
+                .as_mut()
+                .set_packet_interceptor(Box::new(interceptor.clone()));
             jet_stream_client.as_mut().set_packet_interceptor(Box::new(interceptor));
         }
 

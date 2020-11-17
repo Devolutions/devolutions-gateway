@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 
-use tokio_rustls::rustls;
 use bytes::BytesMut;
 use ironrdp::{
     gcc, mcs,
@@ -30,6 +29,7 @@ use ironrdp::{
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
 use sspi::internal::credssp;
+use tokio_rustls::rustls;
 use x509_parser::{parse_x509_der, pem::pem_to_der};
 
 use common::run_proxy;

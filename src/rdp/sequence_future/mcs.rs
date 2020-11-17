@@ -4,8 +4,8 @@ use bytes::BytesMut;
 use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
 use slog_scope::{debug, trace};
 use tokio::net::TcpStream;
-use tokio_util::codec::Framed;
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{

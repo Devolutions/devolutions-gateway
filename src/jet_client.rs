@@ -1,12 +1,12 @@
 use std::{
     collections::HashMap,
-    io,
-    sync::{Arc, Mutex},
     future::Future,
-    task::{Poll, Context},
-    pin::Pin,
-    time::Duration,
+    io,
     ops::DerefMut,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -20,6 +20,7 @@ use jet_proto::{
 use slog_scope::{debug, error};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
+    sync::Mutex,
 };
 use uuid::Uuid;
 
@@ -37,7 +38,6 @@ use crate::{
 };
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
-
 
 pub struct JetClient {
     config: Arc<Config>,
@@ -60,23 +60,12 @@ impl JetClient {
         let (transport, msg) = msg_reader.await?;
 
         match msg {
-            JetMessage::JetTestReq(jet_test_req) => {
-                HandleTestJetMsg::new(transport, jet_test_req).await
-            }
+            JetMessage::JetTestReq(jet_test_req) => HandleTestJetMsg::new(transport, jet_test_req).await,
             JetMessage::JetAcceptReq(jet_accept_req) => {
-                HandleAcceptJetMsg::new(
-                    config,
-                    transport,
-                    jet_accept_req,
-                    jet_associations.clone(),
-                ).await
+                HandleAcceptJetMsg::new(config, transport, jet_accept_req, jet_associations.clone()).await
             }
             JetMessage::JetConnectReq(jet_connect_req) => {
-                let response = HandleConnectJetMsg::new(
-                    transport,
-                    jet_connect_req,
-                    jet_associations.clone()
-                ).await?;
+                let response = HandleConnectJetMsg::new(transport, jet_connect_req, jet_associations.clone()).await?;
 
                 let remove_association = RemoveAssociation::new(
                     jet_associations.clone(),
@@ -92,15 +81,9 @@ impl JetClient {
 
                 proxy_result
             }
-            JetMessage::JetAcceptRsp(_) => {
-                Err(error_other("Jet-Accept response can't be handled by the server."))
-            }
-            JetMessage::JetConnectRsp(_) => {
-                Err(error_other("Jet-Accept response can't be handled by the server."))
-            }
-            JetMessage::JetTestRsp(_) => {
-                Err(error_other("Jet-Test response can't be handled by the server."))
-            }
+            JetMessage::JetAcceptRsp(_) => Err(error_other("Jet-Accept response can't be handled by the server.")),
+            JetMessage::JetConnectRsp(_) => Err(error_other("Jet-Accept response can't be handled by the server.")),
+            JetMessage::JetTestRsp(_) => Err(error_other("Jet-Test response can't be handled by the server.")),
         }
     }
 }
@@ -148,7 +131,10 @@ impl Future for JetMsgReader {
             let mut slice = self.data_received.as_slice();
             let signature = slice.read_u32::<LittleEndian>()?; // signature
             if signature != jet_proto::JET_MSG_SIGNATURE {
-                return Poll::Ready(Err(error_other(format!("Invalid JetPacket - Signature = {}.", signature))));
+                return Poll::Ready(Err(error_other(format!(
+                    "Invalid JetPacket - Signature = {}.",
+                    signature
+                ))));
             }
 
             let msg_len = slice.read_u16::<BigEndian>()?;
@@ -217,11 +203,23 @@ impl HandleAcceptJetMsg {
     }
 
     fn handle_create_response(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Vec<u8>, io::Error>> {
-        let (jet_associations, request_msg, remove_association_future, association_uuid, config) = match self.deref_mut() {
-            Self {jet_associations, request_msg, remove_association_future, association_uuid, config,  ..} => {
-                (jet_associations, request_msg, remove_association_future, association_uuid, config)
-            }
-        };
+        let (jet_associations, request_msg, remove_association_future, association_uuid, config) =
+            match self.deref_mut() {
+                Self {
+                    jet_associations,
+                    request_msg,
+                    remove_association_future,
+                    association_uuid,
+                    config,
+                    ..
+                } => (
+                    jet_associations,
+                    request_msg,
+                    remove_association_future,
+                    association_uuid,
+                    config,
+                ),
+            };
 
         let (status_code, association) = if let Ok(mut jet_associations) = jet_associations.try_lock() {
             match request_msg.version {
@@ -266,14 +264,11 @@ impl HandleAcceptJetMsg {
             }
         } else {
             cx.waker().clone().wake();
-            return Poll::Pending
+            return Poll::Pending;
         };
 
         if request_msg.version == 1 && status_code == StatusCode::OK {
-            remove_association_future.replace(Box::pin(remove_association(
-                jet_associations.clone(),
-                association,
-            )));
+            remove_association_future.replace(Box::pin(remove_association(jet_associations.clone(), association)));
         }
 
         // Build response
@@ -291,11 +286,23 @@ impl HandleAcceptJetMsg {
     }
 
     fn handle_set_transport(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
-        let (jet_associations, transport, request_msg, remove_association_future, association_uuid) = match self.deref_mut() {
-            Self { jet_associations, transport, request_msg, remove_association_future, association_uuid, ..} => {
-                (jet_associations, transport, request_msg, remove_association_future, association_uuid)
-            }
-        };
+        let (jet_associations, transport, request_msg, remove_association_future, association_uuid) =
+            match self.deref_mut() {
+                Self {
+                    jet_associations,
+                    transport,
+                    request_msg,
+                    remove_association_future,
+                    association_uuid,
+                    ..
+                } => (
+                    jet_associations,
+                    transport,
+                    request_msg,
+                    remove_association_future,
+                    association_uuid,
+                ),
+            };
 
         if let Ok(mut jet_associations) = jet_associations.try_lock() {
             match request_msg.version {
@@ -358,7 +365,8 @@ impl Future for HandleAcceptJetMsg {
                     // We have a response for sure ==> Send response
                     let response_msg = response_msg.clone();
 
-                    let transport = self.transport
+                    let transport = self
+                        .transport
                         .as_mut()
                         .expect("Must not be taken upon successful poll_write");
                     ready!(Pin::new(transport).poll_write(cx, &response_msg));
@@ -376,7 +384,6 @@ impl Future for HandleAcceptJetMsg {
         }
     }
 }
-
 
 struct HandleConnectJetMsg {
     client_transport: Option<JetTransport>,
@@ -406,10 +413,33 @@ impl Future for HandleConnectJetMsg {
     type Output = Result<HandleConnectJetMsgResponse, io::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let (jet_associations, request_msg, server_transport, association_id, candidate_id, client_transport, mut response_msg) = match self.deref_mut() {
-            Self { jet_associations, request_msg, server_transport, association_id, candidate_id, client_transport, response_msg, .. } => {
-                (jet_associations, request_msg, server_transport, association_id, candidate_id, client_transport, response_msg)
-            }
+        let (
+            jet_associations,
+            request_msg,
+            server_transport,
+            association_id,
+            candidate_id,
+            client_transport,
+            mut response_msg,
+        ) = match self.deref_mut() {
+            Self {
+                jet_associations,
+                request_msg,
+                server_transport,
+                association_id,
+                candidate_id,
+                client_transport,
+                response_msg,
+                ..
+            } => (
+                jet_associations,
+                request_msg,
+                server_transport,
+                association_id,
+                candidate_id,
+                client_transport,
+                response_msg,
+            ),
         };
 
         // Find the server transport
@@ -498,11 +528,7 @@ impl Future for HandleConnectJetMsg {
         }
 
         // If server stream found, start the proxy
-        match (
-            server_transport.take(),
-            association_id.take(),
-            candidate_id.take(),
-        ) {
+        match (server_transport.take(), association_id.take(), candidate_id.take()) {
             (Some(server_transport), Some(association_id), Some(candidate_id)) => {
                 let client_transport = client_transport.take().expect("Must be taken only once");
                 Poll::Ready(Ok(HandleConnectJetMsgResponse {
@@ -558,9 +584,9 @@ impl Future for HandleTestJetMsg {
         }
 
         let (response, transport) = match self.deref_mut() {
-            Self{ response, transport, ..} => {
-                (response.as_ref().unwrap(), transport)
-            }
+            Self {
+                response, transport, ..
+            } => (response.as_ref().unwrap(), transport),
         };
 
         ready!(Pin::new(transport).poll_write(cx, &response))?;

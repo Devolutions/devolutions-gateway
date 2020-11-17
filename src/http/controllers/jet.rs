@@ -1,11 +1,10 @@
 use jet_proto::JET_VERSION_V2;
 use saphir::{
-    macros::controller,
-    controller::{Controller, DynControllerHandler},
-    http::{StatusCode, Method},
     body::Body,
+    controller::{Controller, DynControllerHandler},
     guard::GuardChain,
-    http::header,
+    http::{header, Method, StatusCode},
+    macros::controller,
     request::Request,
 };
 use slog_scope::info;
@@ -18,8 +17,8 @@ use uuid::Uuid;
 use crate::{
     config::Config,
     http::{
-        middlewares::auth::{parse_auth_header, AuthHeaderType},
         controllers::health::build_health_response,
+        middlewares::auth::{parse_auth_header, AuthHeaderType},
     },
     jet::{
         association::{Association, AssociationResponse},
@@ -28,41 +27,38 @@ use crate::{
     jet_client::JetAssociationsMap,
     utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
 };
+use bytes::Bytes;
 use futures::Future;
 use std::collections::HashMap;
-use bytes::Bytes;
-
-
 
 pub struct JetController {
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
 }
 
-
 impl JetController {
     pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> Self {
         Self {
             config,
-            jet_associations
+            jet_associations,
         }
     }
 }
 
-#[controller(name="jet")]
+#[controller(name = "jet")]
 impl JetController {
     #[get("/association")]
     async fn get_associations(&self, detail: Option<bool>) -> (u16, Option<String>) {
         let with_detail = detail.unwrap_or(false);
 
         let associations_response: Vec<AssociationResponse>;
-        if let Ok(associations) = self.jet_associations.lock() {
+        if let Ok(associations) = self.jet_associations.try_lock() {
             associations_response = associations
                 .values()
                 .map(|association| AssociationResponse::from(association, with_detail))
                 .collect();
         } else {
-            return (StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None)
+            return (StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None);
         };
 
         if let Ok(body) = serde_json::to_string(&associations_response) {
@@ -80,9 +76,7 @@ impl JetController {
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => {
-                return (StatusCode::BAD_REQUEST.as_u16(), ())
-            }
+            None => return (StatusCode::BAD_REQUEST.as_u16(), ()),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
@@ -99,7 +93,7 @@ impl JetController {
                         expected_id,
                         association_id
                     );
-                    return (StatusCode::FORBIDDEN.as_u16(), ())
+                    return (StatusCode::FORBIDDEN.as_u16(), ());
                 }
                 Ok(_) => { /* alright */ }
             }
@@ -107,13 +101,10 @@ impl JetController {
 
         // create association
         // no need to deal with lock poisoning
-        let mut jet_associations = self.jet_associations.lock().unwrap();
+        let mut jet_associations = self.jet_associations.lock().await;
 
         jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-        start_remove_association_future(
-            self.jet_associations.clone(),
-            association_id,
-        );
+        start_remove_association_future(self.jet_associations.clone(), association_id);
 
         (StatusCode::OK.as_u16(), ())
     }
@@ -126,9 +117,7 @@ impl JetController {
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => {
-                return (StatusCode::BAD_REQUEST.as_u16(), None)
-            }
+            None => return (StatusCode::BAD_REQUEST.as_u16(), None),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
@@ -151,14 +140,11 @@ impl JetController {
         }
 
         // create association
-        let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
+        let mut jet_associations = self.jet_associations.lock().await; // no need to deal with lock poisoning
 
         if !jet_associations.contains_key(&association_id) {
             jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-            start_remove_association_future(
-                self.jet_associations.clone(),
-                association_id,
-            );
+            start_remove_association_future(self.jet_associations.clone(), association_id);
         }
 
         let association = jet_associations
@@ -173,7 +159,10 @@ impl JetController {
             }
         }
 
-        (StatusCode::OK.as_u16(), Some(association.gather_candidate().to_string()))
+        (
+            StatusCode::OK.as_u16(),
+            Some(association.gather_candidate().to_string()),
+        )
     }
 
     #[get("/health")]
@@ -182,17 +171,11 @@ impl JetController {
     }
 }
 
-pub fn start_remove_association_future(
-    jet_associations: JetAssociationsMap,
-    uuid: Uuid,
-) {
+pub fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
     tokio::spawn(remove_association(jet_associations, uuid));
 }
 
-pub async fn remove_association(
-    jet_associations: JetAssociationsMap,
-    uuid: Uuid,
-) {
+pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
     tokio::time::sleep(ACCEPT_REQUEST_TIMEOUT).await;
     if RemoveAssociation::new(jet_associations, uuid, None).await {
         info!(

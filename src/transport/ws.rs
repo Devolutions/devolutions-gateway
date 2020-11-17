@@ -1,44 +1,38 @@
-use std::{
-    io::{Cursor, ErrorKind, Read, Write},
-    net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
-    future::Future,
-    task::{Poll, Context},
-    pin::Pin,
+use crate::{
+    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
+    utils::{danger_transport, resolve_url_to_socket_arr},
 };
-use futures::{ready, pin_mut, Stream, Sink, SinkExt, StreamExt};
+use futures::{pin_mut, ready, Sink, SinkExt, Stream, StreamExt};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
+use std::{
+    future::Future,
+    io::{Cursor, ErrorKind, Read, Write},
+    net::SocketAddr,
+    pin::Pin,
+    sync::{atomic::AtomicU64, Arc},
+    task::{Context, Poll},
+};
 use tokio::{
     io::{self, AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-use tokio_rustls::{
-    rustls,
-    client::TlsStream,
-    TlsConnector,
-};
+use tokio_compat_02::IoCompat;
+use tokio_rustls::{client::TlsStream, rustls, TlsConnector};
 use tokio_tungstenite::{
-    WebSocketStream,
     tungstenite::{
         self,
-        protocol::Role,
         handshake::{
             client::{Request, Response},
             server::NoCallback,
             MidHandshake,
         },
-        ClientHandshake, HandshakeError, ServerHandshake,
+        protocol::Role,
+        ClientHandshake, Error, HandshakeError, ServerHandshake, WebSocket,
     },
+    WebSocketStream,
 };
-use tokio_compat_02::IoCompat;
 use url::Url;
-use crate::{
-    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{danger_transport, resolve_url_to_socket_arr},
-};
-use tokio_tungstenite::tungstenite::{WebSocket, Error};
-
 
 enum WsStreamSendState {
     Idle,
@@ -49,7 +43,7 @@ pub struct WsStream {
     inner: WsStreamWrapper,
     // TODO: transform to state enum
     previous_message: Option<Cursor<Vec<u8>>>,
-    previous_send_state: WsStreamSendState
+    previous_send_state: WsStreamSendState,
 }
 
 impl WsStream {
@@ -73,7 +67,11 @@ impl From<WsStreamWrapper> for WsStream {
 }
 
 impl AsyncRead for WsStream {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         match self.previous_message.take() {
             Some(mut message) => {
                 ready!(Pin::new(&mut message).poll_read(cx, buf))?;
@@ -93,22 +91,14 @@ impl AsyncRead for WsStream {
             }
             None => {
                 let message_result = match self.inner {
-                    WsStreamWrapper::Http((ref mut stream, _)) => {
-                        Pin::new(stream).poll_next(cx)
-                    },
-                    WsStreamWrapper::Tcp((ref mut stream, _)) => {
-                        Pin::new(stream).poll_next(cx)
-                    },
-                    WsStreamWrapper::Tls((ref mut stream, _)) => {
-                        Pin::new(stream).poll_next(cx)
-                    },
+                    WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
+                    WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
+                    WsStreamWrapper::Tls((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
                 };
 
                 let message = ready!(message_result)
                     .map(|e| e.map_err(tungstenite_err_to_io_err))
-                    .unwrap_or_else(|| {
-                        Err(io::Error::new(io::ErrorKind::Other, "Connection closed".to_string()))
-                    })?;
+                    .unwrap_or_else(|| Err(io::Error::new(io::ErrorKind::Other, "Connection closed".to_string())))?;
 
                 slog_scope::trace!(
                     "New {} message received (length: {} bytes)",
@@ -137,9 +127,7 @@ impl AsyncRead for WsStream {
                             cx.waker().clone().wake();
                             Poll::Pending
                         }
-                        Poll::Ready(Err(e)) =>  {
-                            Poll::Ready(Err(e))
-                        }
+                        Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
                         Poll::Pending => {
                             // Generally, with Cursor's poll_read this should not be triggered,
                             // but we will keep that here as a safe measure if something will
@@ -182,12 +170,8 @@ impl AsyncWrite for WsStream {
                 };
 
                 match result {
-                    Poll::Ready(Ok(_)) => {
-                        Poll::Ready(Ok(buf.len()))
-                    },
-                    Poll::Ready(Err(e)) => {
-                        Poll::Ready(Err(tungstenite_err_to_io_err(e)))
-                    },
+                    Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
+                    Poll::Ready(Err(e)) => Poll::Ready(Err(tungstenite_err_to_io_err(e))),
                     Poll::Pending => {
                         self.previous_send_state = WsStreamSendState::SendInProgress;
                         Poll::Pending
@@ -196,15 +180,9 @@ impl AsyncWrite for WsStream {
             }
             WsStreamSendState::SendInProgress => {
                 let result = match self.inner {
-                    WsStreamWrapper::Http((ref mut stream, _)) => {
-                        Pin::new(stream).poll_ready(cx)
-                    }
-                    WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => {
-                        Pin::new(stream).poll_ready(cx)
-                    }
-                    WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => {
-                        Pin::new(stream).poll_ready(cx)
-                    }
+                    WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_ready(cx),
+                    WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_ready(cx),
+                    WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_ready(cx),
                 };
 
                 result
@@ -219,15 +197,9 @@ impl AsyncWrite for WsStream {
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         let result = match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => {
-                Pin::new(stream).poll_flush(cx)
-            },
-            WsStreamWrapper::Tcp((ref mut stream, _)) => {
-                Pin::new(stream).poll_flush(cx)
-            },
-            WsStreamWrapper::Tls((ref mut stream, _)) => {
-                Pin::new(stream).poll_flush(cx)
-            },
+            WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
+            WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
+            WsStreamWrapper::Tls((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
         };
 
         result.map_err(tungstenite_err_to_io_err)
@@ -235,15 +207,9 @@ impl AsyncWrite for WsStream {
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         let result = match self.inner {
-            WsStreamWrapper::Http((ref mut stream, _)) => {
-                Pin::new(stream).poll_close(cx)
-            },
-            WsStreamWrapper::Tcp((ref mut stream, _)) => {
-                Pin::new(stream).poll_close(cx)
-            },
-            WsStreamWrapper::Tls((ref mut stream, _)) => {
-                Pin::new(stream).poll_close(cx)
-            },
+            WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_close(cx),
+            WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_close(cx),
+            WsStreamWrapper::Tls((ref mut stream, _)) => Pin::new(stream).poll_close(cx),
         };
 
         result.map_err(tungstenite_err_to_io_err)
@@ -268,15 +234,18 @@ impl WsStreamWrapper {
 
     pub async fn shutdown(&mut self) -> Result<(), std::io::Error> {
         match self {
-            WsStreamWrapper::Http((stream, _)) => {
-                stream.close(None).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            }
-            WsStreamWrapper::Tcp((stream, _)) => {
-                stream.close(None).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            }
-            WsStreamWrapper::Tls((stream, _)) => {
-                stream.close(None).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            }
+            WsStreamWrapper::Http((stream, _)) => stream
+                .close(None)
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            WsStreamWrapper::Tcp((stream, _)) => stream
+                .close(None)
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
+            WsStreamWrapper::Tls((stream, _)) => stream
+                .close(None)
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
         }
     }
 }
@@ -288,14 +257,14 @@ pub struct WsTransport {
 }
 
 impl WsTransport {
-    async fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
+    pub async fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
         let compat_stream = IoCompat::new(upgraded);
         WsTransport {
-            stream: WsStreamWrapper::Http((WebSocketStream::from_raw_socket(
-                compat_stream,
-                Role::Server,
-                None
-            ).await, addr)).into(),
+            stream: WsStreamWrapper::Http((
+                WebSocketStream::from_raw_socket(compat_stream, Role::Server, None).await,
+                addr,
+            ))
+            .into(),
             nb_bytes_read: Arc::new(AtomicU64::new(0)),
             nb_bytes_written: Arc::new(AtomicU64::new(0)),
         }
@@ -342,7 +311,8 @@ impl WsTransport {
 
         match url.scheme() {
             "ws" => {
-                let stream = TcpStream::connect(&socket_addr).await
+                let stream = TcpStream::connect(&socket_addr)
+                    .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
                 let peer_addr = stream.peer_addr().ok();
                 match tokio_tungstenite::client_async(request, stream).await {
@@ -351,7 +321,8 @@ impl WsTransport {
                 }
             }
             "wss" => {
-                let tcp_stream = TcpStream::connect(&socket_addr).await
+                let tcp_stream = TcpStream::connect(&socket_addr)
+                    .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
                 let mut client_config = rustls::ClientConfig::default();
@@ -398,7 +369,10 @@ impl AsyncWrite for WsTransport {
 }
 
 impl Transport for WsTransport {
-    fn connect(url: &Url) -> JetFuture<Self> where Self: Sized, {
+    fn connect(url: &Url) -> JetFuture<Self>
+    where
+        Self: Sized,
+    {
         Box::pin(Self::async_connect(url.clone()))
     }
 

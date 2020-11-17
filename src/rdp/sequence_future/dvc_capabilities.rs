@@ -1,7 +1,4 @@
-use std::{
-    io,
-    marker::PhantomData,
-};
+use std::{io, marker::PhantomData};
 
 use bytes::BytesMut;
 use ironrdp::{
@@ -10,13 +7,12 @@ use ironrdp::{
         self,
         dvc::{self, gfx},
     },
-    McsPdu,
-    PduParsing,
+    McsPdu, PduParsing,
 };
 use slog_scope::debug;
 use tokio::net::TcpStream;
-use tokio_util::codec::Framed;
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
 use crate::{
