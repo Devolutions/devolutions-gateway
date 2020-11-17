@@ -123,6 +123,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) {
         Err(e) => {
             error!(log, "Failure: {}", e);
             eprintln!("{}", e);
+            std::process::exit(1);
         }
     };
 }
@@ -147,6 +148,7 @@ pub fn connect_action(c: &Context) {
         }
         Err(e) => {
             eprintln!("{}", e);
+            std::process::exit(1);
         }
     }
 }
@@ -171,6 +173,7 @@ pub fn accept_action(c: &Context) {
         }
         Err(e) => {
             eprintln!("{}", e);
+            std::process::exit(1);
         }
     }
 }
@@ -193,6 +196,7 @@ pub fn listen_action(c: &Context) {
         }
         Err(e) => {
             eprintln!("{}", e);
+            std::process::exit(1);
         }
     }
 }
