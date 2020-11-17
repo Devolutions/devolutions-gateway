@@ -1,6 +1,6 @@
 use std::{io, marker::PhantomData};
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use ironrdp::{
     mcs::SendDataContext,
     rdp::vc::{
@@ -87,7 +87,7 @@ impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, RdpTransport, RdpPdu
                     mcs_pdu => {
                         let (next_state, next_mcs_pdu, pdu_data) = match mcs_pdu {
                             McsPdu::SendDataRequest(mut send_data_context) => {
-                                data.split_to(data.len() - send_data_context.pdu_length);
+                                data.advance(data.len() - send_data_context.pdu_length);
                                 let (next_state, pdu_data) =
                                     handle_send_data_request(data, sequence_state, self.dvc_manager.as_mut().unwrap())?;
 
@@ -96,7 +96,7 @@ impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, RdpTransport, RdpPdu
                                 (next_state, McsPdu::SendDataRequest(send_data_context), pdu_data)
                             }
                             McsPdu::SendDataIndication(mut send_data_context) => {
-                                data.split_to(data.len() - send_data_context.pdu_length);
+                                data.advance(data.len() - send_data_context.pdu_length);
                                 let (next_state, pdu_data) = handle_send_data_indication(
                                     data,
                                     sequence_state,
@@ -343,7 +343,7 @@ where
     F: FnOnce(BytesMut) -> io::Result<(DvcCapabilitiesState, BytesMut)>,
 {
     let mut svc_header = vc::ChannelPduHeader::from_buffer(pdu.as_ref())?;
-    pdu.split_to(svc_header.buffer_length());
+    pdu.advance(svc_header.buffer_length());
 
     if svc_header.total_length as usize != pdu.len() {
         return Err(io::Error::new(

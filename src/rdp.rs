@@ -8,17 +8,13 @@ mod preconnection_pdu;
 mod sequence_future;
 
 use accept_connection_future::AcceptConnectionMode;
-use futures::{future, Future, TryFutureExt};
 use slog_scope::{error, info};
 
 use sspi::{internal::credssp, AuthIdentity};
 
 use bytes::Buf;
 use std::{io, sync::Arc};
-use tokio::{
-    io::{AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 

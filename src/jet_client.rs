@@ -6,7 +6,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
@@ -119,7 +118,7 @@ impl Future for JetMsgReader {
 
         ready!(Pin::new(transport).poll_read(cx, &mut poll_buff))?;
 
-        if poll_buff.filled().len() == 0 {
+        if poll_buff.filled().is_empty() {
             // The transport is closed
             return Poll::Ready(Err(error_other("Socket closed, no JetPacket received.")));
         }
@@ -203,24 +202,14 @@ impl HandleAcceptJetMsg {
     }
 
     fn handle_create_response(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Vec<u8>, io::Error>> {
-        let (jet_associations, request_msg, remove_association_future, association_uuid, config) =
-            match self.deref_mut() {
-                Self {
-                    jet_associations,
-                    request_msg,
-                    remove_association_future,
-                    association_uuid,
-                    config,
-                    ..
-                } => (
-                    jet_associations,
-                    request_msg,
-                    remove_association_future,
-                    association_uuid,
-                    config,
-                ),
-            };
-
+        let Self {
+            jet_associations,
+            request_msg,
+            remove_association_future,
+            association_uuid,
+            config,
+            ..
+        } = self.deref_mut();
         let (status_code, association) = if let Ok(mut jet_associations) = jet_associations.try_lock() {
             match request_msg.version {
                 1 => {
@@ -286,23 +275,14 @@ impl HandleAcceptJetMsg {
     }
 
     fn handle_set_transport(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
-        let (jet_associations, transport, request_msg, remove_association_future, association_uuid) =
-            match self.deref_mut() {
-                Self {
-                    jet_associations,
-                    transport,
-                    request_msg,
-                    remove_association_future,
-                    association_uuid,
-                    ..
-                } => (
-                    jet_associations,
-                    transport,
-                    request_msg,
-                    remove_association_future,
-                    association_uuid,
-                ),
-            };
+        let Self {
+            jet_associations,
+            transport,
+            request_msg,
+            remove_association_future,
+            association_uuid,
+            ..
+        } = self.deref_mut();
 
         if let Ok(mut jet_associations) = jet_associations.try_lock() {
             match request_msg.version {
@@ -355,7 +335,7 @@ impl Future for HandleAcceptJetMsg {
                 // Already polled last state
                 return Poll::Ready(Ok(()));
             }
-            let mut state = self.state.take().unwrap();
+            let state = self.state.take().unwrap();
             let next_state = match state {
                 HandleAcceptJetMsgState::CreateResponse => {
                     let response_msg_buffer = ready!(self.as_mut().handle_create_response(cx))?;
@@ -369,7 +349,7 @@ impl Future for HandleAcceptJetMsg {
                         .transport
                         .as_mut()
                         .expect("Must not be taken upon successful poll_write");
-                    ready!(Pin::new(transport).poll_write(cx, &response_msg));
+                    ready!(Pin::new(transport).poll_write(cx, &response_msg))?;
 
                     HandleAcceptJetMsgState::SetTransport
                 }
@@ -583,12 +563,10 @@ impl Future for HandleTestJetMsg {
             self.response = Some(response_msg_buffer);
         }
 
-        let (response, transport) = match self.deref_mut() {
-            Self {
-                response, transport, ..
-            } => (response.as_ref().unwrap(), transport),
-        };
-
+        let Self {
+            response, transport, ..
+        } = self.deref_mut();
+        let response = response.as_ref().unwrap();
         ready!(Pin::new(transport).poll_write(cx, &response))?;
         Poll::Ready(Ok(()))
     }

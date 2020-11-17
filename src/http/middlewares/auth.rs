@@ -4,7 +4,6 @@ use saphir::{
     error::SaphirError,
     http::{self, StatusCode},
     http_context::{HttpContext, State},
-    macros::middleware,
     middleware::{Middleware, MiddlewareChain},
     response::Builder as ResponseBuilder,
 };

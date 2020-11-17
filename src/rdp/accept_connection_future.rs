@@ -128,17 +128,14 @@ impl Future for AcceptConnectionFuture {
                     }
                 },
                 Some(identity) => {
-                    let (nego_transport, mut buffer, client, mut rdp_identity) = match self.deref_mut() {
-                        Self {
-                            nego_transport,
-                            buffer,
-                            client,
-                            rdp_identity,
-                            ..
-                        } => (nego_transport, buffer, client, rdp_identity),
-                    };
-
-                    match nego_transport.decode(&mut buffer) {
+                    let Self {
+                        nego_transport,
+                        buffer,
+                        client,
+                        rdp_identity,
+                        ..
+                    } = self.deref_mut();
+                    match nego_transport.decode(buffer) {
                         Ok(Some(request)) => {
                             return Poll::Ready(Ok((
                                 client.take().unwrap(),

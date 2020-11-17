@@ -1,17 +1,12 @@
 use jet_proto::JET_VERSION_V2;
 use saphir::{
-    body::Body,
-    controller::{Controller, DynControllerHandler},
-    guard::GuardChain,
+    controller::Controller,
     http::{header, Method, StatusCode},
     macros::controller,
     request::Request,
 };
 use slog_scope::info;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
@@ -27,9 +22,6 @@ use crate::{
     jet_client::JetAssociationsMap,
     utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
 };
-use bytes::Bytes;
-use futures::Future;
-use std::collections::HashMap;
 
 pub struct JetController {
     config: Arc<Config>,

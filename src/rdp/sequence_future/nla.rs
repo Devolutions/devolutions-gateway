@@ -7,8 +7,8 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::BytesMut;
-use futures::{ready, sink::Send, stream::StreamFuture, SinkExt, Stream, StreamExt, TryFutureExt};
+use bytes::{Buf, BytesMut};
+use futures::{ready, SinkExt, StreamExt};
 use ironrdp::nego;
 
 use slog_scope::{debug, error, trace};
@@ -19,7 +19,7 @@ use sspi::{
     },
     AuthIdentity,
 };
-use tokio::{net::TcpStream, prelude::*};
+use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use tokio_rustls::{rustls, Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
@@ -48,6 +48,10 @@ type EarlyServerUserAuthResultFuture = Box<
             ),
         > + 'static,
 >;
+type NlaWithClientFutureT =
+    Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
+type CredSspWithServerFutureT =
+    Pin<Box<SequenceFuture<'static, CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
 
 pub enum NlaTransport {
     TsRequest(TsRequestFutureTransport),
@@ -427,8 +431,7 @@ impl Decoder for EarlyUserAuthResultTransport {
             Ok(None)
         } else {
             let result = io_try!(EarlyUserAuthResult::from_buffer(buf.as_ref()));
-            buf.split_to(result.buffer_len());
-
+            buf.advance(result.buffer_len());
             Ok(Some(result))
         }
     }
@@ -453,21 +456,17 @@ enum SequenceState {
     Finished,
 }
 
-#[allow(clippy::large_enum_variant)]
+
 enum NlaWithClientFutureState {
     Tls(Accept<TcpStream>),
-    CredSsp(
-        Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>,
-    ),
+    CredSsp(NlaWithClientFutureT),
     EarlyUserAuthResult(Pin<EarlyClientUserAuthResultFuture>),
 }
 
-#[allow(clippy::large_enum_variant)]
+
 enum NlaWithServerFutureState {
     Tls(Connect<TcpStream>),
-    CredSsp(
-        Pin<Box<SequenceFuture<'static, CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>,
-    ),
+    CredSsp(CredSspWithServerFutureT),
     EarlyUserAuthResult(Pin<EarlyServerUserAuthResultFuture>),
 }
 
@@ -479,7 +478,7 @@ async fn make_client_early_user_auth_future(
 }
 
 async fn make_server_early_user_auth_future(
-    mut transport: EarlyUserAuthResultFutureTransport,
+    transport: EarlyUserAuthResultFutureTransport,
 ) -> (
     Option<Result<EarlyUserAuthResult, io::Error>>,
     EarlyUserAuthResultFutureTransport,

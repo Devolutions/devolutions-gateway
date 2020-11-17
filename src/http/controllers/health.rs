@@ -1,6 +1,5 @@
 use crate::config::Config;
 use saphir::{
-    body::Json,
     controller::Controller,
     http::{Method, StatusCode},
     macros::controller,

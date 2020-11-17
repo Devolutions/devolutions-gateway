@@ -6,7 +6,7 @@ use crate::{
     utils::association::RemoveAssociation,
     Proxy,
 };
-use futures::future;
+
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use slog_scope::{error, info};
 use std::{io, net::SocketAddr, sync::Arc};
@@ -135,7 +135,9 @@ async fn handle_jet_accept_impl(
                 }
                 Ok::<(), ()>(())
             })
-            .await;
+            .await
+            .map_err(|_| ())?
+            .unwrap();
             Ok(res)
         }
         _ => Err(()),
@@ -223,12 +225,17 @@ async fn handle_jet_connect_impl(
                         Some(candidate.id()),
                     );
 
-                    let proxy = Proxy::new(config);
+                    Proxy::new(config)
+                        .build(server_transport, client_transport)
+                        .await
+                        .map_err(|_| ())?;
                     let _ = remove_association.await;
                 }
                 Ok(())
             })
-            .await;
+            .await
+            .map_err(|_| ())?
+            .unwrap();
 
             Ok(res)
         }
