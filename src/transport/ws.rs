@@ -2,12 +2,11 @@ use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
     utils::{danger_transport, resolve_url_to_socket_arr},
 };
-use futures::{pin_mut, ready, Sink, SinkExt, Stream, StreamExt};
+use futures::{ready, Sink, Stream};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::{
-    future::Future,
-    io::{Cursor, ErrorKind, Read, Write},
+    io::Cursor,
     net::SocketAddr,
     pin::Pin,
     sync::{atomic::AtomicU64, Arc},
@@ -20,16 +19,8 @@ use tokio::{
 use tokio_compat_02::IoCompat;
 use tokio_rustls::{client::TlsStream, rustls, TlsConnector};
 use tokio_tungstenite::{
-    tungstenite::{
-        self,
-        handshake::{
-            client::{Request, Response},
-            server::NoCallback,
-            MidHandshake,
-        },
-        protocol::Role,
-        ClientHandshake, Error, HandshakeError, ServerHandshake, WebSocket,
-    },
+    tungstenite::{self, handshake::client::Request, protocol::Role},
+    WebSocketStream,
     WebSocketStream,
 };
 use url::Url;
@@ -257,7 +248,7 @@ pub struct WsTransport {
 }
 
 impl WsTransport {
-    async fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
+    pub async fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
         let compat_stream = IoCompat::new(upgraded);
         WsTransport {
             stream: WsStreamWrapper::Http((

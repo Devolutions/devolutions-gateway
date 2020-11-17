@@ -1,18 +1,14 @@
 use crate::config::Config;
+use futures::future::{BoxFuture, FutureExt};
+use saphir::{
+    error::SaphirError,
+    http::{self, StatusCode},
+    http_context::{HttpContext, State},
+    middleware::{Middleware, MiddlewareChain},
+    response::Builder as ResponseBuilder,
+};
 use slog_scope::error;
 use std::sync::Arc;
-use futures::future::{
-    BoxFuture,
-    FutureExt,
-};
-use saphir::{
-    middleware::{MiddlewareChain, Middleware},
-    error::SaphirError,
-    http_context::{HttpContext, State},
-    http::{self, StatusCode},
-    response::Builder as ResponseBuilder,
-    macros::middleware,
-};
 
 pub struct AuthMiddleware {
     config: Arc<Config>,
@@ -25,14 +21,23 @@ impl AuthMiddleware {
 }
 
 impl Middleware for AuthMiddleware {
-    fn next(&'static self, ctx: HttpContext, chain: &'static dyn MiddlewareChain) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
+    fn next(
+        &'static self,
+        ctx: HttpContext,
+        chain: &'static dyn MiddlewareChain,
+    ) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
         auth_middleware(self.config.clone(), ctx, chain).boxed()
     }
 }
 
-async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &'static dyn MiddlewareChain) -> Result<HttpContext, SaphirError> {
+async fn auth_middleware(
+    config: Arc<Config>,
+    ctx: HttpContext,
+    chain: &'static dyn MiddlewareChain,
+) -> Result<HttpContext, SaphirError> {
     if let Some(api_key) = &config.api_key {
-        let auth_header = ctx.state
+        let auth_header = ctx
+            .state
             .request()
             .expect("Invalid middleware state")
             .headers()
@@ -42,9 +47,7 @@ async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &'static 
             Some(header) => header.clone(),
             None => {
                 error!("Authorization header not present in request.");
-                let response = ResponseBuilder::new()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .build()?;
+                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
 
                 let mut ctx = ctx.clone_with_empty_state();
                 ctx.state = State::After(Box::new(response));
@@ -56,9 +59,7 @@ async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &'static 
             Ok(s) => s,
             Err(_) => {
                 error!("Authorization header wrong format");
-                let response = ResponseBuilder::new()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .build()?;
+                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
 
                 let mut ctx = ctx.clone_with_empty_state();
                 ctx.state = State::After(Box::new(response));
@@ -74,9 +75,7 @@ async fn auth_middleware(config: Arc<Config>, ctx: HttpContext, chain: &'static 
         }
 
         error!("Invalid authorization type");
-        let response = ResponseBuilder::new()
-            .status(StatusCode::UNAUTHORIZED)
-            .build()?;
+        let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
 
         let mut ctx = ctx.clone_with_empty_state();
         ctx.state = State::After(Box::new(response));

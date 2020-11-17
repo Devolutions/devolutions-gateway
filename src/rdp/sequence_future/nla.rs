@@ -1,14 +1,14 @@
 use std::{
-    io,
-    sync::Arc,
-    pin::Pin,
     future::Future,
-    task::{Context, Poll},
+    io,
     marker::PhantomData,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
 };
 
-use bytes::BytesMut;
-use futures::{Stream, sink::Send, stream::StreamFuture, ready, StreamExt, SinkExt, TryFutureExt};
+use bytes::{Buf, BytesMut};
+use futures::{ready, SinkExt, StreamExt};
 use ironrdp::nego;
 
 use slog_scope::{debug, error, trace};
@@ -19,11 +19,8 @@ use sspi::{
     },
     AuthIdentity,
 };
-use tokio::{
-    net::TcpStream,
-    prelude::*,
-};
-use tokio_util::codec::{Framed, Encoder, Decoder};
+use tokio::net::TcpStream;
+use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use tokio_rustls::{rustls, Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 
@@ -41,8 +38,20 @@ use crate::{
 
 type TsRequestFutureTransport = Framed<TlsStream<TcpStream>, TsRequestTransport>;
 type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUserAuthResultTransport>;
-type EarlyClientUserAuthResultFuture = Box<dyn Future<Output = Result<EarlyUserAuthResultFutureTransport, io::Error>> + 'static>;
-type EarlyServerUserAuthResultFuture  = Box<dyn Future<Output = (Option<Result<EarlyUserAuthResult, io::Error>>, EarlyUserAuthResultFutureTransport)> + 'static>;
+type EarlyClientUserAuthResultFuture =
+    Box<dyn Future<Output = Result<EarlyUserAuthResultFutureTransport, io::Error>> + 'static>;
+type EarlyServerUserAuthResultFuture = Box<
+    dyn Future<
+            Output = (
+                Option<Result<EarlyUserAuthResult, io::Error>>,
+                EarlyUserAuthResultFutureTransport,
+            ),
+        > + 'static,
+>;
+type NlaWithClientFutureT =
+    Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
+type CredSspWithServerFutureT =
+    Pin<Box<SequenceFuture<'static, CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
 
 pub enum NlaTransport {
     TsRequest(TsRequestFutureTransport),
@@ -80,14 +89,12 @@ impl Future for NlaWithClientFuture {
         loop {
             match &mut self.state {
                 NlaWithClientFutureState::Tls(accept_tls_future) => {
-
-                    let client_tls = ready!(Pin::new(accept_tls_future).poll(cx))
-                        .map_err(move |e| {
-                            io::Error::new(
-                                io::ErrorKind::ConnectionRefused,
-                                format!("Failed to accept the client TLS connection: {}", e),
-                            )
-                        })?;
+                    let client_tls = ready!(Pin::new(accept_tls_future).poll(cx)).map_err(move |e| {
+                        io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            format!("Failed to accept the client TLS connection: {}", e),
+                        )
+                    })?;
                     debug!("TLS connection has been established with the client");
 
                     let client_transport =
@@ -113,10 +120,8 @@ impl Future for NlaWithClientFuture {
                         .client_response_protocol
                         .contains(nego::SecurityProtocol::HYBRID_EX)
                     {
-                        let transport = utils::update_framed_codec(
-                            client_transport,
-                            EarlyUserAuthResultTransport::default()
-                        );
+                        let transport =
+                            utils::update_framed_codec(client_transport, EarlyUserAuthResultTransport::default());
                         let future = Box::pin(make_client_early_user_auth_future(transport));
                         self.state = NlaWithClientFutureState::EarlyUserAuthResult(future);
                     } else {
@@ -177,13 +182,12 @@ impl Future for NlaWithServerFuture {
         loop {
             match &mut self.state {
                 NlaWithServerFutureState::Tls(connect_tls_future) => {
-                    let server_tls = ready!(Pin::new(connect_tls_future).poll(cx))
-                        .map_err(move |e| {
-                            io::Error::new(
-                                io::ErrorKind::ConnectionRefused,
-                                format!("Failed to handshake with a server: {}", e),
-                            )
-                        })?;
+                    let server_tls = ready!(Pin::new(connect_tls_future).poll(cx)).map_err(move |e| {
+                        io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            format!("Failed to handshake with a server: {}", e),
+                        )
+                    })?;
                     debug!("TLS connection has been established with the server");
 
                     let client_tls = tokio_rustls::TlsStream::Client(server_tls);
@@ -214,20 +218,17 @@ impl Future for NlaWithServerFuture {
                         .server_response_protocol
                         .contains(nego::SecurityProtocol::HYBRID_EX)
                     {
-                        let transport = utils::update_framed_codec(
-                            server_transport,
-                            EarlyUserAuthResultTransport::default()
-                        );
+                        let transport =
+                            utils::update_framed_codec(server_transport, EarlyUserAuthResultTransport::default());
                         self.state = NlaWithServerFutureState::EarlyUserAuthResult(Box::pin(
-                            make_server_early_user_auth_future(transport))
-                        );
+                            make_server_early_user_auth_future(transport),
+                        ));
                     } else {
                         return Poll::Ready(Ok(NlaTransport::TsRequest(server_transport)));
                     }
                 }
                 NlaWithServerFutureState::EarlyUserAuthResult(early_user_auth_result_future) => {
-                    let (early_user_auth_result, transport) =
-                        ready!(early_user_auth_result_future.as_mut().poll(cx));
+                    let (early_user_auth_result, transport) = ready!(early_user_auth_result_future.as_mut().poll(cx));
 
                     let early_user_auth_result = early_user_auth_result.transpose()?;
 
@@ -243,7 +244,7 @@ impl Future for NlaWithServerFuture {
 
                             return Poll::Ready(Err(io::Error::new(
                                 io::ErrorKind::Other,
-                                "The server failed CredSSP phase"
+                                "The server failed CredSSP phase",
                             )));
                         }
                         None => {
@@ -430,8 +431,7 @@ impl Decoder for EarlyUserAuthResultTransport {
             Ok(None)
         } else {
             let result = io_try!(EarlyUserAuthResult::from_buffer(buf.as_ref()));
-            buf.split_to(result.buffer_len());
-
+            buf.advance(result.buffer_len());
             Ok(Some(result))
         }
     }
@@ -456,30 +456,32 @@ enum SequenceState {
     Finished,
 }
 
-#[allow(clippy::large_enum_variant)]
+
 enum NlaWithClientFutureState {
     Tls(Accept<TcpStream>),
-    CredSsp(Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>),
+    CredSsp(NlaWithClientFutureT),
     EarlyUserAuthResult(Pin<EarlyClientUserAuthResultFuture>),
 }
 
-#[allow(clippy::large_enum_variant)]
+
 enum NlaWithServerFutureState {
     Tls(Connect<TcpStream>),
-    CredSsp(Pin<Box<SequenceFuture<'static, CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>),
+    CredSsp(CredSspWithServerFutureT),
     EarlyUserAuthResult(Pin<EarlyServerUserAuthResultFuture>),
 }
 
 async fn make_client_early_user_auth_future(
-    mut transport: EarlyUserAuthResultFutureTransport
+    mut transport: EarlyUserAuthResultFutureTransport,
 ) -> Result<EarlyUserAuthResultFutureTransport, io::Error> {
     Pin::new(&mut transport).send(EarlyUserAuthResult::Success).await?;
     Ok(transport)
 }
 
-
 async fn make_server_early_user_auth_future(
-    mut transport: EarlyUserAuthResultFutureTransport
-) -> (Option<Result<EarlyUserAuthResult, io::Error>>, EarlyUserAuthResultFutureTransport) {
+    transport: EarlyUserAuthResultFutureTransport,
+) -> (
+    Option<Result<EarlyUserAuthResult, io::Error>>,
+    EarlyUserAuthResultFutureTransport,
+) {
     transport.into_future().await
 }

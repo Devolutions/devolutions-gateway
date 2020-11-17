@@ -145,16 +145,15 @@ where
         loop {
             match self.future_state {
                 FutureState::GetMessage => {
-                    let (client, server, prev_pdu, future) = match self.deref_mut() {
-                        Self {
-                            client,
-                            server,
-                            pdu,
-                            future,
-                            ..
-                        } => (client, server, pdu, future),
-                    };
+                    let Self {
+                        client,
+                        server,
+                        pdu,
+                        future,
+                        ..
+                    } = self.deref_mut();
 
+                    let prev_pdu = pdu;
                     let sender = match future.next_sender() {
                         NextStream::Client => client
                             .as_mut()
@@ -195,17 +194,13 @@ where
                     };
                 }
                 FutureState::SendMessage => {
-                    let (client, server, future, send_future) = match self.deref_mut() {
-                        Self {
-                            client,
-                            server,
-                            future,
-                            send_future,
-                            ..
-                        } => (client, server, future, send_future),
-                    };
-
-                    let receiver = ready!(send_future
+                    let Self {
+                        client,
+                        server,
+                        future,
+                        send_future,
+                        ..
+                    } = self.deref_mut();                    let receiver = ready!(send_future
                         .as_mut()
                         .expect("Send message state cannot be fired without send_future")
                         .as_mut()
@@ -219,11 +214,9 @@ where
                     self.send_future = None;
                 }
                 FutureState::Finished => {
-                    let (client, server, future) = match self.deref_mut() {
-                        Self {
-                            client, server, future, ..
-                        } => (client, server, future),
-                    };
+                    let Self {
+                        client, server, future, ..
+                    } = self.deref_mut();
 
                     return Poll::Ready(Ok(future.return_item(client.take(), server.take())));
                 }

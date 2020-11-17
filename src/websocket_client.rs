@@ -6,70 +6,58 @@ use crate::{
     utils::association::RemoveAssociation,
     Proxy,
 };
-use futures::{future, Future};
+
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
-use saphir::server::HttpService;
 use slog_scope::{error, info};
 use std::{io, net::SocketAddr, sync::Arc};
-use tokio::runtime::TaskExecutor;
+
 use url::Url;
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct WebsocketService {
-    pub http_service: HttpService,
     pub jet_associations: JetAssociationsMap,
-    pub executor_handle: TaskExecutor,
     pub config: Arc<Config>,
 }
 
 impl WebsocketService {
-    pub fn handle(
+    pub async fn handle(
         &mut self,
         req: Request<Body>,
         client_addr: Option<SocketAddr>,
-    ) -> Box<dyn Future<Item = Response<Body>, Error = saphir::error::ServerError> + Send> {
+    ) -> Result<Response<Body>, saphir::error::InternalError> {
         if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_accept(
-                req,
-                client_addr,
-                self.jet_associations.clone(),
-                self.executor_handle.clone(),
-            )
+            handle_jet_accept(req, client_addr, self.jet_associations.clone()).await
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_connect(
-                req,
-                client_addr,
-                self.jet_associations.clone(),
-                self.executor_handle.clone(),
-                self.config.clone(),
-            )
+            handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone()).await
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_test(req, self.jet_associations.clone())
+            handle_jet_test(req, self.jet_associations.clone()).await
         } else {
-            self.http_service.handle(req)
+            let mut resp = Response::new(Body::empty());
+            *resp.status_mut() = StatusCode::BAD_REQUEST;
+            Ok(resp)
         }
     }
 }
 
-fn handle_jet_test(
+async fn handle_jet_test(
     req: Request<Body>,
     jet_associations: JetAssociationsMap,
-) -> Box<dyn Future<Item = Response<Body>, Error = saphir::error::ServerError> + Send> {
-    match handle_jet_test_impl(req, jet_associations) {
-        Ok(res) => Box::new(future::ok(res)),
+) -> Result<Response<Body>, saphir::error::InternalError> {
+    match handle_jet_test_impl(req, jet_associations).await {
+        Ok(res) => Ok(res),
         Err(status) => {
             let mut res = Response::new(Body::empty());
             *res.status_mut() = status;
-            Box::new(future::ok(res))
+            Ok(res)
         }
     }
 }
 
-fn handle_jet_test_impl(
+async fn handle_jet_test_impl(
     req: Request<Body>,
     jet_associations: JetAssociationsMap,
 ) -> Result<Response<Body>, StatusCode> {
@@ -82,7 +70,7 @@ fn handle_jet_test_impl(
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(StatusCode::BAD_REQUEST)?;
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(StatusCode::BAD_REQUEST)?;
 
-    let jet_assc = jet_associations.lock().unwrap();
+    let jet_assc = jet_associations.lock().await;
     let assc = jet_assc.get(&association_id).ok_or(StatusCode::NOT_FOUND)?;
     if assc.get_candidate(candidate_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -91,27 +79,25 @@ fn handle_jet_test_impl(
     Ok(process_req(&req))
 }
 
-fn handle_jet_accept(
+async fn handle_jet_accept(
     req: Request<Body>,
     client_addr: Option<SocketAddr>,
     jet_associations: JetAssociationsMap,
-    executor_handle: TaskExecutor,
-) -> Box<dyn Future<Item = Response<Body>, Error = saphir::error::ServerError> + Send> {
-    match handle_jet_accept_impl(req, client_addr, jet_associations, executor_handle) {
-        Ok(res) => Box::new(future::ok(res)),
+) -> Result<Response<Body>, saphir::error::InternalError> {
+    match handle_jet_accept_impl(req, client_addr, jet_associations).await {
+        Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
             *res.status_mut() = StatusCode::FORBIDDEN;
-            Box::new(future::ok(res))
+            Ok(res)
         }
     }
 }
 
-fn handle_jet_accept_impl(
+async fn handle_jet_accept_impl(
     req: Request<Body>,
     client_addr: Option<SocketAddr>,
     jet_associations: JetAssociationsMap,
-    executor_handle: TaskExecutor,
 ) -> Result<Response<Body>, ()> {
     let header = req.headers().get("upgrade").ok_or(())?;
     let header_str = header.to_str().map_err(|_| ())?;
@@ -123,58 +109,61 @@ fn handle_jet_accept_impl(
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
     let version = {
-        let associations = jet_associations.lock().unwrap(); // TODO: replace by parking lot
+        let associations = jet_associations.lock().await; // TODO: replace by parking lot
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
 
     let res = process_req(&req);
-    let on_upgrade = req.into_body().on_upgrade();
 
     match version {
         2 | 3 => {
-            let fut = on_upgrade
-                .map(move |upgraded| {
-                    let mut jet_assc = jet_associations.lock().unwrap();
-                    if let Some(assc) = jet_assc.get_mut(&association_id) {
-                        if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                            candidate.set_state(CandidateState::Accepted);
-                            candidate.set_transport(JetTransport::Ws(WsTransport::new_http(upgraded, client_addr)));
-                        }
+            tokio::spawn(async move {
+                let upgrade = req
+                    .into_body()
+                    .on_upgrade()
+                    .await
+                    .map_err(|e| error!("upgrade error: {}", e))?;
+
+                let mut jet_assc = jet_associations.lock().await;
+                if let Some(assc) = jet_assc.get_mut(&association_id) {
+                    if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                        candidate.set_state(CandidateState::Accepted);
+                        let ws_transport = WsTransport::new_http(upgrade, client_addr).await;
+                        candidate.set_transport(JetTransport::Ws(ws_transport));
                     }
-                })
-                .map_err(|e| error!("upgrade error: {}", e));
-
-            executor_handle.spawn(fut);
-
+                }
+                Ok::<(), ()>(())
+            })
+            .await
+            .map_err(|_| ())?
+            .unwrap();
             Ok(res)
         }
         _ => Err(()),
     }
 }
 
-fn handle_jet_connect(
+async fn handle_jet_connect(
     req: Request<Body>,
     client_addr: Option<SocketAddr>,
     jet_associations: JetAssociationsMap,
-    executor_handle: TaskExecutor,
     config: Arc<Config>,
-) -> Box<dyn Future<Item = Response<Body>, Error = saphir::error::ServerError> + Send> {
-    match handle_jet_connect_impl(req, client_addr, jet_associations, executor_handle, config) {
-        Ok(res) => Box::new(future::ok(res)),
+) -> Result<Response<Body>, saphir::error::InternalError> {
+    match handle_jet_connect_impl(req, client_addr, jet_associations, config).await {
+        Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
             *res.status_mut() = StatusCode::BAD_REQUEST;
-            Box::new(future::ok(res))
+            Ok(res)
         }
     }
 }
 
-fn handle_jet_connect_impl(
+async fn handle_jet_connect_impl(
     req: Request<Body>,
     client_addr: Option<SocketAddr>,
     jet_associations: JetAssociationsMap,
-    executor_handle: TaskExecutor,
     config: Arc<Config>,
 ) -> Result<Response<Body>, ()> {
     let header = req.headers().get("upgrade").ok_or(())?;
@@ -184,67 +173,69 @@ fn handle_jet_connect_impl(
     }
 
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
-    let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
+    let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
     let version = {
-        let associations = jet_associations.lock().unwrap(); // TODO: replace by parking lot
+        let associations = jet_associations.lock().await; // TODO: replace by parking lot
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
 
     let res = process_req(&req);
-    let on_upgrade = req.into_body().on_upgrade();
 
     match version {
         2 | 3 => {
-            let executor_handle_cloned = executor_handle.clone();
+            tokio::spawn(async move {
+                let upgrade = req
+                    .into_body()
+                    .on_upgrade()
+                    .await
+                    .map_err(|e| error!("upgrade error: {}", e))?;
 
-            let fut = on_upgrade
-                .map(move |upgraded| {
-                    let mut jet_assc = jet_associations.lock().unwrap();
+                let mut jet_assc = jet_associations.lock().await;
 
-                    let assc = if let Some(assc) = jet_assc.get_mut(&association_id) {
-                        assc
-                    } else {
-                        return;
-                    };
+                let assc = if let Some(assc) = jet_assc.get_mut(&association_id) {
+                    assc
+                } else {
+                    return Err(());
+                };
 
-                    let candidate = if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                        candidate
-                    } else {
-                        return;
-                    };
+                let candidate = if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                    candidate
+                } else {
+                    return Err(());
+                };
 
-                    if (candidate.transport_type() == TransportType::Ws
-                        || candidate.transport_type() == TransportType::Wss)
-                        && candidate.state() == CandidateState::Accepted
-                    {
-                        let server_transport = candidate
-                            .take_transport()
-                            .expect("Candidate cannot be created without a transport");
-                        let client_transport = JetTransport::Ws(WsTransport::new_http(upgraded, client_addr));
-                        candidate.set_state(CandidateState::Connected);
-                        candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
-                        candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+                if (candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss)
+                    && candidate.state() == CandidateState::Accepted
+                {
+                    let server_transport = candidate
+                        .take_transport()
+                        .expect("Candidate cannot be created without a transport");
+                    let ws_transport = WsTransport::new_http(upgrade, client_addr).await;
+                    let client_transport = JetTransport::Ws(ws_transport);
+                    candidate.set_state(CandidateState::Connected);
+                    candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+                    candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-                        // Start the proxy
-                        let remove_association = RemoveAssociation::new(
-                            jet_associations.clone(),
-                            candidate.association_id(),
-                            Some(candidate.id()),
-                        );
+                    // Start the proxy
+                    let remove_association = RemoveAssociation::new(
+                        jet_associations.clone(),
+                        candidate.association_id(),
+                        Some(candidate.id()),
+                    );
 
-                        let proxy = Proxy::new(config)
-                            .build(server_transport, client_transport)
-                            .then(move |_| remove_association)
-                            .map(|_| ());
-
-                        executor_handle_cloned.spawn(proxy);
-                    }
-                })
-                .map_err(|e| error!("upgrade error: {}", e));
-
-            executor_handle.spawn(fut);
+                    Proxy::new(config)
+                        .build(server_transport, client_transport)
+                        .await
+                        .map_err(|_| ())?;
+                    let _ = remove_association.await;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|_| ())?
+            .unwrap();
 
             Ok(res)
         }
@@ -326,26 +317,20 @@ fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
 pub struct WsClient {
     routing_url: Url,
     config: Arc<Config>,
-    _executor_handle: TaskExecutor,
 }
 
 impl WsClient {
-    pub fn new(routing_url: Url, config: Arc<Config>, executor_handle: TaskExecutor) -> Self {
-        WsClient {
-            routing_url,
-            config,
-            _executor_handle: executor_handle,
-        }
+    pub fn new(routing_url: Url, config: Arc<Config>) -> Self {
+        WsClient { routing_url, config }
     }
 
-    pub fn serve<T: 'static + Transport + Send>(
-        self,
-        client_transport: T,
-    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
-        let server_conn = WsTransport::connect(&self.routing_url);
-
-        Box::new(server_conn.and_then(move |server_transport| {
-            Proxy::new(self.config.clone()).build(server_transport, client_transport)
-        }))
+    pub async fn serve<T>(self, client_transport: T) -> Result<(), io::Error>
+    where
+        T: 'static + Transport + Send,
+    {
+        let server_transport = WsTransport::connect(&self.routing_url).await?;
+        Proxy::new(self.config.clone())
+            .build(server_transport, client_transport)
+            .await
     }
 }

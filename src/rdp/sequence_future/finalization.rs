@@ -6,8 +6,8 @@ use ironrdp::{
 };
 use slog_scope::debug;
 use tokio::net::TcpStream;
-use tokio_util::{codec::Framed};
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::transport::rdp::{RdpPdu, RdpTransport};

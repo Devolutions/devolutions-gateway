@@ -4,11 +4,9 @@ use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::{
     cell::RefCell,
     future::Future,
-    io::{Read, Write},
     net::SocketAddr,
     ops::DerefMut,
     pin::Pin,
-    rc::Rc,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -330,7 +328,7 @@ impl<T: AsyncWrite> JetSink<usize> for JetSinkImpl<T> {
     fn nb_bytes_written(self: Pin<&Self>) -> u64 {
         self.nb_bytes_written.load(Ordering::Relaxed)
     }
-    fn finished(mut self: Pin<&mut Self>) -> bool {
+    fn finished(self: Pin<&mut Self>) -> bool {
         let mut buffer = self.buffer.borrow_mut();
         buffer.valid().is_empty()
     }

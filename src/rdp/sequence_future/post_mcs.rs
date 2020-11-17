@@ -9,8 +9,8 @@ use ironrdp::{
 };
 use slog_scope::{debug, trace, warn};
 use tokio::net::TcpStream;
-use tokio_util::codec::Framed;
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::{
@@ -45,7 +45,9 @@ impl PostMcs {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)> for PostMcs {
+impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>
+    for PostMcs
+{
     type Item = (PostMcsFutureTransport, PostMcsFutureTransport, FilterConfig);
 
     fn process_pdu(&mut self, (mcs_pdu, pdu_data): (McsPdu, BytesMut)) -> io::Result<Option<(McsPdu, Vec<u8>)>> {

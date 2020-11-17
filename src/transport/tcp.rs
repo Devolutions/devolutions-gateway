@@ -10,14 +10,13 @@ use tokio::{
     io::{self, AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
-use tokio_rustls::{rustls, TlsConnector, TlsStream};
+use tokio_rustls::{TlsConnector, TlsStream};
 use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
     utils::{danger_transport, resolve_url_to_socket_arr},
 };
-use futures::FutureExt;
 
 #[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {
@@ -33,7 +32,7 @@ impl TcpStreamWrapper {
         }
     }
 
-    pub fn async_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    pub fn async_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         match self.get_mut() {
             TcpStreamWrapper::Plain(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
             TcpStreamWrapper::Tls(ref mut stream) => Pin::new(stream).poll_shutdown(cx),

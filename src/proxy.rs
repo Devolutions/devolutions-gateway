@@ -7,14 +7,16 @@ use crate::{
     transport::{JetSinkType, JetStreamType, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
-use futures::{select, Future, FutureExt, Sink, Stream, StreamExt, TryFutureExt};
+use futures::{select, FutureExt, Sink, Stream, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 use std::{
     collections::HashMap,
     io,
     path::PathBuf,
+    pin::Pin,
     sync::{atomic::Ordering, Arc},
+    task::{Context, Poll},
 };
 
 use std::{

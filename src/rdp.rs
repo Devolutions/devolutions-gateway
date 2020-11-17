@@ -8,19 +8,15 @@ mod preconnection_pdu;
 mod sequence_future;
 
 use accept_connection_future::AcceptConnectionMode;
-use futures::{future, Future, TryFutureExt};
 use slog_scope::{error, info};
 
 use sspi::{internal::credssp, AuthIdentity};
 
+use bytes::Buf;
 use std::{io, sync::Arc};
-use tokio::{
-    io::{AsyncWrite, AsyncWriteExt},
-    net::TcpStream,
-};
+use tokio::{io::AsyncWriteExt, net::TcpStream};
 use tokio_rustls::TlsAcceptor;
 use url::Url;
-use bytes::Buf;
 
 pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 
@@ -115,16 +111,13 @@ impl RdpClient {
             AcceptConnectionMode::RdpTls { identity, request } => {
                 info!("Starting RDP-TLS redirection");
 
-                let proxy_connection = ConnectionSequenceFuture::new(
-                    client,
-                    request,
-                    tls_public_key,
-                    tls_acceptor,
-                    identity
-                ).await.map_err(|e| {
-                    error!("RDP Connection Sequence failed: {}", e);
-                    io::Error::new(io::ErrorKind::Other, e)
-                })?;
+                let proxy_connection =
+                    ConnectionSequenceFuture::new(client, request, tls_public_key, tls_acceptor, identity)
+                        .await
+                        .map_err(|e| {
+                            error!("RDP Connection Sequence failed: {}", e);
+                            io::Error::new(io::ErrorKind::Other, e)
+                        })?;
 
                 let client_transport = proxy_connection.client;
                 let server_transport = proxy_connection.server;
@@ -134,28 +127,33 @@ impl RdpClient {
                 let joined_static_channels = utils::swap_hashmap_kv(joined_static_channels);
 
                 info!("matching channels");
-                let (client_transport, server_transport, dvc_manager, joined_static_channels) = match joined_static_channels.get(DR_DYN_VC_CHANNEL_NAME) {
-                    Some(drdynvc_channel_id) => {
-                        let (client_transport, server_transport, dvc_manager) = create_downgrade_dvc_capabilities_future(
-                            client_transport,
-                            server_transport,
-                            *drdynvc_channel_id,
-                            DvcManager::with_allowed_channels(vec![
-                                RDP8_GRAPHICS_PIPELINE_NAME.to_string()
-                            ]),
-                        ).await.map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("Failed to downgrade DVC capabilities: {}", e),
-                            )
-                        })?;
+                let (client_transport, server_transport, dvc_manager, joined_static_channels) =
+                    match joined_static_channels.get(DR_DYN_VC_CHANNEL_NAME) {
+                        Some(drdynvc_channel_id) => {
+                            let (client_transport, server_transport, dvc_manager) =
+                                create_downgrade_dvc_capabilities_future(
+                                    client_transport,
+                                    server_transport,
+                                    *drdynvc_channel_id,
+                                    DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
+                                )
+                                .await
+                                .map_err(|e| {
+                                    io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!("Failed to downgrade DVC capabilities: {}", e),
+                                    )
+                                })?;
 
-                        (client_transport, server_transport, Some(dvc_manager), joined_static_channels)
-                    }
-                    None => {
-                        (client_transport, server_transport, None, joined_static_channels)
-                    },
-                };
+                            (
+                                client_transport,
+                                server_transport,
+                                Some(dvc_manager),
+                                joined_static_channels,
+                            )
+                        }
+                        None => (client_transport, server_transport, None, joined_static_channels),
+                    };
 
                 let client_tls = client_transport.into_inner();
                 let server_tls = server_transport.into_inner();
@@ -165,10 +163,12 @@ impl RdpClient {
                         TcpTransport::new_tls(server_tls),
                         TcpTransport::new_tls(client_tls),
                         Some(Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager))),
-                    ).await.map_err(move |e| {
-                    error!("Proxy error: {}", e);
-                    e
-                })
+                    )
+                    .await
+                    .map_err(move |e| {
+                        error!("Proxy error: {}", e);
+                        e
+                    })
             }
         }
     }
