@@ -15,6 +15,20 @@ if ($IsWindows) {
     $ExecutableExtension = ''
 }
 
+function Get-DotEnvFile {
+    param(
+        [Parameter(Position=0,Mandatory=$true)]
+        [string] $InputFile
+    )
+
+    $DotEnv = @{}
+    $InputValue = Get-Content -Path $InputFile -Encoding UTF8 -ErrorAction Stop
+    $($InputValue | Select-String -AllMatches -Pattern "^(.+)=`"(.+)`"$").Matches | ForEach-Object {
+        $DotEnv.Add($_.Groups[1].Value, $_.Groups[2].Value)
+    }
+    return $DotEnv
+}
+
 function Invoke-Tlk {
 	param(
 		[ValidateSet('windows','macos','linux')]
@@ -42,12 +56,14 @@ function Invoke-Tlk {
     $ConanProfile = "${Platform}-${Architecture}"
 
     & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
+    $dotenv = Get-DotEnvFile ".\environment.sh.env"
+    $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
 
     $RootPath = Split-Path -Parent $PSScriptRoot
     $BuildRepositoryLocalPath = $RootPath # Build.Repository.LocalPath
     $BuildArtifactStagingDirectory = Join-Path $BuildRepositoryLocalPath "artifacts" # Build.ArtifactStagingDirectory
 
-    .\activate.ps1
+    $Env:OPENSSL_DIR = $OPENSSL_DIR
 
     if ($IsWindows) {
         $Env:RUSTFLAGS = "-C target-feature=+crt-static"
@@ -74,8 +90,6 @@ function Invoke-Tlk {
     Copy-Item "${RootPath}/jetsocat/target/release/${SrcExecutableName}" `
         -Destination "${OutputPath}/${DstExecutableName}" -Force
     Pop-Location
-
-    .\deactivate.ps1
 }
 
 Invoke-Tlk @args
