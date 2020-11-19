@@ -1,28 +1,23 @@
-use devolutions_gateway::{
+use crate::{
     config::Config,
     http::http_server::HttpServer,
     jet_client::{JetAssociationsMap, JetClient},
     logger,
     rdp::RdpClient,
     routing_client::Client,
-    transport::{
-        tcp::TcpTransport,
-        ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport},
-        JetTransport,
-    },
-    utils::{get_pub_key_from_der, load_certs, load_private_key},
+    transport::{tcp::TcpTransport, ws::WsTransport, JetTransport},
+    utils::{default_port, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming},
     websocket_client::{WebsocketService, WsClient},
 };
-use futures::{
-    future,
-    future::{ok, Either},
-    Future, Stream,
-};
-use hyper::service::service_fn;
-use saphir::server::HttpService;
+
+use futures::stream::StreamExt;
+use hyper::{server::conn::Connecting, service::service_fn};
+use tokio_compat_02::IoCompat;
+
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
-use slog_scope_futures::future01::FutureExt;
+use slog_scope_futures::future03::FutureExt as _;
+
 use std::{
     collections::HashMap,
     io,
@@ -31,14 +26,16 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+
 use tokio::{
-    net::tcp::{TcpListener, TcpStream},
-    prelude::{AsyncRead, AsyncWrite},
-    runtime::{Runtime, TaskExecutor},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
 };
+
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use url::Url;
 
+/*
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 pub enum GatewayState {
     Stopped,
@@ -58,6 +55,8 @@ pub struct GatewayService {
     _logger_guard: slog_scope::GlobalLoggerGuard,
 }
 
+ */
+/*
 impl GatewayService {
     pub fn load() -> Option<Self> {
         let config = Arc::new(Config::init());
@@ -89,13 +88,13 @@ impl GatewayService {
     }
 
     pub fn start(&mut self) {
-        let runtime = Runtime::new().expect("failed to create runtime");
+        //let runtime = Runtime::new().expect("failed to create runtime");
 
         let config = self.config.clone();
         let logger = self.logger.clone();
         let executor_handle = runtime.executor();
         let context =
-            create_context(config, logger, executor_handle.clone()).expect("failed to create gateway context");
+            create_context(config, logger).expect("failed to create gateway context");, // executor_handle.clone()).expect("failed to create gateway context");
 
         // start http server
         if let Err(e) = context.http_server.start(executor_handle.clone()) {
@@ -143,7 +142,7 @@ pub struct GatewayContext {
 pub fn create_context(
     config: Arc<Config>,
     logger: slog::Logger,
-    executor_handle: TaskExecutor,
+    // executor_handle: TaskExecutor,
 ) -> Result<GatewayContext, &'static str> {
     let tcp_listeners: Vec<Url> = config
         .listeners
@@ -214,15 +213,20 @@ pub fn create_context(
 
     Ok(GatewayContext { http_server, futures })
 }
+*/
 
+/*
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
+*/
 
 fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_nodelay(true) {
         slog_error!(logger, "set_nodelay on TcpStream failed: {}", e);
     }
-
+    // Temporary following methods is removed in tokio 0.3.3.
+    // When they will be returned next lines should be uncommented.
+    /*
     if let Err(e) = stream.set_keepalive(Some(Duration::from_secs(2))) {
         slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
     }
@@ -234,13 +238,10 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_recv_buffer_size(SOCKET_RECV_BUFFER_SIZE) {
         slog_error!(logger, "set_recv_buffer_size on TcpStream failed: {}", e);
     }
+    */
 }
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
-
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
-
-fn start_tcp_server(
+/*fn start_tcp_server(
     url: Url,
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
@@ -387,17 +388,16 @@ fn start_tcp_server(
 
     Box::new(server.map_err(|e| format!("TCP listener failed: {}", e)))
 }
-
-fn start_websocket_server(
+*/
+async fn start_websocket_server(
     websocket_url: Url,
     config: Arc<Config>,
-    http_service: HttpService,
+
     jet_associations: JetAssociationsMap,
     tls_acceptor: TlsAcceptor,
-    executor_handle: TaskExecutor,
+
     logger: slog::Logger,
-) -> Box<dyn Future<Item = (), Error = String> + Send> {
-    // Start websocket server if needed
+) -> Result<(), String> {
     info!("Starting websocket server ...");
 
     let mut websocket_addr = String::new();
@@ -415,17 +415,16 @@ fn start_websocket_server(
             .as_str(),
     );
 
-    let websocket_listener = TcpListener::bind(
-        &websocket_addr
-            .parse::<SocketAddr>()
-            .expect("Websocket addr can't be parsed."),
-    )
-    .unwrap();
+    let websocket_addr = websocket_addr
+        .parse::<SocketAddr>()
+        .expect("Websocket addr can't be parsed.");
+
+    let websocket_listener = TcpListener::bind(websocket_addr)
+        .await
+        .map_err(|err| format!("{}", err))?;
 
     let websocket_service = WebsocketService {
-        http_service,
         jet_associations,
-        executor_handle,
         config,
     };
 
@@ -434,61 +433,75 @@ fn start_websocket_server(
         listener_logger = listener_logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let http = hyper::server::conn::Http::new();
+    type ConnectionType = Box<dyn AsyncReadWrite + Unpin + Send + Sync + 'static>;
 
-    let incoming = match websocket_url.scheme() {
-        "ws" => Either::A(websocket_listener.incoming().map(move |tcp| {
-            let remote_addr = tcp.peer_addr().ok();
-            set_socket_option(&tcp, &logger);
+    let connection_process = |connection: ConnectionType, remote_addr: Option<SocketAddr>| {
+        let http = hyper::server::conn::Http::new();
+        let listener_logger = listener_logger.clone();
 
-            (
-                Box::new(tcp) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
-                remote_addr,
-            )
-        })),
+        let websocket_service = websocket_service.clone();
 
-        "wss" => Either::B(websocket_listener.incoming().and_then(move |tcp| {
-            set_socket_option(&tcp, &logger);
+        let service = service_fn(move |req| {
+            let mut ws_serve = websocket_service.clone();
+            async move { ws_serve.handle(req, remote_addr).await }
+        });
 
-            tls_acceptor
-                .accept(tcp)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                .map(|tls| {
-                    let remote_addr = tls.get_ref().0.peer_addr().ok();
-                    (
-                        Box::new(tls) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
-                        remote_addr,
-                    )
-                })
-        })),
+        tokio::spawn(async move {
+            let conn = IoCompat::new(connection);
+            let serve_connection = http.serve_connection(conn, service).with_upgrades();
+            let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
+        })
+    };
 
+    let mut incoming = Incoming {
+        listener: &websocket_listener,
+        accept: None,
+    };
+
+    match websocket_url.scheme() {
+        "ws" => {
+            while let Some(tcp) = incoming.next().await {
+                match tcp {
+                    Ok(tcp) => {
+                        set_socket_option(&tcp, &logger);
+
+                        let remote_addr = tcp.peer_addr().ok();
+                        let conn = Box::new(tcp) as ConnectionType;
+
+                        connection_process(conn, remote_addr);
+                    }
+                    Err(err) => warn!(
+                        "{}",
+                        format!("WebSocket listener failed to accept connection - {:?}", err)
+                    ),
+                }
+            }
+        }
+        "wss" => {
+            while let Some(tcp) = incoming.next().await {
+                match tcp {
+                    Ok(tcp) => {
+                        set_socket_option(&tcp, &logger);
+
+                        match tls_acceptor.accept(tcp).await {
+                            Ok(tls) => {
+                                let remote_addr = tls.get_ref().0.peer_addr().ok();
+                                let conn = Box::new(tls) as ConnectionType;
+                                connection_process(conn, remote_addr);
+                            }
+                            Err(err) => warn!("{}", format!("TlsAcceptor failed to accept handshake - {:?}", err)),
+                        }
+                    }
+                    Err(err) => warn!(
+                        "{}",
+                        format!("WebSocket listener failed to accept connection - {:?}", err)
+                    ),
+                }
+            }
+        }
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    let websocket_server = incoming.then(Ok).for_each(move |conn_res| {
-        match conn_res {
-            Ok((conn, remote_addr)) => {
-                let mut ws_serve = websocket_service.clone();
-                let srvc = service_fn(move |req| ws_serve.handle(req, remote_addr));
-                websocket_service
-                    .executor_handle
-                    .spawn(http.serve_connection(conn, srvc).with_upgrades().map_err(|_| ()));
-            }
-            Err(e) => {
-                warn!("incoming connection encountered an error: {}", e);
-            }
-        }
-
-        future::ok(())
-    });
-
     info!("WebSocket server started successfully. Listening on {}", websocket_addr);
-    Box::new(websocket_server.with_logger(listener_logger))
-}
-
-fn default_port(url: &Url) -> Result<u16, ()> {
-    match url.scheme() {
-        "tcp" => Ok(8080),
-        _ => Err(()),
-    }
+    Ok(())
 }

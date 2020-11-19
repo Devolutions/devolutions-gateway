@@ -9,7 +9,11 @@ use crate::{
 
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use slog_scope::{error, info};
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{
+    io::{self, ErrorKind},
+    net::SocketAddr,
+    sync::Arc,
+};
 
 use url::Url;
 use uuid::Uuid;
@@ -25,16 +29,22 @@ impl WebsocketService {
         &mut self,
         req: Request<Body>,
         client_addr: Option<SocketAddr>,
-    ) -> Result<Response<Body>, saphir::error::InternalError> {
+    ) -> Result<Response<Body>, io::Error> {
         if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_accept(req, client_addr, self.jet_associations.clone()).await
+            handle_jet_accept(req, client_addr, self.jet_associations.clone())
+                .await
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone()).await
+            handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone())
+                .await
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_test(req, self.jet_associations.clone()).await
+            handle_jet_test(req, self.jet_associations.clone())
+                .await
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else {
             let mut resp = Response::new(Body::empty());
             *resp.status_mut() = StatusCode::BAD_REQUEST;
@@ -134,10 +144,7 @@ async fn handle_jet_accept_impl(
                     }
                 }
                 Ok::<(), ()>(())
-            })
-            .await
-            .map_err(|_| ())?
-            .unwrap();
+            });
             Ok(res)
         }
         _ => Err(()),
@@ -232,10 +239,7 @@ async fn handle_jet_connect_impl(
                     let _ = remove_association.await;
                 }
                 Ok(())
-            })
-            .await
-            .map_err(|_| ())?
-            .unwrap();
+            });
 
             Ok(res)
         }

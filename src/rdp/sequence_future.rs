@@ -200,7 +200,8 @@ where
                         future,
                         send_future,
                         ..
-                    } = self.deref_mut();                    let receiver = ready!(send_future
+                    } = self.deref_mut();
+                    let receiver = ready!(send_future
                         .as_mut()
                         .expect("Send message state cannot be fired without send_future")
                         .as_mut()

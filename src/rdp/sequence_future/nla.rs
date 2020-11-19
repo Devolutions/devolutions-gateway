@@ -456,13 +456,11 @@ enum SequenceState {
     Finished,
 }
 
-
 enum NlaWithClientFutureState {
     Tls(Accept<TcpStream>),
     CredSsp(NlaWithClientFutureT),
     EarlyUserAuthResult(Pin<EarlyClientUserAuthResultFuture>),
 }
-
 
 enum NlaWithServerFutureState {
     Tls(Connect<TcpStream>),
