@@ -21,7 +21,7 @@ where
         }
 
         buf.truncate(n);
-        trace!(logger, "{}", String::from_utf8_lossy(&buf));
+        trace!(logger, r#""{}""#, String::from_utf8_lossy(&buf));
         tx.unbounded_send(Message::binary(buf))?;
     }
 
@@ -42,7 +42,7 @@ where
         if data.is_empty() {
             debug!(logger, "Empty message");
         } else {
-            trace!(logger, "{}", String::from_utf8_lossy(&data));
+            trace!(logger, r#""{}""#, String::from_utf8_lossy(&data));
         }
 
         writer.write_all(&data).await?;
