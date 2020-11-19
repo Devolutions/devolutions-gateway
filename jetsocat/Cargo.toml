@@ -16,7 +16,7 @@ seahorse = "1.1"
 
 # async
 tokio-tungstenite = { version = "0.12", features = ["tls"] }
-tokio = { version = "0.3", features = ["io-std", "net", "rt", "sync", "process"] }
+tokio = { version = "0.3", features = ["io-std", "net", "rt", "sync", "process", "rt-multi-thread"] }
 futures-util = "0.3"
 futures-channel = "0.3"
 
