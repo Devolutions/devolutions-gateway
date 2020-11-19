@@ -11,8 +11,34 @@ variables:
     value: 1.1.1b-5
 
 stages:
+  - stage: Get_version
+    jobs:
+      - job: Extract_version
+        pool:
+          name: 'Devolutions - Linux containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/toolbox:latest
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - script: |
+              VERSION=$(toml get Cargo.toml package.version | tr -d '"')
+              echo ${VERSION} > VERSION
+            displayName: Get version
+          
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: VERSION
+              artifactName: version
+
   - stage: jetsocat
-    dependsOn: []
+    dependsOn: ['Get_version']
     jobs:
       - job: Linux_x86_64
         pool:
@@ -28,10 +54,16 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
               cargo build --release
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/
+              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
             workingDirectory: jetsocat
 
@@ -54,6 +86,11 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - task: DownloadSecureFile@1
             inputs:
               secureFile: CodeSigningCertificateUnsecure.pfx
@@ -71,15 +108,18 @@ stages:
             displayName: Import signing certificate
 
           - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
               cargo build --release
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat.exe
+              cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Building jetsocat
             workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
-          - powershell: signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat.exe
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
@@ -101,6 +141,11 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - task: DownloadSecureFile@1
             inputs:
               secureFile: CodeSigningCertificateUnsecure.pfx
@@ -118,15 +163,18 @@ stages:
             displayName: Import signing certificate
 
           - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
               cargo build --release --target=i686-pc-windows-msvc
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86
-              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat.exe
+              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Building jetsocat
             workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
-          - powershell: signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat.exe
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
@@ -146,10 +194,16 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
               cargo build --release
               mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat
+              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
             workingDirectory: jetsocat
 
@@ -159,7 +213,7 @@ stages:
               artifactName: jetsocat
 
   - stage: 'Devolutions_Gateway'
-    dependsOn: []
+    dependsOn: ['Get_version']
     jobs:
       - job: Linux_64_bit
         pool:
@@ -175,7 +229,14 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+
               echo "Check formatting"
               cargo fmt --all -- --check
               if ! [ $? -eq 0 ] ; then
@@ -187,7 +248,7 @@ stages:
               . activate.sh
               cargo build --release
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
             displayName: Building devolutions-gateway
 
           - task: PublishBuildArtifacts@1
@@ -209,6 +270,11 @@ stages:
             clean: true
             fetchDepth: 1
 
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
           - task: DownloadSecureFile@1
             inputs:
               secureFile: CodeSigningCertificateUnsecure.pfx
@@ -226,16 +292,19 @@ stages:
             displayName: Import signing certificate
 
           - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
               .\activate.ps1
               cargo build --release
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway.exe
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
             displayName: Building devolutions-gateway
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
-          - powershell: signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway.exe
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
