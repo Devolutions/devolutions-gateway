@@ -160,12 +160,12 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
-        .flag(Flag::new("no-log", FlagType::Bool).description("Disable logging"))
+        .flag(Flag::new("log-term", FlagType::Bool).description("Disable logging"))
 }
 
 enum Logging {
-    Disabled,
-    Enabled { filepath: PathBuf },
+    Term,
+    File { filepath: PathBuf },
 }
 
 struct CommonArgs {
@@ -177,11 +177,11 @@ impl CommonArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let addr = c.args.first().context("Address is missing")?.clone();
 
-        let logging = if c.bool_flag("no-log") {
-            Logging::Disabled
+        let logging = if c.bool_flag("log-term") {
+            Logging::Term
         } else if let Ok(filepath) = c.string_flag("log-file") {
             let filepath = PathBuf::from(filepath);
-            Logging::Enabled { filepath }
+            Logging::File { filepath }
         } else if let Some(mut filepath) = dirs::data_dir() {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now()
@@ -191,10 +191,10 @@ impl CommonArgs {
             std::fs::create_dir_all(&filepath).context("couldn't create jetsocat folder")?;
             filepath.push(format!("{}_{}", action, now.as_secs()));
             filepath.set_extension("log");
-            Logging::Enabled { filepath }
+            Logging::File { filepath }
         } else {
             eprintln!("Couldn't retrieve data directory for log files. Enabling --no-log flag implicitly.");
-            Logging::Disabled
+            Logging::Term
         };
 
         Ok(Self { addr, logging })
@@ -240,12 +240,12 @@ fn setup_logger(logging: Logging) -> slog::Logger {
     use std::panic;
 
     let drain = match logging {
-        Logging::Disabled => {
+        Logging::Term => {
             let decorator = slog_term::TermDecorator::new().build();
             let drain = slog_term::CompactFormat::new(decorator).build().fuse();
             slog_async::Async::new(drain).build().fuse()
         }
-        Logging::Enabled { filepath } => {
+        Logging::File { filepath } => {
             let file = OpenOptions::new()
                 .create(true)
                 .write(true)
