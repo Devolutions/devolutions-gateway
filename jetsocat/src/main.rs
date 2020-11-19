@@ -48,6 +48,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) -> anyhow:
         .context("runtime build failed")?;
     rt.block_on(f)?;
     info!(log, "Terminated successfuly");
+    rt.shutdown_timeout(std::time::Duration::from_millis(100)); // just to be safe
     Ok(())
 }
 
