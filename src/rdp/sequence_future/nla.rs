@@ -39,14 +39,15 @@ use crate::{
 type TsRequestFutureTransport = Framed<TlsStream<TcpStream>, TsRequestTransport>;
 type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUserAuthResultTransport>;
 type EarlyClientUserAuthResultFuture =
-    Box<dyn Future<Output = Result<EarlyUserAuthResultFutureTransport, io::Error>> + 'static>;
+    Box<dyn Future<Output = Result<EarlyUserAuthResultFutureTransport, io::Error>> + Send + 'static>;
 type EarlyServerUserAuthResultFuture = Box<
     dyn Future<
             Output = (
                 Option<Result<EarlyUserAuthResult, io::Error>>,
                 EarlyUserAuthResultFutureTransport,
             ),
-        > + 'static,
+        > + Send
+        + 'static,
 >;
 type NlaWithClientFutureT =
     Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;

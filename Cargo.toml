@@ -19,7 +19,7 @@ url = "1.7.1"
 url_serde = "0.2.0"
 hostname = "^0.3"
 lazy_static = "1.2.0"
-tokio = { version = "0.3", features = ["signal", "net", "io-util", "time", "rt", "sync"] }
+tokio = { version = "0.3", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync"] }
 tokio-util = { version = "0.4", features = ["codec"] }
 tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite", rev = "3c6d4280d77fdff3e25f68ad703d94e89f38dae2", features = [ "tls" ] }
 tokio-compat-02 = "0.1"

@@ -393,13 +393,11 @@ type NegotiationWithClientT = Pin<
         SequenceFuture<'static, NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>,
     >,
 >;
-
 type NlaWithClientT = Pin<Box<NlaWithClientFuture>>;
-type ConnectToServerT = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>>>>;
+type ConnectToServerT = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
 type NegotiationWithServerT = Pin<
     Box<SequenceFuture<'static, NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>,
 >;
-
 type NlaWithServerT = Pin<Box<NlaWithServerFuture>>;
 type McsInitialT = Pin<Box<SequenceFuture<'static, McsInitialFuture, TlsStream<TcpStream>, DataTransport, BytesMut>>>;
 type McsT = Pin<Box<SequenceFuture<'static, McsFuture, TlsStream<TcpStream>, McsTransport, ironrdp::McsPdu>>>;

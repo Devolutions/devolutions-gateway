@@ -17,7 +17,7 @@ use tokio::{
     net::TcpStream,
 };
 use tokio_compat_02::IoCompat;
-use tokio_rustls::{client::TlsStream, rustls, TlsConnector};
+use tokio_rustls::{rustls, TlsConnector, TlsStream};
 use tokio_tungstenite::{
     tungstenite::{self, handshake::client::Request, protocol::Role},
     WebSocketStream,
@@ -326,7 +326,7 @@ impl WsTransport {
                 let tls_stream = cx.connect(dns_name, tcp_stream).await?;
                 let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
 
-                match tokio_tungstenite::client_async(request, tls_stream).await {
+                match tokio_tungstenite::client_async(request, TlsStream::Client(tls_stream)).await {
                     Ok((stream, _)) => Ok(WsTransport::new_tls(stream, peer_addr)),
                     Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
                 }

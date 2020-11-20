@@ -250,9 +250,12 @@ impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'st
 // Now in tokio 0.3.3 TcpListener::incoming() is temporary removed and will be returned in one of the next patches.
 // The next struct is created in purpose to fill the gap.
 // When incoming() will be returned, the Incoming struct should be replaced with the same from tokio
+
+type AcceptType<'a> = Option<Pin<Box<dyn Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send + Sync + 'a>>>;
+
 pub struct Incoming<'a> {
     pub listener: &'a TcpListener,
-    pub accept: Option<Pin<Box<dyn Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send + Sync + 'a>>>,
+    pub accept: AcceptType<'a>,
 }
 
 impl Stream for Incoming<'_> {
