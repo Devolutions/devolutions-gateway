@@ -62,6 +62,7 @@ stages:
           - script: |
               VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
               cargo build --release
+              strip -s target/release/jetsocat
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
@@ -202,6 +203,7 @@ stages:
           - script: |
               VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
               cargo build --release
+              strip target/release/jetsocat
               mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
