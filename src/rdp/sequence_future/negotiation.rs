@@ -21,7 +21,7 @@ impl NegotiationWithClientFuture {
     }
 }
 
-impl SequenceFutureProperties<'_, TcpStream, NegotiationWithClientTransport, Response> for NegotiationWithClientFuture {
+impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport, Response> for NegotiationWithClientFuture {
     type Item = (Framed<TcpStream, NegotiationWithClientTransport>, Request, Response);
 
     fn process_pdu(&mut self, request: Request) -> io::Result<Option<Response>> {
@@ -110,7 +110,7 @@ impl NegotiationWithServerFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TcpStream, NegotiationWithServerTransport, Request>
+impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport, Request>
     for NegotiationWithServerFuture
 {
     type Item = (Framed<TcpStream, NegotiationWithServerTransport>, Response);

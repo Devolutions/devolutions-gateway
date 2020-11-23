@@ -26,7 +26,7 @@ impl Finalization {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, RdpTransport, RdpPdu> for Finalization {
+impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport, RdpPdu> for Finalization {
     type Item = (FinalizationTransport, FinalizationTransport);
 
     fn process_pdu(&mut self, rdp_pdu: RdpPdu) -> io::Result<Option<RdpPdu>> {

@@ -26,13 +26,13 @@ use futures::{ready, Future, SinkExt, Stream};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
-type SendFuture<'a, T, U> = Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + Send + 'a>;
+type SendFuture<T, U> = Box<dyn Future<Output = Result<Framed<T, U>, io::Error>> + Send + 'static>;
 
-pub trait SequenceFutureProperties<'a, T, U, R>
+pub trait SequenceFutureProperties<T, U, R>
 where
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
-    U: Decoder + Encoder<R> + Send + Unpin + 'a,
-    R: 'a,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    U: Decoder + Encoder<R> + Send + Unpin + 'static,
+    R: 'static,
 {
     type Item;
 
@@ -43,32 +43,32 @@ where
     fn sequence_finished(&self, future_state: FutureState) -> bool;
 }
 
-pub struct SequenceFuture<'a, F, T, U, R>
+pub struct SequenceFuture<F, T, U, R>
 where
-    F: SequenceFutureProperties<'a, T, U, R> + Send + Unpin,
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
-    U: Decoder + Encoder<R> + Send + Unpin + 'a,
-    R: Send + Unpin + 'a,
-    <U as Decoder>::Item: Send + Unpin + 'a,
+    F: SequenceFutureProperties<T, U, R> + Send + Unpin,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    U: Decoder + Encoder<R> + Send + Unpin + 'static,
+    R: Send + Unpin + 'static,
+    <U as Decoder>::Item: Send + Unpin + 'static,
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder<R>>::Error>,
 {
     future: F,
     client: Option<Framed<T, U>>,
     server: Option<Framed<T, U>>,
-    send_future: Option<Pin<SendFuture<'a, T, U>>>,
+    send_future: Option<Pin<SendFuture<T, U>>>,
     pdu: Option<<U as Decoder>::Item>,
     future_state: FutureState,
     phantom_data: PhantomData<R>,
 }
 
-impl<'a, F, T, U, R> SequenceFuture<'a, F, T, U, R>
+impl<F, T, U, R> SequenceFuture<F, T, U, R>
 where
-    F: SequenceFutureProperties<'a, T, U, R> + Send + Unpin + 'a,
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
-    U: Decoder + Encoder<R> + Send + Unpin + 'a,
-    R: Send + Unpin + 'a,
-    <U as Decoder>::Item: Send + Unpin + 'a,
+    F: SequenceFutureProperties<T, U, R> + Send + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    U: Decoder + Encoder<R> + Send + Unpin + 'static,
+    R: Send + Unpin + 'static,
+    <U as Decoder>::Item: Send + Unpin + 'static,
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder<R>>::Error>,
 {
@@ -96,7 +96,7 @@ where
         }
     }
 
-    pub fn with_send_state(future: F, args: SendStateArgs<'a, T, U, R>) -> Self {
+    pub fn with_send_state(future: F, args: SendStateArgs<T, U, R>) -> Self {
         Self {
             future,
             client: None,
@@ -129,13 +129,13 @@ where
     }
 }
 
-impl<'a, F, T, U, R> Future for SequenceFuture<'a, F, T, U, R>
+impl<F, T, U, R> Future for SequenceFuture<F, T, U, R>
 where
-    F: SequenceFutureProperties<'a, T, U, R> + Send + Unpin + 'a,
-    T: AsyncRead + AsyncWrite + Send + Unpin + 'a,
-    U: Decoder + Encoder<R> + Send + Unpin + 'a,
-    <U as Decoder>::Item: Send + Unpin + 'a,
-    R: Send + Unpin + 'a,
+    F: SequenceFutureProperties<T, U, R> + Send + Unpin + 'static,
+    T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    U: Decoder + Encoder<R> + Send + Unpin + 'static,
+    <U as Decoder>::Item: Send + Unpin + 'static,
+    R: Send + Unpin + 'static,
     io::Error: From<<U as Decoder>::Error>,
     io::Error: From<<U as Encoder<R>>::Error>,
 {
@@ -262,11 +262,11 @@ where
     pub phantom_data: PhantomData<P>,
 }
 
-pub struct SendStateArgs<'a, T, U, P>
+pub struct SendStateArgs<T, U, P>
 where
     T: AsyncRead + AsyncWrite + Send + Unpin,
     U: Decoder + Encoder<P> + Send + Unpin,
 {
-    pub send_future: Pin<SendFuture<'a, T, U>>,
+    pub send_future: Pin<SendFuture<T, U>>,
     pub phantom_data: PhantomData<P>,
 }

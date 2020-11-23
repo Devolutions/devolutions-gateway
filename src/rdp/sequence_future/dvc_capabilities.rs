@@ -23,12 +23,12 @@ use crate::{
 
 type DvcCapabilitiesTransport = Framed<TlsStream<TcpStream>, RdpTransport>;
 
-pub fn create_downgrade_dvc_capabilities_future<'a>(
+pub fn create_downgrade_dvc_capabilities_future(
     client_transport: Framed<TlsStream<TcpStream>, RdpTransport>,
     server_transport: Framed<TlsStream<TcpStream>, RdpTransport>,
     drdynvc_channel_id: u16,
     dvc_manager: DvcManager,
-) -> SequenceFuture<'a, DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport, RdpPdu> {
+) -> SequenceFuture<DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport, RdpPdu> {
     SequenceFuture::with_get_state(
         DowngradeDvcCapabilitiesFuture::new(drdynvc_channel_id, dvc_manager),
         GetStateArgs {
@@ -55,7 +55,7 @@ impl DowngradeDvcCapabilitiesFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, RdpTransport, RdpPdu> for DowngradeDvcCapabilitiesFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport, RdpPdu> for DowngradeDvcCapabilitiesFuture {
     type Item = (DvcCapabilitiesTransport, DvcCapabilitiesTransport, DvcManager);
 
     fn process_pdu(&mut self, rdp_pdu: RdpPdu) -> io::Result<Option<RdpPdu>> {

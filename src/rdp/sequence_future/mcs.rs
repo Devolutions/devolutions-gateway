@@ -39,7 +39,7 @@ impl McsFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, McsTransport, McsPdu> for McsFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, McsTransport, McsPdu> for McsFuture {
     type Item = (McsFutureTransport, McsFutureTransport, StaticChannels);
 
     fn process_pdu(&mut self, mcs_pdu: McsPdu) -> io::Result<Option<McsPdu>> {
@@ -177,7 +177,7 @@ impl McsInitialFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, DataTransport, BytesMut> for McsInitialFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, DataTransport, BytesMut> for McsInitialFuture {
     type Item = (X224FutureTransport, X224FutureTransport, FilterConfig, StaticChannels);
 
     fn process_pdu(&mut self, data: BytesMut) -> io::Result<Option<BytesMut>> {

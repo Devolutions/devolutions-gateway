@@ -50,9 +50,9 @@ type EarlyServerUserAuthResultFuture = Box<
         + 'static,
 >;
 type NlaWithClientFutureT =
-    Pin<Box<SequenceFuture<'static, CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
+    Pin<Box<SequenceFuture<CredSspWithClientFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
 type CredSspWithServerFutureT =
-    Pin<Box<SequenceFuture<'static, CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
+    Pin<Box<SequenceFuture<CredSspWithServerFuture, TlsStream<TcpStream>, TsRequestTransport, TsRequest>>>;
 
 pub enum NlaTransport {
     TsRequest(TsRequestFutureTransport),
@@ -279,7 +279,7 @@ impl CredSspWithClientFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, TsRequestTransport, TsRequest> for CredSspWithClientFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport, TsRequest> for CredSspWithClientFuture {
     type Item = TsRequestFutureTransport;
 
     fn process_pdu(&mut self, pdu: TsRequest) -> io::Result<Option<TsRequest>> {
@@ -379,7 +379,7 @@ impl CredSspWithServerFuture {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, TsRequestTransport, TsRequest> for CredSspWithServerFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, TsRequestTransport, TsRequest> for CredSspWithServerFuture {
     type Item = TsRequestFutureTransport;
 
     fn process_pdu(&mut self, pdu: TsRequest) -> io::Result<Option<TsRequest>> {

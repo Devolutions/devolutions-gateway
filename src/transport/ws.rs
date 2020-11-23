@@ -31,7 +31,6 @@ enum WsStreamSendState {
 
 pub struct WsStream {
     inner: WsStreamWrapper,
-    // TODO: transform to state enum
     previous_message: Option<Cursor<Vec<u8>>>,
     previous_send_state: WsStreamSendState,
 }

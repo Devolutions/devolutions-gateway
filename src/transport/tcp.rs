@@ -171,7 +171,6 @@ impl TcpTransport {
 
 impl Transport for TcpTransport {
     fn connect(addr: &Url) -> JetFuture<Self> {
-        // TODO: figure out how to do that without cloning
         Box::pin(Self::create_connect_impl_future(addr.clone()))
     }
 

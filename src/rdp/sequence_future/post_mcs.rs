@@ -45,7 +45,7 @@ impl PostMcs {
     }
 }
 
-impl<'a> SequenceFutureProperties<'a, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>
+impl SequenceFutureProperties<TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>
     for PostMcs
 {
     type Item = (PostMcsFutureTransport, PostMcsFutureTransport, FilterConfig);
