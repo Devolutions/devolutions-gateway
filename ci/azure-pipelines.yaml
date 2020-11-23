@@ -1,4 +1,4 @@
-name: $(BuildID)
+name: devolutions-gateway-$(Rev:rr)
 
 trigger:
   branches:
@@ -6,69 +6,310 @@ trigger:
       - master
 
 variables:
-  openssl_version: 1.1.1b-5
+  - group: wayknow
+  - name: openssl_version
+    value: 1.1.1b-5
 
-jobs:
-  - job: linux64
-    pool:
-      name: 'Devolutions - Linux containers'
+stages:
+  - stage: Get_version
+    jobs:
+      - job: Extract_version
+        pool:
+          name: 'Devolutions - Linux containers'
 
-    workspace:
-      clean: all
+        workspace:
+          clean: all
 
-    container: devolutions/waykbuilder:linux
+        container: devolutions/toolbox:latest
 
-    steps:
-      - checkout: self
-        clean: true
-        fetchDepth: 1
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
 
-      - script: |
-          echo "Check formatting"
-          cargo fmt --all -- --check
-          if ! [ $? -eq 0 ] ; then
-              echo "Bad formatting, please run 'cargo +stable fmt --all'"
-              exit 1
-          fi
+          - script: |
+              VERSION=$(toml get Cargo.toml package.version | tr -d '"')
+              echo ${VERSION} > VERSION
+            displayName: Get version
+          
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: VERSION
+              artifactName: version
 
-          conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
-          . activate.sh
-          cargo build --release
-          mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-          cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/
-        displayName: Building devolutions-gateway
+  - stage: jetsocat
+    dependsOn: ['Get_version']
+    jobs:
+      - job: Linux_x86_64
+        pool:
+          name: 'Devolutions - Linux containers'
 
-      - task: PublishBuildArtifacts@1
-        inputs:
-          pathToPublish: $(Build.ArtifactStagingDirectory)
-          artifactName: devolutions-gateway
+        workspace:
+          clean: all
 
-  - job: windows64
-    pool:
-      name: 'Devolutions - Windows containers'
+        container: devolutions/waykbuilder:linux
 
-    workspace:
-      clean: all
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
 
-    container: devolutions/waykbuilder:vstools2k19
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
 
-    steps:
-      - checkout: self
-        clean: true
-        fetchDepth: 1
+          - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+              cargo build --release
+              strip -s target/release/jetsocat
+              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
+              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
+            displayName: Building jetsocat
+            workingDirectory: jetsocat
 
-      - powershell: |
-          conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
-          .\activate.ps1
-          cargo build --release
-          mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-          cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/
-        displayName: Building devolutions-gateway
-        env:
-          RUSTFLAGS: '-C target-feature=+crt-static'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: jetsocat
 
-      - task: PublishBuildArtifacts@1
-        inputs:
-          pathToPublish: $(Build.ArtifactStagingDirectory)
-          artifactName: devolutions-gateway
+      - job: Windows_x86_64
+        pool:
+          name: 'Devolutions - Windows containers'
 
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+            displayName: Import signing certificate
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              cargo build --release
+              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
+              cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+            displayName: Building jetsocat
+            workingDirectory: jetsocat
+            env:
+              RUSTFLAGS: '-C target-feature=+crt-static'
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+            displayName: Signing binary
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: jetsocat
+
+      - job: Windows_x86
+        pool:
+          name: 'Devolutions - Windows containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+            displayName: Import signing certificate
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              cargo build --release --target=i686-pc-windows-msvc
+              mkdir $(Build.ArtifactStagingDirectory)/windows/x86
+              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+            displayName: Building jetsocat
+            workingDirectory: jetsocat
+            env:
+              RUSTFLAGS: '-C target-feature=+crt-static'
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+            displayName: Signing binary
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: jetsocat
+
+      - job: Macos_x86_64
+        pool:
+          name: 'Devolutions - macOS'
+
+        workspace:
+          clean: all
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
+          - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+              cargo build --release
+              strip target/release/jetsocat
+              mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
+              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
+            displayName: Building jetsocat
+            workingDirectory: jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: jetsocat
+
+  - stage: 'Devolutions_Gateway'
+    dependsOn: ['Get_version']
+    jobs:
+      - job: Linux_64_bit
+        pool:
+          name: 'Devolutions - Linux containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:linux
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
+          - script: |
+              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+
+              echo "Check formatting"
+              cargo fmt --all -- --check
+              if ! [ $? -eq 0 ] ; then
+                  echo "Bad formatting, please run 'cargo +stable fmt --all'"
+                  exit 1
+              fi
+
+              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
+              . activate.sh
+              cargo build --release
+              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
+            displayName: Building devolutions-gateway
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: devolutions-gateway
+
+      - job: Windows_64_bit
+        pool:
+          name: 'Devolutions - Windows containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadBuildArtifacts@0
+            inputs:
+              artifactName: version
+              downloadPath: $(Agent.BuildDirectory)
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+            displayName: Import signing certificate
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
+              .\activate.ps1
+              cargo build --release
+              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+            displayName: Building devolutions-gateway
+            env:
+              RUSTFLAGS: '-C target-feature=+crt-static'
+
+          - powershell: |
+              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+            displayName: Signing binary
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.ArtifactStagingDirectory)
+              artifactName: devolutions-gateway
