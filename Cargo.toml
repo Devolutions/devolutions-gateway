@@ -60,6 +60,11 @@ git = "https://github.com/tokio-rs/tls.git"
 rev = "a517e1d0a636359c4e54b0735d7f4e73b786d2c0"
 features = ["dangerous_configuration"]
 
+[patch.crates-io.rustls]
+git = "https://github.com/Devolutions/rustls.git"
+branch = "v0.18.1-patched"
+features = ["dangerous_configuration"]
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
 

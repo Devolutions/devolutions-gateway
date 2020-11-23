@@ -151,7 +151,6 @@ impl TcpTransport {
                     .dangerous()
                     .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
                 let config_ref = Arc::new(client_config);
-                // todo: update rustls repo
                 let tls_connector = TlsConnector::from(config_ref);
                 let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
 
