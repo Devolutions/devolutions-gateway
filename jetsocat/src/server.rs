@@ -27,7 +27,7 @@ pub async fn listen(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()
     debug!(listen_log, "Ready to accept");
 
     let (socket, peer_addr) = listener.accept().await?;
-    let peer_log = listen_log.new(o!("peer" => peer_addr.clone()));
+    let peer_log = listen_log.new(o!("peer" => peer_addr));
     debug!(peer_log, "Connected to {}", peer_addr);
 
     let ws_stream = accept_async(socket).await?;
