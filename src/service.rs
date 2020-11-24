@@ -32,7 +32,7 @@ use crate::{
     rdp::RdpClient,
     routing_client::Client,
     transport::{tcp::TcpTransport, ws::WsTransport, JetTransport},
-    utils::{default_port, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming},
+    utils::{get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming},
     websocket_client::{WebsocketService, WsClient},
 };
 
@@ -72,17 +72,14 @@ impl GatewayService {
         })
     }
 
-    #[allow(dead_code)]
     pub fn get_service_name(&self) -> &str {
         self.config.service_name.as_str()
     }
 
-    #[allow(dead_code)]
     pub fn get_display_name(&self) -> &str {
         self.config.display_name.as_str()
     }
 
-    #[allow(dead_code)]
     pub fn get_description(&self) -> &str {
         self.config.description.as_str()
     }
@@ -243,7 +240,10 @@ async fn start_tcp_server(
     info!("Starting TCP jet server...");
 
     let socket_addr = url
-        .with_default_port(default_port)
+        .with_default_port(|_| match url.scheme() {
+            "tcp" => Ok(8080),
+            _ => Err(()),
+        })
         .expect("invalid URL")
         .to_socket_addrs()
         .unwrap()

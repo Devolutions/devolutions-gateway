@@ -275,10 +275,3 @@ impl Stream for Incoming<'_> {
         }
     }
 }
-
-pub fn default_port(url: &Url) -> Result<u16, ()> {
-    match url.scheme() {
-        "tcp" => Ok(8080),
-        _ => Err(()),
-    }
-}

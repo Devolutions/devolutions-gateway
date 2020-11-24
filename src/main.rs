@@ -1,18 +1,14 @@
-mod config;
-//mod service;
+use devolutions_gateway::{config::Config, service::GatewayService};
 
-use ceviche::{controller::*, Service, ServiceEvent};
-use config::Config;
-// use service::GatewayService;
+use ceviche::{
+    controller::{dispatch, Controller},
+    Service, ServiceEvent,
+};
 use slog_scope::info;
 use std::sync::mpsc;
 
-/*
-
-#[allow(dead_code)]
 enum GatewayServiceEvent {}
 
-#[allow(dead_code)]
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
@@ -44,7 +40,8 @@ fn gateway_service_main(
 
 Service!("gateway", gateway_service_main);
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), String> {
     let config = Config::init();
 
     if !config.service_mode {
@@ -53,11 +50,7 @@ fn main() {
         service.start();
 
         // future waiting for some stop signals (CTRL-C…)
-        let signals_fut = build_signals_fut();
-        let mut runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
-        runtime
-            .block_on(signals_fut)
-            .expect("couldn't block waiting for signals");
+        let _ = build_signals_fut().await?;
 
         service.stop();
     } else {
@@ -69,29 +62,35 @@ fn main() {
 
         controller
             .register(service_main_wrapper)
-            .expect("failed to register service");
+            .map_err(|err| format!("failed to register service - {}", err))?;
     }
+    Ok(())
 }
 
 #[cfg(unix)]
-fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
-    use tokio_signal::unix::{Signal, SIGINT, SIGQUIT, SIGTERM};
+async fn build_signals_fut() -> Result<(), String> {
+    use tokio::signal::unix::{signal, SignalKind};
 
-    let fut = futures::future::select_all(vec![
-        Signal::new(SIGTERM).flatten_stream().into_future(),
-        Signal::new(SIGQUIT).flatten_stream().into_future(),
-        Signal::new(SIGINT).flatten_stream().into_future(),
-    ]);
+    let mut terminate_signal =
+        signal(SignalKind::terminate()).map_err(|err| format!("creating  terminate signal stream failed - {}", err))?;
+    let mut quit_signal =
+        signal(SignalKind::quit()).map_err(|err| format!("creating quit signal stream failed - {}", err))?;
+    let mut interrupt_signal =
+        signal(SignalKind::interrupt()).map_err(|err| format!("creating interrupt signal stream failed - {}", err))?;
 
-    Box::new(fut.map(|_| ()).map_err(|_| ()))
+    futures::future::select_all(vec![
+        Box::pin(terminate_signal.recv()),
+        Box::pin(quit_signal.recv()),
+        Box::pin(interrupt_signal.recv()),
+    ])
+    .await;
+
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn build_signals_fut() -> Box<dyn Future<Item = (), Error = ()> + Send> {
-    let fut = futures::future::select_all(vec![tokio_signal::ctrl_c().flatten_stream().into_future()]);
-    Box::new(fut.map(|_| ()).map_err(|_| ()))
-}
- */
-pub fn main() {
-    panic!("Not implemented!");
+async fn build_signals_fut() -> Result<(), ()> {
+    tokio::signal::ctrl_c()
+        .await
+        .map_err(|err| format!("CTRL_C signal error - {:?}", err))?
 }

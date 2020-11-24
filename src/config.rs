@@ -712,11 +712,7 @@ impl Config {
 
         let http_listeners: Vec<ListenerConfig> = listeners
             .iter()
-            .filter(|listener| match listener.internal_url.scheme() {
-                "http" => true,
-                "https" => true,
-                _ => false,
-            })
+            .filter(|listener| matches!(listener.internal_url.scheme(), "http" | "https"))
             .cloned()
             .collect();
 
