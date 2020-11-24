@@ -89,7 +89,7 @@ async fn build_signals_fut() -> Result<(), String> {
 }
 
 #[cfg(not(unix))]
-async fn build_signals_fut() -> Result<(), ()> {
+async fn build_signals_fut() -> Result<(), String> {
     tokio::signal::ctrl_c()
         .await
         .map_err(|err| format!("CTRL_C signal error - {:?}", err))?
