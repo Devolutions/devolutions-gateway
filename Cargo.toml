@@ -20,6 +20,7 @@ url_serde = "0.2.0"
 hostname = "^0.3"
 lazy_static = "1.2.0"
 tokio = { version = "0.3.4", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
+tokio_02 = {version = "0.2", package = "tokio", features = ["rt-core", "time"]}
 tokio-util = { version = "0.4", features = ["codec"] }
 tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite", rev = "3c6d4280d77fdff3e25f68ad703d94e89f38dae2", features = [ "tls" ] }
 tokio-compat-02 = "0.1"
@@ -31,7 +32,7 @@ bytes = "0.5"
 uuid = { version = "0.7.1", features = ["v4", "serde"] }
 pcap-file = "0.10.0"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
-saphir = { version = "2.7", default-features = false, features = ["https", "json", "macro", "form"] }
+saphir = { version = "=2.7", default-features = false, features = ["https", "json", "macro", "form"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"

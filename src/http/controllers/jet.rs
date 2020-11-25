@@ -1,4 +1,5 @@
 use jet_proto::JET_VERSION_V2;
+
 use saphir::{
     controller::Controller,
     http::{header, Method, StatusCode},
@@ -7,6 +8,7 @@ use saphir::{
 };
 use slog_scope::info;
 use std::sync::Arc;
+use tokio_02::runtime::Handle;
 use uuid::Uuid;
 
 use crate::{
@@ -96,7 +98,7 @@ impl JetController {
         let mut jet_associations = self.jet_associations.lock().await;
 
         jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-        start_remove_association_future(self.jet_associations.clone(), association_id);
+        start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
         (StatusCode::OK.as_u16(), ())
     }
@@ -136,9 +138,8 @@ impl JetController {
 
         if !jet_associations.contains_key(&association_id) {
             jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-            start_remove_association_future(self.jet_associations.clone(), association_id);
+            start_remove_association_future(self.jet_associations.clone(), association_id).await;
         }
-
         let association = jet_associations
             .get_mut(&association_id)
             .expect("presence is checked above");
@@ -163,18 +164,21 @@ impl JetController {
     }
 }
 
-pub fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
-    tokio::spawn(remove_association(jet_associations, uuid));
+pub async fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
+    remove_association(jet_associations, uuid).await;
 }
 
 pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
-    tokio::time::sleep(ACCEPT_REQUEST_TIMEOUT).await;
-    if RemoveAssociation::new(jet_associations, uuid, None).await {
-        info!(
-            "No connect request received with association {}. Association removed!",
-            uuid
-        );
-    }
+    let runtime_handle = Handle::try_current().expect("Tokio 0.2 runtime should be running");
+    runtime_handle.spawn(async move {
+        tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
+        if RemoveAssociation::new(jet_associations, uuid, None).await {
+            info!(
+                "No connect request received with association {}. Association removed!",
+                uuid
+            );
+        }
+    });
 }
 
 fn validate_session_token(config: &Config, req: &Request) -> Result<Uuid, String> {

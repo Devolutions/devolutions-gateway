@@ -6,16 +6,18 @@ use crate::{
     },
     jet_client::JetAssociationsMap,
 };
+
 use saphir::{
     error::SaphirError,
     server::{Server as SaphirServer, SslConfig},
 };
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
-use tokio::task::JoinHandle;
+use tokio_02::{runtime::Runtime, task::JoinHandle};
 
 pub struct HttpServer {
     pub server: Mutex<Option<SaphirServer>>,
+    server_runtime: Option<Runtime>,
     server_handle: Mutex<Option<JoinHandle<Result<(), SaphirError>>>>,
 }
 
@@ -50,11 +52,12 @@ impl HttpServer {
                 router.controller(health).controller(jet).controller(session)
             })
             .configure_listener(|listener| {
-                let server_name = &config
-                    .api_listener
-                    .host_str()
-                    .expect("API listener should be specified");
-                let listener_config = listener.server_name(server_name);
+                let listener_host = config.api_listener.host().expect("API listener should be specified");
+
+                let listener_port = config.api_listener.port().unwrap_or(8080);
+                let interface = format!("{}:{}", listener_host, listener_port);
+
+                let listener_config = listener.interface(&interface).server_name("Saphir Server");
 
                 let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
                     Some(SslConfig::FilePath(cert_path.into()))
@@ -79,9 +82,10 @@ impl HttpServer {
                 }
             })
             .build();
-
+        let runtime = Runtime::new().expect("failed to create runtime for HTTP server");
         HttpServer {
             server: Mutex::new(Some(http_server)),
+            server_runtime: Some(runtime),
             server_handle: Mutex::new(None),
         }
     }
@@ -91,13 +95,17 @@ impl HttpServer {
             let mut guard = self.server.lock().unwrap();
             guard.take().expect("Start server can't be called twice")
         };
+        let server_runtime = self
+            .server_runtime
+            .as_ref()
+            .expect("Runtime must be present on start of HTTP server");
         let mut handle = self.server_handle.lock().unwrap();
-        handle.replace(tokio::spawn(server.run()));
+        handle.replace(server_runtime.spawn(server.run()));
     }
 
     pub fn stop(&self) {
         if let Some(handle) = self.server_handle.lock().unwrap().take() {
-            handle.abort();
+            std::mem::drop(handle)
         }
     }
 }

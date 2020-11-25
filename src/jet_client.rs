@@ -393,35 +393,16 @@ impl Future for HandleConnectJetMsg {
     type Output = Result<HandleConnectJetMsgResponse, io::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let (
+        let Self {
             jet_associations,
             request_msg,
             server_transport,
             association_id,
             candidate_id,
             client_transport,
-            mut response_msg,
-        ) = match self.deref_mut() {
-            Self {
-                jet_associations,
-                request_msg,
-                server_transport,
-                association_id,
-                candidate_id,
-                client_transport,
-                response_msg,
-                ..
-            } => (
-                jet_associations,
-                request_msg,
-                server_transport,
-                association_id,
-                candidate_id,
-                client_transport,
-                response_msg,
-            ),
-        };
-
+            response_msg,
+        } = self.deref_mut();
+        let mut response_msg: &mut Vec<u8> = response_msg;
         // Find the server transport
         if server_transport.is_none() {
             if let Ok(mut jet_associations) = jet_associations.try_lock() {

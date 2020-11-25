@@ -278,9 +278,12 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let peer_addr = &self.peer_addr_str;
 
-        let mut stream = self.stream.borrow_mut();
         let mut buffer = self.buffer.borrow_mut();
         let mut bytes_to_write = self.bytes_to_write.borrow_mut();
+        let mut stream = self.stream.borrow_mut();
+
+        *bytes_to_write = buffer.valid().len();
+
         trace!("{} bytes to write on {}", *bytes_to_write, peer_addr);
 
         loop {

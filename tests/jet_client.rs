@@ -58,9 +58,9 @@ fn smoke_tcp_v1() {
                                 let response = JetMessage::read_accept_response(&mut slice).unwrap();
                                 match response {
                                     JetMessage::JetAcceptRsp(rsp) => {
-                                        assert!(rsp.status_code == 200);
-                                        assert!(rsp.association != Uuid::nil());
-                                        assert!(rsp.version == 1);
+                                        assert_eq!(rsp.status_code, 200);
+                                        assert_ne!(rsp.association, Uuid::nil());
+                                        assert_eq!(rsp.version, 1);
                                         sender_uuid.send(rsp.association).unwrap();
                                     }
                                     _ => {
@@ -130,8 +130,8 @@ fn smoke_tcp_v1() {
                                 let response = JetMessage::read_connect_response(&mut slice).unwrap();
                                 match response {
                                     JetMessage::JetConnectRsp(rsp) => {
-                                        assert!(rsp.status_code == 200);
-                                        assert!(rsp.version == 1);
+                                        assert_eq!(rsp.status_code, 200);
+                                        assert_eq!(rsp.version, 1);
                                     }
                                     _ => {
                                         panic!("Wrong message type received");
@@ -183,9 +183,11 @@ fn smoke_tcp_v1() {
 fn smoke_tcp_v2() {
     let proxy_addr = PROXY_ADDR;
 
-    //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, None, None, None);
+    // Wait for the previous test free addresses
+    thread::sleep(Duration::from_secs(5));
 
+    // Spawn our proxy and wait for it to come online
+    let _proxy = run_proxy(proxy_addr, None, None, None);
     let (sender_synchro, receiver_synchro) = channel();
     let (sender_end, receiver_end) = channel();
 
@@ -194,16 +196,16 @@ fn smoke_tcp_v2() {
     let client = Client::new();
     let url = HTTP_URL.parse::<Url>().unwrap();
     let create_url = url.join(&format!("/jet/association/{}", association_id)).unwrap();
-    assert!(client.post(create_url).send().unwrap().status() == StatusCode::OK);
+    assert_eq!(client.post(create_url).send().unwrap().status(), StatusCode::OK);
 
     // Candidate gathering
     let gather_url = url
         .join(&format!("/jet/association/{}/candidates", association_id))
         .unwrap();
     let mut result = client.post(gather_url).send().unwrap();
-    assert!(result.status() == StatusCode::OK);
+    assert_eq!(result.status(), StatusCode::OK);
     let association_info: AssociationInfo = result.json().unwrap();
-    assert!(Uuid::from_str(&association_info.id).unwrap() == association_id);
+    assert_eq!(Uuid::from_str(&association_info.id).unwrap(), association_id);
 
     let mut candidate_id_opt = None;
     for candidate in &association_info.candidates {
@@ -240,9 +242,9 @@ fn smoke_tcp_v2() {
                                 let response = JetMessage::read_accept_response(&mut slice).unwrap();
                                 match response {
                                     JetMessage::JetAcceptRsp(rsp) => {
-                                        assert!(rsp.status_code == 200);
-                                        assert!(rsp.association == Uuid::nil());
-                                        assert!(rsp.version == 2);
+                                        assert_eq!(rsp.status_code, 200);
+                                        assert_eq!(rsp.association, Uuid::nil());
+                                        assert_eq!(rsp.version, 2);
                                         sender_synchro.send(()).unwrap();
                                     }
                                     _ => {
@@ -312,8 +314,8 @@ fn smoke_tcp_v2() {
                                 let response = JetMessage::read_connect_response(&mut slice).unwrap();
                                 match response {
                                     JetMessage::JetConnectRsp(rsp) => {
-                                        assert!(rsp.status_code == 200);
-                                        assert!(rsp.version == 2);
+                                        assert_eq!(rsp.status_code, 200);
+                                        assert_eq!(rsp.version, 2);
                                     }
                                     _ => {
                                         panic!("Wrong message type received");
