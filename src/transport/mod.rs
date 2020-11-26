@@ -1,4 +1,4 @@
-use futures::{Sink, Stream};
+use futures::{Sink, Stream, ready};
 use slog_scope::{error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::{
@@ -279,12 +279,29 @@ impl<T: AsyncWrite> JetSinkImpl<T> {
 impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
     type Error = io::Error;
 
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Sink is always ready to receive data, because of lack of actual buffering - we are only
+        // incrementing byte count on start_send which is required to be sent on poll_flush
+        return Poll::Ready(Ok(()));
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, bytes_read: usize) -> Result<(), Self::Error> {
+        assert_eq!(self.bytes_to_write, 0, "Sink still has not finished previous transmission");
+        self.bytes_to_write += bytes_read;
+        Ok(())
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let Self {
             peer_addr_str,
             bytes_to_write,
             ..
         } = self.deref_mut();
+
+        if *bytes_to_write == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
         trace!("{} bytes to write on {}", *bytes_to_write, peer_addr_str);
 
         let peer_addr = peer_addr_str.clone();
@@ -292,9 +309,9 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
         loop {
             let Self {
                 stream,
-                buffer,
                 bytes_to_write,
                 nb_bytes_written,
+                buffer,
                 ..
             } = self.deref_mut();
 
@@ -320,17 +337,9 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
         }
     }
 
-    fn start_send(mut self: Pin<&mut Self>, bytes_read: usize) -> Result<(), Self::Error> {
-        assert_eq!(self.bytes_to_write, 0, "Sink still has not finished previous transmission");
-        self.bytes_to_write = bytes_read;
-        Ok(())
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.stream).poll_flush(cx)
-    }
-
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+
         Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
