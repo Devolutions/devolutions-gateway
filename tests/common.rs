@@ -36,8 +36,6 @@ pub fn run_proxy(
         .env("RUST_LOG", "DEBUG")
         .args(&["--listener", format!("tcp://{}", proxy_addr).as_str()]);
 
-    proxy_command.arg("--jet-instance").arg("127.0.0.1");
-
     if let Some(websocket_url) = websocket_url {
         proxy_command.arg("-l").arg(websocket_url);
     }

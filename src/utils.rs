@@ -276,9 +276,9 @@ impl Stream for Incoming<'_> {
     }
 }
 
-pub fn default_port(url: &Url) -> Result<u16, ()> {
+pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
     match url.scheme() {
         "tcp" => Ok(8080),
-        _ => Err(()),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Bad server url")),
     }
 }

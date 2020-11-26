@@ -6,17 +6,15 @@ use crate::{
     },
     jet_client::JetAssociationsMap,
 };
-use saphir::{
-    error::SaphirError,
-    server::{Server as SaphirServer, SslConfig},
-};
+
+use saphir::server::{Server as SaphirServer, SslConfig};
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
-use tokio::task::JoinHandle;
+use tokio_02::runtime::Runtime;
 
 pub struct HttpServer {
     pub server: Mutex<Option<SaphirServer>>,
-    server_handle: Mutex<Option<JoinHandle<Result<(), SaphirError>>>>,
+    server_runtime: Mutex<Option<Runtime>>,
 }
 
 impl HttpServer {
@@ -50,11 +48,12 @@ impl HttpServer {
                 router.controller(health).controller(jet).controller(session)
             })
             .configure_listener(|listener| {
-                let server_name = &config
-                    .api_listener
-                    .host_str()
-                    .expect("API listener should be specified");
-                let listener_config = listener.server_name(server_name);
+                let listener_host = config.api_listener.host().expect("API listener should be specified");
+
+                let listener_port = config.api_listener.port().unwrap_or(8080);
+                let interface = format!("{}:{}", listener_host, listener_port);
+
+                let listener_config = listener.interface(&interface).server_name("Saphir Server");
 
                 let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
                     Some(SslConfig::FilePath(cert_path.into()))
@@ -79,10 +78,10 @@ impl HttpServer {
                 }
             })
             .build();
-
+        let runtime = Runtime::new().expect("failed to create runtime for HTTP server");
         HttpServer {
             server: Mutex::new(Some(http_server)),
-            server_handle: Mutex::new(None),
+            server_runtime: Mutex::new(Some(runtime)),
         }
     }
 
@@ -91,13 +90,19 @@ impl HttpServer {
             let mut guard = self.server.lock().unwrap();
             guard.take().expect("Start server can't be called twice")
         };
-        let mut handle = self.server_handle.lock().unwrap();
-        handle.replace(tokio::spawn(server.run()));
+
+        let runtime_guard = self.server_runtime.lock().unwrap();
+        let runtime = runtime_guard
+            .as_ref()
+            .expect("HTTP server runtime must be present on start");
+        runtime.spawn(server.run());
     }
 
     pub fn stop(&self) {
-        if let Some(handle) = self.server_handle.lock().unwrap().take() {
-            handle.abort();
+        if let Some(runtime) = self.server_runtime.lock().unwrap().take() {
+            // Temporary decision. Should be replaced with saphir server graceful shutdown
+            // when the last one will be available and stable
+            runtime.shutdown_background();
         }
     }
 }
