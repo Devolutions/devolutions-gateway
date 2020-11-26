@@ -7,18 +7,14 @@ use crate::{
     jet_client::JetAssociationsMap,
 };
 
-use saphir::{
-    error::SaphirError,
-    server::{Server as SaphirServer, SslConfig},
-};
+use saphir::server::{Server as SaphirServer, SslConfig};
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
-use tokio_02::{runtime::Runtime, task::JoinHandle};
+use tokio_02::runtime::Runtime;
 
 pub struct HttpServer {
     pub server: Mutex<Option<SaphirServer>>,
-    server_runtime: Option<Runtime>,
-    server_handle: Mutex<Option<JoinHandle<Result<(), SaphirError>>>>,
+    server_runtime: Mutex<Option<Runtime>>,
 }
 
 impl HttpServer {
@@ -85,8 +81,7 @@ impl HttpServer {
         let runtime = Runtime::new().expect("failed to create runtime for HTTP server");
         HttpServer {
             server: Mutex::new(Some(http_server)),
-            server_runtime: Some(runtime),
-            server_handle: Mutex::new(None),
+            server_runtime: Mutex::new(Some(runtime)),
         }
     }
 
@@ -95,17 +90,19 @@ impl HttpServer {
             let mut guard = self.server.lock().unwrap();
             guard.take().expect("Start server can't be called twice")
         };
-        let server_runtime = self
-            .server_runtime
+
+        let runtime_guard = self.server_runtime.lock().unwrap();
+        let runtime = runtime_guard
             .as_ref()
-            .expect("Runtime must be present on start of HTTP server");
-        let mut handle = self.server_handle.lock().unwrap();
-        handle.replace(server_runtime.spawn(server.run()));
+            .expect("HTTP server runtime must be present on start");
+        runtime.spawn(server.run());
     }
 
     pub fn stop(&self) {
-        if let Some(handle) = self.server_handle.lock().unwrap().take() {
-            std::mem::drop(handle)
+        if let Some(runtime) = self.server_runtime.lock().unwrap().take() {
+            // Temporary decision. Should be replaced with saphir server graceful shutdown
+            // when the last one will be available and stable
+            runtime.shutdown_background();
         }
     }
 }

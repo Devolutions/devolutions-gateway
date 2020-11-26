@@ -169,16 +169,17 @@ pub async fn start_remove_association_future(jet_associations: JetAssociationsMa
 }
 
 pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
-    let runtime_handle = Handle::try_current().expect("Tokio 0.2 runtime should be running");
-    runtime_handle.spawn(async move {
-        tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
-        if RemoveAssociation::new(jet_associations, uuid, None).await {
-            info!(
-                "No connect request received with association {}. Association removed!",
-                uuid
-            );
-        }
-    });
+    if let Ok(runtime_handle) = Handle::try_current() {
+        runtime_handle.spawn(async move {
+            tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
+            if RemoveAssociation::new(jet_associations, uuid, None).await {
+                info!(
+                    "No connect request received with association {}. Association removed!",
+                    uuid
+                );
+            }
+        });
+    }
 }
 
 fn validate_session_token(config: &Config, req: &Request) -> Result<Uuid, String> {

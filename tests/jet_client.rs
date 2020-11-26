@@ -17,14 +17,13 @@ use serde_derive::Deserialize;
 use std::str::FromStr;
 use url::Url;
 
-const PROXY_ADDR: &str = "127.0.0.1:8080";
 const HTTP_URL: &str = "http://127.0.0.1:10256";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
 #[test]
 fn smoke_tcp_v1() {
-    let proxy_addr = PROXY_ADDR;
+    let proxy_addr = "127.0.0.1:8080";
 
     //Spawn our proxy and wait for it to come online
     let _proxy = run_proxy(proxy_addr, None, None, None);
@@ -181,10 +180,7 @@ fn smoke_tcp_v1() {
 
 #[test]
 fn smoke_tcp_v2() {
-    let proxy_addr = PROXY_ADDR;
-
-    // Wait for the previous test free addresses
-    thread::sleep(Duration::from_secs(5));
+    let proxy_addr = "127.0.0.1:8081";
 
     // Spawn our proxy and wait for it to come online
     let _proxy = run_proxy(proxy_addr, None, None, None);
