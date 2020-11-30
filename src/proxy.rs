@@ -218,6 +218,6 @@ impl<T> Sink<T> for SizedSink<T> {
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut self.boxed_sink).poll_close(cx)
+        self.boxed_sink.as_mut().poll_close(cx)
     }
 }

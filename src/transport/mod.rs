@@ -279,10 +279,12 @@ impl<T: AsyncWrite> JetSinkImpl<T> {
 impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
     type Error = io::Error;
 
-    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Sink is always ready to receive data, because of lack of actual buffering - we are only
-        // incrementing byte count on start_send which is required to be sent on poll_flush
-        return Poll::Ready(Ok(()));
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self.bytes_to_write == 0 {
+            Poll::Ready(Ok(()))
+        } else {
+            self.as_mut().poll_flush(cx)
+        }
     }
 
     fn start_send(mut self: Pin<&mut Self>, bytes_read: usize) -> Result<(), Self::Error> {
@@ -315,7 +317,9 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
                 ..
             } = self.deref_mut();
 
-            match Pin::new(stream).poll_write(cx, buffer.valid()) {
+            let chunk_size = buffer.valid().len().min(*bytes_to_write);
+
+            match Pin::new(stream).poll_write(cx, &buffer.valid()[..chunk_size]) {
                 Poll::Ready(Ok(len)) => {
                     if len > 0 {
                         buffer.consume(len);
