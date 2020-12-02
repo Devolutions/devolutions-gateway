@@ -75,8 +75,7 @@ impl ConnectionSequenceFuture {
     fn create_negotiation_with_client_future(
         client: TcpStream,
         negotiation_request: nego::Request,
-    ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>
-    {
+    ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response> {
         SequenceFuture::with_parse_state(
             NegotiationWithClientFuture::new(),
             ParseStateArgs {
@@ -109,9 +108,8 @@ impl ConnectionSequenceFuture {
     fn create_server_negotiation_future(
         &mut self,
         server: TcpStream,
-    ) -> io::Result<
-        SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>,
-    > {
+    ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>
+    {
         let server_transport = NegotiationWithServerTransport::default().framed(server);
 
         let target_username = self.identity.target.username.clone();
@@ -222,8 +220,7 @@ impl ConnectionSequenceFuture {
         &mut self,
         client_transport: McsFutureTransport,
         server_transport: McsFutureTransport,
-    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>
-    {
+    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)> {
         SequenceFuture::with_get_state(
             PostMcs::new(
                 self.filter_config
@@ -388,20 +385,15 @@ enum ConnectionSequenceFutureState {
     Finalization(FinalizationT),
 }
 
-type NegotiationWithClientT = Pin<
-    Box<
-        SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>,
-    >,
->;
+type NegotiationWithClientT =
+    Pin<Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>>>;
 type NlaWithClientT = Pin<Box<NlaWithClientFuture>>;
 type ConnectToServerT = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
-type NegotiationWithServerT = Pin<
-    Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>,
->;
+type NegotiationWithServerT =
+    Pin<Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>>;
 type NlaWithServerT = Pin<Box<NlaWithServerFuture>>;
 type McsInitialT = Pin<Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport, BytesMut>>>;
 type McsT = Pin<Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport, ironrdp::McsPdu>>>;
-type PostMcsT = Pin<
-    Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>>,
->;
+type PostMcsT =
+    Pin<Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>>>;
 type FinalizationT = Pin<Box<SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport, RdpPdu>>>;

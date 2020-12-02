@@ -1,5 +1,5 @@
-use futures::{Sink, Stream, ready};
-use slog_scope::{error, trace};
+use futures::{ready, Sink, Stream};
+use slog_scope::{debug, error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::{
     future::Future,
@@ -205,7 +205,7 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
                     Poll::Ready(Ok(())) => {
                         let len = read_buffer.filled().len();
                         if let Some(interceptor) = packet_interceptor {
-                            interceptor.on_new_packet(peer_addr.clone(), &reservation[..len]);
+                            interceptor.on_new_packet(*peer_addr, &reservation[..len]);
                         }
 
                         written += len;
@@ -233,8 +233,9 @@ impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
                 return if written > 0 {
                     Poll::Ready(Some(Ok(written)))
                 } else {
-                    error!("BipBuffer writer cannot write any byte. Closing Writer");
-                    Poll::Ready(None)
+                    debug!("BipBuffer writer temporary cannot reserve {} bytes", PART_LEN);
+                    cx.waker().clone().wake();
+                    Poll::Pending
                 };
             }
         }
@@ -288,7 +289,10 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
     }
 
     fn start_send(mut self: Pin<&mut Self>, bytes_read: usize) -> Result<(), Self::Error> {
-        assert_eq!(self.bytes_to_write, 0, "Sink still has not finished previous transmission");
+        assert_eq!(
+            self.bytes_to_write, 0,
+            "Sink still has not finished previous transmission"
+        );
         self.bytes_to_write += bytes_read;
         Ok(())
     }
