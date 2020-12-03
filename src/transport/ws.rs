@@ -66,7 +66,7 @@ impl AsyncRead for WsStream {
                 ready!(Pin::new(&mut message).poll_read(cx, buf))?;
 
                 slog_scope::trace!(
-                    "Received next part of segmented message ({} of {} bytes read)",
+                    "Received next part of WebSockets message ({} of {} bytes read)",
                     message.position(),
                     message.get_ref().len()
                 );
@@ -74,6 +74,8 @@ impl AsyncRead for WsStream {
                 if message.position() == message.get_ref().len() as u64 {
                     slog_scope::trace!("Segmented message was completely read");
                     self.previous_message = None;
+                } else {
+                    self.previous_message = Some(message);
                 }
 
                 Poll::Ready(Ok(()))
@@ -98,23 +100,19 @@ impl AsyncRead for WsStream {
                 if (message.is_binary() || message.is_text()) && !message.is_empty() {
                     let mut message = Cursor::new(message.into_data());
 
-                    // There are could be potentially not enough provided space in the input buffer
-                    // to store the received message, so pool is required instead of simple read
-
                     match Pin::new(&mut message).poll_read(cx, buf) {
                         Poll::Ready(Ok(_)) => {
                             if message.position() < message.get_ref().len() as u64 {
+                                // Current WS message is not yet read completely, provided input buffer
+                                // has been overflowed
                                 slog_scope::trace!(
-                                    "Received first part of segmented message ({} of {} bytes read)",
+                                    "Received first part of WebSockets message ({} of {} bytes read)",
                                     message.position(),
                                     message.get_ref().len()
                                 );
-                                self.previous_message = Some(message)
+                                self.previous_message = Some(message);
                             }
-                            // Future should be called again to continue read messages, as poll_read
-                            // on Cursor will not perform wake when it returns Poll::Ready
-                            cx.waker().clone().wake();
-                            Poll::Pending
+                            Poll::Ready(Ok(()))
                         }
                         Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
                         Poll::Pending => {
