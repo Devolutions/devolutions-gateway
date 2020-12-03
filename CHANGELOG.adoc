@@ -2,6 +2,8 @@
 
 This document provides a list of notable changes introduced in Devolutions-Gateway by release.
 
+== 0.15.0 (unreleased)
+
 == 0.14.0 (2020-12-03)
   * Send back the SEC_WEBSOCKET_PROTOCOL header only if it was in the request (otherwise IIS doesn't work)
 
