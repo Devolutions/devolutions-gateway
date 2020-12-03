@@ -305,14 +305,20 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
             .unwrap();
     };
 
-    Response::builder()
+    let mut builder = Response::builder();
+
+    builder
         .status(StatusCode::SWITCHING_PROTOCOLS)
         .header(header::UPGRADE, "websocket")
         .header(header::CONNECTION, "upgrade")
-        .header(header::SEC_WEBSOCKET_ACCEPT, key.as_str())
-        .header(header::SEC_WEBSOCKET_PROTOCOL, "binary")
-        .body(Body::empty())
-        .unwrap()
+        .header(header::SEC_WEBSOCKET_ACCEPT, key.as_str());
+
+    // Add the SEC_WEBSOCKET_PROTOCOL header only if it was in the request, otherwise, IIS doesn't like it
+    if let Some(websocket_protocol) = req.headers().get(header::SEC_WEBSOCKET_PROTOCOL) {
+        builder.header(header::SEC_WEBSOCKET_PROTOCOL, websocket_protocol);
+    }
+
+    builder.body(Body::empty()).unwrap()
 }
 
 fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
