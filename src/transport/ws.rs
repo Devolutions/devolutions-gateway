@@ -141,35 +141,35 @@ impl AsyncWrite for WsStream {
                 let result = match self.inner {
                     WsStreamWrapper::Http((ref mut stream, _)) => {
                         let mut pinned = Pin::new(stream);
-                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)?;
-                        pinned.poll_ready(cx)
+                        ready!(pinned.as_mut().poll_ready(cx)).map_err(tungstenite_err_to_io_err)?;
+                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)
                     }
                     WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => {
                         let mut pinned = Pin::new(stream);
-                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)?;
-                        pinned.poll_ready(cx)
+                        ready!(pinned.as_mut().poll_ready(cx)).map_err(tungstenite_err_to_io_err)?;
+                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)
                     }
                     WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => {
                         let mut pinned = Pin::new(stream);
-                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)?;
-                        pinned.poll_ready(cx)
+                        ready!(pinned.as_mut().poll_ready(cx)).map_err(tungstenite_err_to_io_err)?;
+                        pinned.as_mut().start_send(message).map_err(tungstenite_err_to_io_err)
                     }
                 };
 
                 match result {
-                    Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(tungstenite_err_to_io_err(e))),
-                    Poll::Pending => {
+                    Ok(()) => Poll::Ready(Ok(buf.len())),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         self.previous_send_state = WsStreamSendState::SendInProgress;
                         Poll::Pending
                     }
+                    Err(e) => Poll::Ready(Err(e)),
                 }
             }
             WsStreamSendState::SendInProgress => {
                 let result = match self.inner {
-                    WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_ready(cx),
-                    WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_ready(cx),
-                    WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_ready(cx),
+                    WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
+                    WsStreamWrapper::Tcp((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_flush(cx),
+                    WsStreamWrapper::Tls((ref mut stream, ref mut _addr)) => Pin::new(stream).poll_flush(cx),
                 };
 
                 result

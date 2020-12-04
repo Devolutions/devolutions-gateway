@@ -379,23 +379,22 @@ async fn start_websocket_server(
 
     type ConnectionType = Box<dyn AsyncReadWrite + Unpin + Send + Sync + 'static>;
 
-    let connection_process = |connection: ConnectionType, remote_addr: Option<SocketAddr>| {
-        let http = hyper::server::conn::Http::new();
-        let listener_logger = listener_logger.clone();
+    let connection_process =
+        |connection: ConnectionType, remote_addr: Option<SocketAddr>, websocket_service: WebsocketService| {
+            let http = hyper::server::conn::Http::new();
+            let listener_logger = listener_logger.clone();
 
-        let websocket_service = websocket_service.clone();
+            let service = service_fn(move |req| {
+                let mut ws_serve = websocket_service.clone();
+                async move { ws_serve.handle(req, remote_addr).await }
+            });
 
-        let service = service_fn(move |req| {
-            let mut ws_serve = websocket_service.clone();
-            async move { ws_serve.handle(req, remote_addr).await }
-        });
-
-        tokio::spawn(async move {
-            let conn = IoCompat::new(connection);
-            let serve_connection = http.serve_connection(conn, service).with_upgrades();
-            let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
-        })
-    };
+            tokio::spawn(async move {
+                let conn = IoCompat::new(connection);
+                let serve_connection = http.serve_connection(conn, service).with_upgrades();
+                let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
+            })
+        };
 
     let mut incoming = Incoming {
         listener: &websocket_listener,
@@ -412,7 +411,7 @@ async fn start_websocket_server(
                         let remote_addr = tcp.peer_addr().ok();
                         let conn = Box::new(tcp) as ConnectionType;
 
-                        connection_process(conn, remote_addr);
+                        connection_process(conn, remote_addr, websocket_service.clone());
                     }
                     Err(err) => warn!(
                         "{}",
@@ -431,7 +430,7 @@ async fn start_websocket_server(
                             Ok(tls) => {
                                 let remote_addr = tls.get_ref().0.peer_addr().ok();
                                 let conn = Box::new(tls) as ConnectionType;
-                                connection_process(conn, remote_addr);
+                                connection_process(conn, remote_addr, websocket_service.clone());
                             }
                             Err(err) => warn!("{}", format!("TlsAcceptor failed to accept handshake - {:?}", err)),
                         }

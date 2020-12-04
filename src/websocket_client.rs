@@ -8,6 +8,7 @@ use crate::{
 };
 
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
+use saphir::error;
 use slog_scope::{error, info};
 use std::{
     io::{self, ErrorKind},
@@ -46,9 +47,10 @@ impl WebsocketService {
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else {
-            let mut resp = Response::new(Body::empty());
-            *resp.status_mut() = StatusCode::BAD_REQUEST;
-            Ok(resp)
+            saphir::server::inject_raw(req).await.map_err(|err| match err {
+                error::SaphirError::Io(err) => err,
+                err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
+            })
         }
     }
 }
@@ -187,7 +189,6 @@ async fn handle_jet_connect_impl(
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
-
     let res = process_req(&req);
 
     match version {
@@ -200,7 +201,6 @@ async fn handle_jet_connect_impl(
                     .map_err(|e| error!("upgrade error: {}", e))?;
 
                 let mut jet_assc = jet_associations.lock().await;
-
                 let assc = if let Some(assc) = jet_assc.get_mut(&association_id) {
                     assc
                 } else {
@@ -231,12 +231,11 @@ async fn handle_jet_connect_impl(
                         candidate.association_id(),
                         Some(candidate.id()),
                     );
-
                     Proxy::new(config)
                         .build(server_transport, client_transport)
                         .await
-                        .map_err(|_| ())?;
-                    let _ = remove_association.await;
+                        .map_err(|err| error!("failed to build Proxy for WebSocket connection: {}", err))?;
+                    remove_association.await;
                 }
                 Ok(())
             });
