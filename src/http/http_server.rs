@@ -6,19 +6,33 @@ use crate::{
     },
     jet_client::JetAssociationsMap,
 };
-
-use saphir::server::{Server as SaphirServer, SslConfig};
+use futures::FutureExt;
+use saphir::{
+    error::SaphirError,
+    server::{Server as SaphirServer, SslConfig},
+};
 use slog_scope::info;
 use std::sync::{Arc, Mutex};
-use tokio_02::runtime::Runtime;
+use tokio_02::{runtime::Runtime, sync::Notify, task::JoinHandle};
 
 pub struct HttpServer {
     pub server: Mutex<Option<SaphirServer>>,
     server_runtime: Mutex<Option<Runtime>>,
+    shutdown_notification: Arc<Notify>,
+    join_handle: Mutex<Option<JoinHandle<Result<(), SaphirError>>>>,
 }
 
 impl HttpServer {
     pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> HttpServer {
+        let shutdown_notification = Arc::new(Notify::new());
+        let shutdown_notification_clone = shutdown_notification.clone();
+
+        let on_shutdown_check = async move {
+            shutdown_notification_clone.notified().await;
+            info!("HTTP server was gracefully stopped");
+        }
+        .boxed();
+
         let http_server = SaphirServer::builder()
             .configure_middlewares(|middlewares| {
                 info!("Loading HTTP middlewares");
@@ -53,7 +67,10 @@ impl HttpServer {
                 let listener_port = config.api_listener.port().unwrap_or(8080);
                 let interface = format!("{}:{}", listener_host, listener_port);
 
-                let listener_config = listener.interface(&interface).server_name("Saphir Server");
+                let listener_config = listener
+                    .interface(&interface)
+                    .server_name("Saphir Server")
+                    .shutdown(on_shutdown_check, true);
 
                 let cert_config_opt = if let Some(cert_path) = &config.certificate.certificate_file {
                     Some(SslConfig::FilePath(cert_path.into()))
@@ -82,6 +99,8 @@ impl HttpServer {
         HttpServer {
             server: Mutex::new(Some(http_server)),
             server_runtime: Mutex::new(Some(runtime)),
+            shutdown_notification,
+            join_handle: Mutex::new(None),
         }
     }
 
@@ -95,14 +114,17 @@ impl HttpServer {
         let runtime = runtime_guard
             .as_ref()
             .expect("HTTP server runtime must be present on start");
-        runtime.spawn(server.run());
+        let join_handle = runtime.spawn(server.run());
+        self.join_handle.lock().unwrap().replace(join_handle);
     }
 
     pub fn stop(&self) {
-        if let Some(runtime) = self.server_runtime.lock().unwrap().take() {
-            // Temporary decision. Should be replaced with saphir server graceful shutdown
-            // when the last one will be available and stable
-            runtime.shutdown_background();
+        self.shutdown_notification.notify();
+
+        if let Some(mut runtime) = self.server_runtime.lock().unwrap().take() {
+            if let Some(join_handle) = self.join_handle.lock().unwrap().take() {
+                let _ = runtime.block_on(join_handle);
+            }
         }
     }
 }

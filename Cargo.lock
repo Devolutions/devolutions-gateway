@@ -2674,9 +2674,8 @@ checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 
 [[package]]
 name = "saphir"
-version = "2.7.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f8b96cce1fe46550e516414ca6715f269c5a14e4576ccfbeda34ac0f4c9b79"
+version = "2.8.0"
+source = "git+https://github.com/Devolutions/saphir.git?branch=graceful-shutdown-fix#8e1fba672db2f834aa07355a4e4680eceeed4768"
 dependencies = [
  "base64 0.13.0",
  "futures 0.3.8",
@@ -2711,8 +2710,7 @@ dependencies = [
 [[package]]
 name = "saphir_macro"
 version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7fb855f992c80334dbb5ff02dd2d300798b21e82d2e088ba20a0d14fb482d3d"
+source = "git+https://github.com/Devolutions/saphir.git?branch=graceful-shutdown-fix#8e1fba672db2f834aa07355a4e4680eceeed4768"
 dependencies = [
  "http 0.2.1",
  "proc-macro2 1.0.24",
