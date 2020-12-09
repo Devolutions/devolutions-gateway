@@ -1,0 +1,11 @@
+!*.sln
+!WixUserPrivilegesExtension.dll
+*.wixobj
+*.wixpdb
+*.wxl
+*.mst
+*.msi
+*.zip
+bin/
+DevolutionsGateway/
+DevolutionsGateway-x64.wxs
