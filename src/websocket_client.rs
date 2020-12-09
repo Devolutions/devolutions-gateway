@@ -7,6 +7,7 @@ use crate::{
     Proxy,
 };
 
+use tokio_compat_02::FutureExt;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use saphir::error;
 use slog_scope::{error, info};
@@ -47,7 +48,7 @@ impl WebsocketService {
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else {
-            saphir::server::inject_raw(req).await.map_err(|err| match err {
+            saphir::server::inject_raw(req).compat().await.map_err(|err| match err {
                 error::SaphirError::Io(err) => err,
                 err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
             })
@@ -204,16 +205,19 @@ async fn handle_jet_connect_impl(
                 let assc = if let Some(assc) = jet_assc.get_mut(&association_id) {
                     assc
                 } else {
+                    error!("Failed to get association");
                     return Err(());
                 };
 
                 let candidate = if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                     candidate
                 } else {
+                    error!("Failed to get candidate");
                     return Err(());
                 };
 
-                if (candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss)
+                if (candidate.transport_type() == TransportType::Ws
+                        || candidate.transport_type() == TransportType::Wss)
                     && candidate.state() == CandidateState::Accepted
                 {
                     let server_transport = candidate
@@ -231,13 +235,23 @@ async fn handle_jet_connect_impl(
                         candidate.association_id(),
                         Some(candidate.id()),
                     );
-                    Proxy::new(config)
+
+                    // We need to manually drop mutex lock to avoid deadlock below;
+                    // Rust does not drop it automatically before end of the function
+                    std::mem::drop(jet_assc);
+
+                    let proxy_result = Proxy::new(config)
                         .build(server_transport, client_transport)
-                        .await
-                        .map_err(|err| error!("failed to build Proxy for WebSocket connection: {}", err))?;
+                        .await;
+
+                    if let Err(e) = proxy_result {
+                        error!("failed to build Proxy for WebSocket connection: {}", e)
+                    }
+
                     remove_association.await;
                 }
-                Ok(())
+
+                Ok::<(), ()>(())
             });
 
             Ok(res)

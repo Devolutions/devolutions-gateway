@@ -8,6 +8,7 @@ use std::{
 };
 
 use futures::stream::StreamExt;
+use tokio_compat_02::FutureExt as _;
 use tokio::{
     net::{TcpListener, TcpStream},
     runtime::Runtime,
@@ -381,6 +382,7 @@ async fn start_websocket_server(
 
     let connection_process =
         |connection: ConnectionType, remote_addr: Option<SocketAddr>, websocket_service: WebsocketService| {
+
             let http = hyper::server::conn::Http::new();
             let listener_logger = listener_logger.clone();
 
@@ -392,8 +394,9 @@ async fn start_websocket_server(
             tokio::spawn(async move {
                 let conn = IoCompat::new(connection);
                 let serve_connection = http.serve_connection(conn, service).with_upgrades();
-                let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
-            })
+                // use .compat to run 0.2 hyper on tokio 0.3 runtime
+                let _ = serve_connection.with_logger(listener_logger).compat().await.map_err(|_| ());
+            });
         };
 
     let mut incoming = Incoming {

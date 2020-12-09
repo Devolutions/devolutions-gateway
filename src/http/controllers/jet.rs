@@ -9,6 +9,7 @@ use saphir::{
 use slog_scope::info;
 use std::sync::Arc;
 use tokio_02::runtime::Handle;
+use tokio_compat_02::FutureExt;
 use uuid::Uuid;
 
 use crate::{
@@ -93,9 +94,10 @@ impl JetController {
             }
         }
 
-        // create association
-        // no need to deal with lock poisoning
-        let mut jet_associations = self.jet_associations.lock().await;
+        // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
+        // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
+        // when saphir perform transition to tokio 0.3
+        let mut jet_associations = self.jet_associations.lock().compat().await;
 
         jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
         start_remove_association_future(self.jet_associations.clone(), association_id).await;
@@ -134,7 +136,7 @@ impl JetController {
         }
 
         // create association
-        let mut jet_associations = self.jet_associations.lock().await; // no need to deal with lock poisoning
+        let mut jet_associations = self.jet_associations.lock().compat().await; // no need to deal with lock poisoning
 
         if !jet_associations.contains_key(&association_id) {
             jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
@@ -172,7 +174,7 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
     if let Ok(runtime_handle) = Handle::try_current() {
         runtime_handle.spawn(async move {
             tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
-            if RemoveAssociation::new(jet_associations, uuid, None).await {
+            if RemoveAssociation::new(jet_associations, uuid, None).compat().await {
                 info!(
                     "No connect request received with association {}. Association removed!",
                     uuid
