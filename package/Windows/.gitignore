@@ -2,7 +2,6 @@
 !WixUserPrivilegesExtension.dll
 *.wixobj
 *.wixpdb
-*.wxl
 *.mst
 *.msi
 *.zip

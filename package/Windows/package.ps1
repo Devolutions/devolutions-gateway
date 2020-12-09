@@ -33,7 +33,7 @@ $HeatArgs = @('dir', "${ModuleName}/${ModuleVersion}",
     "-dr", "DGATEWAYPSROOTDIRECTORY",
     "-cg", "DGatewayPSComponentGroup",
     '-var', 'var.DGatewayPSSourceDir',
-    '-nologo', '-srd', '-suid', '-sfrag', '-gg')
+    '-nologo', '-srd', '-suid', '-scom', '-sreg', '-sfrag', '-gg')
 
 & 'heat.exe' $HeatArgs + @('-t', 'HeatTransform64.xslt', '-o', "${PackageName}-${TargetArch}.wxs")
 

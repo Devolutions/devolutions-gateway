@@ -220,6 +220,7 @@
       <ComponentRef Id="cmpDGatewayService"/>
       <ComponentRef Id="cmpCommonAppDataFolder"/>
       <ComponentRef Id="cmpDGatewayRegistryEntries"/>
+      <ComponentGroupRef Id="DGatewayPSComponentGroup"/>
     </Feature>
 
     <UI Id="MyWixUI_InstallDir">
