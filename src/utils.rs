@@ -3,20 +3,29 @@ pub mod association;
 use std::{
     collections::HashMap,
     fs,
+    future::Future,
     hash::Hash,
     io::{self, BufReader},
-    net::{SocketAddr, ToSocketAddrs},
+    net::SocketAddr,
+    pin::Pin,
+    task::{Context, Poll},
 };
 
-use crate::config::CertificateConfig;
+use futures::{ready, stream::Stream};
 use tokio::{
-    codec::{Decoder, Encoder, Framed, FramedParts},
-    prelude::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite},
+    net::{lookup_host, TcpListener, TcpStream},
 };
+use tokio_rustls::rustls;
+use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 
+use crate::config::CertificateConfig;
+
 pub mod danger_transport {
+    use tokio_rustls::rustls;
+
     pub struct NoCertificateVerification;
 
     impl rustls::ServerCertVerifier for NoCertificateVerification {
@@ -32,11 +41,14 @@ pub mod danger_transport {
     }
 }
 
-/// FIXME: we need to upgrade to tokio 0.3 in order to make resolving async
-pub fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
+pub async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
-    format!("{}:{}", host, port).to_socket_addrs().ok()?.next()
+    lookup_host(format!("{}:{}", host, port))
+        .await
+        .ok()
+        .map(|mut it| it.next())
+        .flatten()
 }
 
 #[macro_export]
@@ -52,12 +64,8 @@ macro_rules! io_try {
     };
 }
 
-pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
-where
-    S: io::Read + io::Write,
-{
+pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
     let der = get_der_cert_from_stream(&stream)?;
-
     get_pub_key_from_der(&der)
 }
 
@@ -69,19 +77,17 @@ pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
     Ok(public_key.data.to_vec())
 }
 
-fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>>
-where
-    S: io::Read + io::Write,
-{
-    use rustls::internal::msgs::handshake::CertificatePayload;
-
-    let payload: CertificatePayload = stream
-        .get_ref()
-        .1
+fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
+    let (_, session) = stream.get_ref();
+    let payload = session
         .get_peer_certificates()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate."))?;
 
-    Ok(payload[0].as_ref().to_vec())
+    let cert = payload
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates"))?;
+
+    Ok(cert.as_ref().to_vec())
 }
 
 pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
@@ -208,14 +214,14 @@ fn extract_der_data<A>(
     Ok(ders)
 }
 
-pub fn update_framed_codec<Io, OldCodec, NewCodec>(
+pub fn update_framed_codec<Io, OldCodec, NewCodec, OldDecodedType, NewDecodedType>(
     framed: Framed<Io, OldCodec>,
     codec: NewCodec,
 ) -> Framed<Io, NewCodec>
 where
     Io: AsyncRead + AsyncWrite,
-    OldCodec: Decoder + Encoder,
-    NewCodec: Decoder + Encoder,
+    OldCodec: Decoder + Encoder<OldDecodedType>,
+    NewCodec: Decoder + Encoder<NewDecodedType>,
 {
     let FramedParts { io, read_buf, .. } = framed.into_parts();
 
@@ -236,4 +242,43 @@ where
     }
 
     result
+}
+
+pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
+impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
+
+// Now in tokio 0.3.3 TcpListener::incoming() is temporary removed and will be returned in one of the next patches.
+// The next struct is created in purpose to fill the gap.
+// When incoming() will be returned, the Incoming struct should be replaced with the same from tokio
+
+type AcceptType<'a> = Option<Pin<Box<dyn Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send + Sync + 'a>>>;
+
+pub struct Incoming<'a> {
+    pub listener: &'a TcpListener,
+    pub accept: AcceptType<'a>,
+}
+
+impl Stream for Incoming<'_> {
+    type Item = io::Result<TcpStream>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            if self.accept.is_none() {
+                self.accept = Some(Box::pin(self.listener.accept()));
+            }
+
+            if let Some(f) = &mut self.accept {
+                let res = ready!(f.as_mut().poll(cx));
+                self.accept = None;
+                return Poll::Ready(Some(res.map(|(stream, _)| stream)));
+            }
+        }
+    }
+}
+
+pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
+    match url.scheme() {
+        "tcp" => Ok(8080),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Bad server url")),
+    }
 }

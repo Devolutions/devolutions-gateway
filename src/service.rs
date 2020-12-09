@@ -1,43 +1,45 @@
-use devolutions_gateway::{
+use std::{
+    collections::HashMap,
+    future::Future,
+    io,
+    net::{SocketAddr, ToSocketAddrs},
+    pin::Pin,
+    sync::Arc,
+};
+
+use futures::stream::StreamExt;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    runtime::Runtime,
+    sync::Mutex,
+};
+use tokio_compat_02::FutureExt as _;
+
+use tokio_compat_02::IoCompat;
+use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
+
+use hyper::service::service_fn;
+use url::Url;
+
+use slog::{o, Logger};
+use slog_scope::{error, info, slog_error, warn};
+use slog_scope_futures::future03::FutureExt;
+
+use crate::{
     config::Config,
     http::http_server::HttpServer,
     jet_client::{JetAssociationsMap, JetClient},
     logger,
     rdp::RdpClient,
     routing_client::Client,
-    transport::{
-        tcp::TcpTransport,
-        ws::{TcpWebSocketServerHandshake, TlsWebSocketServerHandshake, WsTransport},
-        JetTransport,
+    transport::{tcp::TcpTransport, ws::WsTransport, JetTransport},
+    utils::{
+        get_default_port_from_server_url, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming,
     },
-    utils::{get_pub_key_from_der, load_certs, load_private_key},
     websocket_client::{WebsocketService, WsClient},
 };
-use futures::{
-    future,
-    future::{ok, Either},
-    Future, Stream,
-};
-use hyper::service::service_fn;
-use saphir::server::HttpService;
-use slog::{o, Logger};
-use slog_scope::{error, info, slog_error, warn};
-use slog_scope_futures::future01::FutureExt;
-use std::{
-    collections::HashMap,
-    io,
-    io::ErrorKind,
-    net::{SocketAddr, ToSocketAddrs},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{
-    net::tcp::{TcpListener, TcpStream},
-    prelude::{AsyncRead, AsyncWrite},
-    runtime::{Runtime, TaskExecutor},
-};
-use tokio_rustls::{TlsAcceptor, TlsStream};
-use url::Url;
+
+type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 pub enum GatewayState {
@@ -73,17 +75,14 @@ impl GatewayService {
         })
     }
 
-    #[allow(dead_code)]
     pub fn get_service_name(&self) -> &str {
         self.config.service_name.as_str()
     }
 
-    #[allow(dead_code)]
     pub fn get_display_name(&self) -> &str {
         self.config.display_name.as_str()
     }
 
-    #[allow(dead_code)]
     pub fn get_description(&self) -> &str {
         self.config.description.as_str()
     }
@@ -93,21 +92,18 @@ impl GatewayService {
 
         let config = self.config.clone();
         let logger = self.logger.clone();
-        let executor_handle = runtime.executor();
-        let context =
-            create_context(config, logger, executor_handle.clone()).expect("failed to create gateway context");
+
+        let context = create_context(config, logger).expect("failed to create gateway context");
 
         // start http server
-        if let Err(e) = context.http_server.start(executor_handle.clone()) {
-            error!("HTTP server failed to start: {}", e);
-        }
+        context.http_server.start();
 
-        // future joining all jet tasks
-        let all_tasks = future::join_all(context.futures).map_err(|e| {
-            error!("Listeners failed: {}", e);
+        let join_all = futures::future::join_all(context.futures);
+        runtime.spawn(async {
+            join_all.await.into_iter().for_each(|future_result| {
+                let _ = future_result.map_err(|err| error!("{}", format!("Listeners failed: {}", err)));
+            });
         });
-
-        executor_handle.spawn(all_tasks.map(|_| ()).map_err(|_| ()));
 
         self.state = GatewayState::Running {
             http_server: context.http_server,
@@ -127,7 +123,7 @@ impl GatewayService {
                 http_server.stop();
 
                 // stop runtime now
-                runtime.shutdown_now().wait().unwrap();
+                runtime.shutdown_background();
 
                 self.state = GatewayState::Stopped;
             }
@@ -137,14 +133,10 @@ impl GatewayService {
 
 pub struct GatewayContext {
     pub http_server: HttpServer,
-    pub futures: Vec<Box<dyn Future<Error = String, Item = ()> + Send>>,
+    pub futures: VecOfFuturesType,
 }
 
-pub fn create_context(
-    config: Arc<Config>,
-    logger: slog::Logger,
-    executor_handle: TaskExecutor,
-) -> Result<GatewayContext, &'static str> {
+pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, &'static str> {
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()
@@ -171,8 +163,7 @@ pub fn create_context(
 
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
 
-    let http_server = HttpServer::new(config.clone(), jet_associations.clone(), executor_handle.clone());
-    let http_service = http_server.server.get_request_handler().clone();
+    let http_server = HttpServer::new(config.clone(), jet_associations.clone());
 
     // Create the TLS acceptor.
     let client_no_auth = rustls::NoClientAuth::new();
@@ -183,46 +174,49 @@ pub fn create_context(
     server_config
         .set_single_cert(certs, priv_key)
         .map_err(|_| "couldn't set server config cert")?;
+
     let config_ref = Arc::new(server_config);
     let tls_acceptor = TlsAcceptor::from(config_ref);
 
-    let mut futures = Vec::new();
+    let listeners_count = websocket_listeners.len() + tcp_listeners.len();
+    let mut futures: VecOfFuturesType = Vec::with_capacity(listeners_count);
 
     for url in &websocket_listeners {
-        futures.push(start_websocket_server(
+        futures.push(Box::pin(start_websocket_server(
             url.clone(),
             config.clone(),
-            http_service.clone(),
             jet_associations.clone(),
             tls_acceptor.clone(),
-            executor_handle.clone(),
             logger.clone(),
-        ));
+        )));
     }
 
     for url in &tcp_listeners {
-        futures.push(start_tcp_server(
+        futures.push(Box::pin(start_tcp_server(
             url.clone(),
             config.clone(),
             jet_associations.clone(),
             tls_acceptor.clone(),
             tls_public_key.clone(),
-            executor_handle.clone(),
             logger.clone(),
-        ));
+        )));
     }
 
     Ok(GatewayContext { http_server, futures })
 }
 
+/*
 const SOCKET_SEND_BUFFER_SIZE: usize = 0x7FFFF;
 const SOCKET_RECV_BUFFER_SIZE: usize = 0x7FFFF;
+*/
 
 fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_nodelay(true) {
         slog_error!(logger, "set_nodelay on TcpStream failed: {}", e);
     }
-
+    // Temporary following methods is removed in tokio 0.3.3.
+    // When they will be returned next lines should be uncommented.
+    /*
     if let Err(e) = stream.set_keepalive(Some(Duration::from_secs(2))) {
         slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
     }
@@ -234,33 +228,33 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_recv_buffer_size(SOCKET_RECV_BUFFER_SIZE) {
         slog_error!(logger, "set_recv_buffer_size on TcpStream failed: {}", e);
     }
+    */
 }
 
-pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
-
-impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
-
-fn start_tcp_server(
+async fn start_tcp_server(
     url: Url,
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     tls_acceptor: TlsAcceptor,
     tls_public_key: Vec<u8>,
-    executor_handle: TaskExecutor,
     logger: Logger,
-) -> Box<dyn Future<Item = (), Error = String> + Send> {
+) -> Result<(), String> {
     info!("Starting TCP jet server...");
 
     let socket_addr = url
-        .with_default_port(default_port)
+        .with_default_port(|url| get_default_port_from_server_url(url).map_err(|_| ()))
         .expect("invalid URL")
         .to_socket_addrs()
         .unwrap()
         .next()
         .unwrap();
-    let listener = TcpListener::bind(&socket_addr).unwrap();
 
-    let server = listener.incoming().for_each(move |conn| {
+    let listener = TcpListener::bind(&socket_addr).await.unwrap();
+    let mut incoming = Incoming {
+        listener: &listener,
+        accept: None,
+    };
+    while let Some(Ok(conn)) = incoming.next().await {
         // Configure logger
         let mut logger = logger.clone();
         if let Ok(peer_addr) = conn.peer_addr() {
@@ -275,134 +269,84 @@ fn start_tcp_server(
 
         set_socket_option(&conn, &logger);
 
-        let client_fut = if let Some(routing_url) = &config.routing_url {
-            match routing_url.scheme() {
-                "tcp" => {
-                    let transport = TcpTransport::new(conn);
-                    Client::new(routing_url.clone(), config.clone(), executor_handle.clone()).serve(transport)
-                }
-                "tls" => {
-                    let routing_url_clone = routing_url.clone();
-                    let executor_handle_clone = executor_handle.clone();
-                    let config_clone = config.clone();
-
-                    Box::new(
-                        tls_acceptor
-                            .accept(conn)
-                            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
-                            .and_then(move |tls_stream| {
-                                let transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
-                                Client::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
-                            }),
-                    )
-                }
-                "ws" => {
-                    let routing_url_clone = routing_url.clone();
-                    let executor_handle_clone = executor_handle.clone();
-                    let peer_addr = conn.peer_addr().ok();
-                    let accept = tungstenite::accept(conn);
-
-                    match accept {
-                        Ok(stream) => {
-                            let transport = WsTransport::new_tcp(stream, peer_addr);
-                            Box::new(
-                                WsClient::new(routing_url_clone, config.clone(), executor_handle_clone)
-                                    .serve(transport),
-                            )
-                        }
-                        Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
-                            let config_clone = config.clone();
-                            Box::new(TcpWebSocketServerHandshake(Some(e)).and_then(move |stream| {
-                                let transport = WsTransport::new_tcp(stream, peer_addr);
-                                WsClient::new(routing_url_clone, config_clone, executor_handle_clone).serve(transport)
-                            })) as Box<dyn Future<Item = (), Error = io::Error> + Send>
-                        }
-                        Err(tungstenite::handshake::HandshakeError::Failure(e)) => {
-                            Box::new(future::err(io::Error::new(io::ErrorKind::Other, e)))
-                        }
+        let client_fut: Pin<Box<dyn Future<Output = Result<(), io::Error>> + Send + 'static>> =
+            if let Some(routing_url) = &config.routing_url {
+                match routing_url.scheme() {
+                    "tcp" => {
+                        let transport = TcpTransport::new(conn);
+                        Box::pin(Client::new(routing_url.clone(), config.clone()).serve(transport))
                     }
-                }
-                "wss" => {
-                    let routing_url_clone = routing_url.clone();
-                    let executor_handle_clone = executor_handle.clone();
-                    let config_clone = config.clone();
-
-                    Box::new(
-                        tls_acceptor
+                    "tls" => {
+                        let tls_stream = tls_acceptor
                             .accept(conn)
-                            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))
-                            .and_then(move |tls_stream| {
-                                let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
-                                let accept = tungstenite::accept(TlsStream::Server(tls_stream));
-                                match accept {
-                                    Ok(stream) => {
-                                        let transport = WsTransport::new_tls(stream, peer_addr);
-                                        Box::new(
-                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone)
-                                                .serve(transport),
-                                        )
-                                    }
-                                    Err(tungstenite::handshake::HandshakeError::Interrupted(e)) => {
-                                        Box::new(TlsWebSocketServerHandshake(Some(e)).and_then(move |stream| {
-                                            let transport = WsTransport::new_tls(stream, peer_addr);
-                                            WsClient::new(routing_url_clone, config_clone, executor_handle_clone)
-                                                .serve(transport)
-                                        }))
-                                            as Box<dyn Future<Item = (), Error = io::Error> + Send>
-                                    }
-                                    Err(tungstenite::handshake::HandshakeError::Failure(e)) => {
-                                        Box::new(future::err(io::Error::new(io::ErrorKind::Other, e)))
-                                    }
-                                }
-                            }),
-                    )
+                            .await
+                            .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
+                        let transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
+                        Box::pin(Client::new(routing_url.clone(), config.clone()).serve(transport))
+                    }
+                    "ws" => {
+                        let peer_addr = conn.peer_addr().ok();
+
+                        let stream = tokio_tungstenite::accept_async(conn)
+                            .await
+                            .map_err(|err| format!("Tokio-tungstenite handshake error - {:?}", err))?;
+
+                        let transport = WsTransport::new_tcp(stream, peer_addr);
+                        Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
+                    }
+                    "wss" => {
+                        let tls_stream = tls_acceptor
+                            .accept(conn)
+                            .await
+                            .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
+
+                        let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
+                        let stream = tokio_tungstenite::accept_async(TlsStream::Server(tls_stream))
+                            .await
+                            .map_err(|err| format!("Tokio-tungstenite handshake error - {:?}", err))?;
+
+                        let transport = WsTransport::new_tls(stream, peer_addr);
+                        Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
+                    }
+                    "rdp" => Box::pin(
+                        RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
+                    ),
+                    scheme => panic!("Unsupported routing URL scheme {}", scheme),
                 }
-                "rdp" => RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
-                scheme => panic!("Unsupported routing URL scheme {}", scheme),
+            } else if config.is_rdp_supported() {
+                let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
+                Box::pin(rdp_client.serve(conn))
+            } else {
+                let jet_client = JetClient::new(config.clone(), jet_associations.clone());
+                Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
+            };
+
+        let client_fut = client_fut.with_logger(logger);
+        tokio::spawn(async move {
+            match client_fut.await {
+                Ok(_) => {}
+                Err(e) => error!("Error with client: {}", e),
             }
-        } else if config.is_rdp_supported() {
-            RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn)
-        } else {
-            JetClient::new(config.clone(), jet_associations.clone(), executor_handle.clone())
-                .serve(JetTransport::new_tcp(conn))
-        };
-
-        executor_handle.spawn(
-            client_fut
-                .then(move |res| {
-                    match res {
-                        Ok(_) => {}
-                        Err(e) => error!("Error with client: {}", e),
-                    }
-
-                    Ok(())
-                })
-                .with_logger(logger),
-        );
-
-        ok(())
-    });
+        });
+    }
 
     info!("TCP jet server started successfully. Now listening on {}", socket_addr);
 
-    Box::new(server.map_err(|e| format!("TCP listener failed: {}", e)))
+    Ok(())
 }
 
-fn start_websocket_server(
+async fn start_websocket_server(
     websocket_url: Url,
     config: Arc<Config>,
-    http_service: HttpService,
     jet_associations: JetAssociationsMap,
     tls_acceptor: TlsAcceptor,
-    executor_handle: TaskExecutor,
     logger: slog::Logger,
-) -> Box<dyn Future<Item = (), Error = String> + Send> {
-    // Start websocket server if needed
+) -> Result<(), String> {
     info!("Starting websocket server ...");
 
     let mut websocket_addr = String::new();
     websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
-    websocket_addr.push_str(":");
+    websocket_addr.push(':');
     websocket_addr.push_str(
         websocket_url
             .port()
@@ -415,17 +359,16 @@ fn start_websocket_server(
             .as_str(),
     );
 
-    let websocket_listener = TcpListener::bind(
-        &websocket_addr
-            .parse::<SocketAddr>()
-            .expect("Websocket addr can't be parsed."),
-    )
-    .unwrap();
+    let websocket_addr = websocket_addr
+        .parse::<SocketAddr>()
+        .expect("Websocket addr can't be parsed.");
+
+    let websocket_listener = TcpListener::bind(websocket_addr)
+        .await
+        .map_err(|err| format!("{}", err))?;
 
     let websocket_service = WebsocketService {
-        http_service,
         jet_associations,
-        executor_handle,
         config,
     };
 
@@ -434,61 +377,79 @@ fn start_websocket_server(
         listener_logger = listener_logger.new(o!("listener" => local_addr.to_string()));
     }
 
-    let http = hyper::server::conn::Http::new();
+    type ConnectionType = Box<dyn AsyncReadWrite + Unpin + Send + Sync + 'static>;
 
-    let incoming = match websocket_url.scheme() {
-        "ws" => Either::A(websocket_listener.incoming().map(move |tcp| {
-            let remote_addr = tcp.peer_addr().ok();
-            set_socket_option(&tcp, &logger);
+    let connection_process =
+        |connection: ConnectionType, remote_addr: Option<SocketAddr>, websocket_service: WebsocketService| {
+            let http = hyper::server::conn::Http::new();
+            let listener_logger = listener_logger.clone();
 
-            (
-                Box::new(tcp) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
-                remote_addr,
-            )
-        })),
+            let service = service_fn(move |req| {
+                let mut ws_serve = websocket_service.clone();
+                async move { ws_serve.handle(req, remote_addr).await }
+            });
 
-        "wss" => Either::B(websocket_listener.incoming().and_then(move |tcp| {
-            set_socket_option(&tcp, &logger);
+            tokio::spawn(async move {
+                let conn = IoCompat::new(connection);
+                let serve_connection = http.serve_connection(conn, service).with_upgrades();
+                // use .compat to run 0.2 hyper on tokio 0.3 runtime
+                let _ = serve_connection
+                    .with_logger(listener_logger)
+                    .compat()
+                    .await
+                    .map_err(|_| ());
+            });
+        };
 
-            tls_acceptor
-                .accept(tcp)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                .map(|tls| {
-                    let remote_addr = tls.get_ref().0.peer_addr().ok();
-                    (
-                        Box::new(tls) as Box<dyn AsyncReadWrite + Send + Sync + 'static>,
-                        remote_addr,
-                    )
-                })
-        })),
+    let mut incoming = Incoming {
+        listener: &websocket_listener,
+        accept: None,
+    };
 
+    match websocket_url.scheme() {
+        "ws" => {
+            while let Some(tcp) = incoming.next().await {
+                match tcp {
+                    Ok(tcp) => {
+                        set_socket_option(&tcp, &logger);
+
+                        let remote_addr = tcp.peer_addr().ok();
+                        let conn = Box::new(tcp) as ConnectionType;
+
+                        connection_process(conn, remote_addr, websocket_service.clone());
+                    }
+                    Err(err) => warn!(
+                        "{}",
+                        format!("WebSocket listener failed to accept connection - {:?}", err)
+                    ),
+                }
+            }
+        }
+        "wss" => {
+            while let Some(tcp) = incoming.next().await {
+                match tcp {
+                    Ok(tcp) => {
+                        set_socket_option(&tcp, &logger);
+
+                        match tls_acceptor.accept(tcp).await {
+                            Ok(tls) => {
+                                let remote_addr = tls.get_ref().0.peer_addr().ok();
+                                let conn = Box::new(tls) as ConnectionType;
+                                connection_process(conn, remote_addr, websocket_service.clone());
+                            }
+                            Err(err) => warn!("{}", format!("TlsAcceptor failed to accept handshake - {:?}", err)),
+                        }
+                    }
+                    Err(err) => warn!(
+                        "{}",
+                        format!("WebSocket listener failed to accept connection - {:?}", err)
+                    ),
+                }
+            }
+        }
         scheme => panic!("Not a websocket scheme {}", scheme),
     };
 
-    let websocket_server = incoming.then(Ok).for_each(move |conn_res| {
-        match conn_res {
-            Ok((conn, remote_addr)) => {
-                let mut ws_serve = websocket_service.clone();
-                let srvc = service_fn(move |req| ws_serve.handle(req, remote_addr));
-                websocket_service
-                    .executor_handle
-                    .spawn(http.serve_connection(conn, srvc).with_upgrades().map_err(|_| ()));
-            }
-            Err(e) => {
-                warn!("incoming connection encountered an error: {}", e);
-            }
-        }
-
-        future::ok(())
-    });
-
     info!("WebSocket server started successfully. Listening on {}", websocket_addr);
-    Box::new(websocket_server.with_logger(listener_logger))
-}
-
-fn default_port(url: &Url) -> Result<u16, ()> {
-    match url.scheme() {
-        "tcp" => Ok(8080),
-        _ => Err(()),
-    }
+    Ok(())
 }

@@ -161,7 +161,7 @@ impl GatewayListener {
         }
 
         Some(ListenerConfig {
-            internal_url: internal_url,
+            internal_url,
             external_url,
         })
     }
@@ -276,7 +276,7 @@ fn get_default_hostname() -> Option<String> {
 
 impl Config {
     pub fn init() -> Self {
-        let mut config = Config::load_from_file(get_config_file_path()).unwrap_or_else(|| Config::default());
+        let mut config = Config::load_from_file(get_config_file_path()).unwrap_or_default();
 
         let cli_app = App::new(crate_name!())
             .author("Devolutions Inc.")
@@ -712,11 +712,7 @@ impl Config {
 
         let http_listeners: Vec<ListenerConfig> = listeners
             .iter()
-            .filter(|listener| match listener.internal_url.scheme() {
-                "http" => true,
-                "https" => true,
-                _ => false,
-            })
+            .filter(|listener| matches!(listener.internal_url.scheme(), "http" | "https"))
             .cloned()
             .collect();
 

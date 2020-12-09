@@ -1,9 +1,14 @@
 use crate::{jet::candidate::CandidateState, jet_client::JetAssociationsMap};
-use futures::{Async, Future};
+use futures::Future;
 use slog_scope::debug;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 use uuid::Uuid;
 
-pub const ACCEPT_REQUEST_TIMEOUT_SEC: u32 = 5 * 60;
+pub const ACCEPT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub struct RemoveAssociation {
     jet_associations: JetAssociationsMap,
@@ -22,10 +27,9 @@ impl RemoveAssociation {
 }
 
 impl Future for RemoveAssociation {
-    type Item = bool;
-    type Error = ();
+    type Output = bool;
 
-    fn poll(&mut self) -> Result<Async<<Self as Future>::Item>, <Self as Future>::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if let Ok(mut jet_associations) = self.jet_associations.try_lock() {
             if let Some(association) = jet_associations.get_mut(&self.association_id) {
                 if let Some(candidate_id) = self.candidate_id {
@@ -36,18 +40,18 @@ impl Future for RemoveAssociation {
                 if !association.is_connected() {
                     debug!("Association is removed!");
                     let removed = jet_associations.remove(&self.association_id).is_some();
-                    return Ok(Async::Ready(removed));
+                    return Poll::Ready(removed);
                 } else {
                     debug!("Association still connected!");
                 }
             }
 
             // Jet association already removed or still connected
-            Ok(Async::Ready(false))
+            Poll::Ready(false)
         } else {
             // We want to be called again.
-            futures::task::current().notify();
-            Ok(Async::NotReady)
+            cx.waker().clone().wake();
+            Poll::Pending
         }
     }
 }

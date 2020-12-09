@@ -1,6 +1,6 @@
-use std::io;
+use std::{io, marker::PhantomData};
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use ironrdp::{
     mcs::SendDataContext,
     rdp::vc::{
@@ -10,8 +10,9 @@ use ironrdp::{
     McsPdu, PduParsing,
 };
 use slog_scope::debug;
-use tokio::{codec::Framed, net::tcp::TcpStream};
+use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
 use crate::{
@@ -27,12 +28,13 @@ pub fn create_downgrade_dvc_capabilities_future(
     server_transport: Framed<TlsStream<TcpStream>, RdpTransport>,
     drdynvc_channel_id: u16,
     dvc_manager: DvcManager,
-) -> SequenceFuture<DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport> {
+) -> SequenceFuture<DowngradeDvcCapabilitiesFuture, TlsStream<TcpStream>, RdpTransport, RdpPdu> {
     SequenceFuture::with_get_state(
         DowngradeDvcCapabilitiesFuture::new(drdynvc_channel_id, dvc_manager),
         GetStateArgs {
             client: Some(client_transport),
             server: Some(server_transport),
+            phantom_data: PhantomData,
         },
     )
 }
@@ -53,7 +55,7 @@ impl DowngradeDvcCapabilitiesFuture {
     }
 }
 
-impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeDvcCapabilitiesFuture {
+impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport, RdpPdu> for DowngradeDvcCapabilitiesFuture {
     type Item = (DvcCapabilitiesTransport, DvcCapabilitiesTransport, DvcManager);
 
     fn process_pdu(&mut self, rdp_pdu: RdpPdu) -> io::Result<Option<RdpPdu>> {
@@ -85,7 +87,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeD
                     mcs_pdu => {
                         let (next_state, next_mcs_pdu, pdu_data) = match mcs_pdu {
                             McsPdu::SendDataRequest(mut send_data_context) => {
-                                data.split_to(data.len() - send_data_context.pdu_length);
+                                data.advance(data.len() - send_data_context.pdu_length);
                                 let (next_state, pdu_data) =
                                     handle_send_data_request(data, sequence_state, self.dvc_manager.as_mut().unwrap())?;
 
@@ -94,7 +96,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for DowngradeD
                                 (next_state, McsPdu::SendDataRequest(send_data_context), pdu_data)
                             }
                             McsPdu::SendDataIndication(mut send_data_context) => {
-                                data.split_to(data.len() - send_data_context.pdu_length);
+                                data.advance(data.len() - send_data_context.pdu_length);
                                 let (next_state, pdu_data) = handle_send_data_indication(
                                     data,
                                     sequence_state,
@@ -341,7 +343,7 @@ where
     F: FnOnce(BytesMut) -> io::Result<(DvcCapabilitiesState, BytesMut)>,
 {
     let mut svc_header = vc::ChannelPduHeader::from_buffer(pdu.as_ref())?;
-    pdu.split_to(svc_header.buffer_length());
+    pdu.advance(svc_header.buffer_length());
 
     if svc_header.total_length as usize != pdu.len() {
         return Err(io::Error::new(

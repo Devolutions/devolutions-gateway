@@ -5,8 +5,9 @@ use ironrdp::{
     ShareDataPdu,
 };
 use slog_scope::debug;
-use tokio::{codec::Framed, net::tcp::TcpStream};
+use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::transport::rdp::{RdpPdu, RdpTransport};
@@ -25,7 +26,7 @@ impl Finalization {
     }
 }
 
-impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport> for Finalization {
+impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport, RdpPdu> for Finalization {
     type Item = (FinalizationTransport, FinalizationTransport);
 
     fn process_pdu(&mut self, rdp_pdu: RdpPdu) -> io::Result<Option<RdpPdu>> {

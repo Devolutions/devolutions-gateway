@@ -11,20 +11,24 @@ use crate::{
     },
     transport::{
         mcs::{McsTransport, SendDataContextTransport},
-        rdp::RdpTransport,
+        rdp::{RdpPdu, RdpTransport},
         x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport},
     },
     utils,
 };
-use futures::{try_ready, Future};
+use bytes::BytesMut;
+use futures::{ready, SinkExt};
 use ironrdp::nego;
-use std::io;
-use tokio::{
-    codec::{Decoder, Framed},
-    net::tcp::{ConnectFuture, TcpStream},
-    prelude::{Async, Poll, Sink},
+use std::{
+    future::Future,
+    io,
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
 };
+use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsStream};
+use tokio_util::codec::{Decoder, Framed};
 use utils::resolve_url_to_socket_arr;
 
 pub struct ConnectionSequenceFuture {
@@ -54,7 +58,7 @@ impl ConnectionSequenceFuture {
         identity: RdpIdentity,
     ) -> Self {
         Self {
-            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::new(
+            state: ConnectionSequenceFutureState::NegotiationWithClient(Box::pin(
                 Self::create_negotiation_with_client_future(client, connection_request),
             )),
             client_nla_transport: None,
@@ -71,13 +75,14 @@ impl ConnectionSequenceFuture {
     fn create_negotiation_with_client_future(
         client: TcpStream,
         negotiation_request: nego::Request,
-    ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport> {
+    ) -> SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response> {
         SequenceFuture::with_parse_state(
             NegotiationWithClientFuture::new(),
             ParseStateArgs {
                 client: Some(NegotiationWithClientTransport::default().framed(client)),
                 server: None,
                 pdu: negotiation_request,
+                phantom_data: PhantomData,
             },
         )
     }
@@ -103,7 +108,8 @@ impl ConnectionSequenceFuture {
     fn create_server_negotiation_future(
         &mut self,
         server: TcpStream,
-    ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>> {
+    ) -> io::Result<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>
+    {
         let server_transport = NegotiationWithServerTransport::default().framed(server);
 
         let target_username = self.identity.target.username.clone();
@@ -116,10 +122,17 @@ impl ConnectionSequenceFuture {
                 .clone(),
         )?;
 
+        let send_future = async {
+            let mut server_transport = server_transport;
+            Pin::new(&mut server_transport).send(pdu).await?;
+            Ok(server_transport)
+        };
+
         Ok(SequenceFuture::with_send_state(
             NegotiationWithServerFuture::new(),
             SendStateArgs {
-                send_future: server_transport.send(pdu),
+                send_future: Box::pin(send_future),
+                phantom_data: PhantomData,
             },
         ))
     }
@@ -142,7 +155,7 @@ impl ConnectionSequenceFuture {
     fn create_mcs_initial_future(
         &mut self,
         server_nla_transport: NlaTransport,
-    ) -> SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport> {
+    ) -> SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport, BytesMut> {
         let client_nla_transport = self
             .client_nla_transport
             .take()
@@ -176,6 +189,7 @@ impl ConnectionSequenceFuture {
             GetStateArgs {
                 client: Some(client_transport),
                 server: Some(server_transport),
+                phantom_data: PhantomData,
             },
         )
     }
@@ -185,7 +199,7 @@ impl ConnectionSequenceFuture {
         client_mcs_initial_transport: Framed<TlsStream<TcpStream>, DataTransport>,
         server_mcs_initial_transport: Framed<TlsStream<TcpStream>, DataTransport>,
         static_channels: StaticChannels,
-    ) -> SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport> {
+    ) -> SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport, ironrdp::McsPdu> {
         SequenceFuture::with_get_state(
             McsFuture::new(static_channels),
             GetStateArgs {
@@ -197,6 +211,7 @@ impl ConnectionSequenceFuture {
                     server_mcs_initial_transport,
                     McsTransport::default(),
                 )),
+                phantom_data: PhantomData,
             },
         )
     }
@@ -205,7 +220,7 @@ impl ConnectionSequenceFuture {
         &mut self,
         client_transport: McsFutureTransport,
         server_transport: McsFutureTransport,
-    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport> {
+    ) -> SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)> {
         SequenceFuture::with_get_state(
             PostMcs::new(
                 self.filter_config
@@ -221,6 +236,7 @@ impl ConnectionSequenceFuture {
                     server_transport,
                     SendDataContextTransport::default(),
                 )),
+                phantom_data: PhantomData,
             },
         )
     }
@@ -229,7 +245,7 @@ impl ConnectionSequenceFuture {
         &mut self,
         client_transport: PostMcsFutureTransport,
         server_transport: PostMcsFutureTransport,
-    ) -> SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport> {
+    ) -> SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport, RdpPdu> {
         let client_transport = utils::update_framed_codec(client_transport, RdpTransport::default());
         let server_transport = utils::update_framed_codec(server_transport, RdpTransport::default());
 
@@ -238,64 +254,69 @@ impl ConnectionSequenceFuture {
             GetStateArgs {
                 client: Some(client_transport),
                 server: Some(server_transport),
+                phantom_data: PhantomData,
             },
         )
     }
 }
 
 impl Future for ConnectionSequenceFuture {
-    type Item = RdpProxyConnection;
-    type Error = io::Error;
+    type Output = Result<RdpProxyConnection, io::Error>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
             match &mut self.state {
                 ConnectionSequenceFutureState::NegotiationWithClient(negotiation_future) => {
-                    let (transport, request, response) = try_ready!(negotiation_future.poll());
+                    let (transport, request, response) = ready!(negotiation_future.as_mut().poll(cx))?;
                     self.request = Some(request);
 
                     let client = transport.into_inner();
 
                     if let Some(nego::ResponseData::Response { protocol, .. }) = response.response {
-                        self.state = ConnectionSequenceFutureState::NlaWithClient(Box::new(
+                        self.state = ConnectionSequenceFutureState::NlaWithClient(Box::pin(
                             self.create_nla_client_future(client, protocol),
                         ));
                     } else {
-                        return Err(io::Error::new(
+                        return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
                             "The client does not support HYBRID (or HYBRID_EX) protocol",
-                        ));
+                        )));
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithClient(nla_future) => {
-                    let client_transport = try_ready!(nla_future.poll());
+                    let client_transport = ready!(nla_future.as_mut().poll(cx))?;
                     self.client_nla_transport = Some(client_transport);
 
-                    let socket_addr = resolve_url_to_socket_arr(&self.identity.dest_host).ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::ConnectionRefused,
-                            format!("couldn't resolve {}", self.identity.dest_host),
-                        )
-                    })?;
+                    let dest_host = self.identity.dest_host.clone();
+                    let future = async {
+                        let dest_host = dest_host;
+                        let socket_addr = resolve_url_to_socket_arr(&dest_host).await.ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::ConnectionRefused,
+                                format!("couldn't resolve {}", dest_host),
+                            )
+                        })?;
 
-                    let stream = TcpStream::connect(&socket_addr);
-                    self.state = ConnectionSequenceFutureState::ConnectToServer(stream);
+                        TcpStream::connect(socket_addr).await
+                    };
+
+                    self.state = ConnectionSequenceFutureState::ConnectToServer(Box::pin(future));
                 }
                 ConnectionSequenceFutureState::ConnectToServer(connect_future) => {
-                    let server = try_ready!(connect_future.poll());
+                    let server = ready!(connect_future.as_mut().poll(cx))?;
 
-                    self.state = ConnectionSequenceFutureState::NegotiationWithServer(Box::new(
+                    self.state = ConnectionSequenceFutureState::NegotiationWithServer(Box::pin(
                         self.create_server_negotiation_future(server)?,
                     ));
                 }
                 ConnectionSequenceFutureState::NegotiationWithServer(negotiation_future) => {
-                    let (server_transport, response) = try_ready!(negotiation_future.poll());
+                    let (server_transport, response) = ready!(negotiation_future.as_mut().poll(cx))?;
 
                     let server = server_transport.into_inner();
 
                     if let Some(nego::ResponseData::Response { protocol, .. }) = response.response {
                         self.response_protocol = Some(protocol);
-                        self.state = ConnectionSequenceFutureState::NlaWithServer(Box::new(
+                        self.state = ConnectionSequenceFutureState::NlaWithServer(Box::pin(
                             self.create_nla_server_future(server, protocol)?,
                         ));
                     } else {
@@ -303,42 +324,43 @@ impl Future for ConnectionSequenceFuture {
                     }
                 }
                 ConnectionSequenceFutureState::NlaWithServer(nla_future) => {
-                    let server_nla_transport = try_ready!(nla_future.poll());
+                    let server_nla_transport = ready!(nla_future.as_mut().poll(cx))?;
 
-                    self.state = ConnectionSequenceFutureState::McsInitial(Box::new(
+                    self.state = ConnectionSequenceFutureState::McsInitial(Box::pin(
                         self.create_mcs_initial_future(server_nla_transport),
                     ))
                 }
                 ConnectionSequenceFutureState::McsInitial(mcs_initial_future) => {
                     let (client_transport, server_transport, filter_config, static_channels) =
-                        try_ready!(mcs_initial_future.poll());
+                        ready!(mcs_initial_future.as_mut().poll(cx))?;
                     self.filter_config = Some(filter_config);
 
-                    self.state = ConnectionSequenceFutureState::Mcs(Box::new(self.create_mcs_future(
+                    self.state = ConnectionSequenceFutureState::Mcs(Box::pin(self.create_mcs_future(
                         client_transport,
                         server_transport,
                         static_channels,
                     )));
                 }
                 ConnectionSequenceFutureState::Mcs(mcs_future) => {
-                    let (client_transport, server_transport, joined_static_channels) = try_ready!(mcs_future.poll());
+                    let (client_transport, server_transport, joined_static_channels) =
+                        ready!(mcs_future.as_mut().poll(cx))?;
                     self.joined_static_channels = Some(joined_static_channels);
 
-                    self.state = ConnectionSequenceFutureState::PostMcs(Box::new(
+                    self.state = ConnectionSequenceFutureState::PostMcs(Box::pin(
                         self.create_post_mcs_future(client_transport, server_transport),
                     ));
                 }
                 ConnectionSequenceFutureState::PostMcs(rdp_future) => {
-                    let (client_transport, server_transport, _filter_config) = try_ready!(rdp_future.poll());
+                    let (client_transport, server_transport, _filter_config) = ready!(rdp_future.as_mut().poll(cx))?;
 
-                    self.state = ConnectionSequenceFutureState::Finalization(Box::new(
+                    self.state = ConnectionSequenceFutureState::Finalization(Box::pin(
                         self.create_finalization(client_transport, server_transport),
                     ));
                 }
                 ConnectionSequenceFutureState::Finalization(finalization) => {
-                    let (client_transport, server_transport) = try_ready!(finalization.poll());
+                    let (client_transport, server_transport) = ready!(finalization.as_mut().poll(cx))?;
 
-                    return Ok(Async::Ready(RdpProxyConnection {
+                    return Poll::Ready(Ok(RdpProxyConnection {
                         client: client_transport,
                         server: server_transport,
                         channels: self.joined_static_channels.take().expect(
@@ -352,13 +374,26 @@ impl Future for ConnectionSequenceFuture {
 }
 
 enum ConnectionSequenceFutureState {
-    NegotiationWithClient(Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport>>),
-    NlaWithClient(Box<NlaWithClientFuture>),
-    ConnectToServer(ConnectFuture),
-    NegotiationWithServer(Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport>>),
-    NlaWithServer(Box<NlaWithServerFuture>),
-    McsInitial(Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport>>),
-    Mcs(Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport>>),
-    PostMcs(Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport>>),
-    Finalization(Box<SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport>>),
+    NegotiationWithClient(NegotiationWithClientT),
+    NlaWithClient(NlaWithClientT),
+    ConnectToServer(ConnectToServerT),
+    NegotiationWithServer(NegotiationWithServerT),
+    NlaWithServer(NlaWithServerT),
+    McsInitial(McsInitialT),
+    Mcs(McsT),
+    PostMcs(PostMcsT),
+    Finalization(FinalizationT),
 }
+
+type NegotiationWithClientT =
+    Pin<Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>>>;
+type NlaWithClientT = Pin<Box<NlaWithClientFuture>>;
+type ConnectToServerT = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
+type NegotiationWithServerT =
+    Pin<Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>>;
+type NlaWithServerT = Pin<Box<NlaWithServerFuture>>;
+type McsInitialT = Pin<Box<SequenceFuture<McsInitialFuture, TlsStream<TcpStream>, DataTransport, BytesMut>>>;
+type McsT = Pin<Box<SequenceFuture<McsFuture, TlsStream<TcpStream>, McsTransport, ironrdp::McsPdu>>>;
+type PostMcsT =
+    Pin<Box<SequenceFuture<PostMcs, TlsStream<TcpStream>, SendDataContextTransport, (ironrdp::McsPdu, Vec<u8>)>>>;
+type FinalizationT = Pin<Box<SequenceFuture<Finalization, TlsStream<TcpStream>, RdpTransport, RdpPdu>>>;

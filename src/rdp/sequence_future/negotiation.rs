@@ -3,7 +3,9 @@ use crate::transport::x224::{NegotiationWithClientTransport, NegotiationWithServ
 use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
 use slog_scope::debug;
 use std::io;
-use tokio::{codec::Framed, net::tcp::TcpStream};
+
+use tokio::net::TcpStream;
+use tokio_util::codec::Framed;
 
 pub struct NegotiationWithClientFuture {
     request: Option<Request>,
@@ -19,7 +21,7 @@ impl NegotiationWithClientFuture {
     }
 }
 
-impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport> for NegotiationWithClientFuture {
+impl SequenceFutureProperties<TcpStream, NegotiationWithClientTransport, Response> for NegotiationWithClientFuture {
     type Item = (Framed<TcpStream, NegotiationWithClientTransport>, Request, Response);
 
     fn process_pdu(&mut self, request: Request) -> io::Result<Option<Response>> {
@@ -108,7 +110,7 @@ impl NegotiationWithServerFuture {
     }
 }
 
-impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport> for NegotiationWithServerFuture {
+impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport, Request> for NegotiationWithServerFuture {
     type Item = (Framed<TcpStream, NegotiationWithServerTransport>, Response);
 
     fn process_pdu(&mut self, response: Response) -> io::Result<Option<Request>> {

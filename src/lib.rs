@@ -1,3 +1,5 @@
+#![recursion_limit = "1024"]
+
 #[macro_use]
 extern crate serde_json;
 #[macro_use]
@@ -12,6 +14,7 @@ pub mod logger;
 pub mod proxy;
 pub mod rdp;
 pub mod routing_client;
+pub mod service;
 pub mod transport;
 pub mod utils;
 pub mod websocket_client;

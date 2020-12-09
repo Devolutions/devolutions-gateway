@@ -1,8 +1,8 @@
 use std::io;
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use ironrdp::{McsPdu, PduParsing};
-use tokio::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 use crate::transport::x224;
 
@@ -24,11 +24,10 @@ impl Decoder for McsTransport {
     }
 }
 
-impl Encoder for McsTransport {
-    type Item = ironrdp::McsPdu;
+impl Encoder<ironrdp::McsPdu> for McsTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: ironrdp::McsPdu, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut item_buffer = BytesMut::with_capacity(item.buffer_length());
         item_buffer.resize(item.buffer_length(), 0x00);
         item.to_buffer(item_buffer.as_mut())?;
@@ -51,7 +50,7 @@ impl Decoder for SendDataContextTransport {
             let mcs_pdu = McsPdu::from_buffer(data.as_ref())?;
             match mcs_pdu {
                 McsPdu::SendDataIndication(ref send_data_context) | McsPdu::SendDataRequest(ref send_data_context) => {
-                    data.split_to(data.len() - send_data_context.pdu_length);
+                    data.advance(data.len() - send_data_context.pdu_length);
 
                     Ok(Some((mcs_pdu, data)))
                 }
@@ -67,11 +66,10 @@ impl Decoder for SendDataContextTransport {
     }
 }
 
-impl Encoder for SendDataContextTransport {
-    type Item = (ironrdp::McsPdu, Vec<u8>);
+impl Encoder<(ironrdp::McsPdu, Vec<u8>)> for SendDataContextTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: Self::Item, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: (ironrdp::McsPdu, Vec<u8>), mut buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut item_buffer = BytesMut::with_capacity(item.0.buffer_length() + item.1.len());
         item_buffer.resize(item.0.buffer_length(), 0x00);
         item.0.to_buffer(item_buffer.as_mut())?;

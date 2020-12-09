@@ -1,17 +1,21 @@
 use jet_proto::JET_VERSION_V2;
-use saphir::{Method, *};
-use slog_scope::info;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
+
+use saphir::{
+    controller::Controller,
+    http::{header, Method, StatusCode},
+    macros::controller,
+    request::Request,
 };
-use tokio::runtime::TaskExecutor;
+use slog_scope::info;
+use std::sync::Arc;
+use tokio_02::runtime::Handle;
+use tokio_compat_02::FutureExt;
 use uuid::Uuid;
 
 use crate::{
     config::Config,
     http::{
-        controllers::{health::build_health_response, utils::SyncResponseUtil},
+        controllers::health::build_health_response,
         middlewares::auth::{parse_auth_header, AuthHeaderType},
     },
     jet::{
@@ -19,107 +23,64 @@ use crate::{
         candidate::Candidate,
     },
     jet_client::JetAssociationsMap,
-    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT_SEC},
+    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
 };
-use futures::Future;
-use std::collections::HashMap;
-use tokio::timer::Delay;
-
-struct ControllerData {
-    config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
-    executor_handle: TaskExecutor,
-}
 
 pub struct JetController {
-    dispatch: ControllerDispatch<ControllerData>,
+    config: Arc<Config>,
+    jet_associations: JetAssociationsMap,
 }
 
 impl JetController {
-    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap, executor_handle: TaskExecutor) -> Self {
-        let dispatch = ControllerDispatch::new(ControllerData {
+    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> Self {
+        Self {
             config,
             jet_associations,
-            executor_handle,
-        });
-        dispatch.add(Method::GET, "/association", ControllerData::get_associations);
-        dispatch.add(
-            Method::POST,
-            "/association/<association_id>",
-            ControllerData::create_association,
-        );
-        dispatch.add(
-            Method::POST,
-            "/association/<association_id>/candidates",
-            ControllerData::gather_association_candidates,
-        );
-        dispatch.add(Method::GET, "/health", ControllerData::health);
-
-        JetController { dispatch }
-    }
-}
-
-impl Controller for JetController {
-    fn handle(&self, req: &mut SyncRequest, res: &mut SyncResponse) {
-        self.dispatch.dispatch(req, res);
-    }
-
-    fn base_path(&self) -> &str {
-        "/jet"
-    }
-}
-
-impl ControllerData {
-    fn get_associations(&self, req: &SyncRequest, res: &mut SyncResponse) {
-        res.status(StatusCode::BAD_REQUEST);
-
-        let mut with_detail = false;
-
-        if let Some(query) = req.uri().query() {
-            if let Ok(params) = ::serde_urlencoded::from_str::<HashMap<String, String>>(query) {
-                if let Some(detail) = params.get("detail") {
-                    with_detail = detail.parse::<bool>().unwrap_or(false);
-                }
-            }
         }
+    }
+}
+
+#[controller(name = "jet")]
+impl JetController {
+    #[get("/association")]
+    async fn get_associations(&self, detail: Option<bool>) -> (u16, Option<String>) {
+        let with_detail = detail.unwrap_or(false);
 
         let associations_response: Vec<AssociationResponse>;
-        if let Ok(associations) = self.jet_associations.lock() {
+        if let Ok(associations) = self.jet_associations.try_lock() {
             associations_response = associations
                 .values()
                 .map(|association| AssociationResponse::from(association, with_detail))
                 .collect();
         } else {
-            res.status(StatusCode::INTERNAL_SERVER_ERROR);
-            return;
-        }
+            return (StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None);
+        };
 
         if let Ok(body) = serde_json::to_string(&associations_response) {
-            res.json_body(body);
-            res.status(StatusCode::OK);
+            return (StatusCode::OK.as_u16(), Some(body));
         }
+
+        (StatusCode::BAD_REQUEST.as_u16(), None)
     }
 
-    fn create_association(&self, req: &SyncRequest, res: &mut SyncResponse) {
+    #[post("/association/<association_id>")]
+    async fn create_association(&self, req: Request) -> (u16, ()) {
         let association_id = match req
             .captures()
             .get("association_id")
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => {
-                res.status(StatusCode::BAD_REQUEST);
-                return;
-            }
+            None => return (StatusCode::BAD_REQUEST.as_u16(), ()),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
         if !self.config.unrestricted {
-            match validate_session_token(self.config.as_ref(), req) {
+            match validate_session_token(self.config.as_ref(), &req) {
                 Err(e) => {
                     slog_scope::error!("Couldn't validate session token: {}", e);
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return;
+
+                    return (StatusCode::UNAUTHORIZED.as_u16(), ());
                 }
                 Ok(expected_id) if expected_id != association_id => {
                     slog_scope::error!(
@@ -127,46 +88,40 @@ impl ControllerData {
                         expected_id,
                         association_id
                     );
-                    res.status(StatusCode::FORBIDDEN);
-                    return;
+                    return (StatusCode::FORBIDDEN.as_u16(), ());
                 }
                 Ok(_) => { /* alright */ }
             }
         }
 
-        // create association
-        let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
+        // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
+        // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
+        // when saphir perform transition to tokio 0.3
+        let mut jet_associations = self.jet_associations.lock().compat().await;
 
         jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-        start_remove_association_future(
-            self.executor_handle.clone(),
-            self.jet_associations.clone(),
-            association_id,
-        );
+        start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
-        res.status(StatusCode::OK);
+        (StatusCode::OK.as_u16(), ())
     }
 
-    fn gather_association_candidates(&self, req: &SyncRequest, res: &mut SyncResponse) {
+    #[post("/association/<association_id>/candidates")]
+    async fn gather_association_candidates(&self, req: Request) -> (u16, Option<String>) {
         let association_id = match req
             .captures()
             .get("association_id")
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => {
-                res.status(StatusCode::BAD_REQUEST);
-                return;
-            }
+            None => return (StatusCode::BAD_REQUEST.as_u16(), None),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
         if !self.config.unrestricted {
-            match validate_session_token(self.config.as_ref(), req) {
+            match validate_session_token(self.config.as_ref(), &req) {
                 Err(e) => {
                     slog_scope::error!("Couldn't validate session token: {}", e);
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return;
+                    return (StatusCode::UNAUTHORIZED.as_u16(), None);
                 }
                 Ok(expected_id) if expected_id != association_id => {
                     slog_scope::error!(
@@ -174,25 +129,19 @@ impl ControllerData {
                         expected_id,
                         association_id
                     );
-                    res.status(StatusCode::FORBIDDEN);
-                    return;
+                    return (StatusCode::FORBIDDEN.as_u16(), None);
                 }
                 Ok(_) => { /* alright */ }
             }
         }
 
         // create association
-        let mut jet_associations = self.jet_associations.lock().unwrap(); // no need to deal with lock poisoning
+        let mut jet_associations = self.jet_associations.lock().compat().await; // no need to deal with lock poisoning
 
         if !jet_associations.contains_key(&association_id) {
             jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
-            start_remove_association_future(
-                self.executor_handle.clone(),
-                self.jet_associations.clone(),
-                association_id,
-            );
+            start_remove_association_future(self.jet_associations.clone(), association_id).await;
         }
-
         let association = jet_associations
             .get_mut(&association_id)
             .expect("presence is checked above");
@@ -205,46 +154,37 @@ impl ControllerData {
             }
         }
 
-        let body = association.gather_candidate();
-        res.json_body(body.to_string());
-        res.status(StatusCode::OK);
+        (
+            StatusCode::OK.as_u16(),
+            Some(association.gather_candidate().to_string()),
+        )
     }
 
-    fn health(&self, _req: &SyncRequest, res: &mut SyncResponse) {
-        build_health_response(res, &self.config.hostname);
+    #[get("/health")]
+    async fn health(&self) -> (u16, String) {
+        build_health_response(&self.config)
     }
 }
 
-pub fn start_remove_association_future(
-    executor_handle: TaskExecutor,
-    jet_associations: JetAssociationsMap,
-    uuid: Uuid,
-) {
-    executor_handle.spawn(create_remove_association_future(jet_associations, uuid));
+pub async fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
+    remove_association(jet_associations, uuid).await;
 }
 
-pub fn create_remove_association_future(
-    jet_associations: JetAssociationsMap,
-    uuid: Uuid,
-) -> impl Future<Item = (), Error = ()> + Send {
-    // Start timeout to remove the association if no connect is received
-    let timeout = Delay::new(Instant::now() + Duration::from_secs(ACCEPT_REQUEST_TIMEOUT_SEC as u64));
-
-    timeout.then(move |_| {
-        RemoveAssociation::new(jet_associations, uuid, None).then(move |res| {
-            if let Ok(true) = res {
+pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
+    if let Ok(runtime_handle) = Handle::try_current() {
+        runtime_handle.spawn(async move {
+            tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
+            if RemoveAssociation::new(jet_associations, uuid, None).compat().await {
                 info!(
                     "No connect request received with association {}. Association removed!",
                     uuid
                 );
             }
-
-            Ok(())
-        })
-    })
+        });
+    }
 }
 
-fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<Uuid, String> {
+fn validate_session_token(config: &Config, req: &Request) -> Result<Uuid, String> {
     #[derive(Deserialize)]
     struct PartialSessionToken {
         den_session_id: Uuid,
@@ -256,7 +196,7 @@ fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<Uuid, St
         .ok_or_else(|| "Provisioner public key is missing".to_string())?;
 
     let auth_header = req
-        .headers_map()
+        .headers()
         .get(header::AUTHORIZATION)
         .ok_or_else(|| "Authorization header not present in request.".to_string())?;
 
@@ -266,7 +206,7 @@ fn validate_session_token(config: &Config, req: &SyncRequest) -> Result<Uuid, St
         Some((AuthHeaderType::Bearer, token)) => {
             use picky::jose::jwt::{JwtSig, JwtValidator};
             let jwt = JwtSig::<PartialSessionToken>::decode(&token, key, &JwtValidator::no_check())
-                .map_err(|e| format!("Invalid session token: {}", e))?;
+                .map_err(|e| format!("Invalid session token: {:?}", e))?;
             Ok(jwt.claims.den_session_id)
         }
         _ => Err("Invalid authorization type".to_string()),

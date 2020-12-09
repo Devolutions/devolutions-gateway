@@ -5,7 +5,7 @@ use slog_term::{Decorator, FullFormat, PlainDecorator, TermDecorator};
 use std::{env, fs::OpenOptions, io, result::Result};
 
 const LOGGER_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S:%6f";
-const DEFAULT_CHAN_SIZE: usize = 128;
+const DEFAULT_CHAN_SIZE: usize = 256;
 
 fn format_decorator(decorator: impl Decorator) -> FullFormat<impl Decorator> {
     FullFormat::new(decorator)

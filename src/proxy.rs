@@ -4,17 +4,19 @@ use crate::{
         pcap::PcapInterceptor, rdp::RdpMessageReader, MessageReader, UnknownMessageReader, WaykMessageReader,
     },
     rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
-    transport::{Transport, BIP_BUFFER_LEN},
+    transport::{JetSinkType, JetStreamType, Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
-use futures::{future::Either, Future, Stream};
+use futures::{select, FutureExt, Sink, Stream, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 use std::{
     collections::HashMap,
     io,
     path::PathBuf,
+    pin::Pin,
     sync::{atomic::Ordering, Arc},
+    task::{Context, Poll},
 };
 
 pub struct Proxy {
@@ -26,15 +28,16 @@ impl Proxy {
         Proxy { config }
     }
 
-    pub fn build<T: Transport, U: Transport>(
+    pub async fn build<T: Transport, U: Transport>(
         &self,
         server_transport: T,
         client_transport: U,
-    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+    ) -> Result<(), io::Error> {
         match self.config.protocol {
             Protocol::WAYK => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
                 self.build_with_message_reader(server_transport, client_transport, Some(Box::new(WaykMessageReader)))
+                    .await
             }
             Protocol::RDP => {
                 info!("RdpMessageReader will be used to interpret application protocol");
@@ -48,20 +51,22 @@ impl Proxy {
                         ])),
                     ))),
                 )
+                .await
             }
             Protocol::UNKNOWN => {
                 warn!("Protocol is unknown. Data received will not be split to get application message.");
                 self.build_with_message_reader(server_transport, client_transport, Some(Box::new(UnknownMessageReader)))
+                    .await
             }
         }
     }
 
-    pub fn build_with_message_reader<T: Transport, U: Transport>(
+    pub async fn build_with_message_reader<T: Transport, U: Transport>(
         &self,
         server_transport: T,
         client_transport: U,
         message_reader: Option<Box<dyn MessageReader>>,
-    ) -> Box<dyn Future<Item = (), Error = io::Error> + Send> {
+    ) -> Result<(), io::Error> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
 
@@ -90,25 +95,27 @@ impl Proxy {
 
             interceptor.set_message_reader(message_reader);
 
-            jet_stream_server.set_packet_interceptor(Box::new(interceptor.clone()));
-            jet_stream_client.set_packet_interceptor(Box::new(interceptor));
+            jet_stream_server
+                .as_mut()
+                .set_packet_interceptor(Box::new(interceptor.clone()));
+            jet_stream_client.as_mut().set_packet_interceptor(Box::new(interceptor));
         }
 
+        // Create trait object wrappers to achieve Stream + Sized type
+        let jet_stream_server = SizedStream::new(jet_stream_server);
+        let jet_stream_client = SizedStream::new(jet_stream_client);
+        let jet_sink_client = SizedSink::new(jet_sink_client);
+        let jet_sink_server = SizedSink::new(jet_sink_server);
+
         // Build future to forward all bytes
-        let f1 = jet_stream_server.forward(jet_sink_client);
-        let f2 = jet_stream_client.forward(jet_sink_server);
+        let mut downstream = jet_stream_server.forward(jet_sink_client).fuse();
+        let mut upstream = jet_stream_client.forward(jet_sink_server).fuse();
 
         SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
 
-        use futures_03::{
-            compat::Future01CompatExt,
-            future::{FutureExt, TryFutureExt},
-        };
-
         macro_rules! finish_remaining_forward {
             ( $fut:ident ( $stream_name:literal => $sink_name:literal ) ) => {
-                use tokio::prelude::FutureExt;
-                match $fut.timeout(std::time::Duration::from_secs(1)).compat().await {
+                match tokio::time::timeout(std::time::Duration::from_secs(1), $fut).await {
                     Ok(_) => {
                         slog_scope::info!(concat!(
                             "Stream ",
@@ -134,39 +141,83 @@ impl Proxy {
             };
         }
 
-        let fut = async move {
-            match f1.select2(f2).compat().await {
-                Ok(either) => {
-                    match either {
-                        Either::A(((_, _), forward)) => {
-                            slog_scope::info!("Stream server -> Sink client: terminated normally");
-                            finish_remaining_forward!(forward ("client" => "server"));
-                        }
-                        Either::B(((_, _), forward)) => {
-                            slog_scope::info!("Stream client -> Sink server: terminated normally");
-                            finish_remaining_forward!(forward ("server" => "client"));
-                        }
-                    };
-                }
-                Err(either_e) => match either_e {
-                    Either::A((e, forward)) => {
+        select! {
+            result = downstream => {
+                match result {
+                    Ok(()) =>  {
+                        slog_scope::info!("Stream server -> Sink client: terminated normally");
+                        finish_remaining_forward!(downstream ("client" => "server"));
+                    }
+                    Err(e) => {
                         slog_scope::warn!("Stream server -> Sink client: {}", e);
-                        finish_remaining_forward!(forward ("client" => "server"));
+                        finish_remaining_forward!(downstream ("client" => "server"));
                     }
-                    Either::B((e, forward)) => {
+                }
+            },
+            result = upstream => {
+                match result {
+                    Ok(()) =>  {
+                        slog_scope::info!("Stream client -> Sink server: terminated normally");
+                        finish_remaining_forward!(upstream ("server" => "client"));
+                    }
+                    Err(e) => {
                         slog_scope::warn!("Stream client -> Sink server: {}", e);
-                        finish_remaining_forward!(forward ("server" => "client"));
+                        finish_remaining_forward!(upstream ("server" => "client"));
                     }
-                },
-            }
+                }
+            },
+        };
 
-            SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
-        }
-        .unit_error()
-        .boxed()
-        .compat()
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "select2 failed"));
+        SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
 
-        Box::new(fut)
+        Ok(())
+    }
+}
+
+struct SizedStream<T> {
+    boxed_stream: JetStreamType<T>,
+}
+
+impl<T> SizedStream<T> {
+    pub fn new(boxed_stream: JetStreamType<T>) -> Self {
+        Self { boxed_stream }
+    }
+}
+
+impl<T> Stream for SizedStream<T> {
+    type Item = Result<T, io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.boxed_stream.as_mut().poll_next(cx)
+    }
+}
+
+struct SizedSink<T> {
+    boxed_sink: JetSinkType<T>,
+}
+
+impl<T> SizedSink<T> {
+    pub fn new(boxed_sink: JetSinkType<T>) -> Self {
+        Self { boxed_sink }
+    }
+}
+
+impl<T> Sink<T> for SizedSink<T> {
+    type Error = io::Error;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.boxed_sink.as_mut().poll_ready(cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+        self.boxed_sink.as_mut().start_send(item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.boxed_sink.as_mut().poll_flush(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.boxed_sink.as_mut().poll_close(cx)
     }
 }

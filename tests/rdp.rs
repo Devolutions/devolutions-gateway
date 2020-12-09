@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use ironrdp::{
     gcc, mcs,
     nego::{Request, Response, ResponseData, ResponseFlags, SecurityProtocol},
@@ -29,6 +29,7 @@ use ironrdp::{
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
 use sspi::internal::credssp;
+use tokio_rustls::rustls;
 use x509_parser::{parse_x509_der, pem::pem_to_der};
 
 use common::run_proxy;
@@ -812,7 +813,7 @@ impl RdpServer {
             match &client_pdu {
                 Ok(vc::dvc::ClientPdu::Data(data)) => {
                     assert_eq!(GRAPHICS_DVC_ID, data.channel_id);
-                    channel_data_buffer.split_to(client_pdu.as_ref().unwrap().buffer_length());
+                    channel_data_buffer.advance(client_pdu.as_ref().unwrap().buffer_length());
                     if let vc::dvc::gfx::ClientPdu::CapabilitiesAdvertise(caps) =
                         vc::dvc::gfx::ClientPdu::from_buffer(channel_data_buffer.as_ref()).unwrap()
                     {
@@ -932,9 +933,9 @@ where
     T::Error: fmt::Debug,
 {
     let data_pdu = Data::from_buffer(buffer.as_ref()).expect("failed to read X224 Data");
-    buffer.split_to(data_pdu.buffer_length() - data_pdu.data_length);
+    buffer.advance(data_pdu.buffer_length() - data_pdu.data_length);
     let pdu = T::from_buffer(&buffer[..data_pdu.data_length]).expect("failed to decode X224 Data");
-    buffer.split_to(pdu.buffer_length());
+    buffer.advance(pdu.buffer_length());
 
     pdu
 }
@@ -983,7 +984,7 @@ where
 
             let pdu = T::from_buffer(&buffer[..send_data_context.pdu_length])
                 .expect("failed to decode Send Data Context PDU");
-            buffer.split_to(pdu.buffer_length());
+            buffer.advance(pdu.buffer_length());
 
             pdu
         }
@@ -1149,7 +1150,7 @@ fn read_dvc_pdu(
 
             let channel_header =
                 vc::ChannelPduHeader::from_buffer(buffer.as_ref()).expect("failed to read channel header");
-            buffer.split_to(channel_header.buffer_length());
+            buffer.advance(channel_header.buffer_length());
 
             assert_eq!(channel_header.total_length, buffer.len() as u32);
             assert!(channel_header

@@ -1,18 +1,20 @@
+use futures::{ready, Sink, Stream};
+use slog_scope::{debug, error, trace};
+use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::{
-    io::{Read, Write},
+    future::Future,
     net::SocketAddr,
+    ops::DerefMut,
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    task::{Context, Poll},
 };
-
-use futures::{Async, AsyncSink, Future, Poll, Sink, StartSend, Stream};
-use slog_scope::{error, trace};
-use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::{
-    io::{self, AsyncRead, AsyncWrite, ReadHalf, WriteHalf},
-    net::tcp::TcpStream,
+    io::{self, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
+    net::TcpStream,
 };
 use url::Url;
 
@@ -20,18 +22,20 @@ use crate::{
     interceptor::PacketInterceptor,
     transport::{tcp::TcpTransport, ws::WsTransport},
 };
+use tokio::io::Error;
+
+pub mod tcp;
+pub mod ws;
 
 pub mod fast_path;
 pub mod mcs;
 pub mod rdp;
-pub mod tcp;
 pub mod tsrequest;
-pub mod ws;
 pub mod x224;
 
-pub type JetFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
-pub type JetStreamType<T> = Box<dyn JetStream<Item = T, Error = io::Error> + Send>;
-pub type JetSinkType<T> = Box<dyn JetSink<SinkItem = T, SinkError = io::Error> + Send>;
+pub type JetFuture<T> = Pin<Box<dyn Future<Output = Result<T, io::Error>> + Send>>;
+pub type JetStreamType<T> = Pin<Box<dyn JetStream<Item = Result<T, io::Error>> + Send>>;
+pub type JetSinkType<T> = Pin<Box<dyn JetSink<T, Error = io::Error> + Send>>;
 
 pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
 const PART_LEN: usize = 16 * 1024;
@@ -79,8 +83,7 @@ impl Transport for JetTransport {
     where
         Self: Sized,
     {
-        // TODO
-        unimplemented!()
+        unimplemented!("JetTransport::connect is not implemented yet for JetTransport")
     }
 
     fn peer_addr(&self) -> Option<SocketAddr> {
@@ -102,49 +105,46 @@ impl Transport for JetTransport {
     }
 }
 
-impl Read for JetTransport {
-    fn read(&mut self, mut buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.read(&mut buf),
-            JetTransport::Ws(ref mut ws_transport) => ws_transport.read(&mut buf),
-        }
-    }
-}
-
-impl AsyncRead for JetTransport {}
-
-impl Write for JetTransport {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => tcp_transport.write(&buf),
-            JetTransport::Ws(ref mut ws_transport) => ws_transport.write(&buf),
-        }
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => Write::flush(tcp_transport),
-            JetTransport::Ws(ref mut ws_transport) => Write::flush(ws_transport),
+impl AsyncRead for JetTransport {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<Result<(), io::Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_read(cx, buf),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_read(cx, buf),
         }
     }
 }
 
 impl AsyncWrite for JetTransport {
-    fn shutdown(&mut self) -> Result<Async<()>, std::io::Error> {
-        match self {
-            JetTransport::Tcp(ref mut tcp_transport) => AsyncWrite::shutdown(tcp_transport),
-            JetTransport::Ws(ref mut ws_transport) => AsyncWrite::shutdown(ws_transport),
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_write(cx, buf),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_flush(cx),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        match self.get_mut() {
+            JetTransport::Tcp(ref mut tcp_transport) => Pin::new(tcp_transport).poll_shutdown(cx),
+            JetTransport::Ws(ref mut ws_transport) => Pin::new(ws_transport).poll_shutdown(cx),
         }
     }
 }
 
 pub trait JetStream: Stream {
-    fn nb_bytes_read(&self) -> u64;
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>);
+    fn nb_bytes_read(self: Pin<&Self>) -> u64;
+    fn set_packet_interceptor(self: Pin<&mut Self>, interceptor: Box<dyn PacketInterceptor>);
 }
 
-pub trait JetSink: Sink {
-    fn nb_bytes_written(&self) -> u64;
-    fn finished(&mut self) -> bool;
+pub trait JetSink<SinkItem>: Sink<SinkItem> {
+    fn nb_bytes_written(self: Pin<&Self>) -> u64;
+    fn finished(self: Pin<&mut Self>) -> bool;
 }
 
 struct JetStreamImpl<T: AsyncRead> {
@@ -156,7 +156,7 @@ struct JetStreamImpl<T: AsyncRead> {
     buffer: BipBufferWriter,
 }
 
-impl<T: AsyncRead> JetStreamImpl<T> {
+impl<T: AsyncRead + Unpin> JetStreamImpl<T> {
     fn new(
         stream: ReadHalf<T>,
         nb_bytes_read: Arc<AtomicU64>,
@@ -174,69 +174,80 @@ impl<T: AsyncRead> JetStreamImpl<T> {
     }
 }
 
-impl<T: AsyncRead> Stream for JetStreamImpl<T> {
-    type Item = usize;
-    type Error = io::Error;
+impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
+    type Item = Result<usize, io::Error>;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let peer_addr = &self.peer_addr_str;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut written = 0;
+
         loop {
-            if let Some(mut reservation) = self.buffer.reserve(PART_LEN) {
-                match self.stream.poll_read(reservation.as_mut()) {
-                    Ok(Async::Ready(0)) => {
+            let Self {
+                ref mut stream,
+                buffer,
+                packet_interceptor,
+                peer_addr,
+                nb_bytes_read,
+                peer_addr_str,
+                ..
+            } = self.deref_mut();
+
+            if let Some(mut reservation) = buffer.reserve(PART_LEN) {
+                let mut read_buffer = ReadBuf::new(reservation.as_mut());
+                match Pin::new(stream).poll_read(cx, &mut read_buffer) {
+                    Poll::Ready(Ok(())) if read_buffer.filled().is_empty() => {
                         reservation.cancel(); // equivalent to truncate(0)
                         return if written > 0 {
-                            Ok(Async::Ready(Some(written)))
+                            Poll::Ready(Some(Ok(written)))
                         } else {
-                            Ok(Async::Ready(None))
+                            Poll::Ready(None)
                         };
                     }
-                    Ok(Async::Ready(len)) => {
-                        if let Some(interceptor) = self.packet_interceptor.as_mut() {
-                            interceptor.on_new_packet(self.peer_addr, &reservation[..len]);
+                    Poll::Ready(Ok(())) => {
+                        let len = read_buffer.filled().len();
+                        if let Some(interceptor) = packet_interceptor {
+                            interceptor.on_new_packet(*peer_addr, &reservation[..len]);
                         }
 
                         written += len;
                         reservation.truncate(len);
                         reservation.send();
-                        self.nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
+                        nb_bytes_read.fetch_add(len as u64, Ordering::SeqCst);
 
-                        trace!("{} bytes read on {}", len, peer_addr);
+                        trace!("{} bytes read on {}", len, peer_addr_str);
                     }
-                    Ok(Async::NotReady) => {
+                    Poll::Pending => {
                         reservation.cancel();
                         return if written > 0 {
-                            Ok(Async::Ready(Some(written)))
+                            Poll::Ready(Some(Ok(written)))
                         } else {
-                            Ok(Async::NotReady)
+                            Poll::Pending
                         };
                     }
-                    Err(e) => {
+                    Poll::Ready(Err(e)) => {
                         reservation.cancel();
                         error!("Can't read on socket: {}", e);
-                        return Ok(Async::Ready(None));
+                        return Poll::Ready(None);
                     }
                 }
             } else {
                 return if written > 0 {
-                    Ok(Async::Ready(Some(written)))
+                    Poll::Ready(Some(Ok(written)))
                 } else {
-                    error!("BipBuffer writer cannot write any byte. Closing Writer");
-
-                    Ok(Async::Ready(None))
+                    debug!("BipBuffer writer temporary cannot reserve {} bytes", PART_LEN);
+                    cx.waker().clone().wake();
+                    Poll::Pending
                 };
             }
         }
     }
 }
 
-impl<T: AsyncRead> JetStream for JetStreamImpl<T> {
-    fn nb_bytes_read(&self) -> u64 {
+impl<T: AsyncRead + Unpin> JetStream for JetStreamImpl<T> {
+    fn nb_bytes_read(self: Pin<&Self>) -> u64 {
         self.nb_bytes_read.load(Ordering::Relaxed)
     }
 
-    fn set_packet_interceptor(&mut self, interceptor: Box<dyn PacketInterceptor>) {
+    fn set_packet_interceptor(mut self: Pin<&mut Self>, interceptor: Box<dyn PacketInterceptor>) {
         self.packet_interceptor = Some(interceptor);
     }
 }
@@ -244,6 +255,7 @@ impl<T: AsyncRead> JetStream for JetStreamImpl<T> {
 struct JetSinkImpl<T: AsyncWrite> {
     stream: WriteHalf<T>,
     nb_bytes_written: Arc<AtomicU64>,
+    bytes_to_write: usize,
     peer_addr_str: String,
     buffer: BipBufferReader,
 }
@@ -258,57 +270,93 @@ impl<T: AsyncWrite> JetSinkImpl<T> {
         Self {
             stream,
             nb_bytes_written,
+            bytes_to_write: 0,
             peer_addr_str: peer_addr.map_or("Unknown".to_string(), |addr| addr.to_string()),
             buffer,
         }
     }
 }
 
-impl<T: AsyncWrite> Sink for JetSinkImpl<T> {
-    type SinkItem = usize;
-    type SinkError = io::Error;
+impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
+    type Error = io::Error;
 
-    fn start_send(&mut self, mut bytes_read: Self::SinkItem) -> StartSend<Self::SinkItem, Self::SinkError> {
-        let peer_addr = &self.peer_addr_str;
-        trace!("{} bytes to write on {}", bytes_read, peer_addr);
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if self.bytes_to_write == 0 {
+            Poll::Ready(Ok(()))
+        } else {
+            self.as_mut().poll_flush(cx)
+        }
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, bytes_read: usize) -> Result<(), Self::Error> {
+        assert_eq!(
+            self.bytes_to_write, 0,
+            "Sink still has not finished previous transmission"
+        );
+        self.bytes_to_write += bytes_read;
+        Ok(())
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let Self {
+            peer_addr_str,
+            bytes_to_write,
+            ..
+        } = self.deref_mut();
+
+        if *bytes_to_write == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        trace!("{} bytes to write on {}", *bytes_to_write, peer_addr_str);
+
+        let peer_addr = peer_addr_str.clone();
 
         loop {
-            match self.stream.poll_write(self.buffer.valid()) {
-                Ok(Async::Ready(len)) => {
+            let Self {
+                stream,
+                bytes_to_write,
+                nb_bytes_written,
+                buffer,
+                ..
+            } = self.deref_mut();
+
+            let chunk_size = buffer.valid().len().min(*bytes_to_write);
+
+            match Pin::new(stream).poll_write(cx, &buffer.valid()[..chunk_size]) {
+                Poll::Ready(Ok(len)) => {
                     if len > 0 {
-                        self.buffer.consume(len);
-                        self.nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
-                        bytes_read -= len;
+                        buffer.consume(len);
+                        nb_bytes_written.fetch_add(len as u64, Ordering::SeqCst);
+                        *bytes_to_write -= len;
                     }
                     trace!("{} bytes written on {}", len, peer_addr);
 
-                    if bytes_read == 0 {
-                        return Ok(AsyncSink::Ready);
+                    if *bytes_to_write == 0 {
+                        return Poll::Ready(Ok(()));
                     }
                 }
-                Ok(Async::NotReady) => return Ok(AsyncSink::NotReady(bytes_read)),
-                Err(e) => {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(e)) => {
                     error!("Can't write on socket: {}", e);
-                    return Err(e);
+                    return Poll::Ready(Err(e));
                 }
             }
         }
     }
 
-    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.stream.poll_flush()
-    }
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
 
-    fn close(&mut self) -> Poll<(), Self::SinkError> {
-        self.stream.shutdown()
+        Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
 
-impl<T: AsyncWrite> JetSink for JetSinkImpl<T> {
-    fn nb_bytes_written(&self) -> u64 {
+impl<T: AsyncWrite> JetSink<usize> for JetSinkImpl<T> {
+    fn nb_bytes_written(self: Pin<&Self>) -> u64 {
         self.nb_bytes_written.load(Ordering::Relaxed)
     }
-    fn finished(&mut self) -> bool {
+    fn finished(mut self: Pin<&mut Self>) -> bool {
         self.buffer.valid().is_empty()
     }
 }

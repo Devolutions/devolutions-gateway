@@ -1,5 +1,12 @@
 use crate::config::Config;
-use saphir::*;
+use futures::future::{BoxFuture, FutureExt};
+use saphir::{
+    error::SaphirError,
+    http::{self, StatusCode},
+    http_context::{HttpContext, State},
+    middleware::{Middleware, MiddlewareChain},
+    response::Builder as ResponseBuilder,
+};
 use slog_scope::error;
 use std::sync::Arc;
 
@@ -9,50 +16,73 @@ pub struct AuthMiddleware {
 
 impl AuthMiddleware {
     pub fn new(config: Arc<Config>) -> Self {
-        AuthMiddleware { config }
+        Self { config }
     }
 }
 
 impl Middleware for AuthMiddleware {
-    fn resolve(&self, req: &mut SyncRequest, res: &mut SyncResponse) -> RequestContinuation {
-        if let Some(api_key) = &self.config.api_key {
-            let auth_header = match req.headers_map().get(header::AUTHORIZATION) {
-                Some(h) => h.clone(),
-                None => {
-                    error!("Authorization header not present in request.");
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return RequestContinuation::Stop;
-                }
-            };
-
-            let auth_str = match auth_header.to_str() {
-                Ok(s) => s,
-                Err(_) => {
-                    error!("Authorization header wrong format");
-                    res.status(StatusCode::UNAUTHORIZED);
-                    return RequestContinuation::Stop;
-                }
-            };
-
-            match parse_auth_header(auth_str) {
-                Some((AuthHeaderType::Bearer, token)) => {
-                    // API_KEY
-                    if api_key == &token {
-                        return RequestContinuation::Continue;
-                    }
-                }
-                _ => {
-                    error!("Invalid authorization type");
-                }
-            }
-
-            res.status(StatusCode::UNAUTHORIZED);
-            RequestContinuation::Stop
-        } else {
-            // API_KEY not defined, we accept everything
-            RequestContinuation::Continue
-        }
+    fn next(
+        &'static self,
+        ctx: HttpContext,
+        chain: &'static dyn MiddlewareChain,
+    ) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
+        auth_middleware(self.config.clone(), ctx, chain).boxed()
     }
+}
+
+async fn auth_middleware(
+    config: Arc<Config>,
+    ctx: HttpContext,
+    chain: &'static dyn MiddlewareChain,
+) -> Result<HttpContext, SaphirError> {
+    if let Some(api_key) = &config.api_key {
+        let auth_header = ctx
+            .state
+            .request()
+            .expect("Invalid middleware state")
+            .headers()
+            .get(http::header::AUTHORIZATION);
+
+        let auth_header = match auth_header {
+            Some(header) => header.clone(),
+            None => {
+                error!("Authorization header not present in request.");
+                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
+            }
+        };
+
+        let auth_str = match auth_header.to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                error!("Authorization header wrong format");
+                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
+            }
+        };
+
+        if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_str) {
+            // API_KEY
+            if api_key == &token {
+                return chain.next(ctx).await;
+            }
+        }
+
+        error!("Invalid authorization type");
+        let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+
+        let mut ctx = ctx.clone_with_empty_state();
+        ctx.state = State::After(Box::new(response));
+        return Ok(ctx);
+    }
+
+    Ok(chain.next(ctx).await?)
 }
 
 #[derive(PartialEq)]
