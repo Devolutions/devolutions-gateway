@@ -198,7 +198,6 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
             jet_associations.clone(),
             tls_acceptor.clone(),
             tls_public_key.clone(),
-            // executor_handle.clone(),
             logger.clone(),
         )));
     }
