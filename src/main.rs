@@ -75,8 +75,8 @@ async fn build_signals_fut() -> Result<(), String> {
         signal(SignalKind::terminate()).map_err(|err| format!("failed to create terminate signal stream - {}", err))?;
     let mut quit_signal =
         signal(SignalKind::quit()).map_err(|err| format!("failed to create quit signal stream failed - {}", err))?;
-    let mut interrupt_signal =
-        signal(SignalKind::interrupt()).map_err(|err| format!("failed to create interrupt signal stream failed - {}", err))?;
+    let mut interrupt_signal = signal(SignalKind::interrupt())
+        .map_err(|err| format!("failed to create interrupt signal stream failed - {}", err))?;
 
     futures::future::select_all(vec![
         Box::pin(terminate_signal.recv()),

@@ -8,12 +8,12 @@ use std::{
 };
 
 use futures::stream::StreamExt;
-use tokio_compat_02::FutureExt as _;
 use tokio::{
     net::{TcpListener, TcpStream},
     runtime::Runtime,
     sync::Mutex,
 };
+use tokio_compat_02::FutureExt as _;
 
 use tokio_compat_02::IoCompat;
 use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
@@ -381,7 +381,6 @@ async fn start_websocket_server(
 
     let connection_process =
         |connection: ConnectionType, remote_addr: Option<SocketAddr>, websocket_service: WebsocketService| {
-
             let http = hyper::server::conn::Http::new();
             let listener_logger = listener_logger.clone();
 
@@ -394,7 +393,11 @@ async fn start_websocket_server(
                 let conn = IoCompat::new(connection);
                 let serve_connection = http.serve_connection(conn, service).with_upgrades();
                 // use .compat to run 0.2 hyper on tokio 0.3 runtime
-                let _ = serve_connection.with_logger(listener_logger).compat().await.map_err(|_| ());
+                let _ = serve_connection
+                    .with_logger(listener_logger)
+                    .compat()
+                    .await
+                    .map_err(|_| ());
             });
         };
 

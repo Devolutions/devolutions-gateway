@@ -7,7 +7,6 @@ use crate::{
     Proxy,
 };
 
-use tokio_compat_02::FutureExt;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use saphir::error;
 use slog_scope::{error, info};
@@ -16,6 +15,7 @@ use std::{
     net::SocketAddr,
     sync::Arc,
 };
+use tokio_compat_02::FutureExt;
 
 use url::Url;
 use uuid::Uuid;
@@ -216,8 +216,7 @@ async fn handle_jet_connect_impl(
                     return Err(());
                 };
 
-                if (candidate.transport_type() == TransportType::Ws
-                        || candidate.transport_type() == TransportType::Wss)
+                if (candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss)
                     && candidate.state() == CandidateState::Accepted
                 {
                     let server_transport = candidate
@@ -240,9 +239,7 @@ async fn handle_jet_connect_impl(
                     // Rust does not drop it automatically before end of the function
                     std::mem::drop(jet_assc);
 
-                    let proxy_result = Proxy::new(config)
-                        .build(server_transport, client_transport)
-                        .await;
+                    let proxy_result = Proxy::new(config).build(server_transport, client_transport).await;
 
                     if let Err(e) = proxy_result {
                         error!("failed to build Proxy for WebSocket connection: {}", e)
