@@ -79,7 +79,7 @@
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
 
     <!-- Set properties for add/remove programs -->
-    <Property Id="ARPPRODUCTICON" Value="DevolutionsGateway.exe" />
+    <Property Id="ARPPRODUCTICON" Value="DevolutionsGateway.ico" />
     <Property Id="ARPHELPLINK" Value="$(var.InfoURL)" />
 
     <!-- Clear this property to auto launch WaykAgent.exe after installation -->
@@ -87,14 +87,6 @@
 
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="0" />
     <Property Id="INSTALLSTARTMENUSHORTCUT" Value="0" />
-
-    <!-- If it's an update and the shortcuts don't currently exist, don't install them -->
-    <SetProperty Id="INSTALLDESKTOPSHORTCUT" Value="" Sequence="first" After="AppSearch">
-          WIX_UPGRADE_DETECTED AND NOT DESKTOPSHORTCUTINSTALLED AND NOT LEGACYDESKTOPSHORTCUTINSTALLED
-    </SetProperty>
-    <SetProperty Id="INSTALLSTARTMENUSHORTCUT" Value="" Sequence="first" After="AppSearch">
-          WIX_UPGRADE_DETECTED AND NOT STARTMENUSHORTCUTINSTALLED AND NOT LEGACYSTARTMENUSHORTCUTINSTALLED
-    </SetProperty>
 
     <!-- Upgrade logic -->
     <!-- AllowSameVersionUpgrades -> Always upgrade, never allow two versions to be installed next to each other -->
@@ -122,7 +114,7 @@
     <!-- Set up ARPINSTALLLOCATION property (http://blogs.technet.com/b/alexshev/archive/2008/02/09/from-msi-to-wix-part-2.aspx) -->
     <CustomAction Id="SetARPINSTALLLOCATION" Property="ARPINSTALLLOCATION" Value="[INSTALLDIR]" />
 
-    <Property Id="Set_ProgramDataPermissions" Value='"cmd.exe" /c ECHO Y| &quot;%windir%\System32\cacls.exe&quot; %programdata%\wayk /S:$(var.ProgramDataSddl) /C' />
+    <Property Id="Set_ProgramDataPermissions" Value='"cmd.exe" /c ECHO Y| &quot;%windir%\System32\cacls.exe&quot; %ProgramData%\Devolutions\Gateway /S:$(var.ProgramDataSddl) /C' />
     <CustomAction Id="Set_ProgramDataPermissions" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore"/>
 
     <!-- 
@@ -174,6 +166,12 @@
           <!-- INSTALLDIR is a property name. We need it later for the UI (to be able to change the install dir. -->
           <Directory Id="INSTALLDIR" Name="Gateway">
 
+            <Directory Id="PowerShell" Name="PowerShell">
+              <Directory Id="Modules" Name="Modules">
+                <Directory Id="DGATEWAYPSROOTDIRECTORY" Name="DevolutionsGateway"/>
+              </Directory>
+            </Directory>
+
             <Component Id="cmpDGatewayRegistryEntries" Guid="*" Win64="$(var.Win64)">
               <RegistryKey Root="HKLM" Key="Software\Devolutions\Gateway">
                 <RegistryValue Type="string" Name="InstallDir" Value="[INSTALLDIR]" KeyPath="yes"/>
@@ -205,7 +203,8 @@
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Wayk Now Service TCP" Description="Wayk Now Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Wayk Now Service UDP" Description="Wayk Now Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
       </File>
-      <ServiceInstall Id="ServiceInstaller" Type="ownProcess" Vital="yes" Name="$(var.ServiceName)" DisplayName="$(var.ServiceDisplayName)" Description="$(var.ServiceDescription)" Start="auto" ErrorControl="ignore">
+      <ServiceInstall Id="ServiceInstaller" Type="ownProcess" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
+        DisplayName="$(var.ServiceDisplayName)" Description="$(var.ServiceDescription)" Start="auto" ErrorControl="ignore">
         <util:ServiceConfig FirstFailureActionType='restart' SecondFailureActionType='restart' ThirdFailureActionType='restart' RestartServiceDelayInSeconds='60' ResetPeriodInDays='1'/>
       </ServiceInstall>
       <ServiceControl Id="StartService" Start="install" Stop="both" Remove="uninstall" Name="$(var.ServiceName)" Wait="yes" />
@@ -225,8 +224,6 @@
 
     <UI Id="MyWixUI_InstallDir">
       <UIRef Id="WixUI_InstallDir"/>
-      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="ShortcutSelectionDlg" Order="4">WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID="1"</Publish>
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ProgramSettingsDlg" Order="1">1</Publish>
     </UI>
 
     <UI>

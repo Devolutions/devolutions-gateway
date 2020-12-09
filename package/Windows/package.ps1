@@ -8,13 +8,6 @@ $TargetArch = "x64"
 $ModuleName = "DevolutionsGateway"
 $ModuleVersion = '2020.3.1'
 
-$WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
-$WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
-
-$WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @("-dVersion=$ShortVersion")
-
-$WixFiles = @('ProgramSettingsDlg', 'ShortcutSelectionDlg', 'DevolutionsGateway')
-
 $WebClient = [System.Net.WebClient]::new()
 $DownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/" + `
     "v${InternalVersion}/DevolutionsGateway_windows_${InternalVersion}_x86_64.exe"
@@ -27,7 +20,19 @@ $WebClient.DownloadFile($DownloadUrl, $OutputFile)
 Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
 Remove-Item -Path "${ModuleName}/${ModuleVersion}/PSGetModuleInfo.xml" -ErrorAction 'SilentlyContinue'
 
+$WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
+$WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
+
+$WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @(
+    "-dDGatewayPSSourceDir=${ModuleName}/${ModuleVersion}",
+    "-dVersion=$ShortVersion")
+
+$WixFiles = @('DevolutionsGateway', "DevolutionsGateway-${TargetArch}")
+
 $HeatArgs = @('dir', "${ModuleName}/${ModuleVersion}",
+    "-dr", "DGATEWAYPSROOTDIRECTORY",
+    "-cg", "DGatewayPSComponentGroup",
+    '-var', 'var.DGatewayPSSourceDir',
     '-nologo', '-srd', '-suid', '-sfrag', '-gg')
 
 & 'heat.exe' $HeatArgs + @('-t', 'HeatTransform64.xslt', '-o', "${PackageName}-${TargetArch}.wxs")
