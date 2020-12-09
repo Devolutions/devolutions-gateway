@@ -310,18 +310,18 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
             .unwrap();
     };
 
-    let mut builder = Response::builder();
-
-    builder
+    let builder = Response::builder()
         .status(StatusCode::SWITCHING_PROTOCOLS)
         .header(header::UPGRADE, "websocket")
         .header(header::CONNECTION, "upgrade")
         .header(header::SEC_WEBSOCKET_ACCEPT, key.as_str());
 
     // Add the SEC_WEBSOCKET_PROTOCOL header only if it was in the request, otherwise, IIS doesn't like it
-    if let Some(websocket_protocol) = req.headers().get(header::SEC_WEBSOCKET_PROTOCOL) {
-        builder.header(header::SEC_WEBSOCKET_PROTOCOL, websocket_protocol);
-    }
+    let builder = if let Some(websocket_protocol) = req.headers().get(header::SEC_WEBSOCKET_PROTOCOL) {
+        builder.header(header::SEC_WEBSOCKET_PROTOCOL, websocket_protocol)
+    } else {
+        builder
+    };
 
     builder.body(Body::empty()).unwrap()
 }
