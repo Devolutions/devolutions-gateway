@@ -5,11 +5,10 @@ use uuid::Uuid;
 
 pub const ACCEPT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-
 pub async fn remove_jet_association(
     jet_associations: JetAssociationsMap,
     association_id: Uuid,
-    candidate_id: Option<Uuid>
+    candidate_id: Option<Uuid>,
 ) -> bool {
     let mut jet_associations = jet_associations.lock().await;
 

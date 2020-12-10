@@ -241,10 +241,7 @@ async fn handle_jet_connect_impl(
                         error!("failed to build Proxy for WebSocket connection: {}", e)
                     }
 
-                    remove_jet_association(
-                        jet_associations.clone(),
-                        association_id,
-                        Some(candidate_id)).await;
+                    remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
                 }
 
                 Ok::<(), ()>(())

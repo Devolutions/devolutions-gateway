@@ -53,7 +53,6 @@ impl JetController {
             .map(|association| AssociationResponse::from(association, with_detail))
             .collect();
 
-
         if let Ok(body) = serde_json::to_string(&associations_response) {
             return (StatusCode::OK, Some(body));
         }
@@ -152,10 +151,7 @@ impl JetController {
             }
         }
 
-        (
-            StatusCode::OK,
-            Some(association.gather_candidate().to_string()),
-        )
+        (StatusCode::OK, Some(association.gather_candidate().to_string()))
     }
 
     #[get("/health")]

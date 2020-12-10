@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    future::Future,
-    io,
-    pin::Pin,
-    sync::Arc,
-};
+use std::{collections::HashMap, future::Future, io, pin::Pin, sync::Arc};
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use jet_proto::{
@@ -15,7 +9,7 @@ use jet_proto::{
 };
 use slog_scope::{debug, error};
 use tokio::{
-    io::{AsyncWriteExt, AsyncReadExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     sync::Mutex,
 };
 use uuid::Uuid;
@@ -55,19 +49,14 @@ impl JetClient {
         let (transport, msg) = read_jet_message(transport).await?;
 
         match msg {
-            JetMessage::JetTestReq(jet_test_req) => {
-                handle_test_jet_msg(transport, jet_test_req).await
-            },
+            JetMessage::JetTestReq(jet_test_req) => handle_test_jet_msg(transport, jet_test_req).await,
             JetMessage::JetAcceptReq(jet_accept_req) => {
                 HandleAcceptJetMsg::new(config, transport, jet_accept_req, jet_associations.clone())
-                    .accept().await
+                    .accept()
+                    .await
             }
             JetMessage::JetConnectReq(jet_connect_req) => {
-                let response = handle_connect_jet_msg(
-                    transport,
-                    jet_connect_req,
-                    jet_associations.clone()
-                ).await?;
+                let response = handle_connect_jet_msg(transport, jet_connect_req, jet_associations.clone()).await?;
 
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
@@ -76,10 +65,7 @@ impl JetClient {
                     .build(response.server_transport, response.client_transport)
                     .await;
 
-                remove_jet_association(
-                    jet_associations.clone(),
-                    association_id,
-                    Some(candidate_id)).await;
+                remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
 
                 proxy_result
             }
@@ -94,9 +80,7 @@ fn error_other<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-async fn read_jet_message(
-    mut transport: JetTransport
-) -> Result<(JetTransport, JetMessage), io::Error> {
+async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, JetMessage), io::Error> {
     let mut data_received = Vec::new();
 
     let mut buff = [0u8; 1024];
@@ -105,7 +89,9 @@ async fn read_jet_message(
         let bytes_read = transport.read(&mut buff).await?;
 
         if bytes_read == 0 {
-            return Err(error_other("Socket closed during Jet header receive, no JetPacket received."));
+            return Err(error_other(
+                "Socket closed during Jet header receive, no JetPacket received.",
+            ));
         }
 
         data_received.extend_from_slice(&buff[..bytes_read]);
@@ -120,10 +106,7 @@ async fn read_jet_message(
     let mut slice = data_received.as_slice();
     let signature = ReadBytesExt::read_u32::<LittleEndian>(&mut slice)?; // signature
     if signature != jet_proto::JET_MSG_SIGNATURE {
-        return Err(error_other(format!(
-            "Invalid JetPacket - Signature = {}.",
-            signature
-        )));
+        return Err(error_other(format!("Invalid JetPacket - Signature = {}.", signature)));
     }
 
     let msg_len = ReadBytesExt::read_u16::<BigEndian>(&mut slice)?;
@@ -132,16 +115,14 @@ async fn read_jet_message(
         let bytes_read = transport.read(&mut buff).await?;
 
         if bytes_read == 0 {
-            return Err(error_other("Socket closed during Jet message receive, no JetPacket received."));
+            return Err(error_other(
+                "Socket closed during Jet message receive, no JetPacket received.",
+            ));
         }
 
         data_received.extend_from_slice(&buff[..bytes_read]);
 
-        debug!(
-            "Received {} of {} bytes of jet message",
-            data_received.len(),
-            msg_len
-        );
+        debug!("Received {} of {} bytes of jet message", data_received.len(), msg_len);
     }
 
     let mut slice = data_received.as_slice();
@@ -151,7 +132,7 @@ async fn read_jet_message(
     Ok((transport, jet_message))
 }
 
-struct  HandleAcceptJetMsg {
+struct HandleAcceptJetMsg {
     config: Arc<Config>,
     transport: Option<JetTransport>,
     request_msg: JetAcceptReq,
@@ -224,7 +205,8 @@ impl HandleAcceptJetMsg {
         };
 
         if self.request_msg.version == 1 && status_code == StatusCode::OK {
-            self.remove_association_future.replace(Box::pin(remove_association(self.jet_associations.clone(), association)));
+            self.remove_association_future
+                .replace(Box::pin(remove_association(self.jet_associations.clone(), association)));
         }
 
         // Build response
@@ -282,7 +264,8 @@ impl HandleAcceptJetMsg {
 
     async fn accept(mut self) -> Result<(), io::Error> {
         let response_msg = self.handle_create_response().await?;
-        let transport = self.transport
+        let transport = self
+            .transport
             .as_mut()
             .expect("Must not be taken upon successful call to handle_set_transport");
         transport.write(&response_msg).await?;
@@ -293,7 +276,7 @@ impl HandleAcceptJetMsg {
 async fn handle_connect_jet_msg(
     mut client_transport: JetTransport,
     request_msg: JetConnectReq,
-    jet_associations: JetAssociationsMap
+    jet_associations: JetAssociationsMap,
 ) -> Result<HandleConnectJetMsgResponse, io::Error> {
     let mut response_msg = Vec::with_capacity(512);
     let mut server_transport = None;
@@ -320,8 +303,7 @@ async fn handle_connect_jet_msg(
             }
             (2, 2) => {
                 if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
-                    if candidate.transport_type() == TransportType::Tcp
-                        && candidate.state() == CandidateState::Accepted
+                    if candidate.transport_type() == TransportType::Tcp && candidate.state() == CandidateState::Accepted
                     {
                         Some(candidate)
                     } else {
@@ -371,14 +353,12 @@ async fn handle_connect_jet_msg(
 
     // If server stream found, start the proxy
     match (server_transport.take(), association_id.take(), candidate_id.take()) {
-        (Some(server_transport), Some(association_id), Some(candidate_id)) => {
-            Ok(HandleConnectJetMsgResponse {
-                client_transport,
-                server_transport,
-                association_id,
-                candidate_id,
-            })
-        }
+        (Some(server_transport), Some(association_id), Some(candidate_id)) => Ok(HandleConnectJetMsgResponse {
+            client_transport,
+            server_transport,
+            association_id,
+            candidate_id,
+        }),
         _ => Err(error_other(format!(
             "Invalid association ID received: {}",
             request_msg.association
