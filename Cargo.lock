@@ -2675,7 +2675,7 @@ checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 [[package]]
 name = "saphir"
 version = "2.8.0"
-source = "git+https://github.com/Devolutions/saphir.git?branch=graceful-shutdown-fix#8e1fba672db2f834aa07355a4e4680eceeed4768"
+source = "git+https://github.com/richerarc/saphir.git?rev=d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316#d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316"
 dependencies = [
  "base64 0.13.0",
  "futures 0.3.8",
@@ -2710,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "saphir_macro"
 version = "2.1.1"
-source = "git+https://github.com/Devolutions/saphir.git?branch=graceful-shutdown-fix#8e1fba672db2f834aa07355a4e4680eceeed4768"
+source = "git+https://github.com/richerarc/saphir.git?rev=d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316#d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316"
 dependencies = [
  "http 0.2.1",
  "proc-macro2 1.0.24",

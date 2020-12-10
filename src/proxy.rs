@@ -4,19 +4,17 @@ use crate::{
         pcap::PcapInterceptor, rdp::RdpMessageReader, MessageReader, UnknownMessageReader, WaykMessageReader,
     },
     rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
-    transport::{JetSinkType, JetStreamType, Transport, BIP_BUFFER_LEN},
+    transport::{Transport, BIP_BUFFER_LEN},
     SESSION_IN_PROGRESS_COUNT,
 };
-use futures::{select, FutureExt, Sink, Stream, StreamExt};
+use futures::{select, FutureExt, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 use std::{
     collections::HashMap,
     io,
     path::PathBuf,
-    pin::Pin,
     sync::{atomic::Ordering, Arc},
-    task::{Context, Poll},
 };
 
 pub struct Proxy {
@@ -101,12 +99,6 @@ impl Proxy {
             jet_stream_client.as_mut().set_packet_interceptor(Box::new(interceptor));
         }
 
-        // Create trait object wrappers to achieve Stream + Sized type
-        let jet_stream_server = SizedStream::new(jet_stream_server);
-        let jet_stream_client = SizedStream::new(jet_stream_client);
-        let jet_sink_client = SizedSink::new(jet_sink_client);
-        let jet_sink_server = SizedSink::new(jet_sink_server);
-
         // Build future to forward all bytes
         let mut downstream = jet_stream_server.forward(jet_sink_client).fuse();
         let mut upstream = jet_stream_client.forward(jet_sink_server).fuse();
@@ -171,53 +163,5 @@ impl Proxy {
         SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
 
         Ok(())
-    }
-}
-
-struct SizedStream<T> {
-    boxed_stream: JetStreamType<T>,
-}
-
-impl<T> SizedStream<T> {
-    pub fn new(boxed_stream: JetStreamType<T>) -> Self {
-        Self { boxed_stream }
-    }
-}
-
-impl<T> Stream for SizedStream<T> {
-    type Item = Result<T, io::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.boxed_stream.as_mut().poll_next(cx)
-    }
-}
-
-struct SizedSink<T> {
-    boxed_sink: JetSinkType<T>,
-}
-
-impl<T> SizedSink<T> {
-    pub fn new(boxed_sink: JetSinkType<T>) -> Self {
-        Self { boxed_sink }
-    }
-}
-
-impl<T> Sink<T> for SizedSink<T> {
-    type Error = io::Error;
-
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.boxed_sink.as_mut().poll_ready(cx)
-    }
-
-    fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        self.boxed_sink.as_mut().start_send(item)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.boxed_sink.as_mut().poll_flush(cx)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.boxed_sink.as_mut().poll_close(cx)
     }
 }

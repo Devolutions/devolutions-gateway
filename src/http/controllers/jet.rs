@@ -23,7 +23,7 @@ use crate::{
         candidate::Candidate,
     },
     jet_client::JetAssociationsMap,
-    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
+    utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
 };
 
 pub struct JetController {
@@ -43,35 +43,33 @@ impl JetController {
 #[controller(name = "jet")]
 impl JetController {
     #[get("/association")]
-    async fn get_associations(&self, detail: Option<bool>) -> (u16, Option<String>) {
+    async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
-
         let associations_response: Vec<AssociationResponse>;
-        if let Ok(associations) = self.jet_associations.try_lock() {
-            associations_response = associations
-                .values()
-                .map(|association| AssociationResponse::from(association, with_detail))
-                .collect();
-        } else {
-            return (StatusCode::INTERNAL_SERVER_ERROR.as_u16(), None);
-        };
+        let associations = self.jet_associations.lock().compat().await;
+
+        associations_response = associations
+            .values()
+            .map(|association| AssociationResponse::from(association, with_detail))
+            .collect();
+
 
         if let Ok(body) = serde_json::to_string(&associations_response) {
-            return (StatusCode::OK.as_u16(), Some(body));
+            return (StatusCode::OK, Some(body));
         }
 
-        (StatusCode::BAD_REQUEST.as_u16(), None)
+        (StatusCode::BAD_REQUEST, None)
     }
 
     #[post("/association/<association_id>")]
-    async fn create_association(&self, req: Request) -> (u16, ()) {
+    async fn create_association(&self, req: Request) -> (StatusCode, ()) {
         let association_id = match req
             .captures()
             .get("association_id")
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => return (StatusCode::BAD_REQUEST.as_u16(), ()),
+            None => return (StatusCode::BAD_REQUEST, ()),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
@@ -80,7 +78,7 @@ impl JetController {
                 Err(e) => {
                     slog_scope::error!("Couldn't validate session token: {}", e);
 
-                    return (StatusCode::UNAUTHORIZED.as_u16(), ());
+                    return (StatusCode::UNAUTHORIZED, ());
                 }
                 Ok(expected_id) if expected_id != association_id => {
                     slog_scope::error!(
@@ -88,7 +86,7 @@ impl JetController {
                         expected_id,
                         association_id
                     );
-                    return (StatusCode::FORBIDDEN.as_u16(), ());
+                    return (StatusCode::FORBIDDEN, ());
                 }
                 Ok(_) => { /* alright */ }
             }
@@ -102,18 +100,18 @@ impl JetController {
         jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
         start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
-        (StatusCode::OK.as_u16(), ())
+        (StatusCode::OK, ())
     }
 
     #[post("/association/<association_id>/candidates")]
-    async fn gather_association_candidates(&self, req: Request) -> (u16, Option<String>) {
+    async fn gather_association_candidates(&self, req: Request) -> (StatusCode, Option<String>) {
         let association_id = match req
             .captures()
             .get("association_id")
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             Some(id) => id,
-            None => return (StatusCode::BAD_REQUEST.as_u16(), None),
+            None => return (StatusCode::BAD_REQUEST, None),
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
@@ -121,7 +119,7 @@ impl JetController {
             match validate_session_token(self.config.as_ref(), &req) {
                 Err(e) => {
                     slog_scope::error!("Couldn't validate session token: {}", e);
-                    return (StatusCode::UNAUTHORIZED.as_u16(), None);
+                    return (StatusCode::UNAUTHORIZED, None);
                 }
                 Ok(expected_id) if expected_id != association_id => {
                     slog_scope::error!(
@@ -129,14 +127,14 @@ impl JetController {
                         expected_id,
                         association_id
                     );
-                    return (StatusCode::FORBIDDEN.as_u16(), None);
+                    return (StatusCode::FORBIDDEN, None);
                 }
                 Ok(_) => { /* alright */ }
             }
         }
 
         // create association
-        let mut jet_associations = self.jet_associations.lock().compat().await; // no need to deal with lock poisoning
+        let mut jet_associations = self.jet_associations.lock().compat().await;
 
         if !jet_associations.contains_key(&association_id) {
             jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2));
@@ -155,13 +153,13 @@ impl JetController {
         }
 
         (
-            StatusCode::OK.as_u16(),
+            StatusCode::OK,
             Some(association.gather_candidate().to_string()),
         )
     }
 
     #[get("/health")]
-    async fn health(&self) -> (u16, String) {
+    async fn health(&self) -> (StatusCode, String) {
         build_health_response(&self.config)
     }
 }
@@ -174,7 +172,7 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
     if let Ok(runtime_handle) = Handle::try_current() {
         runtime_handle.spawn(async move {
             tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
-            if RemoveAssociation::new(jet_associations, uuid, None).compat().await {
+            if remove_jet_association(jet_associations, uuid, None).compat().await {
                 info!(
                     "No connect request received with association {}. Association removed!",
                     uuid

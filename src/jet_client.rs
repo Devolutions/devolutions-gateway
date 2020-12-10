@@ -20,6 +20,7 @@ use slog_scope::{debug, error};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     sync::Mutex,
+    pin,
 };
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ use crate::{
         TransportType,
     },
     transport::JetTransport,
-    utils::association::{RemoveAssociation, ACCEPT_REQUEST_TIMEOUT},
+    utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
     Proxy,
 };
 
@@ -66,17 +67,17 @@ impl JetClient {
             JetMessage::JetConnectReq(jet_connect_req) => {
                 let response = HandleConnectJetMsg::new(transport, jet_connect_req, jet_associations.clone()).await?;
 
-                let remove_association = RemoveAssociation::new(
-                    jet_associations.clone(),
-                    response.association_id,
-                    Some(response.candidate_id),
-                );
+                let association_id = response.association_id;
+                let candidate_id = response.candidate_id;
 
                 let proxy_result = Proxy::new(config)
                     .build(response.server_transport, response.client_transport)
                     .await;
 
-                remove_association.await;
+                remove_jet_association(
+                    jet_associations.clone(),
+                    association_id,
+                    Some(candidate_id)).await;
 
                 proxy_result
             }
@@ -210,7 +211,12 @@ impl HandleAcceptJetMsg {
             config,
             ..
         } = self.deref_mut();
-        let (status_code, association) = if let Ok(mut jet_associations) = jet_associations.try_lock() {
+
+        let (status_code, association) = {
+            let jet_associations_lock_future = jet_associations.lock();
+            pin!(jet_associations_lock_future);
+            let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
+
             match request_msg.version {
                 1 => {
                     // Candidate creation
@@ -251,9 +257,6 @@ impl HandleAcceptJetMsg {
                     unreachable!()
                 }
             }
-        } else {
-            cx.waker().clone().wake();
-            return Poll::Pending;
         };
 
         if request_msg.version == 1 && status_code == StatusCode::OK {
@@ -284,45 +287,44 @@ impl HandleAcceptJetMsg {
             ..
         } = self.deref_mut();
 
-        if let Ok(mut jet_associations) = jet_associations.try_lock() {
-            match request_msg.version {
-                1 => {
-                    let association = jet_associations
-                        .get_mut(
-                            association_uuid
-                                .as_ref()
-                                .expect("Must be set during parsing of the request"),
-                        )
-                        .expect("Was checked during parsing the request");
-                    let candidate = association
-                        .get_candidate_by_index(0)
-                        .expect("Only one candidate exists in version 1 and there is no candidate id");
-                    candidate.set_transport(transport.take().expect("Must be set in the constructor"));
-                }
-                2 => {
-                    if let Some(association) = jet_associations.get_mut(&request_msg.association) {
-                        if association.version() == JET_VERSION_V2 {
-                            if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
-                                candidate.set_transport(transport.take().expect("Must be set in the constructor"));
-                            }
+        let jet_associations_lock_future = jet_associations.lock();
+        pin!(jet_associations_lock_future);
+        let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
+
+        match request_msg.version {
+            1 => {
+                let association = jet_associations
+                    .get_mut(
+                        association_uuid
+                            .as_ref()
+                            .expect("Must be set during parsing of the request"),
+                    )
+                    .expect("Was checked during parsing the request");
+                let candidate = association
+                    .get_candidate_by_index(0)
+                    .expect("Only one candidate exists in version 1 and there is no candidate id");
+                candidate.set_transport(transport.take().expect("Must be set in the constructor"));
+            }
+            2 => {
+                if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+                    if association.version() == JET_VERSION_V2 {
+                        if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
+                            candidate.set_transport(transport.take().expect("Must be set in the constructor"));
                         }
                     }
                 }
-                _ => {
-                    // No jet message exist with version different than 1 or 2
-                    unreachable!()
-                }
-            };
-
-            if let Some(remove_association_future) = remove_association_future.take() {
-                tokio::spawn(remove_association_future);
             }
-
-            Poll::Ready(Ok(()))
-        } else {
-            cx.waker().clone().wake();
-            Poll::Pending
+            _ => {
+                // No jet message exist with version different than 1 or 2
+                unreachable!()
+            }
         }
+
+        if let Some(remove_association_future) = remove_association_future.take() {
+            tokio::spawn(remove_association_future);
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -405,79 +407,78 @@ impl Future for HandleConnectJetMsg {
         let mut response_msg: &mut Vec<u8> = response_msg;
         // Find the server transport
         if server_transport.is_none() {
-            if let Ok(mut jet_associations) = jet_associations.try_lock() {
-                let mut status_code = StatusCode::BAD_REQUEST;
+            let mut status_code = StatusCode::BAD_REQUEST;
 
-                if let Some(association) = jet_associations.get_mut(&request_msg.association) {
-                    let candidate = match (association.version(), request_msg.version) {
-                        (1, 1) => {
-                            // Only one candidate exists in version 1 and there is no candidate id.
-                            if let Some(candidate) = association.get_candidate_by_index(0) {
-                                if candidate.state() == CandidateState::Accepted {
-                                    Some(candidate)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                unreachable!("No candidate found for an association version 1. Should never happen.");
-                            }
-                        }
-                        (2, 2) => {
-                            if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
-                                if candidate.transport_type() == TransportType::Tcp
-                                    && candidate.state() == CandidateState::Accepted
-                                {
-                                    Some(candidate)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                status_code = StatusCode::NOT_FOUND;
+            let jet_associations_lock_future = jet_associations.lock();
+            pin!(jet_associations_lock_future);
+            let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
 
+            if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+                let candidate = match (association.version(), request_msg.version) {
+                    (1, 1) => {
+                        // Only one candidate exists in version 1 and there is no candidate id.
+                        if let Some(candidate) = association.get_candidate_by_index(0) {
+                            if candidate.state() == CandidateState::Accepted {
+                                Some(candidate)
+                            } else {
                                 None
                             }
+                        } else {
+                            unreachable!("No candidate found for an association version 1. Should never happen.");
                         }
-                        (association_version, request_version) => {
-                            error!(
-                                "Invalid version: Association version={}, Request version={}",
-                                association_version, request_version
-                            );
+                    }
+                    (2, 2) => {
+                        if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
+                            if candidate.transport_type() == TransportType::Tcp
+                                && candidate.state() == CandidateState::Accepted
+                            {
+                                Some(candidate)
+                            } else {
+                                None
+                            }
+                        } else {
+                            status_code = StatusCode::NOT_FOUND;
 
                             None
                         }
-                    };
-
-                    if let Some(candidate) = candidate {
-                        // The accept request has been received before and a transport is available to open the proxy
-                        if let Some(candidate_server_transport) = candidate.take_transport() {
-                            candidate.set_state(CandidateState::Connected);
-
-                            server_transport.replace(candidate_server_transport);
-                            association_id.replace(candidate.association_id());
-                            candidate_id.replace(candidate.id());
-
-                            let client_transport = client_transport
-                                .as_ref()
-                                .expect("Client's transport must be taken on the future result");
-                            candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
-                            candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
-
-                            status_code = StatusCode::OK;
-                        }
                     }
-                } else {
-                    status_code = StatusCode::NOT_FOUND;
-                }
+                    (association_version, request_version) => {
+                        error!(
+                            "Invalid version: Association version={}, Request version={}",
+                            association_version, request_version
+                        );
 
-                let connect_response_msg = JetMessage::JetConnectRsp(JetConnectRsp {
-                    status_code,
-                    version: request_msg.version,
-                });
-                connect_response_msg.write_to(&mut response_msg)?;
+                        None
+                    }
+                };
+
+                if let Some(candidate) = candidate {
+                    // The accept request has been received before and a transport is available to open the proxy
+                    if let Some(candidate_server_transport) = candidate.take_transport() {
+                        candidate.set_state(CandidateState::Connected);
+
+                        server_transport.replace(candidate_server_transport);
+                        association_id.replace(candidate.association_id());
+                        candidate_id.replace(candidate.id());
+
+                        let client_transport = client_transport
+                            .as_ref()
+                            .expect("Client's transport must be taken on the future result");
+                        candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+                        candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+
+                        status_code = StatusCode::OK;
+                    }
+                }
             } else {
-                cx.waker().clone().wake();
-                return Poll::Pending;
+                status_code = StatusCode::NOT_FOUND;
             }
+
+            let connect_response_msg = JetMessage::JetConnectRsp(JetConnectRsp {
+                status_code,
+                version: request_msg.version,
+            });
+            connect_response_msg.write_to(&mut response_msg)?;
         }
 
         {

@@ -214,8 +214,10 @@ fn set_socket_option(stream: &TcpStream, logger: &Logger) {
     if let Err(e) = stream.set_nodelay(true) {
         slog_error!(logger, "set_nodelay on TcpStream failed: {}", e);
     }
-    // Temporary following methods is removed in tokio 0.3.3.
-    // When they will be returned next lines should be uncommented.
+    // FIXME: The following methods are temporarily not available in tokio 0.3.3.
+    // Tokio issue: (https://github.com/tokio-rs/tokio/issues/3082)
+    // When they will be implemented in the newer tokio version,
+    // the next lines should be uncommented.
     /*
     if let Err(e) = stream.set_keepalive(Some(Duration::from_secs(2))) {
         slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
