@@ -17,8 +17,8 @@ impl Default for SessionsController {
 #[controller(name = "sessions")]
 impl SessionsController {
     #[get("/count")]
-    async fn get_count(&self) -> (u16, String) {
+    async fn get_count(&self) -> (StatusCode, String) {
         let sessions_count = SESSION_IN_PROGRESS_COUNT.load(Ordering::Relaxed).to_string();
-        (StatusCode::OK.as_u16(), sessions_count)
+        (StatusCode::OK, sessions_count)
     }
 }

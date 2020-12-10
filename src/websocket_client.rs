@@ -3,7 +3,7 @@ use crate::{
     jet::{candidate::CandidateState, TransportType},
     jet_client::JetAssociationsMap,
     transport::{ws::WsTransport, JetTransport, Transport},
-    utils::association::RemoveAssociation,
+    utils::association::remove_jet_association,
     Proxy,
 };
 
@@ -122,7 +122,7 @@ async fn handle_jet_accept_impl(
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
     let version = {
-        let associations = jet_associations.lock().await; // TODO: replace by parking lot
+        let associations = jet_associations.lock().await;
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
@@ -186,7 +186,7 @@ async fn handle_jet_connect_impl(
 
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
     let version = {
-        let associations = jet_associations.lock().await; // TODO: replace by parking lot
+        let associations = jet_associations.lock().await;
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
@@ -228,12 +228,8 @@ async fn handle_jet_connect_impl(
                     candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
                     candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-                    // Start the proxy
-                    let remove_association = RemoveAssociation::new(
-                        jet_associations.clone(),
-                        candidate.association_id(),
-                        Some(candidate.id()),
-                    );
+                    let association_id = candidate.association_id();
+                    let candidate_id = candidate.id();
 
                     // We need to manually drop mutex lock to avoid deadlock below;
                     // Rust does not drop it automatically before end of the function
@@ -245,7 +241,7 @@ async fn handle_jet_connect_impl(
                         error!("failed to build Proxy for WebSocket connection: {}", e)
                     }
 
-                    remove_association.await;
+                    remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
                 }
 
                 Ok::<(), ()>(())
