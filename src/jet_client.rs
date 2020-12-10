@@ -2,14 +2,11 @@ use std::{
     collections::HashMap,
     future::Future,
     io,
-    ops::DerefMut,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
 };
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use futures::ready;
 use jet_proto::{
     accept::{JetAcceptReq, JetAcceptRsp},
     connect::{JetConnectReq, JetConnectRsp},
@@ -18,9 +15,8 @@ use jet_proto::{
 };
 use slog_scope::{debug, error};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
+    io::{AsyncWriteExt, AsyncReadExt},
     sync::Mutex,
-    pin,
 };
 use uuid::Uuid;
 
@@ -53,19 +49,25 @@ impl JetClient {
     }
 
     pub async fn serve(self, transport: JetTransport) -> Result<(), io::Error> {
-        let msg_reader = JetMsgReader::new(transport);
         let jet_associations = self.jet_associations.clone();
         let config = self.config;
 
-        let (transport, msg) = msg_reader.await?;
+        let (transport, msg) = read_jet_message(transport).await?;
 
         match msg {
-            JetMessage::JetTestReq(jet_test_req) => HandleTestJetMsg::new(transport, jet_test_req).await,
+            JetMessage::JetTestReq(jet_test_req) => {
+                handle_test_jet_msg(transport, jet_test_req).await
+            },
             JetMessage::JetAcceptReq(jet_accept_req) => {
-                HandleAcceptJetMsg::new(config, transport, jet_accept_req, jet_associations.clone()).await
+                HandleAcceptJetMsg::new(config, transport, jet_accept_req, jet_associations.clone())
+                    .accept().await
             }
             JetMessage::JetConnectReq(jet_connect_req) => {
-                let response = HandleConnectJetMsg::new(transport, jet_connect_req, jet_associations.clone()).await?;
+                let response = handle_connect_jet_msg(
+                    transport,
+                    jet_connect_req,
+                    jet_associations.clone()
+                ).await?;
 
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
@@ -92,94 +94,68 @@ fn error_other<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io
     io::Error::new(io::ErrorKind::Other, desc)
 }
 
-struct JetMsgReader {
-    transport: Option<JetTransport>,
-    data_received: Vec<u8>,
-}
+async fn read_jet_message(
+    mut transport: JetTransport
+) -> Result<(JetTransport, JetMessage), io::Error> {
+    let mut data_received = Vec::new();
 
-impl JetMsgReader {
-    fn new(transport: JetTransport) -> Self {
-        JetMsgReader {
-            transport: Some(transport),
-            data_received: Vec::new(),
+    let mut buff = [0u8; 1024];
+
+    while data_received.len() < jet_proto::JET_MSG_HEADER_SIZE as usize {
+        let bytes_read = transport.read(&mut buff).await?;
+
+        if bytes_read == 0 {
+            return Err(error_other("Socket closed during Jet header receive, no JetPacket received."));
         }
+
+        data_received.extend_from_slice(&buff[..bytes_read]);
+
+        debug!(
+            "Received {} of {} bytes of jet message header",
+            data_received.len(),
+            jet_proto::JET_MSG_HEADER_SIZE
+        );
     }
-}
 
-impl Future for JetMsgReader {
-    type Output = Result<(JetTransport, JetMessage), io::Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let mut buff = [0u8; 1024];
-        let mut poll_buff = ReadBuf::new(&mut buff);
-        let transport = self
-            .transport
-            .as_mut()
-            .expect("Must be taken only for the future result");
-
-        ready!(Pin::new(transport).poll_read(cx, &mut poll_buff))?;
-
-        if poll_buff.filled().is_empty() {
-            // The transport is closed
-            return Poll::Ready(Err(error_other("Socket closed, no JetPacket received.")));
-        }
-
-        let mut buf = poll_buff.filled().to_vec();
-        self.data_received.append(&mut buf);
-
-        if self.data_received.len() >= jet_proto::JET_MSG_HEADER_SIZE as usize {
-            let mut slice = self.data_received.as_slice();
-            let signature = slice.read_u32::<LittleEndian>()?; // signature
-            if signature != jet_proto::JET_MSG_SIGNATURE {
-                return Poll::Ready(Err(error_other(format!(
-                    "Invalid JetPacket - Signature = {}.",
-                    signature
-                ))));
-            }
-
-            let msg_len = slice.read_u16::<BigEndian>()?;
-
-            if self.data_received.len() >= msg_len as usize {
-                let mut slice = self.data_received.as_slice();
-                let jet_message = jet_proto::JetMessage::read_request(&mut slice)?;
-                debug!("jet_message received: {:?}", jet_message);
-
-                Poll::Ready(Ok((self.transport.take().unwrap(), jet_message)))
-            } else {
-                debug!(
-                    "Waiting more data: received:{} - needed:{}",
-                    self.data_received.len(),
-                    msg_len
-                );
-
-                cx.waker().clone().wake();
-                Poll::Pending
-            }
-        } else {
-            debug!(
-                "Waiting more data: received:{} - needed: at least header length ({})",
-                self.data_received.len(),
-                jet_proto::JET_MSG_HEADER_SIZE
-            );
-
-            cx.waker().clone().wake();
-            Poll::Pending
-        }
+    let mut slice = data_received.as_slice();
+    let signature = ReadBytesExt::read_u32::<LittleEndian>(&mut slice)?; // signature
+    if signature != jet_proto::JET_MSG_SIGNATURE {
+        return Err(error_other(format!(
+            "Invalid JetPacket - Signature = {}.",
+            signature
+        )));
     }
+
+    let msg_len = ReadBytesExt::read_u16::<BigEndian>(&mut slice)?;
+
+    while data_received.len() < msg_len as usize {
+        let bytes_read = transport.read(&mut buff).await?;
+
+        if bytes_read == 0 {
+            return Err(error_other("Socket closed during Jet message receive, no JetPacket received."));
+        }
+
+        data_received.extend_from_slice(&buff[..bytes_read]);
+
+        debug!(
+            "Received {} of {} bytes of jet message",
+            data_received.len(),
+            msg_len
+        );
+    }
+
+    let mut slice = data_received.as_slice();
+    let jet_message = jet_proto::JetMessage::read_request(&mut slice)?;
+    debug!("jet_message received: {:?}", jet_message);
+
+    Ok((transport, jet_message))
 }
 
-enum HandleAcceptJetMsgState {
-    CreateResponse,
-    WriteResponse(Vec<u8>),
-    SetTransport,
-}
-
-struct HandleAcceptJetMsg {
+struct  HandleAcceptJetMsg {
     config: Arc<Config>,
     transport: Option<JetTransport>,
     request_msg: JetAcceptReq,
     jet_associations: JetAssociationsMap,
-    state: Option<HandleAcceptJetMsgState>,
     association_uuid: Option<Uuid>,
     remove_association_future: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
@@ -196,28 +172,16 @@ impl HandleAcceptJetMsg {
             transport: Some(transport),
             request_msg: msg,
             jet_associations,
-            state: Some(HandleAcceptJetMsgState::CreateResponse),
             association_uuid: None,
             remove_association_future: None,
         }
     }
 
-    fn handle_create_response(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<Vec<u8>, io::Error>> {
-        let Self {
-            jet_associations,
-            request_msg,
-            remove_association_future,
-            association_uuid,
-            config,
-            ..
-        } = self.deref_mut();
-
+    async fn handle_create_response(&mut self) -> Result<Vec<u8>, io::Error> {
         let (status_code, association) = {
-            let jet_associations_lock_future = jet_associations.lock();
-            pin!(jet_associations_lock_future);
-            let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
+            let mut jet_associations = self.jet_associations.lock().await;
 
-            match request_msg.version {
+            match self.request_msg.version {
                 1 => {
                     // Candidate creation
                     let mut candidate = Candidate::new_v1();
@@ -228,7 +192,7 @@ impl HandleAcceptJetMsg {
                     let mut association = Association::new(uuid, JET_VERSION_V1);
                     association.add_candidate(candidate);
 
-                    association_uuid.replace(uuid);
+                    self.association_uuid.replace(uuid);
                     jet_associations.insert(uuid, association);
 
                     (StatusCode::OK, uuid)
@@ -236,9 +200,9 @@ impl HandleAcceptJetMsg {
                 2 => {
                     let mut status_code = StatusCode::BAD_REQUEST;
 
-                    if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+                    if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
                         if association.version() == JET_VERSION_V2 {
-                            if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
+                            if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
                                 if candidate.transport_type() == TransportType::Tcp {
                                     candidate.set_state(CandidateState::Accepted);
 
@@ -259,43 +223,32 @@ impl HandleAcceptJetMsg {
             }
         };
 
-        if request_msg.version == 1 && status_code == StatusCode::OK {
-            remove_association_future.replace(Box::pin(remove_association(jet_associations.clone(), association)));
+        if self.request_msg.version == 1 && status_code == StatusCode::OK {
+            self.remove_association_future.replace(Box::pin(remove_association(self.jet_associations.clone(), association)));
         }
 
         // Build response
         let response_msg = JetMessage::JetAcceptRsp(JetAcceptRsp {
             status_code,
-            version: request_msg.version,
+            version: self.request_msg.version,
             association,
-            instance: config.hostname.clone(),
+            instance: self.config.hostname.clone(),
             timeout: ACCEPT_REQUEST_TIMEOUT.as_secs() as u32,
         });
         let mut response_msg_buffer = Vec::with_capacity(512);
         response_msg.write_to(&mut response_msg_buffer)?;
 
-        Poll::Ready(Ok(response_msg_buffer))
+        Ok(response_msg_buffer)
     }
 
-    fn handle_set_transport(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
-        let Self {
-            jet_associations,
-            transport,
-            request_msg,
-            remove_association_future,
-            association_uuid,
-            ..
-        } = self.deref_mut();
+    async fn handle_set_transport(&mut self) -> Result<(), io::Error> {
+        let mut jet_associations = self.jet_associations.lock().await;
 
-        let jet_associations_lock_future = jet_associations.lock();
-        pin!(jet_associations_lock_future);
-        let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
-
-        match request_msg.version {
+        match self.request_msg.version {
             1 => {
                 let association = jet_associations
                     .get_mut(
-                        association_uuid
+                        self.association_uuid
                             .as_ref()
                             .expect("Must be set during parsing of the request"),
                     )
@@ -303,13 +256,13 @@ impl HandleAcceptJetMsg {
                 let candidate = association
                     .get_candidate_by_index(0)
                     .expect("Only one candidate exists in version 1 and there is no candidate id");
-                candidate.set_transport(transport.take().expect("Must be set in the constructor"));
+                candidate.set_transport(self.transport.take().expect("Must be set in the constructor"));
             }
             2 => {
-                if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+                if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
                     if association.version() == JET_VERSION_V2 {
-                        if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
-                            candidate.set_transport(transport.take().expect("Must be set in the constructor"));
+                        if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
+                            candidate.set_transport(self.transport.take().expect("Must be set in the constructor"));
                         }
                     }
                 }
@@ -320,191 +273,116 @@ impl HandleAcceptJetMsg {
             }
         }
 
-        if let Some(remove_association_future) = remove_association_future.take() {
+        if let Some(remove_association_future) = self.remove_association_future.take() {
             tokio::spawn(remove_association_future);
         }
 
-        Poll::Ready(Ok(()))
+        Ok(())
+    }
+
+    async fn accept(mut self) -> Result<(), io::Error> {
+        let response_msg = self.handle_create_response().await?;
+        let transport = self.transport
+            .as_mut()
+            .expect("Must not be taken upon successful call to handle_set_transport");
+        transport.write(&response_msg).await?;
+        self.handle_set_transport().await
     }
 }
 
-impl Future for HandleAcceptJetMsg {
-    type Output = Result<(), io::Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        loop {
-            if self.state.is_none() {
-                // Already polled last state
-                return Poll::Ready(Ok(()));
-            }
-            let state = self.state.take().unwrap();
-            let next_state = match state {
-                HandleAcceptJetMsgState::CreateResponse => {
-                    let response_msg_buffer = ready!(self.as_mut().handle_create_response(cx))?;
-                    HandleAcceptJetMsgState::WriteResponse(response_msg_buffer)
-                }
-                HandleAcceptJetMsgState::WriteResponse(response_msg) => {
-                    // We have a response for sure ==> Send response
-                    let response_msg = response_msg.clone();
-
-                    let transport = self
-                        .transport
-                        .as_mut()
-                        .expect("Must not be taken upon successful poll_write");
-                    ready!(Pin::new(transport).poll_write(cx, &response_msg))?;
-
-                    HandleAcceptJetMsgState::SetTransport
-                }
-                HandleAcceptJetMsgState::SetTransport => {
-                    ready!(self.as_mut().handle_set_transport(cx))?;
-
-                    return Poll::Ready(Ok(()));
-                }
-            };
-
-            self.state.replace(next_state);
-        }
-    }
-}
-
-struct HandleConnectJetMsg {
-    client_transport: Option<JetTransport>,
-    server_transport: Option<JetTransport>,
+async fn handle_connect_jet_msg(
+    mut client_transport: JetTransport,
     request_msg: JetConnectReq,
-    response_msg: Vec<u8>,
-    jet_associations: JetAssociationsMap,
-    association_id: Option<Uuid>,
-    candidate_id: Option<Uuid>,
-}
+    jet_associations: JetAssociationsMap
+) -> Result<HandleConnectJetMsgResponse, io::Error> {
+    let mut response_msg = Vec::with_capacity(512);
+    let mut server_transport = None;
+    let mut association_id = None;
+    let mut candidate_id = None;
+    // Find the server transport
+    let mut status_code = StatusCode::BAD_REQUEST;
 
-impl HandleConnectJetMsg {
-    fn new(transport: JetTransport, msg: JetConnectReq, jet_associations: JetAssociationsMap) -> Self {
-        HandleConnectJetMsg {
-            client_transport: Some(transport),
-            server_transport: None,
-            request_msg: msg,
-            response_msg: Vec::with_capacity(512),
-            jet_associations,
-            association_id: None,
-            candidate_id: None,
-        }
-    }
-}
+    let mut jet_associations = jet_associations.lock().await;
 
-impl Future for HandleConnectJetMsg {
-    type Output = Result<HandleConnectJetMsgResponse, io::Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let Self {
-            jet_associations,
-            request_msg,
-            server_transport,
-            association_id,
-            candidate_id,
-            client_transport,
-            response_msg,
-        } = self.deref_mut();
-        let mut response_msg: &mut Vec<u8> = response_msg;
-        // Find the server transport
-        if server_transport.is_none() {
-            let mut status_code = StatusCode::BAD_REQUEST;
-
-            let jet_associations_lock_future = jet_associations.lock();
-            pin!(jet_associations_lock_future);
-            let mut jet_associations = ready!(jet_associations_lock_future.poll(cx));
-
-            if let Some(association) = jet_associations.get_mut(&request_msg.association) {
-                let candidate = match (association.version(), request_msg.version) {
-                    (1, 1) => {
-                        // Only one candidate exists in version 1 and there is no candidate id.
-                        if let Some(candidate) = association.get_candidate_by_index(0) {
-                            if candidate.state() == CandidateState::Accepted {
-                                Some(candidate)
-                            } else {
-                                None
-                            }
-                        } else {
-                            unreachable!("No candidate found for an association version 1. Should never happen.");
-                        }
-                    }
-                    (2, 2) => {
-                        if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
-                            if candidate.transport_type() == TransportType::Tcp
-                                && candidate.state() == CandidateState::Accepted
-                            {
-                                Some(candidate)
-                            } else {
-                                None
-                            }
-                        } else {
-                            status_code = StatusCode::NOT_FOUND;
-
-                            None
-                        }
-                    }
-                    (association_version, request_version) => {
-                        error!(
-                            "Invalid version: Association version={}, Request version={}",
-                            association_version, request_version
-                        );
-
+    if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+        let candidate = match (association.version(), request_msg.version) {
+            (1, 1) => {
+                // Only one candidate exists in version 1 and there is no candidate id.
+                if let Some(candidate) = association.get_candidate_by_index(0) {
+                    if candidate.state() == CandidateState::Accepted {
+                        Some(candidate)
+                    } else {
                         None
                     }
-                };
-
-                if let Some(candidate) = candidate {
-                    // The accept request has been received before and a transport is available to open the proxy
-                    if let Some(candidate_server_transport) = candidate.take_transport() {
-                        candidate.set_state(CandidateState::Connected);
-
-                        server_transport.replace(candidate_server_transport);
-                        association_id.replace(candidate.association_id());
-                        candidate_id.replace(candidate.id());
-
-                        let client_transport = client_transport
-                            .as_ref()
-                            .expect("Client's transport must be taken on the future result");
-                        candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
-                        candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
-
-                        status_code = StatusCode::OK;
-                    }
+                } else {
+                    unreachable!("No candidate found for an association version 1. Should never happen.");
                 }
-            } else {
-                status_code = StatusCode::NOT_FOUND;
             }
+            (2, 2) => {
+                if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
+                    if candidate.transport_type() == TransportType::Tcp
+                        && candidate.state() == CandidateState::Accepted
+                    {
+                        Some(candidate)
+                    } else {
+                        None
+                    }
+                } else {
+                    status_code = StatusCode::NOT_FOUND;
 
-            let connect_response_msg = JetMessage::JetConnectRsp(JetConnectRsp {
-                status_code,
-                version: request_msg.version,
-            });
-            connect_response_msg.write_to(&mut response_msg)?;
-        }
-
-        {
-            let client_transport = client_transport
-                .as_mut()
-                .expect("Client's transport must be taken on the future result");
-
-            ready!(Pin::new(client_transport).poll_write(cx, response_msg.as_ref()))?;
-        }
-
-        // If server stream found, start the proxy
-        match (server_transport.take(), association_id.take(), candidate_id.take()) {
-            (Some(server_transport), Some(association_id), Some(candidate_id)) => {
-                let client_transport = client_transport.take().expect("Must be taken only once");
-                Poll::Ready(Ok(HandleConnectJetMsgResponse {
-                    client_transport,
-                    server_transport,
-                    association_id,
-                    candidate_id,
-                }))
+                    None
+                }
             }
-            _ => Poll::Ready(Err(error_other(format!(
-                "Invalid association ID received: {}",
-                request_msg.association
-            )))),
+            (association_version, request_version) => {
+                error!(
+                    "Invalid version: Association version={}, Request version={}",
+                    association_version, request_version
+                );
+
+                None
+            }
+        };
+
+        if let Some(candidate) = candidate {
+            // The accept request has been received before and a transport is available to open the proxy
+            if let Some(candidate_server_transport) = candidate.take_transport() {
+                candidate.set_state(CandidateState::Connected);
+
+                server_transport.replace(candidate_server_transport);
+                association_id.replace(candidate.association_id());
+                candidate_id.replace(candidate.id());
+                candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+                candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+
+                status_code = StatusCode::OK;
+            }
         }
+    } else {
+        status_code = StatusCode::NOT_FOUND;
+    }
+
+    let connect_response_msg = JetMessage::JetConnectRsp(JetConnectRsp {
+        status_code,
+        version: request_msg.version,
+    });
+    connect_response_msg.write_to(&mut response_msg)?;
+
+    client_transport.write(&response_msg).await?;
+
+    // If server stream found, start the proxy
+    match (server_transport.take(), association_id.take(), candidate_id.take()) {
+        (Some(server_transport), Some(association_id), Some(candidate_id)) => {
+            Ok(HandleConnectJetMsgResponse {
+                client_transport,
+                server_transport,
+                association_id,
+                candidate_id,
+            })
+        }
+        _ => Err(error_other(format!(
+            "Invalid association ID received: {}",
+            request_msg.association
+        ))),
     }
 }
 
@@ -515,41 +393,14 @@ pub struct HandleConnectJetMsgResponse {
     pub candidate_id: Uuid,
 }
 
-struct HandleTestJetMsg {
-    transport: JetTransport,
-    request: JetTestReq,
-    response: Option<Vec<u8>>,
-}
+async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {
+    let response_msg = JetMessage::JetTestRsp(JetTestRsp {
+        status_code: StatusCode::OK,
+        version: request.version,
+    });
+    let mut response_msg_buffer = Vec::with_capacity(512);
+    response_msg.write_to(&mut response_msg_buffer)?;
 
-impl HandleTestJetMsg {
-    fn new(transport: JetTransport, request: JetTestReq) -> Self {
-        Self {
-            transport,
-            request,
-            response: None,
-        }
-    }
-}
-
-impl Future for HandleTestJetMsg {
-    type Output = Result<(), io::Error>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        if self.response.is_none() {
-            let response_msg = JetMessage::JetTestRsp(JetTestRsp {
-                status_code: StatusCode::OK,
-                version: self.request.version,
-            });
-            let mut response_msg_buffer = Vec::with_capacity(512);
-            response_msg.write_to(&mut response_msg_buffer)?;
-            self.response = Some(response_msg_buffer);
-        }
-
-        let Self {
-            response, transport, ..
-        } = self.deref_mut();
-        let response = response.as_ref().unwrap();
-        ready!(Pin::new(transport).poll_write(cx, &response))?;
-        Poll::Ready(Ok(()))
-    }
+    transport.write(&response_msg_buffer).await?;
+    Ok(())
 }
