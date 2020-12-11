@@ -56,7 +56,7 @@
     <WixVariable Id="WixUIDialogBmp" Value="WixUiDialog.jpg" />
 
     <!-- Define icons (ID should not be longer than 18 chars and must end with ".exe") -->
-    <Icon Id="Icon.exe" SourceFile="DevolutionsGateway.ico" />
+    <Icon Id="DevolutionsGateway.ico" SourceFile="DevolutionsGateway.ico" />
 
     <!-- Helper properties for determining what action is taking place -->
     <SetProperty After="FindRelatedProducts" Id="FirstInstall" Value="true">
@@ -75,14 +75,14 @@
           Installed AND NOT Upgrading AND NOT Uninstalling AND NOT UPGRADINGPRODUCTCODE
     </SetProperty>
 
-    <!-- Disable the restart manager, it prompts unnecessarily for NowService.exe crash handler subprocess -->
+    <!-- Disable the restart manager, it prompts unnecessarily for subprocesses -->
     <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable"/>
 
     <!-- Set properties for add/remove programs -->
     <Property Id="ARPPRODUCTICON" Value="DevolutionsGateway.ico" />
     <Property Id="ARPHELPLINK" Value="$(var.InfoURL)" />
 
-    <!-- Clear this property to auto launch WaykAgent.exe after installation -->
+    <!-- Clear this property to auto launch executable after installation -->
     <Property Id="SUPPRESSLAUNCH" Value="1" />
 
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="0" />
@@ -191,23 +191,23 @@
     </Directory>
 
     <DirectoryRef Id="ProgramDataFolder">
-      <Component Id="cmpCommonAppDataFolder" Guid="678e7b73-c6ad-4862-9c06-cc2fa548c327" Permanent="yes">
+      <Component Id="cmpCommonAppDataFolder" Guid="dc6b6f37-78d2-4f0a-9464-d1f63ef64fab" Permanent="yes">
         <CreateFolder>
           <PermissionEx Sddl="$(var.ProgramDataSddl)" />
         </CreateFolder>
       </Component>
     </DirectoryRef>
 
-    <Component Id="cmpDGatewayService" Guid="ef923ddc-b5f3-4d64-bce1-ea222a537c91" Win64="$(var.Win64)" Directory="INSTALLDIR">
+    <Component Id="cmpDGatewayService" Guid="31eaa967-64e3-469c-b0c9-c9ecea61b7d3" Win64="$(var.Win64)" Directory="INSTALLDIR">
       <File Name="DevolutionsGateway.exe" Source="./bin/$(var.ProcessorArchitecture)/DevolutionsGateway.exe" Id="DevolutionsGateway.exe" ProcessorArchitecture="$(var.ProcessorArchitecture)" KeyPath="yes" Vital="yes" DiskId="1">
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Wayk Now Service TCP" Description="Wayk Now Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Wayk Now Service UDP" Description="Wayk Now Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
       </File>
-      <ServiceInstall Id="ServiceInstaller" Type="ownProcess" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
+      <ServiceInstall Id="DGatewayServiceControl" Type="ownProcess" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
         DisplayName="$(var.ServiceDisplayName)" Description="$(var.ServiceDescription)" Start="auto" ErrorControl="ignore">
         <util:ServiceConfig FirstFailureActionType='restart' SecondFailureActionType='restart' ThirdFailureActionType='restart' RestartServiceDelayInSeconds='60' ResetPeriodInDays='1'/>
       </ServiceInstall>
-      <ServiceControl Id="StartService" Start="install" Stop="both" Remove="uninstall" Name="$(var.ServiceName)" Wait="yes" />
+      <ServiceControl Id="DGatewayServiceControl" Start="install" Stop="both" Remove="uninstall" Name="$(var.ServiceName)" Wait="yes" />
     </Component>
 
     <!--
