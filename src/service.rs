@@ -316,8 +316,17 @@ async fn start_tcp_server(
                     scheme => panic!("Unsupported routing URL scheme {}", scheme),
                 }
             } else if config.is_rdp_supported() {
-                let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
-                Box::pin(rdp_client.serve(conn))
+                let mut peeked = [0; 4];
+                let _ = conn.peek(&mut peeked).await;
+
+                if peeked == [74, 69, 84, 0] {
+                    // four first bytes matching JET protocol
+                    let jet_client = JetClient::new(config.clone(), jet_associations.clone());
+                    Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
+                } else {
+                    let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
+                    Box::pin(rdp_client.serve(conn))
+                }
             } else {
                 let jet_client = JetClient::new(config.clone(), jet_associations.clone());
                 Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
