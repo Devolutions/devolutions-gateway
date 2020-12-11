@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="en-us" Codepage="1252" Language="1033" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+   <String Id="Language">1033</String>
+   <!-- Supported language and codepage codes can be found here: http://www.tramontana.co.hu/wix/lesson2.php#2.4 -->
+   <String Id="ProductName">Wayk Now</String>
+   <String Id="ClientProductName">Wayk Client</String>
+   <String Id="AgentProductName">Wayk Agent</String>
+   <String Id="VendorName">Devolutions</String>
+   <String Id="VendorFullName">Devolutions Inc.</String>
+   <String Id="ProductDescription">Instant Remote Support and Remote Desktop</String>
+   <String Id="OS2Old">This product requires at least Windows 7 / Windows Server 2008 R2</String>
+   <String Id="NewerInstalled">A newer version of this product is already installed.</String>
+   <String Id="x64VersionRequired">You need to install the 64-bit version of this product on 64-bit Windows.</String>
+   <String Id="x86VersionRequired">You need to install the 32-bit version of this product on 32-bit Windows.</String>
+   <String Id="ShortcutSelectionDlgTitle">Configure Shortcuts</String>
+   <String Id="ShortcutSelectionDlgDescription">Create application shortcuts</String>
+   <String Id="ShortcutSelectionDlgLabel">Create shortcuts for [ProductName] in the following locations:</String>
+   <String Id="DesktopShortcutChoice">Desktop</String>
+   <String Id="StartMenuShortcutChoice">Start Menu Programs folder</String>
+   <String Id="ProgramSettingsDlgTitle">Configure Settings</String>
+   <String Id="ProgramSettingsDlgDescription">Configure advanced program settings</String>
+   <String Id="ProgramSettingsDlgAnalyticsLabel">Share anonymous usage data to help improve [ProductName]:</String>
+   <String Id="ProgramSettingsDlgAnalyticsLabel2"></String>
+   <UI Width="0" Dialog="ProgramSettingsDlg" Control="AnalyticsLabel2"></UI>
+   <String Id="ProgramSettingsDlgAnalyticsCheckbox">Share telemetry data</String>
+   <UI Y="88" Dialog="ProgramSettingsDlg" Control="EnableAnalyticsCheckBox"></UI>
+   <String Id="ProgramSettingsDlgCrashReportsLabel">Submit anonymous crash reports to help improve stability and security:</String>
+   <String Id="ProgramSettingsDlgCrashReportsLabel2"></String>
+   <UI Width="0" Dialog="ProgramSettingsDlg" Control="CrashReportingLabel2"></UI>
+   <String Id="ProgramSettingsDlgCrashReportsCheckbox">Enable crash reporter</String>
+   <UI Y="140" Dialog="ProgramSettingsDlg" Control="EnableCrashReportingCheckBox"></UI>
+ 
+  <!--All following strings should be copied from Wix directly. The only goal to have those strings here is to change the 
+      font color for white. No other way has been found to change that.-->
+  <String Id="AdvancedWelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Please read the [ProductName] License Agreement</String>
+  
+  <String Id="BrowseDlgTitle">{\MyWixUI_Font_Title}Change destination folder</String>
+  <String Id="BrowseDlgDescription">{\MyWixUI_Font_Description}Browse to the destination folder</String>
+  
+  <String Id="CustomizeDlgTitle">{\MyWixUI_Font_Title}Custom Setup</String>
+  <String Id="CustomizeDlgDescription">{\MyWixUI_Font_Description}Select the way you want features to be installed.</String>
+  
+  <String Id="DiskCostDlgTitle">{\MyWixUI_Font_Title}Disk Space Requirements</String>
+  <String Id="DiskCostDlgDescription">{\MyWixUI_Font_Description}The disk space required for the installation of the selected features.</String>
+  
+  <String Id="FeaturesDlgTitle">{\MyWixUI_Font_Title}Product Features</String>
+  <String Id="FeaturesDlgDescription">{\MyWixUI_Font_Description}Select the way you want features to be installed.</String>
+  
+  <String Id="FilesInUseTitle">{\MyWixUI_Font_Title}Files in Use</String>
+  <String Id="FilesInUseDescription">{\MyWixUI_Font_Description}Some files that need to be updated are currently in use.</String>
+  
+  <String Id="InstallDirDlgTitle">{\MyWixUI_Font_Title}Destination Folder</String>
+  <String Id="InstallDirDlgDescription">{\MyWixUI_Font_Description}Click Next to install to the default folder or click Change to choose another.</String>
+  
+  <String Id="InstallScopeDlgTitle">{\MyWixUI_Font_Title}Installation Scope</String>
+  <String Id="InstallScopeDlgDescription">{\MyWixUI_Font_Description}Choose the installation scope and folder</String>
+  
+  <String Id="LicenseAgreementDlgTitle">{\MyWixUI_Font_Title}End-User License Agreement</String>
+  <String Id="LicenseAgreementDlgDescription">{\MyWixUI_Font_Description}Please read the following license agreement carefully</String>
+  
+  <String Id="MaintenanceTypeDlgTitle">{\MyWixUI_Font_Title}Change, repair, or remove installation</String>
+  <String Id="MaintenanceTypeDlgDescription">{\MyWixUI_Font_Description}Select the operation you wish to perform.</String>
+  
+  <String Id="MsiRMFilesInUseTitle">{\MyWixUI_Font_Title}Files in Use</String>
+  <String Id="MsiRMFilesInUseDescription">{\MyWixUI_Font_Description}Some files that need to be updated are currently in use.</String>
+  
+  <String Id="OutOfDiskDlgTitle">{\MyWixUI_Font_Title}Out of Disk Space</String>
+  <String Id="OutOfDiskDlgDescription">{\MyWixUI_Font_Description}Disk space required for the installation exceeds available disk space.</String>
+  
+  <String Id="OutOfRbDiskDlgTitle">{\MyWixUI_Font_Title}Out of Disk Space</String>
+  <String Id="OutOfRbDiskDlgDescription">{\MyWixUI_Font_Description}Disk space required for the installation exceeds available disk space.</String>
+  
+  <String Id="ProgressDlgTitleInstalling">{\MyWixUI_Font_Title}Installing [ProductName]</String>
+  <String Id="ProgressDlgTitleChanging">{\MyWixUI_Font_Title}Changing [ProductName]</String>
+  <String Id="ProgressDlgTitleRepairing">{\MyWixUI_Font_Title}Repairing [ProductName]</String>
+  <String Id="ProgressDlgTitleRemoving">{\MyWixUI_Font_Title}Removing [ProductName]</String>
+  <String Id="ProgressDlgTitleUpdating">{\MyWixUI_Font_Title}Updating [ProductName]</String>
+  
+  <String Id="SetupTypeDlgTitle">{\MyWixUI_Font_Title}Choose Setup Type</String>
+  <String Id="SetupTypeDlgDescription">{\MyWixUI_Font_Description}Choose the setup type that best suits your needs</String>
+  
+  <String Id="VerifyReadyDlgInstallTitle">{\MyWixUI_Font_Title}Ready to install [ProductName]</String>
+  <String Id="VerifyReadyDlgChangeTitle">{\MyWixUI_Font_Title}Ready to change [ProductName]</String>
+  <String Id="VerifyReadyDlgRepairTitle">{\MyWixUI_Font_Title}Ready to repair [ProductName]</String>
+  <String Id="VerifyReadyDlgRemoveTitle">{\MyWixUI_Font_Title}Ready to remove [ProductName]</String>
+  <String Id="VerifyReadyDlgUpdateTitle">{\MyWixUI_Font_Title}Ready to update [ProductName]</String>
+  
+  <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Please read the [ProductName] License Agreement</String>
+
+</WixLocalization>
