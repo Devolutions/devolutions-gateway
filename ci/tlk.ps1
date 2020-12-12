@@ -29,13 +29,11 @@ function Get-DotEnvFile {
     return $DotEnv
 }
 
-function Invoke-Tlk {
-	param(
-		[ValidateSet('windows','macos','linux')]
-		[string] $Platform,
-		[ValidateSet('x86','x86_64','arm64')]
-		[string] $Architecture
-	)
+function Get-TlkPlatform {
+    param(
+        [Parameter(Position=0)]
+        [string] $Platform
+    )
 
     if (-Not $Platform) {
         $Platform = if ($IsWindows) {
@@ -47,22 +45,49 @@ function Invoke-Tlk {
         }
     }
 
+    $Platform
+}
+
+function Get-TlkArchitecture {
+    param(
+        [Parameter(Position=0)]
+        [string] $Architecture
+    )
+
     if (-Not $Architecture) {
         $Architecture = 'x86_64'
     }
+
+    $Architecture
+}
+
+function Invoke-TlkBuild {
+	param(
+		[ValidateSet('windows','macos','linux')]
+		[string] $Platform,
+		[ValidateSet('x86','x86_64','arm64')]
+		[string] $Architecture
+	)
+
+    $Platform = Get-TlkPlatform
+    $Architecture = Get-TlkArchitecture
 
     $OPENSSL_VERSION = '1.1.1b-5'
     $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
     $ConanProfile = "${Platform}-${Architecture}"
 
-    & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
-    $dotenv = Get-DotEnvFile ".\environment.sh.env"
-    $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
-
     $RootPath = Split-Path -Parent $PSScriptRoot
     $BuildRepositoryLocalPath = $RootPath # Build.Repository.LocalPath
     $BuildArtifactStagingDirectory = Join-Path $BuildRepositoryLocalPath "artifacts" # Build.ArtifactStagingDirectory
 
+    & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
+    $dotenv = Get-DotEnvFile ".\environment.sh.env"
+
+    Get-ChildItem 'conanbuildinfo.*' | Remove-Item
+    Get-ChildItem 'environment.*.env' | Remove-Item
+    Get-ChildItem '*activate.*' | Remove-Item
+
+    $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
     $Env:OPENSSL_DIR = $OPENSSL_DIR
 
     if ($IsWindows) {
@@ -92,4 +117,34 @@ function Invoke-Tlk {
     Pop-Location
 }
 
-Invoke-Tlk @args
+function Invoke-TlkPackage {
+	param(
+		[ValidateSet('windows','macos','linux')]
+		[string] $Platform,
+		[ValidateSet('x86','x86_64','arm64')]
+		[string] $Architecture
+	)
+
+    $Platform = Get-TlkPlatform
+    $Architecture = Get-TlkArchitecture
+
+    $RootPath = Split-Path -Parent $PSScriptRoot
+
+    Push-Location
+    Set-Location "$RootPath/package/$Platform"
+    .\package.ps1
+    Pop-Location
+}
+
+$TlkVerbs = @('build', 'package')
+
+if (($args.Count -lt 1) -or (-Not $TlkVerbs.Contains($args[0]))) {
+    Write-Output "use one of the following verbs: $($TlkVerbs -Join ', ')"
+} else {
+    $TlkVerb = $args[0]
+    $TlkParams = $args[1..$args.Count]
+    switch ($TlkVerb) {
+        "build" { Invoke-TlkBuild @TlkParams }
+        "package" { Invoke-TlkPackage @TlkParams }
+    }
+}
