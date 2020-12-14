@@ -2675,7 +2675,7 @@ checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 [[package]]
 name = "saphir"
 version = "2.8.0"
-source = "git+https://github.com/richerarc/saphir.git?rev=d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316#d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316"
+source = "git+https://github.com/bcortier-devolutions/saphir?rev=87147e4c44fe608aada91f45f478fb708e0cc07a#87147e4c44fe608aada91f45f478fb708e0cc07a"
 dependencies = [
  "base64 0.13.0",
  "futures 0.3.8",
@@ -2710,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "saphir_macro"
 version = "2.1.1"
-source = "git+https://github.com/richerarc/saphir.git?rev=d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316#d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316"
+source = "git+https://github.com/bcortier-devolutions/saphir?rev=87147e4c44fe608aada91f45f478fb708e0cc07a#87147e4c44fe608aada91f45f478fb708e0cc07a"
 dependencies = [
  "http 0.2.1",
  "proc-macro2 1.0.24",

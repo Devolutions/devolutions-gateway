@@ -27,7 +27,7 @@ use slog_scope_futures::future03::FutureExt;
 
 use crate::{
     config::Config,
-    http::http_server::HttpServer,
+    http::http_server::configure_http_server,
     jet_client::{JetAssociationsMap, JetClient},
     logger,
     rdp::RdpClient,
@@ -44,7 +44,7 @@ type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Se
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 pub enum GatewayState {
     Stopped,
-    Running { http_server: HttpServer, runtime: Runtime },
+    Running { runtime: Runtime },
 }
 
 impl Default for GatewayState {
@@ -95,9 +95,6 @@ impl GatewayService {
 
         let context = create_context(config, logger).expect("failed to create gateway context");
 
-        // start http server
-        context.http_server.start();
-
         let join_all = futures::future::join_all(context.futures);
         runtime.spawn(async {
             join_all.await.into_iter().for_each(|future_result| {
@@ -105,10 +102,7 @@ impl GatewayService {
             });
         });
 
-        self.state = GatewayState::Running {
-            http_server: context.http_server,
-            runtime,
-        };
+        self.state = GatewayState::Running { runtime };
     }
 
     pub fn stop(&mut self) {
@@ -116,11 +110,8 @@ impl GatewayService {
             GatewayState::Stopped => {
                 info!("Attempted to stop gateway service, but it isn't started");
             }
-            GatewayState::Running { http_server, runtime } => {
+            GatewayState::Running { runtime } => {
                 info!("Stopping gateway service");
-
-                // stop http server
-                http_server.stop();
 
                 // stop runtime now
                 runtime.shutdown_background();
@@ -132,7 +123,6 @@ impl GatewayService {
 }
 
 pub struct GatewayContext {
-    pub http_server: HttpServer,
     pub futures: VecOfFuturesType,
 }
 
@@ -163,7 +153,11 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
 
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
 
-    let http_server = HttpServer::new(config.clone(), jet_associations.clone());
+    // configure http server
+    configure_http_server(config.clone(), jet_associations.clone()).map_err(|e| {
+        error!("{}", e);
+        "failed to configure http server"
+    })?;
 
     // Create the TLS acceptor.
     let client_no_auth = rustls::NoClientAuth::new();
@@ -202,7 +196,7 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
         )));
     }
 
-    Ok(GatewayContext { http_server, futures })
+    Ok(GatewayContext { futures })
 }
 
 /*
@@ -241,7 +235,7 @@ async fn start_tcp_server(
     tls_public_key: Vec<u8>,
     logger: Logger,
 ) -> Result<(), String> {
-    info!("Starting TCP jet server...");
+    info!("Starting TCP jet server ({})...", url);
 
     let socket_addr = url
         .with_default_port(|url| get_default_port_from_server_url(url).map_err(|_| ()))
@@ -315,7 +309,7 @@ async fn start_tcp_server(
                     ),
                     scheme => panic!("Unsupported routing URL scheme {}", scheme),
                 }
-            } else if config.is_rdp_supported() {
+            } else {
                 let mut peeked = [0; 4];
                 let _ = conn.peek(&mut peeked).await;
 
@@ -327,9 +321,6 @@ async fn start_tcp_server(
                     let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
                     Box::pin(rdp_client.serve(conn))
                 }
-            } else {
-                let jet_client = JetClient::new(config.clone(), jet_associations.clone());
-                Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
             };
 
         let client_fut = client_fut.with_logger(logger);
@@ -353,7 +344,7 @@ async fn start_websocket_server(
     tls_acceptor: TlsAcceptor,
     logger: slog::Logger,
 ) -> Result<(), String> {
-    info!("Starting websocket server ...");
+    info!("Starting websocket server ({})...", websocket_url);
 
     let mut websocket_addr = String::new();
     websocket_addr.push_str(websocket_url.host_str().unwrap_or("0.0.0.0"));
