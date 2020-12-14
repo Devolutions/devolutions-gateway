@@ -650,6 +650,14 @@ impl Config {
             panic!("At least one listener has to be specified.");
         }
 
+        if !config
+            .listeners
+            .iter()
+            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
+        {
+            panic!("At least one HTTP listener is required");
+        }
+
         // early fail if we start as restricted without provisioner key
         if !config.unrestricted && config.provisioner_public_key.is_none() {
             panic!("provisioner public key is missing in unrestricted mode");
