@@ -11,14 +11,14 @@ Use `cargo run` to build and run devolutions-gateway locally with default option
 
 ```
 USAGE:
-    devolutions-jet [FLAGS] [OPTIONS] --jet-instance <NAME>
+    devolutions-gateway [FLAGS] [OPTIONS]
 
 FLAGS:
     -h, --help
             Prints help information
 
-        --rdp
-            Enable RDP/TCP and RDP/TLS in all TCP listeners (temporary)
+        --service
+            Enable service mode
 
         --unrestricted
             Remove API key validation on some HTTP routes
@@ -29,52 +29,50 @@ FLAGS:
 
 OPTIONS:
         --api-key <KEY>
-            The API key used by the server to authenticate client queries. [env: JET_API_KEY]
+            The API key used by the server to authenticate client queries. [env: DGATEWAY_API_KEY=]
+
+        --capture-path <PATH>
+            Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.
+            [env: DGATEWAY_CAPTURE_PATH=]
 
         --certificate-data <DATA>
-            Certificate data, base64-encoded X509 DER. [env: JET_CERTIFICATE_DATA]
+            Certificate data, base64-encoded X509 DER. [env: DGATEWAY_CERTIFICATE_DATA=]
 
         --certificate-file <FILE>
-            Path to the certificate file. [env: JET_CERTIFICATE_FILE]
+            Path to the certificate file. [env: DGATEWAY_CERTIFICATE_FILE=]
 
         --delegation-private-key-data <DATA>
-            Private key data, base64-encoded PKCS10. [env: JET_DELEGATION_PRIVATE_KEY_DATA]
+            Private key data, base64-encoded PKCS10. [env: DGATEWAY_DELEGATION_PRIVATE_KEY_DATA=]
 
         --delegation-private-key-file <FILE>
-            Path to the private key file. [env: JET_DELEGATION_PRIVATE_KEY_FILE]
+            Path to the private key file. [env: DGATEWAY_DELEGATION_PRIVATE_KEY_FILE=]
 
-        --http-listener-url <URL>
-            HTTP listener URL. [env: JET_HTTP_LISTENER_URL]  [default: http://0.0.0.0:10256]
+        --farm-name <FARM-NAME>
+            Farm name [env: DGATEWAY_FARM_NAME=]
 
-        --jet-instance <NAME>
-            Specific name to reach that instance of JET. [env: JET_INSTANCE]
+        --hostname <HOSTNAME>
+            Specific name to reach that instance of Devolutions Gateway. [env: DGATEWAY_HOSTNAME=]
 
     -l, --listener <URL>...
             An URL on which the server will listen on. The external URL returned as candidate can be specified after the
             listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port> If it is
-            not specified, the external url will be <scheme>://<jet_instance>:<port> where <jet_instance> is the value
-            of the jet-instance parameter. [env: JET_LISTENERS]
+            not specified, the external url will be <scheme>://<hostname>:<port> where <hostname> is the value of the
+            hostname parameter. [env: DGATEWAY_LISTENERS=]
+
         --log-file <LOG_FILE>
             A file with logs
 
-        --pcap-files-path <PATH>
-            Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.
-
         --private-key-data <DATA>
-            Private key data, base64-encoded PKCS10. [env: JET_PRIVATE_KEY_DATA]
+            Private key data, base64-encoded PKCS10. [env: DGATEWAY_PRIVATE_KEY_DATA=]
 
         --private-key-file <FILE>
-            Path to the private key file. [env: JET_PRIVATE_KEY_FILE]
+            Path to the private key file. [env: DGATEWAY_PRIVATE_KEY_FILE=]
 
-    -p, --protocol <PROTOCOL_NAME>
-            Specify the application protocol used. Useful when pcap file is saved and you want to avoid application
-            message in two different tcp packet. If protocol is unknown, we can't be sure that application packet is not
-            split between 2 tcp packets. [possible values: wayk, rdp]
         --provisioner-public-key-data <DATA>
-            Public key data, base64-encoded PKCS10. [env: JET_PROVISIONER_PUBLIC_KEY_DATA]
+            Public key data, base64-encoded PKCS10. [env: DGATEWAY_PROVISIONER_PUBLIC_KEY_DATA=]
 
         --provisioner-public-key-file <FILE>
-            Path to the public key file. [env: JET_PROVISIONER_PUBLIC_KEY_FILE]
+            Path to the public key file. [env: DGATEWAY_PROVISIONER_PUBLIC_KEY_FILE=]
 
     -r, --routing-url <URL>
             An address on which the server will route all packets.
