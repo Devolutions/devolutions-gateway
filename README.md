@@ -156,10 +156,8 @@ However, you can easily generate a JWT for testing purposes by using CLI tools p
 
 A native CLI. No binary provided; you will need a Rust toolchain to build yourself. See [Install Rust](https://www.rust-lang.org/tools/install).
 
-`cd` to `tools/tokengen` and then build using
-
 ```
-$ cargo build --release
+$ cargo build --package tokengen --release
 ```
 
 The binary is produced inside a `target/release` folder.
