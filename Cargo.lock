@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "0.15.0"
+version = "2020.3.3"
 dependencies = [
  "base64 0.9.3",
  "byteorder",

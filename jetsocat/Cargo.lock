@@ -353,7 +353,7 @@ checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
 
 [[package]]
 name = "jetsocat"
-version = "0.14.0"
+version = "2020.3.3"
 dependencies = [
  "anyhow",
  "dirs 3.0.1",
