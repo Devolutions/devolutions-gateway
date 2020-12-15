@@ -45,7 +45,7 @@ lazy_static! {
         password: String::from("TargetServerPassword"),
         domain: Some(String::from("TargetServerDomainName")),
     };
-    static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../src/cert/certificate.p12").to_vec();
+    static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../devolutions-gateway/cert/certificate.p12").to_vec();
 }
 
 const IRONRDP_CLIENT_PATH: &str = "ironrdp_client";
@@ -62,8 +62,8 @@ const CHANNEL_INITIATOR_ID: u16 = 1002;
 const GRAPHICS_DVC_ID: u32 = 0x06;
 const DRDYNVC_CHANNEL_NAME: &str = "drdynvc";
 
-const PUBLIC_CERT_PATH: &str = "src/cert/publicCert.pem";
-const PRIVATE_CERT_PATH: &str = "src/cert/private.pem";
+const PUBLIC_CERT_PATH: &str = "devolutions-gateway/cert/publicCert.pem";
+const PRIVATE_CERT_PATH: &str = "devolutions-gateway/cert/private.pem";
 const GRAPHICS_CHANNEL_NAME: &str = "Microsoft::Windows::RDS::Graphics";
 
 fn run_client() -> Child {
@@ -227,7 +227,7 @@ impl RdpServer {
     }
 
     fn nla(&self, mut tls_stream: &mut (impl io::Write + io::Read)) {
-        let tls_pubkey = get_pub_key_from_pem_file("src/cert/publicCert.pem").unwrap();
+        let tls_pubkey = get_pub_key_from_pem_file("devolutions-gateway/cert/publicCert.pem").unwrap();
 
         let mut cred_ssp_context = credssp::CredSspServer::new(tls_pubkey, self.identities_proxy.clone())
             .expect("failed to create a CredSSP server");

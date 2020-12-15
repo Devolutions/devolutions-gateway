@@ -101,7 +101,7 @@ pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certific
         load_certs_from_data(data)
             .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate data"))
     } else {
-        let certfile = include_bytes!("cert/publicCert.pem");
+        let certfile = include_bytes!("../cert/publicCert.pem");
         let mut reader = BufReader::new(certfile.as_ref());
 
         rustls::internal::pemfile::certs(&mut reader)
@@ -132,7 +132,7 @@ fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::Pr
         load_rsa_private_key_from_data(data)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid rsa private key"))
     } else {
-        let keyfile = include_bytes!("cert/private.pem");
+        let keyfile = include_bytes!("../cert/private.pem");
         rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
     }
@@ -151,7 +151,7 @@ fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::
         load_pkcs8_private_key_from_data(data)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid pkcs8 private key"))
     } else {
-        let keyfile = include_bytes!("cert/private.pem");
+        let keyfile = include_bytes!("../cert/private.pem");
         rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,

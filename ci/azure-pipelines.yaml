@@ -31,7 +31,7 @@ stages:
               VERSION=$(toml get Cargo.toml package.version | tr -d '"')
               echo ${VERSION} > VERSION
             displayName: Get version
-          
+
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: VERSION
@@ -61,12 +61,11 @@ stages:
 
           - script: |
               VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
-              cargo build --release
+              cargo build --release --package jetsocat
               strip -s target/release/jetsocat
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
-            workingDirectory: jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -110,11 +109,10 @@ stages:
 
           - powershell: |
               $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              cargo build --release
+              cargo build --release --package jetsocat
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
               cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Building jetsocat
-            workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
@@ -165,11 +163,10 @@ stages:
 
           - powershell: |
               $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              cargo build --release --target=i686-pc-windows-msvc
+              cargo build --release --target=i686-pc-windows-msvc --package jetsocat
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86
               cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Building jetsocat
-            workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
@@ -202,12 +199,11 @@ stages:
 
           - script: |
               VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
-              cargo build --release
+              cargo build --release --package jetsocat
               strip target/release/jetsocat
               mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
-            workingDirectory: jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -248,7 +244,7 @@ stages:
 
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
               . activate.sh
-              cargo build --release
+              cargo build --release --package devolutions-gateway
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
               cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
             displayName: Building devolutions-gateway
@@ -261,7 +257,7 @@ stages:
       - job: Windows_64_bit
         pool:
           name: 'Devolutions - Windows containers'
-        
+
         workspace:
           clean: all
 
@@ -305,7 +301,7 @@ stages:
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr $(TargetPlatform)-$(TargetArchitecture)
               .\activate.ps1
-              cargo build --release
+              cargo build --release --package devolutions-gateway
               mkdir $TargetOutputPath
               $DGatewayExecutable = "$TargetOutputPath/DevolutionsGateway_$(TargetPlatform)_${CargoVersion}_$(TargetArchitecture).exe"
               cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $DGatewayExecutable

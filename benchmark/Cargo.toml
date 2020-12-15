@@ -1,5 +1,5 @@
 [package]
-name = "devolutions_benchmark"
+name = "benchmark"
 version = "0.1.0"
 authors = ["Vlad Alex <vlad.al.dp@gmail.com>",
             "Vladyslav Hordiienko <hord.vlad@gmail.com>"]
@@ -9,4 +9,4 @@ edition = "2018"
 structopt = "0.3"
 uuid = "0.7.1"
 http = "0.1"
-jet-proto = { path = "../../jet-proto" }
+jet-proto = { path = "../jet-proto" }
