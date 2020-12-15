@@ -31,7 +31,7 @@ stages:
               VERSION=$(toml get Cargo.toml package.version | tr -d '"')
               echo ${VERSION} > VERSION
             displayName: Get version
-          
+
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: VERSION
@@ -66,7 +66,6 @@ stages:
               mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
-            workingDirectory: jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -114,7 +113,6 @@ stages:
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
               cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Building jetsocat
-            workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
@@ -169,7 +167,6 @@ stages:
               mkdir $(Build.ArtifactStagingDirectory)/windows/x86
               cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Building jetsocat
-            workingDirectory: jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
@@ -207,7 +204,6 @@ stages:
               mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
               cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
-            workingDirectory: jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -261,7 +257,7 @@ stages:
       - job: Windows_64_bit
         pool:
           name: 'Devolutions - Windows containers'
-        
+
         workspace:
           clean: all
 
