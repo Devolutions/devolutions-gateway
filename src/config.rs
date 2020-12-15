@@ -13,13 +13,10 @@ use std::{
 };
 use url::Url;
 
-const DEFAULT_HTTP_LISTENER_PORT: u32 = 10256;
-
 const ARG_API_KEY: &str = "api-key";
 const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
 const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
-const ARG_API_LISTENER: &str = "api-listener";
 const ARG_HOSTNAME: &str = "hostname";
 const ARG_FARM_NAME: &str = "farm-name";
 const ARG_CERTIFICATE_FILE: &str = "certificate-file";
@@ -96,7 +93,6 @@ pub struct Config {
     pub log_file: Option<String>,
     pub application_protocols: Vec<String>,
     pub certificate: CertificateConfig,
-    pub api_listener: Url,
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
 }
@@ -104,11 +100,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
-
-        let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
-        let api_listener = default_api_listener_url
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
 
         Config {
             service_mode: false,
@@ -132,7 +123,6 @@ impl Default for Config {
                 private_key_file: None,
                 private_key_data: None,
             },
-            api_listener,
             provisioner_public_key: None,
             delegation_private_key: None,
         }
@@ -215,8 +205,6 @@ pub struct ConfigFile {
     pub capture_path: Option<String>,
     #[serde(rename = "Unrestricted")]
     pub unrestricted: Option<bool>,
-    #[serde(rename = "ApiListener")]
-    pub api_listener: Option<String>,
 }
 
 fn get_config_path() -> PathBuf {
@@ -321,14 +309,6 @@ impl Config {
                     .value_delimiter(";")
                     .takes_value(true)
                     .number_of_values(1),
-            )
-            .arg(
-                Arg::with_name(ARG_API_LISTENER)
-                    .long("api-listener")
-                    .value_name("URL")
-                    .env("DGATEWAY_API_LISTENER")
-                    .help("API HTTP listener URL.")
-                    .takes_value(true),
             )
             .arg(
                 Arg::with_name(ARG_FARM_NAME)
@@ -517,12 +497,6 @@ impl Config {
             config.unrestricted = true;
         }
 
-        if let Some(api_listener) = matches.value_of(ARG_API_LISTENER) {
-            config.api_listener = api_listener
-                .parse::<Url>()
-                .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
-        }
-
         if let Some(farm_name) = matches.value_of(ARG_FARM_NAME) {
             config.farm_name = farm_name.to_owned();
         }
@@ -676,6 +650,14 @@ impl Config {
             panic!("At least one listener has to be specified.");
         }
 
+        if !config
+            .listeners
+            .iter()
+            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
+        {
+            panic!("At least one HTTP listener is required");
+        }
+
         // early fail if we start as restricted without provisioner key
         if !config.unrestricted && config.provisioner_public_key.is_none() {
             panic!("provisioner public key is missing in unrestricted mode");
@@ -776,16 +758,6 @@ impl Config {
         let unrestricted = config_file.unrestricted.unwrap_or(true);
         let capture_path = config_file.capture_path;
 
-        // We always create a dummy API listener because Saphir needs one.
-        // However, this API listener is unable to process WebSocket traffic.
-        // Create the API listener as a dummy listener to make Saphir happy,
-        // but in fact we just ignore it and use only our gateway listeners.
-        let default_api_listener_url = format!("http://0.0.0.0:{}", DEFAULT_HTTP_LISTENER_PORT);
-        let api_listener_url = config_file.api_listener.unwrap_or(default_api_listener_url);
-        let api_listener = api_listener_url
-            .parse::<Url>()
-            .unwrap_or_else(|e| panic!("API listener URL is invalid: {}", e));
-
         Some(Config {
             unrestricted,
             api_key,
@@ -800,7 +772,6 @@ impl Config {
                 private_key_file,
                 ..Default::default()
             },
-            api_listener,
             provisioner_public_key,
             delegation_private_key,
             ..Default::default()

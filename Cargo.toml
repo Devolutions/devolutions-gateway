@@ -56,8 +56,8 @@ spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", 
 indexmap = "1.0"
 
 [dependencies.saphir]
-git = "https://github.com/richerarc/saphir.git"
-rev = "d0fcd6adc0a8a5e22c095d41a9a2c6c0d0d91316"
+git = "https://github.com/richerarc/saphir"
+rev = "5f3602d5165a224b83678a5641e34c77b2325bca"
 default-features = false
 features = ["https", "json", "macro", "form"]
 
