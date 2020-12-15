@@ -182,7 +182,7 @@ class TlkRecipe
         $WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @(
             "-dDGatewayPSSourceDir=${ModuleName}/${ModuleVersion}",
             "-dDGatewayExecutable=$DGatewayExecutable",
-            "-dVersion=$ShortVersion")
+            "-dVersion=$ShortVersion", "-v")
         
         $WixFiles = @('DevolutionsGateway', "DevolutionsGateway-$TargetArch")
         
@@ -217,6 +217,12 @@ class TlkRecipe
             & 'torch.exe' "-v" "$($this.PackageName).msi" "$($this.PackageName)_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst"
             & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName).msi" "${Culture}_$TargetArch.mst" "1036"
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
+        }
+
+        if (Test-Path Env:BUILD_STAGING_DIRECTORY) {
+            $BuildStagingDirectory = $Env:BUILD_STAGING_DIRECTORY
+            $PackageFile = "$($this.PackageName).msi"
+            Copy-Item -Path $PackageFile -Destination $(Join-Path $BuildStagingDirectory $PackageFile)
         }
 
         Pop-Location

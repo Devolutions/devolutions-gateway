@@ -309,6 +309,13 @@ stages:
               signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
             displayName: Signing binary
 
+          - powershell: |
+              $Version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $Env:DGATEWAY_EXECUTABLE="$(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_$Version_x86_64.exe"
+              $Env:BUILD_STAGING_DIRECTORY="$(Build.ArtifactStagingDirectory)/windows/x86_64"
+              .\$(Build.Repository.LocalPath)\ci\tlk.ps1 package
+            displayName: Creating MSI package
+
           - task: PublishBuildArtifacts@1
             inputs:
               pathToPublish: $(Build.ArtifactStagingDirectory)
