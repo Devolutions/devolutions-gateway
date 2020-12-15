@@ -1,0 +1,33 @@
+name: devolutions-gateway-ps-$(Rev:rr)
+
+trigger:
+  branches:
+    include:
+      - master
+
+variables:
+  - group: wayknow
+
+jobs:
+  - job: building
+    pool:
+      name: 'Devolutions - Windows containers'
+
+    container: devolutions/waykbuilder:vstools2k19
+
+    workspace:
+      clean: all
+
+    steps:
+      - powershell: .\build.ps1
+
+      - task: ArchiveFiles@2
+        inputs:
+          rootFolderOrFile: $(Build.Repository.LocalPath)\package\DevolutionsGateway
+          includeRootFolder: false
+          archiveFile: $(Build.ArtifactStagingDirectory)/devolutions-gateway-ps.zip
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          pathToPublish: $(Build.ArtifactStagingDirectory)
+          artifactName: devolutions-gateway-ps

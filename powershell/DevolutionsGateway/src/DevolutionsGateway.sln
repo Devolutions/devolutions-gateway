@@ -1,0 +1,17 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DevolutionsGateway", "DevolutionsGateway.csproj", "{FD38D799-1337-417E-9F85-7A451D4B3F9F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FD38D799-1337-417E-9F85-7A451D4B3F9F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD38D799-1337-417E-9F85-7A451D4B3F9F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD38D799-1337-417E-9F85-7A451D4B3F9F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD38D799-1337-417E-9F85-7A451D4B3F9F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
