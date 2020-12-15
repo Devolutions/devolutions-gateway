@@ -2,7 +2,7 @@
 
 This document provides a list of notable changes introduced in Devolutions-Gateway by release.
 
-== 2020.3.3 (unrealesed)
+== 2020.3.3 (unrealeased)
 
 === Gateway
 
