@@ -294,19 +294,21 @@ stages:
             displayName: Import signing certificate
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $CargoVersion = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              Write-Host "##vso[task.setvariable variable=CARGO_VERSION]$CargoVersion"
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
               .\activate.ps1
               cargo build --release
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+              mkdir $(Build.StagingDirectory)/windows/x86_64
+              $DGatewayExecutable = "$(Build.StagingDirectory)/windows/x86_64/DevolutionsGateway_windows_${CargoVersion}_x86_64.exe"
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $DGatewayExecutable
+              Write-Host "##vso[task.setvariable variable=DGATEWAY_EXECUTABLE]$DGatewayExecutable"
             displayName: Building devolutions-gateway
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(DGATEWAY_EXECUTABLE)
             displayName: Signing binary
 
           - task: PowerShell@2
@@ -315,10 +317,11 @@ stages:
               filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
               arguments: package -Platform 'Windows' -Architecture 'x86_64'
             env:
-              BUILD_STAGING_DIRECTORY: "$(Build.ArtifactStagingDirectory)/windows/x86_64"
+              BUILD_STAGING_DIRECTORY: "$(Build.StagingDirectory)/windows/x86_64"
+              DGATEWAY_EXECUTABLE: "$(DGATEWAY_EXECUTABLE)"
             displayName: Creating MSI package
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway
