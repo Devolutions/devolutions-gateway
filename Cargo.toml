@@ -56,9 +56,8 @@ spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", 
 indexmap = "1.0"
 
 [dependencies.saphir]
-# TODO: point to a saphir version on crates.io once it's published
-git = "https://github.com/bcortier-devolutions/saphir"
-rev = "87147e4c44fe608aada91f45f478fb708e0cc07a"
+git = "https://github.com/richerarc/saphir"
+rev = "5f3602d5165a224b83678a5641e34c77b2325bca"
 default-features = false
 features = ["https", "json", "macro", "form"]
 
