@@ -312,9 +312,10 @@ stages:
           - powershell: |
               $Version = Get-Content $(Agent.BuildDirectory)\version\VERSION
               $Env:DGATEWAY_EXECUTABLE="$(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_$Version_x86_64.exe"
-              $Env:BUILD_STAGING_DIRECTORY="$(Build.ArtifactStagingDirectory)/windows/x86_64"
-              .\$(Build.Repository.LocalPath)\ci\tlk.ps1 package
+              .\$(Agent.BuildDirectory)\ci\tlk.ps1 package
             displayName: Creating MSI package
+            env:
+              BUILD_STAGING_DIRECTORY: "$(Build.ArtifactStagingDirectory)/windows/x86_64"
 
           - task: PublishBuildArtifacts@1
             inputs:
