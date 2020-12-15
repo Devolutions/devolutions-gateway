@@ -77,11 +77,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn run_servers(
-    opt: Opt,
-    associations_sender: mpsc::Sender<Uuid>,
-    barrier: Arc<Barrier>,
-) -> io::Result<()> {
+fn run_servers(opt: Opt, associations_sender: mpsc::Sender<Uuid>, barrier: Arc<Barrier>) -> io::Result<()> {
     let msg = vec![0; opt.server_block_size];
     let mut buf = vec![0; opt.client_block_size];
     let host = opt.connect_addr.ip().to_string();
@@ -115,11 +111,7 @@ fn run_servers(
     Ok(())
 }
 
-fn run_clients(
-    opt: Opt,
-    associations_receiver: mpsc::Receiver<Uuid>,
-    barrier: Arc<Barrier>,
-) -> std::io::Result<()> {
+fn run_clients(opt: Opt, associations_receiver: mpsc::Receiver<Uuid>, barrier: Arc<Barrier>) -> std::io::Result<()> {
     let msg = vec![0; opt.client_block_size];
     let mut buf = vec![0; opt.server_block_size];
     let host = opt.connect_addr.ip().to_string();
@@ -127,11 +119,8 @@ fn run_clients(
     let total_time_ms: u128 = (0..opt.tests)
         .map(|i| {
             let mut stream = std::net::TcpStream::connect(opt.connect_addr).unwrap();
-            let association = associations_receiver
-                .recv()
-                .expect("failed to receive association");
-            jet_proto::connect_as_client(&mut stream, host.clone(), association)
-                .expect("failed to connect as client");
+            let association = associations_receiver.recv().expect("failed to receive association");
+            jet_proto::connect_as_client(&mut stream, host.clone(), association).expect("failed to connect as client");
             barrier.wait();
 
             let now = std::time::Instant::now();

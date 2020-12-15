@@ -4,11 +4,7 @@ use http::StatusCode;
 use jet_proto::{accept::JetAcceptReq, connect::JetConnectReq, JetMessage, JET_VERSION_V1};
 use uuid::Uuid;
 
-pub fn connect_as_client(
-    mut stream: impl io::Write + io::Read,
-    host: String,
-    association: Uuid,
-) -> io::Result<()> {
+pub fn connect_as_client(mut stream: impl io::Write + io::Read, host: String, association: Uuid) -> io::Result<()> {
     let message = JetMessage::JetConnectReq(JetConnectReq {
         version: JET_VERSION_V1 as u32,
         host,
@@ -18,9 +14,8 @@ pub fn connect_as_client(
     write_jet_message(&mut &mut stream, message)?;
 
     let buffer = read_bytes(&mut stream)?;
-    if let JetMessage::JetConnectRsp(response) =
-        JetMessage::read_connect_response(&mut buffer.as_slice())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+    if let JetMessage::JetConnectRsp(response) = JetMessage::read_connect_response(&mut buffer.as_slice())
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
     {
         assert_eq!(StatusCode::OK, response.status_code);
         assert_eq!(JET_VERSION_V1 as u32, response.version);
@@ -42,8 +37,7 @@ pub fn connect_as_server(mut stream: impl io::Write + io::Read, host: String) ->
 
     let buffer = read_bytes(&mut stream)?;
     if let JetMessage::JetAcceptRsp(response) =
-        JetMessage::read_accept_response(&mut buffer.as_slice())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        JetMessage::read_accept_response(&mut buffer.as_slice()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
     {
         assert_eq!(StatusCode::OK, response.status_code);
         assert_eq!(JET_VERSION_V1 as u32, response.version);
