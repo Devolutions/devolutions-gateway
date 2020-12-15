@@ -261,11 +261,15 @@ stages:
       - job: Windows_64_bit
         pool:
           name: 'Devolutions - Windows containers'
-
+        
         workspace:
           clean: all
 
         container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86_64"
 
         steps:
           - checkout: self
@@ -291,25 +295,42 @@ stages:
               $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
             displayName: Import signing certificate
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr windows-x86_64
+              $CargoVersion = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              Write-Host "##vso[task.setvariable variable=CargoVersion]$CargoVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr $(TargetPlatform)-$(TargetArchitecture)
               .\activate.ps1
               cargo build --release
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+              mkdir $TargetOutputPath
+              $DGatewayExecutable = "$TargetOutputPath/DevolutionsGateway_$(TargetPlatform)_${CargoVersion}_$(TargetArchitecture).exe"
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $DGatewayExecutable
+              Write-Host "##vso[task.setvariable variable=DGATEWAY_EXECUTABLE]$DGatewayExecutable"
             displayName: Building devolutions-gateway
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/DevolutionsGateway_windows_"$version"_x86_64.exe
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(DGATEWAY_EXECUTABLE)
             displayName: Signing binary
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGATEWAY_EXECUTABLE)"
+              DGATEWAY_PACKAGE_FILENAME: "DevolutionsGateway-$(TargetArchitecture)-$(CargoVersion).msi"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Creating MSI package
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway

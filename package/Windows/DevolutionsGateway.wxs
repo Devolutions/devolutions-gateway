@@ -199,7 +199,7 @@
     </DirectoryRef>
 
     <Component Id="cmpDGatewayService" Guid="31eaa967-64e3-469c-b0c9-c9ecea61b7d3" Win64="$(var.Win64)" Directory="INSTALLDIR">
-      <File Name="DevolutionsGateway.exe" Source="./bin/$(var.ProcessorArchitecture)/DevolutionsGateway.exe" Id="DevolutionsGateway.exe" ProcessorArchitecture="$(var.ProcessorArchitecture)" KeyPath="yes" Vital="yes" DiskId="1">
+      <File Name="DevolutionsGateway.exe" Source="$(var.DGatewayExecutable)" Id="DevolutionsGateway.exe" ProcessorArchitecture="$(var.ProcessorArchitecture)" KeyPath="yes" Vital="yes" DiskId="1">
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Wayk Now Service TCP" Description="Wayk Now Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Wayk Now Service UDP" Description="Wayk Now Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
       </File>
