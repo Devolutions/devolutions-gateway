@@ -11,34 +11,7 @@ variables:
     value: 1.1.1b-5
 
 stages:
-  - stage: Get_version
-    jobs:
-      - job: Extract_version
-        pool:
-          name: 'Devolutions - Linux containers'
-
-        workspace:
-          clean: all
-
-        container: devolutions/toolbox:latest
-
-        steps:
-          - checkout: self
-            clean: true
-            fetchDepth: 1
-
-          - script: |
-              VERSION=$(toml get Cargo.toml package.version | tr -d '"')
-              echo ${VERSION} > VERSION
-            displayName: Get version
-
-          - task: PublishBuildArtifacts@1
-            inputs:
-              pathToPublish: VERSION
-              artifactName: version
-
   - stage: jetsocat
-    dependsOn: ['Get_version']
     jobs:
       - job: Linux_x86_64
         pool:
@@ -49,27 +22,26 @@ stages:
 
         container: devolutions/waykbuilder:linux
 
+        variables:
+          TargetPlatform: "linux"
+          TargetArchitecture: "x86_64"
+
         steps:
           - checkout: self
             clean: true
             fetchDepth: 1
 
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
-
           - script: |
-              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
               cargo build --release --package jetsocat
               strip -s target/release/jetsocat
-              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/linux/x86_64
+              cp target/release/jetsocat $(Build.StagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Windows_x86_64
@@ -81,15 +53,14 @@ stages:
 
         container: devolutions/waykbuilder:vstools2k19
 
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86_64"
+
         steps:
           - checkout: self
             clean: true
             fetchDepth: 1
-
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
 
           - task: DownloadSecureFile@1
             inputs:
@@ -102,28 +73,28 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
-              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
             displayName: Import signing certificate
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               cargo build --release --package jetsocat
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+              mkdir $(Build.StagingDirectory)/windows/x86_64
+              cp target/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Building jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Windows_x86
@@ -135,15 +106,14 @@ stages:
 
         container: devolutions/waykbuilder:vstools2k19
 
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86"
+
         steps:
           - checkout: self
             clean: true
             fetchDepth: 1
-
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
 
           - task: DownloadSecureFile@1
             inputs:
@@ -156,28 +126,28 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
-              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
             displayName: Import signing certificate
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               cargo build --release --target=i686-pc-windows-msvc --package jetsocat
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86
-              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+              mkdir $(Build.StagingDirectory)/windows/x86
+              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Building jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
-              $version = Get-Content $(Agent.BuildDirectory)\version\VERSION
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Macos_x86_64
@@ -187,31 +157,29 @@ stages:
         workspace:
           clean: all
 
+        variables:
+          TargetPlatform: "macos"
+          TargetArchitecture: "x86_64"
+
         steps:
           - checkout: self
             clean: true
             fetchDepth: 1
 
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
-
           - script: |
-              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
               cargo build --release --package jetsocat
               strip target/release/jetsocat
-              mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/macos/x86_64
+              cp target/release/jetsocat $(Build.StagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
   - stage: 'Devolutions_Gateway'
-    dependsOn: ['Get_version']
     jobs:
       - job: Linux_64_bit
         pool:
@@ -222,18 +190,17 @@ stages:
 
         container: devolutions/waykbuilder:linux
 
+        variables:
+          TargetPlatform: "linux"
+          TargetArchitecture: "x86_64"
+
         steps:
           - checkout: self
             clean: true
             fetchDepth: 1
 
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
-
           - script: |
-              VERSION=`cat $(Agent.BuildDirectory)/version/VERSION`
+              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
 
               echo "Check formatting"
               cargo fmt --all -- --check
@@ -245,13 +212,13 @@ stages:
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
               . activate.sh
               cargo build --release --package devolutions-gateway
-              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/linux/x86_64
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.StagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
             displayName: Building devolutions-gateway
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway
 
       - job: Windows_64_bit
@@ -272,11 +239,6 @@ stages:
             clean: true
             fetchDepth: 1
 
-          - task: DownloadBuildArtifacts@0
-            inputs:
-              artifactName: version
-              downloadPath: $(Agent.BuildDirectory)
-
           - task: DownloadSecureFile@1
             inputs:
               secureFile: CodeSigningCertificateUnsecure.pfx
@@ -288,14 +250,14 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
-              $secureString = convertto-securestring "$(WINDOWS_SIGNING_PASSPHRASE)" -asplaintext -force
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
               Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
             displayName: Import signing certificate
 
           - powershell: |
-              $CargoVersion = Get-Content $(Agent.BuildDirectory)\version\VERSION
+              $CargoVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
               Write-Host "##vso[task.setvariable variable=CargoVersion]$CargoVersion"
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
