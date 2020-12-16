@@ -22,6 +22,10 @@ stages:
 
         container: devolutions/waykbuilder:linux
 
+        variables:
+          TargetPlatform: "linux"
+          TargetArchitecture: "x86_64"
+
         steps:
           - checkout: self
             clean: true
@@ -31,13 +35,13 @@ stages:
               VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
               cargo build --release --package jetsocat
               strip -s target/release/jetsocat
-              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/linux/x86_64
+              cp target/release/jetsocat $(Build.StagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Windows_x86_64
@@ -48,6 +52,10 @@ stages:
           clean: all
 
         container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86_64"
 
         steps:
           - checkout: self
@@ -73,20 +81,20 @@ stages:
           - powershell: |
               $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               cargo build --release --package jetsocat
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86_64
-              cp target/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+              mkdir $(Build.StagingDirectory)/windows/x86_64
+              cp target/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Building jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
               $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Windows_x86
@@ -97,6 +105,10 @@ stages:
           clean: all
 
         container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86"
 
         steps:
           - checkout: self
@@ -122,20 +134,20 @@ stages:
           - powershell: |
               $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               cargo build --release --target=i686-pc-windows-msvc --package jetsocat
-              mkdir $(Build.ArtifactStagingDirectory)/windows/x86
-              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+              mkdir $(Build.StagingDirectory)/windows/x86
+              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Building jetsocat
             env:
               RUSTFLAGS: '-C target-feature=+crt-static'
 
           - powershell: |
               $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.ArtifactStagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
+              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
             displayName: Signing binary
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
       - job: Macos_x86_64
@@ -144,6 +156,10 @@ stages:
 
         workspace:
           clean: all
+
+        variables:
+          TargetPlatform: "macos"
+          TargetArchitecture: "x86_64"
 
         steps:
           - checkout: self
@@ -154,13 +170,13 @@ stages:
               VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
               cargo build --release --package jetsocat
               strip target/release/jetsocat
-              mkdir -p $(Build.ArtifactStagingDirectory)/macos/x86_64
-              cp target/release/jetsocat $(Build.ArtifactStagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/macos/x86_64
+              cp target/release/jetsocat $(Build.StagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
   - stage: 'Devolutions_Gateway'
@@ -196,13 +212,13 @@ stages:
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
               . activate.sh
               cargo build --release --package devolutions-gateway
-              mkdir -p $(Build.ArtifactStagingDirectory)/linux/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.ArtifactStagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
+              mkdir -p $(Build.StagingDirectory)/linux/x86_64
+              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.StagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
             displayName: Building devolutions-gateway
 
           - task: PublishBuildArtifacts@1
             inputs:
-              pathToPublish: $(Build.ArtifactStagingDirectory)
+              pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway
 
       - job: Windows_64_bit
