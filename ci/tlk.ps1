@@ -150,7 +150,7 @@ class TlkRecipe
 
     [void] Package() {
         $ShortVersion = $this.Version.Substring(2) # msi version
-        $InternalVersion = "0.14.0" # Cargo.toml version
+        $CargoVersion = "0.14.0" # Cargo.toml version
         $TargetArch = if ($this.Target.Architecture -eq 'x86_64') { 'x64' } else { 'x86' }
         
         $ModuleName = "DevolutionsGateway"
@@ -164,7 +164,7 @@ class TlkRecipe
         } else {
             $WebClient = [System.Net.WebClient]::new()
             $DownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/" + `
-                "v${InternalVersion}/DevolutionsGateway_windows_${InternalVersion}_x86_64.exe"
+                "v${CargoVersion}/DevolutionsGateway_windows_${CargoVersion}_x86_64.exe"
             
             $OutputFile = "$(Get-Location)/bin/DevolutionsGateway.exe"
             New-Item -Path "bin" -ItemType 'Directory' -ErrorAction 'SilentlyContinue' | Out-Null
@@ -219,10 +219,26 @@ class TlkRecipe
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
         }
 
-        if (Test-Path Env:BUILD_STAGING_DIRECTORY) {
-            $BuildStagingDirectory = $Env:BUILD_STAGING_DIRECTORY
-            $PackageFile = "$($this.PackageName).msi"
-            Copy-Item -Path $PackageFile -Destination $(Join-Path $BuildStagingDirectory $PackageFile)
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
+            $PackageFileName = "$($this.PackageName).msi"
+            if (Test-Path Env:DGATEWAY_PACKAGE_FILENAME) {
+                $PackageFileName = $Env:DGATEWAY_PACKAGE_FILENAME
+            }
+            $TargetPackageFile = $(Join-Path $TargetOutputPath $PackageFileName)
+            Copy-Item -Path "$($this.PackageName).msi" -Destination $TargetPackageFile
+
+            if (Test-Path Env:SIGNTOOL_NAME) {
+                $SignToolName = $Env:SIGNTOOL_NAME
+                $TimestampServer = 'http://timestamp.verisign.com/scripts/timstamp.dll'
+                $SignToolArgs = @(
+                    'sign', '/fd', 'SHA256', '/v',
+                    '/n', $SignToolName,
+                    '/t', $TimestampServer,
+                    $TargetPackageFile
+                )
+                & 'signtool' $SignToolArgs
+            }
         }
 
         Pop-Location
