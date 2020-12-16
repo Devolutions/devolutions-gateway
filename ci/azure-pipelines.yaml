@@ -301,7 +301,7 @@ stages:
           - powershell: |
               $CargoVersion = Get-Content $(Agent.BuildDirectory)\version\VERSION
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-              Write-Host "##vso[task.setvariable variable=CARGO_VERSION]$CargoVersion"
+              Write-Host "##vso[task.setvariable variable=CargoVersion]$CargoVersion"
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
               conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr $(TargetPlatform)-$(TargetArchitecture)
               .\activate.ps1
