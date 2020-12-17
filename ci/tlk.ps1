@@ -219,14 +219,9 @@ class TlkRecipe
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
         }
 
-        if (Test-Path Env:TARGET_OUTPUT_PATH) {
-            $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
-            $PackageFileName = "$($this.PackageName).msi"
-            if (Test-Path Env:DGATEWAY_PACKAGE_FILENAME) {
-                $PackageFileName = $Env:DGATEWAY_PACKAGE_FILENAME
-            }
-            $TargetPackageFile = $(Join-Path $TargetOutputPath $PackageFileName)
-            Copy-Item -Path "$($this.PackageName).msi" -Destination $TargetPackageFile
+        if (Test-Path Env:DGATEWAY_PACKAGE) {
+            $DGatewayPackage = $Env:DGATEWAY_PACKAGE
+            Copy-Item -Path "$($this.PackageName).msi" -Destination $DGatewayPackage
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
@@ -235,7 +230,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/t', $TimestampServer,
-                    $TargetPackageFile
+                    $DGatewayPackage
                 )
                 & 'signtool' $SignToolArgs
             }
