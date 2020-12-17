@@ -88,6 +88,27 @@ class TlkTarget
     [bool] IsLinux() {
         return $this.Platform -eq 'Linux'
     }
+
+    [string] CargoTarget() {
+
+        $CargoArchitecture = `
+        switch ($this.Architecture) {
+            "x86" { "i686" }
+            "x86_64" { "x86_64" }
+            "aarch64" { "aarch64" }
+        }
+
+        $CargoPlatform = `
+        switch ($this.Platform.ToLower()) {
+            "windows" { "pc-windows-msvc" }
+            "macos" { "apple-darwin" }
+            "ios" { "apple-ios" }
+            "linux" { "unknown-linux-gnu" }
+            "android" { "linux-android" }
+        }
+
+        return "${CargoArchitecture}-${CargoPlatform}"
+    }
 }
 
 class TlkRecipe
@@ -117,17 +138,25 @@ class TlkRecipe
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
     
-        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts" # Build.StagingDirectory
-    
-        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
-        $dotenv = Get-DotEnvFile ".\environment.sh.env"
-    
-        Get-ChildItem 'conanbuildinfo.*' | Remove-Item
-        Get-ChildItem 'environment.*.env' | Remove-Item
-        Get-ChildItem '*activate.*' | Remove-Item
-    
-        $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
-        $Env:OPENSSL_DIR = $OPENSSL_DIR
+        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
+
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
+        }
+
+        if (-Not $this.Target.IsMacOS()) {
+            # FIXME: this fails on CI build machines for macOS, maybe conan is outdated?
+            
+            & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
+            $dotenv = Get-DotEnvFile ".\environment.sh.env"
+        
+            Get-ChildItem 'conanbuildinfo.*' | Remove-Item
+            Get-ChildItem 'environment.*.env' | Remove-Item
+            Get-ChildItem '*activate.*' | Remove-Item
+        
+            $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
+            $Env:OPENSSL_DIR = $OPENSSL_DIR
+        }
     
         if ($this.Target.IsWindows()) {
             $Env:RUSTFLAGS = "-C target-feature=+crt-static"
@@ -138,23 +167,62 @@ class TlkRecipe
     
         Push-Location
         Set-Location $this.SourcePath
-        & 'cargo' 'build' '--release'
-        $DstExecutableName = $SrcExecutableName = 'devolutions-gateway', $this.Target.ExecutableExtension -ne '' -Join '.'
-        if ($this.Target.IsWindows()) {
-            $DstExecutableName = "DevolutionsGateway.exe"
+
+        $CargoPackage = "devolutions-gateway"
+        if (Test-Path Env:CARGO_PACKAGE) {
+            $CargoPackage = $Env:CARGO_PACKAGE
         }
-        Copy-Item "$($this.SourcePath)/target/release/${SrcExecutableName}" `
-            -Destination "${OutputPath}/${DstExecutableName}" -Force
+
+        $CargoTarget = $this.Target.CargoTarget()
+
+        $CargoArgs = @('build', '--release')
+        $CargoArgs += @('--package', $CargoPackage)
+        $CargoArgs += @('--target', $CargoTarget)
+
+        & 'cargo' $CargoArgs
+
+        $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
+        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/release/${SrcExecutableName}"
+
+        if (-Not $this.Target.IsWindows()) {
+            & 'strip' $SrcExecutablePath
+        }
+
+        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+            $DestinationExecutable = $DGatewayExecutable
+        } elseif (Test-Path Env:JETSOCAT_EXECUTABLE) {
+            $JetsocatExecutable = $Env:JETSOCAT_EXECUTABLE
+            $DestinationExecutable = $JetsocatExecutable
+        } else {
+            $DestinationExecutable = $null
+        }
+
+        if ($DestinationExecutable) {
+            Copy-Item -Path $SrcExecutablePath -Destination $DestinationExecutable
+
+            if (Test-Path Env:SIGNTOOL_NAME) {
+                $SignToolName = $Env:SIGNTOOL_NAME
+                $TimestampServer = 'http://timestamp.verisign.com/scripts/timstamp.dll'
+                $SignToolArgs = @(
+                    'sign', '/fd', 'SHA256', '/v',
+                    '/n', $SignToolName,
+                    '/t', $TimestampServer,
+                    $DestinationExecutable
+                )
+                & 'signtool' $SignToolArgs
+            }
+        }
+
         Pop-Location
     }
 
     [void] Package() {
         $ShortVersion = $this.Version.Substring(2) # msi version
-        $CargoVersion = "0.14.0" # Cargo.toml version
         $TargetArch = if ($this.Target.Architecture -eq 'x86_64') { 'x64' } else { 'x86' }
         
         $ModuleName = "DevolutionsGateway"
-        $ModuleVersion = $this.Version # both versions should match
+        $ModuleVersion = "2020.3.1" # both versions should match
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
@@ -162,15 +230,7 @@ class TlkRecipe
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
             $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
         } else {
-            $WebClient = [System.Net.WebClient]::new()
-            $DownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/" + `
-                "v${CargoVersion}/DevolutionsGateway_windows_${CargoVersion}_x86_64.exe"
-            
-            $OutputFile = "$(Get-Location)/bin/DevolutionsGateway.exe"
-            New-Item -Path "bin" -ItemType 'Directory' -ErrorAction 'SilentlyContinue' | Out-Null
-            Remove-Item $OutputFile -ErrorAction 'SilentlyContinue'
-            $WebClient.DownloadFile($DownloadUrl, $OutputFile)
-            $DGatewayExecutable = $OutputFile
+            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
         
         Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
@@ -219,14 +279,9 @@ class TlkRecipe
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
         }
 
-        if (Test-Path Env:TARGET_OUTPUT_PATH) {
-            $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
-            $PackageFileName = "$($this.PackageName).msi"
-            if (Test-Path Env:DGATEWAY_PACKAGE_FILENAME) {
-                $PackageFileName = $Env:DGATEWAY_PACKAGE_FILENAME
-            }
-            $TargetPackageFile = $(Join-Path $TargetOutputPath $PackageFileName)
-            Copy-Item -Path "$($this.PackageName).msi" -Destination $TargetPackageFile
+        if (Test-Path Env:DGATEWAY_PACKAGE) {
+            $DGatewayPackage = $Env:DGATEWAY_PACKAGE
+            Copy-Item -Path "$($this.PackageName).msi" -Destination $DGatewayPackage
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
@@ -235,7 +290,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/t', $TimestampServer,
-                    $TargetPackageFile
+                    $DGatewayPackage
                 )
                 & 'signtool' $SignToolArgs
             }
