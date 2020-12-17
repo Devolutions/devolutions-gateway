@@ -117,8 +117,12 @@ class TlkRecipe
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
     
-        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts" # Build.StagingDirectory
-    
+        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
+
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
+        }
+
         & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
         $dotenv = Get-DotEnvFile ".\environment.sh.env"
     
@@ -138,23 +142,51 @@ class TlkRecipe
     
         Push-Location
         Set-Location $this.SourcePath
-        & 'cargo' 'build' '--release'
+
+        $CargoArgs = @('cargo', 'build', '--release')
+        $CargoArgs += @('--package', 'devolutions-gateway')
+
+        & 'cargo' $CargoArgs
+
         $DstExecutableName = $SrcExecutableName = 'devolutions-gateway', $this.Target.ExecutableExtension -ne '' -Join '.'
+        $SrcExecutablePath = "$($this.SourcePath)/target/release/${SrcExecutableName}"
+
         if ($this.Target.IsWindows()) {
             $DstExecutableName = "DevolutionsGateway.exe"
         }
-        Copy-Item "$($this.SourcePath)/target/release/${SrcExecutableName}" `
-            -Destination "${OutputPath}/${DstExecutableName}" -Force
+
+        if (-Not $this.Target.IsWindows()) {
+            & 'strip' $SrcExecutablePath
+        }
+        
+        Copy-Item -Path $SrcExecutablePath -Destination "${OutputPath}/${DstExecutableName}" -Force
+
+        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+            Copy-Item -Path $SrcExecutablePath -Destination $DGatewayExecutable
+
+            if (Test-Path Env:SIGNTOOL_NAME) {
+                $SignToolName = $Env:SIGNTOOL_NAME
+                $TimestampServer = 'http://timestamp.verisign.com/scripts/timstamp.dll'
+                $SignToolArgs = @(
+                    'sign', '/fd', 'SHA256', '/v',
+                    '/n', $SignToolName,
+                    '/t', $TimestampServer,
+                    $DGatewayExecutable
+                )
+                & 'signtool' $SignToolArgs
+            }
+        }
+
         Pop-Location
     }
 
     [void] Package() {
         $ShortVersion = $this.Version.Substring(2) # msi version
-        $CargoVersion = "0.14.0" # Cargo.toml version
         $TargetArch = if ($this.Target.Architecture -eq 'x86_64') { 'x64' } else { 'x86' }
         
         $ModuleName = "DevolutionsGateway"
-        $ModuleVersion = $this.Version # both versions should match
+        $ModuleVersion = "2020.3.1" # both versions should match
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
@@ -162,15 +194,7 @@ class TlkRecipe
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
             $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
         } else {
-            $WebClient = [System.Net.WebClient]::new()
-            $DownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/" + `
-                "v${CargoVersion}/DevolutionsGateway_windows_${CargoVersion}_x86_64.exe"
-            
-            $OutputFile = "$(Get-Location)/bin/DevolutionsGateway.exe"
-            New-Item -Path "bin" -ItemType 'Directory' -ErrorAction 'SilentlyContinue' | Out-Null
-            Remove-Item $OutputFile -ErrorAction 'SilentlyContinue'
-            $WebClient.DownloadFile($DownloadUrl, $OutputFile)
-            $DGatewayExecutable = $OutputFile
+            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
         
         Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'

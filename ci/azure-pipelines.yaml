@@ -252,7 +252,7 @@ stages:
           - powershell: |
               $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-              $ExecutableFileName = DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
               $PackageFileName = "DevolutionsGateway-$(TargetArchitecture)-${PackageVersion}.msi"
               $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
               $DGatewayPackage = "$TargetOutputPath/$PackageFileName"
@@ -269,19 +269,16 @@ stages:
               Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
             displayName: Import signing certificate
 
-          - powershell: |
-              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr $(TargetPlatform)-$(TargetArchitecture)
-              .\activate.ps1
-              cargo build --release --package devolutions-gateway
-              mkdir $(TargetOutputPath)
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway.exe $(DGatewayExecutable)
-            displayName: Building devolutions-gateway
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
-              RUSTFLAGS: '-C target-feature=+crt-static'
-
-          - powershell: |
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(DGatewayExecutable)
-            displayName: Signing binary
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building Devolutions Gateway
 
           - task: PowerShell@2
             inputs:
@@ -289,10 +286,11 @@ stages:
               filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
               arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
               DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
               DGATEWAY_PACKAGE: "$(DGatewayPackage)"
               SIGNTOOL_NAME: "$(SignToolName)"
-            displayName: Creating MSI package
+            displayName: Packaging Devolutions Gateway
 
           - task: PublishBuildArtifacts@1
             inputs:
