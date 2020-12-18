@@ -1,0 +1,8 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: wayk-agent
+Source: https://wayk.devolutions.net
+
+Files: *
+Copyright: 2020 Devolutions Inc.
+License: non-free
+ .

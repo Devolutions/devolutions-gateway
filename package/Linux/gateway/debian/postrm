@@ -1,0 +1,52 @@
+#!/bin/sh
+
+set -e
+
+action="$1"
+
+# Only do complete clean-up on purge.
+if [ "$action" != "purge" ] ; then
+  exit 0
+fi
+
+# System-wide package configuration.
+DEFAULTS_FILE="/etc/default/wayk-agent"
+
+arch=`dpkg --print-architecture`
+REPOCONFIG="deb [arch=$arch] http://https://devolutions.bintray.com/wayk stable main"
+REPOCONFIGREGEX="deb (\[arch=[^]]*\bamd64\b[^]]*\][[:space:]]*) https?://devolutions.bintray.com/wayk stable main"
+
+# Finding the APT tools
+APT_GET="$(which apt-get 2> /dev/null)"
+APT_CONFIG="$(which apt-config 2> /dev/null)"
+
+find_apt_sources() {
+  eval $("$APT_CONFIG" shell APT_SOURCESDIR 'Dir::Etc::sourceparts/d')
+}
+
+# Remove our custom sources list file.
+# Returns:
+# 0 - successfully removed, or not configured
+# !0 - failed to remove
+clean_sources_lists() {
+  if [ ! "$REPOCONFIG" ]; then
+    return 0
+  fi
+
+  find_apt_sources
+
+  SOURCELIST="$APT_SOURCESDIR/wayk-agent.list"
+
+  if [ ! -r "$SOURCELIST" ]; then
+    return 0
+  fi
+
+  rm -f $SOURCELIST
+}
+
+if [ -s "$DEFAULTS_FILE" ]; then
+  rm "$DEFAULTS_FILE" || exit 1
+fi
+
+# Remove repository added by the package.
+clean_sources_lists

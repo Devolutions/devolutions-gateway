@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# System-wide package configuration.
+DEFAULTS_FILE="/etc/default/wayk-agent"
+
+UPDATE_MENUS="`which update-menus 2> /dev/null || true`"
+if [ -x "$UPDATE_MENUS" ]; then
+	update-menus
+fi
+
+update-desktop-database > /dev/null 2>&1 || true
+
+#if [ ! -e "$DEFAULTS_FILE" ]; then
+	echo 'repo_add_once="true"' > "$DEFAULTS_FILE"
+	echo 'repo_reenable_on_distupgrade="true"' >> "$DEFAULTS_FILE"
+#fi
+
+# Run the cron job immediately to perform repository configuration.
+nohup sh /etc/cron.daily/wayk-agent > /dev/null 2>&1 &
+
+if [ ! -d /etc/wayk ]; then
+	/bin/mkdir /etc/wayk
+	/bin/chmod 655 /etc/wayk
+fi
+
+if [ -f /etc/wayk/WaykNow.key ]; then
+	/bin/chmod 660 /etc/wayk/WaykNow.key
+fi
+
+for i in $(/usr/bin/find /etc/wayk/den -type f -name "*.key"); do
+	/bin/chmod 660 "$i"
+done
+
+/usr/bin/wayk-agent import-server-certificates /etc/wayk >/dev/null 2>&1
+
+if [ -d /run/systemd/system ]; then
+	/usr/bin/now-service --cmd create >/dev/null
+	systemctl restart now-service >/dev/null 2>&1
+	systemctl daemon-reload
+fi
+
+# if /etc/wayk/.unique exists we move it under the new name .unique.bak to show that
+# it is now unused explicitely (not deleting yet just in case).
+if [ -f /etc/wayk/.unique ]; then
+	/bin/mv /etc/wayk/.unique /etc/wayk/.unique.bak
+fi
+

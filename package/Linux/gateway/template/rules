@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+override_dh_auto_clean:
+override_dh_auto_configure:
+override_dh_auto_build:
+override_dh_auto_test:
+override_dh_auto_install:
+override_dh_usrlocal:
+	install -D -m 0755 {{ dst_dir }}/platform/Linux/app/agent/WaykAgent $$(pwd)/debian/wayk-agent/usr/bin/wayk-agent
+	install -D -m 0755 {{ dst_dir }}/platform/Linux/app/host/WaykHost $$(pwd)/debian/wayk-agent/usr/bin/wayk-host
+	install -D -m 0755 {{ dst_dir }}/target/release/NowService $$(pwd)/debian/wayk-agent/usr/bin/now-service
+	install -D -m 0755 {{ dst_dir }}/target/release/NowSession $$(pwd)/debian/wayk-agent/usr/bin/now-session
+	mkdir -p $$(pwd)/debian/wayk-agent/usr/share/polkit-1/actions/
+	mkdir -p $$(pwd)/debian/wayk-agent/usr/share/wayk-agent/
+	mkdir -p $$(pwd)/debian/wayk-agent/usr/share/applications/
+	mkdir -p $$(pwd)/debian/wayk-agent/etc/cron.daily/
+	ln -s $$(pwd)/debian/wayk-agent/usr/bin/wayk-agent $$(pwd)/debian/wayk-agent/usr/share/wayk-agent/wayk-agent
+	cp {{ platform_dir }}/policies/net.devolutions.wayk.policy $$(pwd)/debian/wayk-agent/usr/share/polkit-1/actions/
+	cp {{ platform_dir }}/resources/wayk_agent_image_logo.png $$(pwd)/debian/wayk-agent/usr/share/wayk-agent/WaykAgent.png
+	cp {{ platform_dir }}/pkg/agent/debian/wayk-agent.desktop $$(pwd)/debian/wayk-agent/usr/share/applications/wayk-agent.desktop
+	cp {{ platform_dir }}/pkg/cron.daily/wayk-agent $$(pwd)/debian/wayk-agent/etc/cron.daily/wayk-agent
+

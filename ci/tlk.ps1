@@ -22,6 +22,37 @@ function Get-DotEnvFile {
     }
     return $DotEnv
 }
+function Merge-Tokens
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0,Mandatory=$true,ParameterSetName="TemplateValue")]
+        [string] $TemplateValue,
+        [Parameter(Mandatory=$true,ParameterSetName="TemplateFile")]
+        [string] $TemplateFile,
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+        [Hashtable] $Tokens,
+        [string] $OutputFile
+    )
+
+    if ($TemplateFile) {
+        $TemplateValue = Get-Content -Path $TemplateFile -Raw -Encoding UTF8
+    }
+
+    $TokenPattern = '{{([^}]+)}}'
+    $OutputValue = [regex]::Replace($TemplateValue, $TokenPattern, { param($Match)
+        $TokenName = $Match.Groups[1].Value.Trim()
+        $Tokens[$TokenName]
+    })
+
+    if ($OutputFile) {
+        $AsByteStream = if ($PSEdition -eq 'Core') { @{AsByteStream = $true} } else { @{'Encoding' = 'Byte'} }
+        $OutputBytes = $([System.Text.Encoding]::UTF8).GetBytes($OutputValue)
+        Set-Content -Path $OutputFile -Value $OutputBytes @AsByteStream
+    }
+
+    $OutputValue
+}
 
 function Get-TlkPlatform {
     param(
@@ -108,6 +139,31 @@ class TlkTarget
         }
 
         return "${CargoArchitecture}-${CargoPlatform}"
+    }
+
+    [string] WindowsArchitecture() {
+
+        $WindowsArchitecture = `
+        switch ($this.Architecture) {
+            "x86" { "x86" }
+            "x86_64" { "x64" }
+            "aarch64" { "ARM64" }
+        }
+        
+        return $WindowsArchitecture
+    }
+
+    [string] DebianArchitecture() {
+        # https://wiki.debian.org/Multiarch/Tuples
+
+        $DebianArchitecture = `
+        switch ($this.Architecture) {
+            "x86" { "i386" }
+            "x86_64" { "amd64" }
+            "aarch64" { "arm64" }
+        }
+        
+        return $DebianArchitecture
     }
 }
 
@@ -217,9 +273,9 @@ class TlkRecipe
         Pop-Location
     }
 
-    [void] Package() {
+    [void] Package_Windows() {
         $ShortVersion = $this.Version.Substring(2) # msi version
-        $TargetArch = if ($this.Target.Architecture -eq 'x86_64') { 'x64' } else { 'x86' }
+        $TargetArch = $this.Target.WindowsArchitecture()
         
         $ModuleName = "DevolutionsGateway"
         $ModuleVersion = "2020.3.1" # both versions should match
@@ -297,6 +353,87 @@ class TlkRecipe
         }
 
         Pop-Location
+    }
+
+    [void] Package_Linux() {
+        $DebianArchitecture = $this.Target.DebianArchitecture()
+        $Packager = "Devolutions Inc."
+        $Email = "support@devolutions.net"
+        $Website = "http://wayk.devolutions.net"
+        $Dependencies = @('liblzma5', 'liblz4-1')
+
+        $Env:DEBFULLNAME = $Packager
+        $Env:DEBEMAIL = $Email
+
+        $InputPackagePath = Join-Path $this.SourcePath "package/Linux"
+
+        $OutputPath = Join-Path $this.SourcePath "output"
+        New-Item -Path $OutputPath -ItemType 'Directory' -Force | Out-Null
+
+        $OutputPackagePath = Join-Path $OutputPath "gateway"
+        $OutputDebianPath = Join-Path $OutputPackagePath "debian"
+
+        @($OutputPath, $OutputPackagePath, $OutputDebianPath) | % {
+            New-Item -Path $_ -ItemType 'Directory' -Force | Out-Null
+        }
+
+        Push-Location
+        Set-Location $OutputPackagePath
+
+        $DebPkgName = "devolutions-gateway"
+        $PkgNameVersion = "${DebPkgName}_$($this.Version).0"
+        $PkgNameTarget = "${PkgNameVersion}_${DebianArchitecture}"
+        $CopyrightFile = Join-Path $InputPackagePath "gateway/copyright"
+
+        # dh_make
+
+        $DhMakeArgs = @('-e', $Email,
+            '-n', '-s', '-p', $PkgNameVersion,
+            '-y', '-c', 'custom',
+            "--copyrightfile=$CopyrightFile")
+
+        & 'dh_make' $DhMakeArgs
+
+        # debian/docs
+        Set-Content -Path "$OutputDebianPath/docs" -Value ""
+
+        # debian/README.debian
+        Remove-Item -Path "$OutputDebianPath/README.debian" -ErrorAction 'SilentlyContinue'
+
+        # debian/rules
+        $RulesFile = Join-Path $OutputDebianPath "rules"
+        $RulesTemplate = Join-Path $InputPackagePath "gateway/template/rules"
+
+        # debian/control
+        $ControlFile = Join-Path $OutputDebianPath "control"
+        $ControlTemplate = Join-Path $InputPackagePath "gateway/template/control"
+
+        # debian/copyright
+        $CopyrightFile = Join-Path $OutputDebianPath "copyright"
+        $CopyrightTemplate = Join-Path $InputPackagePath "template/copyright"
+
+        # debian/changelog
+        $ChangelogFile = Join-Path $OutputDebianPath "changelog"
+        $ChangelogTemplate = Join-Path $InputPackagePath "template/changelog"
+
+        @('postinst', 'prerm', 'postrm') | % {
+            $InputFile = Join-Path $InputPackagePath "gateway/debian/$_"
+            $OutputFile = Join-Path $OutputDebianPath $_
+            Copy-Item $InputFile $OutputFile
+        }
+
+        $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
+        & 'dpkg-buildpackage' $DpkgBuildPackageArgs
+
+        Pop-Location
+    }
+
+    [void] Package() {
+        if ($this.Target.IsWindows()) {
+            $this.Package_Windows()
+        } elseif ($this.Target.IsLinux()) {
+            $this.Package_Linux()
+        }
     }
 }
 
