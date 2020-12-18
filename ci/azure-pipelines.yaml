@@ -46,7 +46,7 @@ stages:
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
-              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
               arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
@@ -218,7 +218,7 @@ stages:
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
-              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
               arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
@@ -273,7 +273,7 @@ stages:
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
-              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
               arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
