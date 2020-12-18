@@ -1,20 +1,28 @@
 
-$module = 'DevolutionsGateway'
+$ModuleName = 'DevolutionsGateway'
 Push-Location $PSScriptRoot
 
-Remove-Item -Path .\package -Recurse -Force -ErrorAction SilentlyContinue
-
-New-Item -Path "$PSScriptRoot\package\$module" -ItemType 'Directory' -Force | Out-Null
-@('bin', 'Public', 'Private') | foreach {
-    New-Item -Path "$PSScriptRoot\package\$module\$_" -ItemType 'Directory' -Force | Out-Null
+if (Test-Path Env:PSMODULE_OUTPUT_PATH) {
+    $PSModuleOutputPath = $Env:PSMODULE_OUTPUT_PATH
+} else {
+    $PSModuleOutputPath = Join-Path $PSScriptRoot 'package'
 }
 
-& dotnet publish "$PSScriptRoot\$module\src" -f netstandard2.0 -c Release -o "$PSScriptRoot\$module\bin"
+Remove-Item -Path "$PSModuleOutputPath\$ModuleName" -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -Path "$PSModuleOutputPath\$ModuleName" -ItemType 'Directory' -Force | Out-Null
 
-Copy-Item "$PSScriptRoot\$module\bin" -Destination "$PSScriptRoot\package\$module" -Recurse -Force
+@('bin', 'Public', 'Private') | % {
+    New-Item -Path "$PSModuleOutputPath\$ModuleName\$_" -ItemType 'Directory' -Force | Out-Null
+}
 
-Copy-Item "$PSScriptRoot\$module\Private" -Destination "$PSScriptRoot\package\$module" -Recurse -Force
-Copy-Item "$PSScriptRoot\$module\Public" -Destination "$PSScriptRoot\package\$module" -Recurse -Force
+& dotnet publish "$PSScriptRoot\$ModuleName\src" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
 
-Copy-Item "$PSScriptRoot\$module\$module.psd1" -Destination "$PSScriptRoot\package\$module" -Force
-Copy-Item "$PSScriptRoot\$module\$module.psm1" -Destination "$PSScriptRoot\package\$module" -Force
+Copy-Item "$PSScriptRoot\$ModuleName\bin" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
+
+Copy-Item "$PSScriptRoot\$ModuleName\Private" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
+Copy-Item "$PSScriptRoot\$ModuleName\Public" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
+
+Copy-Item "$PSScriptRoot\$ModuleName\$ModuleName.psd1" -Destination "$PSModuleOutputPath\$ModuleName" -Force
+Copy-Item "$PSScriptRoot\$ModuleName\$ModuleName.psm1" -Destination "$PSModuleOutputPath\$ModuleName" -Force
+
+Pop-Location

@@ -289,20 +289,25 @@ class TlkRecipe
             throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
         
-        Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
-        Remove-Item -Path "${ModuleName}/${ModuleVersion}/PSGetModuleInfo.xml" -ErrorAction 'SilentlyContinue'
+        if (Test-Path Env:DGATEWAY_PSMODULE_PATH) {
+            $DGatewayPSModulePath = $Env:DGATEWAY_PSMODULE_PATH
+        } else {
+            Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
+            Remove-Item -Path "${ModuleName}/${ModuleVersion}/PSGetModuleInfo.xml" -ErrorAction 'SilentlyContinue'
+            $DGatewayPSModulePath = "${ModuleName}/${ModuleVersion}"
+        }
         
         $WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
         $WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
         
         $WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @(
-            "-dDGatewayPSSourceDir=${ModuleName}/${ModuleVersion}",
+            "-dDGatewayPSSourceDir=$DGatewayPSModulePath",
             "-dDGatewayExecutable=$DGatewayExecutable",
             "-dVersion=$ShortVersion", "-v")
         
         $WixFiles = @('DevolutionsGateway', "DevolutionsGateway-$TargetArch")
         
-        $HeatArgs = @('dir', "${ModuleName}/${ModuleVersion}",
+        $HeatArgs = @('dir', "$DGatewayPSModulePath",
             "-dr", "DGATEWAYPSROOTDIRECTORY",
             "-cg", "DGatewayPSComponentGroup",
             '-var', 'var.DGatewayPSSourceDir',

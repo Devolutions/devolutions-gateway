@@ -335,11 +335,15 @@ stages:
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
               $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
               $PackageFileName = "DevolutionsGateway-$(TargetArchitecture)-${PackageVersion}.msi"
+              $PSModuleOutputPath = "$(Build.StagingDirectory)/PowerShell"
+              $DGatewayPSModulePath = "$PSModuleOutputPath/DevolutionsGateway"
               $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
               $DGatewayPackage = "$TargetOutputPath/$PackageFileName"
               Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=PSModuleOutputPath]$PSModuleOutputPath"
               Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
+              Write-Host "##vso[task.setvariable variable=DGatewayPSModulePath]$DGatewayPSModulePath"
               Write-Host "##vso[task.setvariable variable=DGatewayPackage]$DGatewayPackage"
             displayName: Load dynamic variables
 
@@ -357,12 +361,21 @@ stages:
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\powershell\build.ps1
+            env:
+              PSMODULE_OUTPUT_PATH: "$(PSModuleOutputPath)"
+            displayName: Building PowerShell Module
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
               filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
               arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
               DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
               DGATEWAY_PACKAGE: "$(DGatewayPackage)"
+              DGATEWAY_PSMODULE_PATH: "$(DGatewayPSModulePath)"
               SIGNTOOL_NAME: "$(SignToolName)"
             displayName: Packaging Devolutions Gateway
 
