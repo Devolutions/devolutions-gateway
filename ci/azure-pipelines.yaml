@@ -31,12 +31,27 @@ stages:
             clean: true
             fetchDepth: 1
 
-          - script: |
-              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
-              cargo build --release --package jetsocat
-              strip -s target/release/jetsocat
-              mkdir -p $(Build.StagingDirectory)/linux/x86_64
-              cp target/release/jetsocat $(Build.StagingDirectory)/linux/x86_64/jetsocat_linux_${VERSION}_x86_64
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
@@ -73,6 +88,13 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
               $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
               $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
@@ -83,12 +105,6 @@ stages:
               Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
             displayName: Load dynamic variables
-
-          - powershell: |
-              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-            displayName: Import signing certificate
 
           - task: PowerShell@2
             inputs:
@@ -136,6 +152,13 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
               $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
               $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
@@ -146,12 +169,6 @@ stages:
               Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
             displayName: Load dynamic variables
-
-          - powershell: |
-              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-            displayName: Import signing certificate
 
           - task: PowerShell@2
             inputs:
@@ -186,12 +203,27 @@ stages:
             clean: true
             fetchDepth: 1
 
-          - script: |
-              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
-              cargo build --release --package jetsocat
-              strip target/release/jetsocat
-              mkdir -p $(Build.StagingDirectory)/macos/x86_64
-              cp target/release/jetsocat $(Build.StagingDirectory)/macos/x86_64/jetsocat_macos_${VERSION}_x86_64
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
             displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
@@ -220,21 +252,33 @@ stages:
             fetchDepth: 1
 
           - script: |
-              VERSION=`cat $(Build.Repository.LocalPath)/VERSION`
-
               echo "Check formatting"
               cargo fmt --all -- --check
               if ! [ $? -eq 0 ] ; then
                   echo "Bad formatting, please run 'cargo +stable fmt --all'"
                   exit 1
               fi
+            displayName: Checking code format
 
-              conan install openssl/$(OPENSSL_VERSION)@devolutions/stable -g virtualenv -pr linux-x86_64
-              . activate.sh
-              cargo build --release --package devolutions-gateway
-              mkdir -p $(Build.StagingDirectory)/linux/x86_64
-              cp $(Build.Repository.LocalPath)/target/release/devolutions-gateway $(Build.StagingDirectory)/linux/x86_64/devolutions-gateway_linux_${VERSION}_x86_64
-            displayName: Building devolutions-gateway
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
+            displayName: Load dynamic variables
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+            displayName: Building Devolutions Gateway
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -270,6 +314,13 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
               $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
               $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
               $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
@@ -281,13 +332,6 @@ stages:
               Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
               Write-Host "##vso[task.setvariable variable=DGatewayPackage]$DGatewayPackage"
             displayName: Load dynamic variables
-
-          - powershell: |
-              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
-            displayName: Import signing certificate
 
           - task: PowerShell@2
             inputs:
