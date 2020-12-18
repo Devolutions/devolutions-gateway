@@ -88,6 +88,27 @@ class TlkTarget
     [bool] IsLinux() {
         return $this.Platform -eq 'Linux'
     }
+
+    [string] CargoTarget() {
+
+        $CargoArchitecture = `
+        switch ($this.Architecture) {
+            "x86" { "i686" }
+            "x86_64" { "x86_64" }
+            "aarch64" { "aarch64" }
+        }
+
+        $CargoPlatform = `
+        switch ($this.Platform.ToLower()) {
+            "windows" { "pc-windows-msvc" }
+            "macos" { "apple-darwin" }
+            "ios" { "apple-ios" }
+            "linux" { "unknown-linux-gnu" }
+            "android" { "linux-android" }
+        }
+
+        "${CargoArchitecture}-${CargoPlatform}"
+    }
 }
 
 class TlkRecipe
@@ -143,27 +164,38 @@ class TlkRecipe
         Push-Location
         Set-Location $this.SourcePath
 
+        $CargoPackage = "devolutions-gateway"
+        if (Test-Path Env:CARGO_PACKAGE) {
+            $CargoPackage = $Env:CARGO_PACKAGE
+        }
+
+        $CargoTarget = $this.Target.CargoTarget()
+
         $CargoArgs = @('build', '--release')
-        $CargoArgs += @('--package', 'devolutions-gateway')
+        $CargoArgs += @('--package', $CargoPackage)
+        $CargoArgs += @('--target', $CargoTarget)
 
         & 'cargo' $CargoArgs
 
-        $DstExecutableName = $SrcExecutableName = 'devolutions-gateway', $this.Target.ExecutableExtension -ne '' -Join '.'
-        $SrcExecutablePath = "$($this.SourcePath)/target/release/${SrcExecutableName}"
-
-        if ($this.Target.IsWindows()) {
-            $DstExecutableName = "DevolutionsGateway.exe"
-        }
+        $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
+        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/release/${SrcExecutableName}"
 
         if (-Not $this.Target.IsWindows()) {
             & 'strip' $SrcExecutablePath
         }
-        
-        Copy-Item -Path $SrcExecutablePath -Destination "${OutputPath}/${DstExecutableName}" -Force
 
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
             $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
-            Copy-Item -Path $SrcExecutablePath -Destination $DGatewayExecutable
+            $DestinationExecutable = $DGatewayExecutable
+        } elseif (Test-Path Env:JETSOCAT_EXECUTABLE) {
+            $JetsocatExecutable = $Env:JETSOCAT_EXECUTABLE
+            $DestinationExecutable = $JetsocatExecutable
+        } else {
+            $DestinationExecutable = $null
+        }
+
+        if ($DestinationExecutable) {
+            Copy-Item -Path $SrcExecutablePath -Destination $DestinationExecutable
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
@@ -172,7 +204,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/t', $TimestampServer,
-                    $DGatewayExecutable
+                    $DestinationExecutable
                 )
                 & 'signtool' $SignToolArgs
             }
