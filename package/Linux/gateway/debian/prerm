@@ -12,15 +12,3 @@ fi
 if [ "$action" = "upgrade" ] ; then
   exit 0
 fi
-
-UPDATE_MENUS="`which update-menus 2> /dev/null || true`"
-if [ -x "$UPDATE_MENUS" ]; then
-  update-menus
-fi
-
-update-desktop-database > /dev/null 2>&1 || true
-
-if [ -d /run/systemd/system ]; then
-	/usr/bin/now-service --cmd stop >/dev/null
-	/usr/bin/now-service --cmd delete >/dev/null
-fi

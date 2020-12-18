@@ -3,7 +3,7 @@
 # setup package repository for updates
 
 # System-wide package configuration.
-DEFAULTS_FILE="/etc/default/wayk-client"
+DEFAULTS_FILE="/etc/default/devolutions-gateway"
 
 arch=`dpkg --print-architecture`
 REPOCONFIG="deb [arch=$arch] https://devolutions.bintray.com/wayk-now stable main"
@@ -114,7 +114,7 @@ update_bad_sources() {
 
   find_apt_sources
 
-  SOURCELIST="$APT_SOURCESDIR/wayk-now.list"
+  SOURCELIST="$APT_SOURCESDIR/devolutions-gateway.list"
   # Don't do anything if the file isn't there, since that probably means the
   # user disabled it.
   if [ ! -r "$SOURCELIST" ]; then
@@ -165,7 +165,7 @@ update_bad_sources() {
   return 2
 }
 
-# Add the wayk now repository to the apt sources.
+# Add the devolutions repository to the apt sources.
 # Returns:
 # 0 - sources list was created
 # 2 - error
@@ -176,7 +176,7 @@ create_sources_lists() {
 
   find_apt_sources
 
-  SOURCELIST="$APT_SOURCESDIR/wayk-now.list"
+  SOURCELIST="$APT_SOURCESDIR/devolutions-gateway.list"
   if [ -d "$APT_SOURCESDIR" ]; then
     printf "$SOURCES_PREAMBLE" > "$SOURCELIST"
     printf "$REPOCONFIG\n" >> "$SOURCELIST"
@@ -198,8 +198,7 @@ clean_sources_lists() {
 
   find_apt_sources
 
-  rm -f "$APT_SOURCESDIR/wayk-now.list" \
-        "$APT_SOURCESDIR/wayk-now-stable.list"
+  rm -f "$APT_SOURCESDIR/devolutions-gateway.list"
 }
 
 # Detect if the repo config was disabled by distro upgrade and enable if necessary.
@@ -209,7 +208,7 @@ handle_distro_upgrade() {
   fi
 
   find_apt_sources
-  SOURCELIST="$APT_SOURCESDIR/wayk-now.list"
+  SOURCELIST="$APT_SOURCESDIR/devolutions-gateway.list"
   if [ -r "$SOURCELIST" ]; then
     REPOLINE=$(grep -E "^[[:space:]]*#[[:space:]]*$REPOCONFIGREGEX[[:space:]]*# disabled on upgrade to .*" "$SOURCELIST")
     if [ $? -eq 0 ]; then
@@ -224,7 +223,7 @@ handle_distro_upgrade() {
 }
 
 ## MAIN ##
-DEFAULTS_FILE="/etc/default/wayk-client"
+DEFAULTS_FILE="/etc/default/devolutions-gateway"
 if [ -r "$DEFAULTS_FILE" ]; then
   . "$DEFAULTS_FILE"
 fi

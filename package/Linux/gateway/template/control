@@ -1,4 +1,4 @@
-Source: wayk-agent
+Source: devolutions-gateway
 Section: non-free/net
 Priority: optional
 Maintainer: {{ packager }} <{{ email }}>
@@ -6,18 +6,8 @@ Build-Depends: debhelper (>= 8.0.0)
 Standards-Version: 3.9.4
 Homepage: {{ website }}
 
-Package: wayk-agent
-Replaces: wayk-now (<< 2020.3.0)
-Breaks: wayk-now (<< 2020.3.0)
+Package: devolutions-gateway
 Architecture: {{ arch }}
 Depends: {{ deps }}
-Description: Instant Remote Support and Remote Desktop
+Description: Devolutions Gateway
  {{ website }}
-
-Package: wayk-now
-Depends: wayk-agent, ${misc:Depends}
-Architecture: all
-Section: oldlibs
-Description: transitional package
- This is a transitional package. It can safely be removed.
-

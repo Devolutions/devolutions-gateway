@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Encoding=UTF-8
-Name=Wayk Agent
-Comment=Instant Remote Support and Remote Desktop
-Exec=/usr/bin/wayk-agent %u
-Icon=/usr/share/wayk-agent/WaykAgent.png
-Terminal=false
-Categories=Network;RemoteAccess;Utility;

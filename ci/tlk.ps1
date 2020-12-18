@@ -360,10 +360,18 @@ class TlkRecipe
         $Packager = "Devolutions Inc."
         $Email = "support@devolutions.net"
         $Website = "http://wayk.devolutions.net"
-        $Dependencies = @('liblzma5', 'liblz4-1')
+        $PackageVersion = $this.Version
+        $DistroCodeName = "xenial" # Ubuntu 16.04
+        $Dependencies = @('liblzma5', 'liblz4-1', '${shlibs:Depends}', '${misc:Depends}')
 
         $Env:DEBFULLNAME = $Packager
         $Env:DEBEMAIL = $Email
+
+        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+        } else {
+            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
+        }
 
         $InputPackagePath = Join-Path $this.SourcePath "package/Linux"
 
@@ -397,24 +405,54 @@ class TlkRecipe
         # debian/docs
         Set-Content -Path "$OutputDebianPath/docs" -Value ""
 
+        # debian/compat
+        Set-Content -Path "$OutputDebianPath/compat" -Value "9"
+
         # debian/README.debian
         Remove-Item -Path "$OutputDebianPath/README.debian" -ErrorAction 'SilentlyContinue'
 
         # debian/rules
         $RulesFile = Join-Path $OutputDebianPath "rules"
         $RulesTemplate = Join-Path $InputPackagePath "gateway/template/rules"
+        Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
+            dgateway_executable = $DGatewayExecutable
+            platform_dir = $InputPackagePath
+        } -OutputFile $RulesFile
 
         # debian/control
         $ControlFile = Join-Path $OutputDebianPath "control"
         $ControlTemplate = Join-Path $InputPackagePath "gateway/template/control"
+        Merge-Tokens -TemplateFile $ControlTemplate -Tokens @{
+            arch = $DebianArchitecture
+            deps = $($Dependencies -Join ",")
+            email = $Email
+            package = $Packager
+            website = $Website
+        } -OutputFile $ControlFile
 
         # debian/copyright
         $CopyrightFile = Join-Path $OutputDebianPath "copyright"
         $CopyrightTemplate = Join-Path $InputPackagePath "template/copyright"
 
+        Merge-Tokens -TemplateFile $CopyrightTemplate -Tokens @{
+            package = $DebPkgName
+            packager = $Packager
+            year = $(Get-Date).Year
+            website = $Website
+        } -OutputFile $CopyrightFile
+
         # debian/changelog
         $ChangelogFile = Join-Path $OutputDebianPath "changelog"
         $ChangelogTemplate = Join-Path $InputPackagePath "template/changelog"
+
+        Merge-Tokens -TemplateFile $ChangelogTemplate -Tokens @{
+            package = $DebPkgName
+            distro = $DistroCodeName
+            email = $Email
+            packager = $Packager
+            version = "${PackageVersion}.0"
+            date = $($(Get-Date -UFormat "%a, %d %b %Y %H:%M:%S %Z00") -Replace '\.','')
+        } -OutputFile $ChangelogFile
 
         @('postinst', 'prerm', 'postrm') | % {
             $InputFile = Join-Path $InputPackagePath "gateway/debian/$_"
@@ -424,6 +462,13 @@ class TlkRecipe
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs
+
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
+            New-Item -Path $TargetOutputPath -ItemType 'Directory' -Force | Out-Null
+            Copy-Item "$OutputPath/${PkgNameTarget}.deb" "$TargetOutputPath/${PkgNameTarget}.deb"
+            Copy-Item "$OutputPath/${PkgNameTarget}.changes" "$TargetOutputPath/${PkgNameTarget}.changes"
+        }
 
         Pop-Location
     }

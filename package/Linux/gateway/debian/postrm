@@ -10,7 +10,7 @@ if [ "$action" != "purge" ] ; then
 fi
 
 # System-wide package configuration.
-DEFAULTS_FILE="/etc/default/wayk-agent"
+DEFAULTS_FILE="/etc/default/devolutions-gateway"
 
 arch=`dpkg --print-architecture`
 REPOCONFIG="deb [arch=$arch] http://https://devolutions.bintray.com/wayk stable main"
@@ -35,7 +35,7 @@ clean_sources_lists() {
 
   find_apt_sources
 
-  SOURCELIST="$APT_SOURCESDIR/wayk-agent.list"
+  SOURCELIST="$APT_SOURCESDIR/devolutions-gateway.list"
 
   if [ ! -r "$SOURCELIST" ]; then
     return 0
