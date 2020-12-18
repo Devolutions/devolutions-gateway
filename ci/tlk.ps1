@@ -144,15 +144,19 @@ class TlkRecipe
             $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
         }
 
-        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
-        $dotenv = Get-DotEnvFile ".\environment.sh.env"
-    
-        Get-ChildItem 'conanbuildinfo.*' | Remove-Item
-        Get-ChildItem 'environment.*.env' | Remove-Item
-        Get-ChildItem '*activate.*' | Remove-Item
-    
-        $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
-        $Env:OPENSSL_DIR = $OPENSSL_DIR
+        if (-Not $this.Target.IsMacOS()) {
+            # FIXME: this fails on CI build machines for macOS, maybe conan is outdated?
+            
+            & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
+            $dotenv = Get-DotEnvFile ".\environment.sh.env"
+        
+            Get-ChildItem 'conanbuildinfo.*' | Remove-Item
+            Get-ChildItem 'environment.*.env' | Remove-Item
+            Get-ChildItem '*activate.*' | Remove-Item
+        
+            $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
+            $Env:OPENSSL_DIR = $OPENSSL_DIR
+        }
     
         if ($this.Target.IsWindows()) {
             $Env:RUSTFLAGS = "-C target-feature=+crt-static"
