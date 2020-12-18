@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# System-wide package configuration.
+DEFAULTS_FILE="/etc/default/devolutions-gateway"
+
+#if [ ! -e "$DEFAULTS_FILE" ]; then
+	echo 'repo_add_once="true"' > "$DEFAULTS_FILE"
+	echo 'repo_reenable_on_distupgrade="true"' >> "$DEFAULTS_FILE"
+#fi
+
+# Run the cron job immediately to perform repository configuration.
+nohup sh /etc/cron.daily/devolutions-gateway > /dev/null 2>&1 &
+
+if [ ! -d /etc/devolutions-gateway ]; then
+	/bin/mkdir /etc/devolutions-gateway
+	/bin/chmod 655 /etc/devolutions-gateway
+fi

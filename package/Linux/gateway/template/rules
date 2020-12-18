@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+override_dh_auto_clean:
+override_dh_auto_configure:
+override_dh_auto_build:
+override_dh_auto_test:
+override_dh_auto_install:
+override_dh_usrlocal:
+	install -D -m 0755 {{ dgateway_executable }} $$(pwd)/debian/devolutions-gateway/usr/bin/devolutions-gateway
+	mkdir -p $$(pwd)/debian/devolutions-gateway/etc/cron.daily/
+	cp {{ platform_dir }}/cron.daily/devolutions-gateway $$(pwd)/debian/devolutions-gateway/etc/cron.daily/devolutions-gateway

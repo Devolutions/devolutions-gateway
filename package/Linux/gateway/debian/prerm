@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -e
+
+action="$1"
+if [ "$2" = "in-favour" ]; then
+  # Treat conflict remove as an upgrade.
+  action="upgrade"
+fi
+
+# Don't clean-up just for an upgrade.`
+if [ "$action" = "upgrade" ] ; then
+  exit 0
+fi
