@@ -73,24 +73,34 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
               $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
             displayName: Import signing certificate
 
-          - powershell: |
-              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              cargo build --release --package jetsocat
-              mkdir $(Build.StagingDirectory)/windows/x86_64
-              cp target/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
-            displayName: Building jetsocat
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
-              RUSTFLAGS: '-C target-feature=+crt-static'
-
-          - powershell: |
-              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86_64/jetsocat_windows_"$version"_x86_64.exe
-            displayName: Signing binary
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
@@ -126,24 +136,34 @@ stages:
               contents: 'CodeSigningCertificateUnsecure.pfx'
 
           - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
               $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
               Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
             displayName: Import signing certificate
 
-          - powershell: |
-              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              cargo build --release --target=i686-pc-windows-msvc --package jetsocat
-              mkdir $(Build.StagingDirectory)/windows/x86
-              cp target/i686-pc-windows-msvc/release/jetsocat.exe $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
-            displayName: Building jetsocat
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
             env:
-              RUSTFLAGS: '-C target-feature=+crt-static'
-
-          - powershell: |
-              $version = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-              signtool sign /fd SHA256 /v /t http://timestamp.verisign.com/scripts/timstamp.dll $(Build.StagingDirectory)/windows/x86/jetsocat_windows_"$version"_x86.exe
-            displayName: Signing binary
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building jetsocat
 
           - task: PublishBuildArtifacts@1
             inputs:
