@@ -143,7 +143,7 @@ class TlkRecipe
         Push-Location
         Set-Location $this.SourcePath
 
-        $CargoArgs = @('cargo', 'build', '--release')
+        $CargoArgs = @('build', '--release')
         $CargoArgs += @('--package', 'devolutions-gateway')
 
         & 'cargo' $CargoArgs
