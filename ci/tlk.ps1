@@ -107,7 +107,7 @@ class TlkTarget
             "android" { "linux-android" }
         }
 
-        "${CargoArchitecture}-${CargoPlatform}"
+        return "${CargoArchitecture}-${CargoPlatform}"
     }
 }
 
