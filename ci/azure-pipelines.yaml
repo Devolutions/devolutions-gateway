@@ -100,10 +100,14 @@ stages:
               $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
               $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
               $CargoPackage = "jetsocat"
+              $CargoNoDefaultFeatures = "true"
+              $CargoFeatures = "native-tls"
               Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
               Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+              Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
+              Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
             displayName: Load dynamic variables
 
           - task: PowerShell@2
@@ -115,6 +119,8 @@ stages:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
               JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
               CARGO_PACKAGE: "$(CargoPackage)"
+              CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
+              CARGO_FEATURES: "$(CargoFeatures)"
               SIGNTOOL_NAME: "$(SignToolName)"
             displayName: Building jetsocat
 
@@ -164,10 +170,14 @@ stages:
               $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
               $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
               $CargoPackage = "jetsocat"
+              $CargoNoDefaultFeatures = "true"
+              $CargoFeatures = "native-tls"
               Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
               Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+              Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
+              Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
             displayName: Load dynamic variables
 
           - task: PowerShell@2
@@ -179,6 +189,8 @@ stages:
               TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
               JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
               CARGO_PACKAGE: "$(CargoPackage)"
+              CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
+              CARGO_FEATURES: "$(CargoFeatures)"
               SIGNTOOL_NAME: "$(SignToolName)"
             displayName: Building jetsocat
 

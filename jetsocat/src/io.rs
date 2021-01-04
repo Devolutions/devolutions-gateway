@@ -1,6 +1,6 @@
+use async_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use futures_channel::mpsc;
 use slog::{debug, trace};
-use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 
 pub async fn read_and_send<R>(
     mut reader: R,

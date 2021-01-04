@@ -1,8 +1,8 @@
 use anyhow::{Context as _, Result};
+use async_tungstenite::WebSocketStream;
 use futures_channel::mpsc;
 use slog::{info, o};
 use tokio::process::Command;
-use tokio_tungstenite::WebSocketStream;
 
 #[derive(Debug)]
 pub enum PipeCmd {
@@ -12,7 +12,7 @@ pub enum PipeCmd {
 
 pub async fn pipe_with_ws<S>(ws_stream: WebSocketStream<S>, pipe: PipeCmd, log: slog::Logger) -> Result<()>
 where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    S: futures_io::AsyncRead + futures_io::AsyncWrite + Unpin,
 {
     use crate::io::{read_and_send, ws_stream_to_writer};
     use futures_util::{future, pin_mut, StreamExt as _};

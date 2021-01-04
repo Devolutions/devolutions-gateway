@@ -4,9 +4,9 @@ use slog::*;
 
 pub async fn connect(addr: String, log: Logger) -> Result<()> {
     use crate::io::{read_and_send, ws_stream_to_writer};
+    use async_tungstenite::tokio::connect_async;
     use futures_util::StreamExt as _;
     use futures_util::{future, pin_mut};
-    use tokio_tungstenite::connect_async;
 
     let connect_log = log.new(o!("connect" => addr.clone()));
     info!(connect_log, "Connecting");

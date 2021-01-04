@@ -183,7 +183,7 @@ impl CommonArgs {
         } else if let Ok(filepath) = c.string_flag("log-file") {
             let filepath = PathBuf::from(filepath);
             Logging::File { filepath }
-        } else if let Some(mut filepath) = dirs::data_dir() {
+        } else if let Some(mut filepath) = dirs_next::data_dir() {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
