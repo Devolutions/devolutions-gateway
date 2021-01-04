@@ -259,7 +259,7 @@ class TlkRecipe
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
-                $TimestampServer = 'http://timestamp.digicert.com?alg=sha256'
+                $TimestampServer = 'http://timestamp.globalsign.com/scripts/timstamp.dll'
                 $SignToolArgs = @(
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
