@@ -284,7 +284,7 @@ class TlkRecipe
         $TargetArch = $this.Target.WindowsArchitecture()
         
         $ModuleName = "DevolutionsGateway"
-        $ModuleVersion = "2020.3.1" # both versions should match
+        $ModuleVersion = "2021.1.0" # both versions should match
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
