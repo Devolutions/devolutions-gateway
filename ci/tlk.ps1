@@ -228,12 +228,18 @@ class TlkRecipe
         if (Test-Path Env:CARGO_PACKAGE) {
             $CargoPackage = $Env:CARGO_PACKAGE
         }
+        Set-Location -Path $CargoPackage
 
         $CargoTarget = $this.Target.CargoTarget()
 
         $CargoArgs = @('build', '--release')
-        $CargoArgs += @('--package', $CargoPackage)
         $CargoArgs += @('--target', $CargoTarget)
+        if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
+            $CargoArgs += @('--no-default-features')
+        }
+        if (Test-Path Env:CARGO_FEATURES) {
+            $CargoArgs += @('--features', $Env:CARGO_FEATURES)
+        }
 
         & 'cargo' $CargoArgs
 

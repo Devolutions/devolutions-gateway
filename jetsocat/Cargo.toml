@@ -6,8 +6,10 @@ edition = "2018"
 description = "WebSocket toolkit for jet protocol related operations"
 
 [features]
-default = []
+default = ["rustls"]
 verbose = ["slog/max_level_trace"]
+rustls = ["async-tungstenite/tokio-rustls"]
+native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
 
@@ -15,10 +17,11 @@ verbose = ["slog/max_level_trace"]
 seahorse = "1.1"
 
 # async
-tokio-tungstenite = { version = "0.12", features = ["tls"] }
-tokio = { version = "0.3", features = ["io-std", "net", "rt", "sync", "process", "rt-multi-thread"] }
+tokio = { version = "1.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread"] }
 futures-util = "0.3"
 futures-channel = "0.3"
+futures-io = "0.3"
+async-tungstenite = "0.11"
 
 # logging
 slog = "2.5"
@@ -29,5 +32,5 @@ slog-term = "2.6"
 anyhow = "1"
 
 # location of special directories
-dirs = "3"
+dirs-next = "2"
 

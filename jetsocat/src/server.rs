@@ -3,7 +3,7 @@ use anyhow::{Context as _, Result};
 use slog::{debug, o};
 
 pub async fn accept(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()> {
-    use tokio_tungstenite::connect_async;
+    use async_tungstenite::tokio::connect_async;
 
     let accept_log = log.new(o!("accept" => addr.clone()));
     debug!(accept_log, "Connecting");
@@ -18,8 +18,8 @@ pub async fn accept(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()
 }
 
 pub async fn listen(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()> {
+    use async_tungstenite::tokio::accept_async;
     use tokio::net::TcpListener;
-    use tokio_tungstenite::accept_async;
 
     let listen_log = log.new(o!("listen" => addr.clone()));
     debug!(listen_log, "Bind listener");
