@@ -11,6 +11,27 @@ variables:
     value: 1.1.1b-5
 
 stages:
+  - stage: Get_version
+    jobs:
+       - job: Extract_version
+         pool:
+           name: 'Devolutions - Linux containers'
+
+         workspace:
+            clean: all
+
+         container: devolutions/toolbox:latest
+
+         steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: VERSION
+              artifactName: version
+
   - stage: jetsocat
     jobs:
       - job: Linux_x86_64
