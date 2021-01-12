@@ -25,18 +25,18 @@ impl TcpServer {
 
         let log = log.clone();
 
-        self.send_jet_connect_request(&mut jet_server_stream).await?;
-        self.process_jet_connect_response(&mut jet_server_stream).await?;
+        self.send_jet_accept_request(&mut jet_server_stream).await?;
+        self.process_jet_accept_response(&mut jet_server_stream).await?;
 
         run_proxy(jet_server_stream, server_stream, log).await?;
 
         Ok(())
     }
-    async fn send_jet_connect_request(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
+    async fn send_jet_accept_request(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
         use jet_proto::{accept::JetAcceptReq, JetMessage};
         use tokio::io::AsyncWriteExt;
 
-        let jet_connect_request = JetMessage::JetAcceptReq(JetAcceptReq {
+        let jet_accept_request = JetMessage::JetAcceptReq(JetAcceptReq {
             version: 2,
             host: self.listener_url.to_string(),
             association: self.association_id,
@@ -44,13 +44,13 @@ impl TcpServer {
         });
 
         let mut buffer: Vec<u8> = Vec::new();
-        jet_connect_request.write_to(&mut buffer)?;
+        jet_accept_request.write_to(&mut buffer)?;
         jet_server_stream.write_all(&buffer).await?;
 
         Ok(())
     }
 
-    async fn process_jet_connect_response(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
+    async fn process_jet_accept_response(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
         use jet_proto::JetMessage;
         use tokio::io::AsyncReadExt;
 
@@ -67,13 +67,13 @@ impl TcpServer {
         match response {
             JetMessage::JetAcceptRsp(rsp) => {
                 if rsp.status_code != 200 {
-                    return Err(anyhow!("Devolutions-Gateway sent bad connection response"));
+                    return Err(anyhow!("Devolutions-Gateway sent bad accept response"));
                 }
                 Ok(())
             }
             other_message => {
                 return Err(anyhow!(
-                    "Devolutions-Gateway sent {:?} message instead of JetConnectRsp",
+                    "Devolutions-Gateway sent {:?} message instead of JetAcceptRsp",
                     other_message
                 ))
             }
@@ -117,11 +117,11 @@ pub fn resolve_url_to_tcp_socket_addr(listener_url: String) -> Result<SocketAddr
     let url = Url::parse(&listener_url)?;
 
     if url.scheme() != TCP_ROUTING_HOST_SCHEME {
-        return Err(anyhow!("Incorrect routing host scheme, must starts with `tcp://`"));
+        return Err(anyhow!("Incorrect routing host scheme, it should start with `tcp://`"));
     }
 
     if !url.path().is_empty() {
-        return Err(anyhow!("Incorrect Url: Url must not have any path"));
+        return Err(anyhow!("Incorrect Url: Url should have empty path"));
     }
 
     if url.port().is_none() {
