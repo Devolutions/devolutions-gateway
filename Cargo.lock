@@ -1488,11 +1488,14 @@ dependencies = [
  "futures-util",
  "jetsocat-proxy",
  "proxy_cfg",
+ "jet-proto",
  "seahorse",
  "slog",
  "slog-async",
  "slog-term",
  "tokio 1.0.1",
+ "url 2.2.0",
+ "uuid",
 ]
 
 [[package]]
