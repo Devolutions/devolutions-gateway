@@ -11,6 +11,7 @@ use picky::{
 };
 use serde::Serialize;
 use std::{error::Error, path::PathBuf, time::SystemTime};
+use uuid::Uuid;
 
 #[derive(Clap)]
 struct App {
@@ -24,10 +25,12 @@ struct App {
     subcmd: SubCommand,
 }
 
+#[allow(clippy::enum_variant_names)] // Enumeration variants that are prefixed with `Rdp`, but we are going to add new protocols
 #[derive(Clap)]
 enum SubCommand {
     RdpTcp,
     RdpTls(RdpTlsIdentity),
+    RdpTcpRendezvous(RdpTcpRendezvousJetAID),
 }
 
 #[derive(Clone, Clap, Serialize)]
@@ -46,12 +49,18 @@ struct RdpTlsIdentity {
     dst_pwd: String,
 }
 
+#[derive(Clone, Clap, Serialize)]
+struct RdpTcpRendezvousJetAID {
+    jet_aid: Uuid,
+}
+
 #[derive(Clone, Serialize)]
 struct RoutingClaims {
     exp: i64,
     nbf: i64,
     jet_cm: String,
     jet_ap: String,
+    jet_aid: Option<Uuid>,
     dst_hst: String,
     #[serde(flatten)]
     identity: Option<RdpTlsIdentity>,
@@ -69,17 +78,34 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let exp = (now + validity_duration).as_secs();
 
+    let jet_cm = match app.subcmd {
+        SubCommand::RdpTcpRendezvous(_) => "rdv".to_owned(),
+        _ => "fwd".to_owned(),
+    };
+
+    let jet_ap = match app.subcmd {
+        SubCommand::RdpTcpRendezvous(_) => "rdp-tcp".to_owned(),
+        _ => "rdp".to_owned(),
+    };
+
+    let jet_aid = match &app.subcmd {
+        SubCommand::RdpTcpRendezvous(rdv) => Some(rdv.jet_aid),
+        _ => None,
+    };
+
+    let identity = match &app.subcmd {
+        SubCommand::RdpTls(identity) => Some(identity.clone()),
+        _ => None,
+    };
+
     let claims = RoutingClaims {
         exp: exp as i64,
         nbf: now.as_secs() as i64,
         dst_hst: app.dst_hst,
-        jet_cm: "fwd".to_owned(),
-        jet_ap: "rdp".to_owned(),
-        identity: if let SubCommand::RdpTls(identity) = app.subcmd {
-            Some(identity)
-        } else {
-            None
-        },
+        jet_cm,
+        jet_ap,
+        jet_aid,
+        identity,
     };
 
     let signed = JwtSig::new(JwsAlg::RS256, claims.clone()).encode(&private_key)?;
