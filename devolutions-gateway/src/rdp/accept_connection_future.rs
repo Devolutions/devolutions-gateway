@@ -1,7 +1,7 @@
 use crate::{
     config::Config,
     rdp::{
-        preconnection_pdu::{decode_preconnection_pdu, TokenRoutingMode},
+        preconnection_pdu::{self, decode_preconnection_pdu, TokenRoutingMode},
         RdpIdentity,
     },
     transport::x224::NegotiationWithClientTransport,
@@ -23,6 +23,7 @@ use tokio::{
 };
 use tokio_util::codec::Decoder;
 use url::Url;
+use uuid::Uuid;
 
 const READ_BUFFER_SIZE: usize = 4 * 1024;
 const MAX_FUTURE_BUFFER_SIZE: usize = 64 * 1024;
@@ -30,6 +31,10 @@ const MAX_FUTURE_BUFFER_SIZE: usize = 64 * 1024;
 pub enum AcceptConnectionMode {
     RdpTcp {
         url: Url,
+        leftover_request: BytesMut,
+    },
+    RdpTcpRendezvous {
+        association_id: Uuid,
         leftover_request: BytesMut,
     },
     RdpTls {
@@ -96,12 +101,21 @@ impl Future for AcceptConnectionFuture {
                 None => match decode_preconnection_pdu(&mut self.buffer) {
                     Ok(Some(pdu)) => {
                         let leftover_request = self.buffer.split_off(pdu.buffer_length());
-                        let mode = crate::rdp::preconnection_pdu::resolve_routing_mode(&pdu, &self.config)?;
+                        let mode = preconnection_pdu::resolve_routing_mode(&pdu, &self.config)?;
                         match mode {
                             TokenRoutingMode::RdpTcp(url) => {
                                 return Poll::Ready(Ok((
                                     self.client.take().unwrap(),
                                     AcceptConnectionMode::RdpTcp { url, leftover_request },
+                                )));
+                            }
+                            TokenRoutingMode::RdpTcpRendezvous(association_id) => {
+                                return Poll::Ready(Ok((
+                                    self.client.take().unwrap(),
+                                    AcceptConnectionMode::RdpTcpRendezvous {
+                                        association_id,
+                                        leftover_request,
+                                    },
                                 )));
                             }
                             TokenRoutingMode::RdpTls(identity) => {

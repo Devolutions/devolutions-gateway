@@ -28,7 +28,9 @@ use self::{
 use crate::{
     config::Config,
     interceptor::rdp::RdpMessageReader,
-    transport::{tcp::TcpTransport, Transport},
+    jet_client::JetAssociationsMap,
+    jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy,
+    transport::{tcp::TcpTransport, JetTransport, Transport},
     utils, Proxy,
 };
 
@@ -67,21 +69,31 @@ pub struct RdpClient {
     config: Arc<Config>,
     tls_public_key: Vec<u8>,
     tls_acceptor: TlsAcceptor,
+    jet_associations: JetAssociationsMap,
 }
 
 impl RdpClient {
-    pub fn new(config: Arc<Config>, tls_public_key: Vec<u8>, tls_acceptor: TlsAcceptor) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        tls_public_key: Vec<u8>,
+        tls_acceptor: TlsAcceptor,
+        jet_associations: JetAssociationsMap,
+    ) -> Self {
         Self {
             config,
             tls_public_key,
             tls_acceptor,
+            jet_associations,
         }
     }
 
     pub async fn serve(self, client: TcpStream) -> Result<(), io::Error> {
-        let config = self.config.clone();
-        let tls_acceptor = self.tls_acceptor;
-        let tls_public_key = self.tls_public_key;
+        let Self {
+            config,
+            tls_acceptor,
+            tls_public_key,
+            jet_associations,
+        } = self;
 
         let (client, mode) = AcceptConnectionFuture::new(client, config.clone()).await.map_err(|e| {
             error!("Accept connection failed: {}", e);
@@ -107,6 +119,18 @@ impl RdpClient {
                         error!("Encountered a failure during plain tcp traffic proxying: {}", e);
                         e
                     })
+            }
+            AcceptConnectionMode::RdpTcpRendezvous {
+                association_id,
+                leftover_request,
+            } => {
+                info!("Starting RdpTcpRendezvous redirection");
+
+                let leftover_request = leftover_request.bytes();
+
+                JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client), association_id)
+                    .proxy(config, leftover_request)
+                    .await
             }
             AcceptConnectionMode::RdpTls { identity, request } => {
                 info!("Starting RDP-TLS redirection");

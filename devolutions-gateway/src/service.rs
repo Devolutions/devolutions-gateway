@@ -305,7 +305,13 @@ async fn start_tcp_server(
                         Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
                     }
                     "rdp" => Box::pin(
-                        RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
+                        RdpClient::new(
+                            config.clone(),
+                            tls_public_key.clone(),
+                            tls_acceptor.clone(),
+                            jet_associations.clone(),
+                        )
+                        .serve(conn),
                     ),
                     scheme => panic!("Unsupported routing URL scheme {}", scheme),
                 }
@@ -318,7 +324,12 @@ async fn start_tcp_server(
                     let jet_client = JetClient::new(config.clone(), jet_associations.clone());
                     Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
                 } else {
-                    let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
+                    let rdp_client = RdpClient::new(
+                        config.clone(),
+                        tls_public_key.clone(),
+                        tls_acceptor.clone(),
+                        jet_associations.clone()
+                    );
                     Box::pin(rdp_client.serve(conn))
                 }
             };

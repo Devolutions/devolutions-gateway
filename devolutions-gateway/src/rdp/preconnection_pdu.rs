@@ -9,15 +9,21 @@ use picky::jose::{
 use sspi::AuthIdentity;
 use std::io;
 use url::Url;
+use uuid::Uuid;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
-const EXPECTED_JET_AP_VALUE: &str = "rdp";
-const EXPECTED_JET_CM_VALUE: &str = "fwd"; // currently only "forward-only" connection mode is supported
+
+const JET_APP_RDP_TCP: &str = "rdp-tcp";
+const JET_CM_RDV: &str = "rdp";
+
+const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_APP_RDP_TCP];
+const EXPECTED_JET_CM_VALUES: [&str; 2] = ["fwd", JET_CM_RDV];
 
 pub enum TokenRoutingMode {
     RdpTcp(Url),
     RdpTls(RdpIdentity),
+    RdpTcpRendezvous(Uuid),
 }
 
 #[derive(Deserialize, Debug)]
@@ -40,10 +46,14 @@ struct RoutingClaims {
     dst_hst: String,
 
     /// Identity connection mode used for Jet association
+    #[serde(default = "get_default_jet_connection_mode")]
     jet_cm: String,
 
     /// Application protocol used over Jet transport
     jet_ap: String,
+
+    /// Jet assassination ID used for RdpTcpRendezvous routing mode
+    jet_aid: Option<String>,
 }
 
 pub fn is_encrypted(token: &str) -> bool {
@@ -104,17 +114,17 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
     let claims = jwt_token.claims;
 
-    if claims.jet_ap != EXPECTED_JET_AP_VALUE {
+    if EXPECTED_JET_AP_VALUES.iter().all(|&jet_app| claims.jet_ap != jet_app) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "Non-RDP JWT-based routing via preconnection PDU is not supported",
         ));
     }
 
-    if claims.jet_cm != EXPECTED_JET_CM_VALUE {
+    if EXPECTED_JET_CM_VALUES.iter().all(|&jet_cm| claims.jet_cm != jet_cm) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            "JWT-based routing via preconnection PDU only support Forward-Only communication mode",
+            "JWT-based routing via preconnection PDU only support Forward and RdpTcpRendezvous communication mode",
         ));
     }
 
@@ -154,6 +164,23 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
             },
             dest_host,
         })),
+        None if (claims.jet_ap == JET_APP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
+            let jet_aid = claims.jet_aid.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "RdpTcpRendezvous token routing mode, but Jet AssociationId is missing".to_string(),
+                )
+            })?;
+
+            let jet_aid = Uuid::parse_str(jet_aid.as_str()).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to parse Jet AssociationId: Invalid Uuid value: {}", err),
+                )
+            })?;
+
+            Ok(TokenRoutingMode::RdpTcpRendezvous(jet_aid))
+        }
         None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -175,4 +202,8 @@ pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<Preconnecti
             format!("Failed to parse preconnection PDU: {}", e),
         )),
     }
+}
+
+fn get_default_jet_connection_mode() -> String {
+    "fwd".to_owned()
 }
