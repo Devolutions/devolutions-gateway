@@ -23,7 +23,10 @@ use crate::{
         TransportType,
     },
     transport::JetTransport,
-    utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
+    utils::{
+        association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
+        into_other_io_error as error_other,
+    },
     Proxy,
 };
 
@@ -74,10 +77,6 @@ impl JetClient {
             JetMessage::JetTestRsp(_) => Err(error_other("Jet-Test response can't be handled by the server.")),
         }
     }
-}
-
-fn error_other<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
 }
 
 async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, JetMessage), io::Error> {

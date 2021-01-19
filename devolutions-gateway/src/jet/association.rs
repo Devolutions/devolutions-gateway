@@ -25,6 +25,13 @@ impl Association {
         &self.candidates
     }
 
+    pub fn take_first_candidate(&mut self) -> Option<&mut Candidate> {
+        match self.candidates.get_index_mut(0) {
+            Some((_, candidate)) => Some(candidate),
+            None => None,
+        }
+    }
+
     pub fn add_candidate(&mut self, mut candidate: Candidate) {
         candidate.set_association_id(self.id);
         self.candidates.insert(candidate.id(), candidate);

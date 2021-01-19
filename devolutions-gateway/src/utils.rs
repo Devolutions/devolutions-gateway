@@ -282,3 +282,7 @@ pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
         _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Bad server url")),
     }
 }
+
+pub fn into_other_io_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, desc)
+}
