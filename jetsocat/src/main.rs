@@ -1,16 +1,14 @@
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _};
 use jetsocat::{
     pipe::PipeCmd,
-    server::{resolve_url_to_tcp_socket_addr, TcpServer},
     proxy::{detect_proxy, ProxyConfig, ProxyType},
+    tcp_proxy::TcpProxyCmd,
 };
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
-use std::{env, future::Future, net::SocketAddr, path::PathBuf};
+use std::{env, future::Future, path::PathBuf};
 use tokio::runtime;
-use uuid::Uuid;
 
-const DEFAULT_RDP_ADDRESS: &str = "127.0.0.1:3389";
 
 fn main() {
     let args: Vec<String> = if let Ok(args_str) = std::env::var("JETSOCAT_ARGS") {
@@ -96,17 +94,21 @@ fn accept_command() -> Command {
         .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
         .action(accept_action);
 
-    apply_common_flags(apply_server_side_flags(cmd))
+    apply_common_flags(apply_pipe_server_flags(cmd))
 }
 
 pub fn accept_action(c: &Context) {
     let res = ServerArgs::parse("accept", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
+<<<<<<< HEAD
         let pipe = args.pipe.ok_or_else(|| anyhow!("pipe is missing"))?;
         run(
             log.clone(),
             jetsocat::server::accept(args.common.addr, pipe, args.common.proxy_cfg, log)
         )
+=======
+        run(log.clone(), jetsocat::server::accept(args.common.addr, args.cmd, log))
+>>>>>>> Performed general refactoring of jetsocat
     });
     exit(res);
 }
@@ -118,14 +120,13 @@ fn listen_command() -> Command {
         .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
         .action(listen_action);
 
-    apply_common_flags(apply_server_side_flags(cmd))
+    apply_common_flags(apply_pipe_server_flags(cmd))
 }
 
 pub fn listen_action(c: &Context) {
     let res = ServerArgs::parse("listen", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        let pipe = args.pipe.ok_or_else(|| anyhow!("pipe is missing"))?;
-        run(log.clone(), jetsocat::server::listen(args.common.addr, pipe, log))
+        run(log.clone(), jetsocat::server::listen(args.common.addr, args.cmd, log))
     });
     exit(res);
 }
@@ -135,18 +136,17 @@ fn proxy_command() -> Command {
         .alias("p")
         .description("Reverse tcp-proxy")
         .usage(format!(
-            "{} tcp-proxy --listener-url tcp://gateway.jet.listener:port --association-id <UUID> --candidate-id <UUID>",
+            "{} tcp-proxy tcp://gateway.jet.listener:port --source-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID>",
             env!("CARGO_PKG_NAME")
         ))
         .action(proxy_action);
-    apply_common_flags(apply_server_side_flags(cmd))
+    apply_common_flags(apply_tcp_proxy_server_flags(cmd))
 }
 
 pub fn proxy_action(c: &Context) {
-    let res = ServerArgs::parse("tcp-proxy", c).and_then(|args| {
+    let res = TcpProxyArgs::parse("tcp-proxy", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        let proxy = args.proxy.ok_or_else(|| anyhow!("proxy is missing"))?;
-        run(log.clone(), proxy.serve(log))
+        run(log.clone(), jetsocat::tcp_proxy::proxy(args.common.addr, args.cmd, log))
     });
     exit(res);
 }
@@ -263,7 +263,7 @@ impl CommonArgs {
     }
 }
 
-fn apply_server_side_flags(cmd: Command) -> Command {
+fn apply_pipe_server_flags(cmd: Command) -> Command {
     cmd.flag(
         Flag::new("sh-c", FlagType::String).description("Start specified command line using `sh -c` (even on Windows)"),
     )
@@ -271,31 +271,56 @@ fn apply_server_side_flags(cmd: Command) -> Command {
         Flag::new("cmd", FlagType::String)
             .description("Start specified command line using `cmd /C` on windows or `sh -c` otherwise"),
     )
-    .flag(
-        Flag::new("listener-url", FlagType::String)
-            .description("Jet listener URL for Devolutions-Gateway rendezvous connection"),
-    )
-    .flag(
-        Flag::new("association-id", FlagType::String)
-            .description("Jet association UUID for Devolutions-Gateway rendezvous connection"),
-    )
-    .flag(
-        Flag::new("candidate-id", FlagType::String)
-            .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
-    )
+}
+
+fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
+    cmd
+        .flag(
+            Flag::new("source-addr", FlagType::String)
+                .description("Source IP:PORT for tcp forwarding"),
+        )
+        .flag(
+            Flag::new("association-id", FlagType::String)
+                .description("Jet association UUID for Devolutions-Gateway rendezvous connection"),
+        )
+        .flag(
+            Flag::new("candidate-id", FlagType::String)
+                .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
+        )
+}
+
+struct TcpProxyArgs {
+    common: CommonArgs,
+    cmd: TcpProxyCmd,
+}
+
+impl TcpProxyArgs {
+    fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(action, c)?;
+
+        let association_id = c.string_flag("association-id")
+            .with_context(|| "command is missing --association-id")?;
+        let candidate_id = c.string_flag("candidate-id")
+            .with_context(|| "command is missing --candidate-id")?;
+        let source_addr = c.string_flag("source-addr")
+            .with_context(|| "command is missing --source_addr")?;
+
+        let cmd = TcpProxyCmd { source_addr, association_id, candidate_id };
+
+        Ok(Self { common, cmd })
+    }
 }
 
 struct ServerArgs {
     common: CommonArgs,
-    pipe: Option<PipeCmd>,
-    proxy: Option<TcpServer>,
+    cmd: PipeCmd,
 }
 
 impl ServerArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(action, c)?;
 
-        let pipe = if let Ok(command_string) = c.string_flag("sh-c") {
+        let cmd = if let Ok(command_string) = c.string_flag("sh-c") {
             Some(PipeCmd::ShC(command_string))
         } else if let Ok(command_string) = c.string_flag("cmd") {
             Some(PipeCmd::Cmd(command_string))
@@ -303,38 +328,10 @@ impl ServerArgs {
             None
         };
 
-        let listener_url = c.string_flag("listener-url").ok();
-        let association_id = c.string_flag("association-id").ok();
-        let candidate_id = c.string_flag("candidate-id").ok();
+        let cmd = cmd
+            .with_context(|| "command is missing arguments (--sh-c OR --cmd)")?;
 
-        let proxy = if listener_url.is_some() && association_id.is_some() && candidate_id.is_some() {
-            let association_id =
-                Uuid::parse_str(&association_id.unwrap()).with_context(|| "Failed to parse AssociationId UUID")?;
-            let candidate_id =
-                Uuid::parse_str(&candidate_id.unwrap()).with_context(|| "Failed to parse CandidateId UUID")?;
-
-            let listener_url = resolve_url_to_tcp_socket_addr(listener_url.unwrap())?;
-            let routing_socket = DEFAULT_RDP_ADDRESS
-                .parse::<SocketAddr>()
-                .with_context(|| "Failed to parse DEFAULT_RDP_ADDRESS to SocketAddr")?;
-
-            Some(TcpServer {
-                association_id,
-                candidate_id,
-                listener_url,
-                routing_socket,
-            })
-        } else {
-            None
-        };
-
-        if pipe.is_none() && proxy.is_none() {
-            return Err(anyhow!(
-                "Pipe command(--sh-c OR --cmd) or tcp-proxy command(--listener-url, --association_id and --candidate_id) is missing"
-            ));
-        }
-
-        Ok(ServerArgs { common, pipe, proxy })
+        Ok(Self { common, cmd })
     }
 }
 

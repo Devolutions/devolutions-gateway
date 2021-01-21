@@ -1,11 +1,18 @@
+use std::net::SocketAddr;
 use crate::proxy::{ProxyConfig, ProxyType};
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Result, Context as _};
 use async_tungstenite::{
     tokio::ClientStream,
     tungstenite::{client::IntoClientRequest, handshake::client::Response},
     WebSocketStream,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::lookup_host,
+};
+use url::Url;
+
+const TCP_ROUTING_HOST_SCHEME: &str = "tcp";
 
 // See E0225 to understand why this trait is required
 pub trait MetaAsyncStream: 'static + AsyncRead + AsyncWrite + Unpin {}
@@ -31,23 +38,23 @@ pub async fn ws_connect_async(
 
     let stream: AsyncStream = match proxy_cfg {
         Some(ProxyConfig {
-            ty: ProxyType::Socks4,
-            addr: proxy_addr,
-        }) => {
+                 ty: ProxyType::Socks4,
+                 addr: proxy_addr,
+             }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks4Stream::connect(stream, req_addr, "jetsocat").await?)
         }
         Some(ProxyConfig {
-            ty: ProxyType::Socks5,
-            addr: proxy_addr,
-        }) => {
+                 ty: ProxyType::Socks5,
+                 addr: proxy_addr,
+             }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks5Stream::connect(stream, req_addr).await?)
         }
         Some(ProxyConfig {
-            ty: ProxyType::Socks,
-            addr: proxy_addr,
-        }) => {
+                 ty: ProxyType::Socks,
+                 addr: proxy_addr,
+             }) => {
             // unknown SOCKS version, try SOCKS5 first and then SOCKS4
             let stream = TcpStream::connect(proxy_addr.clone()).await?;
             match Socks5Stream::connect(stream, req_addr).await {
@@ -75,4 +82,29 @@ pub async fn ws_connect_async(
     let (ws_stream, rsp) = client_async_tls(req, stream).await?;
 
     Ok((ws_stream, rsp))
+}
+
+pub async fn resolve_url_to_tcp_socket_addr(listener_url: String) -> Result<SocketAddr> {
+    let url = Url::parse(&listener_url)?;
+
+    if url.scheme() != TCP_ROUTING_HOST_SCHEME {
+        return Err(anyhow!("Incorrect routing host scheme, it should start with `tcp://`"));
+    }
+
+    if !url.path().is_empty() {
+        return Err(anyhow!("Incorrect Url: Url should have empty path"));
+    }
+
+    if url.host().is_none() {
+        return Err(anyhow!("Incorrect Url: Host is missing"));
+    }
+
+    if url.port().is_none() {
+        return Err(anyhow!("Incorrect Url: Port is missing"));
+    }
+
+    lookup_host(format!("{}:{}", url.host_str().unwrap(), url.port().unwrap()))
+        .await?
+        .next()
+        .ok_or_else(|| anyhow!("Can't resolve host from url {}", url))
 }
