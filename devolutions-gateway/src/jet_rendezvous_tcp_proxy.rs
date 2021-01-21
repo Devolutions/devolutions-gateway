@@ -1,10 +1,16 @@
 use crate::{
-    config::Config, jet_client::JetAssociationsMap, proxy::Proxy, transport::JetTransport, utils::into_other_io_error,
+    config::Config,
+    jet_client::JetAssociationsMap,
+    proxy::Proxy,
+    transport::JetTransport,
+    utils::{into_other_io_error},
+    http::controllers::jet::start_remove_association_future,
 };
 use slog_scope::error;
 use std::{io, sync::Arc};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
+use crate::jet::candidate::CandidateState;
 
 pub struct JetRendezvousTcpProxy {
     jet_associations: JetAssociationsMap,
@@ -28,7 +34,7 @@ impl JetRendezvousTcpProxy {
             association_id,
         } = self;
 
-        let mut server_transport: JetTransport = {
+        let mut server_transport = {
             let mut jet_associations = jet_associations.lock().await;
 
             let assc = jet_associations.get_mut(&association_id).ok_or_else(|| {
@@ -38,16 +44,22 @@ impl JetRendezvousTcpProxy {
                 ))
             })?;
 
-            let candidate = assc.take_first_active_candidate().ok_or_else(|| {
+            let candidate = assc.get_first_accepted_tcp_candidate().ok_or_else(|| {
                 into_other_io_error(format!(
                     "There is not any candidates in {} JetAssociations map",
                     association_id
                 ))
             })?;
 
-            candidate
+            let transport = candidate
                 .take_transport()
-                .expect("Candidate cannot be created without a transport")
+                .expect("Candidate cannot be created without a transport");
+
+            candidate.set_state(CandidateState::Connected);
+            candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+            candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+
+            transport
         };
 
         server_transport.write_buf(&mut leftover_request).await.map_err(|e| {
@@ -55,12 +67,17 @@ impl JetRendezvousTcpProxy {
             e
         })?;
 
-        Proxy::new(config)
+        let proxy_result =  Proxy::new(config)
             .build_with_message_reader(server_transport, client_transport, None)
             .await
             .map_err(|e| {
                 error!("An error occurred while running JetRendezvousTcpProxy: {}", e);
                 e
-            })
+            });
+
+        // remove association after a few minutes of inactivity
+        start_remove_association_future(jet_associations, association_id).await;
+
+        proxy_result
     }
 }

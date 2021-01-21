@@ -1,4 +1,7 @@
-use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
+use crate::jet::{
+    candidate::{Candidate, CandidateResponse, CandidateState},
+    TransportType,
+};
 use chrono::{serde::ts_seconds, DateTime, Utc};
 use indexmap::IndexMap;
 use serde_json::Value;
@@ -25,8 +28,13 @@ impl Association {
         &self.candidates
     }
 
-    pub fn take_first_active_candidate(&mut self) -> Option<&mut Candidate> {
-        let index = self.candidates.iter_mut().find(|(_, v)| v.has_transport()).map(|(k, _)| k.clone());
+    pub fn get_first_accepted_tcp_candidate(&mut self) -> Option<&mut Candidate> {
+        let index = self.candidates
+            .iter_mut()
+            .find(|(_, v)| v.has_transport()
+                && v.state() == CandidateState::Accepted
+                && v.transport_type() == TransportType::Tcp)
+            .map(|(k, _)| k.clone());
 
         index.map(move |index| {
             self.candidates.get_mut(&index)
