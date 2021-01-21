@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Context as _, Result};
 use slog::{debug, o, Logger};
 use std::net::SocketAddr;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, pin};
 use uuid::Uuid;
+use futures_util::FutureExt;
 
 #[derive(Debug)]
 pub struct TcpProxyCmd {
@@ -36,21 +37,22 @@ impl TcpServer {
     pub async fn serve(self, log: Logger) -> Result<()> {
         debug!(log, "Performing rendezvous connect...");
 
-        let mut jet_server_stream = TcpStream::connect(self.jet_listener_addr).await?;
-        let server_stream = TcpStream::connect(self.source_addr).await?;
+        loop
+        {
+            let mut jet_server_stream = TcpStream::connect(self.jet_listener_addr).await?;
+            let server_stream = TcpStream::connect(self.source_addr).await?;
 
-        let log = log.clone();
+            let log = log.clone();
 
-        debug!(log, "Sending jet accept request...");
+            debug!(log, "Sending jet accept request...");
 
-        self.send_jet_accept_request(&mut jet_server_stream).await?;
-        self.process_jet_accept_response(&mut jet_server_stream).await?;
+            self.send_jet_accept_request(&mut jet_server_stream).await?;
+            self.process_jet_accept_response(&mut jet_server_stream).await?;
 
-        debug!(log, "Starting tcp forwarding...");
+            debug!(log, "Starting tcp forwarding...");
 
-        run_proxy(jet_server_stream, server_stream, log).await?;
-
-        Ok(())
+            run_proxy(jet_server_stream, server_stream, log).await?
+        }
     }
     async fn send_jet_accept_request(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
         use jet_proto::{accept::JetAcceptReq, JetMessage};
@@ -103,7 +105,7 @@ impl TcpServer {
 
 async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream, log: Logger) -> Result<()> {
     use crate::io::read_and_write;
-    use futures_util::try_join;
+    use futures_util::select;
 
     debug!(
         log,
@@ -121,12 +123,44 @@ async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream
     let client_server_logger = log.new(o!("client" => " -> server"));
     let server_client_logger = log.new(o!("client" => " <- server"));
 
-    let client_to_server = read_and_write(&mut client_read_half, &mut server_write_half, client_server_logger);
-    let server_to_client = read_and_write(&mut server_read_half, &mut client_write_half, server_client_logger);
+    let client_to_server = read_and_write(&mut client_read_half, &mut server_write_half, client_server_logger).fuse();
+    let server_to_client = read_and_write(&mut server_read_half, &mut client_write_half, server_client_logger).fuse();
 
-    try_join!(client_to_server, server_to_client)
+    pin!(client_to_server);
+    pin!(server_to_client);
+
+
+    select! {
+            result = client_to_server => {
+                match result {
+                    Ok(()) =>  {
+                        // Detected
+                        println!("client_to_server disconnected gracefully");
+                    }
+                    Err(e) => {
+                        println!("client_to_server disconnected with error: {}", e);
+                    }
+                }
+            },
+            result = server_to_client => {
+                match result {
+                    Ok(()) =>  {
+                        println!("server_to_client disconnected gracefully");
+                    }
+                    Err(e) => {
+                        println!("server_to_client disconnected with error: {}", e);
+                    }
+                }
+            },
+        };
+
+    Ok(())
+
+    /*
+    join!(client_to_server, server_to_client)
         .map(|_| ())
         .map_err(|e| anyhow!("tcp proxy failed: {}", e))
+     */
 }
 
 pub async fn proxy(addr: String, cmd: TcpProxyCmd, log: slog::Logger) -> Result<()> {
