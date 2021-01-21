@@ -15,7 +15,7 @@ const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
 
 const JET_APP_RDP_TCP: &str = "rdp-tcp";
-const JET_CM_RDV: &str = "rdp";
+const JET_CM_RDV: &str = "rdv";
 
 const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_APP_RDP_TCP];
 const EXPECTED_JET_CM_VALUES: [&str; 2] = ["fwd", JET_CM_RDV];

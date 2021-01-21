@@ -121,6 +121,10 @@ impl Candidate {
         self.transport.take()
     }
 
+    pub fn has_transport(&self) -> bool {
+        self.transport.is_some()
+    }
+
     pub fn set_client_nb_bytes_read(&mut self, client_nb_bytes_read: Arc<AtomicU64>) {
         self.client_nb_bytes_read = Some(client_nb_bytes_read);
     }

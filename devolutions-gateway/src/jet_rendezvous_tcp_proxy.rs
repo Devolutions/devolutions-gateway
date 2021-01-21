@@ -38,7 +38,7 @@ impl JetRendezvousTcpProxy {
                 ))
             })?;
 
-            let candidate = assc.take_first_candidate().ok_or_else(|| {
+            let candidate = assc.take_first_active_candidate().ok_or_else(|| {
                 into_other_io_error(format!(
                     "There is not any candidates in {} JetAssociations map",
                     association_id

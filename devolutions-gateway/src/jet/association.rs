@@ -25,11 +25,12 @@ impl Association {
         &self.candidates
     }
 
-    pub fn take_first_candidate(&mut self) -> Option<&mut Candidate> {
-        match self.candidates.get_index_mut(0) {
-            Some((_, candidate)) => Some(candidate),
-            None => None,
-        }
+    pub fn take_first_active_candidate(&mut self) -> Option<&mut Candidate> {
+        let index = self.candidates.iter_mut().find(|(_, v)| v.has_transport()).map(|(k, _)| k.clone());
+
+        index.map(move |index| {
+            self.candidates.get_mut(&index)
+        }).flatten()
     }
 
     pub fn add_candidate(&mut self, mut candidate: Candidate) {
