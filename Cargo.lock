@@ -1450,10 +1450,18 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
+ "jetsocat-proxy",
  "seahorse",
  "slog",
  "slog-async",
  "slog-term",
+ "tokio 1.0.1",
+]
+
+[[package]]
+name = "jetsocat-proxy"
+version = "0.1.0"
+dependencies = [
  "tokio 1.0.1",
 ]
 
@@ -3397,6 +3405,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite 0.2.0",
  "signal-hook-registry",
+ "tokio-macros 1.0.0",
  "winapi 0.3.9",
 ]
 
@@ -3471,6 +3480,17 @@ name = "tokio-macros"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46dfffa59fc3c8aad216ed61bdc2c263d2b9d87a9c8ac9de0c11a813e51b6db7"
+dependencies = [
+ "proc-macro2 1.0.24",
+ "quote 1.0.8",
+ "syn 1.0.57",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42517d2975ca3114b22a16192634e8241dc5cc1f130be194645970cc1c371494"
 dependencies = [
  "proc-macro2 1.0.24",
  "quote 1.0.8",

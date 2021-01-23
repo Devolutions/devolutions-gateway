@@ -3,6 +3,7 @@ members = [
     "devolutions-gateway",
     "jet-proto",
     "jetsocat",
+    "jetsocat/proxy",
     "benchmark",
     "tools/*"
 ]
