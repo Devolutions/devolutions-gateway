@@ -13,6 +13,8 @@ native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
 
+jetsocat-proxy = { path = "./proxy" }
+
 # cli
 seahorse = "1.1"
 
