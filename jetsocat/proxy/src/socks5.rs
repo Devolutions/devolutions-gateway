@@ -211,7 +211,7 @@ where
                 // as per RFC server should send 0xFF as method if none of the methods
                 // listed by client are acceptable.
                 // However some implementation ignores this (ie: CCProxy 8.0).
-                return Err(io::Error::new(io::ErrorKind::Other, "no acceptable auth method"))
+                return Err(io::Error::new(io::ErrorKind::Other, "no acceptable auth method"));
             }
             _ => {
                 return Err(io::Error::new(
