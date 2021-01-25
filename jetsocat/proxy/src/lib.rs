@@ -1,4 +1,3 @@
-pub mod https;
 pub mod socks4;
 pub mod socks5;
 
@@ -21,7 +20,7 @@ impl DestAddr {
             _ => None,
         }
     }
-    
+
     pub fn as_domain(&self) -> Option<(&str, u16)> {
         match self {
             DestAddr::Domain(dns, port) => Some((&dns, *port)),
