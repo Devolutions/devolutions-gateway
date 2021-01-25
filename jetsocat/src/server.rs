@@ -1,13 +1,15 @@
 use crate::pipe::{pipe_with_ws, PipeCmd};
+use crate::ProxyConfig;
 use anyhow::{Context as _, Result};
 use slog::{debug, o};
 
-pub async fn accept(addr: String, pipe: PipeCmd, log: slog::Logger) -> Result<()> {
-    use async_tungstenite::tokio::connect_async;
+pub async fn accept(addr: String, pipe: PipeCmd, proxy_cfg: Option<ProxyConfig>, log: slog::Logger) -> Result<()> {
+    use crate::utils::ws_connect_async;
 
     let accept_log = log.new(o!("accept" => addr.clone()));
+
     debug!(accept_log, "Connecting");
-    let (ws_stream, rsp) = connect_async(addr).await?;
+    let (ws_stream, rsp) = ws_connect_async(addr, proxy_cfg).await?;
     debug!(accept_log, "Connected: {:?}", rsp);
 
     pipe_with_ws(ws_stream, pipe, accept_log)

@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use anyhow::Context as _;
 use jetsocat::pipe::PipeCmd;
+use jetsocat::ProxyConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
 use std::env;
@@ -77,7 +78,7 @@ fn connect_command() -> Command {
 pub fn connect_action(c: &Context) {
     let res = CommonArgs::parse("connect", c).and_then(|args| {
         let log = setup_logger(args.logging);
-        run(log.clone(), jetsocat::client::connect(args.addr, log))
+        run(log.clone(), jetsocat::client::connect(args.addr, args.proxy_cfg, log))
     });
     exit(res);
 }
@@ -97,7 +98,10 @@ fn accept_command() -> Command {
 pub fn accept_action(c: &Context) {
     let res = ServerArgs::parse("accept", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        run(log.clone(), jetsocat::server::accept(args.common.addr, args.pipe, log))
+        run(
+            log.clone(),
+            jetsocat::server::accept(args.common.addr, args.pipe, args.common.proxy_cfg, log),
+        )
     });
     exit(res);
 }
@@ -162,6 +166,8 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
         .flag(Flag::new("log-term", FlagType::Bool).description("Disable logging"))
+        .flag(Flag::new("socks4", FlagType::String).description("Use specificed address:port as SOCKS4 proxy"))
+        .flag(Flag::new("socks5", FlagType::String).description("Use specificed address:port as SOCKS5 proxy"))
 }
 
 enum Logging {
@@ -172,6 +178,7 @@ enum Logging {
 struct CommonArgs {
     addr: String,
     logging: Logging,
+    proxy_cfg: Option<ProxyConfig>,
 }
 
 impl CommonArgs {
@@ -198,7 +205,19 @@ impl CommonArgs {
             Logging::Term
         };
 
-        Ok(Self { addr, logging })
+        let proxy_cfg = if let Ok(addr) = c.string_flag("socks5") {
+            Some(ProxyConfig::Socks5 { addr })
+        } else if let Ok(addr) = c.string_flag("socks4") {
+            Some(ProxyConfig::Socks4 { addr })
+        } else {
+            None
+        };
+
+        Ok(Self {
+            addr,
+            logging,
+            proxy_cfg,
+        })
     }
 }
 
