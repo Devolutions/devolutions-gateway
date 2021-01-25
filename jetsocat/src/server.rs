@@ -1,5 +1,5 @@
 use crate::pipe::{pipe_with_ws, PipeCmd};
-use crate::ProxyConfig;
+use crate::proxy::ProxyConfig;
 use anyhow::{Context as _, Result};
 use slog::{debug, o};
 

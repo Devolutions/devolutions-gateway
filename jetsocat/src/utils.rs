@@ -1,4 +1,4 @@
-use crate::ProxyConfig;
+use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{Context as _, Result};
 use async_tungstenite::{
     tokio::ClientStream,
@@ -29,14 +29,35 @@ pub async fn ws_connect_async(
     let req_addr = (domain, port);
 
     let stream: AsyncStream = match proxy_cfg {
-        Some(ProxyConfig::Socks4 { addr: proxy_addr }) => {
+        Some(ProxyConfig {
+            ty: ProxyType::Socks4,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks4Stream::connect(stream, req_addr, "jetsocat").await?)
         }
-        Some(ProxyConfig::Socks5 { addr: proxy_addr }) => {
+        Some(ProxyConfig {
+            ty: ProxyType::Socks5,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks5Stream::connect(stream, req_addr).await?)
         }
+        Some(ProxyConfig {
+            ty: ProxyType::Socks,
+            addr: proxy_addr,
+        }) => {
+            // unknown SOCKS version, try SOCKS5 first and then SOCKS4
+            let stream = TcpStream::connect(proxy_addr.clone()).await?;
+            match Socks5Stream::connect(stream, req_addr).await {
+                Ok(socks4) => Box::new(socks4),
+                Err(_) => {
+                    let stream = TcpStream::connect(proxy_addr).await?;
+                    Box::new(Socks4Stream::connect(stream, req_addr, "jetsocat").await?)
+                }
+            }
+        }
+        Some(ProxyConfig { ty: unsupported, .. }) => anyhow::bail!("{:?} proxy protocol is not supported", unsupported),
         None => Box::new(TcpStream::connect(req_addr).await?),
     };
 

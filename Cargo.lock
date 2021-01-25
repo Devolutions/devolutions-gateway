@@ -375,7 +375,7 @@ dependencies = [
  "num-derive 0.2.5",
  "num-traits",
  "objc",
- "system-configuration-sys",
+ "system-configuration-sys 0.4.1",
  "systemd-rs",
  "timer",
  "widestring",
@@ -500,6 +500,16 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25b9e03f145fd4f2bf705e07b900cd41fc636598fe5dc452fd0db1441c3f496d"
+dependencies = [
+ "core-foundation-sys 0.6.2",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57d24c7a13c43e870e37c1556b74555437870a04514f7685f5b354e090567171"
@@ -517,6 +527,12 @@ dependencies = [
  "core-foundation-sys 0.8.2",
  "libc",
 ]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7ca8a5221364ef15ce201e8ed2f609fc312682a8f4e0e3d4aa5879764e0fa3b"
 
 [[package]]
 name = "core-foundation-sys"
@@ -1471,6 +1487,7 @@ dependencies = [
  "futures-io",
  "futures-util",
  "jetsocat-proxy",
+ "proxy_cfg",
  "seahorse",
  "slog",
  "slog-async",
@@ -2292,6 +2309,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0704ee1a7e00d7bb417d0770ea303c1bccbabf0ef1667dae92b5967f5f8a71"
 dependencies = [
  "unicode-xid 0.2.1",
+]
+
+[[package]]
+name = "proxy_cfg"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb2fc88689c67c50b7d78763f338bc227a1ab58322b97ccc5b5cb7ef70536652"
+dependencies = [
+ "core-foundation 0.6.4",
+ "system-configuration-sys 0.3.0",
+ "url 2.2.0",
+ "winapi 0.3.9",
+ "winreg 0.7.0",
 ]
 
 [[package]]
@@ -3224,6 +3254,16 @@ dependencies = [
 
 [[package]]
 name = "system-configuration-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfd906a2882d54084bfdf517bf03892ac06820f1c0a3d37e48609f334798ad99"
+dependencies = [
+ "core-foundation-sys 0.6.2",
+ "libc",
+]
+
+[[package]]
+name = "system-configuration-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "269e271436d8e4bb2621c535a11fe03d5d012f74b19af72f80288f3a72f6180a"
@@ -4152,6 +4192,15 @@ name = "winreg"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2986deb581c4fe11b621998a5e53361efe6b48a151178d0cd9eeffa4dc6acc9"
+dependencies = [
+ "winapi 0.3.9",
+]
+
+[[package]]
+name = "winreg"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0120db82e8a1e0b9fb3345a539c478767c0048d842860994d96113d5b667bd69"
 dependencies = [
  "winapi 0.3.9",
 ]

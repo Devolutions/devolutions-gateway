@@ -6,14 +6,17 @@ edition = "2018"
 description = "WebSocket toolkit for jet protocol related operations"
 
 [features]
-default = ["rustls"]
+default = ["rustls", "detect-proxy"]
 verbose = ["slog/max_level_trace"]
+detect-proxy = ["proxy_cfg"]
 rustls = ["async-tungstenite/tokio-rustls"]
 native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
 
+# proxy support
 jetsocat-proxy = { path = "./proxy" }
+proxy_cfg = { version = "0.3.6", optional = true }
 
 # cli
 seahorse = "1.1"
