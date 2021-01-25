@@ -1,16 +1,17 @@
+use crate::ProxyConfig;
 use anyhow::Result;
 use futures_channel::mpsc;
 use slog::*;
 
-pub async fn connect(addr: String, log: Logger) -> Result<()> {
+pub async fn connect(addr: String, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<()> {
     use crate::io::{read_and_send, ws_stream_to_writer};
-    use async_tungstenite::tokio::connect_async;
+    use crate::utils::ws_connect_async;
     use futures_util::StreamExt as _;
     use futures_util::{future, pin_mut};
 
     let connect_log = log.new(o!("connect" => addr.clone()));
     info!(connect_log, "Connecting");
-    let (ws_stream, rsp) = connect_async(addr).await?;
+    let (ws_stream, rsp) = ws_connect_async(addr, proxy_cfg).await?;
     debug!(connect_log, "Connected: {:?}", rsp);
     let (write, read) = ws_stream.split();
 
