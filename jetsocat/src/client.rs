@@ -1,4 +1,4 @@
-use crate::ProxyConfig;
+use crate::proxy::ProxyConfig;
 use anyhow::Result;
 use futures_channel::mpsc;
 use slog::*;

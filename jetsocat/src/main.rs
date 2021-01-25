@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use anyhow::Context as _;
 use jetsocat::pipe::PipeCmd;
-use jetsocat::ProxyConfig;
+use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
 use std::env;
@@ -166,6 +166,7 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
         .flag(Flag::new("log-term", FlagType::Bool).description("Disable logging"))
+        .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specificed address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specificed address:port as SOCKS5 proxy"))
 }
@@ -206,11 +207,19 @@ impl CommonArgs {
         };
 
         let proxy_cfg = if let Ok(addr) = c.string_flag("socks5") {
-            Some(ProxyConfig::Socks5 { addr })
+            Some(ProxyConfig {
+                ty: ProxyType::Socks5,
+                addr,
+            })
         } else if let Ok(addr) = c.string_flag("socks4") {
-            Some(ProxyConfig::Socks4 { addr })
-        } else {
+            Some(ProxyConfig {
+                ty: ProxyType::Socks4,
+                addr,
+            })
+        } else if c.bool_flag("no-proxy") {
             None
+        } else {
+            detect_proxy()
         };
 
         Ok(Self {
