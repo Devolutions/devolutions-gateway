@@ -265,11 +265,11 @@ class TlkRecipe
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
-                $TimestampServer = 'http://timestamp.globalsign.com/scripts/timstamp.dll'
+                $TimestampServer = 'http://timestamp.comodoca.com/?td=sha256'
                 $SignToolArgs = @(
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
-                    '/t', $TimestampServer,
+                    '/tr', $TimestampServer,
                     $DestinationExecutable
                 )
                 & 'signtool' $SignToolArgs
@@ -352,11 +352,11 @@ class TlkRecipe
 
             if (Test-Path Env:SIGNTOOL_NAME) {
                 $SignToolName = $Env:SIGNTOOL_NAME
-                $TimestampServer = 'http://timestamp.globalsign.com/scripts/timstamp.dll'
+                $TimestampServer = 'http://timestamp.comodoca.com/?td=sha256'
                 $SignToolArgs = @(
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
-                    '/t', $TimestampServer,
+                    '/tr', $TimestampServer,
                     $DGatewayPackage
                 )
                 & 'signtool' $SignToolArgs
