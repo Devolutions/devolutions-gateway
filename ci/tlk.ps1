@@ -270,7 +270,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/tr', $TimestampServer,
-		    '/td sha256',
+		    '/td', 'sha256',
                     $DestinationExecutable
                 )
                 & 'signtool' $SignToolArgs
@@ -358,7 +358,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/tr', $TimestampServer,
-		    '/td sha256',
+		    '/td', 'sha256',
                     $DGatewayPackage
                 )
                 & 'signtool' $SignToolArgs
