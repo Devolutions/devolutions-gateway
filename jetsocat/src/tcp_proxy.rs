@@ -5,11 +5,11 @@ use tokio::{net::TcpStream, pin};
 use uuid::Uuid;
 use futures_util::FutureExt;
 
-#[derive(Debug)]
 pub struct TcpProxyCmd {
     pub source_addr: String,
     pub association_id: String,
     pub candidate_id: String,
+    pub auto_reconnect: bool,
 }
 
 struct TcpServer {
@@ -17,6 +17,7 @@ struct TcpServer {
     jet_listener_addr: SocketAddr,
     association_id: uuid::Uuid,
     candidate_id: uuid::Uuid,
+    auto_reconnect: bool,
 }
 
 impl TcpServer {
@@ -24,13 +25,15 @@ impl TcpServer {
         source_addr: SocketAddr,
         jet_listener_addr: SocketAddr,
         association_id: uuid::Uuid,
-        candidate_id: uuid::Uuid
+        candidate_id: uuid::Uuid,
+        auto_reconnect: bool,
     ) -> Self {
         Self {
             source_addr,
             jet_listener_addr,
             association_id,
             candidate_id,
+            auto_reconnect,
         }
     }
 
@@ -51,8 +54,14 @@ impl TcpServer {
 
             debug!(log, "Starting tcp forwarding...");
 
-            run_proxy(jet_server_stream, server_stream, log).await?
-        }
+            run_proxy(jet_server_stream, server_stream, log).await?;
+
+            if !self.auto_reconnect {
+                break;
+            }
+        };
+
+        Ok(())
     }
     async fn send_jet_accept_request(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
         use jet_proto::{accept::JetAcceptReq, JetMessage};
@@ -126,41 +135,32 @@ async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream
     let client_to_server = read_and_write(&mut client_read_half, &mut server_write_half, client_server_logger).fuse();
     let server_to_client = read_and_write(&mut server_read_half, &mut client_write_half, server_client_logger).fuse();
 
-    pin!(client_to_server);
-    pin!(server_to_client);
-
+    pin!(client_to_server, server_to_client);
 
     select! {
-            result = client_to_server => {
-                match result {
-                    Ok(()) =>  {
-                        // Detected
-                        println!("client_to_server disconnected gracefully");
-                    }
-                    Err(e) => {
-                        println!("client_to_server disconnected with error: {}", e);
-                    }
+        result = client_to_server => {
+            match result {
+                Ok(()) =>  {
+                    debug!(log, "client_to_server disconnected gracefully");
                 }
-            },
-            result = server_to_client => {
-                match result {
-                    Ok(()) =>  {
-                        println!("server_to_client disconnected gracefully");
-                    }
-                    Err(e) => {
-                        println!("server_to_client disconnected with error: {}", e);
-                    }
+                Err(e) => {
+                    debug!(log, "client_to_server disconnected with error: {}", e);
                 }
-            },
-        };
+            }
+        },
+        result = server_to_client => {
+            match result {
+                Ok(()) =>  {
+                    debug!(log, "server_to_client disconnected gracefully");
+                }
+                Err(e) => {
+                    debug!(log, "server_to_client disconnected with error: {}", e);
+                }
+            }
+        },
+    };
 
     Ok(())
-
-    /*
-    join!(client_to_server, server_to_client)
-        .map(|_| ())
-        .map_err(|e| anyhow!("tcp proxy failed: {}", e))
-     */
 }
 
 pub async fn proxy(addr: String, cmd: TcpProxyCmd, log: slog::Logger) -> Result<()> {
@@ -175,6 +175,6 @@ pub async fn proxy(addr: String, cmd: TcpProxyCmd, log: slog::Logger) -> Result<
     let candidate_id = Uuid::parse_str(&cmd.candidate_id)
         .with_context(|| "Failed to parse jet candidate id")?;
 
-    TcpServer::new(source_addr, jet_listener_addr, association_id, candidate_id)
+    TcpServer::new(source_addr, jet_listener_addr, association_id, candidate_id, cmd.auto_reconnect)
         .serve(log).await
 }

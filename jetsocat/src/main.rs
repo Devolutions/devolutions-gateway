@@ -136,7 +136,7 @@ fn proxy_command() -> Command {
         .alias("p")
         .description("Reverse tcp-proxy")
         .usage(format!(
-            "{} tcp-proxy tcp://gateway.jet.listener:port --source-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID>",
+            "{} tcp-proxy tcp://gateway.jet.listener:port --source-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID> --auto-reconnect",
             env!("CARGO_PKG_NAME")
         ))
         .action(proxy_action);
@@ -287,6 +287,10 @@ fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
             Flag::new("candidate-id", FlagType::String)
                 .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
         )
+        .flag(
+            Flag::new("auto-reconnect", FlagType::Bool)
+                .description("Jetsocat will automatically reconnect to Jet when connection interrupts"),
+        )
 }
 
 struct TcpProxyArgs {
@@ -303,9 +307,10 @@ impl TcpProxyArgs {
         let candidate_id = c.string_flag("candidate-id")
             .with_context(|| "command is missing --candidate-id")?;
         let source_addr = c.string_flag("source-addr")
-            .with_context(|| "command is missing --source_addr")?;
+            .with_context(|| "command is missing --source-addr")?;
+        let auto_reconnect = c.bool_flag("auto-reconnect");
 
-        let cmd = TcpProxyCmd { source_addr, association_id, candidate_id };
+        let cmd = TcpProxyCmd { source_addr, association_id, candidate_id, auto_reconnect };
 
         Ok(Self { common, cmd })
     }
