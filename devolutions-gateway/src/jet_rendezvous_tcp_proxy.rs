@@ -1,16 +1,12 @@
+use crate::jet::candidate::CandidateState;
 use crate::{
-    config::Config,
-    jet_client::JetAssociationsMap,
-    proxy::Proxy,
-    transport::JetTransport,
-    utils::{into_other_io_error},
-    http::controllers::jet::start_remove_association_future,
+    config::Config, http::controllers::jet::start_remove_association_future, jet_client::JetAssociationsMap,
+    proxy::Proxy, transport::JetTransport, utils::into_other_io_error,
 };
 use slog_scope::error;
 use std::{io, sync::Arc};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
-use crate::jet::candidate::CandidateState;
 
 pub struct JetRendezvousTcpProxy {
     jet_associations: JetAssociationsMap,
@@ -67,7 +63,7 @@ impl JetRendezvousTcpProxy {
             e
         })?;
 
-        let proxy_result =  Proxy::new(config)
+        let proxy_result = Proxy::new(config)
             .build_with_message_reader(server_transport, client_transport, None)
             .await
             .map_err(|e| {

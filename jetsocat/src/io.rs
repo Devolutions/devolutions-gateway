@@ -1,5 +1,5 @@
-use async_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use anyhow::Result;
+use async_tungstenite::tungstenite::{Error as TungsteniteError, Message};
 use futures_channel::mpsc;
 use slog::{debug, trace};
 

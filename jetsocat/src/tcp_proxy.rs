@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context as _, Result};
+use futures_util::FutureExt;
 use slog::{debug, o, Logger};
 use std::net::SocketAddr;
 use tokio::{net::TcpStream, pin};
 use uuid::Uuid;
-use futures_util::FutureExt;
 
 pub struct TcpProxyCmd {
     pub source_addr: String,
@@ -40,8 +40,7 @@ impl TcpServer {
     pub async fn serve(self, log: Logger) -> Result<()> {
         debug!(log, "Performing rendezvous connect...");
 
-        loop
-        {
+        loop {
             let mut jet_server_stream = TcpStream::connect(self.jet_listener_addr).await?;
             let server_stream = TcpStream::connect(self.source_addr).await?;
 
@@ -59,7 +58,7 @@ impl TcpServer {
             if !self.auto_reconnect {
                 break;
             }
-        };
+        }
 
         Ok(())
     }
@@ -165,16 +164,22 @@ async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream
 
 pub async fn proxy(addr: String, cmd: TcpProxyCmd, log: slog::Logger) -> Result<()> {
     let jet_listener_addr = crate::utils::resolve_url_to_tcp_socket_addr(addr).await?;
-    let source_addr = cmd.source_addr
+    let source_addr = cmd
+        .source_addr
         .parse()
         .with_context(|| format!("Invalid source addr {}", cmd.source_addr))?;
 
-    let association_id = Uuid::parse_str(&cmd.association_id)
-        .with_context(|| "Failed to parse jet association id")?;
+    let association_id = Uuid::parse_str(&cmd.association_id).with_context(|| "Failed to parse jet association id")?;
 
-    let candidate_id = Uuid::parse_str(&cmd.candidate_id)
-        .with_context(|| "Failed to parse jet candidate id")?;
+    let candidate_id = Uuid::parse_str(&cmd.candidate_id).with_context(|| "Failed to parse jet candidate id")?;
 
-    TcpServer::new(source_addr, jet_listener_addr, association_id, candidate_id, cmd.auto_reconnect)
-        .serve(log).await
+    TcpServer::new(
+        source_addr,
+        jet_listener_addr,
+        association_id,
+        candidate_id,
+        cmd.auto_reconnect,
+    )
+    .serve(log)
+    .await
 }

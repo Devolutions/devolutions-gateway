@@ -29,16 +29,15 @@ impl Association {
     }
 
     pub fn get_first_accepted_tcp_candidate(&mut self) -> Option<&mut Candidate> {
-        let index = self.candidates
+        let index = self
+            .candidates
             .iter_mut()
-            .find(|(_, v)| v.has_transport()
-                && v.state() == CandidateState::Accepted
-                && v.transport_type() == TransportType::Tcp)
+            .find(|(_, v)| {
+                v.has_transport() && v.state() == CandidateState::Accepted && v.transport_type() == TransportType::Tcp
+            })
             .map(|(k, _)| k.clone());
 
-        index.map(move |index| {
-            self.candidates.get_mut(&index)
-        }).flatten()
+        index.map(move |index| self.candidates.get_mut(&index)).flatten()
     }
 
     pub fn add_candidate(&mut self, mut candidate: Candidate) {

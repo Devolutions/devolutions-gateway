@@ -9,7 +9,6 @@ use slog::{info, o, Logger};
 use std::{env, future::Future, path::PathBuf};
 use tokio::runtime;
 
-
 fn main() {
     let args: Vec<String> = if let Ok(args_str) = std::env::var("JETSOCAT_ARGS") {
         env::args()
@@ -100,15 +99,10 @@ fn accept_command() -> Command {
 pub fn accept_action(c: &Context) {
     let res = ServerArgs::parse("accept", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-<<<<<<< HEAD
-        let pipe = args.pipe.ok_or_else(|| anyhow!("pipe is missing"))?;
         run(
             log.clone(),
-            jetsocat::server::accept(args.common.addr, pipe, args.common.proxy_cfg, log)
+            jetsocat::server::accept(args.common.addr, args.cmd, args.common.proxy_cfg, log)
         )
-=======
-        run(log.clone(), jetsocat::server::accept(args.common.addr, args.cmd, log))
->>>>>>> Performed general refactoring of jetsocat
     });
     exit(res);
 }
@@ -274,11 +268,7 @@ fn apply_pipe_server_flags(cmd: Command) -> Command {
 }
 
 fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
-    cmd
-        .flag(
-            Flag::new("source-addr", FlagType::String)
-                .description("Source IP:PORT for tcp forwarding"),
-        )
+    cmd.flag(Flag::new("source-addr", FlagType::String).description("Source IP:PORT for tcp forwarding"))
         .flag(
             Flag::new("association-id", FlagType::String)
                 .description("Jet association UUID for Devolutions-Gateway rendezvous connection"),
@@ -302,15 +292,23 @@ impl TcpProxyArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(action, c)?;
 
-        let association_id = c.string_flag("association-id")
+        let association_id = c
+            .string_flag("association-id")
             .with_context(|| "command is missing --association-id")?;
-        let candidate_id = c.string_flag("candidate-id")
+        let candidate_id = c
+            .string_flag("candidate-id")
             .with_context(|| "command is missing --candidate-id")?;
-        let source_addr = c.string_flag("source-addr")
+        let source_addr = c
+            .string_flag("source-addr")
             .with_context(|| "command is missing --source-addr")?;
         let auto_reconnect = c.bool_flag("auto-reconnect");
 
-        let cmd = TcpProxyCmd { source_addr, association_id, candidate_id, auto_reconnect };
+        let cmd = TcpProxyCmd {
+            source_addr,
+            association_id,
+            candidate_id,
+            auto_reconnect,
+        };
 
         Ok(Self { common, cmd })
     }
@@ -333,8 +331,7 @@ impl ServerArgs {
             None
         };
 
-        let cmd = cmd
-            .with_context(|| "command is missing arguments (--sh-c OR --cmd)")?;
+        let cmd = cmd.with_context(|| "command is missing arguments (--sh-c OR --cmd)")?;
 
         Ok(Self { common, cmd })
     }

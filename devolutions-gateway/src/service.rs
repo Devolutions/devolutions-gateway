@@ -328,7 +328,7 @@ async fn start_tcp_server(
                         config.clone(),
                         tls_public_key.clone(),
                         tls_acceptor.clone(),
-                        jet_associations.clone()
+                        jet_associations.clone(),
                     );
                     Box::pin(rdp_client.serve(conn))
                 }
