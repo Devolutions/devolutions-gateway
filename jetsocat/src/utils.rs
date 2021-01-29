@@ -1,4 +1,3 @@
-use anyhow::{anyhow, Result};
 use std::net::SocketAddr;
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{anyhow, Result, Context as _};

@@ -1486,9 +1486,9 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
+ "jet-proto",
  "jetsocat-proxy",
  "proxy_cfg",
- "jet-proto",
  "seahorse",
  "slog",
  "slog-async",
@@ -2460,7 +2460,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90bde5296fc891b0cef12a6d03ddccc162ce7b2aff54160af9338f8d40df6d19"
 dependencies = [
  "getrandom 0.1.16",
-<<<<<<< HEAD
 ]
 
 [[package]]
@@ -2470,8 +2469,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c026d7df8b298d90ccbbc5190bd04d85e159eaf5576caeacf8741da93ccbd2e5"
 dependencies = [
  "getrandom 0.2.2",
-=======
->>>>>>> Added support of a new Rendezvous token generation for tokengen tool
 ]
 
 [[package]]
@@ -3991,7 +3988,7 @@ version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
 dependencies = [
- "getrandom 0.2.1",
+ "getrandom 0.2.2",
  "serde",
 ]
 
