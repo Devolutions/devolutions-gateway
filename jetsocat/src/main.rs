@@ -169,6 +169,7 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specificed address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specificed address:port as SOCKS5 proxy"))
+        .flag(Flag::new("http-proxy", FlagType::String).description("Use specificed address:port as HTTP proxy"))
 }
 
 enum Logging {
@@ -214,6 +215,11 @@ impl CommonArgs {
         } else if let Ok(addr) = c.string_flag("socks4") {
             Some(ProxyConfig {
                 ty: ProxyType::Socks4,
+                addr,
+            })
+        } else if let Ok(addr) = c.string_flag("http-proxy") {
+            Some(ProxyConfig {
+                ty: ProxyType::Http,
                 addr,
             })
         } else if c.bool_flag("no-proxy") {

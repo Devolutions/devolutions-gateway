@@ -1,3 +1,4 @@
+pub mod http;
 pub mod socks4;
 pub mod socks5;
 
@@ -6,6 +7,11 @@ pub mod test_utils;
 
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+
+pub use http::HttpProxyStream;
+pub use socks4::Socks4Stream;
+pub use socks5::Socks5Listener;
+pub use socks5::Socks5Stream;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestAddr {
