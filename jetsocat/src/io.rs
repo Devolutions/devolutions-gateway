@@ -13,18 +13,15 @@ where
     loop {
         let mut buf = vec![0; 1024];
 
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
+        let bytes_read = reader.read(&mut buf).await?;
+        if bytes_read == 0 {
             break;
         }
 
-        buf.truncate(n);
+        buf.truncate(bytes_read);
         trace!(logger, r#""{}""#, String::from_utf8_lossy(&buf));
-        let n = writer.write(&buf).await?;
 
-        if n == 0 {
-            break;
-        }
+        writer.write_all(&buf).await?;
     }
     Ok(())
 }
@@ -38,12 +35,12 @@ where
     loop {
         let mut buf = vec![0; 1024];
 
-        let n = reader.read(&mut buf).await?;
-        if n == 0 {
+        let bytes_read = reader.read(&mut buf).await?;
+        if bytes_read == 0 {
             break;
         }
 
-        buf.truncate(n);
+        buf.truncate(bytes_read);
         trace!(logger, r#""{}""#, String::from_utf8_lossy(&buf));
         tx.unbounded_send(Message::binary(buf))?;
     }

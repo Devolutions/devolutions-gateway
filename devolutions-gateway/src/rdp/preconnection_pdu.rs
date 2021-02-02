@@ -14,7 +14,7 @@ use uuid::Uuid;
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
 
-const JET_APP_RDP_TCP: &str = "rdp-tcp";
+const JET_APP_RDP_TCP: &str = "rdp_tcp";
 const JET_CM_RDV: &str = "rdv";
 
 const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_APP_RDP_TCP];
@@ -43,7 +43,7 @@ struct RoutingClaims {
     creds: Option<CredsClaims>,
 
     /// Destination Host <host>:<port>
-    dst_hst: String,
+    dst_hst: Option<String>,
 
     /// Identity connection mode used for Jet association
     #[serde(default = "get_default_jet_connection_mode")]
@@ -128,42 +128,57 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         ));
     }
 
-    let route_url_str = if claims.dst_hst.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
-        claims.dst_hst
-    } else {
-        format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, claims.dst_hst)
-    };
+    let dest_host = if let Some(dest_host_claim) = &claims.dst_hst {
+        let route_url_str = if dest_host_claim.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
+            dest_host_claim.clone()
+        } else {
+            format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, dest_host_claim)
+        };
 
-    let mut dest_host = Url::parse(&route_url_str).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Failed to parse routing URL in JWT token: {}", e),
-        )
-    })?;
-
-    if dest_host.port().is_none() {
-        dest_host.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
+        let mut dest_host = Url::parse(&route_url_str).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Invalid URL: Can't set default port for routing URL".to_string(),
+                format!("Failed to parse routing URL in JWT token: {}", e),
             )
         })?;
-    }
+
+        if dest_host.port().is_none() {
+            dest_host.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid URL: Can't set default port for routing URL".to_string(),
+                )
+            })?;
+        }
+
+        Some(dest_host)
+    } else {
+        None
+    };
 
     match claims.creds {
-        Some(creds) if is_encrypted => Ok(TokenRoutingMode::RdpTls(RdpIdentity {
-            proxy: AuthIdentity {
-                username: creds.prx_usr,
-                password: creds.prx_pwd,
-                domain: None,
-            },
-            target: AuthIdentity {
-                username: creds.dst_usr,
-                password: creds.dst_pwd,
-                domain: None,
-            },
-            dest_host,
-        })),
+        Some(creds) if is_encrypted => {
+            let dest_host = dest_host.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "dest_host claim is missing for RdpTls mode".to_string(),
+                )
+            })?;
+
+            Ok(TokenRoutingMode::RdpTls(RdpIdentity {
+                proxy: AuthIdentity {
+                    username: creds.prx_usr,
+                    password: creds.prx_pwd,
+                    domain: None,
+                },
+                target: AuthIdentity {
+                    username: creds.dst_usr,
+                    password: creds.dst_pwd,
+                    domain: None,
+                },
+                dest_host,
+            }))
+        },
         None if (claims.jet_ap == JET_APP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
             let jet_aid = claims.jet_aid.ok_or_else(|| {
                 io::Error::new(
@@ -181,7 +196,16 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
             Ok(TokenRoutingMode::RdpTcpRendezvous(jet_aid))
         }
-        None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
+        None => {
+            let dest_host = dest_host.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "dest_host claim is missing for RdpTcp mode".to_string(),
+                )
+            })?;
+
+            Ok(TokenRoutingMode::RdpTcp(dest_host))
+        },
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Received a non encrypted JWT containing credentials. This is bad.".to_string(),

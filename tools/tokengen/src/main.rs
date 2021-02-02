@@ -15,8 +15,6 @@ use uuid::Uuid;
 
 #[derive(Clap)]
 struct App {
-    #[clap(long)]
-    dst_hst: String,
     #[clap(long, default_value = "15m")]
     validity_duration: String,
     #[clap(long)]
@@ -25,12 +23,20 @@ struct App {
     subcmd: SubCommand,
 }
 
-#[allow(clippy::enum_variant_names)] // Enumeration variants that are prefixed with `Rdp`, but we are going to add new protocols
+// clippy: All enumeration variants that are prefixed with `Rdp`; this produces the clippy error.
+// It will be marked as allowed as we may add new non-RDP related protocols in the future
+#[allow(clippy::enum_variant_names)]
 #[derive(Clap)]
 enum SubCommand {
-    RdpTcp,
+    RdpTcp(RdpTcpParams),
     RdpTls(RdpTlsIdentity),
     RdpTcpRendezvous(RdpTcpRendezvousJetAID),
+}
+
+#[derive(Clap)]
+struct RdpTcpParams {
+    #[clap(long)]
+    dst_hst: String,
 }
 
 #[derive(Clone, Clap, Serialize)]
@@ -38,6 +44,9 @@ struct RdpTlsIdentity {
     #[serde(skip_serializing)]
     #[clap(long)]
     jet_public_key: PathBuf,
+    #[serde(skip_serializing)]
+    #[clap(long)]
+    dst_hst: String,
 
     #[clap(long)]
     prx_usr: String,
@@ -61,7 +70,7 @@ struct RoutingClaims {
     jet_cm: String,
     jet_ap: String,
     jet_aid: Option<Uuid>,
-    dst_hst: String,
+    dst_hst: Option<String>,
     #[serde(flatten)]
     identity: Option<RdpTlsIdentity>,
 }
@@ -84,7 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let jet_ap = match app.subcmd {
-        SubCommand::RdpTcpRendezvous(_) => "rdp-tcp".to_owned(),
+        SubCommand::RdpTcpRendezvous(_) => "rdp_tcp".to_owned(),
         _ => "rdp".to_owned(),
     };
 
@@ -98,10 +107,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => None,
     };
 
+    let dst_hst = match &app.subcmd {
+        SubCommand::RdpTcp(params) => Some(params.dst_hst.clone()),
+        SubCommand::RdpTls(identity) => Some(identity.dst_hst.clone()),
+        _ => None
+    };
+
     let claims = RoutingClaims {
         exp: exp as i64,
         nbf: now.as_secs() as i64,
-        dst_hst: app.dst_hst,
+        dst_hst,
         jet_cm,
         jet_ap,
         jet_aid,
