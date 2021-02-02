@@ -4,7 +4,7 @@
 
 Offline tests can be performed using standard `cargo test` command.
 
-Advanced tests are provided as additional binaries.
+Advanced tests are provided through an additional binary.
 For these, a running proxy server is required with specific configurations.
 
 ### No authentication method testing
@@ -17,7 +17,13 @@ Let's assume proxy address for SOCKS is `192.168.122.70:1080`.
 SOCKS tests are run by running
 
 ```
-cargo run --bin socks_test -- --addr 192.168.122.70:1080
+cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080
+```
+
+HTTP proxy tests are run by using
+
+```
+cargo run --bin tester -- --mode http --addr 192.168.122.70:808
 ```
 
 ### Username/Password authentication method testing
@@ -31,6 +37,6 @@ Let's assume proxy address for SOCKS is `192.168.122.70:1080` and credential pai
 SOCKS tests are run by running
 
 ```
-cargo run --bin socks_test -- --addr 192.168.122.70:1080 --pass username --pass password
+cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080 --pass username --pass password
 ```
 

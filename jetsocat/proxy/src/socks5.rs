@@ -48,6 +48,10 @@ where
     pub fn dest_addr(&self) -> &DestAddr {
         &self.dest_addr
     }
+
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
 }
 
 impl<S> AsyncRead for Socks5Stream<S>

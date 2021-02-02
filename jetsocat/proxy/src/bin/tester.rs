@@ -29,8 +29,8 @@ macro_rules! test {
     }}
 }
 
-const GOOGLE_ADDR: &str = "google.com:80";
-const USAGE: &str = "--addr <PROXY_ADDR> [--pass <PASSWORD> --user <USERNAME>]";
+const GOOGLE_ADDR: &str = "www.google.com:80";
+const USAGE: &str = "--mode <TEST_MODE> --addr <PROXY_ADDR> [--pass <PASSWORD> --user <USERNAME>]";
 
 fn usage() {
     let prgm_name = env::args().next().unwrap();
@@ -79,12 +79,26 @@ impl<T> OkOrUsage for Option<T> {
 fn main() {
     let args = parse_args();
 
+    let mode = args
+        .get("--mode")
+        .ok_or_usage("argument --mode is missing [possible values: socks, http]");
     let addr = args.get("--addr").ok_or_usage("argument --addr is missing");
 
-    if let (Some(username), Some(password)) = (args.get("--user"), args.get("--pass")) {
-        password::test(addr, username, password);
-    } else {
-        no_password::test(addr);
+    match mode.as_str() {
+        "socks" => {
+            if let (Some(username), Some(password)) = (args.get("--user"), args.get("--pass")) {
+                socks_password::test(addr, username, password);
+            } else {
+                socks_no_password::test(addr);
+            }
+        }
+        "http" => {
+            http::test(addr);
+        }
+        _ => {
+            eprintln!("{}", "invalid mode provided");
+            usage();
+        }
     }
 }
 
@@ -95,6 +109,7 @@ where
     stream.write_all(b"GET / HTTP/1.0\r\n\r\n").await.unwrap();
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).await.unwrap();
+    assert!(!buf.is_empty());
     assert!(buf.starts_with(b"HTTP/1.0"));
     assert!(buf.ends_with(b"</HTML>\r\n") || buf.ends_with(b"</html>"));
 }
@@ -113,7 +128,7 @@ async fn socks5_connect_with_password(
     Socks5Stream::connect_with_password(socket, GOOGLE_ADDR, username, password).await
 }
 
-mod no_password {
+mod socks_no_password {
     use super::*;
 
     use jetsocat_proxy::socks4::Socks4Stream;
@@ -145,7 +160,7 @@ mod no_password {
     }
 }
 
-mod password {
+mod socks_password {
     use super::*;
 
     pub fn test(addr: &str, username: &str, password: &str) {
@@ -173,5 +188,22 @@ mod password {
         let err = socks5_connect(addr).await.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::Other);
         assert_eq!(err.to_string(), "no acceptable auth method");
+    }
+}
+
+mod http {
+    use super::*;
+    use jetsocat_proxy::http::HttpProxyStream;
+
+    pub fn test(addr: &str) {
+        test! {
+            basic(addr).await;
+        }
+    }
+
+    async fn basic(addr: &str) {
+        let socket = TcpStream::connect(addr).await.unwrap();
+        let stream = HttpProxyStream::connect(socket, GOOGLE_ADDR).await.unwrap();
+        crate::ping_google(stream).await;
     }
 }

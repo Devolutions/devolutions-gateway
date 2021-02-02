@@ -19,6 +19,7 @@ pub async fn ws_connect_async(
     proxy_cfg: Option<ProxyConfig>,
 ) -> Result<(WebSocketStream<ClientStream<AsyncStream>>, Response)> {
     use async_tungstenite::tokio::client_async_tls;
+    use jetsocat_proxy::http::HttpProxyStream;
     use jetsocat_proxy::socks4::Socks4Stream;
     use jetsocat_proxy::socks5::Socks5Stream;
     use tokio::net::TcpStream;
@@ -57,7 +58,17 @@ pub async fn ws_connect_async(
                 }
             }
         }
-        Some(ProxyConfig { ty: unsupported, .. }) => anyhow::bail!("{:?} proxy protocol is not supported", unsupported),
+        Some(ProxyConfig {
+            ty: ProxyType::Http,
+            addr: proxy_addr,
+        })
+        | Some(ProxyConfig {
+            ty: ProxyType::Https,
+            addr: proxy_addr,
+        }) => {
+            let stream = TcpStream::connect(proxy_addr).await?;
+            Box::new(HttpProxyStream::connect(stream, req_addr).await?)
+        }
         None => Box::new(TcpStream::connect(req_addr).await?),
     };
 
