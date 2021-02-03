@@ -35,7 +35,7 @@ where
     pub fn dest_addr(&self) -> SocketAddrV4 {
         self.dest_addr
     }
-    
+
     pub fn into_inner(self) -> S {
         self.inner
     }
