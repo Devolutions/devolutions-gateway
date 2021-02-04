@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dst_hst = match &app.subcmd {
         SubCommand::RdpTcp(params) => Some(params.dst_hst.clone()),
         SubCommand::RdpTls(identity) => Some(identity.dst_hst.clone()),
-        _ => None
+        _ => None,
     };
 
     let claims = RoutingClaims {

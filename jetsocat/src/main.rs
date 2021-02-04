@@ -1,4 +1,4 @@
-use anyhow::{Context as _};
+use anyhow::Context as _;
 use jetsocat::{
     pipe::PipeCmd,
     proxy::{detect_proxy, ProxyConfig, ProxyType},
@@ -101,7 +101,7 @@ pub fn accept_action(c: &Context) {
         let log = setup_logger(args.common.logging);
         run(
             log.clone(),
-            jetsocat::server::accept(args.common.addr, args.cmd, args.common.proxy_cfg, log)
+            jetsocat::server::accept(args.common.addr, args.cmd, args.common.proxy_cfg, log),
         )
     });
     exit(res);

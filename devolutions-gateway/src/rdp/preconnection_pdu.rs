@@ -178,7 +178,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
                 },
                 dest_host,
             }))
-        },
+        }
         None if (claims.jet_ap == JET_APP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
             let jet_aid = claims.jet_aid.ok_or_else(|| {
                 io::Error::new(
@@ -205,7 +205,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
             })?;
 
             Ok(TokenRoutingMode::RdpTcp(dest_host))
-        },
+        }
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Received a non encrypted JWT containing credentials. This is bad.".to_string(),

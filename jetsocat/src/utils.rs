@@ -1,11 +1,11 @@
-use std::net::SocketAddr;
 use crate::proxy::{ProxyConfig, ProxyType};
-use anyhow::{anyhow, Result, Context as _};
+use anyhow::{anyhow, Context as _, Result};
 use async_tungstenite::{
     tokio::ClientStream,
     tungstenite::{client::IntoClientRequest, handshake::client::Response},
     WebSocketStream,
 };
+use std::net::SocketAddr;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::lookup_host,
@@ -38,23 +38,23 @@ pub async fn ws_connect_async(
 
     let stream: AsyncStream = match proxy_cfg {
         Some(ProxyConfig {
-                 ty: ProxyType::Socks4,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks4,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks4Stream::connect(stream, req_addr, "jetsocat").await?)
         }
         Some(ProxyConfig {
-                 ty: ProxyType::Socks5,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks5,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks5Stream::connect(stream, req_addr).await?)
         }
         Some(ProxyConfig {
-                 ty: ProxyType::Socks,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks,
+            addr: proxy_addr,
+        }) => {
             // unknown SOCKS version, try SOCKS5 first and then SOCKS4
             let stream = TcpStream::connect(proxy_addr.clone()).await?;
             match Socks5Stream::connect(stream, req_addr).await {
