@@ -35,7 +35,7 @@ impl Association {
             .find(|(_, v)| {
                 v.has_transport() && v.state() == CandidateState::Accepted && v.transport_type() == TransportType::Tcp
             })
-            .map(|(k, _)| k.clone());
+            .map(|(k, _)| *k);
 
         index.map(move |index| self.candidates.get_mut(&index)).flatten()
     }

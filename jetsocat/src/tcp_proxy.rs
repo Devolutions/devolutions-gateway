@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
+use jet_proto::JET_VERSION_V2;
 use slog::{debug, o, Logger};
 use std::net::SocketAddr;
 use tokio::{net::TcpStream, pin};
@@ -67,7 +68,7 @@ impl TcpServer {
         use tokio::io::AsyncWriteExt;
 
         let jet_accept_request = JetMessage::JetAcceptReq(JetAcceptReq {
-            version: 2,
+            version: JET_VERSION_V2 as u32,
             host: "jetsocat".to_string(),
             association: self.association_id,
             candidate: self.candidate_id,
