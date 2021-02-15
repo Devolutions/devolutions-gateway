@@ -14,10 +14,10 @@ use uuid::Uuid;
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
 
-const JET_APP_RDP_TCP: &str = "rdp_tcp";
+const JET_AP_RDP_TCP: &str = "rdp_tcp";
 const JET_CM_RDV: &str = "rdv";
 
-const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_APP_RDP_TCP];
+const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_AP_RDP_TCP];
 const EXPECTED_JET_CM_VALUES: [&str; 2] = ["fwd", JET_CM_RDV];
 
 pub enum TokenRoutingMode {
@@ -114,14 +114,14 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
     let claims = jwt_token.claims;
 
-    if EXPECTED_JET_AP_VALUES.iter().all(|&jet_app| claims.jet_ap != jet_app) {
+    if !EXPECTED_JET_AP_VALUES.contains(&claims.jet_ap.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "Non-RDP JWT-based routing via preconnection PDU is not supported",
         ));
     }
 
-    if EXPECTED_JET_CM_VALUES.iter().all(|&jet_cm| claims.jet_cm != jet_cm) {
+    if !EXPECTED_JET_CM_VALUES.contains(&claims.jet_cm.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "JWT-based routing via preconnection PDU only support Forward and RdpTcpRendezvous communication mode",
@@ -179,7 +179,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
                 dest_host,
             }))
         }
-        None if (claims.jet_ap == JET_APP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
+        None if (claims.jet_ap == JET_AP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
             let jet_aid = claims.jet_aid.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,

@@ -30,8 +30,6 @@ futures-channel = "0.3"
 futures-io = "0.3"
 async-tungstenite = "0.12"
 
-# Url parsing
-url = "2.2.0"
 
 # logging
 slog = "2.5"

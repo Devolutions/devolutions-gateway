@@ -2,48 +2,60 @@ use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
 use jet_proto::JET_VERSION_V2;
 use slog::{debug, o, Logger};
-use std::net::SocketAddr;
-use tokio::{net::TcpStream, pin};
+use tokio::pin;
 use uuid::Uuid;
+use jetsocat_proxy::{DestAddr, ToDestAddr};
+use crate::{
+    proxy::ProxyConfig,
+    utils::{AsyncStream, tcp_connect_async},
+};
 
-pub struct TcpProxyCmd {
-    pub source_addr: String,
+pub struct JetTcpAcceptCmd {
+    pub forward_addr: String,
     pub association_id: String,
     pub candidate_id: String,
-    pub auto_reconnect: bool,
+    pub max_reconnection_count: usize,
 }
 
 struct TcpServer {
-    source_addr: SocketAddr,
-    jet_listener_addr: SocketAddr,
+    forward_addr: DestAddr,
+    jet_listener_addr: DestAddr,
     association_id: uuid::Uuid,
     candidate_id: uuid::Uuid,
-    auto_reconnect: bool,
+    max_reconnection_count: usize,
+    proxy_cfg: Option<ProxyConfig>,
 }
 
 impl TcpServer {
     pub fn new(
-        source_addr: SocketAddr,
-        jet_listener_addr: SocketAddr,
+        forward_addr: DestAddr,
+        jet_listener_addr: DestAddr,
         association_id: uuid::Uuid,
         candidate_id: uuid::Uuid,
-        auto_reconnect: bool,
+        max_reconnection_count: usize,
+        proxy_cfg: Option<ProxyConfig>,
     ) -> Self {
         Self {
-            source_addr,
+            forward_addr,
             jet_listener_addr,
             association_id,
             candidate_id,
-            auto_reconnect,
+            max_reconnection_count,
+            proxy_cfg,
         }
     }
 
     pub async fn serve(self, log: Logger) -> Result<()> {
         debug!(log, "Performing rendezvous connect...");
 
-        loop {
-            let mut jet_server_stream = TcpStream::connect(self.jet_listener_addr).await?;
-            let server_stream = TcpStream::connect(self.source_addr).await?;
+        for _ in 0..=self.max_reconnection_count {
+
+
+            let mut jet_server_stream =
+                tcp_connect_async(&self.jet_listener_addr, self.proxy_cfg.clone()).await?;
+            // forward_addr points to local machine/network, proxy should be ignored
+            let server_stream =
+                tcp_connect_async(&self.forward_addr, None).await?;
 
             let log = log.clone();
 
@@ -55,15 +67,12 @@ impl TcpServer {
             debug!(log, "Starting tcp forwarding...");
 
             run_proxy(jet_server_stream, server_stream, log).await?;
-
-            if !self.auto_reconnect {
-                break;
-            }
         }
 
         Ok(())
     }
-    async fn send_jet_accept_request(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
+
+    async fn send_jet_accept_request(&self, jet_server_stream: &mut AsyncStream) -> Result<()> {
         use jet_proto::{accept::JetAcceptReq, JetMessage};
         use tokio::io::AsyncWriteExt;
 
@@ -81,7 +90,7 @@ impl TcpServer {
         Ok(())
     }
 
-    async fn process_jet_accept_response(&self, jet_server_stream: &mut TcpStream) -> Result<()> {
+    async fn process_jet_accept_response(&self, jet_server_stream: &mut AsyncStream) -> Result<()> {
         use jet_proto::JetMessage;
         use tokio::io::AsyncReadExt;
 
@@ -112,22 +121,18 @@ impl TcpServer {
     }
 }
 
-async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream, log: Logger) -> Result<()> {
+async fn run_proxy(
+    jet_server_stream: AsyncStream,
+    tcp_server_transport: AsyncStream,
+    log: Logger
+) -> Result<()> {
     use crate::io::read_and_write;
     use futures_util::select;
 
-    debug!(
-        log,
-        "{}",
-        format!(
-            "Running proxy. JetServer {}, TcpServer on {}.",
-            jet_server_stream.peer_addr().unwrap(),
-            tcp_server_transport.peer_addr().unwrap()
-        )
-    );
+    debug!(log, "{}", "Running jet tcp proxy");
 
-    let (mut client_read_half, mut client_write_half) = jet_server_stream.into_split();
-    let (mut server_read_half, mut server_write_half) = tcp_server_transport.into_split();
+    let (mut client_read_half, mut client_write_half) = tokio::io::split(jet_server_stream);
+    let (mut server_read_half, mut server_write_half) = tokio::io::split(tcp_server_transport);
 
     let client_server_logger = log.new(o!("client" => " -> server"));
     let server_client_logger = log.new(o!("client" => " <- server"));
@@ -163,23 +168,27 @@ async fn run_proxy(jet_server_stream: TcpStream, tcp_server_transport: TcpStream
     Ok(())
 }
 
-pub async fn proxy(addr: String, cmd: TcpProxyCmd, log: slog::Logger) -> Result<()> {
-    let jet_listener_addr = crate::utils::resolve_url_to_tcp_socket_addr(addr).await?;
-    let source_addr = cmd
-        .source_addr
-        .parse()
-        .with_context(|| format!("Invalid source addr {}", cmd.source_addr))?;
+pub async fn jet_tcp_accept(addr: String, cmd: JetTcpAcceptCmd, proxy_cfg: Option<ProxyConfig>, log: slog::Logger) -> Result<()> {
+    let jet_listener_addr = addr
+        .as_str()
+        .to_dest_addr()
+        .with_context(|| "Invalid jet listener address")?;
+    let forward_addr = cmd.forward_addr
+        .as_str()
+        .to_dest_addr()
+        .with_context(|| "Invalid forward address")?;
 
     let association_id = Uuid::parse_str(&cmd.association_id).with_context(|| "Failed to parse jet association id")?;
 
     let candidate_id = Uuid::parse_str(&cmd.candidate_id).with_context(|| "Failed to parse jet candidate id")?;
 
     TcpServer::new(
-        source_addr,
+        forward_addr,
         jet_listener_addr,
         association_id,
         candidate_id,
-        cmd.auto_reconnect,
+        cmd.max_reconnection_count,
+        proxy_cfg
     )
     .serve(log)
     .await

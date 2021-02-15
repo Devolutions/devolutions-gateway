@@ -2,7 +2,7 @@ use anyhow::Context as _;
 use jetsocat::{
     pipe::PipeCmd,
     proxy::{detect_proxy, ProxyConfig, ProxyType},
-    tcp_proxy::TcpProxyCmd,
+    tcp_proxy::JetTcpAcceptCmd,
 };
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
@@ -27,7 +27,7 @@ fn main() {
         .command(connect_command())
         .command(accept_command())
         .command(listen_command())
-        .command(proxy_command());
+        .command(jet_tcp_accept_command());
 
     app.run(args);
 }
@@ -125,22 +125,22 @@ pub fn listen_action(c: &Context) {
     exit(res);
 }
 
-fn proxy_command() -> Command {
-    let cmd = Command::new("tcp-proxy")
+fn jet_tcp_accept_command() -> Command {
+    let cmd = Command::new("jet-tcp-accept")
         .alias("p")
         .description("Reverse tcp-proxy")
         .usage(format!(
-            "{} tcp-proxy tcp://gateway.jet.listener:port --source-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID> --auto-reconnect",
+            "{} jet-tcp-accept gateway.jet.listener:port --forward-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID> [--max-reconnection-count=3]",
             env!("CARGO_PKG_NAME")
         ))
-        .action(proxy_action);
+        .action(jet_tcp_accept_action);
     apply_common_flags(apply_tcp_proxy_server_flags(cmd))
 }
 
-pub fn proxy_action(c: &Context) {
-    let res = TcpProxyArgs::parse("tcp-proxy", c).and_then(|args| {
+pub fn jet_tcp_accept_action(c: &Context) {
+    let res = JetTcpAcceptArgs::parse("jet-tcp-accept", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        run(log.clone(), jetsocat::tcp_proxy::proxy(args.common.addr, args.cmd, log))
+        run(log.clone(), jetsocat::tcp_proxy::jet_tcp_accept(args.common.addr, args.cmd, args.common.proxy_cfg, log))
     });
     exit(res);
 }
@@ -283,12 +283,12 @@ fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
         )
 }
 
-struct TcpProxyArgs {
+struct JetTcpAcceptArgs {
     common: CommonArgs,
-    cmd: TcpProxyCmd,
+    cmd: JetTcpAcceptCmd,
 }
 
-impl TcpProxyArgs {
+impl JetTcpAcceptArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(action, c)?;
 
@@ -298,16 +298,18 @@ impl TcpProxyArgs {
         let candidate_id = c
             .string_flag("candidate-id")
             .with_context(|| "command is missing --candidate-id")?;
-        let source_addr = c
-            .string_flag("source-addr")
-            .with_context(|| "command is missing --source-addr")?;
-        let auto_reconnect = c.bool_flag("auto-reconnect");
+        let forward_addr = c
+            .string_flag("forward-addr")
+            .with_context(|| "command is missing --forward-addr")?;
+        let max_reconnection_count = c
+            .int_flag("max-reconnection-count")
+            .unwrap_or(0) as usize;
 
-        let cmd = TcpProxyCmd {
-            source_addr,
+        let cmd = JetTcpAcceptCmd {
+            forward_addr,
             association_id,
             candidate_id,
-            auto_reconnect,
+            max_reconnection_count,
         };
 
         Ok(Self { common, cmd })
