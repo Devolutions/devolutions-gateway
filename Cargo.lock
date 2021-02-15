@@ -731,7 +731,7 @@ dependencies = [
  "tokio-util 0.4.0",
  "url 1.7.2",
  "url_serde",
- "uuid 0.7.4",
+ "uuid 0.8.2",
  "webpki",
  "winapi 0.3.9",
  "x509-parser",
@@ -1473,7 +1473,7 @@ dependencies = [
  "http 0.1.21",
  "httparse",
  "log",
- "uuid 0.7.4",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1494,7 +1494,7 @@ dependencies = [
  "slog-async",
  "slog-term",
  "tokio 1.0.1",
- "uuid 0.7.4",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3978,7 +3978,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90dbc611eb48397705a6b0f6e917da23ae517e4d127123d2cf7674206627d32a"
 dependencies = [
  "rand 0.6.5",
- "serde",
 ]
 
 [[package]]

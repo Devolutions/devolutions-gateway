@@ -14,7 +14,7 @@ native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
 jet-proto = { path = "../jet-proto" }
-uuid = { version = "0.7.1", features = ["v4"] }
+uuid = { version = "0.8", features = ["v4"] }
 
 # proxy support
 jetsocat-proxy = { path = "./proxy" }

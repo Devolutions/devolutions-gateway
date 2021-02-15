@@ -29,7 +29,7 @@ webpki = "0.21.0"
 native-tls = "0.2"
 byteorder = "1.2.7"
 bytes = "0.5"
-uuid = { version = "0.7.1", features = ["v4", "serde"] }
+uuid = { version = "0.8", features = ["v4", "serde"] }
 pcap-file = "0.10.0"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 serde = "1.0"
