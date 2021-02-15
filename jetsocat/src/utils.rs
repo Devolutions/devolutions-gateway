@@ -5,12 +5,12 @@ use async_tungstenite::{
     tungstenite::{client::IntoClientRequest, handshake::client::Response},
     WebSocketStream,
 };
+use jetsocat_proxy::{DestAddr, ToDestAddr};
+use std::net::SocketAddr;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
 };
-use jetsocat_proxy::{ToDestAddr, DestAddr};
-use std::net::SocketAddr;
 
 // See E0225 to understand why this trait is required
 pub trait MetaAsyncStream: 'static + AsyncRead + AsyncWrite + Unpin {}
@@ -19,33 +19,30 @@ impl<T> MetaAsyncStream for T where T: 'static + AsyncRead + AsyncWrite + Unpin 
 
 pub type AsyncStream = Box<dyn MetaAsyncStream>;
 
-pub async fn tcp_connect_async(
-    req_addr: impl ToDestAddr,
-    proxy_cfg: Option<ProxyConfig>,
-) -> Result<AsyncStream> {
+pub async fn tcp_connect_async(req_addr: impl ToDestAddr, proxy_cfg: Option<ProxyConfig>) -> Result<AsyncStream> {
     use jetsocat_proxy::socks4::Socks4Stream;
     use jetsocat_proxy::socks5::Socks5Stream;
     use jetsocat_proxy::http::HttpProxyStream;
 
     let stream: AsyncStream = match proxy_cfg {
         Some(ProxyConfig {
-                 ty: ProxyType::Socks4,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks4,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks4Stream::connect(stream, req_addr, "jetsocat").await?)
         }
         Some(ProxyConfig {
-                 ty: ProxyType::Socks5,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks5,
+            addr: proxy_addr,
+        }) => {
             let stream = TcpStream::connect(proxy_addr).await?;
             Box::new(Socks5Stream::connect(stream, req_addr).await?)
         }
         Some(ProxyConfig {
-                 ty: ProxyType::Socks,
-                 addr: proxy_addr,
-             }) => {
+            ty: ProxyType::Socks,
+            addr: proxy_addr,
+        }) => {
             // unknown SOCKS version, try SOCKS5 first and then SOCKS4
             let stream = TcpStream::connect(proxy_addr.clone()).await?;
             match Socks5Stream::connect(stream, &req_addr).await {
@@ -68,12 +65,11 @@ pub async fn tcp_connect_async(
             Box::new(HttpProxyStream::connect(stream, req_addr).await?)
         }
         None => {
-            let dest_addr = resolve_dest_addr(
-                req_addr.to_dest_addr().with_context(|| format!("Invalid target address"))?
-            ).await?;
+            let dest_addr =
+                resolve_dest_addr(req_addr.to_dest_addr().with_context(|| "Invalid target address")?).await?;
 
             Box::new(TcpStream::connect(dest_addr).await?)
-        },
+        }
     };
     Ok(stream)
 }
@@ -81,15 +77,13 @@ pub async fn tcp_connect_async(
 async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
     match dest_addr {
         DestAddr::Ip(socket_addr) => Ok(socket_addr),
-        DestAddr::Domain(host, port) => {
-            tokio::net::lookup_host((host.as_str(), port)).await
-                .with_context(|| "Lookup host failed")?
-                .next()
-                .ok_or_else(|| anyhow!("Failed to resolve target address"))
-        }
+        DestAddr::Domain(host, port) => tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .with_context(|| "Lookup host failed")?
+            .next()
+            .ok_or_else(|| anyhow!("Failed to resolve target address")),
     }
 }
-
 
 pub async fn ws_connect_async(
     addr: String,

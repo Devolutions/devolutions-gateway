@@ -29,10 +29,9 @@ impl Association {
     }
 
     pub fn get_first_accepted_tcp_candidate(&mut self) -> Option<&mut Candidate> {
-        self.candidates
-            .iter_mut()
-            .map(|(_, v)| v)
-            .find(|v| v.has_transport() && v.state() == CandidateState::Accepted && v.transport_type() == TransportType::Tcp)
+        self.candidates.iter_mut().map(|(_, v)| v).find(|v| {
+            v.has_transport() && v.state() == CandidateState::Accepted && v.transport_type() == TransportType::Tcp
+        })
     }
 
     pub fn add_candidate(&mut self, mut candidate: Candidate) {

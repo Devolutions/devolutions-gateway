@@ -1,14 +1,14 @@
+use crate::{
+    proxy::ProxyConfig,
+    utils::{tcp_connect_async, AsyncStream},
+};
 use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
 use jet_proto::JET_VERSION_V2;
+use jetsocat_proxy::{DestAddr, ToDestAddr};
 use slog::{debug, o, Logger};
 use tokio::pin;
 use uuid::Uuid;
-use jetsocat_proxy::{DestAddr, ToDestAddr};
-use crate::{
-    proxy::ProxyConfig,
-    utils::{AsyncStream, tcp_connect_async},
-};
 
 pub struct JetTcpAcceptCmd {
     pub forward_addr: String,
@@ -49,13 +49,9 @@ impl TcpServer {
         debug!(log, "Performing rendezvous connect...");
 
         for _ in 0..=self.max_reconnection_count {
-
-
-            let mut jet_server_stream =
-                tcp_connect_async(&self.jet_listener_addr, self.proxy_cfg.clone()).await?;
+            let mut jet_server_stream = tcp_connect_async(&self.jet_listener_addr, self.proxy_cfg.clone()).await?;
             // forward_addr points to local machine/network, proxy should be ignored
-            let server_stream =
-                tcp_connect_async(&self.forward_addr, None).await?;
+            let server_stream = tcp_connect_async(&self.forward_addr, None).await?;
 
             let log = log.clone();
 
@@ -121,11 +117,7 @@ impl TcpServer {
     }
 }
 
-async fn run_proxy(
-    jet_server_stream: AsyncStream,
-    tcp_server_transport: AsyncStream,
-    log: Logger
-) -> Result<()> {
+async fn run_proxy(jet_server_stream: AsyncStream, tcp_server_transport: AsyncStream, log: Logger) -> Result<()> {
     use crate::io::read_and_write;
     use futures_util::select;
 
@@ -168,12 +160,18 @@ async fn run_proxy(
     Ok(())
 }
 
-pub async fn jet_tcp_accept(addr: String, cmd: JetTcpAcceptCmd, proxy_cfg: Option<ProxyConfig>, log: slog::Logger) -> Result<()> {
+pub async fn jet_tcp_accept(
+    addr: String,
+    cmd: JetTcpAcceptCmd,
+    proxy_cfg: Option<ProxyConfig>,
+    log: slog::Logger,
+) -> Result<()> {
     let jet_listener_addr = addr
         .as_str()
         .to_dest_addr()
         .with_context(|| "Invalid jet listener address")?;
-    let forward_addr = cmd.forward_addr
+    let forward_addr = cmd
+        .forward_addr
         .as_str()
         .to_dest_addr()
         .with_context(|| "Invalid forward address")?;
@@ -188,7 +186,7 @@ pub async fn jet_tcp_accept(addr: String, cmd: JetTcpAcceptCmd, proxy_cfg: Optio
         association_id,
         candidate_id,
         cmd.max_reconnection_count,
-        proxy_cfg
+        proxy_cfg,
     )
     .serve(log)
     .await

@@ -140,7 +140,10 @@ fn jet_tcp_accept_command() -> Command {
 pub fn jet_tcp_accept_action(c: &Context) {
     let res = JetTcpAcceptArgs::parse("jet-tcp-accept", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        run(log.clone(), jetsocat::tcp_proxy::jet_tcp_accept(args.common.addr, args.cmd, args.common.proxy_cfg, log))
+        run(
+            log.clone(),
+            jetsocat::tcp_proxy::jet_tcp_accept(args.common.addr, args.cmd, args.common.proxy_cfg, log),
+        )
     });
     exit(res);
 }
@@ -301,9 +304,7 @@ impl JetTcpAcceptArgs {
         let forward_addr = c
             .string_flag("forward-addr")
             .with_context(|| "command is missing --forward-addr")?;
-        let max_reconnection_count = c
-            .int_flag("max-reconnection-count")
-            .unwrap_or(0) as usize;
+        let max_reconnection_count = c.int_flag("max-reconnection-count").unwrap_or(0) as usize;
 
         let cmd = JetTcpAcceptCmd {
             forward_addr,
