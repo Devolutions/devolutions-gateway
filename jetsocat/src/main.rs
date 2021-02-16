@@ -271,7 +271,7 @@ fn apply_pipe_server_flags(cmd: Command) -> Command {
 }
 
 fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
-    cmd.flag(Flag::new("source-addr", FlagType::String).description("Source IP:PORT for tcp forwarding"))
+    cmd.flag(Flag::new("forward-addr", FlagType::String).description("Source IP:PORT for tcp forwarding"))
         .flag(
             Flag::new("association-id", FlagType::String)
                 .description("Jet association UUID for Devolutions-Gateway rendezvous connection"),
@@ -281,8 +281,8 @@ fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
                 .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
         )
         .flag(
-            Flag::new("auto-reconnect", FlagType::Bool)
-                .description("Jetsocat will automatically reconnect to Jet when connection interrupts"),
+            Flag::new("max-reconnection-count", FlagType::Int)
+                .description("Max reconnection count for tcp forwarding"),
         )
 }
 
