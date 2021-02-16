@@ -20,9 +20,9 @@ impl<T> MetaAsyncStream for T where T: 'static + AsyncRead + AsyncWrite + Unpin 
 pub type AsyncStream = Box<dyn MetaAsyncStream>;
 
 pub async fn tcp_connect_async(req_addr: impl ToDestAddr, proxy_cfg: Option<ProxyConfig>) -> Result<AsyncStream> {
+    use jetsocat_proxy::http::HttpProxyStream;
     use jetsocat_proxy::socks4::Socks4Stream;
     use jetsocat_proxy::socks5::Socks5Stream;
-    use jetsocat_proxy::http::HttpProxyStream;
 
     let stream: AsyncStream = match proxy_cfg {
         Some(ProxyConfig {

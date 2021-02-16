@@ -281,8 +281,7 @@ fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
                 .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
         )
         .flag(
-            Flag::new("max-reconnection-count", FlagType::Int)
-                .description("Max reconnection count for tcp forwarding"),
+            Flag::new("max-reconnection-count", FlagType::Int).description("Max reconnection count for tcp forwarding"),
         )
 }
 
