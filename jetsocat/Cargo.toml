@@ -1,6 +1,6 @@
 [package]
 name = "jetsocat"
-version = "2021.1.0"
+version = "2021.1.1"
 authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
 edition = "2018"
 description = "WebSocket toolkit for jet protocol related operations"
