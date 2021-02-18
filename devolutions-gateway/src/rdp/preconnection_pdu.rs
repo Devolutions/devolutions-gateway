@@ -146,7 +146,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
             dest_host.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Invalid URL: Can't set default port for routing URL".to_string(),
+                    "Invalid URL: couldn't set default port for routing URL".to_string(),
                 )
             })?;
         }
@@ -183,7 +183,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
             let jet_aid = claims.jet_aid.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "RdpTcpRendezvous token routing mode, but Jet AssociationId is missing".to_string(),
+                    "RdpTcpRendezvous token routing mode, but Jet AssociationId is missing",
                 )
             })?;
 
@@ -200,7 +200,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
             let dest_host = dest_host.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "dest_host claim is missing for RdpTcp mode".to_string(),
+                    "dest_host claim is missing for RdpTcp mode",
                 )
             })?;
 
@@ -208,7 +208,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         }
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "Received a non encrypted JWT containing credentials. This is bad.".to_string(),
+            "Received a non encrypted JWT containing credentials. This is bad.",
         )),
     }
 }

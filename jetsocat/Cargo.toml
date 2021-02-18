@@ -13,8 +13,10 @@ rustls = ["async-tungstenite/tokio-rustls"]
 native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
+
+# jet protocol for TCP transport
 jet-proto = { path = "../jet-proto" }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = "0.8"
 
 # proxy support
 jetsocat-proxy = { path = "./proxy" }
@@ -29,7 +31,6 @@ futures-util = "0.3"
 futures-channel = "0.3"
 futures-io = "0.3"
 async-tungstenite = "0.12"
-
 
 # logging
 slog = "2.5"

@@ -93,7 +93,7 @@ fn accept_command() -> Command {
         .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
         .action(accept_action);
 
-    apply_common_flags(apply_pipe_server_flags(cmd))
+    apply_common_flags(apply_server_pipe_flags(cmd))
 }
 
 pub fn accept_action(c: &Context) {
@@ -114,7 +114,7 @@ fn listen_command() -> Command {
         .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
         .action(listen_action);
 
-    apply_common_flags(apply_pipe_server_flags(cmd))
+    apply_common_flags(apply_server_pipe_flags(cmd))
 }
 
 pub fn listen_action(c: &Context) {
@@ -130,7 +130,7 @@ fn jet_tcp_accept_command() -> Command {
         .alias("p")
         .description("Reverse tcp-proxy")
         .usage(format!(
-            "{} jet-tcp-accept gateway.jet.listener:port --forward-addr 127.0.0.1:3389 --association-id <UUID> --candidate-id <UUID> [--max-reconnection-count=3]",
+            "{} jet-tcp-accept <GATEWAY_ADDR> --forward-addr <ADDR> --association-id <UUID> --candidate-id <UUID> [--max-reconnection-count=3]",
             env!("CARGO_PKG_NAME")
         ))
         .action(jet_tcp_accept_action);
@@ -260,7 +260,7 @@ impl CommonArgs {
     }
 }
 
-fn apply_pipe_server_flags(cmd: Command) -> Command {
+fn apply_server_pipe_flags(cmd: Command) -> Command {
     cmd.flag(
         Flag::new("sh-c", FlagType::String).description("Start specified command line using `sh -c` (even on Windows)"),
     )
@@ -296,13 +296,13 @@ impl JetTcpAcceptArgs {
 
         let association_id = c
             .string_flag("association-id")
-            .with_context(|| "command is missing --association-id")?;
+            .with_context(|| "missing argument --association-id")?;
         let candidate_id = c
             .string_flag("candidate-id")
-            .with_context(|| "command is missing --candidate-id")?;
+            .with_context(|| "missing argument --candidate-id")?;
         let forward_addr = c
             .string_flag("forward-addr")
-            .with_context(|| "command is missing --forward-addr")?;
+            .with_context(|| "missing argument --forward-addr")?;
         let max_reconnection_count = c.int_flag("max-reconnection-count").unwrap_or(0) as usize;
 
         let cmd = JetTcpAcceptCmd {
@@ -326,14 +326,12 @@ impl ServerArgs {
         let common = CommonArgs::parse(action, c)?;
 
         let cmd = if let Ok(command_string) = c.string_flag("sh-c") {
-            Some(PipeCmd::ShC(command_string))
+            PipeCmd::ShC(command_string)
         } else if let Ok(command_string) = c.string_flag("cmd") {
-            Some(PipeCmd::Cmd(command_string))
+            PipeCmd::Cmd(command_string)
         } else {
-            None
+            return Err(anyhow::anyhow!("Pipe command is missing (--sh-c OR --cmd)"));
         };
-
-        let cmd = cmd.with_context(|| "command is missing arguments (--sh-c OR --cmd)")?;
 
         Ok(Self { common, cmd })
     }
