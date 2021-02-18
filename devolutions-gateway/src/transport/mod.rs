@@ -1,27 +1,20 @@
 use futures::{ready, Sink, Stream};
 use slog_scope::{debug, error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use std::{
-    future::Future,
-    net::SocketAddr,
-    ops::DerefMut,
-    pin::Pin,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-};
-use tokio::{
-    io::{self, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
-    net::TcpStream,
-};
+use std::future::Future;
+use std::net::SocketAddr;
+use std::ops::DerefMut;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf};
+use tokio::net::TcpStream;
 use url::Url;
 
-use crate::{
-    interceptor::PacketInterceptor,
-    transport::{tcp::TcpTransport, ws::WsTransport},
-};
+use crate::interceptor::PacketInterceptor;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::ws::WsTransport;
 use tokio::io::Error;
 
 pub mod tcp;

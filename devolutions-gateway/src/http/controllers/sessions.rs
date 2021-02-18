@@ -1,9 +1,7 @@
 use crate::SESSION_IN_PROGRESS_COUNT;
-use saphir::{
-    controller::Controller,
-    http::{Method, StatusCode},
-    macros::controller,
-};
+use saphir::controller::Controller;
+use saphir::http::{Method, StatusCode};
+use saphir::macros::controller;
 use std::sync::atomic::Ordering;
 
 pub struct SessionsController;

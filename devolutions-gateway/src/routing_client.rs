@@ -1,12 +1,12 @@
-use std::{io, sync::Arc};
+use std::io;
+use std::sync::Arc;
 
 use url::Url;
 
-use crate::{
-    config::Config,
-    proxy::Proxy,
-    transport::{tcp::TcpTransport, Transport},
-};
+use crate::config::Config;
+use crate::proxy::Proxy;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::Transport;
 
 pub struct Client {
     routing_url: Url,

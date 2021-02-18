@@ -10,29 +10,30 @@ mod sequence_future;
 use accept_connection_future::AcceptConnectionMode;
 use slog_scope::{error, info};
 
-use sspi::{internal::credssp, AuthIdentity};
+use sspi::internal::credssp;
+use sspi::AuthIdentity;
 
 use bytes::Buf;
-use std::{io, sync::Arc};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use std::io;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
 pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 
-use self::{
-    accept_connection_future::AcceptConnectionFuture, connection_sequence_future::ConnectionSequenceFuture,
-    sequence_future::create_downgrade_dvc_capabilities_future,
-};
+use self::accept_connection_future::AcceptConnectionFuture;
+use self::connection_sequence_future::ConnectionSequenceFuture;
+use self::sequence_future::create_downgrade_dvc_capabilities_future;
 
-use crate::{
-    config::Config,
-    interceptor::rdp::RdpMessageReader,
-    jet_client::JetAssociationsMap,
-    jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy,
-    transport::{tcp::TcpTransport, JetTransport, Transport},
-    utils, Proxy,
-};
+use crate::config::Config;
+use crate::interceptor::rdp::RdpMessageReader;
+use crate::jet_client::JetAssociationsMap;
+use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::{utils, Proxy};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";

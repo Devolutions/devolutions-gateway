@@ -1,16 +1,13 @@
-use std::{
-    convert::TryInto,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
+use std::convert::TryInto;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use slog_scope::error;
 use url::Url;
 use uuid::Uuid;
 
-use crate::{jet::TransportType, transport::JetTransport};
+use crate::jet::TransportType;
+use crate::transport::JetTransport;
 
 #[derive(Serialize, Deserialize)]
 pub struct CandidateResponse {

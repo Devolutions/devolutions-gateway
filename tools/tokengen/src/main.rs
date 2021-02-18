@@ -1,16 +1,14 @@
 use clap::Clap;
 use humantime::parse_duration;
-use picky::{
-    jose::{
-        jwe::{Jwe, JweAlg, JweEnc},
-        jws::JwsAlg,
-        jwt::JwtSig,
-    },
-    key::{PrivateKey, PublicKey},
-    pem::Pem,
-};
+use picky::jose::jwe::{Jwe, JweAlg, JweEnc};
+use picky::jose::jws::JwsAlg;
+use picky::jose::jwt::JwtSig;
+use picky::key::{PrivateKey, PublicKey};
+use picky::pem::Pem;
 use serde::Serialize;
-use std::{error::Error, path::PathBuf, time::SystemTime};
+use std::error::Error;
+use std::path::PathBuf;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 #[derive(Clap)]

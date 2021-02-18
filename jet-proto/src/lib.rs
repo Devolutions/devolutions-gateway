@@ -3,19 +3,15 @@ pub mod connect;
 pub mod test;
 pub mod utils;
 
-use crate::{
-    accept::{JetAcceptReq, JetAcceptRsp},
-    connect::{JetConnectReq, JetConnectRsp},
-    utils::RequestHelper,
-};
+use crate::accept::{JetAcceptReq, JetAcceptRsp};
+use crate::connect::{JetConnectReq, JetConnectRsp};
+use crate::utils::RequestHelper;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 pub use http::StatusCode;
 use log::trace;
-use std::{
-    env,
-    io::{self, Read},
-    sync::Once,
-};
+use std::env;
+use std::io::{self, Read};
+use std::sync::Once;
 use test::{JetTestReq, JetTestRsp};
 use uuid::Uuid;
 
@@ -349,7 +345,8 @@ mod tests {
 
     #[test]
     fn test_accept_v2() {
-        use std::{io::Cursor, str::FromStr};
+        use std::io::Cursor;
+        use std::str::FromStr;
 
         let mut cursor = Cursor::new(TEST_JET_ACCEPT_REQ_V2);
         let jet_message = JetMessage::read_request(&mut cursor).unwrap();

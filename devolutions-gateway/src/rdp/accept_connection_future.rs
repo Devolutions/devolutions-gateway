@@ -1,26 +1,18 @@
-use crate::{
-    config::Config,
-    rdp::{
-        preconnection_pdu::{self, decode_preconnection_pdu, TokenRoutingMode},
-        RdpIdentity,
-    },
-    transport::x224::NegotiationWithClientTransport,
-};
+use crate::config::Config;
+use crate::rdp::preconnection_pdu::{self, decode_preconnection_pdu, TokenRoutingMode};
+use crate::rdp::RdpIdentity;
+use crate::transport::x224::NegotiationWithClientTransport;
 use bytes::BytesMut;
 use futures::ready;
 use ironrdp::{nego, PduBufferParsing};
-use std::{
-    future::Future,
-    io,
-    ops::DerefMut,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-use tokio::{
-    io::{AsyncRead, ReadBuf},
-    net::TcpStream,
-};
+use std::future::Future;
+use std::io;
+use std::ops::DerefMut;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, ReadBuf};
+use tokio::net::TcpStream;
 use tokio_util::codec::Decoder;
 use url::Url;
 use uuid::Uuid;

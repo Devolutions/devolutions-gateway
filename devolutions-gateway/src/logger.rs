@@ -2,7 +2,9 @@ use chrono::Local;
 use slog::{o, Drain, Duplicate, FilterLevel, Level, Logger, Never, OwnedKVList, Record};
 use slog_async::{Async, OverflowStrategy};
 use slog_term::{Decorator, FullFormat, PlainDecorator, TermDecorator};
-use std::{env, fs::OpenOptions, io, result::Result};
+use std::fs::OpenOptions;
+use std::result::Result;
+use std::{env, io};
 
 const LOGGER_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S:%6f";
 const DEFAULT_CHAN_SIZE: usize = 256;

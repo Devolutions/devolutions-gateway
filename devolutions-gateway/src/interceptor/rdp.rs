@@ -1,22 +1,19 @@
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, io};
+use std::collections::HashMap;
+use std::io;
 
-use ironrdp::{
-    fast_path::{FastPathError, FastPathHeader},
-    mcs::DisconnectUltimatumReason,
-    nego::NegotiationError,
-    rdp::vc,
-    Data, McsPdu, PduParsing, TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH,
-};
+use ironrdp::fast_path::{FastPathError, FastPathHeader};
+use ironrdp::mcs::DisconnectUltimatumReason;
+use ironrdp::nego::NegotiationError;
+use ironrdp::rdp::vc;
+use ironrdp::{Data, McsPdu, PduParsing, TpktHeader, TPDU_DATA_HEADER_LENGTH, TPKT_HEADER_LENGTH};
 
 use slog_scope::{error, info};
 
-use crate::{
-    interceptor::{MessageReader, PduSource},
-    rdp::DvcManager,
-};
+use crate::interceptor::{MessageReader, PduSource};
+use crate::rdp::DvcManager;
 
 pub struct RdpMessageReader {
     static_channels: HashMap<String, u16>,

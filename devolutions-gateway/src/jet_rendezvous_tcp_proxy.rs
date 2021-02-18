@@ -1,10 +1,13 @@
+use crate::config::Config;
+use crate::http::controllers::jet::start_remove_association_future;
 use crate::jet::candidate::CandidateState;
-use crate::{
-    config::Config, http::controllers::jet::start_remove_association_future, jet_client::JetAssociationsMap,
-    proxy::Proxy, transport::JetTransport, utils::into_other_io_error,
-};
+use crate::jet_client::JetAssociationsMap;
+use crate::proxy::Proxy;
+use crate::transport::JetTransport;
+use crate::utils::into_other_io_error;
 use slog_scope::error;
-use std::{io, sync::Arc};
+use std::io;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 

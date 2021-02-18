@@ -1,9 +1,7 @@
 use crate::config::Config;
-use saphir::{
-    controller::Controller,
-    http::{Method, StatusCode},
-    macros::controller,
-};
+use saphir::controller::Controller;
+use saphir::http::{Method, StatusCode};
+use saphir::macros::controller;
 use std::sync::Arc;
 
 pub struct HealthController {

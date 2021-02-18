@@ -125,15 +125,14 @@ where
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty reply"))?;
 
     let code = status
-        .split(" ")
-        .skip(1)
-        .next()
+        .split(' ')
+        .nth(1)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid status"))?;
 
     // Any 2xx (Successful) response indicates that the sender (and all inbound proxies)
     // will switch to tunnel mode immediately after the
     // blank line that concludes the successful response's header section
-    if code.chars().next() != Some('2') {
+    if !code.starts_with('2') {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("request rejected: {}", status),

@@ -1,34 +1,28 @@
-use std::{collections::HashMap, future::Future, io, pin::Pin, sync::Arc};
+use std::collections::HashMap;
+use std::future::Future;
+use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use jet_proto::{
-    accept::{JetAcceptReq, JetAcceptRsp},
-    connect::{JetConnectReq, JetConnectRsp},
-    test::{JetTestReq, JetTestRsp},
-    JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
-};
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use jet_proto::connect::{JetConnectReq, JetConnectRsp};
+use jet_proto::test::{JetTestReq, JetTestRsp};
+use jet_proto::{JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
 use slog_scope::{debug, error};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::Mutex,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::{
-    config::Config,
-    http::controllers::jet::remove_association,
-    jet::{
-        association::Association,
-        candidate::{Candidate, CandidateState},
-        TransportType,
-    },
-    transport::JetTransport,
-    utils::{
-        association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
-        into_other_io_error as error_other,
-    },
-    Proxy,
-};
+use crate::config::Config;
+use crate::http::controllers::jet::remove_association;
+use crate::jet::association::Association;
+use crate::jet::candidate::{Candidate, CandidateState};
+use crate::jet::TransportType;
+use crate::transport::JetTransport;
+use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
+use crate::utils::into_other_io_error as error_other;
+use crate::Proxy;
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 

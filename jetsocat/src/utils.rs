@@ -1,16 +1,13 @@
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{anyhow, Context as _, Result};
-use async_tungstenite::{
-    tokio::ClientStream,
-    tungstenite::{client::IntoClientRequest, handshake::client::Response},
-    WebSocketStream,
-};
+use async_tungstenite::tokio::ClientStream;
+use async_tungstenite::tungstenite::client::IntoClientRequest;
+use async_tungstenite::tungstenite::handshake::client::Response;
+use async_tungstenite::WebSocketStream;
 use jetsocat_proxy::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 
 // See E0225 to understand why this trait is required
 pub trait MetaAsyncStream: 'static + AsyncRead + AsyncWrite + Unpin {}

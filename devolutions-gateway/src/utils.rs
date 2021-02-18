@@ -1,21 +1,18 @@
 pub mod association;
 
-use std::{
-    collections::HashMap,
-    fs,
-    future::Future,
-    hash::Hash,
-    io::{self, BufReader},
-    net::SocketAddr,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::collections::HashMap;
+use std::fs;
+use std::future::Future;
+use std::hash::Hash;
+use std::io::{self, BufReader};
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use futures::{ready, stream::Stream};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{lookup_host, TcpListener, TcpStream},
-};
+use futures::ready;
+use futures::stream::Stream;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::{lookup_host, TcpListener, TcpStream};
 use tokio_rustls::rustls;
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;

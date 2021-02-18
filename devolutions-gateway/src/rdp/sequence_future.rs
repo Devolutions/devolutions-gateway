@@ -5,22 +5,18 @@ mod negotiation;
 mod nla;
 mod post_mcs;
 
-pub use self::{
-    dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture},
-    finalization::Finalization,
-    mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels},
-    negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture},
-    nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture},
-    post_mcs::{PostMcs, PostMcsFutureTransport},
-};
+pub use self::dvc_capabilities::{create_downgrade_dvc_capabilities_future, DowngradeDvcCapabilitiesFuture};
+pub use self::finalization::Finalization;
+pub use self::mcs::{McsFuture, McsFutureTransport, McsInitialFuture, StaticChannels};
+pub use self::negotiation::{create_negotiation_request, NegotiationWithClientFuture, NegotiationWithServerFuture};
+pub use self::nla::{NlaTransport, NlaWithClientFuture, NlaWithServerFuture};
+pub use self::post_mcs::{PostMcs, PostMcsFutureTransport};
 
-use std::{
-    io,
-    marker::PhantomData,
-    ops::DerefMut,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::io;
+use std::marker::PhantomData;
+use std::ops::DerefMut;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use futures::{ready, Future, SinkExt, Stream};
 use tokio::io::{AsyncRead, AsyncWrite};

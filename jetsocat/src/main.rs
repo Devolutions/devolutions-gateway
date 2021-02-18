@@ -1,12 +1,12 @@
 use anyhow::Context as _;
-use jetsocat::{
-    pipe::PipeCmd,
-    proxy::{detect_proxy, ProxyConfig, ProxyType},
-    tcp_proxy::JetTcpAcceptCmd,
-};
+use jetsocat::pipe::PipeCmd;
+use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
+use jetsocat::tcp_proxy::JetTcpAcceptCmd;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
-use std::{env, future::Future, path::PathBuf};
+use std::env;
+use std::future::Future;
+use std::path::PathBuf;
 use tokio::runtime;
 
 fn main() {
@@ -341,7 +341,8 @@ impl ServerArgs {
 
 fn setup_logger(logging: Logging) -> slog::Logger {
     use slog::Drain;
-    use std::{fs::OpenOptions, panic};
+    use std::fs::OpenOptions;
+    use std::panic;
 
     let drain = match logging {
         Logging::Term => {

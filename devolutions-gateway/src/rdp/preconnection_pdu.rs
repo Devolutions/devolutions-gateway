@@ -1,11 +1,10 @@
-use crate::{config::Config, rdp::RdpIdentity};
+use crate::config::Config;
+use crate::rdp::RdpIdentity;
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
-use picky::jose::{
-    jwe::Jwe,
-    jwt::{JwtDate, JwtSig, JwtValidator},
-};
+use picky::jose::jwe::Jwe;
+use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
 use sspi::AuthIdentity;
 use std::io;
 use url::Url;
@@ -198,10 +197,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         }
         None => {
             let dest_host = dest_host.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "dest_host claim is missing for RdpTcp mode",
-                )
+                io::Error::new(io::ErrorKind::InvalidData, "dest_host claim is missing for RdpTcp mode")
             })?;
 
             Ok(TokenRoutingMode::RdpTcp(dest_host))

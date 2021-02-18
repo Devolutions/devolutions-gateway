@@ -1,9 +1,6 @@
 use gcc::ClientEarlyCapabilityFlags;
-use ironrdp::{
-    gcc, nego,
-    rdp::{capability_sets, ClientInfoFlags, Credentials},
-    CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive,
-};
+use ironrdp::rdp::{capability_sets, ClientInfoFlags, Credentials};
+use ironrdp::{gcc, nego, CapabilitySet, ClientInfoPdu, ConnectInitial, ConnectResponse, DemandActive};
 
 pub trait Filter {
     fn filter(&mut self, config: &FilterConfig);
@@ -78,14 +75,15 @@ impl Filter for ClientInfoPdu {
 impl Filter for DemandActive {
     fn filter(&mut self, _config: &FilterConfig) {
         self.capability_sets.retain(|capability_set| {
-            !matches!(capability_set,
+            !matches!(
+                capability_set,
                 CapabilitySet::BitmapCacheHostSupport(_)
-                | CapabilitySet::Control(_)
-                | CapabilitySet::WindowActivation(_)
-                | CapabilitySet::Share(_)
-                | CapabilitySet::Font(_)
-                | CapabilitySet::LargePointer(_)
-                | CapabilitySet::DesktopComposition(_)
+                    | CapabilitySet::Control(_)
+                    | CapabilitySet::WindowActivation(_)
+                    | CapabilitySet::Share(_)
+                    | CapabilitySet::Font(_)
+                    | CapabilitySet::LargePointer(_)
+                    | CapabilitySet::DesktopComposition(_)
             )
         });
 

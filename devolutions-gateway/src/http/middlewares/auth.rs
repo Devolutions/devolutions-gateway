@@ -1,12 +1,10 @@
 use crate::config::Config;
 use futures::future::{BoxFuture, FutureExt};
-use saphir::{
-    error::SaphirError,
-    http::{self, StatusCode},
-    http_context::{HttpContext, State},
-    middleware::{Middleware, MiddlewareChain},
-    response::Builder as ResponseBuilder,
-};
+use saphir::error::SaphirError;
+use saphir::http::{self, StatusCode};
+use saphir::http_context::{HttpContext, State};
+use saphir::middleware::{Middleware, MiddlewareChain};
+use saphir::response::Builder as ResponseBuilder;
 use slog_scope::error;
 use std::sync::Arc;
 

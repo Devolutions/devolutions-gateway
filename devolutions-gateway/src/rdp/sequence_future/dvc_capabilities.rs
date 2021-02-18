@@ -1,25 +1,20 @@
-use std::{io, marker::PhantomData};
+use std::io;
+use std::marker::PhantomData;
 
 use bytes::{Buf, BytesMut};
-use ironrdp::{
-    mcs::SendDataContext,
-    rdp::vc::{
-        self,
-        dvc::{self, gfx},
-    },
-    McsPdu, PduParsing,
-};
+use ironrdp::mcs::SendDataContext;
+use ironrdp::rdp::vc;
+use ironrdp::rdp::vc::dvc::{self, gfx};
+use ironrdp::{McsPdu, PduParsing};
 use slog_scope::debug;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use tokio_util::codec::Framed;
 
 use super::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
-use crate::{
-    interceptor::PduSource,
-    rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME},
-    transport::rdp::{RdpPdu, RdpTransport},
-};
+use crate::interceptor::PduSource;
+use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
+use crate::transport::rdp::{RdpPdu, RdpTransport};
 
 type DvcCapabilitiesTransport = Framed<TlsStream<TcpStream>, RdpTransport>;
 

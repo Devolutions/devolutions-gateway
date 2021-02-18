@@ -2,19 +2,13 @@
 #![allow(unused_imports)]
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use jet_proto::{
-    accept::{JetAcceptReq, JetAcceptRsp},
-    connect::JetConnectReq,
-    JetMessage, JET_VERSION_V1,
-};
-use std::{
-    env,
-    io::{self, Cursor, Error, Read, Write},
-    net::{TcpListener, TcpStream},
-    process,
-    str::FromStr,
-    thread,
-};
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use jet_proto::connect::JetConnectReq;
+use jet_proto::{JetMessage, JET_VERSION_V1};
+use std::io::{self, Cursor, Error, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::str::FromStr;
+use std::{env, process, thread};
 use uuid::Uuid;
 
 type Port = u16;

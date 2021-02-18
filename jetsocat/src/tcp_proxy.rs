@@ -1,7 +1,5 @@
-use crate::{
-    proxy::ProxyConfig,
-    utils::{tcp_connect_async, AsyncStream},
-};
+use crate::proxy::ProxyConfig;
+use crate::utils::{tcp_connect_async, AsyncStream};
 use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
 use jet_proto::JET_VERSION_V2;
@@ -69,7 +67,8 @@ impl TcpServer {
     }
 
     async fn send_jet_accept_request(&self, jet_server_stream: &mut AsyncStream) -> Result<()> {
-        use jet_proto::{accept::JetAcceptReq, JetMessage};
+        use jet_proto::accept::JetAcceptReq;
+        use jet_proto::JetMessage;
         use tokio::io::AsyncWriteExt;
 
         let jet_accept_request = JetMessage::JetAcceptReq(JetAcceptReq {

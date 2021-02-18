@@ -1,10 +1,8 @@
 use std::io;
 
 use bytes::{Buf, BytesMut};
-use ironrdp::{
-    fast_path::{FastPathError, FastPathHeader},
-    PduParsing,
-};
+use ironrdp::fast_path::{FastPathError, FastPathHeader};
+use ironrdp::PduParsing;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Default)]
