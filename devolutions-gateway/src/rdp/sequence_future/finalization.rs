@@ -1,9 +1,7 @@
 use std::io;
 
-use ironrdp::{
-    mcs::SendDataContext, ControlAction, McsPdu, PduParsing, ShareControlHeader, ShareControlPdu, ShareDataHeader,
-    ShareDataPdu,
-};
+use ironrdp::mcs::SendDataContext;
+use ironrdp::{ControlAction, McsPdu, PduParsing, ShareControlHeader, ShareControlPdu, ShareDataHeader, ShareDataPdu};
 use slog_scope::debug;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;

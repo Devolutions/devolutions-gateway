@@ -1,16 +1,12 @@
 use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
-use picky::{
-    key::{PrivateKey, PublicKey},
-    pem::Pem,
-};
+use picky::key::{PrivateKey, PublicKey};
+use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    fs::File,
-    io::BufReader,
-    path::{Path, PathBuf},
-};
+use std::env;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 const ARG_API_KEY: &str = "api-key";

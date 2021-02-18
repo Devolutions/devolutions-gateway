@@ -1,7 +1,7 @@
-use anyhow::anyhow;
 use anyhow::Context as _;
 use jetsocat::pipe::PipeCmd;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
+use jetsocat::tcp_proxy::JetTcpAcceptCmd;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{info, o, Logger};
 use std::env;
@@ -26,7 +26,8 @@ fn main() {
         .usage(generate_usage())
         .command(connect_command())
         .command(accept_command())
-        .command(listen_command());
+        .command(listen_command())
+        .command(jet_tcp_accept_command());
 
     app.run(args);
 }
@@ -92,7 +93,7 @@ fn accept_command() -> Command {
         .usage(format!("{} accept <ws://URL | wss://URL>", env!("CARGO_PKG_NAME")))
         .action(accept_action);
 
-    apply_common_flags(apply_server_side_flags(cmd))
+    apply_common_flags(apply_server_pipe_flags(cmd))
 }
 
 pub fn accept_action(c: &Context) {
@@ -100,7 +101,7 @@ pub fn accept_action(c: &Context) {
         let log = setup_logger(args.common.logging);
         run(
             log.clone(),
-            jetsocat::server::accept(args.common.addr, args.pipe, args.common.proxy_cfg, log),
+            jetsocat::server::accept(args.common.addr, args.cmd, args.common.proxy_cfg, log),
         )
     });
     exit(res);
@@ -113,13 +114,36 @@ fn listen_command() -> Command {
         .usage(format!("{} listen BINDING_ADDRESS", env!("CARGO_PKG_NAME")))
         .action(listen_action);
 
-    apply_common_flags(apply_server_side_flags(cmd))
+    apply_common_flags(apply_server_pipe_flags(cmd))
 }
 
 pub fn listen_action(c: &Context) {
     let res = ServerArgs::parse("listen", c).and_then(|args| {
         let log = setup_logger(args.common.logging);
-        run(log.clone(), jetsocat::server::listen(args.common.addr, args.pipe, log))
+        run(log.clone(), jetsocat::server::listen(args.common.addr, args.cmd, log))
+    });
+    exit(res);
+}
+
+fn jet_tcp_accept_command() -> Command {
+    let cmd = Command::new("jet-tcp-accept")
+        .alias("p")
+        .description("Reverse tcp-proxy")
+        .usage(format!(
+            "{} jet-tcp-accept <GATEWAY_ADDR> --forward-addr <ADDR> --association-id <UUID> --candidate-id <UUID> [--max-reconnection-count=3]",
+            env!("CARGO_PKG_NAME")
+        ))
+        .action(jet_tcp_accept_action);
+    apply_common_flags(apply_tcp_proxy_server_flags(cmd))
+}
+
+pub fn jet_tcp_accept_action(c: &Context) {
+    let res = JetTcpAcceptArgs::parse("jet-tcp-accept", c).and_then(|args| {
+        let log = setup_logger(args.common.logging);
+        run(
+            log.clone(),
+            jetsocat::tcp_proxy::jet_tcp_accept(args.common.addr, args.cmd, args.common.proxy_cfg, log),
+        )
     });
     exit(res);
 }
@@ -236,7 +260,7 @@ impl CommonArgs {
     }
 }
 
-fn apply_server_side_flags(cmd: Command) -> Command {
+fn apply_server_pipe_flags(cmd: Command) -> Command {
     cmd.flag(
         Flag::new("sh-c", FlagType::String).description("Start specified command line using `sh -c` (even on Windows)"),
     )
@@ -246,24 +270,70 @@ fn apply_server_side_flags(cmd: Command) -> Command {
     )
 }
 
+fn apply_tcp_proxy_server_flags(cmd: Command) -> Command {
+    cmd.flag(Flag::new("forward-addr", FlagType::String).description("Source IP:PORT for tcp forwarding"))
+        .flag(
+            Flag::new("association-id", FlagType::String)
+                .description("Jet association UUID for Devolutions-Gateway rendezvous connection"),
+        )
+        .flag(
+            Flag::new("candidate-id", FlagType::String)
+                .description("Jet candidate UUID for Devolutions-Gateway rendezvous connection"),
+        )
+        .flag(
+            Flag::new("max-reconnection-count", FlagType::Int).description("Max reconnection count for tcp forwarding"),
+        )
+}
+
+struct JetTcpAcceptArgs {
+    common: CommonArgs,
+    cmd: JetTcpAcceptCmd,
+}
+
+impl JetTcpAcceptArgs {
+    fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(action, c)?;
+
+        let association_id = c
+            .string_flag("association-id")
+            .with_context(|| "missing argument --association-id")?;
+        let candidate_id = c
+            .string_flag("candidate-id")
+            .with_context(|| "missing argument --candidate-id")?;
+        let forward_addr = c
+            .string_flag("forward-addr")
+            .with_context(|| "missing argument --forward-addr")?;
+        let max_reconnection_count = c.int_flag("max-reconnection-count").unwrap_or(0) as usize;
+
+        let cmd = JetTcpAcceptCmd {
+            forward_addr,
+            association_id,
+            candidate_id,
+            max_reconnection_count,
+        };
+
+        Ok(Self { common, cmd })
+    }
+}
+
 struct ServerArgs {
     common: CommonArgs,
-    pipe: PipeCmd,
+    cmd: PipeCmd,
 }
 
 impl ServerArgs {
     fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(action, c)?;
 
-        let pipe = if let Ok(command_string) = c.string_flag("sh-c") {
+        let cmd = if let Ok(command_string) = c.string_flag("sh-c") {
             PipeCmd::ShC(command_string)
         } else if let Ok(command_string) = c.string_flag("cmd") {
             PipeCmd::Cmd(command_string)
         } else {
-            return Err(anyhow!("Command is missing (--sh-c OR --cmd)"));
+            return Err(anyhow::anyhow!("Pipe command is missing (--sh-c OR --cmd)"));
         };
 
-        Ok(ServerArgs { common, pipe })
+        Ok(Self { common, cmd })
     }
 }
 

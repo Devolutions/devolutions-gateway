@@ -1,4 +1,5 @@
-use std::{collections::HashMap, io, iter};
+use std::collections::HashMap;
+use std::{io, iter};
 
 use bytes::BytesMut;
 use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
@@ -8,13 +9,10 @@ use tokio_rustls::TlsStream;
 use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
-use crate::{
-    rdp::{
-        filter::{Filter, FilterConfig},
-        GLOBAL_CHANNEL_NAME, USER_CHANNEL_NAME,
-    },
-    transport::{mcs::McsTransport, x224::DataTransport},
-};
+use crate::rdp::filter::{Filter, FilterConfig};
+use crate::rdp::{GLOBAL_CHANNEL_NAME, USER_CHANNEL_NAME};
+use crate::transport::mcs::McsTransport;
+use crate::transport::x224::DataTransport;
 
 pub type StaticChannels = HashMap<u16, String>;
 pub type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;

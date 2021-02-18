@@ -1,11 +1,9 @@
-use crate::{
-    config::Config,
-    http::{
-        controllers::{health::HealthController, jet::JetController, sessions::SessionsController},
-        middlewares::auth::AuthMiddleware,
-    },
-    jet_client::JetAssociationsMap,
-};
+use crate::config::Config;
+use crate::http::controllers::health::HealthController;
+use crate::http::controllers::jet::JetController;
+use crate::http::controllers::sessions::SessionsController;
+use crate::http::middlewares::auth::AuthMiddleware;
+use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
 use slog_scope::info;
 use std::sync::Arc;

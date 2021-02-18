@@ -2,12 +2,12 @@ mod gfx;
 #[cfg(test)]
 mod tests;
 
-use std::{cmp::Ordering, collections::HashMap, io};
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::io;
 
-use ironrdp::{
-    rdp::vc::{self, dvc},
-    PduParsing,
-};
+use ironrdp::rdp::vc::{self, dvc};
+use ironrdp::PduParsing;
 use slog_scope::{error, info};
 
 use crate::interceptor::PduSource;

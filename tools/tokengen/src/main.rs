@@ -1,21 +1,18 @@
 use clap::Clap;
 use humantime::parse_duration;
-use picky::{
-    jose::{
-        jwe::{Jwe, JweAlg, JweEnc},
-        jws::JwsAlg,
-        jwt::JwtSig,
-    },
-    key::{PrivateKey, PublicKey},
-    pem::Pem,
-};
+use picky::jose::jwe::{Jwe, JweAlg, JweEnc};
+use picky::jose::jws::JwsAlg;
+use picky::jose::jwt::JwtSig;
+use picky::key::{PrivateKey, PublicKey};
+use picky::pem::Pem;
 use serde::Serialize;
-use std::{error::Error, path::PathBuf, time::SystemTime};
+use std::error::Error;
+use std::path::PathBuf;
+use std::time::SystemTime;
+use uuid::Uuid;
 
 #[derive(Clap)]
 struct App {
-    #[clap(long)]
-    dst_hst: String,
     #[clap(long, default_value = "15m")]
     validity_duration: String,
     #[clap(long)]
@@ -24,10 +21,20 @@ struct App {
     subcmd: SubCommand,
 }
 
+// clippy: All enumeration variants that are prefixed with `Rdp`; this produces the clippy error.
+// It will be marked as allowed as we may add new non-RDP related protocols in the future
+#[allow(clippy::enum_variant_names)]
 #[derive(Clap)]
 enum SubCommand {
-    RdpTcp,
+    RdpTcp(RdpTcpParams),
     RdpTls(RdpTlsIdentity),
+    RdpTcpRendezvous(RdpTcpRendezvousJetAID),
+}
+
+#[derive(Clap)]
+struct RdpTcpParams {
+    #[clap(long)]
+    dst_hst: String,
 }
 
 #[derive(Clone, Clap, Serialize)]
@@ -35,6 +42,9 @@ struct RdpTlsIdentity {
     #[serde(skip_serializing)]
     #[clap(long)]
     jet_public_key: PathBuf,
+    #[serde(skip_serializing)]
+    #[clap(long)]
+    dst_hst: String,
 
     #[clap(long)]
     prx_usr: String,
@@ -46,13 +56,19 @@ struct RdpTlsIdentity {
     dst_pwd: String,
 }
 
+#[derive(Clone, Clap, Serialize)]
+struct RdpTcpRendezvousJetAID {
+    jet_aid: Uuid,
+}
+
 #[derive(Clone, Serialize)]
 struct RoutingClaims {
     exp: i64,
     nbf: i64,
     jet_cm: String,
     jet_ap: String,
-    dst_hst: String,
+    jet_aid: Option<Uuid>,
+    dst_hst: Option<String>,
     #[serde(flatten)]
     identity: Option<RdpTlsIdentity>,
 }
@@ -69,17 +85,40 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let exp = (now + validity_duration).as_secs();
 
+    let jet_cm = match app.subcmd {
+        SubCommand::RdpTcpRendezvous(_) => "rdv".to_owned(),
+        _ => "fwd".to_owned(),
+    };
+
+    let jet_ap = match app.subcmd {
+        SubCommand::RdpTcpRendezvous(_) => "rdp_tcp".to_owned(),
+        _ => "rdp".to_owned(),
+    };
+
+    let jet_aid = match &app.subcmd {
+        SubCommand::RdpTcpRendezvous(rdv) => Some(rdv.jet_aid),
+        _ => None,
+    };
+
+    let identity = match &app.subcmd {
+        SubCommand::RdpTls(identity) => Some(identity.clone()),
+        _ => None,
+    };
+
+    let dst_hst = match &app.subcmd {
+        SubCommand::RdpTcp(params) => Some(params.dst_hst.clone()),
+        SubCommand::RdpTls(identity) => Some(identity.dst_hst.clone()),
+        _ => None,
+    };
+
     let claims = RoutingClaims {
         exp: exp as i64,
         nbf: now.as_secs() as i64,
-        dst_hst: app.dst_hst,
-        jet_cm: "fwd".to_owned(),
-        jet_ap: "rdp".to_owned(),
-        identity: if let SubCommand::RdpTls(identity) = app.subcmd {
-            Some(identity)
-        } else {
-            None
-        },
+        dst_hst,
+        jet_cm,
+        jet_ap,
+        jet_aid,
+        identity,
     };
 
     let signed = JwtSig::new(JwsAlg::RS256, claims.clone()).encode(&private_key)?;

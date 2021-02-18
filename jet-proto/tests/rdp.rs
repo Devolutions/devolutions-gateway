@@ -1,36 +1,30 @@
 mod common;
 
-use std::{
-    collections::HashMap,
-    fmt, fs,
-    io::{self, BufReader, Write},
-    net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
-    process::{Child, Command},
-    sync::Arc,
-    thread,
-    time::Duration,
-};
+use std::collections::HashMap;
+use std::io::{self, BufReader, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::process::{Child, Command};
+use std::sync::Arc;
+use std::time::Duration;
+use std::{fmt, fs, thread};
 
 use bytes::{Buf, BytesMut};
+use ironrdp::nego::{Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
+use ironrdp::rdp::server_license::{
+    InitialMessageType, InitialServerLicenseMessage, LicenseErrorCode, LicenseHeader, LicensingErrorMessage,
+    LicensingStateTransition, PreambleFlags, PreambleType, PreambleVersion, PREAMBLE_SIZE,
+};
+use ironrdp::rdp::{self, capability_sets, vc};
 use ironrdp::{
-    gcc, mcs,
-    nego::{Request, Response, ResponseData, ResponseFlags, SecurityProtocol},
-    rdp::{
-        self, capability_sets,
-        server_license::{
-            InitialMessageType, InitialServerLicenseMessage, LicenseErrorCode, LicenseHeader, LicensingErrorMessage,
-            LicensingStateTransition, PreambleFlags, PreambleType, PreambleVersion, PREAMBLE_SIZE,
-        },
-        vc,
-    },
-    ClientConfirmActive, ClientInfoPdu, ConnectInitial, ConnectResponse, Data, McsPdu, PduParsing, SendDataContext,
-    ServerDemandActive, ShareControlHeader,
+    gcc, mcs, ClientConfirmActive, ClientInfoPdu, ConnectInitial, ConnectResponse, Data, McsPdu, PduParsing,
+    SendDataContext, ServerDemandActive, ShareControlHeader,
 };
 use lazy_static::lazy_static;
 use serde_derive::{Deserialize, Serialize};
 use sspi::internal::credssp;
 use tokio_rustls::rustls;
-use x509_parser::{parse_x509_der, pem::pem_to_der};
+use x509_parser::parse_x509_der;
+use x509_parser::pem::pem_to_der;
 
 use common::run_proxy;
 
@@ -609,14 +603,15 @@ impl RdpServer {
         {
             let size = pdu.capability_sets.len();
             pdu.capability_sets.retain(|capability_set| {
-                !matches!(capability_set,
+                !matches!(
+                    capability_set,
                     rdp::CapabilitySet::BitmapCacheHostSupport(_)
-                    | rdp::CapabilitySet::Control(_)
-                    | rdp::CapabilitySet::WindowActivation(_)
-                    | rdp::CapabilitySet::Share(_)
-                    | rdp::CapabilitySet::Font(_)
-                    | rdp::CapabilitySet::LargePointer(_)
-                    | rdp::CapabilitySet::DesktopComposition(_)
+                        | rdp::CapabilitySet::Control(_)
+                        | rdp::CapabilitySet::WindowActivation(_)
+                        | rdp::CapabilitySet::Share(_)
+                        | rdp::CapabilitySet::Font(_)
+                        | rdp::CapabilitySet::LargePointer(_)
+                        | rdp::CapabilitySet::DesktopComposition(_)
                 )
             });
             if size != pdu.capability_sets.len() {

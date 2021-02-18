@@ -1,20 +1,18 @@
-use crate::{
-    config::Config,
-    jet::{candidate::CandidateState, TransportType},
-    jet_client::JetAssociationsMap,
-    transport::{ws::WsTransport, JetTransport, Transport},
-    utils::association::remove_jet_association,
-    Proxy,
-};
+use crate::config::Config;
+use crate::jet::candidate::CandidateState;
+use crate::jet::TransportType;
+use crate::jet_client::JetAssociationsMap;
+use crate::transport::ws::WsTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::utils::association::remove_jet_association;
+use crate::Proxy;
 
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use saphir::error;
 use slog_scope::{error, info};
-use std::{
-    io::{self, ErrorKind},
-    net::SocketAddr,
-    sync::Arc,
-};
+use std::io::{self, ErrorKind};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio_compat_02::FutureExt;
 
 use url::Url;

@@ -1,18 +1,14 @@
-use std::{
-    collections::HashMap,
-    future::Future,
-    io,
-    net::{SocketAddr, ToSocketAddrs},
-    pin::Pin,
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::future::Future;
+use std::io;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::pin::Pin;
+use std::sync::Arc;
 
 use futures::stream::StreamExt;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    runtime::Runtime,
-    sync::Mutex,
-};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime::Runtime;
+use tokio::sync::Mutex;
 use tokio_compat_02::FutureExt as _;
 
 use tokio_compat_02::IoCompat;
@@ -25,19 +21,19 @@ use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future03::FutureExt;
 
-use crate::{
-    config::Config,
-    http::http_server::configure_http_server,
-    jet_client::{JetAssociationsMap, JetClient},
-    logger,
-    rdp::RdpClient,
-    routing_client::Client,
-    transport::{tcp::TcpTransport, ws::WsTransport, JetTransport},
-    utils::{
-        get_default_port_from_server_url, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming,
-    },
-    websocket_client::{WebsocketService, WsClient},
+use crate::config::Config;
+use crate::http::http_server::configure_http_server;
+use crate::jet_client::{JetAssociationsMap, JetClient};
+use crate::logger;
+use crate::rdp::RdpClient;
+use crate::routing_client::Client;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::ws::WsTransport;
+use crate::transport::JetTransport;
+use crate::utils::{
+    get_default_port_from_server_url, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite, Incoming,
 };
+use crate::websocket_client::{WebsocketService, WsClient};
 
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
 
@@ -305,7 +301,13 @@ async fn start_tcp_server(
                         Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
                     }
                     "rdp" => Box::pin(
-                        RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone()).serve(conn),
+                        RdpClient::new(
+                            config.clone(),
+                            tls_public_key.clone(),
+                            tls_acceptor.clone(),
+                            jet_associations.clone(),
+                        )
+                        .serve(conn),
                     ),
                     scheme => panic!("Unsupported routing URL scheme {}", scheme),
                 }
@@ -318,7 +320,12 @@ async fn start_tcp_server(
                     let jet_client = JetClient::new(config.clone(), jet_associations.clone());
                     Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
                 } else {
-                    let rdp_client = RdpClient::new(config.clone(), tls_public_key.clone(), tls_acceptor.clone());
+                    let rdp_client = RdpClient::new(
+                        config.clone(),
+                        tls_public_key.clone(),
+                        tls_acceptor.clone(),
+                        jet_associations.clone(),
+                    );
                     Box::pin(rdp_client.serve(conn))
                 }
             };

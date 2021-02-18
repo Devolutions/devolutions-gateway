@@ -1,8 +1,6 @@
 use bytes::{Buf, BytesMut};
-use ironrdp::{
-    nego::{NegotiationError, Request, Response},
-    Data, PduParsing,
-};
+use ironrdp::nego::{NegotiationError, Request, Response};
+use ironrdp::{Data, PduParsing};
 use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 

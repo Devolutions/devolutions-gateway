@@ -10,27 +10,30 @@ mod sequence_future;
 use accept_connection_future::AcceptConnectionMode;
 use slog_scope::{error, info};
 
-use sspi::{internal::credssp, AuthIdentity};
+use sspi::internal::credssp;
+use sspi::AuthIdentity;
 
 use bytes::Buf;
-use std::{io, sync::Arc};
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use std::io;
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 use url::Url;
 
 pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 
-use self::{
-    accept_connection_future::AcceptConnectionFuture, connection_sequence_future::ConnectionSequenceFuture,
-    sequence_future::create_downgrade_dvc_capabilities_future,
-};
+use self::accept_connection_future::AcceptConnectionFuture;
+use self::connection_sequence_future::ConnectionSequenceFuture;
+use self::sequence_future::create_downgrade_dvc_capabilities_future;
 
-use crate::{
-    config::Config,
-    interceptor::rdp::RdpMessageReader,
-    transport::{tcp::TcpTransport, Transport},
-    utils, Proxy,
-};
+use crate::config::Config;
+use crate::interceptor::rdp::RdpMessageReader;
+use crate::jet_client::JetAssociationsMap;
+use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::{utils, Proxy};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -67,21 +70,31 @@ pub struct RdpClient {
     config: Arc<Config>,
     tls_public_key: Vec<u8>,
     tls_acceptor: TlsAcceptor,
+    jet_associations: JetAssociationsMap,
 }
 
 impl RdpClient {
-    pub fn new(config: Arc<Config>, tls_public_key: Vec<u8>, tls_acceptor: TlsAcceptor) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        tls_public_key: Vec<u8>,
+        tls_acceptor: TlsAcceptor,
+        jet_associations: JetAssociationsMap,
+    ) -> Self {
         Self {
             config,
             tls_public_key,
             tls_acceptor,
+            jet_associations,
         }
     }
 
     pub async fn serve(self, client: TcpStream) -> Result<(), io::Error> {
-        let config = self.config.clone();
-        let tls_acceptor = self.tls_acceptor;
-        let tls_public_key = self.tls_public_key;
+        let Self {
+            config,
+            tls_acceptor,
+            tls_public_key,
+            jet_associations,
+        } = self;
 
         let (client, mode) = AcceptConnectionFuture::new(client, config.clone()).await.map_err(|e| {
             error!("Accept connection failed: {}", e);
@@ -107,6 +120,18 @@ impl RdpClient {
                         error!("Encountered a failure during plain tcp traffic proxying: {}", e);
                         e
                     })
+            }
+            AcceptConnectionMode::RdpTcpRendezvous {
+                association_id,
+                leftover_request,
+            } => {
+                info!("Starting RdpTcpRendezvous redirection");
+
+                let leftover_request = leftover_request.bytes();
+
+                JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client), association_id)
+                    .proxy(config, leftover_request)
+                    .await
             }
             AcceptConnectionMode::RdpTls { identity, request } => {
                 info!("Starting RDP-TLS redirection");

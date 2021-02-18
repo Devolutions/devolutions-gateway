@@ -1,30 +1,22 @@
 use jet_proto::JET_VERSION_V2;
 
-use saphir::{
-    controller::Controller,
-    http::{header, Method, StatusCode},
-    macros::controller,
-    request::Request,
-};
+use saphir::controller::Controller;
+use saphir::http::{header, Method, StatusCode};
+use saphir::macros::controller;
+use saphir::request::Request;
 use slog_scope::info;
 use std::sync::Arc;
 use tokio_02::runtime::Handle;
 use tokio_compat_02::FutureExt;
 use uuid::Uuid;
 
-use crate::{
-    config::Config,
-    http::{
-        controllers::health::build_health_response,
-        middlewares::auth::{parse_auth_header, AuthHeaderType},
-    },
-    jet::{
-        association::{Association, AssociationResponse},
-        candidate::Candidate,
-    },
-    jet_client::JetAssociationsMap,
-    utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
-};
+use crate::config::Config;
+use crate::http::controllers::health::build_health_response;
+use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
+use crate::jet::association::{Association, AssociationResponse};
+use crate::jet::candidate::Candidate;
+use crate::jet_client::JetAssociationsMap;
+use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 
 pub struct JetController {
     config: Arc<Config>,

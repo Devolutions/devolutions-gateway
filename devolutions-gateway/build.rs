@@ -4,7 +4,9 @@
 #[cfg(target_os = "windows")]
 extern crate embed_resource;
 
-use std::{env, fs::File, io::Write};
+use std::env;
+use std::fs::File;
+use std::io::Write;
 
 #[cfg(target_os = "windows")]
 fn generate_version_rc() -> String {

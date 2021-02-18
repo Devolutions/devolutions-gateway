@@ -1,23 +1,28 @@
-use crate::{config::Config, rdp::RdpIdentity};
+use crate::config::Config;
+use crate::rdp::RdpIdentity;
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
-use picky::jose::{
-    jwe::Jwe,
-    jwt::{JwtDate, JwtSig, JwtValidator},
-};
+use picky::jose::jwe::Jwe;
+use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
 use sspi::AuthIdentity;
 use std::io;
 use url::Url;
+use uuid::Uuid;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
-const EXPECTED_JET_AP_VALUE: &str = "rdp";
-const EXPECTED_JET_CM_VALUE: &str = "fwd"; // currently only "forward-only" connection mode is supported
+
+const JET_AP_RDP_TCP: &str = "rdp_tcp";
+const JET_CM_RDV: &str = "rdv";
+
+const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_AP_RDP_TCP];
+const EXPECTED_JET_CM_VALUES: [&str; 2] = ["fwd", JET_CM_RDV];
 
 pub enum TokenRoutingMode {
     RdpTcp(Url),
     RdpTls(RdpIdentity),
+    RdpTcpRendezvous(Uuid),
 }
 
 #[derive(Deserialize, Debug)]
@@ -37,13 +42,17 @@ struct RoutingClaims {
     creds: Option<CredsClaims>,
 
     /// Destination Host <host>:<port>
-    dst_hst: String,
+    dst_hst: Option<String>,
 
     /// Identity connection mode used for Jet association
+    #[serde(default = "get_default_jet_connection_mode")]
     jet_cm: String,
 
     /// Application protocol used over Jet transport
     jet_ap: String,
+
+    /// Jet assassination ID used for RdpTcpRendezvous routing mode
+    jet_aid: Option<String>,
 }
 
 pub fn is_encrypted(token: &str) -> bool {
@@ -104,60 +113,98 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
     let claims = jwt_token.claims;
 
-    if claims.jet_ap != EXPECTED_JET_AP_VALUE {
+    if !EXPECTED_JET_AP_VALUES.contains(&claims.jet_ap.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "Non-RDP JWT-based routing via preconnection PDU is not supported",
         ));
     }
 
-    if claims.jet_cm != EXPECTED_JET_CM_VALUE {
+    if !EXPECTED_JET_CM_VALUES.contains(&claims.jet_cm.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            "JWT-based routing via preconnection PDU only support Forward-Only communication mode",
+            "JWT-based routing via preconnection PDU only support Forward and RdpTcpRendezvous communication mode",
         ));
     }
 
-    let route_url_str = if claims.dst_hst.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
-        claims.dst_hst
-    } else {
-        format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, claims.dst_hst)
-    };
+    let dest_host = if let Some(dest_host_claim) = &claims.dst_hst {
+        let route_url_str = if dest_host_claim.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
+            dest_host_claim.clone()
+        } else {
+            format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, dest_host_claim)
+        };
 
-    let mut dest_host = Url::parse(&route_url_str).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Failed to parse routing URL in JWT token: {}", e),
-        )
-    })?;
-
-    if dest_host.port().is_none() {
-        dest_host.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
+        let mut dest_host = Url::parse(&route_url_str).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Invalid URL: Can't set default port for routing URL".to_string(),
+                format!("Failed to parse routing URL in JWT token: {}", e),
             )
         })?;
-    }
+
+        if dest_host.port().is_none() {
+            dest_host.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid URL: couldn't set default port for routing URL".to_string(),
+                )
+            })?;
+        }
+
+        Some(dest_host)
+    } else {
+        None
+    };
 
     match claims.creds {
-        Some(creds) if is_encrypted => Ok(TokenRoutingMode::RdpTls(RdpIdentity {
-            proxy: AuthIdentity {
-                username: creds.prx_usr,
-                password: creds.prx_pwd,
-                domain: None,
-            },
-            target: AuthIdentity {
-                username: creds.dst_usr,
-                password: creds.dst_pwd,
-                domain: None,
-            },
-            dest_host,
-        })),
-        None => Ok(TokenRoutingMode::RdpTcp(dest_host)),
+        Some(creds) if is_encrypted => {
+            let dest_host = dest_host.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "dest_host claim is missing for RdpTls mode".to_string(),
+                )
+            })?;
+
+            Ok(TokenRoutingMode::RdpTls(RdpIdentity {
+                proxy: AuthIdentity {
+                    username: creds.prx_usr,
+                    password: creds.prx_pwd,
+                    domain: None,
+                },
+                target: AuthIdentity {
+                    username: creds.dst_usr,
+                    password: creds.dst_pwd,
+                    domain: None,
+                },
+                dest_host,
+            }))
+        }
+        None if (claims.jet_ap == JET_AP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
+            let jet_aid = claims.jet_aid.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "RdpTcpRendezvous token routing mode, but Jet AssociationId is missing",
+                )
+            })?;
+
+            let jet_aid = Uuid::parse_str(jet_aid.as_str()).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Failed to parse Jet AssociationId: Invalid Uuid value: {}", err),
+                )
+            })?;
+
+            Ok(TokenRoutingMode::RdpTcpRendezvous(jet_aid))
+        }
+        None => {
+            let dest_host = dest_host.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "dest_host claim is missing for RdpTcp mode")
+            })?;
+
+            Ok(TokenRoutingMode::RdpTcp(dest_host))
+        }
         Some(_) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "Received a non encrypted JWT containing credentials. This is bad.".to_string(),
+            "Received a non encrypted JWT containing credentials. This is bad.",
         )),
     }
 }
@@ -175,4 +222,8 @@ pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<Preconnecti
             format!("Failed to parse preconnection PDU: {}", e),
         )),
     }
+}
+
+fn get_default_jet_connection_mode() -> String {
+    "fwd".to_owned()
 }

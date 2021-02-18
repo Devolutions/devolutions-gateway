@@ -3,20 +3,17 @@ mod licensing;
 use std::io;
 
 use bytes::BytesMut;
-use ironrdp::{
-    mcs::SendDataContext, rdp::server_license::LicenseEncryptionData, ClientInfoPdu, McsPdu, PduParsing,
-    ShareControlHeader, ShareControlPdu,
-};
+use ironrdp::mcs::SendDataContext;
+use ironrdp::rdp::server_license::LicenseEncryptionData;
+use ironrdp::{ClientInfoPdu, McsPdu, PduParsing, ShareControlHeader, ShareControlPdu};
 use slog_scope::{debug, trace, warn};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use tokio_util::codec::Framed;
 
 use super::{FutureState, NextStream, SequenceFutureProperties};
-use crate::{
-    rdp::filter::{Filter, FilterConfig},
-    transport::mcs::SendDataContextTransport,
-};
+use crate::rdp::filter::{Filter, FilterConfig};
+use crate::transport::mcs::SendDataContextTransport;
 use licensing::{process_challenge, process_license_request, process_upgrade_license, LicenseCredentials, LicenseData};
 
 pub type PostMcsFutureTransport = Framed<TlsStream<TcpStream>, SendDataContextTransport>;

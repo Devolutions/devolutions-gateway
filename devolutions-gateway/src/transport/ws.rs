@@ -1,27 +1,22 @@
-use crate::{
-    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{danger_transport, resolve_url_to_socket_arr},
-};
+use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
+use crate::utils::{danger_transport, resolve_url_to_socket_arr};
 use futures::{ready, Sink, Stream};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
-use std::{
-    io::Cursor,
-    net::SocketAddr,
-    pin::Pin,
-    sync::{atomic::AtomicU64, Arc},
-    task::{Context, Poll},
-};
-use tokio::{
-    io::{self, AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream,
-};
+use std::io::Cursor;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::TcpStream;
 use tokio_compat_02::IoCompat;
 use tokio_rustls::{rustls, TlsConnector, TlsStream};
-use tokio_tungstenite::{
-    tungstenite::{self, handshake::client::Request, protocol::Role},
-    WebSocketStream,
-};
+use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::handshake::client::Request;
+use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::WebSocketStream;
 use url::Url;
 
 enum WsStreamSendState {

@@ -1,9 +1,7 @@
 use std::io;
 
-use ironrdp::{
-    dvc::gfx::{zgfx, ServerPdu},
-    PduParsing,
-};
+use ironrdp::dvc::gfx::{zgfx, ServerPdu};
+use ironrdp::PduParsing;
 use slog_scope::debug;
 
 use super::{CompleteDataResult, DynamicChannelDataHandler};

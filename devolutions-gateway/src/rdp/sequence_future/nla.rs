@@ -1,40 +1,30 @@
-use std::{
-    future::Future,
-    io,
-    marker::PhantomData,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::future::Future;
+use std::io;
+use std::marker::PhantomData;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use bytes::{Buf, BytesMut};
 use futures::{ready, SinkExt, StreamExt};
 use ironrdp::nego;
 
 use slog_scope::{debug, error, trace};
-use sspi::{
-    internal::credssp::{
-        self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest,
-        EARLY_USER_AUTH_RESULT_PDU_SIZE,
-    },
-    AuthIdentity,
+use sspi::internal::credssp::{
+    self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest, EARLY_USER_AUTH_RESULT_PDU_SIZE,
 };
+use sspi::AuthIdentity;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder, Framed};
 
 use tokio_rustls::{rustls, Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
 
-use crate::{
-    io_try,
-    rdp::{
-        sequence_future::{
-            FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
-        },
-        RdpIdentity,
-    },
-    transport::tsrequest::TsRequestTransport,
-    utils,
+use crate::rdp::sequence_future::{
+    FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
 };
+use crate::rdp::RdpIdentity;
+use crate::transport::tsrequest::TsRequestTransport;
+use crate::{io_try, utils};
 
 type TsRequestFutureTransport = Framed<TlsStream<TcpStream>, TsRequestTransport>;
 type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUserAuthResultTransport>;

@@ -1,9 +1,8 @@
-use devolutions_gateway::{config::Config, service::GatewayService};
+use devolutions_gateway::config::Config;
+use devolutions_gateway::service::GatewayService;
 
-use ceviche::{
-    controller::{dispatch, Controller},
-    Service, ServiceEvent,
-};
+use ceviche::controller::{dispatch, Controller};
+use ceviche::{Service, ServiceEvent};
 use slog_scope::info;
 use std::sync::mpsc;
 

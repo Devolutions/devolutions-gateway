@@ -1,12 +1,9 @@
 mod jet_proto;
 
-use std::{
-    io::{self, Read, Write},
-    net::{self, TcpStream},
-    str,
-    sync::{mpsc, Arc, Barrier},
-    thread,
-};
+use std::io::{self, Read, Write};
+use std::net::{self, TcpStream};
+use std::sync::{mpsc, Arc, Barrier};
+use std::{str, thread};
 
 use structopt::StructOpt;
 use uuid::Uuid;

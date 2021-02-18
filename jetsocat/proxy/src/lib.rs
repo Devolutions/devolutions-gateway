@@ -10,8 +10,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
 pub use http::HttpProxyStream;
 pub use socks4::Socks4Stream;
-pub use socks5::Socks5Listener;
-pub use socks5::Socks5Stream;
+pub use socks5::{Socks5Listener, Socks5Stream};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestAddr {

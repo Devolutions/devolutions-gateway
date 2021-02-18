@@ -1,7 +1,9 @@
 use std::io;
 
 use http::StatusCode;
-use jet_proto::{accept::JetAcceptReq, connect::JetConnectReq, JetMessage, JET_VERSION_V1};
+use jet_proto::accept::JetAcceptReq;
+use jet_proto::connect::JetConnectReq;
+use jet_proto::{JetMessage, JET_VERSION_V1};
 use uuid::Uuid;
 
 pub fn connect_as_client(mut stream: impl io::Write + io::Read, host: String, association: Uuid) -> io::Result<()> {

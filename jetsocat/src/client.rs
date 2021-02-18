@@ -6,8 +6,7 @@ use slog::*;
 pub async fn connect(addr: String, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<()> {
     use crate::io::{read_and_send, ws_stream_to_writer};
     use crate::utils::ws_connect_async;
-    use futures_util::StreamExt as _;
-    use futures_util::{future, pin_mut};
+    use futures_util::{future, pin_mut, StreamExt as _};
 
     let connect_log = log.new(o!("connect" => addr.clone()));
     info!(connect_log, "Connecting");

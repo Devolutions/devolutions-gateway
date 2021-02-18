@@ -1,4 +1,6 @@
-use std::{env, io::Write, net::TcpStream, process};
+use std::io::Write;
+use std::net::TcpStream;
+use std::{env, process};
 
 type Port = u16;
 

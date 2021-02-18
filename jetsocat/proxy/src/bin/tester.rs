@@ -1,7 +1,6 @@
 use jetsocat_proxy::socks5::Socks5Stream;
 use std::collections::HashMap;
-use std::env;
-use std::io;
+use std::{env, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 

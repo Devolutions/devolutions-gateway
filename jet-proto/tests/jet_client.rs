@@ -1,17 +1,16 @@
 mod common;
 
 use jet_proto::JetMessage;
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-    sync::mpsc::channel,
-    thread,
-    time::Duration,
-};
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time::Duration;
 use uuid::Uuid;
 
 use common::run_proxy;
-use jet_proto::{accept::JetAcceptReq, connect::JetConnectReq};
+use jet_proto::accept::JetAcceptReq;
+use jet_proto::connect::JetConnectReq;
 use reqwest::{Client, StatusCode};
 use serde_derive::Deserialize;
 use std::str::FromStr;

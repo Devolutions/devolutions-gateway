@@ -1,4 +1,5 @@
-use crate::{jet::candidate::CandidateState, jet_client::JetAssociationsMap};
+use crate::jet::candidate::CandidateState;
+use crate::jet_client::JetAssociationsMap;
 use slog_scope::debug;
 use std::time::Duration;
 use uuid::Uuid;
