@@ -88,16 +88,16 @@ OPTIONS:
 1. Run Wayk Now on 2 hosts to be able to open a Wayk session between those 2 hosts.
     * Download Wayk Now [here](https://wayk.devolutions.net/home/download)
 
-1. Start devolutions-gateway and specify the routing URL where x.x.x.x is the IP of your Wayk server host. You can easily get the host IP in the source ID drop down list in Wayk Now.
+1. Start devolutions-gateway and specify the routing URL where x.x.x.x is the IP of your Wayk server host.
     ```
-    $ cargo run -- -r tls://x.x.x.x:4489
+    $ cargo run -- -l 'tcp://0.0.0.0:10000,tcp://*:10000' -l 'ws://0.0.0.0:7171,wss://*:443' -r tls://x.x.x.x:4489
     ```
     * If you want to save the network traffic in a PCAP file, you can add the pcap-files-path parameter. The command will look to something like this:
         ```
-        $ cargo run -- -r tls://x.x.x.x:4489 --pcap-files-path c:\waykTraffic\ -p wayk
+        $ cargo run -- -l 'tcp://0.0.0.0:10000,tcp://*:10000' -l 'ws://0.0.0.0:7171,wss://*:443' -r tls://x.x.x.x:4489 --capture-path c:\waykTraffic\ -p wayk
         ```
 
-1. On the same host where devolutions-gateway is running, open wayk and connect to 127.0.0.1:8080
+1. On the same host where devolutions-gateway is running, open wayk and connect to 127.0.0.1:10000
     * The connection should start. A dummy certificate will be shown. You can accept it and the Wayk connection should start.
 
 ### RDP routing
