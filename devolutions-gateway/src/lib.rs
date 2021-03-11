@@ -19,6 +19,7 @@ pub mod service;
 pub mod transport;
 pub mod utils;
 pub mod websocket_client;
+pub mod plugin_manager;
 
 pub use proxy::Proxy;
 

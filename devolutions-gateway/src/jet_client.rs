@@ -5,26 +5,30 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
-use jet_proto::connect::{JetConnectReq, JetConnectRsp};
-use jet_proto::test::{JetTestReq, JetTestRsp};
-use jet_proto::{JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
+use jet_proto::{accept::{JetAcceptReq, JetAcceptRsp}, connect::{JetConnectReq, JetConnectRsp}, test::{JetTestReq, JetTestRsp}, JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
 use slog_scope::{debug, error};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::config::Config;
-use crate::http::controllers::jet::remove_association;
-use crate::jet::association::Association;
-use crate::jet::candidate::{Candidate, CandidateState};
-use crate::jet::TransportType;
-use crate::transport::JetTransport;
-use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
-use crate::utils::into_other_io_error as error_other;
-use crate::Proxy;
+use crate::{
+    config::Config,
+    http::controllers::jet::remove_association,
+    jet::{
+        association::Association,
+        candidate::{Candidate, CandidateState},
+        TransportType,
+    },
+    transport::{JetTransport, Transport, tcp::TcpTransport},
+    utils::{association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT}, create_tls_connector, into_other_io_error as error_other},
+    Proxy,
+    interceptor::pcap_recording::PcapRecordingInterceptor,
+};
+
+use tokio_rustls::{TlsStream, TlsAcceptor};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
+const EXPECTED_JET_TP_VALUE: &str = "record";
 
 pub struct JetClient {
     config: Arc<Config>,
@@ -39,7 +43,7 @@ impl JetClient {
         }
     }
 
-    pub async fn serve(self, transport: JetTransport) -> Result<(), io::Error> {
+    pub async fn serve(self, transport: JetTransport, tls_acceptor: TlsAcceptor) -> Result<(), io::Error> {
         let jet_associations = self.jet_associations.clone();
         let config = self.config;
 
@@ -58,9 +62,7 @@ impl JetClient {
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
 
-                let proxy_result = Proxy::new(config)
-                    .build(response.server_transport, response.client_transport)
-                    .await;
+                let proxy_result = handle_build_proxy(jet_associations.clone(), config, response, tls_acceptor).await;
 
                 remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
 
@@ -70,6 +72,60 @@ impl JetClient {
             JetMessage::JetConnectRsp(_) => Err(error_other("Jet-Accept response can't be handled by the server.")),
             JetMessage::JetTestRsp(_) => Err(error_other("Jet-Test response can't be handled by the server.")),
         }
+    }
+}
+
+async fn handle_build_proxy(jet_associations: JetAssociationsMap, config: Arc<Config>,
+                            response: HandleConnectJetMsgResponse, tls_acceptor: TlsAcceptor) -> Result<(), io::Error> {
+    let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
+    let association_id = response.association_id;
+
+    let associations = jet_associations.lock().await;
+    if let Some(association) = associations.get(&association_id) {
+        if let Some(jet_tp_claim) = association.get_jet_tp_claim() {
+            if jet_tp_claim.eq(EXPECTED_JET_TP_VALUE) && config.plugins.is_some() {
+
+                let mut interceptor =
+                    PcapRecordingInterceptor::new(
+                        response.server_transport.peer_addr().unwrap(),
+                        response.client_transport.peer_addr().unwrap(),
+                        association_id.clone().to_string(),
+                        response.candidate_id.clone().to_string());
+
+                if let Some(path) = &config.recording_path {
+                    interceptor.set_recording_directory(path.as_str());
+                }
+
+                recording_interceptor = Some(interceptor);
+            }
+        }
+    }
+
+    return if let Some(interceptor) = recording_interceptor {
+        let client_stream = response.client_transport.get_tcp_stream();
+        let server_stream = response.server_transport.get_tcp_stream();
+
+        if client_stream.is_some() && server_stream.is_some() {
+            let tls_stream = tls_acceptor
+                .accept(client_stream.unwrap())
+                .await
+                .map_err(|err| err)?;
+            let client_transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
+
+
+            let tls_handshake = create_tls_connector(server_stream.unwrap())
+                .await
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
+
+            Proxy::new(config)
+                .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor))).await
+        } else {
+            Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to retrieve tcp stream to create tls connection!"))
+        }
+    } else {
+        Proxy::new(config)
+            .build(response.server_transport, response.client_transport).await
     }
 }
 
@@ -163,7 +219,7 @@ impl HandleAcceptJetMsg {
 
                     // Association creation
                     let uuid = Uuid::new_v4();
-                    let mut association = Association::new(uuid, JET_VERSION_V1);
+                    let mut association = Association::new(uuid, JET_VERSION_V1, None);
                     association.add_candidate(candidate);
 
                     self.association_uuid.replace(uuid);

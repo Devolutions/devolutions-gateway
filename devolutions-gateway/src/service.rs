@@ -318,7 +318,7 @@ async fn start_tcp_server(
                 if peeked == [74, 69, 84, 0] {
                     // four first bytes matching JET protocol
                     let jet_client = JetClient::new(config.clone(), jet_associations.clone());
-                    Box::pin(jet_client.serve(JetTransport::new_tcp(conn)))
+                    Box::pin(jet_client.serve(JetTransport::new_tcp(conn),tls_acceptor.clone()))
                 } else {
                     let rdp_client = RdpClient::new(
                         config.clone(),

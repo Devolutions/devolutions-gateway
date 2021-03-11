@@ -11,15 +11,17 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
+    jet_tp: Option<String>,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8) -> Self {
+    pub fn new(id: Uuid, version: u8, jet_tp: Option<String>) -> Self {
         Association {
             id,
             version,
             creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
+            jet_tp,
         }
     }
 
@@ -87,6 +89,10 @@ impl Association {
         self.candidates
             .iter()
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
+    }
+
+    pub fn get_jet_tp_claim(&self) -> &Option<String> {
+        &self.jet_tp
     }
 }
 

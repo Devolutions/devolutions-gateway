@@ -10,8 +10,10 @@ use tokio::net::TcpStream;
 use tokio_rustls::{TlsConnector, TlsStream};
 use url::Url;
 
-use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
-use crate::utils::{danger_transport, resolve_url_to_socket_arr};
+use crate::{
+    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
+    utils::{danger_transport, resolve_url_to_socket_arr, create_tls_connector},
+};
 
 #[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {
@@ -101,6 +103,13 @@ impl TcpTransport {
     pub fn clone_nb_bytes_written(&self) -> Arc<AtomicU64> {
         self.nb_bytes_written.clone()
     }
+
+    pub fn get_tcp_stream(self) -> Option<TcpStream> {
+        match self.stream {
+            TcpStreamWrapper::Plain(stream) => Some(stream),
+            _ => None,
+        }
+    }
 }
 
 impl AsyncRead for TcpTransport {
@@ -141,16 +150,7 @@ impl TcpTransport {
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr).await?;
 
-                let mut client_config = tokio_rustls::rustls::ClientConfig::default();
-                client_config
-                    .dangerous()
-                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
-                let config_ref = Arc::new(client_config);
-                let tls_connector = TlsConnector::from(config_ref);
-                let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
-
-                let tls_handshake = tls_connector
-                    .connect(dns_name, socket)
+                let tls_handshake = create_tls_connector(socket)
                     .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 

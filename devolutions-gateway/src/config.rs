@@ -8,6 +8,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use url::Url;
+use slog_scope::debug;
+use crate::plugin_manager::PLUGIN_MANAGER;
 
 const ARG_API_KEY: &str = "api-key";
 const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
@@ -28,6 +30,8 @@ const ARG_CAPTURE_PATH: &str = "capture-path";
 const ARG_PROTOCOL: &str = "protocol";
 const ARG_LOG_FILE: &str = "log-file";
 const ARG_SERVICE_MODE: &str = "service";
+const ARG_PLUGINS: &str = "plugins";
+const ARG_RECORDING_PATH: &str = "recording-path";
 
 const SERVICE_NAME: &str = "devolutions-gateway";
 const DISPLAY_NAME: &str = "Devolutions Gateway";
@@ -91,6 +95,8 @@ pub struct Config {
     pub certificate: CertificateConfig,
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
+    pub plugins: Option<Vec<String>>,
+    pub recording_path: Option<String>,
 }
 
 impl Default for Config {
@@ -121,6 +127,8 @@ impl Default for Config {
             },
             provisioner_public_key: None,
             delegation_private_key: None,
+            plugins: None,
+            recording_path: None,
         }
     }
 }
@@ -191,6 +199,10 @@ pub struct ConfigFile {
     pub provisioner_public_key_file: Option<String>,
     #[serde(rename = "DelegationPrivateKeyFile")]
     pub delegation_private_key_file: Option<String>,
+    #[serde(rename = "Plugins")]
+    pub plugins: Option<Vec<String>>,
+    #[serde(rename = "RecordingPath")]
+    pub recording_path: Option<String>,
 
     // unstable options (subject to change)
     #[serde(rename = "ApiKey")]
@@ -473,7 +485,47 @@ impl Config {
                     .long("service")
                     .takes_value(false)
                     .help("Enable service mode"),
-            );
+            )
+            .arg(
+                Arg::with_name(ARG_PLUGINS)
+                    .long("plugin")
+                    .value_name("PATH")
+                    .help(
+                        "An path where the plugin is located including the plugin name and plugin extension.",
+                    )
+                    .long_help(
+                        "An path where the plugin is located including the plugin name and plugin extension. \
+                    The plugin will be loaded as dynamic library. \
+                    For example, on linux  - home/usr/libs/libplugin.so \
+                    on Windows - D:\\libs\\plugin.dll.",
+                    )
+                    .multiple(true)
+                    .use_delimiter(true)
+                    .value_delimiter(";")
+                    .takes_value(true)
+                    .number_of_values(1),
+            )
+            .arg(
+            Arg::with_name(ARG_RECORDING_PATH)
+                .long("recording-path")
+                .value_name("PATH")
+                .help(
+                    "An path where the recording of the session wil be located.",
+                )
+                .long_help(
+                    "An path where the recording will be saved. \
+                    If not set the TEMP directory will be used.",
+                )
+                .takes_value(true)
+                .empty_values(false)
+                .validator(|v| {
+                    if std::path::PathBuf::from(v).is_dir() {
+                        Ok(())
+                    } else {
+                        Err(String::from("The value does not exist or is not a path"))
+                    }
+                }),
+        );
 
         let matches = cli_app.get_matches();
 
@@ -588,6 +640,29 @@ impl Config {
             config.delegation_private_key = Some(private_key);
         }
 
+        // plugins parsing
+        let mut plugins= Vec::new();
+        for plugin in matches.values_of(ARG_PLUGINS).unwrap_or_else(Default::default) {
+            plugins.push(plugin.to_string());
+        }
+
+        if !plugins.is_empty() {
+            config.plugins = Some(plugins);
+        }
+
+        // early fail if the specified plugin is not exist
+        if let Some(plugins) = &config.plugins {
+            for plugin in plugins {
+                println!("Plugin path: {}", plugin);
+                debug!("Plugin path: {}", plugin);
+                let mut manager = PLUGIN_MANAGER.lock().unwrap();
+                match manager.load_plugin(plugin) {
+                    Ok(_) => {},
+                    Err(e) => panic!("Failed to load plugin with error {}", e.to_string()),
+                };
+            }
+        }
+
         // listeners parsing
 
         let mut listeners = Vec::new();
@@ -657,6 +732,10 @@ impl Config {
         // early fail if we start as restricted without provisioner key
         if !config.unrestricted && config.provisioner_public_key.is_none() {
             panic!("provisioner public key is missing in unrestricted mode");
+        }
+
+        if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
+            config.recording_path = Some(recording_path.to_owned());
         }
 
         config
@@ -749,6 +828,9 @@ impl Config {
             .as_ref()
             .map(|pem| PrivateKey::from_pem(pem).unwrap());
 
+        let plugins = config_file.plugins;
+        let recording_path = config_file.recording_path;
+
         // unstable options (subject to change)
         let api_key = config_file.api_key;
         let unrestricted = config_file.unrestricted.unwrap_or(true);
@@ -770,6 +852,8 @@ impl Config {
             },
             provisioner_public_key,
             delegation_private_key,
+            plugins,
+            recording_path,
             ..Default::default()
         })
     }

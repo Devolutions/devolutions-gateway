@@ -54,6 +54,8 @@ slog-stdlog = "4.0"
 ring = "0.16.0"
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
 indexmap = "1.0"
+dlopen = "0.1.8"
+dlopen_derive = "0.1.4"
 
 [dependencies.saphir]
 git = "https://github.com/richerarc/saphir"

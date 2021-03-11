@@ -3,9 +3,11 @@ use std::net::SocketAddr;
 
 pub mod pcap;
 pub mod rdp;
+pub mod pcap_recording;
 
 pub trait PacketInterceptor: Send + Sync {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
+    fn get_interceptor_clone(&self) -> Box<dyn PacketInterceptor>;
 }
 
 pub trait MessageReader: Send + Sync {

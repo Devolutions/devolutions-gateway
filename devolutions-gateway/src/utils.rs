@@ -1,24 +1,29 @@
 pub mod association;
 
-use std::collections::HashMap;
-use std::fs;
-use std::future::Future;
-use std::hash::Hash;
-use std::io::{self, BufReader};
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    collections::HashMap,
+    fs,
+    future::Future,
+    hash::Hash,
+    io::{self, BufReader},
+    net::SocketAddr,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-use futures::ready;
-use futures::stream::Stream;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{lookup_host, TcpListener, TcpStream};
-use tokio_rustls::rustls;
+use futures::{ready, stream::Stream};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::{lookup_host, TcpListener, TcpStream},
+};
+use tokio_rustls::{rustls, Connect};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 
+use tokio_rustls::TlsConnector;
 use crate::config::CertificateConfig;
+use std::sync::Arc;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
@@ -282,4 +287,15 @@ pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
 
 pub fn into_other_io_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {
     io::Error::new(io::ErrorKind::Other, desc)
+}
+
+pub fn create_tls_connector(socket: TcpStream) -> Connect<TcpStream> {
+    let mut client_config = tokio_rustls::rustls::ClientConfig::default();
+    client_config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
+    let config_ref = Arc::new(client_config);
+    let tls_connector = TlsConnector::from(config_ref);
+    let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
+    tls_connector.connect(dns_name, socket)
 }

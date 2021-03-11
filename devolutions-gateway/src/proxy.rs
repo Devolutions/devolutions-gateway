@@ -8,11 +8,13 @@ use crate::SESSION_IN_PROGRESS_COUNT;
 use futures::{select, FutureExt, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
-use std::collections::HashMap;
-use std::io;
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    io,
+    path::PathBuf,
+    sync::{atomic::Ordering, Arc},
+};
+use crate::interceptor::PacketInterceptor;
 
 pub struct Proxy {
     config: Arc<Config>,
@@ -62,13 +64,9 @@ impl Proxy {
         client_transport: U,
         message_reader: Option<Box<dyn MessageReader>>,
     ) -> Result<(), io::Error> {
-        let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
-        let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
-
+        let mut interceptor: Option<Box<dyn PacketInterceptor>> = None;
         let server_peer_addr = server_transport.peer_addr().unwrap();
         let client_peer_addr = client_transport.peer_addr().unwrap();
-        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
-        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
 
         if let (Some(capture_path), Some(message_reader)) = (self.config.capture_path.as_ref(), message_reader) {
             let filename = format!(
@@ -82,18 +80,36 @@ impl Proxy {
             let mut path = PathBuf::from(capture_path);
             path.push(filename);
 
-            let mut interceptor = PcapInterceptor::new(
+            let mut pcap_interceptor = PcapInterceptor::new(
                 server_peer_addr,
                 client_peer_addr,
                 path.to_str().expect("path to pcap files must be valid"),
             );
 
-            interceptor.set_message_reader(message_reader);
+            pcap_interceptor.set_message_reader(message_reader);
+            interceptor = Some(Box::new(pcap_interceptor));
+        }
 
+        self.build_with_packet_interceptor(server_transport, client_transport, interceptor).await
+    }
+
+    pub async fn build_with_packet_interceptor<T: Transport, U: Transport>(
+        &self,
+        server_transport: T,
+        client_transport: U,
+        packet_interceptor: Option<Box<dyn PacketInterceptor>>
+    ) -> Result<(), io::Error> {
+        let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
+        let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
+
+        let (mut jet_stream_server, jet_sink_server) = server_transport.split_transport(server_writer, server_reader);
+        let (mut jet_stream_client, jet_sink_client) = client_transport.split_transport(client_writer, client_reader);
+
+        if let Some(interceptor) = packet_interceptor {
             jet_stream_server
                 .as_mut()
-                .set_packet_interceptor(Box::new(interceptor.clone()));
-            jet_stream_client.as_mut().set_packet_interceptor(Box::new(interceptor));
+                .set_packet_interceptor(interceptor.get_interceptor_clone());
+            jet_stream_client.as_mut().set_packet_interceptor(interceptor);
         }
 
         // Build future to forward all bytes
