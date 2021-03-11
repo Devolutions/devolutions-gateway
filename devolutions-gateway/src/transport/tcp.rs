@@ -7,12 +7,12 @@ use std::task::{Context, Poll};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use tokio_rustls::{TlsConnector, TlsStream};
+use tokio_rustls::TlsStream;
 use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{danger_transport, resolve_url_to_socket_arr, create_tls_connector},
+    utils::{resolve_url_to_socket_arr, create_tls_connector},
 };
 
 #[allow(clippy::large_enum_variant)]

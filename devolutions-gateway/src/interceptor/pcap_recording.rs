@@ -1,5 +1,5 @@
 use std::{sync::{Arc, Mutex}, net::SocketAddr};
-use crate::interceptor::{PeerInfo, MessageReader, PacketInterceptor};
+use crate::interceptor::{PeerInfo, PacketInterceptor};
 use slog_scope::debug;
 use crate::plugin_manager::{PLUGIN_MANAGER, PacketsParser, Recorder};
 
@@ -46,14 +46,14 @@ impl PacketInterceptor for PcapRecordingInterceptor {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]) {
         debug!("New packet intercepted. Packet size = {}", data.len());
 
-        let mut server_info = self.server_info.lock().unwrap();
+        let server_info = self.server_info.lock().unwrap();
 
-        let mut option_parser = self.packets_parser.lock().unwrap();
-        let mut option_recorder = self.recorder.lock().unwrap();
+        let option_parser = self.packets_parser.lock().unwrap();
+        let option_recorder = self.recorder.lock().unwrap();
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         if option_parser.is_some() {
-            let mut parser = option_parser.as_ref().unwrap();
+            let parser = option_parser.as_ref().unwrap();
             let mut message_id: u32 = 0;
 
             let parse_res = parser.parse_message(data, data.len(), is_from_server);
@@ -64,9 +64,9 @@ impl PacketInterceptor for PcapRecordingInterceptor {
                 return;
             } else if message_id == PacketsParser::NOW_UPDATE_MSG_ID {
                 let size = parser.get_size();
-                let mut image_data = parser.get_image_data();
+                let image_data = parser.get_image_data();
                 if option_recorder.is_some() {
-                    let mut recorder = option_recorder.as_ref().unwrap();
+                    let recorder = option_recorder.as_ref().unwrap();
                     recorder.set_size(size.width, size.height);
                     recorder.update_recording(image_data);
                 }
