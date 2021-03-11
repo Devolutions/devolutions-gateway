@@ -1,6 +1,7 @@
 use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
 use crate::interceptor::rdp::RdpMessageReader;
+use crate::interceptor::PacketInterceptor;
 use crate::interceptor::{MessageReader, UnknownMessageReader, WaykMessageReader};
 use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 use crate::transport::{Transport, BIP_BUFFER_LEN};
@@ -14,7 +15,6 @@ use std::{
     path::PathBuf,
     sync::{atomic::Ordering, Arc},
 };
-use crate::interceptor::PacketInterceptor;
 
 pub struct Proxy {
     config: Arc<Config>,
@@ -90,14 +90,15 @@ impl Proxy {
             interceptor = Some(Box::new(pcap_interceptor));
         }
 
-        self.build_with_packet_interceptor(server_transport, client_transport, interceptor).await
+        self.build_with_packet_interceptor(server_transport, client_transport, interceptor)
+            .await
     }
 
     pub async fn build_with_packet_interceptor<T: Transport, U: Transport>(
         &self,
         server_transport: T,
         client_transport: U,
-        packet_interceptor: Option<Box<dyn PacketInterceptor>>
+        packet_interceptor: Option<Box<dyn PacketInterceptor>>,
     ) -> Result<(), io::Error> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);

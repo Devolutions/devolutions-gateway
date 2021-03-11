@@ -12,6 +12,7 @@ pub mod jet;
 pub mod jet_client;
 pub mod jet_rendezvous_tcp_proxy;
 pub mod logger;
+pub mod plugin_manager;
 pub mod proxy;
 pub mod rdp;
 pub mod routing_client;
@@ -19,7 +20,6 @@ pub mod service;
 pub mod transport;
 pub mod utils;
 pub mod websocket_client;
-pub mod plugin_manager;
 
 pub use proxy::Proxy;
 

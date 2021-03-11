@@ -1,7 +1,10 @@
-use std::{sync::{Arc, Mutex}, net::SocketAddr};
-use crate::interceptor::{PeerInfo, PacketInterceptor};
+use crate::interceptor::{PacketInterceptor, PeerInfo};
+use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
 use slog_scope::debug;
-use crate::plugin_manager::{PLUGIN_MANAGER, PacketsParser, Recorder};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 #[derive(Clone)]
 pub struct PcapRecordingInterceptor {
@@ -16,11 +19,7 @@ impl PcapRecordingInterceptor {
         debug!("Recording Interceptor was created");
         let recording_plugin = PLUGIN_MANAGER.lock().unwrap().get_recording_plugin();
         if let Some(recorder) = &recording_plugin {
-            let filename = format!(
-                "{}-to-{}",
-                association_id,
-                candidate_id
-            );
+            let filename = format!("{}-to-{}", association_id, candidate_id);
             recorder.set_filename(filename.as_str());
         }
 
@@ -54,11 +53,10 @@ impl PacketInterceptor for PcapRecordingInterceptor {
 
         if option_parser.is_some() {
             let parser = option_parser.as_ref().unwrap();
-            let mut message_id: u32 = 0;
 
             let parse_res = parser.parse_message(data, data.len(), is_from_server);
             let status = parse_res.0;
-            message_id = parse_res.1;
+            let message_id: u32 = parse_res.1;
 
             if !parser.is_message_constructed() {
                 return;

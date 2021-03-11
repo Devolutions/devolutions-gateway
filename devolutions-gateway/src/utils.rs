@@ -21,9 +21,9 @@ use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 
-use tokio_rustls::TlsConnector;
 use crate::config::CertificateConfig;
 use std::sync::Arc;
+use tokio_rustls::TlsConnector;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;

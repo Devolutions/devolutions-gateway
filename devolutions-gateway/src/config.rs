@@ -1,15 +1,15 @@
+use crate::plugin_manager::PLUGIN_MANAGER;
 use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
+use slog_scope::debug;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use url::Url;
-use slog_scope::debug;
-use crate::plugin_manager::PLUGIN_MANAGER;
 
 const ARG_API_KEY: &str = "api-key";
 const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
@@ -490,9 +490,7 @@ impl Config {
                 Arg::with_name(ARG_PLUGINS)
                     .long("plugin")
                     .value_name("PATH")
-                    .help(
-                        "An path where the plugin is located including the plugin name and plugin extension.",
-                    )
+                    .help("An path where the plugin is located including the plugin name and plugin extension.")
                     .long_help(
                         "An path where the plugin is located including the plugin name and plugin extension. \
                     The plugin will be loaded as dynamic library. \
@@ -506,26 +504,24 @@ impl Config {
                     .number_of_values(1),
             )
             .arg(
-            Arg::with_name(ARG_RECORDING_PATH)
-                .long("recording-path")
-                .value_name("PATH")
-                .help(
-                    "An path where the recording of the session wil be located.",
-                )
-                .long_help(
-                    "An path where the recording will be saved. \
+                Arg::with_name(ARG_RECORDING_PATH)
+                    .long("recording-path")
+                    .value_name("PATH")
+                    .help("An path where the recording of the session wil be located.")
+                    .long_help(
+                        "An path where the recording will be saved. \
                     If not set the TEMP directory will be used.",
-                )
-                .takes_value(true)
-                .empty_values(false)
-                .validator(|v| {
-                    if std::path::PathBuf::from(v).is_dir() {
-                        Ok(())
-                    } else {
-                        Err(String::from("The value does not exist or is not a path"))
-                    }
-                }),
-        );
+                    )
+                    .takes_value(true)
+                    .empty_values(false)
+                    .validator(|v| {
+                        if std::path::PathBuf::from(v).is_dir() {
+                            Ok(())
+                        } else {
+                            Err(String::from("The value does not exist or is not a path"))
+                        }
+                    }),
+            );
 
         let matches = cli_app.get_matches();
 
@@ -641,7 +637,7 @@ impl Config {
         }
 
         // plugins parsing
-        let mut plugins= Vec::new();
+        let mut plugins = Vec::new();
         for plugin in matches.values_of(ARG_PLUGINS).unwrap_or_else(Default::default) {
             plugins.push(plugin.to_string());
         }
@@ -656,8 +652,8 @@ impl Config {
                 println!("Plugin path: {}", plugin);
                 debug!("Plugin path: {}", plugin);
                 let mut manager = PLUGIN_MANAGER.lock().unwrap();
-                match manager.load_plugin(plugin) {
-                    Ok(_) => {},
+                match manager.load_plugin(plugin.as_str()) {
+                    Ok(_) => {}
                     Err(e) => panic!("Failed to load plugin with error {}", e.to_string()),
                 };
             }

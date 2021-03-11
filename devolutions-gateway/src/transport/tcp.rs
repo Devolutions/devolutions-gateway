@@ -12,7 +12,7 @@ use url::Url;
 
 use crate::{
     transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{resolve_url_to_socket_arr, create_tls_connector},
+    utils::{create_tls_connector, resolve_url_to_socket_arr},
 };
 
 #[allow(clippy::large_enum_variant)]

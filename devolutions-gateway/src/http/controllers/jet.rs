@@ -64,15 +64,16 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let mut jet_tp_claim: Option<String> = None;
-        jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
+        let jet_tp_claim: Option<String> = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, ());
             }
             Ok(expected_token) => {
-                if !self.config.unrestricted &&
-                    (!expected_token.den_session_id.is_some() || expected_token.den_session_id.unwrap() != association_id) {
+                if !self.config.unrestricted
+                    && (expected_token.den_session_id.is_none()
+                        || expected_token.den_session_id.unwrap() != association_id)
+                {
                     slog_scope::error!(
                         "Invalid session token: expected {:?}, got {}",
                         expected_token.den_session_id,
@@ -92,7 +93,10 @@ impl JetController {
         // when saphir perform transition to tokio 0.3
         let mut jet_associations = self.jet_associations.lock().compat().await;
 
-        jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2, jet_tp_claim));
+        jet_associations.insert(
+            association_id,
+            Association::new(association_id, JET_VERSION_V2, jet_tp_claim),
+        );
         start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
         (StatusCode::OK, ())
@@ -110,15 +114,16 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let mut jet_tp_claim: Option<String> = None;
-        jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
+        let jet_tp_claim: Option<String> = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, None);
             }
             Ok(expected_token) => {
-                if !self.config.unrestricted &&
-                    (!expected_token.den_session_id.is_some() || expected_token.den_session_id.unwrap() != association_id) {
+                if !self.config.unrestricted
+                    && (expected_token.den_session_id.is_none()
+                        || expected_token.den_session_id.unwrap() != association_id)
+                {
                     slog_scope::error!(
                         "Invalid session token: expected {:?}, got {}",
                         expected_token.den_session_id,
@@ -137,7 +142,10 @@ impl JetController {
         let mut jet_associations = self.jet_associations.lock().compat().await;
 
         if !jet_associations.contains_key(&association_id) {
-            jet_associations.insert(association_id, Association::new(association_id, JET_VERSION_V2, jet_tp_claim));
+            jet_associations.insert(
+                association_id,
+                Association::new(association_id, JET_VERSION_V2, jet_tp_claim),
+            );
             start_remove_association_future(self.jet_associations.clone(), association_id).await;
         }
         let association = jet_associations
@@ -179,12 +187,10 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
     }
 }
 
-
-
 #[derive(Deserialize)]
 struct PartialSessionToken {
     den_session_id: Option<Uuid>,
-    jet_tp: Option<String>
+    jet_tp: Option<String>,
 }
 
 fn validate_session_token(config: &Config, req: &Request) -> Result<PartialSessionToken, String> {

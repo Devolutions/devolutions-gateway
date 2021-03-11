@@ -5,7 +5,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use jet_proto::{accept::{JetAcceptReq, JetAcceptRsp}, connect::{JetConnectReq, JetConnectRsp}, test::{JetTestReq, JetTestRsp}, JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
+use jet_proto::{
+    accept::{JetAcceptReq, JetAcceptRsp},
+    connect::{JetConnectReq, JetConnectRsp},
+    test::{JetTestReq, JetTestRsp},
+    JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
+};
 use slog_scope::{debug, error};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
@@ -14,18 +19,21 @@ use uuid::Uuid;
 use crate::{
     config::Config,
     http::controllers::jet::remove_association,
+    interceptor::pcap_recording::PcapRecordingInterceptor,
     jet::{
         association::Association,
         candidate::{Candidate, CandidateState},
         TransportType,
     },
-    transport::{JetTransport, Transport, tcp::TcpTransport},
-    utils::{association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT}, create_tls_connector, into_other_io_error as error_other},
+    transport::{tcp::TcpTransport, JetTransport, Transport},
+    utils::{
+        association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
+        create_tls_connector, into_other_io_error as error_other,
+    },
     Proxy,
-    interceptor::pcap_recording::PcapRecordingInterceptor,
 };
 
-use tokio_rustls::{TlsStream, TlsAcceptor};
+use tokio_rustls::{TlsAcceptor, TlsStream};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 const EXPECTED_JET_TP_VALUE: &str = "record";
@@ -75,8 +83,12 @@ impl JetClient {
     }
 }
 
-async fn handle_build_proxy(jet_associations: JetAssociationsMap, config: Arc<Config>,
-                            response: HandleConnectJetMsgResponse, tls_acceptor: TlsAcceptor) -> Result<(), io::Error> {
+async fn handle_build_proxy(
+    jet_associations: JetAssociationsMap,
+    config: Arc<Config>,
+    response: HandleConnectJetMsgResponse,
+    tls_acceptor: TlsAcceptor,
+) -> Result<(), io::Error> {
     let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
     let association_id = response.association_id;
 
@@ -84,13 +96,12 @@ async fn handle_build_proxy(jet_associations: JetAssociationsMap, config: Arc<Co
     if let Some(association) = associations.get(&association_id) {
         if let Some(jet_tp_claim) = association.get_jet_tp_claim() {
             if jet_tp_claim.eq(EXPECTED_JET_TP_VALUE) && config.plugins.is_some() {
-
-                let mut interceptor =
-                    PcapRecordingInterceptor::new(
-                        response.server_transport.peer_addr().unwrap(),
-                        response.client_transport.peer_addr().unwrap(),
-                        association_id.clone().to_string(),
-                        response.candidate_id.clone().to_string());
+                let mut interceptor = PcapRecordingInterceptor::new(
+                    response.server_transport.peer_addr().unwrap(),
+                    response.client_transport.peer_addr().unwrap(),
+                    association_id.clone().to_string(),
+                    response.candidate_id.clone().to_string(),
+                );
 
                 if let Some(path) = &config.recording_path {
                     interceptor.set_recording_directory(path.as_str());
@@ -106,12 +117,8 @@ async fn handle_build_proxy(jet_associations: JetAssociationsMap, config: Arc<Co
         let server_stream = response.server_transport.get_tcp_stream();
 
         if client_stream.is_some() && server_stream.is_some() {
-            let tls_stream = tls_acceptor
-                .accept(client_stream.unwrap())
-                .await
-                .map_err(|err| err)?;
+            let tls_stream = tls_acceptor.accept(client_stream.unwrap()).await.map_err(|err| err)?;
             let client_transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
-
 
             let tls_handshake = create_tls_connector(server_stream.unwrap())
                 .await
@@ -119,14 +126,19 @@ async fn handle_build_proxy(jet_associations: JetAssociationsMap, config: Arc<Co
             let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
 
             Proxy::new(config)
-                .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor))).await
+                .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
+                .await
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidData, "Failed to retrieve tcp stream to create tls connection!"))
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Failed to retrieve tcp stream to create tls connection!",
+            ))
         }
     } else {
         Proxy::new(config)
-            .build(response.server_transport, response.client_transport).await
-    }
+            .build(response.server_transport, response.client_transport)
+            .await
+    };
 }
 
 async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, JetMessage), io::Error> {
