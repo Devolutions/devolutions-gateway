@@ -109,7 +109,7 @@ impl Proxy {
         if let Some(interceptor) = packet_interceptor {
             jet_stream_server
                 .as_mut()
-                .set_packet_interceptor(interceptor.get_clone());
+                .set_packet_interceptor(interceptor.boxed_clone());
             jet_stream_client.as_mut().set_packet_interceptor(interceptor);
         }
 

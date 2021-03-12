@@ -58,13 +58,13 @@ impl PluginInformation {
 
     pub fn get_capabilities(&self) -> Vec<PluginCapabilities> {
         let mut size = 0;
-        let mut capabilities = Vec::new();
 
         let capabilities_array = unsafe {
             let ptr: *const u8 = (self.info.NowPluginGeneral_GetCapabilities)((&mut size) as *mut usize);
             from_raw_parts::<u8>(ptr, size)
         };
 
+        let mut capabilities = Vec::with_capacity(size);
         for raw_capability in capabilities_array {
             match PluginCapabilities::try_from(*raw_capability as u32) {
                 Ok(capability) => capabilities.push(capability),
