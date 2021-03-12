@@ -20,24 +20,22 @@ lazy_static! {
 
 impl PluginManager {
     pub fn get_recording_plugin(&self) -> Option<Recorder> {
-        let libs = self.lib.clone();
-        for lib in libs {
+        for lib in &self.lib {
             let info = PluginInformation::new(lib.clone());
             if info.get_capabilities().contains(&PluginCapabilities::Recording) {
                 debug!("recording plugin found");
-                return Some(Recorder::new(lib));
+                return Some(Recorder::new(lib.clone()));
             }
         }
         None
     }
 
     pub fn get_parsing_packets_plugin(&self) -> Option<PacketsParser> {
-        let libs = self.lib.clone();
-        for lib in libs {
+        for lib in &self.lib {
             let info = PluginInformation::new(lib.clone());
             if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing) {
                 debug!("parsing plugin found");
-                return Some(PacketsParser::new(lib));
+                return Some(PacketsParser::new(lib.clone()));
             }
         }
         None

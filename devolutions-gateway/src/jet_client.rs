@@ -112,7 +112,7 @@ async fn handle_build_proxy(
         }
     }
 
-    return if let Some(interceptor) = recording_interceptor {
+    if let Some(interceptor) = recording_interceptor {
         let client_stream = response.client_transport.get_tcp_stream();
         let server_stream = response.server_transport.get_tcp_stream();
 
@@ -138,7 +138,7 @@ async fn handle_build_proxy(
         Proxy::new(config)
             .build(response.server_transport, response.client_transport)
             .await
-    };
+    }
 }
 
 async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, JetMessage), io::Error> {

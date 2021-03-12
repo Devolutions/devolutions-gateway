@@ -1,7 +1,8 @@
+use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use slog_scope::{debug, error};
-use std::{convert::TryFrom, ffi::CStr, mem::transmute, os::raw::c_char, slice::from_raw_parts, sync::Arc};
+use std::{convert::TryFrom, ffi::CStr, io::Error, mem::transmute, os::raw::c_char, slice::from_raw_parts, sync::Arc};
 
 #[derive(Debug, PartialEq)]
 pub enum PluginCapabilities {
@@ -10,13 +11,13 @@ pub enum PluginCapabilities {
 }
 
 impl TryFrom<u32> for PluginCapabilities {
-    type Error = String;
+    type Error = Error;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(PluginCapabilities::PacketsParsing),
             2 => Ok(PluginCapabilities::Recording),
-            _ => Err(format!("Unknown capability detected {}", value)),
+            _ => Err(into_other_io_error(format!("Unknown capability detected {}", value))),
         }
     }
 }
