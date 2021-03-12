@@ -21,9 +21,10 @@ fn construct_routing_url(scheme: &str, addr: &str) -> String {
 fn smoke() {
     let proxy_addr = PROXY_ADDR;
     let routing_url = ROUTING_ADDR;
+    let ws_ulr = "127.0.0.1:8092";
 
     //Spawn our proxy and wait for it to come online
-    let _proxy = run_proxy(proxy_addr, None, Some(&construct_routing_url("tcp", routing_url)), None);
+    let _proxy = run_proxy(proxy_addr, Some(&construct_routing_url("ws", ws_ulr)), Some(&construct_routing_url("tcp", routing_url)), None);
 
     let (sender_end, receiver_end) = channel();
 
