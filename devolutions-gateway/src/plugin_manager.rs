@@ -3,10 +3,10 @@ use lazy_static::lazy_static;
 use slog_scope::debug;
 use std::sync::{Arc, Mutex};
 
-mod general;
+mod plugin_info;
 mod packets_parsing;
 mod recording;
-use general::{PluginCapabilities, PluginInformation};
+use plugin_info::{PluginCapabilities, PluginInformation};
 pub use packets_parsing::PacketsParser;
 pub use recording::Recorder;
 

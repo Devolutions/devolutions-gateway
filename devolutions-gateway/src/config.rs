@@ -515,7 +515,7 @@ impl Config {
                     .takes_value(true)
                     .empty_values(false)
                     .validator(|v| {
-                        if std::path::PathBuf::from(v).is_dir() {
+                        if PathBuf::from(v).is_dir() {
                             Ok(())
                         } else {
                             Err(String::from("The value does not exist or is not a path"))
@@ -637,10 +637,10 @@ impl Config {
         }
 
         // plugins parsing
-        let mut plugins = Vec::new();
-        for plugin in matches.values_of(ARG_PLUGINS).unwrap_or_else(Default::default) {
-            plugins.push(plugin.to_string());
-        }
+        let plugins= matches.values_of(ARG_PLUGINS)
+            .unwrap_or_else(Default::default)
+            .map(|plugin| plugin.to_string())
+            .collect::<Vec<String>>();
 
         if !plugins.is_empty() {
             config.plugins = Some(plugins);
@@ -648,14 +648,12 @@ impl Config {
 
         // early fail if the specified plugin is not exist
         if let Some(plugins) = &config.plugins {
+            let mut manager = PLUGIN_MANAGER.lock().unwrap();
             for plugin in plugins {
-                println!("Plugin path: {}", plugin);
                 debug!("Plugin path: {}", plugin);
-                let mut manager = PLUGIN_MANAGER.lock().unwrap();
-                match manager.load_plugin(plugin.as_str()) {
-                    Ok(_) => {}
-                    Err(e) => panic!("Failed to load plugin with error {}", e.to_string()),
-                };
+                manager
+                    .load_plugin(plugin.as_str())
+                    .unwrap_or_else(|e| panic!("Failed to load plugin with error {}", e));
             }
         }
 

@@ -1,6 +1,6 @@
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::sync::Arc;
+use std::{sync::Arc, mem::transmute, slice::from_raw_parts};
 
 pub type NowPacketsParsing = usize;
 
@@ -52,7 +52,7 @@ pub struct PacketsParsingApi<'a> {
 
 pub struct PacketsParser {
     api: PacketsParsingApi<'static>,
-    //this filed is needed to prove the compiler that info will not outlive the lib
+    // this field is needed to prove the compiler that info will not outlive the lib
     _lib: Arc<Library>,
     ctx: NowPacketsParsing,
 }
@@ -65,38 +65,37 @@ impl PacketsParser {
     pub fn new(lib: Arc<Library>) -> Self {
         let api = unsafe {
             let lib = PacketsParsingApi::load(&lib).unwrap();
-            std::mem::transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib)
+            transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib)
         };
         let ctx = unsafe { (api.NowWaykPacketsParsing_CreateParsingContext)() };
 
         Self {
-            _lib: lib.clone(),
+            _lib: lib,
             api,
             ctx,
         }
     }
 
     pub fn get_size(&self) -> FrameSize {
-        unsafe {
-            let mut width: u32 = 0;
-            let mut height: u32 = 0;
-            (self.api.NowWaykPacketsParsing_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32);
-            FrameSize { width, height }
-        }
+        let mut width = 0;
+        let mut height = 0;
+        unsafe { (self.api.NowWaykPacketsParsing_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32); }
+
+        FrameSize { width, height }
     }
 
     pub fn parse_message(&self, buffer: &[u8], len: usize, is_from_server: bool) -> (usize, u32) {
-        unsafe {
-            let mut message_id: u32 = 0;
-            let res = (self.api.NowWaykPacketsParsing_ParseMessage)(
+        let mut message_id = 0;
+        let res = unsafe {
+            (self.api.NowWaykPacketsParsing_ParseMessage)(
                 self.ctx,
                 buffer.as_ptr(),
                 len,
                 (&mut message_id) as *mut u32,
                 is_from_server,
-            );
-            (res, message_id)
-        }
+            )
+        };
+        (res, message_id)
     }
 
     pub fn is_message_constructed(&self) -> bool {
@@ -104,13 +103,15 @@ impl PacketsParser {
     }
 
     pub fn get_image_data(&self) -> ImageUpdate {
+        let mut update_x = 0;
+        let mut update_y = 0;
+        let mut update_width = 0;
+        let mut update_height = 0;
+        let mut surface_step = 0;
+        let mut surface_size = 0;
+        let mut image_buff = Vec::new();
+
         unsafe {
-            let mut update_x: u32 = 0;
-            let mut update_y: u32 = 0;
-            let mut update_width: u32 = 0;
-            let mut update_height: u32 = 0;
-            let mut surface_step: u32 = 0;
-            let mut surface_size: u32 = 0;
             let ptr: *const u8 = (self.api.NowWaykPacketsParsing_GetImageBuff)(
                 self.ctx,
                 (&mut update_x) as *mut u32,
@@ -121,18 +122,17 @@ impl PacketsParser {
                 (&mut surface_size) as *mut u32,
             );
 
-            let mut image_buff: Vec<u8> = Vec::new();
-            let raw_image_buf = std::slice::from_raw_parts::<u8>(ptr, surface_size as usize);
+            let raw_image_buf = from_raw_parts::<u8>(ptr, surface_size as usize);
             image_buff.extend_from_slice(raw_image_buf);
+        }
 
-            ImageUpdate {
-                update_x,
-                update_y,
-                update_height,
-                update_width,
-                surface_step,
-                image_buff,
-            }
+        ImageUpdate {
+            update_x,
+            update_y,
+            update_height,
+            update_width,
+            surface_step,
+            image_buff,
         }
     }
 }

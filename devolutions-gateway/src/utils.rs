@@ -9,6 +9,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
+    sync::Arc,
 };
 
 use futures::{ready, stream::Stream};
@@ -16,14 +17,12 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{lookup_host, TcpListener, TcpStream},
 };
-use tokio_rustls::{rustls, Connect};
+use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
 
 use crate::config::CertificateConfig;
-use std::sync::Arc;
-use tokio_rustls::TlsConnector;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;

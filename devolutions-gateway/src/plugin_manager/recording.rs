@@ -1,7 +1,7 @@
 use crate::plugin_manager::packets_parsing::ImageUpdate;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{ffi::CString, os::raw::c_char, sync::Arc};
+use std::{ffi::CString, os::raw::c_char, sync::Arc, mem::transmute};
 
 pub type RecordingContext = usize;
 
@@ -29,7 +29,7 @@ pub struct RecordingApi<'a> {
 
 pub struct Recorder {
     api: RecordingApi<'static>,
-    //this filed is needed to prove the compiler that info will not outlive the lib
+    // this field is needed to prove the compiler that info will not outlive the lib
     _lib: Arc<Library>,
     ctx: RecordingContext,
 }
@@ -38,12 +38,12 @@ impl Recorder {
     pub fn new(lib: Arc<Library>) -> Self {
         let api = unsafe {
             let lib = RecordingApi::load(&lib).unwrap();
-            std::mem::transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib)
+            transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib)
         };
         let ctx = unsafe { (api.NowRecording_CreateRecordingContext)() };
 
         Self {
-            _lib: lib.clone(),
+            _lib: lib,
             api,
             ctx,
         }

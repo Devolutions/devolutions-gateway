@@ -7,7 +7,7 @@ pub mod rdp;
 
 pub trait PacketInterceptor: Send + Sync {
     fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
-    fn get_interceptor_clone(&self) -> Box<dyn PacketInterceptor>;
+    fn get_clone(&self) -> Box<dyn PacketInterceptor>;
 }
 
 pub trait MessageReader: Send + Sync {

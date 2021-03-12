@@ -1,7 +1,7 @@
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use slog_scope::{debug, error};
-use std::{convert::TryFrom, ffi::CStr, os::raw::c_char, sync::Arc};
+use std::{convert::TryFrom, ffi::CStr, os::raw::c_char, sync::Arc, mem::transmute, slice::from_raw_parts};
 
 #[derive(Debug, PartialEq)]
 pub enum PluginCapabilities {
@@ -30,7 +30,7 @@ pub struct PluginInformationApi<'a> {
 
 pub struct PluginInformation {
     info: PluginInformationApi<'static>,
-    //this filed is needed to prove the compiler that info will not outlive the lib
+    // this field is needed to prove the compiler that info will not outlive the lib
     _lib: Arc<Library>,
 }
 
@@ -40,38 +40,34 @@ impl PluginInformation {
             _lib: lib.clone(),
             info: unsafe {
                 let lib = PluginInformationApi::load(&lib).unwrap();
-                std::mem::transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib)
+                transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib)
             },
         }
     }
 
     pub fn get_name(&self) -> String {
-        unsafe {
-            let cstr = CStr::from_ptr((self.info.NowPluginGeneral_GetName)());
-            match cstr.to_str() {
-                Ok(result) => result.to_string(),
-                Err(e) => {
-                    error!("Failed to get the plugin name: {}", e.to_string());
-                    String::new()
-                }
-            }
-        }
+        let cstr = unsafe { CStr::from_ptr((self.info.NowPluginGeneral_GetName)()) };
+        cstr.to_str()
+            .unwrap_or_else(|e| { error!("Failed to get the plugin name: {}", e); "" })
+            .to_string()
     }
 
     pub fn get_capabilities(&self) -> Vec<PluginCapabilities> {
-        unsafe {
-            let mut size: usize = 0;
-            let ptr: *const u8 = (self.info.NowPluginGeneral_GetCapabilities)((&mut size) as *mut usize);
-            let mut capabilities: Vec<PluginCapabilities> = Vec::new();
-            let capabilities_array = std::slice::from_raw_parts::<u8>(ptr, size);
-            for raw_capability in capabilities_array {
-                match PluginCapabilities::try_from(*raw_capability as u32) {
-                    Ok(capability) => capabilities.push(capability),
-                    Err(e) => debug!("Unknown capability detected {}", e.to_string()),
-                };
-            }
+        let mut size = 0;
+        let mut capabilities= Vec::new();
 
-            capabilities
+        let mut capabilities_array = unsafe {
+            let ptr: *const u8 = (self.info.NowPluginGeneral_GetCapabilities)((&mut size) as *mut usize);
+            from_raw_parts::<u8>(ptr, size)
+        };
+
+        for raw_capability in capabilities_array {
+            match PluginCapabilities::try_from(*raw_capability as u32) {
+                Ok(capability) => capabilities.push(capability),
+                Err(e) => debug!("Unknown capability detected {}", e),
+            };
         }
+
+        capabilities
     }
 }

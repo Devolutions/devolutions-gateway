@@ -64,7 +64,7 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let jet_tp_claim: Option<String> = match validate_session_token(self.config.as_ref(), &req) {
+        let jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, ());
@@ -114,7 +114,7 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let jet_tp_claim: Option<String> = match validate_session_token(self.config.as_ref(), &req) {
+        let jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, None);

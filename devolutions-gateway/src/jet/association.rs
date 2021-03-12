@@ -91,8 +91,8 @@ impl Association {
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 
-    pub fn get_jet_tp_claim(&self) -> &Option<String> {
-        &self.jet_tp
+    pub fn get_jet_tp_claim(&self) -> Option<String> {
+        self.jet_tp.clone()
     }
 }
 

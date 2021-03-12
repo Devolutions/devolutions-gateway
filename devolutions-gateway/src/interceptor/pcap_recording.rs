@@ -54,9 +54,7 @@ impl PacketInterceptor for PcapRecordingInterceptor {
         if option_parser.is_some() {
             let parser = option_parser.as_ref().unwrap();
 
-            let parse_res = parser.parse_message(data, data.len(), is_from_server);
-            let status = parse_res.0;
-            let message_id: u32 = parse_res.1;
+            let (status, message_id) = parser.parse_message(data, data.len(), is_from_server);
 
             if !parser.is_message_constructed() {
                 return;
@@ -79,7 +77,7 @@ impl PacketInterceptor for PcapRecordingInterceptor {
         }
     }
 
-    fn get_interceptor_clone(&self) -> Box<dyn PacketInterceptor> {
-        Box::new(self.clone())
+    fn get_clone(&self) -> Box<dyn PacketInterceptor> {
+        Box::new(self.get_clone())
     }
 }
