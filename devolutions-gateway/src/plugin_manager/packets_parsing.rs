@@ -120,7 +120,7 @@ impl PacketsParser {
                 (&mut surface_size) as *mut u32,
             );
 
-           from_raw_parts::<u8>(ptr, surface_size as usize)
+            from_raw_parts::<u8>(ptr, surface_size as usize)
         };
 
         image_buff.extend_from_slice(raw_image_buf);
