@@ -109,7 +109,7 @@ impl PacketsParser {
         let mut surface_size: u32 = 0;
         let mut image_buff = Vec::new();
 
-        unsafe {
+        let raw_image_buf = unsafe {
             let ptr: *const u8 = (self.api.NowWaykPacketsParsing_GetImageBuff)(
                 self.ctx,
                 (&mut update_x) as *mut u32,
@@ -120,10 +120,10 @@ impl PacketsParser {
                 (&mut surface_size) as *mut u32,
             );
 
-            let raw_image_buf = from_raw_parts::<u8>(ptr, surface_size as usize);
-            image_buff.extend_from_slice(raw_image_buf);
-        }
+           from_raw_parts::<u8>(ptr, surface_size as usize)
+        };
 
+        image_buff.extend_from_slice(raw_image_buf);
         ImageUpdate {
             update_x,
             update_y,
