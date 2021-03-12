@@ -39,7 +39,7 @@ lazy_static! {
         password: String::from("TargetServerPassword"),
         domain: Some(String::from("TargetServerDomainName")),
     };
-    static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../devolutions-gateway/cert/certificate.p12").to_vec();
+    static ref CERT_PKCS12_DER: Vec<u8> = include_bytes!("../../devolutions-gateway/cert/certificate.p12").to_vec();
 }
 
 const IRONRDP_CLIENT_PATH: &str = "ironrdp_client";

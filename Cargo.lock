@@ -1494,11 +1494,24 @@ name = "jet-proto"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "bytes 0.5.6",
+ "exitcode",
  "hex-literal",
  "http 0.1.21",
  "httparse",
+ "ironrdp",
+ "lazy_static",
  "log",
+ "reqwest",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sspi",
+ "tempfile",
+ "tokio-rustls 0.20.0",
+ "url 1.7.2",
  "uuid 0.8.2",
+ "x509-parser",
 ]
 
 [[package]]
