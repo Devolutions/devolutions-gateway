@@ -637,7 +637,8 @@ impl Config {
         }
 
         // plugins parsing
-        let plugins= matches.values_of(ARG_PLUGINS)
+        let plugins = matches
+            .values_of(ARG_PLUGINS)
             .unwrap_or_else(Default::default)
             .map(|plugin| plugin.to_string())
             .collect::<Vec<String>>();

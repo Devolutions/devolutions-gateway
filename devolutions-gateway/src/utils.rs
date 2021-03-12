@@ -8,8 +8,8 @@ use std::{
     io::{self, BufReader},
     net::SocketAddr,
     pin::Pin,
-    task::{Context, Poll},
     sync::Arc,
+    task::{Context, Poll},
 };
 
 use futures::{ready, stream::Stream};

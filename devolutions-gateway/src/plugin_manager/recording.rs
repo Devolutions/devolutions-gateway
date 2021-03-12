@@ -1,7 +1,7 @@
 use crate::plugin_manager::packets_parsing::ImageUpdate;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{ffi::CString, os::raw::c_char, sync::Arc, mem::transmute};
+use std::{ffi::CString, mem::transmute, os::raw::c_char, sync::Arc};
 
 pub type RecordingContext = usize;
 
@@ -42,11 +42,7 @@ impl Recorder {
         };
         let ctx = unsafe { (api.NowRecording_CreateRecordingContext)() };
 
-        Self {
-            _lib: lib,
-            api,
-            ctx,
-        }
+        Self { _lib: lib, api, ctx }
     }
 
     pub fn update_recording(&self, mut image_data: ImageUpdate) {

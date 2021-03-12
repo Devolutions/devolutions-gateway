@@ -1,6 +1,6 @@
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{sync::Arc, mem::transmute, slice::from_raw_parts};
+use std::{mem::transmute, slice::from_raw_parts, sync::Arc};
 
 pub type NowPacketsParsing = usize;
 
@@ -69,17 +69,15 @@ impl PacketsParser {
         };
         let ctx = unsafe { (api.NowWaykPacketsParsing_CreateParsingContext)() };
 
-        Self {
-            _lib: lib,
-            api,
-            ctx,
-        }
+        Self { _lib: lib, api, ctx }
     }
 
     pub fn get_size(&self) -> FrameSize {
         let mut width = 0;
         let mut height = 0;
-        unsafe { (self.api.NowWaykPacketsParsing_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32); }
+        unsafe {
+            (self.api.NowWaykPacketsParsing_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32);
+        }
 
         FrameSize { width, height }
     }
@@ -108,7 +106,7 @@ impl PacketsParser {
         let mut update_width = 0;
         let mut update_height = 0;
         let mut surface_step = 0;
-        let mut surface_size = 0;
+        let mut surface_size: u32 = 0;
         let mut image_buff = Vec::new();
 
         unsafe {

@@ -1,7 +1,7 @@
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use slog_scope::{debug, error};
-use std::{convert::TryFrom, ffi::CStr, os::raw::c_char, sync::Arc, mem::transmute, slice::from_raw_parts};
+use std::{convert::TryFrom, ffi::CStr, mem::transmute, os::raw::c_char, slice::from_raw_parts, sync::Arc};
 
 #[derive(Debug, PartialEq)]
 pub enum PluginCapabilities {
@@ -48,15 +48,18 @@ impl PluginInformation {
     pub fn get_name(&self) -> String {
         let cstr = unsafe { CStr::from_ptr((self.info.NowPluginGeneral_GetName)()) };
         cstr.to_str()
-            .unwrap_or_else(|e| { error!("Failed to get the plugin name: {}", e); "" })
+            .unwrap_or_else(|e| {
+                error!("Failed to get the plugin name: {}", e);
+                ""
+            })
             .to_string()
     }
 
     pub fn get_capabilities(&self) -> Vec<PluginCapabilities> {
         let mut size = 0;
-        let mut capabilities= Vec::new();
+        let mut capabilities = Vec::new();
 
-        let mut capabilities_array = unsafe {
+        let capabilities_array = unsafe {
             let ptr: *const u8 = (self.info.NowPluginGeneral_GetCapabilities)((&mut size) as *mut usize);
             from_raw_parts::<u8>(ptr, size)
         };
