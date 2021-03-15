@@ -6,36 +6,47 @@ use std::sync::{Arc, Mutex};
 mod packets_parsing;
 mod plugin_info;
 mod recording;
+use crate::utils::into_other_io_error;
 pub use packets_parsing::PacketsParser;
 use plugin_info::{PluginCapabilities, PluginInformation};
 pub use recording::Recorder;
 
+#[derive(Clone)]
+struct Plugin {
+    lib: Arc<Library>,
+    info: Arc<PluginInformation>,
+}
+
 pub struct PluginManager {
-    lib: Vec<Arc<Library>>,
+    libs: Vec<Plugin>,
 }
 
 lazy_static! {
-    pub static ref PLUGIN_MANAGER: Mutex<PluginManager> = Mutex::new(PluginManager { lib: Vec::new() });
+    pub static ref PLUGIN_MANAGER: Mutex<PluginManager> = Mutex::new(PluginManager { libs: Vec::new() });
 }
 
 impl PluginManager {
     pub fn get_recording_plugin(&self) -> Option<Recorder> {
-        for lib in &self.lib {
-            let info = PluginInformation::new(lib.clone());
+        for plugin in &self.libs {
+            let info = plugin.info.clone();
             if info.get_capabilities().contains(&PluginCapabilities::Recording) {
-                debug!("recording plugin found");
-                return Some(Recorder::new(lib.clone()));
+                if let Ok(plugin) = Recorder::new(plugin.lib.clone()) {
+                    debug!("recording plugin found");
+                    return Some(plugin);
+                }
             }
         }
         None
     }
 
     pub fn get_parsing_packets_plugin(&self) -> Option<PacketsParser> {
-        for lib in &self.lib {
-            let info = PluginInformation::new(lib.clone());
+        for plugin in &self.libs {
+            let info = plugin.info.clone();
             if info.get_capabilities().contains(&PluginCapabilities::PacketsParsing) {
-                debug!("parsing plugin found");
-                return Some(PacketsParser::new(lib.clone()));
+                if let Ok(plugin) = PacketsParser::new(plugin.lib.clone()) {
+                    debug!("parsing plugin found");
+                    return Some(plugin);
+                }
             }
         }
         None
@@ -43,9 +54,22 @@ impl PluginManager {
 
     pub fn load_plugin(&mut self, path: &str) -> Result<(), Error> {
         let lib = Arc::new(Library::open(path)?);
-        self.lib.push(lib.clone());
-        let info = PluginInformation::new(lib);
-        slog_scope::info!("Plugin {} loaded", info.get_name());
-        Ok(())
+        match PluginInformation::new(lib.clone()) {
+            Ok(info) => {
+                slog_scope::info!("Plugin {} loaded", info.get_name());
+
+                let plugin = Plugin {
+                    lib,
+                    info: Arc::new(info),
+                };
+
+                self.libs.push(plugin);
+                Ok(())
+            }
+            Err(e) => {
+                slog_scope::error!("{}", e);
+                Err(Error::SymbolGettingError(into_other_io_error(e)))
+            }
+        }
     }
 }

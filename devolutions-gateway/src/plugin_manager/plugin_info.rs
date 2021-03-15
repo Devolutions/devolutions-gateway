@@ -36,14 +36,16 @@ pub struct PluginInformation {
 }
 
 impl PluginInformation {
-    pub fn new(lib: Arc<Library>) -> Self {
-        Self {
-            _lib: lib.clone(),
-            info: unsafe {
-                let lib = PluginInformationApi::load(&lib).unwrap();
-                transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib)
-            },
+    pub fn new(lib: Arc<Library>) -> Result<Self, Error> {
+        unsafe {
+            if let Ok(lib_load) = PluginInformationApi::load(&lib) {
+                return Ok(Self {
+                    _lib: lib.clone(),
+                    info: transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib_load),
+                });
+            }
         }
+        Err(into_other_io_error(String::from("Failed to load api for info plugin!")))
     }
 
     pub fn get_name(&self) -> String {

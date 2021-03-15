@@ -10,6 +10,7 @@ use common::run_proxy;
 
 const PROXY_ADDR: &str = "127.0.0.1:8090";
 const ROUTING_ADDR: &str = "127.0.0.1:8091";
+const WS_ADDR: &str = "127.0.0.1:8092";
 const SERVER_DATA: &str = "Server Response";
 const CLIENT_DATA: &str = "Client Request";
 
@@ -21,7 +22,7 @@ fn construct_routing_url(scheme: &str, addr: &str) -> String {
 fn smoke() {
     let proxy_addr = PROXY_ADDR;
     let routing_url = ROUTING_ADDR;
-    let ws_ulr = "127.0.0.1:8092";
+    let ws_ulr = WS_ADDR;
 
     //Spawn our proxy and wait for it to come online
     let _proxy = run_proxy(

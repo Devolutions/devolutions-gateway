@@ -83,6 +83,35 @@ impl JetClient {
     }
 }
 
+async fn handle_build_tls_proxy(
+    config: Arc<Config>,
+    response: HandleConnectJetMsgResponse,
+    interceptor: PcapRecordingInterceptor,
+    tls_acceptor: TlsAcceptor,
+) -> Result<(), io::Error> {
+    let client_stream = response.client_transport.get_tcp_stream();
+    let server_stream = response.server_transport.get_tcp_stream();
+
+    if client_stream.is_some() && server_stream.is_some() {
+        let tls_stream = tls_acceptor.accept(client_stream.unwrap()).await.map_err(|err| err)?;
+        let client_transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
+
+        let tls_handshake = create_tls_connector(server_stream.unwrap())
+            .await
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
+
+        Proxy::new(config)
+            .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
+            .await
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Failed to retrieve tcp stream to create tls connection!",
+        ))
+    }
+}
+
 async fn handle_build_proxy(
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
@@ -113,27 +142,7 @@ async fn handle_build_proxy(
     }
 
     if let Some(interceptor) = recording_interceptor {
-        let client_stream = response.client_transport.get_tcp_stream();
-        let server_stream = response.server_transport.get_tcp_stream();
-
-        if client_stream.is_some() && server_stream.is_some() {
-            let tls_stream = tls_acceptor.accept(client_stream.unwrap()).await.map_err(|err| err)?;
-            let client_transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
-
-            let tls_handshake = create_tls_connector(server_stream.unwrap())
-                .await
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-            let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
-
-            Proxy::new(config)
-                .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
-                .await
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Failed to retrieve tcp stream to create tls connection!",
-            ))
-        }
+        handle_build_tls_proxy(config, response, interceptor, tls_acceptor).await
     } else {
         Proxy::new(config)
             .build(response.server_transport, response.client_transport)

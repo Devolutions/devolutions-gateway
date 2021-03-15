@@ -1,6 +1,7 @@
+use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{mem::transmute, slice::from_raw_parts, sync::Arc};
+use std::{io::Error, mem::transmute, slice::from_raw_parts, sync::Arc};
 
 pub type NowPacketsParsing = usize;
 
@@ -62,14 +63,19 @@ impl PacketsParser {
     pub const NOW_SURFACE_MSG_ID: u32 = 65;
     pub const NOW_UPDATE_MSG_ID: u32 = 66;
 
-    pub fn new(lib: Arc<Library>) -> Self {
-        let api = unsafe {
-            let lib = PacketsParsingApi::load(&lib).unwrap();
-            transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib)
-        };
-        let ctx = unsafe { (api.NowWaykPacketsParsing_CreateParsingContext)() };
+    pub fn new(lib: Arc<Library>) -> Result<Self, Error> {
+        unsafe {
+            if let Ok(lib_load) = PacketsParsingApi::load(&lib) {
+                let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
+                let ctx = (api.NowWaykPacketsParsing_CreateParsingContext)();
 
-        Self { _lib: lib, api, ctx }
+                return Ok(Self { _lib: lib, api, ctx });
+            }
+        }
+
+        Err(into_other_io_error(String::from(
+            "Failed to load api for recording plugin!",
+        )))
     }
 
     pub fn get_size(&self) -> FrameSize {
