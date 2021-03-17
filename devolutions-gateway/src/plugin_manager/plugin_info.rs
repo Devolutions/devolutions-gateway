@@ -25,8 +25,8 @@ impl TryFrom<u32> for PluginCapabilities {
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
 pub struct PluginInformationApi<'a> {
-    NowPluginGeneral_GetName: Symbol<'a, unsafe extern "C" fn() -> *const c_char>,
-    NowPluginGeneral_GetCapabilities: Symbol<'a, unsafe extern "C" fn(size: *mut usize) -> *const u8>,
+    NowPlugin_GetName: Symbol<'a, unsafe extern "C" fn() -> *const c_char>,
+    NowPlugin_GetCapabilities: Symbol<'a, unsafe extern "C" fn(size: *mut usize) -> *const u8>,
 }
 
 pub struct PluginInformation {
@@ -49,7 +49,7 @@ impl PluginInformation {
     }
 
     pub fn get_name(&self) -> String {
-        let cstr = unsafe { CStr::from_ptr((self.info.NowPluginGeneral_GetName)()) };
+        let cstr = unsafe { CStr::from_ptr((self.info.NowPlugin_GetName)()) };
         cstr.to_str()
             .unwrap_or_else(|e| {
                 error!("Failed to get the plugin name: {}", e);
@@ -62,7 +62,7 @@ impl PluginInformation {
         let mut size = 0;
 
         let capabilities_array = unsafe {
-            let ptr: *const u8 = (self.info.NowPluginGeneral_GetCapabilities)((&mut size) as *mut usize);
+            let ptr: *const u8 = (self.info.NowPlugin_GetCapabilities)((&mut size) as *mut usize);
             from_raw_parts::<u8>(ptr, size)
         };
 

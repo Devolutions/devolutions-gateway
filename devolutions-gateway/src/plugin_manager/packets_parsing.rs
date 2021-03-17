@@ -3,7 +3,7 @@ use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use std::{io::Error, mem::transmute, slice::from_raw_parts, sync::Arc};
 
-pub type NowPacketsParsing = usize;
+pub type NowPacketParser = usize;
 
 pub struct FrameSize {
     pub width: u32,
@@ -22,23 +22,23 @@ pub struct ImageUpdate {
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
 pub struct PacketsParsingApi<'a> {
-    NowWaykPacketsParsing_CreateParsingContext: Symbol<'a, unsafe extern "C" fn() -> NowPacketsParsing>,
+    NowWaykPacketsParsing_New: Symbol<'a, unsafe extern "C" fn() -> NowPacketParser>,
     NowWaykPacketsParsing_GetSize:
-        Symbol<'a, unsafe extern "C" fn(ctx: NowPacketsParsing, width: *mut u32, height: *mut u32)>,
+        Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser, width: *mut u32, height: *mut u32)>,
     NowWaykPacketsParsing_ParseMessage: Symbol<
         'a,
         unsafe extern "C" fn(
-            ctx: NowPacketsParsing,
+            ctx: NowPacketParser,
             buffer: *const u8,
             len: usize,
             messageType: *mut u32,
             isFromServer: bool,
         ) -> usize,
     >,
-    NowWaykPacketsParsing_GetImageBuff: Symbol<
+    NowWaykPacketsParsing_GetImage: Symbol<
         'a,
         unsafe extern "C" fn(
-            ctx: NowPacketsParsing,
+            ctx: NowPacketParser,
             updateX: *mut u32,
             updateY: *mut u32,
             updateWidth: *mut u32,
@@ -47,15 +47,15 @@ pub struct PacketsParsingApi<'a> {
             surfaceSize: *mut u32,
         ) -> *mut u8,
     >,
-    NowWaykPacketsParsing_IsMessageConstructed: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketsParsing) -> bool>,
-    NowWaykPacketsParsing_FreeParsingContext: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketsParsing)>,
+    NowWaykPacketsParsing_IsMessageConstructed: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser) -> bool>,
+    NowWaykPacketsParsing_Free: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser)>,
 }
 
 pub struct PacketsParser {
     api: PacketsParsingApi<'static>,
     // this field is needed to prove the compiler that info will not outlive the lib
     _lib: Arc<Library>,
-    ctx: NowPacketsParsing,
+    ctx: NowPacketParser,
 }
 
 impl PacketsParser {
@@ -67,7 +67,7 @@ impl PacketsParser {
         unsafe {
             if let Ok(lib_load) = PacketsParsingApi::load(&lib) {
                 let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
-                let ctx = (api.NowWaykPacketsParsing_CreateParsingContext)();
+                let ctx = (api.NowWaykPacketsParsing_New)();
 
                 return Ok(Self { _lib: lib, api, ctx });
             }
@@ -116,7 +116,7 @@ impl PacketsParser {
         let mut image_buff = Vec::new();
 
         let raw_image_buf = unsafe {
-            let ptr: *const u8 = (self.api.NowWaykPacketsParsing_GetImageBuff)(
+            let ptr: *const u8 = (self.api.NowWaykPacketsParsing_GetImage)(
                 self.ctx,
                 (&mut update_x) as *mut u32,
                 (&mut update_y) as *mut u32,
@@ -144,7 +144,7 @@ impl PacketsParser {
 impl Drop for PacketsParser {
     fn drop(&mut self) {
         unsafe {
-            (self.api.NowWaykPacketsParsing_FreeParsingContext)(self.ctx);
+            (self.api.NowWaykPacketsParsing_Free)(self.ctx);
         }
     }
 }

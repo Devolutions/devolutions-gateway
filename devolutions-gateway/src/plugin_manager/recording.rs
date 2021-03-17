@@ -9,11 +9,11 @@ pub type RecordingContext = usize;
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
 pub struct RecordingApi<'a> {
-    NowRecording_CreateRecordingContext: Symbol<'a, unsafe extern "C" fn() -> RecordingContext>,
+    NowRecording_New: Symbol<'a, unsafe extern "C" fn() -> RecordingContext>,
     NowRecording_SetSize: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, width: u32, height: u32)>,
     NowRecording_SetFilename: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, filename: *mut c_char)>,
     NowRecording_SetDirectory: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, directory: *mut c_char)>,
-    NowRecording_UpdateRecording: Symbol<
+    NowRecording_Update: Symbol<
         'a,
         unsafe extern "C" fn(
             ctx: RecordingContext,
@@ -25,7 +25,7 @@ pub struct RecordingApi<'a> {
             surfaceStep: *const u32,
         ),
     >,
-    NowRecording_FreeRecordingContext: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
+    NowRecording_Free: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
 }
 
 pub struct Recorder {
@@ -40,7 +40,7 @@ impl Recorder {
         unsafe {
             if let Ok(lib_load) = RecordingApi::load(&lib) {
                 let api = transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib_load);
-                let ctx = (api.NowRecording_CreateRecordingContext)();
+                let ctx = (api.NowRecording_New)();
 
                 return Ok(Self { _lib: lib, api, ctx });
             }
@@ -53,7 +53,7 @@ impl Recorder {
 
     pub fn update_recording(&self, mut image_data: ImageUpdate) {
         unsafe {
-            (self.api.NowRecording_UpdateRecording)(
+            (self.api.NowRecording_Update)(
                 self.ctx,
                 image_data.image_buff.as_mut_ptr(),
                 image_data.update_x,
@@ -91,7 +91,7 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         unsafe {
-            (self.api.NowRecording_FreeRecordingContext)(self.ctx);
+            (self.api.NowRecording_Free)(self.ctx);
         }
     }
 }
