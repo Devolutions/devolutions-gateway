@@ -1,3 +1,4 @@
+use crate::http::controllers::jet::JetTpType;
 use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
 use crate::jet::TransportType;
 use chrono::serde::ts_seconds;
@@ -11,15 +12,17 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
+    jet_tp: Option<JetTpType>,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8) -> Self {
+    pub fn new(id: Uuid, version: u8, jet_tp: Option<JetTpType>) -> Self {
         Association {
             id,
             version,
             creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
+            jet_tp,
         }
     }
 
@@ -87,6 +90,10 @@ impl Association {
         self.candidates
             .iter()
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
+    }
+
+    pub fn get_jet_tp_claim(&self) -> Option<JetTpType> {
+        self.jet_tp.clone()
     }
 }
 

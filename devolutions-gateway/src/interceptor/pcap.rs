@@ -130,4 +130,7 @@ impl PacketInterceptor for PcapInterceptor {
             }
         }
     }
+    fn boxed_clone(&self) -> Box<dyn PacketInterceptor> {
+        Box::new(self.clone())
+    }
 }

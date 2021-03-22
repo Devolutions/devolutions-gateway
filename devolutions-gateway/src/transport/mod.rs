@@ -69,6 +69,13 @@ impl JetTransport {
             JetTransport::Ws(ws_transport) => ws_transport.clone_nb_bytes_written(),
         }
     }
+
+    pub fn get_tcp_stream(self) -> Option<TcpStream> {
+        match self {
+            JetTransport::Tcp(tcp_transport) => tcp_transport.get_tcp_stream(),
+            _ => None,
+        }
+    }
 }
 
 impl Transport for JetTransport {
