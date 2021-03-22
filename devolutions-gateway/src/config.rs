@@ -490,9 +490,9 @@ impl Config {
                 Arg::with_name(ARG_PLUGINS)
                     .long("plugin")
                     .value_name("PATH")
-                    .help("An path where the plugin is located including the plugin name and plugin extension.")
+                    .help("A path where the plugin is located including the plugin name and plugin extension.")
                     .long_help(
-                        "An path where the plugin is located including the plugin name and plugin extension. \
+                        "A path where the plugin is located including the plugin name and plugin extension. \
                     The plugin will be loaded as dynamic library. \
                     For example, on linux  - home/usr/libs/libplugin.so \
                     on Windows - D:\\libs\\plugin.dll.",
@@ -507,9 +507,9 @@ impl Config {
                 Arg::with_name(ARG_RECORDING_PATH)
                     .long("recording-path")
                     .value_name("PATH")
-                    .help("An path where the recording of the session wil be located.")
+                    .help("A path where the recording of the session will be located.")
                     .long_help(
-                        "An path where the recording will be saved. \
+                        "A path where the recording will be saved. \
                     If not set the TEMP directory will be used.",
                     )
                     .takes_value(true)

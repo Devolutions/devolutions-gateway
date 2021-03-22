@@ -22,10 +22,9 @@ pub struct ImageUpdate {
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
 pub struct PacketsParsingApi<'a> {
-    NowWaykPacketsParsing_New: Symbol<'a, unsafe extern "C" fn() -> NowPacketParser>,
-    NowWaykPacketsParsing_GetSize:
-        Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser, width: *mut u32, height: *mut u32)>,
-    NowWaykPacketsParsing_ParseMessage: Symbol<
+    NowPacketParser_New: Symbol<'a, unsafe extern "C" fn() -> NowPacketParser>,
+    NowPacketParser_GetSize: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser, width: *mut u32, height: *mut u32)>,
+    NowPacketParser_ParseMessage: Symbol<
         'a,
         unsafe extern "C" fn(
             ctx: NowPacketParser,
@@ -35,7 +34,7 @@ pub struct PacketsParsingApi<'a> {
             isFromServer: bool,
         ) -> usize,
     >,
-    NowWaykPacketsParsing_GetImage: Symbol<
+    NowPacketParser_GetImage: Symbol<
         'a,
         unsafe extern "C" fn(
             ctx: NowPacketParser,
@@ -47,8 +46,8 @@ pub struct PacketsParsingApi<'a> {
             surfaceSize: *mut u32,
         ) -> *mut u8,
     >,
-    NowWaykPacketsParsing_IsMessageConstructed: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser) -> bool>,
-    NowWaykPacketsParsing_Free: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser)>,
+    NowPacketParser_IsMessageConstructed: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser) -> bool>,
+    NowPacketParser_Free: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser)>,
 }
 
 pub struct PacketsParser {
@@ -67,7 +66,7 @@ impl PacketsParser {
         unsafe {
             if let Ok(lib_load) = PacketsParsingApi::load(&lib) {
                 let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
-                let ctx = (api.NowWaykPacketsParsing_New)();
+                let ctx = (api.NowPacketParser_New)();
 
                 return Ok(Self { _lib: lib, api, ctx });
             }
@@ -82,7 +81,7 @@ impl PacketsParser {
         let mut width = 0;
         let mut height = 0;
         unsafe {
-            (self.api.NowWaykPacketsParsing_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32);
+            (self.api.NowPacketParser_GetSize)(self.ctx, (&mut width) as *mut u32, (&mut height) as *mut u32);
         }
 
         FrameSize { width, height }
@@ -91,7 +90,7 @@ impl PacketsParser {
     pub fn parse_message(&self, buffer: &[u8], len: usize, is_from_server: bool) -> (usize, u32) {
         let mut message_id = 0;
         let res = unsafe {
-            (self.api.NowWaykPacketsParsing_ParseMessage)(
+            (self.api.NowPacketParser_ParseMessage)(
                 self.ctx,
                 buffer.as_ptr(),
                 len,
@@ -103,7 +102,7 @@ impl PacketsParser {
     }
 
     pub fn is_message_constructed(&self) -> bool {
-        unsafe { (self.api.NowWaykPacketsParsing_IsMessageConstructed)(self.ctx) }
+        unsafe { (self.api.NowPacketParser_IsMessageConstructed)(self.ctx) }
     }
 
     pub fn get_image_data(&self) -> ImageUpdate {
@@ -116,7 +115,7 @@ impl PacketsParser {
         let mut image_buff = Vec::new();
 
         let raw_image_buf = unsafe {
-            let ptr: *const u8 = (self.api.NowWaykPacketsParsing_GetImage)(
+            let ptr: *const u8 = (self.api.NowPacketParser_GetImage)(
                 self.ctx,
                 (&mut update_x) as *mut u32,
                 (&mut update_y) as *mut u32,
@@ -144,7 +143,7 @@ impl PacketsParser {
 impl Drop for PacketsParser {
     fn drop(&mut self) {
         unsafe {
-            (self.api.NowWaykPacketsParsing_Free)(self.ctx);
+            (self.api.NowPacketParser_Free)(self.ctx);
         }
     }
 }

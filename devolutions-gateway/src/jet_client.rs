@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::{
     config::Config,
-    http::controllers::jet::remove_association,
+    http::controllers::jet::{remove_association, JetTpType},
     interceptor::pcap_recording::PcapRecordingInterceptor,
     jet::{
         association::Association,
@@ -36,7 +36,6 @@ use crate::{
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
-const EXPECTED_JET_TP_VALUE: &str = "record";
 
 pub struct JetClient {
     config: Arc<Config>,
@@ -123,8 +122,8 @@ async fn handle_build_proxy(
 
     let associations = jet_associations.lock().await;
     if let Some(association) = associations.get(&association_id) {
-        if let Some(jet_tp_claim) = association.get_jet_tp_claim() {
-            if jet_tp_claim.eq(EXPECTED_JET_TP_VALUE) && config.plugins.is_some() {
+        if let Some(JetTpType::Record) = association.get_jet_tp_claim() {
+            if config.plugins.is_some() {
                 let mut interceptor = PcapRecordingInterceptor::new(
                     response.server_transport.peer_addr().unwrap(),
                     response.client_transport.peer_addr().unwrap(),

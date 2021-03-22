@@ -51,9 +51,7 @@ impl PacketInterceptor for PcapRecordingInterceptor {
         let option_recorder = self.recorder.lock().unwrap();
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
-        if option_parser.is_some() {
-            let parser = option_parser.as_ref().unwrap();
-
+        if let Some(parser) = option_parser.as_ref() {
             let (status, message_id) = parser.parse_message(data, data.len(), is_from_server);
 
             if !parser.is_message_constructed() {
@@ -61,8 +59,7 @@ impl PacketInterceptor for PcapRecordingInterceptor {
             } else if message_id == PacketsParser::NOW_UPDATE_MSG_ID {
                 let size = parser.get_size();
                 let image_data = parser.get_image_data();
-                if option_recorder.is_some() {
-                    let recorder = option_recorder.as_ref().unwrap();
+                if let Some(recorder) = option_recorder.as_ref() {
                     recorder.set_size(size.width, size.height);
                     recorder.update_recording(image_data);
                 }

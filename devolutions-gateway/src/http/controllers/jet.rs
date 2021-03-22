@@ -187,10 +187,17 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum JetTpType {
+    Relay,
+    Record,
+}
+
 #[derive(Deserialize)]
 struct PartialSessionToken {
     den_session_id: Option<Uuid>,
-    jet_tp: Option<String>,
+    jet_tp: Option<JetTpType>,
 }
 
 fn validate_session_token(config: &Config, req: &Request) -> Result<PartialSessionToken, String> {
