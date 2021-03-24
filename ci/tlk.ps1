@@ -300,10 +300,10 @@ class TlkRecipe
             throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
         
-        $ManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0])
-        $Manifest = Import-PowerShellDataFile -Path $ManifestFile
-        $PSModuleName = $(Get-Item $ManifestFile).BaseName
-        $PSModuleVersion = $Manifest.ModuleVersion
+        $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
+        $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
+        $PSModuleName = $(Get-Item $PSManifestFile).BaseName
+        $PSModuleVersion = $PSManifest.ModuleVersion
 
         if ($PackageVersion -ne $PSModuleVersion) {
             Write-Warning "PowerShell module version mismatch: $PSModuleVersion (expected: $PackageVersion)"
