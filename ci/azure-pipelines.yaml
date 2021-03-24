@@ -409,6 +409,7 @@ stages:
               DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
               DGATEWAY_PACKAGE: "$(DGatewayPackage)"
               DGATEWAY_PSMODULE_PATH: "$(DGatewayPSModulePath)"
+              DGATEWAY_PSMODULE_CLEAN: "1"
               SIGNTOOL_NAME: "$(SignToolName)"
             displayName: Packaging Devolutions Gateway
 

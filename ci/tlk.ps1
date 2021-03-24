@@ -54,6 +54,64 @@ function Merge-Tokens
     $OutputValue
 }
 
+function New-ModulePackage
+{
+    [CmdletBinding()]
+	param(
+        [Parameter(Mandatory=$true,Position=0)]
+        [string] $InputPath,
+        [Parameter(Mandatory=$true,Position=1)]
+        [string] $OutputPath,
+        [string] $TempPath
+    )
+
+    $UniqueId = New-Guid
+
+    if ([string]::IsNullOrEmpty($TempPath)) {
+        $TempPath = [System.IO.Path]::GetTempPath()
+    }
+
+    $PSRepoName = "psrepo-$UniqueId"
+    $PSRepoPath = Join-Path $TempPath $UniqueId
+
+    if (-Not (Test-Path -Path $InputPath -PathType 'Container')) {
+        throw "`"$InputPath`" does not exist"
+    }
+
+    $PSModulePath = $InputPath
+    $PSManifestFile = $(@(Get-ChildItem -Path $PSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
+    $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
+    $PSModuleName = $(Get-Item $PSManifestFile).BaseName
+    $PSModuleVersion = $PSManifest.ModuleVersion
+
+    New-Item -Path $PSRepoPath -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+
+    $Params = @{
+        Name = $PSRepoName;
+        SourceLocation = $PSRepoPath;
+        PublishLocation = $PSRepoPath;
+        InstallationPolicy = "Trusted";
+    }
+
+    Register-PSRepository @Params | Out-Null
+
+    $OutputFileName = "${PSModuleName}.${PSModuleVersion}.nupkg"
+    $PSModulePackage = Join-Path $PSRepoPath $OutputFileName
+    Remove-Item -Path $PSModulePackage -ErrorAction 'SilentlyContinue'
+    Publish-Module -Path $PSModulePath -Repository $PSRepoName
+
+    Unregister-PSRepository -Name $PSRepoName | Out-Null
+
+    New-Item -Path $OutputPath -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+    $OutputFile = Join-Path $OutputPath $OutputFileName
+    Copy-Item $PSModulePackage $OutputFile
+
+    Remove-Item $PSmodulePackage
+    Remove-Item -Path $PSRepoPath
+
+    $OutputFile
+}
+
 function Get-TlkPlatform {
     param(
         [Parameter(Position=0)]
@@ -281,11 +339,9 @@ class TlkRecipe
     }
 
     [void] Package_Windows() {
+        $PackageVersion = $this.Version
         $ShortVersion = $this.Version.Substring(2) # msi version
         $TargetArch = $this.Target.WindowsArchitecture()
-        
-        $ModuleName = "DevolutionsGateway"
-        $ModuleVersion = "2021.1.1" # both versions should match
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
@@ -295,15 +351,28 @@ class TlkRecipe
         } else {
             throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
-        
+
         if (Test-Path Env:DGATEWAY_PSMODULE_PATH) {
             $DGatewayPSModulePath = $Env:DGATEWAY_PSMODULE_PATH
         } else {
-            Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
-            Remove-Item -Path "${ModuleName}/${ModuleVersion}/PSGetModuleInfo.xml" -ErrorAction 'SilentlyContinue'
-            $DGatewayPSModulePath = "${ModuleName}/${ModuleVersion}"
+            throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
         
+        $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
+        $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
+        $PSModuleName = $(Get-Item $PSManifestFile).BaseName
+        $PSModuleVersion = $PSManifest.ModuleVersion
+
+        if ($PackageVersion -ne $PSModuleVersion) {
+            Write-Warning "PowerShell module version mismatch: $PSModuleVersion (expected: $PackageVersion)"
+        }
+
+        $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+        $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps-$PSModuleVersion.zip"
+        Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath
+
+        New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
+
         $WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
         $WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
         
@@ -345,6 +414,11 @@ class TlkRecipe
             & 'torch.exe' "-v" "$($this.PackageName).msi" "$($this.PackageName)_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst"
             & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName).msi" "${Culture}_$TargetArch.mst" "1036"
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
+        }
+
+        if (Test-Path Env:DGATEWAY_PSMODULE_CLEAN) {
+            # clean up the extracted PowerShell module directory
+            Remove-Item -Path $DGatewayPSModulePath -Recurse
         }
 
         if (Test-Path Env:DGATEWAY_PACKAGE) {
