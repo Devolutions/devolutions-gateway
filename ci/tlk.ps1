@@ -283,9 +283,6 @@ class TlkRecipe
     [void] Package_Windows() {
         $ShortVersion = $this.Version.Substring(2) # msi version
         $TargetArch = $this.Target.WindowsArchitecture()
-        
-        $ModuleName = "DevolutionsGateway"
-        $ModuleVersion = "2021.1.1" # both versions should match
 
         Push-Location
         Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
@@ -295,15 +292,18 @@ class TlkRecipe
         } else {
             throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
-        
+
         if (Test-Path Env:DGATEWAY_PSMODULE_PATH) {
             $DGatewayPSModulePath = $Env:DGATEWAY_PSMODULE_PATH
         } else {
-            Save-Module -Name $ModuleName -Force -RequiredVersion $ModuleVersion -Repository 'PSGallery' -Path '.'
-            Remove-Item -Path "${ModuleName}/${ModuleVersion}/PSGetModuleInfo.xml" -ErrorAction 'SilentlyContinue'
-            $DGatewayPSModulePath = "${ModuleName}/${ModuleVersion}"
+            throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
         
+        $PSModuleName = "DevolutionsGateway"
+        $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
+        $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps.zip"
+        Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath
+
         $WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
         $WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
         
@@ -345,6 +345,11 @@ class TlkRecipe
             & 'torch.exe' "-v" "$($this.PackageName).msi" "$($this.PackageName)_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst"
             & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName).msi" "${Culture}_$TargetArch.mst" "1036"
             & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
+        }
+
+        if (Test-Path Env:DGATEWAY_PSMODULE_CLEAN) {
+            # clean up the extracted PowerShell module directory
+            Remove-Item -Path $DGatewayPSModulePath -Recurse
         }
 
         if (Test-Path Env:DGATEWAY_PACKAGE) {
