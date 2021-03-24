@@ -281,6 +281,7 @@ class TlkRecipe
     }
 
     [void] Package_Windows() {
+        $PackageVersion = $this.Version
         $ShortVersion = $this.Version.Substring(2) # msi version
         $TargetArch = $this.Target.WindowsArchitecture()
 
@@ -299,9 +300,17 @@ class TlkRecipe
             throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
         
-        $PSModuleName = "DevolutionsGateway"
+        $ManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0])
+        $Manifest = Import-PowerShellDataFile -Path $ManifestFile
+        $PSModuleName = $(Get-Item $ManifestFile).BaseName
+        $PSModuleVersion = $Manifest.ModuleVersion
+
+        if ($PackageVersion -ne $PSModuleVersion) {
+            Write-Warning "PowerShell module version mismatch: $PSModuleVersion (expected: $PackageVersion)"
+        }
+
         $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
-        $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps.zip"
+        $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps-$PSModuleVersion.zip"
         Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath
 
         $WixExtensions = @('WixUtilExtension', 'WixUIExtension', 'WixFirewallExtension')
