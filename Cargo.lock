@@ -2709,8 +2709,9 @@ checksum = "ef703b7cb59335eae2eb93ceb664c0eb7ea6bf567079d843e09420219668e072"
 
 [[package]]
 name = "saphir"
-version = "2.8.0"
-source = "git+https://github.com/richerarc/saphir?rev=5f3602d5165a224b83678a5641e34c77b2325bca#5f3602d5165a224b83678a5641e34c77b2325bca"
+version = "2.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e2dd7c860fa4b3c61763e2b3408a809deae1d607a91082a87d0009b7e7f5afa"
 dependencies = [
  "base64 0.13.0",
  "futures 0.3.13",
@@ -2744,8 +2745,9 @@ dependencies = [
 
 [[package]]
 name = "saphir_macro"
-version = "2.1.1"
-source = "git+https://github.com/richerarc/saphir?rev=5f3602d5165a224b83678a5641e34c77b2325bca#5f3602d5165a224b83678a5641e34c77b2325bca"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd78fb0515ec7e4daef1255e9dbb18d3cd209029bceab9fd06554cd2a4c33fc9"
 dependencies = [
  "http 0.2.3",
  "proc-macro2 1.0.24",
