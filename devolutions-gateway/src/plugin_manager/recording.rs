@@ -25,6 +25,9 @@ pub struct RecordingApi<'a> {
             surfaceStep: *const u32,
         ),
     >,
+    NowRecording_Timeout: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
+    NowRecording_GetTimeout: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext) -> u32>,
+    NowRecording_GetPath: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, path: *mut c_char)>,
     NowRecording_Free: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
 }
 
@@ -85,6 +88,25 @@ impl Recorder {
                 (self.api.NowRecording_SetDirectory)(self.ctx, c_str.into_raw());
             }
         }
+    }
+
+    pub fn timeout(&self) {
+        unsafe {
+            (self.api.NowRecording_Timeout)(self.ctx);
+        }
+    }
+
+    pub fn get_timeout(&self) -> u32 {
+        unsafe { (self.api.NowRecording_GetTimeout)(self.ctx) }
+    }
+
+    pub fn get_filepath(&self) -> String {
+        let mut path_array = [0i8; 512];
+        unsafe {
+            (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr());
+        }
+        return String::from_utf8(path_array.iter().map(|element| *element as u8).collect())
+            .map_or("".to_string(), |path| path);
     }
 }
 
