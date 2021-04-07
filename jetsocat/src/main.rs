@@ -33,13 +33,29 @@ fn main() {
 }
 
 fn generate_usage() -> String {
+    #[cfg(debug_assertions)]
+    const IS_DEBUG: bool = true;
+    #[cfg(not(debug_assertions))]
+    const IS_DEBUG: bool = false;
+    #[cfg(feature = "verbose")]
+    const IS_VERBOSE: bool = true;
+    #[cfg(not(feature = "verbose"))]
+    const IS_VERBOSE: bool = false;
+
     format!(
         "{command} [action]\n\
         \n\
-        \tExample: unauthenticated powershell\n\
+        \tExample: unauthenticated PowerShell\n\
         \n\
-        \t  {command} listen 127.0.0.1:5002 --cmd 'pwsh -sshs -NoLogo -NoProfile'",
-        command = env!("CARGO_PKG_NAME")
+        \t  {command} listen 127.0.0.1:5002 --cmd 'pwsh -sshs -NoLogo -NoProfile'\n\
+        \n\
+        For detailed logs use debug binary or any binary built with 'verbose' feature enabled.\n\
+        This binary was built as:\n\
+        \tDebug? {is_debug}\n\
+        \tVerbose? {is_verbose}",
+        command = env!("CARGO_PKG_NAME"),
+        is_debug = IS_DEBUG,
+        is_verbose = IS_VERBOSE,
     )
 }
 
@@ -49,7 +65,7 @@ pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) -> anyhow:
         .build()
         .context("runtime build failed")?;
     rt.block_on(f)?;
-    info!(log, "Terminated successfuly");
+    info!(log, "Terminated successfully");
     rt.shutdown_timeout(std::time::Duration::from_millis(100)); // just to be safe
     Ok(())
 }
@@ -189,7 +205,7 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
-        .flag(Flag::new("log-term", FlagType::Bool).description("Disable logging"))
+        .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specificed address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specificed address:port as SOCKS5 proxy"))
