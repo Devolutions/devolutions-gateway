@@ -50,7 +50,8 @@ impl PcapRecordingInterceptor {
             }
 
             let (state, cond_var) = &*condition_timeout;
-            let result = cond_var.wait_timeout(state.lock().unwrap(), std::time::Duration::from_millis(timeout as u64));
+            let result = cond_var
+                .wait_timeout(state.lock().unwrap(), std::time::Duration::from_millis(timeout as u64));
 
             match result {
                 Ok((state_result, timeout_result)) => match *state_result {

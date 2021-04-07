@@ -5,6 +5,7 @@ use dlopen_derive::SymBorApi;
 use std::{ffi::CString, io::Error, mem::transmute, os::raw::c_char, sync::Arc};
 
 pub type RecordingContext = usize;
+const MAX_PATH_LEN: u32 = 512;
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
@@ -101,7 +102,7 @@ impl Recorder {
     }
 
     pub fn get_filepath(&self) -> String {
-        let mut path_array = [0i8; 512];
+        let mut path_array = [0i8; MAX_PATH_LEN];
         unsafe {
             (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr());
         }
