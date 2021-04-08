@@ -2,10 +2,17 @@ use crate::plugin_manager::packets_parsing::ImageUpdate;
 use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{ffi::CString, io::Error, mem::transmute, os::raw::c_char, sync::Arc};
+use std::{
+    ffi::CString,
+    io::Error,
+    mem::transmute,
+    os::raw::c_char,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub type RecordingContext = usize;
-const MAX_PATH_LEN: u32 = 512;
+const MAX_PATH_LEN: usize = 512;
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
@@ -101,13 +108,18 @@ impl Recorder {
         unsafe { (self.api.NowRecording_GetTimeout)(self.ctx) }
     }
 
-    pub fn get_filepath(&self) -> String {
+    pub fn get_filepath(&self) -> Option<PathBuf> {
         let mut path_array = [0i8; MAX_PATH_LEN];
         unsafe {
             (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr());
         }
-        return String::from_utf8(path_array.iter().map(|element| *element as u8).collect())
-            .map_or("".to_string(), |path| path);
+
+        let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
+        if let Ok(path) = str_path {
+            Some(Path::new(path.as_str()).to_path_buf())
+        } else {
+            None
+        }
     }
 }
 

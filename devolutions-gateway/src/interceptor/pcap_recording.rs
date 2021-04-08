@@ -4,10 +4,12 @@ use slog_scope::debug;
 use std::{
     net::SocketAddr,
     sync::{Arc, Condvar, Mutex},
+    thread,
+    time::Duration,
 };
 
-#[derive(Debug, Clone, Copy)]
-enum State {
+#[derive(Debug)]
+enum RecordingState {
     Update,
     Finish,
 }
@@ -18,7 +20,7 @@ pub struct PcapRecordingInterceptor {
     client_info: Arc<Mutex<PeerInfo>>,
     packets_parser: Arc<Mutex<Option<PacketsParser>>>,
     recorder: Arc<Mutex<Option<Recorder>>>,
-    condition_timeout: Arc<(Mutex<State>, Condvar)>,
+    condition_timeout: Arc<(Mutex<RecordingState>, Condvar)>,
 }
 
 impl PcapRecordingInterceptor {
@@ -35,13 +37,13 @@ impl PcapRecordingInterceptor {
             client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
             packets_parser: Arc::new(Mutex::new(PLUGIN_MANAGER.lock().unwrap().get_parsing_packets_plugin())),
             recorder: Arc::new(Mutex::new(recording_plugin)),
-            condition_timeout: Arc::new((Mutex::new(State::Update), Condvar::new())),
+            condition_timeout: Arc::new((Mutex::new(RecordingState::Update), Condvar::new())),
         };
 
         let recorder = interceptor.recorder.clone();
         let condition_timeout = interceptor.condition_timeout.clone();
-        std::thread::spawn(move || loop {
-            let mut timeout: u32 = 0;
+        thread::spawn(move || loop {
+            let mut timeout = 0;
 
             {
                 if let Some(recorder) = recorder.lock().unwrap().as_ref() {
@@ -49,20 +51,19 @@ impl PcapRecordingInterceptor {
                 }
             }
 
-            let (state, cond_var) = &*condition_timeout;
-            let result = cond_var
-                .wait_timeout(state.lock().unwrap(), std::time::Duration::from_millis(timeout as u64));
+            let (state, cond_var) = condition_timeout.as_ref();
+            let result = cond_var.wait_timeout(state.lock().unwrap(), Duration::from_millis(timeout as u64));
 
             match result {
                 Ok((state_result, timeout_result)) => match *state_result {
-                    State::Update => {
+                    RecordingState::Update => {
                         if timeout_result.timed_out() {
                             if let Some(recorder) = recorder.lock().unwrap().as_ref() {
                                 recorder.timeout();
                             }
                         }
                     }
-                    State::Finish => break,
+                    RecordingState::Finish => break,
                 },
                 Err(e) => {
                     slog_scope::error!("Wait timeout failed with error! {}", e);
@@ -89,9 +90,10 @@ impl PacketInterceptor for PcapRecordingInterceptor {
         let is_from_server = source_addr.unwrap() == server_info.addr;
 
         if is_from_server {
-            let (state, cond_var) = &*self.condition_timeout.clone();
+            let condition_timeout = self.condition_timeout.clone();
+            let (state, cond_var) = condition_timeout.as_ref();
             let mut pending = state.lock().unwrap();
-            *pending = State::Update;
+            *pending = RecordingState::Update;
             cond_var.notify_one();
         }
 
@@ -132,9 +134,10 @@ impl PacketInterceptor for PcapRecordingInterceptor {
 
 impl Drop for PcapRecordingInterceptor {
     fn drop(&mut self) {
-        let (state, cond_var) = &*self.condition_timeout.clone();
+        let condition_timeout = self.condition_timeout.clone();
+        let (state, cond_var) = condition_timeout.as_ref();
         let mut pending = state.lock().unwrap();
-        *pending = State::Finish;
+        *pending = RecordingState::Finish;
         cond_var.notify_one();
     }
 }
