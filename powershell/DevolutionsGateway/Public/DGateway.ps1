@@ -18,12 +18,14 @@ function Get-DGatewayImage
         [string] $Platform
     )
 
-    $Version = '0.14.0'
+    $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
+    $Manifest = Import-PowerShellDataFile -Path $ManifestPath
+    $DGatewayVersion = $Manifest.ModuleVersion
 
     $image = if ($Platform -ne "windows") {
-        "devolutions/devolutions-gateway:${Version}-buster"
+        "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
     } else {
-        "devolutions/devolutions-gateway:${Version}-servercore-ltsc2019"
+        "devolutions/devolutions-gateway:${DGatewayVersion}-servercore-ltsc2019"
     }
 
     return $image
