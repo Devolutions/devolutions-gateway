@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context as _, Result};
 use futures_util::FutureExt;
 use jet_proto::JET_VERSION_V2;
 use jetsocat_proxy::{DestAddr, ToDestAddr};
-use slog::{debug, o, Logger};
+use slog::{debug, info, o, warn, Logger};
 use tokio::pin;
 use uuid::Uuid;
 
@@ -44,23 +44,29 @@ impl TcpServer {
     }
 
     pub async fn serve(self, log: Logger) -> Result<()> {
-        debug!(log, "Performing rendezvous connect...");
+        info!(log, "Performing rendezvous connect...");
 
-        for _ in 0..=self.max_reconnection_count {
+        debug!(
+            log,
+            "Up to {} reconnection(s) are allowed (at most {} connection(s))",
+            self.max_reconnection_count,
+            self.max_reconnection_count + 1
+        );
+
+        for i in 0..=self.max_reconnection_count {
             let mut jet_server_stream = tcp_connect_async(&self.jet_listener_addr, self.proxy_cfg.clone()).await?;
             // forward_addr points to local machine/network, proxy should be ignored
             let server_stream = tcp_connect_async(&self.forward_addr, None).await?;
 
-            let log = log.clone();
-
-            debug!(log, "Sending jet accept request...");
-
+            debug!(log, "Sending JetAcceptReq...");
             self.send_jet_accept_request(&mut jet_server_stream).await?;
+            debug!(log, "JetAcceptReq sent!");
             self.process_jet_accept_response(&mut jet_server_stream).await?;
+            debug!(log, "JetAcceptRsp received and processed successfully!");
 
-            debug!(log, "Starting tcp forwarding...");
+            info!(log, "Successful rendezvous connect ({})", i);
 
-            run_proxy(jet_server_stream, server_stream, log).await?;
+            run_proxy(jet_server_stream, server_stream, log.clone()).await?;
         }
 
         Ok(())
@@ -94,7 +100,7 @@ impl TcpServer {
         let read_bytes_count = jet_server_stream.read(&mut buffer).await?;
 
         if read_bytes_count == 0 {
-            return Err(anyhow!("Failed to read JetConnectResponse"));
+            return Err(anyhow!("Failed to read JetConnectRsp"));
         }
 
         let mut buffer: &[u8] = &buffer[0..read_bytes_count];
@@ -102,13 +108,16 @@ impl TcpServer {
         match response {
             JetMessage::JetAcceptRsp(rsp) => {
                 if rsp.status_code != 200 {
-                    return Err(anyhow!("Devolutions-Gateway sent bad accept response"));
+                    return Err(anyhow!(
+                        "received JetAcceptRsp with unexpected status code from Devolutions-Gateway ({})",
+                        rsp.status_code
+                    ));
                 }
                 Ok(())
             }
             other_message => {
                 return Err(anyhow!(
-                    "Devolutions-Gateway sent {:?} message instead of JetAcceptRsp",
+                    "received {:?} message from Devolutions-Gateway instead of JetAcceptRsp",
                     other_message
                 ))
             }
@@ -120,13 +129,13 @@ async fn run_proxy(jet_server_stream: AsyncStream, tcp_server_transport: AsyncSt
     use crate::io::read_and_write;
     use futures_util::select;
 
-    debug!(log, "{}", "Running jet tcp proxy");
+    info!(log, "{}", "Running jet TCP proxy");
 
     let (mut client_read_half, mut client_write_half) = tokio::io::split(jet_server_stream);
     let (mut server_read_half, mut server_write_half) = tokio::io::split(tcp_server_transport);
 
-    let client_server_logger = log.new(o!("client" => " -> server"));
-    let server_client_logger = log.new(o!("client" => " <- server"));
+    let client_server_logger = log.new(o!("client" => " → server"));
+    let server_client_logger = log.new(o!("client" => " ← server"));
 
     let client_to_server = read_and_write(&mut client_read_half, &mut server_write_half, client_server_logger).fuse();
     let server_to_client = read_and_write(&mut server_read_half, &mut client_write_half, server_client_logger).fuse();
@@ -137,20 +146,20 @@ async fn run_proxy(jet_server_stream: AsyncStream, tcp_server_transport: AsyncSt
         result = client_to_server => {
             match result {
                 Ok(()) =>  {
-                    debug!(log, "client_to_server disconnected gracefully");
+                    info!(log, "client → server stream ended gracefully");
                 }
                 Err(e) => {
-                    debug!(log, "client_to_server disconnected with error: {}", e);
+                    warn!(log, "client → server stream ended with error: {}", e);
                 }
             }
         },
         result = server_to_client => {
             match result {
                 Ok(()) =>  {
-                    debug!(log, "server_to_client disconnected gracefully");
+                    info!(log, "client ← server stream ended gracefully");
                 }
                 Err(e) => {
-                    debug!(log, "server_to_client disconnected with error: {}", e);
+                    warn!(log, "client ← server stream ended with error: {}", e);
                 }
             }
         },
