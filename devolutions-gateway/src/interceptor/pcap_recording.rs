@@ -1,6 +1,6 @@
 use crate::interceptor::{PacketInterceptor, PeerInfo};
 use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
-use slog_scope::debug;
+use slog_scope::{debug, error};
 use std::{
     net::SocketAddr,
     sync::{Arc, Condvar, Mutex},
@@ -21,6 +21,7 @@ pub struct PcapRecordingInterceptor {
     packets_parser: Arc<Mutex<Option<PacketsParser>>>,
     recorder: Arc<Mutex<Option<Recorder>>>,
     condition_timeout: Arc<(Mutex<RecordingState>, Condvar)>,
+    handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl PcapRecordingInterceptor {
@@ -32,46 +33,50 @@ impl PcapRecordingInterceptor {
             recorder.set_filename(filename.as_str());
         }
 
-        let interceptor = PcapRecordingInterceptor {
-            server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
-            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
-            packets_parser: Arc::new(Mutex::new(PLUGIN_MANAGER.lock().unwrap().get_parsing_packets_plugin())),
-            recorder: Arc::new(Mutex::new(recording_plugin)),
-            condition_timeout: Arc::new((Mutex::new(RecordingState::Update), Condvar::new())),
-        };
+        let recorder = Arc::new(Mutex::new(recording_plugin));
+        let condition_timeout = Arc::new((Mutex::new(RecordingState::Update), Condvar::new()));
 
-        let recorder = interceptor.recorder.clone();
-        let condition_timeout = interceptor.condition_timeout.clone();
-        thread::spawn(move || loop {
-            let mut timeout = 0;
+        let handle = thread::spawn({
+            let recorder = recorder.clone();
+            let condition_timeout = condition_timeout.clone();
+            move || loop {
+                let mut timeout = 0;
 
-            {
-                if let Some(recorder) = recorder.lock().unwrap().as_ref() {
-                    timeout = recorder.get_timeout();
+                {
+                    if let Some(recorder) = recorder.lock().unwrap().as_ref() {
+                        timeout = recorder.get_timeout();
+                    }
                 }
-            }
 
-            let (state, cond_var) = condition_timeout.as_ref();
-            let result = cond_var.wait_timeout(state.lock().unwrap(), Duration::from_millis(timeout as u64));
+                let (state, cond_var) = condition_timeout.as_ref();
+                let result = cond_var.wait_timeout(state.lock().unwrap(), Duration::from_millis(timeout as u64));
 
-            match result {
-                Ok((state_result, timeout_result)) => match *state_result {
-                    RecordingState::Update => {
-                        if timeout_result.timed_out() {
-                            if let Some(recorder) = recorder.lock().unwrap().as_ref() {
-                                recorder.timeout();
+                match result {
+                    Ok((state_result, timeout_result)) => match *state_result {
+                        RecordingState::Update => {
+                            if timeout_result.timed_out() {
+                                if let Some(recorder) = recorder.lock().unwrap().as_ref() {
+                                    recorder.timeout();
+                                }
                             }
                         }
+                        RecordingState::Finish => break,
+                    },
+                    Err(e) => {
+                        error!("Wait timeout failed with error! {}", e);
                     }
-                    RecordingState::Finish => break,
-                },
-                Err(e) => {
-                    slog_scope::error!("Wait timeout failed with error! {}", e);
                 }
             }
         });
 
-        interceptor
+        PcapRecordingInterceptor {
+            server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
+            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
+            packets_parser: Arc::new(Mutex::new(PLUGIN_MANAGER.lock().unwrap().get_parsing_packets_plugin())),
+            recorder,
+            condition_timeout,
+            handle: Arc::new(Mutex::new(Some(handle))),
+        }
     }
 
     pub fn set_recording_directory(&mut self, directory: &str) {
@@ -134,10 +139,19 @@ impl PacketInterceptor for PcapRecordingInterceptor {
 
 impl Drop for PcapRecordingInterceptor {
     fn drop(&mut self) {
-        let condition_timeout = self.condition_timeout.clone();
-        let (state, cond_var) = condition_timeout.as_ref();
-        let mut pending = state.lock().unwrap();
-        *pending = RecordingState::Finish;
-        cond_var.notify_one();
+        {
+            let condition_timeout = self.condition_timeout.clone();
+            let (state, cond_var) = condition_timeout.as_ref();
+            let mut pending = state.lock().unwrap();
+            *pending = RecordingState::Finish;
+            cond_var.notify_one();
+        }
+
+        let mut option_handle = self.handle.lock().unwrap();
+        if let Some(handle) = option_handle.take() {
+            if let Err(e) = handle.join() {
+                error!("Failed to join the thread: {:?}", e);
+            }
+        }
     }
 }
