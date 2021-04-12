@@ -13,7 +13,7 @@ use std::{
 };
 
 pub type RecordingContext = usize;
-const MAX_PATH_LEN: usize = 2;
+const MAX_PATH_LEN: usize = 512;
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
