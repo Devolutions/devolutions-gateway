@@ -66,6 +66,14 @@ impl AcceptConnectionFuture {
         ready!(pinned_client.poll_read(cx, &mut read_buf))?;
 
         let read_bytes = read_buf.filled().len();
+
+        if read_bytes == 0 {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "No data to read, EOF has been reached.",
+            )));
+        }
+
         self.buffer.extend_from_slice(&received[..read_bytes]);
 
         if self.buffer.len() > MAX_FUTURE_BUFFER_SIZE {

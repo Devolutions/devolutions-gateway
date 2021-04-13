@@ -2,6 +2,9 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
+## 2021.1.3 (2021-04-13)
+  * Fix infinite loop issue when the precondition pdu was not completely received
+
 ## 2021.1.2 (2021-03-26)
   * Fix broken Linux container image (missing executable)
   * Add PowerShell module .zip/.nupkg to release artifacts
