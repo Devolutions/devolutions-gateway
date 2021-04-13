@@ -4,6 +4,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## 2021.1.3 (2021-04-13)
   * Fix infinite loop issue when the precondition pdu was not completely received
+  * Fix possible stability issue with protocol peeking
 
 ## 2021.1.2 (2021-03-26)
   * Fix broken Linux container image (missing executable)
