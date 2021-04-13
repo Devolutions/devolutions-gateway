@@ -46,7 +46,8 @@ pub struct PacketsParsingApi<'a> {
             surfaceSize: *mut u32,
         ) -> *mut u8,
     >,
-    NowPacketParser_IsMessageConstructed: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser) -> bool>,
+    NowPacketParser_IsMessageConstructed:
+        Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser, isFromServer: bool) -> bool>,
     NowPacketParser_Free: Symbol<'a, unsafe extern "C" fn(ctx: NowPacketParser)>,
 }
 
@@ -101,8 +102,8 @@ impl PacketsParser {
         (res, message_id)
     }
 
-    pub fn is_message_constructed(&self) -> bool {
-        unsafe { (self.api.NowPacketParser_IsMessageConstructed)(self.ctx) }
+    pub fn is_message_constructed(&self, is_from_server: bool) -> bool {
+        unsafe { (self.api.NowPacketParser_IsMessageConstructed)(self.ctx, is_from_server) }
     }
 
     pub fn get_image_data(&self) -> ImageUpdate {

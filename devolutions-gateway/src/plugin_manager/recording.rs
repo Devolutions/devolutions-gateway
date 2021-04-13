@@ -2,9 +2,18 @@ use crate::plugin_manager::packets_parsing::ImageUpdate;
 use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{ffi::CString, io::Error, mem::transmute, os::raw::c_char, sync::Arc};
+use std::string::FromUtf8Error;
+use std::{
+    ffi::CString,
+    io::Error,
+    mem::transmute,
+    os::raw::c_char,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 pub type RecordingContext = usize;
+const MAX_PATH_LEN: usize = 512;
 
 #[allow(non_snake_case)]
 #[derive(SymBorApi)]
@@ -25,6 +34,10 @@ pub struct RecordingApi<'a> {
             surfaceStep: *const u32,
         ),
     >,
+    NowRecording_Timeout: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
+    NowRecording_GetTimeout: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext) -> u32>,
+    NowRecording_GetPath:
+        Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext, path: *mut c_char, size: usize) -> usize>,
     NowRecording_Free: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
 }
 
@@ -84,6 +97,35 @@ impl Recorder {
             if let Ok(c_str) = CString::new(directory) {
                 (self.api.NowRecording_SetDirectory)(self.ctx, c_str.into_raw());
             }
+        }
+    }
+
+    pub fn timeout(&self) {
+        unsafe {
+            (self.api.NowRecording_Timeout)(self.ctx);
+        }
+    }
+
+    pub fn get_timeout(&self) -> u32 {
+        unsafe { (self.api.NowRecording_GetTimeout)(self.ctx) }
+    }
+
+    pub fn get_filepath(&self) -> Result<PathBuf, FromUtf8Error> {
+        let mut path_array = vec![0i8; MAX_PATH_LEN];
+        let path_size = unsafe { (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), MAX_PATH_LEN) };
+
+        if path_size > MAX_PATH_LEN {
+            path_array.resize(path_size, 0i8);
+            unsafe {
+                (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), path_array.len());
+            }
+        }
+
+        let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
+
+        match str_path {
+            Ok(path) => Ok(Path::new(path.as_str()).to_path_buf()),
+            Err(e) => Err(e),
         }
     }
 }
