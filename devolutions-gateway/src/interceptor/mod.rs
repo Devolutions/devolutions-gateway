@@ -39,10 +39,9 @@ impl PeerInfo {
 pub struct UnknownMessageReader;
 impl MessageReader for UnknownMessageReader {
     fn get_messages(&mut self, data: &mut Vec<u8>, _source: PduSource) -> Vec<Vec<u8>> {
-        let mut result = Vec::new();
-        result.push(data.clone());
-        data.clear();
-        result
+        let mut destination = Vec::new();
+        std::mem::swap(data, &mut destination);
+        vec![destination]
     }
 }
 
