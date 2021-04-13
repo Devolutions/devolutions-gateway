@@ -1,20 +1,18 @@
 use crate::config::{Config, Protocol};
 use crate::interceptor::pcap::PcapInterceptor;
 use crate::interceptor::rdp::RdpMessageReader;
-use crate::interceptor::PacketInterceptor;
-use crate::interceptor::{MessageReader, UnknownMessageReader, WaykMessageReader};
+use crate::interceptor::{MessageReader, PacketInterceptor, UnknownMessageReader, WaykMessageReader};
 use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 use crate::transport::{Transport, BIP_BUFFER_LEN};
 use crate::SESSION_IN_PROGRESS_COUNT;
 use futures::{select, FutureExt, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
-use std::{
-    collections::HashMap,
-    io,
-    path::PathBuf,
-    sync::{atomic::Ordering, Arc},
-};
+use std::collections::HashMap;
+use std::io;
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 pub struct Proxy {
     config: Arc<Config>,
@@ -31,12 +29,12 @@ impl Proxy {
         client_transport: U,
     ) -> Result<(), io::Error> {
         match self.config.protocol {
-            Protocol::WAYK => {
+            Protocol::Wayk => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
                 self.build_with_message_reader(server_transport, client_transport, Some(Box::new(WaykMessageReader)))
                     .await
             }
-            Protocol::RDP => {
+            Protocol::Rdp => {
                 info!("RdpMessageReader will be used to interpret application protocol");
                 self.build_with_message_reader(
                     server_transport,
@@ -50,7 +48,7 @@ impl Proxy {
                 )
                 .await
             }
-            Protocol::UNKNOWN => {
+            Protocol::Unknown => {
                 warn!("Protocol is unknown. Data received will not be split to get application message.");
                 self.build_with_message_reader(server_transport, client_transport, Some(Box::new(UnknownMessageReader)))
                     .await

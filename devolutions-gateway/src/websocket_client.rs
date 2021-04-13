@@ -25,11 +25,7 @@ pub struct WebsocketService {
 }
 
 impl WebsocketService {
-    pub async fn handle(
-        &mut self,
-        req: Request<Body>,
-        client_addr: Option<SocketAddr>,
-    ) -> Result<Response<Body>, io::Error> {
+    pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> Result<Response<Body>, io::Error> {
         if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
             info!("{} {}", req.method(), req.uri().path());
             handle_jet_accept(req, client_addr, self.jet_associations.clone())
@@ -92,7 +88,7 @@ async fn handle_jet_test_impl(
 
 async fn handle_jet_accept(
     req: Request<Body>,
-    client_addr: Option<SocketAddr>,
+    client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
     match handle_jet_accept_impl(req, client_addr, jet_associations).await {
@@ -107,7 +103,7 @@ async fn handle_jet_accept(
 
 async fn handle_jet_accept_impl(
     req: Request<Body>,
-    client_addr: Option<SocketAddr>,
+    client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
 ) -> Result<Response<Body>, ()> {
     let header = req.headers().get("upgrade").ok_or(())?;
@@ -140,7 +136,7 @@ async fn handle_jet_accept_impl(
                 if let Some(assc) = jet_assc.get_mut(&association_id) {
                     if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                         candidate.set_state(CandidateState::Accepted);
-                        let ws_transport = WsTransport::new_http(upgrade, client_addr).await;
+                        let ws_transport = WsTransport::new_http(upgrade, Some(client_addr)).await;
                         candidate.set_transport(JetTransport::Ws(ws_transport));
                     }
                 }
@@ -154,7 +150,7 @@ async fn handle_jet_accept_impl(
 
 async fn handle_jet_connect(
     req: Request<Body>,
-    client_addr: Option<SocketAddr>,
+    client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
@@ -170,7 +166,7 @@ async fn handle_jet_connect(
 
 async fn handle_jet_connect_impl(
     req: Request<Body>,
-    client_addr: Option<SocketAddr>,
+    client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
 ) -> Result<Response<Body>, ()> {
@@ -220,7 +216,7 @@ async fn handle_jet_connect_impl(
                     let server_transport = candidate
                         .take_transport()
                         .expect("Candidate cannot be created without a transport");
-                    let ws_transport = WsTransport::new_http(upgrade, client_addr).await;
+                    let ws_transport = WsTransport::new_http(upgrade, Some(client_addr)).await;
                     let client_transport = JetTransport::Ws(ws_transport);
                     candidate.set_state(CandidateState::Connected);
                     candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());

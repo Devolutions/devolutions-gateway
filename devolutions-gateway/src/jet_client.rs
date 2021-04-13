@@ -5,33 +5,26 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use jet_proto::{
-    accept::{JetAcceptReq, JetAcceptRsp},
-    connect::{JetConnectReq, JetConnectRsp},
-    test::{JetTestReq, JetTestRsp},
-    JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2,
-};
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use jet_proto::connect::{JetConnectReq, JetConnectRsp};
+use jet_proto::test::{JetTestReq, JetTestRsp};
+use jet_proto::{JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
 use slog_scope::{debug, error};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::{
-    config::Config,
-    http::controllers::jet::{remove_association, JetTpType},
-    interceptor::pcap_recording::PcapRecordingInterceptor,
-    jet::{
-        association::Association,
-        candidate::{Candidate, CandidateState},
-        TransportType,
-    },
-    transport::{tcp::TcpTransport, JetTransport, Transport},
-    utils::{
-        association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT},
-        create_tls_connector, into_other_io_error as error_other,
-    },
-    Proxy,
-};
+use crate::config::Config;
+use crate::http::controllers::jet::{remove_association, JetTpType};
+use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
+use crate::jet::association::Association;
+use crate::jet::candidate::{Candidate, CandidateState};
+use crate::jet::TransportType;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
+use crate::utils::{create_tls_connector, into_other_io_error as error_other};
+use crate::Proxy;
 
 use tokio_rustls::{TlsAcceptor, TlsStream};
 

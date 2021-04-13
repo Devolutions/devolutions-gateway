@@ -19,16 +19,17 @@ url = "1.7.1"
 url_serde = "0.2.0"
 hostname = "^0.3"
 lazy_static = "1.2.0"
-tokio = { version = "0.3.4", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
+tokio = { version = "1", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
 tokio_02 = {version = "0.2", package = "tokio", features = ["rt-core", "time"]}
-tokio-util = { version = "0.4", features = ["codec"] }
-tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite", rev = "3c6d4280d77fdff3e25f68ad703d94e89f38dae2", features = [ "tls" ] }
-tokio-compat-02 = "0.1"
+tokio-util = { version = "0.6", features = ["codec"] }
+tokio-tungstenite = "0.14"
+tokio-compat-02 = "0.2"
+tokio-rustls = { version = "0.22", features = ["dangerous_configuration"] }
 futures = "0.3"
 webpki = "0.21.0"
 native-tls = "0.2"
 byteorder = "1.2.7"
-bytes = "0.5"
+bytes = "1"
 uuid = { version = "0.8", features = ["v4", "serde"] }
 pcap-file = "0.10.0"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
@@ -61,11 +62,6 @@ dlopen_derive = "0.1.4"
 version = "2.8"
 default-features = false
 features = ["https", "json", "macro", "form"]
-
-[dependencies.tokio-rustls]
-git = "https://github.com/tokio-rs/tls.git"
-rev = "a517e1d0a636359c4e54b0735d7f4e73b786d2c0"
-features = ["dangerous_configuration"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }

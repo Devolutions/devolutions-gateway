@@ -1,7 +1,10 @@
 use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::{io::Error, mem::transmute, slice::from_raw_parts, sync::Arc};
+use std::io::Error;
+use std::mem::transmute;
+use std::slice::from_raw_parts;
+use std::sync::Arc;
 
 pub type NowPacketParser = usize;
 

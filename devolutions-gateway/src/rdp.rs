@@ -7,13 +7,20 @@ mod preconnection_pdu;
 
 mod sequence_future;
 
+use self::accept_connection_future::AcceptConnectionFuture;
+use self::connection_sequence_future::ConnectionSequenceFuture;
+use self::sequence_future::create_downgrade_dvc_capabilities_future;
+use crate::config::Config;
+use crate::interceptor::rdp::RdpMessageReader;
+use crate::jet_client::JetAssociationsMap;
+use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::{JetTransport, Transport};
+use crate::{utils, Proxy};
 use accept_connection_future::AcceptConnectionMode;
 use slog_scope::{error, info};
-
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
-
-use bytes::Buf;
 use std::io;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -22,18 +29,6 @@ use tokio_rustls::TlsAcceptor;
 use url::Url;
 
 pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
-
-use self::accept_connection_future::AcceptConnectionFuture;
-use self::connection_sequence_future::ConnectionSequenceFuture;
-use self::sequence_future::create_downgrade_dvc_capabilities_future;
-
-use crate::config::Config;
-use crate::interceptor::rdp::RdpMessageReader;
-use crate::jet_client::JetAssociationsMap;
-use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::{JetTransport, Transport};
-use crate::{utils, Proxy};
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";
@@ -102,13 +97,15 @@ impl RdpClient {
         })?;
 
         match mode {
-            AcceptConnectionMode::RdpTcp { url, leftover_request } => {
+            AcceptConnectionMode::RdpTcp {
+                url,
+                mut leftover_request,
+            } => {
                 info!("Starting RDP-TCP redirection");
 
                 let mut server_conn = TcpTransport::connect(&url).await?;
                 let client_transport = TcpTransport::new(client);
 
-                let mut leftover_request = leftover_request.bytes();
                 server_conn.write_buf(&mut leftover_request).await.map_err(|e| {
                     error!("Failed to write leftover request: {}", e);
                     e
@@ -127,10 +124,8 @@ impl RdpClient {
             } => {
                 info!("Starting RdpTcpRendezvous redirection");
 
-                let leftover_request = leftover_request.bytes();
-
                 JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client), association_id)
-                    .proxy(config, leftover_request)
+                    .proxy(config, &*leftover_request)
                     .await
             }
             AcceptConnectionMode::RdpTls { identity, request } => {

@@ -13,10 +13,9 @@ use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_compat_02::IoCompat;
 use tokio_rustls::{rustls, TlsConnector, TlsStream};
-use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::protocol::Role;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{tungstenite, WebSocketStream};
 use url::Url;
 
 enum WsStreamSendState {

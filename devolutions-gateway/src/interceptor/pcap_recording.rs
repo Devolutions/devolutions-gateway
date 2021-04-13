@@ -1,12 +1,10 @@
 use crate::interceptor::{PacketInterceptor, PeerInfo};
 use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
 use slog_scope::{debug, error};
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Condvar, Mutex},
-    thread,
-    time::Duration,
-};
+use std::net::SocketAddr;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug)]
 enum RecordingState {
