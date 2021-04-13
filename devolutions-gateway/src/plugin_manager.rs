@@ -1,4 +1,5 @@
-use dlopen::{symbor::Library, Error};
+use dlopen::symbor::Library;
+use dlopen::Error;
 use lazy_static::lazy_static;
 use slog_scope::debug;
 use std::sync::{Arc, Mutex};

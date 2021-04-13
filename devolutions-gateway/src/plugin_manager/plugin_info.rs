@@ -2,7 +2,13 @@ use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use slog_scope::{debug, error};
-use std::{convert::TryFrom, ffi::CStr, io::Error, mem::transmute, os::raw::c_char, slice::from_raw_parts, sync::Arc};
+use std::convert::TryFrom;
+use std::ffi::CStr;
+use std::io::Error;
+use std::mem::transmute;
+use std::os::raw::c_char;
+use std::slice::from_raw_parts;
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq)]
 pub enum PluginCapabilities {

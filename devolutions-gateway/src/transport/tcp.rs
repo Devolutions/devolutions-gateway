@@ -10,10 +10,8 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use url::Url;
 
-use crate::{
-    transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport},
-    utils::{create_tls_connector, resolve_url_to_socket_arr},
-};
+use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
+use crate::utils::{create_tls_connector, resolve_url_to_socket_arr};
 
 #[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {

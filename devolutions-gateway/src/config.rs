@@ -56,9 +56,9 @@ cfg_if! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
-    WAYK,
-    RDP,
-    UNKNOWN,
+    Wayk,
+    Rdp,
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -116,7 +116,7 @@ impl Default for Config {
             hostname: default_hostname,
             routing_url: None,
             capture_path: None,
-            protocol: Protocol::UNKNOWN,
+            protocol: Protocol::Unknown,
             log_file: None,
             application_protocols: Vec::new(),
             certificate: CertificateConfig {
@@ -567,9 +567,9 @@ impl Config {
 
         if let Some(protocol) = matches.value_of(ARG_PROTOCOL) {
             match protocol {
-                "wayk" => config.protocol = Protocol::WAYK,
-                "rdp" => config.protocol = Protocol::RDP,
-                _ => config.protocol = Protocol::UNKNOWN,
+                "wayk" => config.protocol = Protocol::Wayk,
+                "rdp" => config.protocol = Protocol::Rdp,
+                _ => config.protocol = Protocol::Unknown,
             }
         };
 

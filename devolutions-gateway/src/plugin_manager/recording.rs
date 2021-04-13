@@ -2,15 +2,13 @@ use crate::plugin_manager::packets_parsing::ImageUpdate;
 use crate::utils::into_other_io_error;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
+use std::ffi::CString;
+use std::io::Error;
+use std::mem::transmute;
+use std::os::raw::c_char;
+use std::path::{Path, PathBuf};
 use std::string::FromUtf8Error;
-use std::{
-    ffi::CString,
-    io::Error,
-    mem::transmute,
-    os::raw::c_char,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 pub type RecordingContext = usize;
 const MAX_PATH_LEN: usize = 512;

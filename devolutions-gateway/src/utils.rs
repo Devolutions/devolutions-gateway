@@ -1,28 +1,23 @@
 pub mod association;
 
-use std::{
-    collections::HashMap,
-    fs,
-    future::Future,
-    hash::Hash,
-    io::{self, BufReader},
-    net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-
-use futures::{ready, stream::Stream};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{lookup_host, TcpListener, TcpStream},
-};
+use crate::config::CertificateConfig;
+use futures::ready;
+use futures::stream::Stream;
+use std::collections::HashMap;
+use std::fs;
+use std::future::Future;
+use std::hash::Hash;
+use std::io::{self, BufReader};
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::{lookup_host, TcpListener, TcpStream};
 use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 use x509_parser::parse_x509_der;
-
-use crate::config::CertificateConfig;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
