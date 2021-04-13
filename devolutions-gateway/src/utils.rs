@@ -1,19 +1,14 @@
 pub mod association;
 
 use crate::config::CertificateConfig;
-use futures::ready;
-use futures::stream::Stream;
 use std::collections::HashMap;
 use std::fs;
-use std::future::Future;
 use std::hash::Hash;
 use std::io::{self, BufReader};
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{lookup_host, TcpListener, TcpStream};
+use tokio::net::{lookup_host, TcpStream};
 use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
@@ -241,36 +236,8 @@ where
 }
 
 pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
+
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
-
-// Now in tokio 0.3.3 TcpListener::incoming() is temporary removed and will be returned in one of the next patches.
-// The next struct is created in purpose to fill the gap.
-// When incoming() will be returned, the Incoming struct should be replaced with the same from tokio
-
-type AcceptType<'a> = Option<Pin<Box<dyn Future<Output = io::Result<(TcpStream, SocketAddr)>> + Send + Sync + 'a>>>;
-
-pub struct Incoming<'a> {
-    pub listener: &'a TcpListener,
-    pub accept: AcceptType<'a>,
-}
-
-impl Stream for Incoming<'_> {
-    type Item = io::Result<TcpStream>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            if self.accept.is_none() {
-                self.accept = Some(Box::pin(self.listener.accept()));
-            }
-
-            if let Some(f) = &mut self.accept {
-                let res = ready!(f.as_mut().poll(cx));
-                self.accept = None;
-                return Poll::Ready(Some(res.map(|(stream, _)| stream)));
-            }
-        }
-    }
-}
 
 pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
     match url.scheme() {
