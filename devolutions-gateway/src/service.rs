@@ -220,6 +220,8 @@ async fn start_tcp_server(
     tls_public_key: Vec<u8>,
     logger: Logger,
 ) -> Result<(), String> {
+    use futures::FutureExt as _;
+
     info!("Starting TCP jet server ({})...", url);
 
     let socket_addr = url
@@ -302,22 +304,29 @@ async fn start_tcp_server(
                             scheme => panic!("Unsupported routing URL scheme {}", scheme),
                         }
                     } else {
-                        let mut peeked = [0; 4];
-                        let _ = conn.peek(&mut peeked).await;
+                        let tls_public_key = tls_public_key.clone();
+                        let jet_associations = jet_associations.clone();
+                        let config = config.clone();
+                        let tls_acceptor = tls_acceptor.clone();
+                        async {
+                            let mut peeked = [0; 4];
+                            let _ = conn.peek(&mut peeked).await;
 
-                        if peeked == [74, 69, 84, 0] {
-                            // four first bytes matching JET protocol
-                            let jet_client = JetClient::new(config.clone(), jet_associations.clone());
-                            Box::pin(jet_client.serve(JetTransport::new_tcp(conn), tls_acceptor.clone()))
-                        } else {
-                            let rdp_client = RdpClient::new(
-                                config.clone(),
-                                tls_public_key.clone(),
-                                tls_acceptor.clone(),
-                                jet_associations.clone(),
-                            );
-                            Box::pin(rdp_client.serve(conn))
+                            if peeked == [74, 69, 84, 0] {
+                                // four first bytes matching JET protocol
+                                let jet_client = JetClient::new(config, jet_associations);
+                                jet_client.serve(JetTransport::new_tcp(conn), tls_acceptor).await
+                            } else {
+                                let rdp_client = RdpClient::new(
+                                    config.clone(),
+                                    tls_public_key,
+                                    tls_acceptor.clone(),
+                                    jet_associations.clone(),
+                                );
+                                rdp_client.serve(conn).await
+                            }
                         }
+                        .boxed()
                     };
 
                 let client_fut = client_fut.with_logger(logger);
