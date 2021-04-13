@@ -92,42 +92,44 @@ impl PacketInterceptor for PcapRecordingInterceptor {
         debug!("New packet intercepted. Packet size = {}", data.len());
 
         let server_info = self.server_info.lock().unwrap();
-        let is_from_server = source_addr.unwrap() == server_info.addr;
+        if let Some(src_addr) = source_addr {
+            let is_from_server = src_addr == server_info.addr;
 
-        if is_from_server {
-            let condition_timeout = self.condition_timeout.clone();
-            let (state, cond_var) = condition_timeout.as_ref();
-            let mut pending = state.lock().unwrap();
-            *pending = RecordingState::Update;
-            cond_var.notify_one();
-        }
-
-        let option_parser = self.packets_parser.lock().unwrap();
-        let option_recorder = self.recorder.lock().unwrap();
-
-        if let Some(parser) = option_parser.as_ref() {
-            let (status, message_id) = parser.parse_message(data, data.len(), is_from_server);
-            debug!(
-                "Returned from parse message with status: {} and message_id: {}",
-                status, message_id
-            );
-
-            if !parser.is_message_constructed(is_from_server) {
-                return;
-            } else if message_id == PacketsParser::NOW_UPDATE_MSG_ID {
-                let size = parser.get_size();
-                let image_data = parser.get_image_data();
-                if let Some(recorder) = option_recorder.as_ref() {
-                    recorder.set_size(size.width, size.height);
-                    recorder.update_recording(image_data);
-                }
+            if is_from_server {
+                let condition_timeout = self.condition_timeout.clone();
+                let (state, cond_var) = condition_timeout.as_ref();
+                let mut pending = state.lock().unwrap();
+                *pending = RecordingState::Update;
+                cond_var.notify_one();
             }
 
-            if status < data.len() {
-                drop(server_info);
-                drop(option_parser);
-                drop(option_recorder);
-                self.on_new_packet(source_addr, &data[status..]);
+            let option_parser = self.packets_parser.lock().unwrap();
+            let option_recorder = self.recorder.lock().unwrap();
+
+            if let Some(parser) = option_parser.as_ref() {
+                let (status, message_id) = parser.parse_message(data, data.len(), is_from_server);
+                debug!(
+                    "Returned from parse message with status: {} and message_id: {}",
+                    status, message_id
+                );
+
+                if !parser.is_message_constructed(is_from_server) {
+                    return;
+                } else if message_id == PacketsParser::NOW_UPDATE_MSG_ID {
+                    let size = parser.get_size();
+                    let image_data = parser.get_image_data();
+                    if let Some(recorder) = option_recorder.as_ref() {
+                        recorder.set_size(size.width, size.height);
+                        recorder.update_recording(image_data);
+                    }
+                }
+
+                if status < data.len() {
+                    drop(server_info);
+                    drop(option_parser);
+                    drop(option_recorder);
+                    self.on_new_packet(source_addr, &data[status..]);
+                }
             }
         }
     }
