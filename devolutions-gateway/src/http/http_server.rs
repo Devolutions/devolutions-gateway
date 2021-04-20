@@ -3,6 +3,7 @@ use crate::http::controllers::health::HealthController;
 use crate::http::controllers::jet::JetController;
 use crate::http::controllers::sessions::SessionsController;
 use crate::http::middlewares::auth::AuthMiddleware;
+use crate::http::middlewares::log::LogMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
 use slog_scope::info;
@@ -23,11 +24,13 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 auth_include_path.push("/jet/association/<association_id>");
             }
 
-            middlewares.apply(
-                AuthMiddleware::new(config.clone()),
-                auth_include_path,
-                Some(auth_exclude_path),
-            )
+            middlewares
+                .apply(
+                    AuthMiddleware::new(config.clone()),
+                    auth_include_path,
+                    Some(auth_exclude_path),
+                )
+                .apply(LogMiddleware, vec!["/"], None)
         })
         .configure_router(|router| {
             info!("Loading HTTP controllers");

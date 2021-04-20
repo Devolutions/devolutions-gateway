@@ -2,6 +2,9 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
+## Next release ()
+  * Add logs to track all HTTP requests received and processed
+
 ## 2021.1.3 (2021-04-13)
   * Fix infinite loop issue when the precondition pdu was not completely received
   * Fix possible stability issue with protocol peeking

@@ -61,7 +61,7 @@ dlopen_derive = "0.1.4"
 [dependencies.saphir]
 version = "2.8"
 default-features = false
-features = ["https", "json", "macro", "form"]
+features = ["https", "json", "macro", "form", "operation"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
