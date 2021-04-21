@@ -2,6 +2,7 @@ use crate::interceptor::{PacketInterceptor, PeerInfo};
 use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
 use slog_scope::{debug, error};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -20,15 +21,22 @@ pub struct PcapRecordingInterceptor {
     recorder: Arc<Mutex<Option<Recorder>>>,
     condition_timeout: Arc<(Mutex<RecordingState>, Condvar)>,
     handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    file_name: Arc<Mutex<String>>,
 }
 
 impl PcapRecordingInterceptor {
-    pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, association_id: String, candidate_id: String) -> Self {
+    pub fn new(
+        server_addr: SocketAddr,
+        client_addr: SocketAddr,
+        association_id: String,
+        candidate_id: String, /*push_data: Option<RemoteRepoData>,*/
+    ) -> Self {
         debug!("Recording Interceptor was created");
         let recording_plugin = PLUGIN_MANAGER.lock().unwrap().get_recording_plugin();
+        let file_name = format!("{}-to-{}", association_id, candidate_id);
+
         if let Some(recorder) = &recording_plugin {
-            let filename = format!("{}-to-{}", association_id, candidate_id);
-            recorder.set_filename(filename.as_str());
+            recorder.set_filename(file_name.as_str());
         }
 
         let recorder = Arc::new(Mutex::new(recording_plugin));
@@ -74,6 +82,7 @@ impl PcapRecordingInterceptor {
             recorder,
             condition_timeout,
             handle: Arc::new(Mutex::new(Some(handle))),
+            file_name: Arc::new(Mutex::new(file_name)),
         }
     }
 
@@ -82,6 +91,25 @@ impl PcapRecordingInterceptor {
         if let Some(recorder) = rec.as_ref() {
             recorder.set_directory(directory);
         }
+    }
+
+    pub fn get_recording_directory(&mut self) -> Option<PathBuf> {
+        let rec = self.recorder.lock().unwrap();
+        if let Some(recorder) = rec.as_ref() {
+            match recorder.get_filepath() {
+                Ok(path_buf) => {
+                    debug!("the path is {:?}", path_buf.to_str());
+                    return Some(path_buf);
+                }
+                Err(e) => error!("Failed to get video path: {}", e),
+            }
+        }
+        None
+    }
+
+    pub fn get_filename_pattern(&mut self) -> String {
+        let rec = self.file_name.lock().unwrap();
+        rec.clone()
     }
 }
 

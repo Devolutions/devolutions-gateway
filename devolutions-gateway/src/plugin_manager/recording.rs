@@ -119,6 +119,9 @@ impl Recorder {
             }
         }
 
+        //-1 for the last /0 in the cstr
+        path_array.truncate(path_size - 1);
+
         let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
 
         match str_path {
