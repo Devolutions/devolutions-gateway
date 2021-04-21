@@ -15,6 +15,8 @@ New-Item -Path "$PSModuleOutputPath\$ModuleName" -ItemType 'Directory' -Force | 
     New-Item -Path "$PSModuleOutputPath\$ModuleName\$_" -ItemType 'Directory' -Force | Out-Null
 }
 
+& dotnet nuget add source "https://api.nuget.org/v3/index.json" -n "nuget.org" | Out-Null
+
 & dotnet publish "$PSScriptRoot\$ModuleName\src" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
 
 Copy-Item "$PSScriptRoot\$ModuleName\bin" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
