@@ -115,7 +115,7 @@ async fn handle_build_proxy(
     let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
     let association_id = response.association_id;
     let mut remote_data = None;
-    let mut recording_dir: Option<PathBuf> = None;
+    let mut recording_dir = None;
 
     let associations = jet_associations.lock().await;
     if let Some(association) = associations.get(&association_id) {
@@ -131,7 +131,7 @@ async fn handle_build_proxy(
                 recording_dir = match &config.recording_path {
                     Some(path) => {
                         interceptor.set_recording_directory(path.as_str());
-                        Some(PathBuf::from(path.clone()))
+                        Some(PathBuf::from(path))
                     }
                     None => interceptor.get_recording_directory(),
                 };
@@ -154,13 +154,12 @@ async fn handle_build_proxy(
     }
 
     if let Some(interceptor) = recording_interceptor {
-        let result = handle_build_tls_proxy(config, response, interceptor, tls_acceptor).await;
-        if let Some(push_data) = remote_data {
-            if let Some(dir) = recording_dir {
-                push_data.push(dir.as_path(), association_id.clone().to_string());
-            }
-        }
-        result
+        let proxy_result = handle_build_tls_proxy(config, response, interceptor, tls_acceptor).await;
+        if let (Some(push_data), Some(dir)) = (remote_data, recording_dir) {
+            push_data.push(dir.as_path(), association_id.clone().to_string())
+        };
+
+        proxy_result
     } else {
         Proxy::new(config)
             .build(response.server_transport, response.client_transport)

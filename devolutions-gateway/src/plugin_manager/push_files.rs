@@ -19,7 +19,6 @@ impl SogarData {
         image_name: Option<String>,
         file_pattern: Option<String>,
     ) -> Option<Self> {
-        debug!("Sogar data created!");
         if let (
             Some(sogar_path),
             Some(registry_url),
@@ -29,6 +28,7 @@ impl SogarData {
             Some(file_pattern),
         ) = (sogar_path, registry_url, username, password, image_name, file_pattern)
         {
+            debug!("Sogar data created!");
             Some(SogarData {
                 sogar_path,
                 registry_url,
@@ -110,9 +110,8 @@ impl SogarData {
             .arg(file_path.to_string());
 
         debug!("Command args for sogar are: {:?}", args);
-        let sogar_output = args.output();
 
-        match sogar_output {
+        match args.output() {
             Ok(output) => {
                 if !output.status.success() {
                     error!("Status of the output is fail!");

@@ -25,12 +25,7 @@ pub struct PcapRecordingInterceptor {
 }
 
 impl PcapRecordingInterceptor {
-    pub fn new(
-        server_addr: SocketAddr,
-        client_addr: SocketAddr,
-        association_id: String,
-        candidate_id: String, /*push_data: Option<RemoteRepoData>,*/
-    ) -> Self {
+    pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, association_id: String, candidate_id: String) -> Self {
         debug!("Recording Interceptor was created");
         let recording_plugin = PLUGIN_MANAGER.lock().unwrap().get_recording_plugin();
         let file_name = format!("{}-to-{}", association_id, candidate_id);
@@ -93,7 +88,7 @@ impl PcapRecordingInterceptor {
         }
     }
 
-    pub fn get_recording_directory(&mut self) -> Option<PathBuf> {
+    pub fn get_recording_directory(&self) -> Option<PathBuf> {
         let rec = self.recorder.lock().unwrap();
         if let Some(recorder) = rec.as_ref() {
             match recorder.get_filepath() {
@@ -107,7 +102,7 @@ impl PcapRecordingInterceptor {
         None
     }
 
-    pub fn get_filename_pattern(&mut self) -> String {
+    pub fn get_filename_pattern(&self) -> String {
         let rec = self.file_name.lock().unwrap();
         rec.clone()
     }

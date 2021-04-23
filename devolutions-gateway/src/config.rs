@@ -36,7 +36,7 @@ const ARG_SOGAR_UTIL_PATH: &str = "sogar-path";
 const ARG_SOGAR_REGISTRY_URL: &str = "sogar-registry-url";
 const ARG_SOGAR_USERNAME: &str = "sogar-username";
 const ARG_SOGAR_PASSWORD: &str = "sogar-password";
-const ARG_SOGAR_IMAGE_NAME: &str = "soagar-image-name";
+const ARG_SOGAR_IMAGE_NAME: &str = "sogar-image-name";
 
 const SERVICE_NAME: &str = "devolutions-gateway";
 const DISPLAY_NAME: &str = "Devolutions Gateway";
