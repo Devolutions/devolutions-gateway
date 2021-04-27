@@ -13,6 +13,8 @@ enum RecordingState {
     Finish,
 }
 
+// The interceptor implements the trait PacketInterceptor which is not async, therefore
+// the std::Mutex is used here
 #[derive(Clone)]
 pub struct PcapRecordingInterceptor {
     server_info: Arc<Mutex<PeerInfo>>,
