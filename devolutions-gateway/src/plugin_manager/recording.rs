@@ -6,7 +6,7 @@ use std::ffi::CString;
 use std::io::Error;
 use std::mem::transmute;
 use std::os::raw::c_char;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::string::FromUtf8Error;
 use std::sync::Arc;
 
@@ -119,10 +119,13 @@ impl Recorder {
             }
         }
 
+        // -1 for the last /0 in the cstr
+        path_array.truncate(path_size - 1);
+
         let str_path = String::from_utf8(path_array.iter().map(|element| *element as u8).collect());
 
         match str_path {
-            Ok(path) => Ok(Path::new(path.as_str()).to_path_buf()),
+            Ok(path) => Ok(PathBuf::from(path)),
             Err(e) => Err(e),
         }
     }

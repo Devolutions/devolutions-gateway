@@ -20,12 +20,14 @@ use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
 use crate::jet::association::Association;
 use crate::jet::candidate::{Candidate, CandidateState};
 use crate::jet::TransportType;
+use crate::plugin_manager::SogarData;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::Proxy;
 
+use std::path::PathBuf;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
@@ -112,6 +114,8 @@ async fn handle_build_proxy(
 ) -> Result<(), io::Error> {
     let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
     let association_id = response.association_id;
+    let mut remote_data = None;
+    let mut recording_dir = None;
 
     let associations = jet_associations.lock().await;
     if let Some(association) = associations.get(&association_id) {
@@ -124,9 +128,25 @@ async fn handle_build_proxy(
                     response.candidate_id.clone().to_string(),
                 );
 
-                if let Some(path) = &config.recording_path {
-                    interceptor.set_recording_directory(path.as_str());
-                }
+                recording_dir = match &config.recording_path {
+                    Some(path) => {
+                        interceptor.set_recording_directory(path.as_str());
+                        Some(PathBuf::from(path))
+                    }
+                    None => interceptor.get_recording_directory(),
+                };
+
+                let file_pattern = interceptor.get_filename_pattern();
+
+                let recording_info = config.recording_info.clone();
+                remote_data = SogarData::new(
+                    recording_info.sogar_path.clone(),
+                    recording_info.registry_url.clone(),
+                    recording_info.username.clone(),
+                    recording_info.password.clone(),
+                    recording_info.image_name,
+                    Some(file_pattern),
+                );
 
                 recording_interceptor = Some(interceptor);
             }
@@ -134,7 +154,12 @@ async fn handle_build_proxy(
     }
 
     if let Some(interceptor) = recording_interceptor {
-        handle_build_tls_proxy(config, response, interceptor, tls_acceptor).await
+        let proxy_result = handle_build_tls_proxy(config, response, interceptor, tls_acceptor).await;
+        if let (Some(push_data), Some(dir)) = (remote_data, recording_dir) {
+            push_data.push(dir.as_path(), association_id.clone().to_string())
+        };
+
+        proxy_result
     } else {
         Proxy::new(config)
             .build(response.server_transport, response.client_transport)

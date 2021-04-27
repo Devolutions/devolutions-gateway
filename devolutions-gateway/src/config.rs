@@ -32,6 +32,11 @@ const ARG_LOG_FILE: &str = "log-file";
 const ARG_SERVICE_MODE: &str = "service";
 const ARG_PLUGINS: &str = "plugins";
 const ARG_RECORDING_PATH: &str = "recording-path";
+const ARG_SOGAR_UTIL_PATH: &str = "sogar-path";
+const ARG_SOGAR_REGISTRY_URL: &str = "sogar-registry-url";
+const ARG_SOGAR_USERNAME: &str = "sogar-username";
+const ARG_SOGAR_PASSWORD: &str = "sogar-password";
+const ARG_SOGAR_IMAGE_NAME: &str = "sogar-image-name";
 
 const SERVICE_NAME: &str = "devolutions-gateway";
 const DISPLAY_NAME: &str = "Devolutions Gateway";
@@ -75,6 +80,15 @@ pub struct CertificateConfig {
     pub private_key_data: Option<String>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct RecordingInfo {
+    pub sogar_path: Option<String>,
+    pub registry_url: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub image_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub service_mode: bool,
@@ -97,6 +111,7 @@ pub struct Config {
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<String>>,
     pub recording_path: Option<String>,
+    pub recording_info: RecordingInfo,
 }
 
 impl Default for Config {
@@ -129,6 +144,13 @@ impl Default for Config {
             delegation_private_key: None,
             plugins: None,
             recording_path: None,
+            recording_info: RecordingInfo {
+                sogar_path: None,
+                registry_url: None,
+                username: None,
+                password: None,
+                image_name: None,
+            },
         }
     }
 }
@@ -203,6 +225,16 @@ pub struct ConfigFile {
     pub plugins: Option<Vec<String>>,
     #[serde(rename = "RecordingPath")]
     pub recording_path: Option<String>,
+    #[serde(rename = "SogarPath")]
+    pub sogar_path: Option<String>,
+    #[serde(rename = "SogarRegistryUrl")]
+    pub registry_url: Option<String>,
+    #[serde(rename = "SogarUsername")]
+    pub username: Option<String>,
+    #[serde(rename = "SogarPassword")]
+    pub password: Option<String>,
+    #[serde(rename = "SogarImageName")]
+    pub image_name: Option<String>,
 
     // unstable options (subject to change)
     #[serde(rename = "ApiKey")]
@@ -521,6 +553,52 @@ impl Config {
                             Err(String::from("The value does not exist or is not a path"))
                         }
                     }),
+            )
+            .arg(
+                Arg::with_name(ARG_SOGAR_UTIL_PATH)
+                    .long(ARG_SOGAR_UTIL_PATH)
+                    .value_name("PATH")
+                    .help("A path where the sogar utility is located including the name and extension.")
+                    .takes_value(true)
+                    .empty_values(false)
+                    .requires_all(&[
+                        ARG_SOGAR_REGISTRY_URL,
+                        ARG_SOGAR_USERNAME,
+                        ARG_SOGAR_PASSWORD,
+                        ARG_SOGAR_IMAGE_NAME,
+                    ]),
+            )
+            .arg(
+                Arg::with_name(ARG_SOGAR_REGISTRY_URL)
+                    .long(ARG_SOGAR_REGISTRY_URL)
+                    .value_name("URL")
+                    .help("Registry url to where the session recordings will be pushed.")
+                    .env("SOGAR_REGISTRY_URL")
+                    .takes_value(true)
+                    .empty_values(false),
+            )
+            .arg(
+                Arg::with_name(ARG_SOGAR_USERNAME)
+                    .long(ARG_SOGAR_USERNAME)
+                    .help("Registry username.")
+                    .env("SOGAR_REGISTRY_USERNAME")
+                    .takes_value(true)
+                    .empty_values(false),
+            )
+            .arg(
+                Arg::with_name(ARG_SOGAR_PASSWORD)
+                    .long(ARG_SOGAR_PASSWORD)
+                    .help("Registry password.")
+                    .env("SOGAR_REGISTRY_PASSWORD")
+                    .takes_value(true)
+                    .empty_values(false),
+            )
+            .arg(
+                Arg::with_name(ARG_SOGAR_IMAGE_NAME)
+                    .long(ARG_SOGAR_IMAGE_NAME)
+                    .help("Image name of the registry where to push the file. For example videos/demo")
+                    .takes_value(true)
+                    .empty_values(false),
             );
 
         let matches = cli_app.get_matches();
@@ -656,6 +734,26 @@ impl Config {
                     .load_plugin(plugin.as_str())
                     .unwrap_or_else(|e| panic!("Failed to load plugin with error {}", e));
             }
+        }
+
+        if let Some(sogar_path) = matches.value_of(ARG_SOGAR_UTIL_PATH) {
+            config.recording_info.sogar_path = Some(sogar_path.to_owned());
+        }
+
+        if let Some(registry_url) = matches.value_of(ARG_SOGAR_REGISTRY_URL) {
+            config.recording_info.registry_url = Some(registry_url.to_owned());
+        }
+
+        if let Some(username) = matches.value_of(ARG_SOGAR_USERNAME) {
+            config.recording_info.username = Some(username.to_owned());
+        }
+
+        if let Some(password) = matches.value_of(ARG_SOGAR_PASSWORD) {
+            config.recording_info.password = Some(password.to_owned());
+        }
+
+        if let Some(image_name) = matches.value_of(ARG_SOGAR_IMAGE_NAME) {
+            config.recording_info.image_name = Some(image_name.to_owned());
         }
 
         // listeners parsing
@@ -825,6 +923,11 @@ impl Config {
 
         let plugins = config_file.plugins;
         let recording_path = config_file.recording_path;
+        let sogar_path = config_file.sogar_path;
+        let registry_url = config_file.registry_url;
+        let username = config_file.username;
+        let password = config_file.password;
+        let image_name = config_file.image_name;
 
         // unstable options (subject to change)
         let api_key = config_file.api_key;
@@ -849,6 +952,13 @@ impl Config {
             delegation_private_key,
             plugins,
             recording_path,
+            recording_info: RecordingInfo {
+                sogar_path,
+                registry_url,
+                username,
+                password,
+                image_name,
+            },
             ..Default::default()
         })
     }
