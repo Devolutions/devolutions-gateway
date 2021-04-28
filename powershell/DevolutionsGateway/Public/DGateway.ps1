@@ -12,15 +12,30 @@ $script:DGatewayProvisionerPrivateKeyFileName = "provisioner.key"
 $script:DGatewayDelegationPublicKeyFileName = "delegation.pem"
 $script:DGatewayDelegationPrivateKeyFileName = "delegation.key"
 
+function Get-DGatewayVersion
+{
+    param(
+        [Parameter(Mandatory=$true,Position=0)]
+        [ValidateSet("Module")]
+        [string] $Type
+    )
+
+    if ($Type -eq "Module") {
+        $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
+        $Manifest = Import-PowerShellDataFile -Path $ManifestPath
+        $DGatewayVersion = $Manifest.ModuleVersion
+    }
+
+    $DGatewayVersion
+}
+
 function Get-DGatewayImage
 {
     param(
         [string] $Platform
     )
 
-    $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
-    $Manifest = Import-PowerShellDataFile -Path $ManifestPath
-    $DGatewayVersion = $Manifest.ModuleVersion
+    $DGatewayVersion = Get-DGatewayVersion "Module"
 
     $image = if ($Platform -ne "windows") {
         "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
@@ -736,6 +751,91 @@ function Get-DGatewayService
     $Service.External = $false
 
     return $Service
+}
+
+function Install-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[string] $RequiredVersion,
+		[switch] $Quiet,
+		[switch] $Force
+	)
+
+    $Version = Get-DGatewayVersion "Module"
+
+    if ($RequiredVersion) {
+        $Version = $RequiredVersion
+    }
+
+    $TempPath = Join-Path $([System.IO.Path]::GetTempPath()) "dgateway-${Version}"
+    New-Item -ItemType Directory -Path $TempPath -ErrorAction SilentlyContinue | Out-Null
+
+    $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
+    $DownloadUrl = "${GitHubDownloadUrl}v${Version}/DevolutionsGateway-x86_64-${Version}.msi"
+
+	$DownloadFile = Split-Path -Path $DownloadUrl -Leaf
+	$DownloadFilePath = Join-Path $TempPath $DownloadFile
+	Write-Host "Downloading $DownloadUrl"
+
+	$WebClient = [System.Net.WebClient]::new()
+	$WebClient.DownloadFile($DownloadUrl, $DownloadFilePath)
+	$WebClient.Dispose()
+	
+	$DownloadFilePath = Resolve-Path $DownloadFilePath
+
+	if ($IsWindows) {
+		$Display = '/passive'
+		if ($Quiet){
+			$Display = '/quiet'
+		}
+		$InstallLogFile = Join-Path $TempPath "DGateway_Install.log"
+		$MsiArgs = @(
+			'/i', "`"$DownloadFilePath`"",
+			$Display,
+			'/norestart',
+			'/log', "`"$InstallLogFile`""
+		)
+
+		Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait -NoNewWindow
+
+		Remove-Item -Path $InstallLogFile -Force -ErrorAction SilentlyContinue
+	} elseif ($IsMacOS) {
+        throw  "unsupported platform"
+	} elseif ($IsLinux) {
+        throw  "not implemented"
+	}
+
+	Remove-Item -Path $TempPath -Force -Recurse
+}
+
+function Uninstall-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[switch] $Quiet
+	)
+	
+	if ($IsWindows) {
+        $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
+            | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
+		if ($UninstallReg) {
+			$UninstallString = $($UninstallReg.UninstallString `
+				-Replace "msiexec.exe", "" -Replace "/I", "" -Replace "/X", "").Trim()
+			$Display = '/passive'
+			if ($Quiet){
+				$Display = '/quiet'
+			}
+			$MsiArgs = @(
+				'/X', $UninstallString, $Display
+			)
+			Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait
+		}
+	} elseif ($IsMacOS) {
+        throw  "unsupported platform"
+	} elseif ($IsLinux) {
+        throw  "not implemented"
+	}
 }
 
 function Update-DGatewayImage
