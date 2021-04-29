@@ -16,14 +16,33 @@ function Get-DGatewayVersion
 {
     param(
         [Parameter(Mandatory=$true,Position=0)]
-        [ValidateSet("Module")]
+        [ValidateSet("PSModule","Installed")]
         [string] $Type
     )
 
-    if ($Type -eq "Module") {
+    if ($Type -eq "PSModule") {
         $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
         $Manifest = Import-PowerShellDataFile -Path $ManifestPath
         $DGatewayVersion = $Manifest.ModuleVersion
+    } elseif ($Type -eq "Installed") {
+        if ($IsWindows) {
+            $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
+                | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
+            if ($UninstallReg) {
+                $DGatewayVersion = $UninstallReg.DisplayVersion
+            }
+        } elseif ($IsMacOS) {
+            throw "not supported"
+        } elseif ($IsLinux) {
+            $PackageName = 'devolutions-gateway'
+            $DpkgStatus = $(dpkg -s $PackageName 2>$null)
+            $DpkgMatches = $($DpkgStatus | Select-String -AllMatches -Pattern 'version: (\S+)').Matches
+            if ($DpkgMatches) {
+                $VersionQuad = $DpkgMatches.Groups[1].Value
+                $VersionTriple = $VersionQuad -Replace "^(\d+)\.(\d+)\.(\d+)\.(\d+)$", "`$1.`$2.`$3"
+                $DGatewayVersion = $VersionTriple
+            }
+        }
     }
 
     $DGatewayVersion
@@ -35,7 +54,7 @@ function Get-DGatewayImage
         [string] $Platform
     )
 
-    $DGatewayVersion = Get-DGatewayVersion "Module"
+    $DGatewayVersion = Get-DGatewayVersion "PSModule"
 
     $image = if ($Platform -ne "windows") {
         "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
@@ -753,6 +772,47 @@ function Get-DGatewayService
     return $Service
 }
 
+function Get-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[string] $RequiredVersion,
+		[ValidateSet("Windows","Linux")]
+		[string] $Platform
+	)
+
+    $Version = Get-DGatewayVersion "PSModule"
+
+    if ($RequiredVersion) {
+        $Version = $RequiredVersion
+    }
+
+    if (-Not $Platform) {
+        if ($IsWindows) {
+            $Platform = "Windows"
+        } else {
+            $Platform = "Linux"
+        }
+    }
+
+    $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
+
+    if ($Platform -eq 'Windows') {
+        $Architecture = "x64_64"
+        $PackageFileName = "DevolutionsGateway-${Architecture}-${Version}.msi"
+    } elseif ($Platform -eq 'Linux') {
+        $Architecture = "amd64"
+        $PackageFileName = "devolutions-gateway_${Version}.0_${Architecture}.deb"
+    }
+
+    $DownloadUrl = "${GitHubDownloadUrl}v${Version}/$PackageFileName"
+
+    [PSCustomObject]@{
+        Url = $DownloadUrl;
+        Version = $Version;
+    }
+}
+
 function Install-DGatewayPackage
 {
     [CmdletBinding()]
@@ -762,17 +822,24 @@ function Install-DGatewayPackage
 		[switch] $Force
 	)
 
-    $Version = Get-DGatewayVersion "Module"
+    $Version = Get-DGatewayVersion "PSModule"
 
     if ($RequiredVersion) {
         $Version = $RequiredVersion
     }
 
+    $InstalledVersion = Get-DGatewayVersion "Installed"
+
+    if (($InstalledVersion -eq $Version) -and (-Not $Force)) {
+        Write-Host "Devolutions Gateway is already installed ($Version)"
+        return
+    }
+
     $TempPath = Join-Path $([System.IO.Path]::GetTempPath()) "dgateway-${Version}"
     New-Item -ItemType Directory -Path $TempPath -ErrorAction SilentlyContinue | Out-Null
 
-    $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
-    $DownloadUrl = "${GitHubDownloadUrl}v${Version}/DevolutionsGateway-x86_64-${Version}.msi"
+    $Package = Get-DGatewayPackage -RequiredVersion $Version
+    $DownloadUrl = $Package.Url
 
 	$DownloadFile = Split-Path -Path $DownloadUrl -Leaf
 	$DownloadFilePath = Join-Path $TempPath $DownloadFile
@@ -803,7 +870,15 @@ function Install-DGatewayPackage
 	} elseif ($IsMacOS) {
         throw  "unsupported platform"
 	} elseif ($IsLinux) {
-        throw  "not implemented"
+		$DpkgArgs = @(
+			'-i', $DownloadFilePath
+		)
+		if ((id -u) -eq 0) {
+			Start-Process 'dpkg' -ArgumentList $DpkgArgs -Wait
+		} else {
+			$DpkgArgs = @('dpkg') + $DpkgArgs
+			Start-Process 'sudo' -ArgumentList $DpkgArgs -Wait
+		}
 	}
 
 	Remove-Item -Path $TempPath -Force -Recurse
@@ -834,7 +909,17 @@ function Uninstall-DGatewayPackage
 	} elseif ($IsMacOS) {
         throw  "unsupported platform"
 	} elseif ($IsLinux) {
-        throw  "not implemented"
+		if (Get-DGatewayVersion "Installed") {
+			$AptArgs = @(
+				'-y', 'remove', 'devolutions-gateway', '--purge'
+			)
+			if ((id -u) -eq 0) {
+				Start-Process 'apt-get' -ArgumentList $AptArgs -Wait
+			} else {
+				$AptArgs = @('apt-get') + $AptArgs
+				Start-Process 'sudo' -ArgumentList $AptArgs -Wait
+			}
+		}
 	}
 }
 
