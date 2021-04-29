@@ -29,7 +29,7 @@ function Get-DGatewayVersion
             $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
                 | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
             if ($UninstallReg) {
-                $DGatewayVersion = $UninstallReg.DisplayVersion
+                $DGatewayVersion = "20" + $UninstallReg.DisplayVersion
             }
         } elseif ($IsMacOS) {
             throw "not supported"
@@ -798,7 +798,7 @@ function Get-DGatewayPackage
     $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
 
     if ($Platform -eq 'Windows') {
-        $Architecture = "x64_64"
+        $Architecture = "x86_64"
         $PackageFileName = "DevolutionsGateway-${Architecture}-${Version}.msi"
     } elseif ($Platform -eq 'Linux') {
         $Architecture = "amd64"
