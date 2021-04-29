@@ -4,42 +4,41 @@
 . "$PSScriptRoot/../Private/DockerHelper.ps1"
 . "$PSScriptRoot/../Private/TokenHelper.ps1"
 
-$script:DGatewayConfigFileName = "gateway.json"
-$script:DGatewayCertificateFileName = "certificate.pem"
-$script:DGatewayPrivateKeyFileName = "certificate.key"
-$script:DGatewayProvisionerPublicKeyFileName = "provisioner.pem"
-$script:DGatewayProvisionerPrivateKeyFileName = "provisioner.key"
-$script:DGatewayDelegationPublicKeyFileName = "delegation.pem"
-$script:DGatewayDelegationPrivateKeyFileName = "delegation.key"
+$script:DGatewayConfigFileName = 'gateway.json'
+$script:DGatewayCertificateFileName = 'certificate.pem'
+$script:DGatewayPrivateKeyFileName = 'certificate.key'
+$script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pem'
+$script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.key'
+$script:DGatewayDelegationPublicKeyFileName = 'delegation.pem'
+$script:DGatewayDelegationPrivateKeyFileName = 'delegation.key'
 
-function Get-DGatewayVersion
-{
+function Get-DGatewayVersion {
     param(
-        [Parameter(Mandatory=$true,Position=0)]
-        [ValidateSet("PSModule","Installed")]
+        [Parameter(Mandatory = $true, Position = 0)]
+        [ValidateSet('PSModule', 'Installed')]
         [string] $Type
     )
 
-    if ($Type -eq "PSModule") {
+    if ($Type -eq 'PSModule') {
         $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
         $Manifest = Import-PowerShellDataFile -Path $ManifestPath
         $DGatewayVersion = $Manifest.ModuleVersion
-    } elseif ($Type -eq "Installed") {
+    } elseif ($Type -eq 'Installed') {
         if ($IsWindows) {
-            $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
-                | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
+            $UninstallReg = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' `
+            | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match 'Devolutions Gateway' }
             if ($UninstallReg) {
-                $DGatewayVersion = "20" + $UninstallReg.DisplayVersion
+                $DGatewayVersion = '20' + $UninstallReg.DisplayVersion
             }
         } elseif ($IsMacOS) {
-            throw "not supported"
+            throw 'not supported'
         } elseif ($IsLinux) {
             $PackageName = 'devolutions-gateway'
             $DpkgStatus = $(dpkg -s $PackageName 2>$null)
             $DpkgMatches = $($DpkgStatus | Select-String -AllMatches -Pattern 'version: (\S+)').Matches
             if ($DpkgMatches) {
                 $VersionQuad = $DpkgMatches.Groups[1].Value
-                $VersionTriple = $VersionQuad -Replace "^(\d+)\.(\d+)\.(\d+)\.(\d+)$", "`$1.`$2.`$3"
+                $VersionTriple = $VersionQuad -Replace '^(\d+)\.(\d+)\.(\d+)\.(\d+)$', "`$1.`$2.`$3"
                 $DGatewayVersion = $VersionTriple
             }
         }
@@ -48,15 +47,14 @@ function Get-DGatewayVersion
     $DGatewayVersion
 }
 
-function Get-DGatewayImage
-{
+function Get-DGatewayImage {
     param(
         [string] $Platform
     )
 
-    $DGatewayVersion = Get-DGatewayVersion "PSModule"
+    $DGatewayVersion = Get-DGatewayVersion 'PSModule'
 
-    $image = if ($Platform -ne "windows") {
+    $image = if ($Platform -ne 'windows') {
         "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
     } else {
         "devolutions/devolutions-gateway:${DGatewayVersion}-servercore-ltsc2019"
@@ -65,8 +63,7 @@ function Get-DGatewayImage
     return $image
 }
 
-class DGatewayListener
-{
+class DGatewayListener {
     [string] $InternalUrl
     [string] $ExternalUrl
 
@@ -78,21 +75,19 @@ class DGatewayListener
     }
 }
 
-function New-DGatewayListener()
-{
+function New-DGatewayListener() {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string] $ListenerUrl,
-        [Parameter(Mandatory=$true, Position=1)]
+        [Parameter(Mandatory = $true, Position = 1)]
         [string] $ExternalUrl
     )
 
     return [DGatewayListener]::new($ListenerUrl, $ExternalUrl)
 }
 
-class DGatewayConfig
-{
+class DGatewayConfig {
     [string] $FarmName
     [string[]] $FarmMembers
 
@@ -114,12 +109,11 @@ class DGatewayConfig
     [string] $DockerContainerName
 }
 
-function Save-DGatewayConfig
-{
+function Save-DGatewayConfig {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [DGatewayConfig] $Config
     )
 
@@ -127,14 +121,13 @@ function Save-DGatewayConfig
     $ConfigFile = Join-Path $ConfigPath $DGatewayConfigFileName
 
     $Properties = $Config.PSObject.Properties.Name
-    $NonNullProperties = $Properties.Where({ -Not [string]::IsNullOrEmpty($Config.$_) })
+    $NonNullProperties = $Properties.Where( { -Not [string]::IsNullOrEmpty($Config.$_) })
     $ConfigData = $Config | Select-Object $NonNullProperties | ConvertTo-Json
 
     [System.IO.File]::WriteAllLines($ConfigFile, $ConfigData, $(New-Object System.Text.UTF8Encoding $False))
 }
 
-function Set-DGatewayConfig
-{
+function Set-DGatewayConfig {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -151,11 +144,11 @@ function Set-DGatewayConfig
         [string] $DelegationPublicKeyFile,
         [string] $DelegationPrivateKeyFile,
 
-        [ValidateSet("linux","windows")]
+        [ValidateSet('linux', 'windows')]
         [string] $DockerPlatform,
-        [ValidateSet("process","hyperv")]
+        [ValidateSet('process', 'hyperv')]
         [string] $DockerIsolation,
-        [ValidateSet("no","on-failure","always","unless-stopped")]
+        [ValidateSet('no', 'on-failure', 'always', 'unless-stopped')]
         [string] $DockerRestartPolicy,
         [string] $DockerImage,
         [string] $DockerContainerName,
@@ -186,8 +179,7 @@ function Set-DGatewayConfig
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayConfig
-{
+function Get-DGatewayConfig {
     [CmdletBinding()]
     [OutputType('DGatewayConfig')]
     param(
@@ -226,29 +218,28 @@ function Get-DGatewayConfig
 
     if (-Not $NullProperties) {
         $Properties = $Config.PSObject.Properties.Name
-        $NonNullProperties = $Properties.Where({ -Not [string]::IsNullOrEmpty($Config.$_) })
+        $NonNullProperties = $Properties.Where( { -Not [string]::IsNullOrEmpty($Config.$_) })
         $Config = $Config | Select-Object $NonNullProperties
     }
 
     return $config
 }
 
-function Expand-DGatewayConfig
-{
+function Expand-DGatewayConfig {
     param(
         [DGatewayConfig] $Config
     )
 
     if (-Not $config.DockerPlatform) {
         if ($IsWindows) {
-            $config.DockerPlatform = "windows"
+            $config.DockerPlatform = 'windows'
         } else {
-            $config.DockerPlatform = "linux"
+            $config.DockerPlatform = 'linux'
         }
     }
 
     if (-Not $config.DockerRestartPolicy) {
-        $config.DockerRestartPolicy = "always"
+        $config.DockerRestartPolicy = 'always'
     }
 
     if (-Not $config.DockerImage) {
@@ -260,8 +251,7 @@ function Expand-DGatewayConfig
     }
 }
 
-function Find-DGatewayConfig
-{
+function Find-DGatewayConfig {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -287,8 +277,7 @@ function Find-DGatewayConfig
     return $ConfigPath
 }
 
-function Enter-DGatewayConfig
-{
+function Enter-DGatewayConfig {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -307,39 +296,36 @@ function Enter-DGatewayConfig
     }
 }
 
-function Exit-DGatewayConfig
-{
+function Exit-DGatewayConfig {
     Remove-Item Env:DGATEWAY_CONFIG_PATH
 }
 
-function Get-DGatewayPath()
-{
-	[CmdletBinding()]
-	param(
-		[Parameter(Position=0)]
-        [ValidateSet("ConfigPath")]
-		[string] $PathType = "ConfigPath"
-	)
+function Get-DGatewayPath() {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [ValidateSet('ConfigPath')]
+        [string] $PathType = 'ConfigPath'
+    )
 
-    $DisplayName = "Gateway"
-    $CompanyName = "Devolutions"
+    $DisplayName = 'Gateway'
+    $CompanyName = 'Devolutions'
 
-	if ($IsWindows)	{
-		$ConfigPath = $Env:ProgramData + "\${CompanyName}\${DisplayName}"
-	} elseif ($IsMacOS) {
-		$ConfigPath = "/Library/Application Support/${CompanyName} ${DisplayName}"
-	} elseif ($IsLinux) {
-		$ConfigPath = "/etc/devolutions-gateway"
-	}
+    if ($IsWindows) {
+        $ConfigPath = $Env:ProgramData + "\${CompanyName}\${DisplayName}"
+    } elseif ($IsMacOS) {
+        $ConfigPath = "/Library/Application Support/${CompanyName} ${DisplayName}"
+    } elseif ($IsLinux) {
+        $ConfigPath = '/etc/devolutions-gateway'
+    }
 
-	switch ($PathType) {
+    switch ($PathType) {
         'ConfigPath' { $ConfigPath }
-		default { throw("Invalid path type: $PathType") }
-	}
+        default { throw("Invalid path type: $PathType") }
+    }
 }
 
-function Get-DGatewayFarmName
-{
+function Get-DGatewayFarmName {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -348,12 +334,11 @@ function Get-DGatewayFarmName
     $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).FarmName
 }
 
-function Set-DGatewayFarmName
-{
+function Set-DGatewayFarmName {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string] $FarmName
     )
 
@@ -362,8 +347,7 @@ function Set-DGatewayFarmName
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayFarmMembers
-{
+function Get-DGatewayFarmMembers {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -372,12 +356,11 @@ function Get-DGatewayFarmMembers
     $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).FarmMembers
 }
 
-function Set-DGatewayFarmMembers
-{
+function Set-DGatewayFarmMembers {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [AllowEmptyCollection()]
         [string[]] $FarmMembers
     )
@@ -387,8 +370,7 @@ function Set-DGatewayFarmMembers
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayHostname
-{
+function Get-DGatewayHostname {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -397,12 +379,11 @@ function Get-DGatewayHostname
     $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).Hostname
 }
 
-function Set-DGatewayHostname
-{
+function Set-DGatewayHostname {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [string] $Hostname
     )
 
@@ -411,8 +392,7 @@ function Set-DGatewayHostname
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayListeners
-{
+function Get-DGatewayListeners {
     [CmdletBinding()]
     [OutputType('DGatewayListener[]')]
     param(
@@ -424,12 +404,11 @@ function Get-DGatewayListeners
     $Config.Listeners
 }
 
-function Set-DGatewayListeners
-{
+function Set-DGatewayListeners {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [AllowEmptyCollection()]
         [DGatewayListener[]] $Listeners
     )
@@ -440,8 +419,7 @@ function Set-DGatewayListeners
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayApplicationProtocols
-{
+function Get-DGatewayApplicationProtocols {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -450,14 +428,13 @@ function Get-DGatewayApplicationProtocols
     $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).ApplicationProtocols
 }
 
-function Set-DGatewayApplicationProtocols
-{
+function Set-DGatewayApplicationProtocols {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory = $true, Position = 0)]
         [AllowEmptyCollection()]
-        [ValidateSet("none","rdp","wayk","pwsh")]
+        [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string[]] $ApplicationProtocols
     )
 
@@ -466,8 +443,7 @@ function Set-DGatewayApplicationProtocols
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Import-DGatewayCertificate
-{
+function Import-DGatewayCertificate {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -485,7 +461,7 @@ function Import-DGatewayCertificate
     $CertificateData = $result.Certificate
     $PrivateKeyData = $result.PrivateKey
 
-    New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+    New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
 
     $CertificateFile = Join-Path $ConfigPath $DGatewayCertificateFileName
     $PrivateKeyFile = Join-Path $ConfigPath $DGatewayPrivateKeyFileName
@@ -499,8 +475,7 @@ function Import-DGatewayCertificate
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function New-DGatewayProvisionerKeyPair
-{
+function New-DGatewayProvisionerKeyPair {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -512,7 +487,7 @@ function New-DGatewayProvisionerKeyPair
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
 
     if (-Not (Test-Path -Path $ConfigPath)) {
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
     }
 
     $PublicKeyFile = Join-Path $ConfigPath $DGatewayProvisionerPublicKeyFileName
@@ -540,8 +515,7 @@ function New-DGatewayProvisionerKeyPair
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Import-DGatewayProvisionerKey
-{
+function Import-DGatewayProvisionerKey {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -556,7 +530,7 @@ function Import-DGatewayProvisionerKey
         $PublicKeyData = Get-Content -Path $PublicKeyFile -Encoding UTF8
         $OutputFile = Join-Path $ConfigPath $DGatewayProvisionerPublicKeyFileName
         $Config.ProvisionerPublicKeyFile = $DGatewayProvisionerPublicKeyFileName
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
         Set-Content -Path $OutputFile -Value $PublicKeyData -Force
     }
 
@@ -564,15 +538,14 @@ function Import-DGatewayProvisionerKey
         $PrivateKeyData = Get-Content -Path $PrivateKeyFile -Encoding UTF8
         $OutputFile = Join-Path $ConfigPath $DGatewayProvisionerPrivateKeyFileName
         $Config.ProvisionerPrivateKeyFile = $DGatewayProvisionerPrivateKeyFileName
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
         Set-Content -Path $OutputFile -Value $PrivateKeyData -Force
     }
 
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function New-DGatewayDelegationKeyPair
-{
+function New-DGatewayDelegationKeyPair {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -584,7 +557,7 @@ function New-DGatewayDelegationKeyPair
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
 
     if (-Not (Test-Path -Path $ConfigPath)) {
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
     }
 
     $PublicKeyFile = Join-Path $ConfigPath $DGatewayDelegationPublicKeyFileName
@@ -612,8 +585,7 @@ function New-DGatewayDelegationKeyPair
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Import-DGatewayDelegationKey
-{
+function Import-DGatewayDelegationKey {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -628,7 +600,7 @@ function Import-DGatewayDelegationKey
         $PublicKeyData = Get-Content -Path $PublicKeyFile -Encoding UTF8
         $OutputFile = Join-Path $ConfigPath $DGatewayDelegationPublicKeyFileName
         $Config.DelegationPublicKeyFile = $DGatewayDelegationPublicKeyFileName
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
         Set-Content -Path $OutputFile -Value $PublicKeyData -Force
     }
 
@@ -636,15 +608,14 @@ function Import-DGatewayDelegationKey
         $PrivateKeyData = Get-Content -Path $PrivateKeyFile -Encoding UTF8
         $OutputFile = Join-Path $ConfigPath $DGatewayDelegationPrivateKeyFileName
         $Config.DelegationPrivateKeyFile = $DGatewayDelegationPrivateKeyFileName
-        New-Item -Path $ConfigPath -ItemType "Directory" -Force | Out-Null
+        New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
         Set-Content -Path $OutputFile -Value $PrivateKeyData -Force
     }
 
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function New-DGatewayToken
-{
+function New-DGatewayToken {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
@@ -656,9 +627,9 @@ function New-DGatewayToken
 
         # private claims
         [string] $DestinationHost, # dst_hst
-        [ValidateSet("none","rdp","wayk","pwsh")]
+        [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string] $ApplicationProtocol, # jet_ap
-        [ValidateSet("fwd","rdv")]
+        [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
 
         # signature parameters
@@ -718,9 +689,9 @@ function New-DGatewayToken
     }
     
     $Payload = [PSCustomObject]@{
-        iat = $iat
-        nbf = $nbf
-        exp = $exp
+        iat    = $iat
+        nbf    = $nbf
+        exp    = $exp
         jet_ap = $ApplicationProtocol
         jet_cm = $ConnectionMode
     }
@@ -732,17 +703,16 @@ function New-DGatewayToken
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey
 }
 
-function Get-DGatewayService
-{
+function Get-DGatewayService {
     param(
         [string] $ConfigPath,
         [DGatewayConfig] $Config
     )
 
-    if ($config.DockerPlatform -eq "linux") {
-        $ContainerConfigPath = "/etc/devolutions-gateway"
+    if ($config.DockerPlatform -eq 'linux') {
+        $ContainerConfigPath = '/etc/devolutions-gateway'
     } else {
-        $ContainerConfigPath = "C:\ProgramData\Devolutions\Gateway"
+        $ContainerConfigPath = 'C:\ProgramData\Devolutions\Gateway'
     }
 
     $Service = [DockerService]::new()
@@ -762,9 +732,9 @@ function Get-DGatewayService
 
     $Service.PublishAll = $true
     $Service.Environment = [ordered]@{
-        "DGATEWAY_CONFIG_PATH" = $ContainerConfigPath;
-        "RUST_BACKTRACE" = "1";
-        "RUST_LOG" = "info";
+        'DGATEWAY_CONFIG_PATH' = $ContainerConfigPath;
+        'RUST_BACKTRACE'       = '1';
+        'RUST_LOG'             = 'info';
     }
     $Service.Volumes = @("${ConfigPath}:${ContainerConfigPath}")
     $Service.External = $false
@@ -772,16 +742,15 @@ function Get-DGatewayService
     return $Service
 }
 
-function Get-DGatewayPackage
-{
+function Get-DGatewayPackage {
     [CmdletBinding()]
     param(
-		[string] $RequiredVersion,
-		[ValidateSet("Windows","Linux")]
-		[string] $Platform
-	)
+        [string] $RequiredVersion,
+        [ValidateSet('Windows', 'Linux')]
+        [string] $Platform
+    )
 
-    $Version = Get-DGatewayVersion "PSModule"
+    $Version = Get-DGatewayVersion 'PSModule'
 
     if ($RequiredVersion) {
         $Version = $RequiredVersion
@@ -789,46 +758,45 @@ function Get-DGatewayPackage
 
     if (-Not $Platform) {
         if ($IsWindows) {
-            $Platform = "Windows"
+            $Platform = 'Windows'
         } else {
-            $Platform = "Linux"
+            $Platform = 'Linux'
         }
     }
 
-    $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
+    $GitHubDownloadUrl = 'https://github.com/Devolutions/devolutions-gateway/releases/download/'
 
     if ($Platform -eq 'Windows') {
-        $Architecture = "x86_64"
+        $Architecture = 'x86_64'
         $PackageFileName = "DevolutionsGateway-${Architecture}-${Version}.msi"
     } elseif ($Platform -eq 'Linux') {
-        $Architecture = "amd64"
+        $Architecture = 'amd64'
         $PackageFileName = "devolutions-gateway_${Version}.0_${Architecture}.deb"
     }
 
     $DownloadUrl = "${GitHubDownloadUrl}v${Version}/$PackageFileName"
 
     [PSCustomObject]@{
-        Url = $DownloadUrl;
+        Url     = $DownloadUrl;
         Version = $Version;
     }
 }
 
-function Install-DGatewayPackage
-{
+function Install-DGatewayPackage {
     [CmdletBinding()]
     param(
-		[string] $RequiredVersion,
-		[switch] $Quiet,
-		[switch] $Force
-	)
+        [string] $RequiredVersion,
+        [switch] $Quiet,
+        [switch] $Force
+    )
 
-    $Version = Get-DGatewayVersion "PSModule"
+    $Version = Get-DGatewayVersion 'PSModule'
 
     if ($RequiredVersion) {
         $Version = $RequiredVersion
     }
 
-    $InstalledVersion = Get-DGatewayVersion "Installed"
+    $InstalledVersion = Get-DGatewayVersion 'Installed'
 
     if (($InstalledVersion -eq $Version) -and (-Not $Force)) {
         Write-Host "Devolutions Gateway is already installed ($Version)"
@@ -841,90 +809,88 @@ function Install-DGatewayPackage
     $Package = Get-DGatewayPackage -RequiredVersion $Version
     $DownloadUrl = $Package.Url
 
-	$DownloadFile = Split-Path -Path $DownloadUrl -Leaf
-	$DownloadFilePath = Join-Path $TempPath $DownloadFile
-	Write-Host "Downloading $DownloadUrl"
+    $DownloadFile = Split-Path -Path $DownloadUrl -Leaf
+    $DownloadFilePath = Join-Path $TempPath $DownloadFile
+    Write-Host "Downloading $DownloadUrl"
 
-	$WebClient = [System.Net.WebClient]::new()
-	$WebClient.DownloadFile($DownloadUrl, $DownloadFilePath)
-	$WebClient.Dispose()
-	
-	$DownloadFilePath = Resolve-Path $DownloadFilePath
+    $WebClient = [System.Net.WebClient]::new()
+    $WebClient.DownloadFile($DownloadUrl, $DownloadFilePath)
+    $WebClient.Dispose()
 
-	if ($IsWindows) {
-		$Display = '/passive'
-		if ($Quiet){
-			$Display = '/quiet'
-		}
-		$InstallLogFile = Join-Path $TempPath "DGateway_Install.log"
-		$MsiArgs = @(
-			'/i', "`"$DownloadFilePath`"",
-			$Display,
-			'/norestart',
-			'/log', "`"$InstallLogFile`""
-		)
+    $DownloadFilePath = Resolve-Path $DownloadFilePath
 
-		Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait -NoNewWindow
+    if ($IsWindows) {
+        $Display = '/passive'
+        if ($Quiet) {
+            $Display = '/quiet'
+        }
+        $InstallLogFile = Join-Path $TempPath 'DGateway_Install.log'
+        $MsiArgs = @(
+            '/i', "`"$DownloadFilePath`"",
+            $Display,
+            '/norestart',
+            '/log', "`"$InstallLogFile`""
+        )
 
-		Remove-Item -Path $InstallLogFile -Force -ErrorAction SilentlyContinue
-	} elseif ($IsMacOS) {
-        throw  "unsupported platform"
-	} elseif ($IsLinux) {
-		$DpkgArgs = @(
-			'-i', $DownloadFilePath
-		)
-		if ((id -u) -eq 0) {
-			Start-Process 'dpkg' -ArgumentList $DpkgArgs -Wait
-		} else {
-			$DpkgArgs = @('dpkg') + $DpkgArgs
-			Start-Process 'sudo' -ArgumentList $DpkgArgs -Wait
-		}
-	}
+        Start-Process 'msiexec.exe' -ArgumentList $MsiArgs -Wait -NoNewWindow
 
-	Remove-Item -Path $TempPath -Force -Recurse
+        Remove-Item -Path $InstallLogFile -Force -ErrorAction SilentlyContinue
+    } elseif ($IsMacOS) {
+        throw  'unsupported platform'
+    } elseif ($IsLinux) {
+        $DpkgArgs = @(
+            '-i', $DownloadFilePath
+        )
+        if ((id -u) -eq 0) {
+            Start-Process 'dpkg' -ArgumentList $DpkgArgs -Wait
+        } else {
+            $DpkgArgs = @('dpkg') + $DpkgArgs
+            Start-Process 'sudo' -ArgumentList $DpkgArgs -Wait
+        }
+    }
+
+    Remove-Item -Path $TempPath -Force -Recurse
 }
 
-function Uninstall-DGatewayPackage
-{
+function Uninstall-DGatewayPackage {
     [CmdletBinding()]
     param(
-		[switch] $Quiet
-	)
-	
-	if ($IsWindows) {
-        $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
-            | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
-		if ($UninstallReg) {
-			$UninstallString = $($UninstallReg.UninstallString `
-				-Replace "msiexec.exe", "" -Replace "/I", "" -Replace "/X", "").Trim()
-			$Display = '/passive'
-			if ($Quiet){
-				$Display = '/quiet'
-			}
-			$MsiArgs = @(
-				'/X', $UninstallString, $Display
-			)
-			Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait
-		}
-	} elseif ($IsMacOS) {
-        throw  "unsupported platform"
-	} elseif ($IsLinux) {
-		if (Get-DGatewayVersion "Installed") {
-			$AptArgs = @(
-				'-y', 'remove', 'devolutions-gateway', '--purge'
-			)
-			if ((id -u) -eq 0) {
-				Start-Process 'apt-get' -ArgumentList $AptArgs -Wait
-			} else {
-				$AptArgs = @('apt-get') + $AptArgs
-				Start-Process 'sudo' -ArgumentList $AptArgs -Wait
-			}
-		}
-	}
+        [switch] $Quiet
+    )
+
+    if ($IsWindows) {
+        $UninstallReg = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' `
+        | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match 'Devolutions Gateway' }
+        if ($UninstallReg) {
+            $UninstallString = $($UninstallReg.UninstallString `
+                    -Replace 'msiexec.exe', '' -Replace '/I', '' -Replace '/X', '').Trim()
+            $Display = '/passive'
+            if ($Quiet) {
+                $Display = '/quiet'
+            }
+            $MsiArgs = @(
+                '/X', $UninstallString, $Display
+            )
+            Start-Process 'msiexec.exe' -ArgumentList $MsiArgs -Wait
+        }
+    } elseif ($IsMacOS) {
+        throw  'unsupported platform'
+    } elseif ($IsLinux) {
+        if (Get-DGatewayVersion 'Installed') {
+            $AptArgs = @(
+                '-y', 'remove', 'devolutions-gateway', '--purge'
+            )
+            if ((id -u) -eq 0) {
+                Start-Process 'apt-get' -ArgumentList $AptArgs -Wait
+            } else {
+                $AptArgs = @('apt-get') + $AptArgs
+                Start-Process 'sudo' -ArgumentList $AptArgs -Wait
+            }
+        }
+    }
 }
 
-function Update-DGatewayImage
-{
+function Update-DGatewayImage {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
@@ -938,20 +904,19 @@ function Update-DGatewayImage
     Request-ContainerImage -Name $Service.Image
 }
 
-function Get-DGatewayLaunchType
-{
+function Get-DGatewayLaunchType {
     [CmdletBinding()]
     param(
-        [Parameter(Position=0)]
-        [ValidateSet("Detect","Container","Service")]
-        [string] $LaunchType = "Detect"
+        [Parameter(Position = 0)]
+        [ValidateSet('Detect', 'Container', 'Service')]
+        [string] $LaunchType = 'Detect'
     )
 
     if ($LaunchType -eq 'Detect') {
-        if (Get-DGatewayVersion "Installed") {
-            $LaunchType = "Service"
+        if (Get-DGatewayVersion 'Installed') {
+            $LaunchType = 'Service'
         } elseif ($(Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-            $LaunchType = "Container"
+            $LaunchType = 'Container'
         } else {
             $LaunchType = $null
         }
@@ -960,14 +925,13 @@ function Get-DGatewayLaunchType
     $LaunchType
 }
 
-function Start-DGateway
-{
+function Start-DGateway {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Position=0)]
-        [ValidateSet("Detect","Container","Service")]
-        [string] $LaunchType = "Detect"
+        [Parameter(Position = 0)]
+        [ValidateSet('Detect', 'Container', 'Service')]
+        [string] $LaunchType = 'Detect'
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
@@ -977,7 +941,7 @@ function Start-DGateway
     $LaunchType = Get-DGatewayLaunchType $LaunchType
 
     if (-Not $LaunchType) {
-        throw "No suitable Devolutions Gateway launch type detected"
+        throw 'No suitable Devolutions Gateway launch type detected'
     }
 
     if ($LaunchType -eq 'Container') {
@@ -991,21 +955,20 @@ function Start-DGateway
         Start-DockerService -Service $Service -Remove
     } elseif ($LaunchType -eq 'Service') {
         if ($IsWindows) {
-            Start-Service "DevolutionsGateway"
+            Start-Service 'DevolutionsGateway'
         } else {
-            throw "not implemented"
+            throw 'not implemented'
         }
     }
 }
 
-function Stop-DGateway
-{
+function Stop-DGateway {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Position=0)]
-        [ValidateSet("Detect","Container","Service")]
-        [string] $LaunchType = "Detect",
+        [Parameter(Position = 0)]
+        [ValidateSet('Detect', 'Container', 'Service')]
+        [string] $LaunchType = 'Detect',
         [switch] $Remove
     )
 
@@ -1016,7 +979,7 @@ function Stop-DGateway
     $LaunchType = Get-DGatewayLaunchType $LaunchType
 
     if (-Not $LaunchType) {
-        throw "No suitable Devolutions Gateway launch type detected"
+        throw 'No suitable Devolutions Gateway launch type detected'
     }
 
     if ($LaunchType -eq 'Container') {
@@ -1030,21 +993,20 @@ function Stop-DGateway
         }
     } elseif ($LaunchType -eq 'Service') {
         if ($IsWindows) {
-            Stop-Service "DevolutionsGateway"
+            Stop-Service 'DevolutionsGateway'
         } else {
-            throw "not implemented"
+            throw 'not implemented'
         }
     }
 }
 
-function Restart-DGateway
-{
+function Restart-DGateway {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
-        [Parameter(Position=0)]
-        [ValidateSet("Detect","Container","Service")]
-        [string] $LaunchType = "Detect"
+        [Parameter(Position = 0)]
+        [ValidateSet('Detect', 'Container', 'Service')]
+        [string] $LaunchType = 'Detect'
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
