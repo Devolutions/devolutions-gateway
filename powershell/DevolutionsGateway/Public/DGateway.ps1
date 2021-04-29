@@ -240,7 +240,7 @@ function Expand-DGatewayConfig
     )
 
     if (-Not $config.DockerPlatform) {
-        if (Get-IsWindows) {
+        if ($IsWindows) {
             $config.DockerPlatform = "windows"
         } else {
             $config.DockerPlatform = "linux"
@@ -324,7 +324,7 @@ function Get-DGatewayPath()
     $DisplayName = "Gateway"
     $CompanyName = "Devolutions"
 
-	if (Get-IsWindows)	{
+	if ($IsWindows)	{
 		$ConfigPath = $Env:ProgramData + "\${CompanyName}\${DisplayName}"
 	} elseif ($IsMacOS) {
 		$ConfigPath = "/Library/Application Support/${CompanyName} ${DisplayName}"
@@ -938,25 +938,64 @@ function Update-DGatewayImage
     Request-ContainerImage -Name $Service.Image
 }
 
+function Get-DGatewayLaunchType
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
+    )
+
+    if ($LaunchType -eq 'Detect') {
+        if (Get-DGatewayVersion "Installed") {
+            $LaunchType = "Service"
+        } elseif ($(Get-Command 'docker' -ErrorAction SilentlyContinue)) {
+            $LaunchType = "Container"
+        } else {
+            $LaunchType = $null
+        }
+    }
+
+    $LaunchType
+}
+
 function Start-DGateway
 {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath
+        [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
     $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     Expand-DGatewayConfig -Config:$config
 
-    $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+    $LaunchType = Get-DGatewayLaunchType $LaunchType
 
-    # pull docker images only if they are not cached locally
-    if (-Not (Get-ContainerImageId -Name $Service.Image)) {
-        Request-ContainerImage -Name $Service.Image
+    if (-Not $LaunchType) {
+        throw "No suitable Devolutions Gateway launch type detected"
     }
 
-    Start-DockerService -Service $Service -Remove
+    if ($LaunchType -eq 'Container') {
+        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+
+        # pull docker images only if they are not cached locally
+        if (-Not (Get-ContainerImageId -Name $Service.Image)) {
+            Request-ContainerImage -Name $Service.Image
+        }
+    
+        Start-DockerService -Service $Service -Remove
+    } elseif ($LaunchType -eq 'Service') {
+        if ($IsWindows) {
+            Start-Service "DevolutionsGateway"
+        } else {
+            throw "not implemented"
+        }
+    }
 }
 
 function Stop-DGateway
@@ -964,6 +1003,9 @@ function Stop-DGateway
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect",
         [switch] $Remove
     )
 
@@ -971,13 +1013,27 @@ function Stop-DGateway
     $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     Expand-DGatewayConfig -Config $config
 
-    $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+    $LaunchType = Get-DGatewayLaunchType $LaunchType
 
-    Write-Host "Stopping $($Service.ContainerName)"
-    Stop-Container -Name $Service.ContainerName -Quiet
+    if (-Not $LaunchType) {
+        throw "No suitable Devolutions Gateway launch type detected"
+    }
 
-    if ($Remove) {
-        Remove-Container -Name $Service.ContainerName
+    if ($LaunchType -eq 'Container') {
+        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+
+        Write-Host "Stopping $($Service.ContainerName)"
+        Stop-Container -Name $Service.ContainerName -Quiet
+    
+        if ($Remove) {
+            Remove-Container -Name $Service.ContainerName
+        }
+    } elseif ($LaunchType -eq 'Service') {
+        if ($IsWindows) {
+            Stop-Service "DevolutionsGateway"
+        } else {
+            throw "not implemented"
+        }
     }
 }
 
@@ -985,10 +1041,13 @@ function Restart-DGateway
 {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath
+        [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    Stop-DGateway -ConfigPath:$ConfigPath
-    Start-DGateway -ConfigPath:$ConfigPath
+    Stop-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
+    Start-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
 }
