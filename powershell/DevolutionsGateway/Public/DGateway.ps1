@@ -12,15 +12,49 @@ $script:DGatewayProvisionerPrivateKeyFileName = "provisioner.key"
 $script:DGatewayDelegationPublicKeyFileName = "delegation.pem"
 $script:DGatewayDelegationPrivateKeyFileName = "delegation.key"
 
+function Get-DGatewayVersion
+{
+    param(
+        [Parameter(Mandatory=$true,Position=0)]
+        [ValidateSet("PSModule","Installed")]
+        [string] $Type
+    )
+
+    if ($Type -eq "PSModule") {
+        $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
+        $Manifest = Import-PowerShellDataFile -Path $ManifestPath
+        $DGatewayVersion = $Manifest.ModuleVersion
+    } elseif ($Type -eq "Installed") {
+        if ($IsWindows) {
+            $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
+                | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
+            if ($UninstallReg) {
+                $DGatewayVersion = "20" + $UninstallReg.DisplayVersion
+            }
+        } elseif ($IsMacOS) {
+            throw "not supported"
+        } elseif ($IsLinux) {
+            $PackageName = 'devolutions-gateway'
+            $DpkgStatus = $(dpkg -s $PackageName 2>$null)
+            $DpkgMatches = $($DpkgStatus | Select-String -AllMatches -Pattern 'version: (\S+)').Matches
+            if ($DpkgMatches) {
+                $VersionQuad = $DpkgMatches.Groups[1].Value
+                $VersionTriple = $VersionQuad -Replace "^(\d+)\.(\d+)\.(\d+)\.(\d+)$", "`$1.`$2.`$3"
+                $DGatewayVersion = $VersionTriple
+            }
+        }
+    }
+
+    $DGatewayVersion
+}
+
 function Get-DGatewayImage
 {
     param(
         [string] $Platform
     )
 
-    $ManifestPath = "$PSScriptRoot/../DevolutionsGateway.psd1"
-    $Manifest = Import-PowerShellDataFile -Path $ManifestPath
-    $DGatewayVersion = $Manifest.ModuleVersion
+    $DGatewayVersion = Get-DGatewayVersion "PSModule"
 
     $image = if ($Platform -ne "windows") {
         "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
@@ -206,7 +240,7 @@ function Expand-DGatewayConfig
     )
 
     if (-Not $config.DockerPlatform) {
-        if (Get-IsWindows) {
+        if ($IsWindows) {
             $config.DockerPlatform = "windows"
         } else {
             $config.DockerPlatform = "linux"
@@ -290,7 +324,7 @@ function Get-DGatewayPath()
     $DisplayName = "Gateway"
     $CompanyName = "Devolutions"
 
-	if (Get-IsWindows)	{
+	if ($IsWindows)	{
 		$ConfigPath = $Env:ProgramData + "\${CompanyName}\${DisplayName}"
 	} elseif ($IsMacOS) {
 		$ConfigPath = "/Library/Application Support/${CompanyName} ${DisplayName}"
@@ -738,6 +772,157 @@ function Get-DGatewayService
     return $Service
 }
 
+function Get-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[string] $RequiredVersion,
+		[ValidateSet("Windows","Linux")]
+		[string] $Platform
+	)
+
+    $Version = Get-DGatewayVersion "PSModule"
+
+    if ($RequiredVersion) {
+        $Version = $RequiredVersion
+    }
+
+    if (-Not $Platform) {
+        if ($IsWindows) {
+            $Platform = "Windows"
+        } else {
+            $Platform = "Linux"
+        }
+    }
+
+    $GitHubDownloadUrl = "https://github.com/Devolutions/devolutions-gateway/releases/download/"
+
+    if ($Platform -eq 'Windows') {
+        $Architecture = "x86_64"
+        $PackageFileName = "DevolutionsGateway-${Architecture}-${Version}.msi"
+    } elseif ($Platform -eq 'Linux') {
+        $Architecture = "amd64"
+        $PackageFileName = "devolutions-gateway_${Version}.0_${Architecture}.deb"
+    }
+
+    $DownloadUrl = "${GitHubDownloadUrl}v${Version}/$PackageFileName"
+
+    [PSCustomObject]@{
+        Url = $DownloadUrl;
+        Version = $Version;
+    }
+}
+
+function Install-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[string] $RequiredVersion,
+		[switch] $Quiet,
+		[switch] $Force
+	)
+
+    $Version = Get-DGatewayVersion "PSModule"
+
+    if ($RequiredVersion) {
+        $Version = $RequiredVersion
+    }
+
+    $InstalledVersion = Get-DGatewayVersion "Installed"
+
+    if (($InstalledVersion -eq $Version) -and (-Not $Force)) {
+        Write-Host "Devolutions Gateway is already installed ($Version)"
+        return
+    }
+
+    $TempPath = Join-Path $([System.IO.Path]::GetTempPath()) "dgateway-${Version}"
+    New-Item -ItemType Directory -Path $TempPath -ErrorAction SilentlyContinue | Out-Null
+
+    $Package = Get-DGatewayPackage -RequiredVersion $Version
+    $DownloadUrl = $Package.Url
+
+	$DownloadFile = Split-Path -Path $DownloadUrl -Leaf
+	$DownloadFilePath = Join-Path $TempPath $DownloadFile
+	Write-Host "Downloading $DownloadUrl"
+
+	$WebClient = [System.Net.WebClient]::new()
+	$WebClient.DownloadFile($DownloadUrl, $DownloadFilePath)
+	$WebClient.Dispose()
+	
+	$DownloadFilePath = Resolve-Path $DownloadFilePath
+
+	if ($IsWindows) {
+		$Display = '/passive'
+		if ($Quiet){
+			$Display = '/quiet'
+		}
+		$InstallLogFile = Join-Path $TempPath "DGateway_Install.log"
+		$MsiArgs = @(
+			'/i', "`"$DownloadFilePath`"",
+			$Display,
+			'/norestart',
+			'/log', "`"$InstallLogFile`""
+		)
+
+		Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait -NoNewWindow
+
+		Remove-Item -Path $InstallLogFile -Force -ErrorAction SilentlyContinue
+	} elseif ($IsMacOS) {
+        throw  "unsupported platform"
+	} elseif ($IsLinux) {
+		$DpkgArgs = @(
+			'-i', $DownloadFilePath
+		)
+		if ((id -u) -eq 0) {
+			Start-Process 'dpkg' -ArgumentList $DpkgArgs -Wait
+		} else {
+			$DpkgArgs = @('dpkg') + $DpkgArgs
+			Start-Process 'sudo' -ArgumentList $DpkgArgs -Wait
+		}
+	}
+
+	Remove-Item -Path $TempPath -Force -Recurse
+}
+
+function Uninstall-DGatewayPackage
+{
+    [CmdletBinding()]
+    param(
+		[switch] $Quiet
+	)
+	
+	if ($IsWindows) {
+        $UninstallReg = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" `
+            | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_ -Match "Devolutions Gateway" }
+		if ($UninstallReg) {
+			$UninstallString = $($UninstallReg.UninstallString `
+				-Replace "msiexec.exe", "" -Replace "/I", "" -Replace "/X", "").Trim()
+			$Display = '/passive'
+			if ($Quiet){
+				$Display = '/quiet'
+			}
+			$MsiArgs = @(
+				'/X', $UninstallString, $Display
+			)
+			Start-Process "msiexec.exe" -ArgumentList $MsiArgs -Wait
+		}
+	} elseif ($IsMacOS) {
+        throw  "unsupported platform"
+	} elseif ($IsLinux) {
+		if (Get-DGatewayVersion "Installed") {
+			$AptArgs = @(
+				'-y', 'remove', 'devolutions-gateway', '--purge'
+			)
+			if ((id -u) -eq 0) {
+				Start-Process 'apt-get' -ArgumentList $AptArgs -Wait
+			} else {
+				$AptArgs = @('apt-get') + $AptArgs
+				Start-Process 'sudo' -ArgumentList $AptArgs -Wait
+			}
+		}
+	}
+}
+
 function Update-DGatewayImage
 {
     [CmdletBinding()]
@@ -753,25 +938,64 @@ function Update-DGatewayImage
     Request-ContainerImage -Name $Service.Image
 }
 
+function Get-DGatewayLaunchType
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
+    )
+
+    if ($LaunchType -eq 'Detect') {
+        if (Get-DGatewayVersion "Installed") {
+            $LaunchType = "Service"
+        } elseif ($(Get-Command 'docker' -ErrorAction SilentlyContinue)) {
+            $LaunchType = "Container"
+        } else {
+            $LaunchType = $null
+        }
+    }
+
+    $LaunchType
+}
+
 function Start-DGateway
 {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath
+        [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
     $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     Expand-DGatewayConfig -Config:$config
 
-    $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+    $LaunchType = Get-DGatewayLaunchType $LaunchType
 
-    # pull docker images only if they are not cached locally
-    if (-Not (Get-ContainerImageId -Name $Service.Image)) {
-        Request-ContainerImage -Name $Service.Image
+    if (-Not $LaunchType) {
+        throw "No suitable Devolutions Gateway launch type detected"
     }
 
-    Start-DockerService -Service $Service -Remove
+    if ($LaunchType -eq 'Container') {
+        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+
+        # pull docker images only if they are not cached locally
+        if (-Not (Get-ContainerImageId -Name $Service.Image)) {
+            Request-ContainerImage -Name $Service.Image
+        }
+    
+        Start-DockerService -Service $Service -Remove
+    } elseif ($LaunchType -eq 'Service') {
+        if ($IsWindows) {
+            Start-Service "DevolutionsGateway"
+        } else {
+            throw "not implemented"
+        }
+    }
 }
 
 function Stop-DGateway
@@ -779,6 +1003,9 @@ function Stop-DGateway
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect",
         [switch] $Remove
     )
 
@@ -786,13 +1013,27 @@ function Stop-DGateway
     $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     Expand-DGatewayConfig -Config $config
 
-    $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+    $LaunchType = Get-DGatewayLaunchType $LaunchType
 
-    Write-Host "Stopping $($Service.ContainerName)"
-    Stop-Container -Name $Service.ContainerName -Quiet
+    if (-Not $LaunchType) {
+        throw "No suitable Devolutions Gateway launch type detected"
+    }
 
-    if ($Remove) {
-        Remove-Container -Name $Service.ContainerName
+    if ($LaunchType -eq 'Container') {
+        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
+
+        Write-Host "Stopping $($Service.ContainerName)"
+        Stop-Container -Name $Service.ContainerName -Quiet
+    
+        if ($Remove) {
+            Remove-Container -Name $Service.ContainerName
+        }
+    } elseif ($LaunchType -eq 'Service') {
+        if ($IsWindows) {
+            Stop-Service "DevolutionsGateway"
+        } else {
+            throw "not implemented"
+        }
     }
 }
 
@@ -800,10 +1041,13 @@ function Restart-DGateway
 {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath
+        [string] $ConfigPath,
+        [Parameter(Position=0)]
+        [ValidateSet("Detect","Container","Service")]
+        [string] $LaunchType = "Detect"
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    Stop-DGateway -ConfigPath:$ConfigPath
-    Start-DGateway -ConfigPath:$ConfigPath
+    Stop-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
+    Start-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
 }
