@@ -38,10 +38,10 @@ const ARG_SOGAR_USERNAME: &str = "sogar-username";
 const ARG_SOGAR_PASSWORD: &str = "sogar-password";
 const ARG_SOGAR_IMAGE_NAME: &str = "sogar-image-name";
 
-const SERVICE_NAME: &str = "devolutions-gateway";
-const DISPLAY_NAME: &str = "Devolutions Gateway";
-const DESCRIPTION: &str = "Devolutions Gateway service";
-const COMPANY_NAME: &str = "Devolutions";
+pub const SERVICE_NAME: &str = "devolutions-gateway";
+pub const DISPLAY_NAME: &str = "Devolutions Gateway";
+pub const DESCRIPTION: &str = "Devolutions Gateway service";
+pub const COMPANY_NAME: &str = "Devolutions";
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
