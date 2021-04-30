@@ -5,6 +5,7 @@ use ceviche::controller::{*, dispatch, Controller};
 use ceviche::{Service, ServiceEvent};
 use slog_scope::info;
 use std::sync::mpsc;
+use cfg_if::cfg_if;
 
 enum GatewayServiceEvent {}
 
@@ -59,6 +60,24 @@ async fn main() -> Result<(), String> {
                 let display_name = devolutions_gateway::config::DISPLAY_NAME;
                 let description = devolutions_gateway::config::DESCRIPTION;
                 let mut controller = Controller::new(service_name, display_name, description);
+
+                
+                cfg_if! { if #[cfg(target_os = "linux")] {
+                    controller.config = Some(r#"
+                        [Unit]
+                        After=
+                        After=network-online.target
+
+                        [Service]
+                        ExecStart=
+                        ExecStart=/usr/bin/devolutions-gateway --service
+                        Restart=on-failure
+
+                        [Install]
+                        WantedBy=
+                        WantedBy=multi-user.target
+                    "#.to_string());
+                }}
 
                 match matches.subcommand() {
                     ("register", Some(_matches)) => {
