@@ -1,11 +1,11 @@
+use ceviche::controller::{dispatch, Controller, *};
+use ceviche::{Service, ServiceEvent};
+use cfg_if::cfg_if;
+use clap::{crate_name, crate_version, App, SubCommand};
 use devolutions_gateway::config::Config;
 use devolutions_gateway::service::GatewayService;
-use clap::{crate_name, crate_version, App, SubCommand};
-use ceviche::controller::{*, dispatch, Controller};
-use ceviche::{Service, ServiceEvent};
 use slog_scope::info;
 use std::sync::mpsc;
-use cfg_if::cfg_if;
 
 enum GatewayServiceEvent {}
 
@@ -49,9 +49,10 @@ async fn main() -> Result<(), String> {
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
             .about("Devolutions Gateway")
-            .subcommand(SubCommand::with_name("service")
-                .subcommand(SubCommand::with_name("register"))
-                .subcommand(SubCommand::with_name("unregister"))
+            .subcommand(
+                SubCommand::with_name("service")
+                    .subcommand(SubCommand::with_name("register"))
+                    .subcommand(SubCommand::with_name("unregister")),
             );
 
         match cli_app.get_matches().subcommand() {
@@ -61,7 +62,6 @@ async fn main() -> Result<(), String> {
                 let description = devolutions_gateway::config::DESCRIPTION;
                 let mut controller = Controller::new(service_name, display_name, description);
 
-                
                 cfg_if! { if #[cfg(target_os = "linux")] {
                     controller.config = Some(r#"
                         [Unit]
@@ -82,14 +82,14 @@ async fn main() -> Result<(), String> {
                 match matches.subcommand() {
                     ("register", Some(_matches)) => {
                         controller.create().expect("failed to register service");
-                    },
+                    }
                     ("unregister", Some(_matches)) => {
                         controller.delete().expect("failed to unregister service");
-                    },
-                    _ => panic!("invalid service subcommand")
+                    }
+                    _ => panic!("invalid service subcommand"),
                 }
             }
-            _ => panic!("invalid command")
+            _ => panic!("invalid command"),
         }
     } else {
         let config = Config::init();
