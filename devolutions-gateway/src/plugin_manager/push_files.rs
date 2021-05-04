@@ -1,5 +1,8 @@
 use slog_scope::{debug, error};
-use std::{fs, fs::DirEntry, io, path::Path, process::Command};
+use std::fs::DirEntry;
+use std::path::Path;
+use std::process::Command;
+use std::{fs, io};
 
 pub struct SogarData {
     sogar_path: String,
