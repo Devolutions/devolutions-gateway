@@ -2,8 +2,10 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
-## Next release ()
+## 2021.1.4 (2021-05-04)
   * Add logs to track all HTTP requests received and processed
+  * Add Linux service registration support in debian package
+  * Add Install/Uninstall package commands in PowerShell module
 
 ## 2021.1.3 (2021-04-13)
   * Fix infinite loop issue when the precondition pdu was not completely received
