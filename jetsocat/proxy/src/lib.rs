@@ -114,6 +114,12 @@ impl<'a> ToDestAddr for &'a str {
     }
 }
 
+impl ToDestAddr for String {
+    fn to_dest_addr(&self) -> io::Result<DestAddr> {
+        self.as_str().to_dest_addr()
+    }
+}
+
 impl<T: ToDestAddr + ?Sized> ToDestAddr for &T {
     fn to_dest_addr(&self) -> io::Result<DestAddr> {
         (**self).to_dest_addr()
