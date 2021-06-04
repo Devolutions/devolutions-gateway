@@ -80,13 +80,37 @@ pub struct CertificateConfig {
     pub private_key_data: Option<String>,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct RecordingInfo {
-    pub sogar_path: Option<String>,
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SogarPushRegistryInfo {
+    pub sogar_util_path: Option<String>,
     pub registry_url: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
     pub image_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SogarPermission {
+    Push,
+    Pull,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SogarUser {
+    pub password: Option<String>,
+    pub username: Option<String>,
+    pub permission: Option<SogarPermission>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct SogarRegistryConfig {
+    pub serve_as_registry: Option<bool>,
+    pub local_registry_name: Option<String>,
+    pub local_registry_image: Option<String>,
+    pub keep_files: Option<bool>,
+    pub keep_time: Option<usize>,
+    pub push_files: Option<bool>,
+    pub sogar_push_registry_info: SogarPushRegistryInfo,
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +135,8 @@ pub struct Config {
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<String>>,
     pub recording_path: Option<String>,
-    pub recording_info: RecordingInfo,
+    pub sogar_registry_config: SogarRegistryConfig,
+    pub sogar_user: Vec<SogarUser>,
 }
 
 impl Default for Config {
@@ -144,13 +169,22 @@ impl Default for Config {
             delegation_private_key: None,
             plugins: None,
             recording_path: None,
-            recording_info: RecordingInfo {
-                sogar_path: None,
-                registry_url: None,
-                username: None,
-                password: None,
-                image_name: None,
+            sogar_registry_config: SogarRegistryConfig {
+                serve_as_registry: None,
+                local_registry_name: None,
+                local_registry_image: None,
+                keep_files: None,
+                keep_time: None,
+                push_files: None,
+                sogar_push_registry_info: SogarPushRegistryInfo {
+                    sogar_util_path: None,
+                    registry_url: None,
+                    username: None,
+                    password: None,
+                    image_name: None,
+                },
             },
+            sogar_user: Vec::new(),
         }
     }
 }
@@ -226,7 +260,7 @@ pub struct ConfigFile {
     #[serde(rename = "RecordingPath")]
     pub recording_path: Option<String>,
     #[serde(rename = "SogarPath")]
-    pub sogar_path: Option<String>,
+    pub sogar_util_path: Option<String>,
     #[serde(rename = "SogarRegistryUrl")]
     pub registry_url: Option<String>,
     #[serde(rename = "SogarUsername")]
@@ -235,6 +269,20 @@ pub struct ConfigFile {
     pub password: Option<String>,
     #[serde(rename = "SogarImageName")]
     pub image_name: Option<String>,
+    #[serde(rename = "SogarUsersList")]
+    pub sogar_users_list: Option<Vec<SogarUser>>,
+    #[serde(rename = "ServeAsRegistry")]
+    pub serve_as_registry: Option<bool>,
+    #[serde(rename = "RegistryName")]
+    pub registry_name: Option<String>,
+    #[serde(rename = "RegistryImage")]
+    pub registry_image: Option<String>,
+    #[serde(rename = "KeepFiles")]
+    pub keep_files: Option<bool>,
+    #[serde(rename = "KeepTime")]
+    pub keep_time: Option<usize>,
+    #[serde(rename = "PushFiles")]
+    pub push_files: Option<bool>,
 
     // unstable options (subject to change)
     #[serde(rename = "ApiKey")]
@@ -737,23 +785,23 @@ impl Config {
         }
 
         if let Some(sogar_path) = matches.value_of(ARG_SOGAR_UTIL_PATH) {
-            config.recording_info.sogar_path = Some(sogar_path.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.sogar_util_path = Some(sogar_path.to_owned());
         }
 
         if let Some(registry_url) = matches.value_of(ARG_SOGAR_REGISTRY_URL) {
-            config.recording_info.registry_url = Some(registry_url.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.registry_url = Some(registry_url.to_owned());
         }
 
         if let Some(username) = matches.value_of(ARG_SOGAR_USERNAME) {
-            config.recording_info.username = Some(username.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.username = Some(username.to_owned());
         }
 
         if let Some(password) = matches.value_of(ARG_SOGAR_PASSWORD) {
-            config.recording_info.password = Some(password.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.password = Some(password.to_owned());
         }
 
         if let Some(image_name) = matches.value_of(ARG_SOGAR_IMAGE_NAME) {
-            config.recording_info.image_name = Some(image_name.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.image_name = Some(image_name.to_owned());
         }
 
         // listeners parsing
@@ -923,11 +971,18 @@ impl Config {
 
         let plugins = config_file.plugins;
         let recording_path = config_file.recording_path;
-        let sogar_path = config_file.sogar_path;
+        let sogar_util_path = config_file.sogar_util_path;
         let registry_url = config_file.registry_url;
         let username = config_file.username;
         let password = config_file.password;
         let image_name = config_file.image_name;
+        let serve_as_registry = config_file.serve_as_registry;
+        let registry_name = config_file.registry_name;
+        let registry_image = config_file.registry_image;
+        let keep_files = config_file.keep_files;
+        let keep_time = config_file.keep_time;
+        let push_files = config_file.push_files;
+        let sogar_user = config_file.sogar_users_list.unwrap_or_default();
 
         // unstable options (subject to change)
         let api_key = config_file.api_key;
@@ -952,13 +1007,22 @@ impl Config {
             delegation_private_key,
             plugins,
             recording_path,
-            recording_info: RecordingInfo {
-                sogar_path,
-                registry_url,
-                username,
-                password,
-                image_name,
+            sogar_registry_config: SogarRegistryConfig {
+                serve_as_registry,
+                local_registry_name: registry_name,
+                local_registry_image: registry_image,
+                keep_files,
+                keep_time,
+                push_files,
+                sogar_push_registry_info: SogarPushRegistryInfo {
+                    sogar_util_path,
+                    registry_url,
+                    username,
+                    password,
+                    image_name,
+                },
             },
+            sogar_user,
             ..Default::default()
         })
     }

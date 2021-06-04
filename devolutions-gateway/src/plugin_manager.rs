@@ -8,6 +8,8 @@ mod packets_parsing;
 mod plugin_info;
 mod push_files;
 mod recording;
+pub mod registry;
+
 use crate::utils::into_other_io_error;
 pub use packets_parsing::PacketsParser;
 use plugin_info::{PluginCapabilities, PluginInformation};

@@ -46,53 +46,21 @@ impl SogarData {
     }
 
     pub fn push(&self, path: &Path, tag: String) {
-        let filtered_files = self.get_filtered_files(path);
-        if !filtered_files.is_empty() {
-            let mut file_paths = Vec::new();
-            for file in filtered_files {
-                match file {
-                    Ok(entry) => {
-                        if let Some(path) = entry.path().to_str() {
-                            file_paths.push(path.to_string())
-                        }
-                    }
-                    Err(e) => error!("Failed to get filename for the push: {}", e),
-                }
-            }
-
-            if file_paths.is_empty() {
-                debug!(
-                    "The recording folder does not contain the files with the specified file name {}",
-                    self.file_pattern
-                );
-                return;
-            }
-
-            let reference = format!("{}:{}", self.image_name.clone(), tag);
-            let joined_path: &str = &file_paths.join(";");
-            self.invoke_command(joined_path, reference);
-            for filepath in file_paths {
-                if let Err(e) = fs::remove_file(filepath.as_str()) {
-                    error!("Failed to delete file {} after push: {}", filepath, e);
-                }
-            }
+        let file_paths = get_file_list_from_path(self.file_pattern.as_str(), path);
+        if file_paths.is_empty() {
+            debug!(
+                "The recording folder does not contain the files with the specified file name {}",
+                self.file_pattern
+            );
+            return;
         }
-    }
 
-    fn get_filtered_files(&self, path: &Path) -> Vec<io::Result<DirEntry>> {
-        match fs::read_dir(path) {
-            Ok(paths) => paths
-                .filter(|path| match path {
-                    Ok(dir_entry) => match dir_entry.file_name().into_string() {
-                        Ok(filename) => filename.starts_with(self.file_pattern.as_str()),
-                        Err(_) => false,
-                    },
-                    Err(_) => false,
-                })
-                .collect::<Vec<_>>(),
-            Err(e) => {
-                error!("Failed to read dir {:?} with error {}", path, e);
-                Vec::new()
+        let reference = format!("{}:{}", self.image_name.clone(), tag);
+        let joined_path: &str = &file_paths.join(";");
+        self.invoke_command(joined_path, reference);
+        for filepath in file_paths {
+            if let Err(e) = fs::remove_file(filepath.as_str()) {
+                error!("Failed to delete file {} after push: {}", filepath, e);
             }
         }
     }
@@ -124,4 +92,43 @@ impl SogarData {
             Err(e) => error!("Command failed with error: {}", e),
         }
     }
+}
+
+fn get_filtered_files(file_pattern: &str, path: &Path) -> Vec<io::Result<DirEntry>> {
+    match fs::read_dir(path) {
+        Ok(paths) => paths
+            .filter(|path| match path {
+                Ok(dir_entry) => match dir_entry.file_name().into_string() {
+                    Ok(filename) => filename.starts_with(file_pattern),
+                    Err(_) => false,
+                },
+                Err(_) => false,
+            })
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            error!("Failed to read dir {:?} with error {}", path, e);
+            Vec::new()
+        }
+    }
+}
+
+pub fn get_file_list_from_path(file_pattern: &str, path: &Path) -> Vec<String> {
+    let filtered_files = get_filtered_files(file_pattern, path);
+    if !filtered_files.is_empty() {
+        let mut file_paths = Vec::new();
+        for file in filtered_files {
+            match file {
+                Ok(entry) => {
+                    if let Some(path) = entry.path().to_str() {
+                        file_paths.push(path.to_string())
+                    }
+                }
+                Err(e) => error!("Failed to get filename for the push: {}", e),
+            }
+        }
+
+        return file_paths;
+    }
+
+    Vec::new()
 }
