@@ -153,11 +153,13 @@ async fn handle_build_proxy(
                 .local_registry_name
                 .clone()
                 .unwrap_or_else(|| String::from(REGISTRY_NAME));
+
             let registry_namespace = config
                 .sogar_registry_config
                 .local_registry_image
                 .clone()
                 .unwrap_or_else(|| String::from(NAMESPACE));
+
             let registry = Registry::new(config, format!("{}/{}", registry_name, registry_namespace));
             registry.manage_files(association_id.clone().to_string(), pattern, dir.as_path());
         };

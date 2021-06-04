@@ -7,8 +7,10 @@ use sogar_core::{
     create_annotation_for_filename, parse_digest, read_file_data, sogar_config, sogar_registry, FileInfo, Layer,
 };
 use std::{
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Duration,
 };
 use tempfile::NamedTempFile;
@@ -40,9 +42,9 @@ impl Registry {
         }
 
         if let Some(true) = config.keep_files {
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 if let Some(duration) = config.keep_time {
-                    std::thread::sleep(Duration::from_secs(duration as u64));
+                    thread::sleep(Duration::from_secs(duration as u64));
                     remove_files(files);
                 }
             });
@@ -73,6 +75,7 @@ impl Registry {
 
     fn push_files(&self, file_pattern: String, recording_dir: &Path, tag: String) {
         let sogar_push_data = self.config.sogar_registry_config.sogar_push_registry_info.clone();
+
         let remote_data = SogarData::new(
             sogar_push_data.sogar_util_path.clone(),
             sogar_push_data.registry_url,
@@ -90,7 +93,7 @@ impl Registry {
 
 fn remove_files(files: Vec<String>) {
     for file in files {
-        if let Err(e) = std::fs::remove_file(Path::new(&file)) {
+        if let Err(e) = fs::remove_file(Path::new(&file)) {
             error!("Failed to remove file {} with error {}", file, e);
         }
     }
@@ -125,7 +128,7 @@ fn create_and_move_manifest(
     let manifest_file_info = manifest_file_info.unwrap();
     let manifest_path = registry_path.join(sogar_registry::ARTIFACTS_DIR).join(tag);
 
-    if let Err(e) = std::fs::copy(manifest_file_info.path, manifest_path) {
+    if let Err(e) = fs::copy(manifest_file_info.path, manifest_path) {
         error!("Failed to copy manifest to the registry with error {}!", e);
         return None;
     }
@@ -158,10 +161,11 @@ fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
     let blob_dir = registry_path
         .join(sogar_registry::ARTIFACTS_DIR)
         .join(&digest.digest_type);
+
     let blob_path = blob_dir.join(&digest.value);
 
     if !blob_dir.exists() {
-        if let Err(e) = std::fs::create_dir_all(blob_dir) {
+        if let Err(e) = fs::create_dir_all(blob_dir) {
             error!("Failed to create dir for the blob with error {}!", e);
             return None;
         }
@@ -170,7 +174,7 @@ fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
         return None;
     }
 
-    if let Err(e) = std::fs::copy(file_path, blob_path) {
+    if let Err(e) = fs::copy(file_path, blob_path) {
         error!("Failed to copy blob to the registry with error {}!", e);
     }
 
@@ -180,7 +184,6 @@ fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use std::fs::File;
     use std::io::Write;
 

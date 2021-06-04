@@ -9,7 +9,7 @@ use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
 use slog_scope::info;
-use sogar_core::sogar_registry::{BLOB_GET_LOCATION_PATH, BLOB_PATH, MANIFEST_PATH, UPLOAD_BLOB_PATH};
+use sogar_core::sogar_registry::{SogarController, BLOB_GET_LOCATION_PATH, BLOB_PATH, MANIFEST_PATH, UPLOAD_BLOB_PATH};
 use std::sync::Arc;
 
 pub const REGISTRY_NAME: &str = "devolutions_registry";
@@ -54,14 +54,16 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 .local_registry_name
                 .clone()
                 .unwrap_or_else(|| String::from(REGISTRY_NAME));
+
             let registry_namespace = config
                 .sogar_registry_config
                 .local_registry_image
                 .clone()
                 .unwrap_or_else(|| String::from(NAMESPACE));
-            let sogar =
-                sogar_core::sogar_registry::SogarController::new(registry_name.as_str(), registry_namespace.as_str());
+
+            let sogar = SogarController::new(registry_name.as_str(), registry_namespace.as_str());
             let token_controller = TokenController::new(config.clone());
+
             info!("Configuring HTTP router");
             router
                 .controller(health)
