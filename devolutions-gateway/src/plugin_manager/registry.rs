@@ -1,5 +1,6 @@
 use crate::{
     config::Config,
+    http::http_server::{NAMESPACE, REGISTRY_NAME},
     plugin_manager::{push_files::get_file_list_from_path, SogarData},
 };
 use slog_scope::{debug, error};
@@ -21,7 +22,21 @@ pub struct Registry {
 }
 
 impl Registry {
-    pub fn new(config: Arc<Config>, registry_path: String) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
+        let registry_name = config
+            .sogar_registry_config
+            .local_registry_name
+            .clone()
+            .unwrap_or_else(|| String::from(REGISTRY_NAME));
+
+        let registry_namespace = config
+            .sogar_registry_config
+            .local_registry_image
+            .clone()
+            .unwrap_or_else(|| String::from(NAMESPACE));
+
+        let registry_path = format!("{}/{}", registry_name, registry_namespace);
+
         Self {
             config,
             registry_path: PathBuf::from(registry_path),
@@ -193,16 +208,17 @@ mod tests {
         let file_name = "test1.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path = "test_registry1/test_image1";
-        let path_buf = PathBuf::from(path).join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry1/test_image1").join(sogar_registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
         config.sogar_registry_config.serve_as_registry = Some(true);
         config.sogar_registry_config.push_files = Some(false);
         config.sogar_registry_config.keep_files = Some(false);
+        config.sogar_registry_config.local_registry_name = Some(String::from("test_registry1"));
+        config.sogar_registry_config.local_registry_image = Some(String::from("test_image1"));
 
-        let registry = Registry::new(Arc::new(config), path.to_string());
+        let registry = Registry::new(Arc::new(config));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
@@ -230,8 +246,7 @@ mod tests {
         let file_name = "test2.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path = "test_registry2/test_image2";
-        let path_buf = PathBuf::from(path).join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry2/test_image2").join(sogar_registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
@@ -239,8 +254,10 @@ mod tests {
         config.sogar_registry_config.push_files = Some(false);
         config.sogar_registry_config.keep_files = Some(true);
         config.sogar_registry_config.keep_time = None;
+        config.sogar_registry_config.local_registry_name = Some(String::from("test_registry2"));
+        config.sogar_registry_config.local_registry_image = Some(String::from("test_image2"));
 
-        let registry = Registry::new(Arc::new(config), path.to_string());
+        let registry = Registry::new(Arc::new(config));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
@@ -268,8 +285,7 @@ mod tests {
         let file_name = "test3.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path = "test_registry3/test_image3";
-        let path_buf = PathBuf::from(path).join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry3/test_image3").join(sogar_registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
@@ -277,8 +293,10 @@ mod tests {
         config.sogar_registry_config.push_files = Some(false);
         config.sogar_registry_config.keep_files = Some(true);
         config.sogar_registry_config.keep_time = Some(30);
+        config.sogar_registry_config.local_registry_name = Some(String::from("test_registry3"));
+        config.sogar_registry_config.local_registry_image = Some(String::from("test_image3"));
 
-        let registry = Registry::new(Arc::new(config), path.to_string());
+        let registry = Registry::new(Arc::new(config));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);

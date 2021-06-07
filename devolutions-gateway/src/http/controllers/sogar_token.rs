@@ -14,11 +14,6 @@ use slog_scope::error;
 use sogar_core::AccessToken;
 use std::sync::Arc;
 
-#[derive(Serialize, Deserialize, Debug)]
-struct ResponseAccessToken {
-    access_token: String,
-}
-
 pub struct TokenController {
     config: Arc<Config>,
 }
@@ -40,8 +35,7 @@ impl TokenController {
 
                 let config = self.config.clone();
 
-                let users_list = config.sogar_user.clone();
-                for user in users_list {
+                for user in &config.sogar_user {
                     if let (Some(username), Some(hashed_password)) = (&user.username, &user.password) {
                         if username == &username_out {
                             let matched = argon2::verify_encoded(hashed_password.as_str(), password_out.as_bytes());
@@ -64,17 +58,27 @@ impl TokenController {
     }
 }
 
-fn create_token(private_key: &Option<PrivateKey>, user: SogarUser) -> (StatusCode, Option<String>) {
+fn create_token(private_key: &Option<PrivateKey>, user: &SogarUser) -> (StatusCode, Option<String>) {
+    #[derive(Serialize, Deserialize, Debug)]
+    struct ResponseAccessToken {
+        access_token: String,
+    }
+
     match private_key {
         Some(private_key) => {
             let signed_result = JwtSig::new(JwsAlg::RS256, user).encode(private_key);
 
             match signed_result {
-                Ok(signed) => {
-                    let response = ResponseAccessToken { access_token: signed };
+                Ok(access_token) => {
+                    let response = ResponseAccessToken { access_token };
 
-                    let token = ::serde_json::to_string(&response).unwrap();
-                    (StatusCode::OK, Some(token))
+                    match serde_json::to_string(&response) {
+                        Ok(token) => (StatusCode::OK, Some(token)),
+                        Err(e) => {
+                            error!("Failed serialize token! Error is {}", e);
+                            (StatusCode::BAD_REQUEST, None)
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("Failed to create token! Error is {}", e);

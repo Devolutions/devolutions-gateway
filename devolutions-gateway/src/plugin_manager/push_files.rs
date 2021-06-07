@@ -1,8 +1,7 @@
 use slog_scope::{debug, error};
-use std::fs::DirEntry;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::{fs, io};
 
 pub struct SogarData {
     sogar_path: String,
@@ -55,7 +54,7 @@ impl SogarData {
             return;
         }
 
-        let reference = format!("{}:{}", self.image_name.clone(), tag);
+        let reference = format!("{}:{}", self.image_name, tag);
         let joined_path: &str = &file_paths.join(";");
         self.invoke_command(joined_path, reference);
         for filepath in file_paths {
@@ -94,7 +93,7 @@ impl SogarData {
     }
 }
 
-fn get_filtered_files(file_pattern: &str, path: &Path) -> Vec<io::Result<DirEntry>> {
+pub fn get_file_list_from_path(file_pattern: &str, path: &Path) -> Vec<String> {
     match fs::read_dir(path) {
         Ok(paths) => paths
             .filter(|path| match path {
@@ -104,31 +103,16 @@ fn get_filtered_files(file_pattern: &str, path: &Path) -> Vec<io::Result<DirEntr
                 },
                 Err(_) => false,
             })
+            .map(|entry| entry.ok())
+            .filter(|entry| match entry {
+                Some(dir_entry) => dir_entry.path().to_str().is_some(),
+                None => false,
+            })
+            .map(|path| path.unwrap().path().to_str().unwrap().to_string())
             .collect::<Vec<_>>(),
         Err(e) => {
             error!("Failed to read dir {:?} with error {}", path, e);
             Vec::new()
         }
     }
-}
-
-pub fn get_file_list_from_path(file_pattern: &str, path: &Path) -> Vec<String> {
-    let filtered_files = get_filtered_files(file_pattern, path);
-    if !filtered_files.is_empty() {
-        let mut file_paths = Vec::new();
-        for file in filtered_files {
-            match file {
-                Ok(entry) => {
-                    if let Some(path) = entry.path().to_str() {
-                        file_paths.push(path.to_string())
-                    }
-                }
-                Err(e) => error!("Failed to get filename for the push: {}", e),
-            }
-        }
-
-        return file_paths;
-    }
-
-    Vec::new()
 }
