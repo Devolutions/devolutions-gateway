@@ -29,7 +29,7 @@ pub struct RecordingApi<'a> {
             updateY: u32,
             updateWidth: u32,
             updateHeight: u32,
-            surfaceStep: *const u32,
+            surfaceStep: u32,
         ),
     >,
     NowRecording_Timeout: Symbol<'a, unsafe extern "C" fn(ctx: RecordingContext)>,
@@ -71,7 +71,7 @@ impl Recorder {
                 image_data.update_y,
                 image_data.update_width,
                 image_data.update_height,
-                (&mut image_data.surface_step) as *mut u32,
+                image_data.surface_step,
             );
         }
     }
