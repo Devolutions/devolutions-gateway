@@ -43,7 +43,7 @@ fn generate_usage() -> String {
         \n\
         \tExample: unauthenticated PowerShell\n\
         \n\
-        \t  {command} forward tcp-listen://127.0.0.1:5002 'cmd://pwsh -sshs -NoLogo -NoProfile'\n\
+        \t  {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'\n\
         \n\
         For detailed logs use debug binary or any binary built with 'verbose' feature enabled.\n\
         This binary was built as:\n\
@@ -102,7 +102,7 @@ Pipe formats:
 
 Example: unauthenticated PowerShell
 
-    {command} forward tcp-listen://127.0.0.1:5002 'cmd://pwsh -sshs -NoLogo -NoProfile'"##,
+    {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'"##,
         command = env!("CARGO_PKG_NAME")
     );
 
@@ -302,9 +302,13 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     }
 
     match scheme {
-        "tcp-listen" => Ok(PipeMode::TcpListener(value.to_owned())),
-        "cmd" => Ok(PipeMode::ProcessCmd(value.to_owned())),
-        "tcp" => Ok(PipeMode::Tcp(value.to_owned())),
+        "tcp-listen" => Ok(PipeMode::TcpListener {
+            bind_addr: value.to_owned(),
+        }),
+        "cmd" => Ok(PipeMode::ProcessCmd {
+            command: value.to_owned(),
+        }),
+        "tcp" => Ok(PipeMode::Tcp { addr: value.to_owned() }),
         "jet-tcp-connect" => {
             let (addr, association_id, candidate_id) = parse_jet_pipe_format(value)?;
             Ok(PipeMode::JetTcpConnect {
@@ -321,7 +325,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
                 candidate_id,
             })
         }
-        "ws" | "wss" => Ok(PipeMode::WebSocket(arg)),
+        "ws" | "wss" => Ok(PipeMode::WebSocket { url: arg }),
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
 }

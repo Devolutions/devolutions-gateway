@@ -103,7 +103,9 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
 
     impl_tcp_connect!(req_addr, proxy_cfg, Result<WebSocketConnectOutput>, |stream| {
         async {
-            let (ws, rsp) = client_async_tls(req, stream).await?;
+            let (ws, rsp) = client_async_tls(req, stream)
+                .await
+                .context("WebSocket handshake failed")?;
             let (sink, stream) = ws.split();
             let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin>;
             let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin>;
