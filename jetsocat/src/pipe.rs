@@ -1,16 +1,22 @@
 use crate::proxy::ProxyConfig;
 use anyhow::Result;
 use slog::{debug, info, o, Logger};
+use std::any::Any;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::process::Command;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum PipeMode {
     Stdio,
-    ProcessCmd(String),
-    TcpListener(String),
-    Tcp(String),
+    ProcessCmd {
+        command: String,
+    },
+    TcpListener {
+        bind_addr: String,
+    },
+    Tcp {
+        addr: String,
+    },
     JetTcpAccept {
         addr: String,
         association_id: Uuid,
@@ -21,27 +27,34 @@ pub enum PipeMode {
         association_id: Uuid,
         candidate_id: Uuid,
     },
-    WebSocket(String),
+    WebSocket {
+        url: String,
+    },
 }
 
 pub struct Pipe {
     name: &'static str,
     read: Box<dyn AsyncRead + Unpin>,
     write: Box<dyn AsyncWrite + Unpin>,
+
+    // Useful when we don't want to drop something before the Pipe
+    _handle: Option<Box<dyn Any>>,
 }
 
 pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<Pipe> {
     use anyhow::Context as _;
     use std::process::Stdio;
+    use tokio::process::Command;
 
     match mode {
         PipeMode::Stdio => Ok(Pipe {
             name: "stdio",
             read: Box::new(tokio::io::stdin()),
             write: Box::new(tokio::io::stdout()),
+            _handle: None,
         }),
-        PipeMode::ProcessCmd(command_string) => {
-            info!(log, "Spawn process with command: {}", command_string);
+        PipeMode::ProcessCmd { command } => {
+            info!(log, "Spawn process with command: {}", command);
 
             #[cfg(target_os = "windows")]
             let mut cmd = Command::new("cmd");
@@ -54,7 +67,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
             cmd.arg("-c");
 
             let mut handle = cmd
-                .arg(command_string)
+                .arg(command)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .kill_on_drop(true)
@@ -68,14 +81,15 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "process",
                 read: Box::new(stdout),
                 write: Box::new(stdin),
+                _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
-        PipeMode::TcpListener(addr) => {
+        PipeMode::TcpListener { bind_addr } => {
             use tokio::net::TcpListener;
 
-            info!(log, "Listening for TCP on {}", addr);
+            info!(log, "Listening for TCP on {}", bind_addr);
 
-            let listener = TcpListener::bind(addr)
+            let listener = TcpListener::bind(bind_addr)
                 .await
                 .with_context(|| "Failed to bind TCP listener")?;
             let (socket, peer_addr) = listener
@@ -91,9 +105,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "tcp-listener",
                 read: Box::new(read),
                 write: Box::new(write),
+                _handle: None,
             })
         }
-        PipeMode::Tcp(addr) => {
+        PipeMode::Tcp { addr } => {
             use crate::utils::tcp_connect;
 
             info!(log, "Connecting TCP to {}", addr);
@@ -108,6 +123,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "tcp",
                 read,
                 write,
+                _handle: None,
             })
         }
         PipeMode::JetTcpAccept {
@@ -127,11 +143,11 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 .await
                 .with_context(|| "TCP connect failed")?;
 
-            debug!(log, "Sending accept request...");
+            debug!(log, "Sending JET accept request…");
             write_jet_accept_request(&mut write, association_id, candidate_id).await?;
-            debug!(log, "Accept request sent!");
+            debug!(log, "JET accept request sent, waiting for response…");
             read_jet_accept_response(&mut read).await?;
-            debug!(log, "Accept response received and processed successfully!");
+            debug!(log, "JET accept response received and processed successfully!");
 
             debug!(log, "Connected");
 
@@ -139,6 +155,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "jet-tcp-accept",
                 read,
                 write,
+                _handle: None,
             })
         }
         PipeMode::JetTcpConnect {
@@ -158,11 +175,11 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 .await
                 .with_context(|| "TCP connect failed")?;
 
-            debug!(log, "Sending connect request...");
+            debug!(log, "Sending JET connect request…");
             write_jet_connect_request(&mut write, association_id, candidate_id).await?;
-            debug!(log, "Connect request sent!");
+            debug!(log, "JET connect request sent, waiting for response…");
             read_jet_connect_response(&mut read).await?;
-            debug!(log, "Connect response received and processed successfully!");
+            debug!(log, "JET connect response received and processed successfully!");
 
             debug!(log, "Connected");
 
@@ -170,14 +187,15 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "jet-tcp-connect",
                 read,
                 write,
+                _handle: None,
             })
         }
-        PipeMode::WebSocket(addr) => {
+        PipeMode::WebSocket { url } => {
             use crate::utils::ws_connect;
 
-            info!(log, "Connecting WebSocket to {}", addr);
+            info!(log, "Connecting WebSocket at {}", url);
 
-            let (read, write, rsp) = ws_connect(addr, proxy_cfg)
+            let (read, write, rsp) = ws_connect(url, proxy_cfg)
                 .await
                 .with_context(|| "WebSocket connect failed")?;
 
@@ -187,6 +205,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 name: "websocket",
                 read,
                 write,
+                _handle: None,
             })
         }
     }
