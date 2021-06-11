@@ -14,7 +14,7 @@ where
 {
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-    let mut buf = [0u8; 1024];
+    let mut buf = [0u8; 5120];
 
     loop {
         let bytes_read = reader.read(&mut buf).await?;
@@ -26,6 +26,7 @@ where
         trace!(logger, r#""{}""#, String::from_utf8_lossy(&buf[..bytes_read]));
 
         writer.write_all(&buf[..bytes_read]).await?;
+        writer.flush().await?;
     }
 
     Ok(())
