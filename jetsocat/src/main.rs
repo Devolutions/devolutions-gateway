@@ -101,9 +101,17 @@ Pipe formats:
     `wss://<URL>`: WebSocket Secure
     `ws-listen://<BINDING ADDRESS>`: WebSocket listener"
 
-Example: unauthenticated PowerShell
+Example: unauthenticated PowerShell server
 
-    {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'"##,
+    {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'
+
+Example: unauthenticated sftp server
+
+    {command} forward tcp-listen://0.0.0.0:2222 cmd://'/usr/lib/openssh/sftp-server'
+
+Example: unauthenticated sftp client
+
+    JETSOCAT_ARGS="forward - tcp://192.168.122.178:2222" sftp -D {command}"##,
         command = env!("CARGO_PKG_NAME")
     );
 
@@ -327,7 +335,9 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
             })
         }
         "ws" | "wss" => Ok(PipeMode::WebSocket { url: arg }),
-        "ws-listen" => Ok(PipeMode::WebSocketListen { bind_addr: value.to_owned() }),
+        "ws-listen" => Ok(PipeMode::WebSocketListen {
+            bind_addr: value.to_owned(),
+        }),
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
 }
