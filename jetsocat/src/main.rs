@@ -98,7 +98,8 @@ Pipe formats:
     `jet-tcp-connect://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as client
     `jet-tcp-accept://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as server
     `ws://<URL>`: WebSocket
-    `wss://<URL>`: WebSocket Secure"
+    `wss://<URL>`: WebSocket Secure
+    `ws-listen://<BINDING ADDRESS>`: WebSocket listener"
 
 Example: unauthenticated PowerShell
 
@@ -302,7 +303,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     }
 
     match scheme {
-        "tcp-listen" => Ok(PipeMode::TcpListener {
+        "tcp-listen" => Ok(PipeMode::TcpListen {
             bind_addr: value.to_owned(),
         }),
         "cmd" => Ok(PipeMode::ProcessCmd {
@@ -326,6 +327,7 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
             })
         }
         "ws" | "wss" => Ok(PipeMode::WebSocket { url: arg }),
+        "ws-listen" => Ok(PipeMode::WebSocketListen { bind_addr: value.to_owned() }),
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
 }

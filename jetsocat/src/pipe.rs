@@ -11,7 +11,7 @@ pub enum PipeMode {
     ProcessCmd {
         command: String,
     },
-    TcpListener {
+    TcpListen {
         bind_addr: String,
     },
     Tcp {
@@ -29,6 +29,9 @@ pub enum PipeMode {
     },
     WebSocket {
         url: String,
+    },
+    WebSocketListen {
+        bind_addr: String,
     },
 }
 
@@ -84,7 +87,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
-        PipeMode::TcpListener { bind_addr } => {
+        PipeMode::TcpListen { bind_addr } => {
             use tokio::net::TcpListener;
 
             info!(log, "Listening for TCP on {}", bind_addr);
@@ -203,6 +206,40 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
 
             Ok(Pipe {
                 name: "websocket",
+                read,
+                write,
+                _handle: None,
+            })
+        }
+        PipeMode::WebSocketListen { bind_addr } => {
+            use crate::io::{ReadableWebSocketHalf, WritableWebSocketHalf};
+            use async_tungstenite::tokio::accept_async;
+            use futures_util::StreamExt as _;
+            use tokio::net::TcpListener;
+
+            info!(log, "Listening for WebSocket on {}", bind_addr);
+
+            let listener = TcpListener::bind(bind_addr)
+                .await
+                .with_context(|| "Failed to bind TCP listener")?;
+            let (socket, peer_addr) = listener
+                .accept()
+                .await
+                .with_context(|| "TCP listener couldn't accept")?;
+
+            info!(log, "Accepted {}", peer_addr);
+
+            let ws = accept_async(socket)
+                .await
+                .with_context(|| "WebSocket handshake failed")?;
+
+            let (sink, stream) = ws.split();
+
+            let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin>;
+            let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin>;
+
+            Ok(Pipe {
+                name: "websocket-listener",
                 read,
                 write,
                 _handle: None,
