@@ -90,6 +90,7 @@ where
 
         let dest = buf.initialize_unfilled_to(bytes_to_copy);
         dest.copy_from_slice(&data[..bytes_to_copy]);
+        buf.advance(bytes_to_copy);
 
         if data.len() > bytes_to_copy {
             data.drain(..bytes_to_copy);
