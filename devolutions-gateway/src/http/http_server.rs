@@ -9,7 +9,7 @@ use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
 use slog_scope::info;
-use sogar_core::sogar_registry::{SogarController, BLOB_GET_LOCATION_PATH, BLOB_PATH, MANIFEST_PATH, UPLOAD_BLOB_PATH};
+use sogar_core::registry::{SogarController, BLOB_GET_LOCATION_PATH, BLOB_PATH, MANIFEST_PATH, UPLOAD_BLOB_PATH};
 use std::sync::Arc;
 
 pub const REGISTRY_NAME: &str = "devolutions_registry";
@@ -36,12 +36,12 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                     auth_include_path,
                     Some(auth_exclude_path),
                 )
-                .apply(LogMiddleware, vec!["/"], None)
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
                     vec![BLOB_PATH, BLOB_GET_LOCATION_PATH, UPLOAD_BLOB_PATH, MANIFEST_PATH],
                     vec!["registry/oauth2/token"],
                 )
+                .apply(LogMiddleware, vec!["/"], None)
         })
         .configure_router(|router| {
             info!("Loading HTTP controllers");

@@ -5,7 +5,7 @@ use crate::{
 use picky::jose::jwt::{JwtSig, JwtValidator};
 use saphir::{http, http_context::State, prelude::*, response::Builder as ResponseBuilder};
 use slog_scope::error;
-use sogar_core::sogar_registry::{
+use sogar_core::registry::{
     BLOB_DOWNLOAD_ENDPOINT, BLOB_EXIST_ENDPOINT, BLOB_GET_LOCATION_ENDPOINT, BLOB_UPLOAD_ENDPOINT,
     MANIFEST_DOWNLOAD_ENDPOINT, MANIFEST_EXIST_ENDPOINT, MANIFEST_UPLOAD_ENDPOINT,
 };
@@ -44,21 +44,22 @@ async fn auth_middleware(
             .headers()
             .get(http::header::AUTHORIZATION);
 
-        if auth_header.is_none() || auth_header.unwrap().to_str().is_err() {
-            error!("Authorization header is missing or wrong format.");
-            //to be able to play video in the browser
-            return if metadata == BLOB_DOWNLOAD_ENDPOINT || metadata == MANIFEST_DOWNLOAD_ENDPOINT {
-                chain.next(ctx).await
-            } else {
-                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+        let auth_str = match auth_header.and_then(|header| header.to_str().ok()) {
+            None => {
+                error!("Authorization header is missing or wrong format.");
+                //to be able to play video in the browser
+                return if metadata == BLOB_DOWNLOAD_ENDPOINT || metadata == MANIFEST_DOWNLOAD_ENDPOINT {
+                    chain.next(ctx).await
+                } else {
+                    let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
 
-                let mut ctx = ctx.clone_with_empty_state();
-                ctx.state = State::After(Box::new(response));
-                Ok(ctx)
-            };
-        }
-
-        let auth_str = auth_header.unwrap().to_str().unwrap();
+                    let mut ctx = ctx.clone_with_empty_state();
+                    ctx.state = State::After(Box::new(response));
+                    Ok(ctx)
+                };
+            }
+            Some(auth_str) => auth_str,
+        };
 
         let private_key = config.delegation_private_key.clone();
         if let (Some((AuthHeaderType::Bearer, token)), Some(private_key)) = (parse_auth_header(auth_str), private_key) {

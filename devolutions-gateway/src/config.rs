@@ -82,7 +82,7 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SogarPushRegistryInfo {
-    pub sogar_util_path: Option<String>,
+    pub sogar_util_path: Option<PathBuf>,
     pub registry_url: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -134,7 +134,7 @@ pub struct Config {
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<String>>,
-    pub recording_path: Option<String>,
+    pub recording_path: Option<PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
 }
@@ -614,7 +614,14 @@ impl Config {
                         ARG_SOGAR_USERNAME,
                         ARG_SOGAR_PASSWORD,
                         ARG_SOGAR_IMAGE_NAME,
-                    ]),
+                    ])
+                    .validator(|sogar_path| {
+                        if PathBuf::from(sogar_path).is_file() {
+                            Ok(())
+                        } else {
+                            Err(String::from("The value does not exist or is not a file."))
+                        }
+                    }),
             )
             .arg(
                 Arg::with_name(ARG_SOGAR_REGISTRY_URL)
@@ -785,7 +792,7 @@ impl Config {
         }
 
         if let Some(sogar_path) = matches.value_of(ARG_SOGAR_UTIL_PATH) {
-            config.sogar_registry_config.sogar_push_registry_info.sogar_util_path = Some(sogar_path.to_owned());
+            config.sogar_registry_config.sogar_push_registry_info.sogar_util_path = Some(PathBuf::from(sogar_path));
         }
 
         if let Some(registry_url) = matches.value_of(ARG_SOGAR_REGISTRY_URL) {
@@ -876,7 +883,7 @@ impl Config {
         }
 
         if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
-            config.recording_path = Some(recording_path.to_owned());
+            config.recording_path = Some(PathBuf::from(recording_path));
         }
 
         config
@@ -970,8 +977,10 @@ impl Config {
             .map(|pem| PrivateKey::from_pem(pem).unwrap());
 
         let plugins = config_file.plugins;
-        let recording_path = config_file.recording_path;
-        let sogar_util_path = config_file.sogar_util_path;
+        let recording_path = config_file.recording_path.map(PathBuf::from);
+
+        let sogar_util_path = config_file.sogar_util_path.map(PathBuf::from);
+
         let registry_url = config_file.registry_url;
         let username = config_file.username;
         let password = config_file.password;

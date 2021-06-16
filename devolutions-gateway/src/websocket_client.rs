@@ -244,11 +244,11 @@ async fn handle_jet_connect_impl(
                             );
 
                             recording_dir = match &config.recording_path {
-                                Some(path) => {
-                                    interceptor.set_recording_directory(path.as_str());
+                                Some(path) if path.to_str().is_some() => {
+                                    interceptor.set_recording_directory(path.to_str().unwrap());
                                     Some(std::path::PathBuf::from(path))
                                 }
-                                None => interceptor.get_recording_directory(),
+                                _ => interceptor.get_recording_directory(),
                             };
 
                             file_pattern = Some(interceptor.get_filename_pattern());
@@ -268,7 +268,7 @@ async fn handle_jet_connect_impl(
 
                     if has_interceptor {
                         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
-                            let registry = crate::plugin_manager::registry::Registry::new(config);
+                            let registry = crate::registry::Registry::new(config);
                             registry.manage_files(association_id.clone().to_string(), pattern, dir.as_path());
                         };
                     }

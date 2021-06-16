@@ -1,12 +1,12 @@
+mod push_files;
+
+use crate::registry::push_files::{get_file_list_from_path, SogarData};
 use crate::{
     config::Config,
     http::http_server::{NAMESPACE, REGISTRY_NAME},
-    plugin_manager::{push_files::get_file_list_from_path, SogarData},
 };
 use slog_scope::{debug, error};
-use sogar_core::{
-    create_annotation_for_filename, parse_digest, read_file_data, sogar_config, sogar_registry, FileInfo, Layer,
-};
+use sogar_core::{create_annotation_for_filename, parse_digest, read_file_data, registry, FileInfo, Layer};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -85,7 +85,7 @@ impl Registry {
 
         let manifest_mime = create_and_move_manifest(self.registry_path.as_path(), config_data.unwrap(), layers, tag);
 
-        sogar_registry::add_artifacts_info(tag.to_string(), manifest_mime, self.registry_path.as_path());
+        registry::add_artifacts_info(tag.to_string(), manifest_mime, self.registry_path.as_path());
     }
 
     fn push_files(&self, file_pattern: String, recording_dir: &Path, tag: String) {
@@ -141,7 +141,7 @@ fn create_and_move_manifest(
     }
 
     let manifest_file_info = manifest_file_info.unwrap();
-    let manifest_path = registry_path.join(sogar_registry::ARTIFACTS_DIR).join(tag);
+    let manifest_path = registry_path.join(registry::ARTIFACTS_DIR).join(tag);
 
     if let Err(e) = fs::copy(manifest_file_info.path, manifest_path) {
         error!("Failed to copy manifest to the registry with error {}!", e);
@@ -153,7 +153,7 @@ fn create_and_move_manifest(
 
 fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
     let file_path = Path::new(file.as_str());
-    let mime_type = sogar_config::get_mime_type_from_file_extension(file.clone());
+    let mime_type = sogar_core::config::get_mime_type_from_file_extension(file.clone());
     let annotations = create_annotation_for_filename(file_path);
     let file_data = read_file_data(file_path, mime_type, Some(annotations));
 
@@ -173,9 +173,7 @@ fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
     }
 
     let digest = digest.unwrap();
-    let blob_dir = registry_path
-        .join(sogar_registry::ARTIFACTS_DIR)
-        .join(&digest.digest_type);
+    let blob_dir = registry_path.join(registry::ARTIFACTS_DIR).join(&digest.digest_type);
 
     let blob_path = blob_dir.join(&digest.value);
 

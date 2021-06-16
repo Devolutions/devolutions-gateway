@@ -1,10 +1,10 @@
 use slog_scope::{debug, error};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct SogarData {
-    sogar_path: String,
+    sogar_path: PathBuf,
     registry_url: String,
     username: String,
     password: String,
@@ -14,7 +14,7 @@ pub struct SogarData {
 
 impl SogarData {
     pub fn new(
-        sogar_path: Option<String>,
+        sogar_path: Option<PathBuf>,
         registry_url: Option<String>,
         username: Option<String>,
         password: Option<String>,
@@ -65,7 +65,12 @@ impl SogarData {
     }
 
     fn invoke_command(&self, file_path: &str, reference: String) {
-        let mut command = Command::new(self.sogar_path.clone());
+        if self.sogar_path.to_str().is_none() || !self.sogar_path.is_file() {
+            error!("Failed to retrieve path string or path is not a file.");
+            return;
+        }
+
+        let mut command = Command::new(self.sogar_path.to_str().unwrap());
         let args = command
             .arg("--registry-url")
             .arg(self.registry_url.clone().as_str())
@@ -96,19 +101,19 @@ impl SogarData {
 pub fn get_file_list_from_path(file_pattern: &str, path: &Path) -> Vec<String> {
     match fs::read_dir(path) {
         Ok(paths) => paths
-            .filter(|path| match path {
-                Ok(dir_entry) => match dir_entry.file_name().into_string() {
-                    Ok(filename) => filename.starts_with(file_pattern),
-                    Err(_) => false,
+            .filter_map(|path| match path {
+                Ok(dir_entry) => match (dir_entry.file_name().into_string(), dir_entry.path().to_str()) {
+                    (Ok(filename), Some(path)) => {
+                        if filename.starts_with(file_pattern) {
+                            Some(path.to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
                 },
-                Err(_) => false,
+                Err(_) => None,
             })
-            .map(|entry| entry.ok())
-            .filter(|entry| match entry {
-                Some(dir_entry) => dir_entry.path().to_str().is_some(),
-                None => false,
-            })
-            .map(|path| path.unwrap().path().to_str().unwrap().to_string())
             .collect::<Vec<_>>(),
         Err(e) => {
             error!("Failed to read dir {:?} with error {}", path, e);

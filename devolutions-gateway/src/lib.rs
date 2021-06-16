@@ -15,6 +15,7 @@ pub mod logger;
 pub mod plugin_manager;
 pub mod proxy;
 pub mod rdp;
+pub mod registry;
 pub mod routing_client;
 pub mod service;
 pub mod transport;

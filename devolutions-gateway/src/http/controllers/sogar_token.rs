@@ -30,12 +30,10 @@ impl TokenController {
     async fn get_token(&self, mut req: Request) -> (StatusCode, Option<String>) {
         match req.form::<AccessToken>().await {
             Ok(body) => {
-                let password_out = body.password.clone();
+                let password_out = body.password;
                 let username_out = body.username;
 
-                let config = self.config.clone();
-
-                for user in &config.sogar_user {
+                for user in &self.config.sogar_user {
                     if let (Some(username), Some(hashed_password)) = (&user.username, &user.password) {
                         if username == &username_out {
                             let matched = argon2::verify_encoded(hashed_password.as_str(), password_out.as_bytes());
@@ -43,7 +41,7 @@ impl TokenController {
                                 return (StatusCode::UNAUTHORIZED, None);
                             }
 
-                            return create_token(&config.delegation_private_key, user);
+                            return create_token(&self.config.delegation_private_key, user);
                         }
                     }
                 }

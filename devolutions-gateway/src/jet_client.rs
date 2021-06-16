@@ -20,7 +20,7 @@ use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
 use crate::jet::association::Association;
 use crate::jet::candidate::{Candidate, CandidateState};
 use crate::jet::TransportType;
-use crate::plugin_manager::registry::Registry;
+use crate::registry::Registry;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
@@ -128,11 +128,11 @@ async fn handle_build_proxy(
                 );
 
                 recording_dir = match &config.recording_path {
-                    Some(path) => {
-                        interceptor.set_recording_directory(path.as_str());
+                    Some(path) if path.to_str().is_some() => {
+                        interceptor.set_recording_directory(path.to_str().unwrap());
                         Some(PathBuf::from(path))
                     }
-                    None => interceptor.get_recording_directory(),
+                    _ => interceptor.get_recording_directory(),
                 };
 
                 file_pattern = Some(interceptor.get_filename_pattern());
@@ -147,7 +147,7 @@ async fn handle_build_proxy(
 
         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
             let registry = Registry::new(config);
-            registry.manage_files(association_id.clone().to_string(), pattern, dir.as_path());
+            registry.manage_files(association_id.to_string(), pattern, dir.as_path());
         };
 
         proxy_result

@@ -3339,7 +3339,7 @@ dependencies = [
 [[package]]
 name = "sogar-core"
 version = "0.1.0"
-source = "git+https://github.com/Devolutions/sogar.git?branch=sogar_registry#64e6f6f578eb79c4996f565611fbb31103432e85"
+source = "git+https://github.com/Devolutions/sogar.git?branch=sogar_registry#8d37b9f226de9c14f35971a45141feeec9802b15"
 dependencies = [
  "clap 2.33.3",
  "config",
