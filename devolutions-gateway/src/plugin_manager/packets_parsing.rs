@@ -136,8 +136,8 @@ impl PacketsParser {
         ImageUpdate {
             update_x,
             update_y,
-            update_height,
             update_width,
+            update_height,
             surface_step,
             image_buff,
         }

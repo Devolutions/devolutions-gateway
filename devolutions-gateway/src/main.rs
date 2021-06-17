@@ -43,7 +43,7 @@ Service!("gateway", gateway_service_main);
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
-    if (args.len() > 1) && (!args[1].starts_with("-")) {
+    if (args.len() > 1) && (!args[1].starts_with('-')) {
         let cli_app = App::new(crate_name!())
             .author("Devolutions Inc.")
             .version(concat!(crate_version!(), "\n"))

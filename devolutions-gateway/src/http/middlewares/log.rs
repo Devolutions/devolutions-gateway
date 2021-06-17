@@ -3,7 +3,6 @@ use saphir::http_context::HttpContext;
 use saphir::middleware::MiddlewareChain;
 use saphir::prelude::*;
 use slog::{o, slog_debug, slog_info};
-use slog_scope;
 use slog_scope_futures::future03::FutureExt as SLogFutureEx;
 use std::time::Instant;
 

@@ -229,7 +229,7 @@ async fn handle_jet_connect_impl(
                     let association_id = candidate.association_id();
                     let candidate_id = candidate.id();
 
-                    let mut remote_data = None;
+                    let mut file_pattern = None;
                     let mut recording_dir = None;
                     let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
                     let mut has_interceptor = false;
@@ -244,24 +244,14 @@ async fn handle_jet_connect_impl(
                             );
 
                             recording_dir = match &config.recording_path {
-                                Some(path) => {
-                                    interceptor.set_recording_directory(path.as_str());
+                                Some(path) if path.to_str().is_some() => {
+                                    interceptor.set_recording_directory(path.to_str().unwrap());
                                     Some(std::path::PathBuf::from(path))
                                 }
-                                None => interceptor.get_recording_directory(),
+                                _ => interceptor.get_recording_directory(),
                             };
 
-                            let file_pattern = interceptor.get_filename_pattern();
-
-                            let recording_info = config.recording_info.clone();
-                            remote_data = crate::plugin_manager::SogarData::new(
-                                recording_info.sogar_path.clone(),
-                                recording_info.registry_url.clone(),
-                                recording_info.username.clone(),
-                                recording_info.password.clone(),
-                                recording_info.image_name,
-                                Some(file_pattern),
-                            );
+                            file_pattern = Some(interceptor.get_filename_pattern());
 
                             recording_interceptor = Some(Box::new(interceptor));
                             has_interceptor = true;
@@ -272,13 +262,14 @@ async fn handle_jet_connect_impl(
                     // Rust does not drop it automatically before end of the function
                     std::mem::drop(jet_assc);
 
-                    let proxy_result = Proxy::new(config)
+                    let proxy_result = Proxy::new(config.clone())
                         .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
                         .await;
 
                     if has_interceptor {
-                        if let (Some(push_data), Some(dir)) = (remote_data, recording_dir) {
-                            push_data.push(dir.as_path(), association_id.clone().to_string())
+                        if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
+                            let registry = crate::registry::Registry::new(config);
+                            registry.manage_files(association_id.clone().to_string(), pattern, dir.as_path());
                         };
                     }
 
