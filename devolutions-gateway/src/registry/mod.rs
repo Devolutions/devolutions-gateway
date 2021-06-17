@@ -76,7 +76,14 @@ impl Registry {
             }
         }
 
-        let config_data = sogar_core::create_config();
+        let config_file = NamedTempFile::new();
+        if let Err(e) = &config_file {
+            error!("Failed to create config file file with error {}.", e);
+            return;
+        }
+
+        let config_file = config_file.unwrap();
+        let config_data = sogar_core::create_config(config_file.path());
 
         if let Err(e) = &config_data {
             error!("Failed to create file info about config with error {}. Skipping it.", e);
