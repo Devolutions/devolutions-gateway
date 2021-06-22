@@ -2,6 +2,12 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
+## 2021.1.5 (2021-06-22)
+  * `jetsocat` tool has been rewritten and CLI overhauled
+  * SOGAR registry support
+    * Recorded sessions can be pushed to a registry
+    * Devolutions Gateway itself can be used as a registry
+
 ## 2021.1.4 (2021-05-04)
   * Add logs to track all HTTP requests received and processed
   * Add Linux service registration support in debian package
