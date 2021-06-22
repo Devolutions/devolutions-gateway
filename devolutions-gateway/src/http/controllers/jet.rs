@@ -141,13 +141,11 @@ impl JetController {
         // create association
         let mut jet_associations = self.jet_associations.lock().compat().await;
 
-        if !jet_associations.contains_key(&association_id) {
-            jet_associations.insert(
-                association_id,
-                Association::new(association_id, JET_VERSION_V2, jet_tp_claim),
-            );
+        if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
+            e.insert(Association::new(association_id, JET_VERSION_V2, jet_tp_claim));
             start_remove_association_future(self.jet_associations.clone(), association_id).await;
         }
+
         let association = jet_associations
             .get_mut(&association_id)
             .expect("presence is checked above");

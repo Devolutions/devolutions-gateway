@@ -18,38 +18,42 @@ pub struct JetConnectReq {
 
 impl JetConnectReq {
     pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
-        if self.version == 1 {
-            stream.write_fmt(format_args!("GET / HTTP/1.1\r\n"))?;
-            stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
-            stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
-            stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_METHOD, "Connect"))?;
-            stream.write_fmt(format_args!(
-                "{}: {}\r\n",
-                JET_HEADER_ASSOCIATION,
-                &self.association.to_string()
-            ))?;
-            stream.write_fmt(format_args!(
-                "{}: {}\r\n",
-                JET_HEADER_VERSION,
-                &self.version.to_string()
-            ))?;
-            stream.write_fmt(format_args!("\r\n"))?;
-        } else {
-            // version = 2
-            stream.write_fmt(format_args!(
-                "GET /jet/connect/{}/{} HTTP/1.1\r\n",
-                &self.association.to_string(),
-                &self.candidate.to_string()
-            ))?;
-            stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
-            stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
-            stream.write_fmt(format_args!(
-                "{}: {}\r\n",
-                JET_HEADER_VERSION,
-                &self.version.to_string()
-            ))?;
-            stream.write_fmt(format_args!("\r\n"))?;
+        match self.version {
+            1 => {
+                stream.write_fmt(format_args!("GET / HTTP/1.1\r\n"))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
+                stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_METHOD, "Connect"))?;
+                stream.write_fmt(format_args!(
+                    "{}: {}\r\n",
+                    JET_HEADER_ASSOCIATION,
+                    &self.association.to_string()
+                ))?;
+                stream.write_fmt(format_args!(
+                    "{}: {}\r\n",
+                    JET_HEADER_VERSION,
+                    &self.version.to_string()
+                ))?;
+                stream.write_fmt(format_args!("\r\n"))?;
+            }
+            _ => {
+                // version = 2
+                stream.write_fmt(format_args!(
+                    "GET /jet/connect/{}/{} HTTP/1.1\r\n",
+                    &self.association.to_string(),
+                    &self.candidate.to_string()
+                ))?;
+                stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
+                stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
+                stream.write_fmt(format_args!(
+                    "{}: {}\r\n",
+                    JET_HEADER_VERSION,
+                    &self.version.to_string()
+                ))?;
+                stream.write_fmt(format_args!("\r\n"))?;
+            }
         }
+
         Ok(())
     }
 
