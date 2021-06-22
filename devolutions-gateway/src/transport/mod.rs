@@ -168,7 +168,7 @@ impl<T: AsyncRead + Unpin> JetStreamImpl<T> {
             nb_bytes_read,
             packet_interceptor: None,
             peer_addr,
-            peer_addr_str: peer_addr.clone().map_or("Unknown".to_string(), |addr| addr.to_string()),
+            peer_addr_str: peer_addr.map_or("Unknown".to_owned(), |addr| addr.to_string()),
             buffer,
         }
     }
