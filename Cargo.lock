@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2021.1.4"
+version = "2021.1.5"
 dependencies = [
  "base64 0.9.3",
  "byteorder",
@@ -1603,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2021.1.4"
+version = "2021.1.5"
 dependencies = [
  "anyhow",
  "async-tungstenite",
