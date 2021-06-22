@@ -57,8 +57,7 @@ spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", 
 indexmap = "1.0"
 dlopen = "0.1.8"
 dlopen_derive = "0.1.4"
-
-sogar-core = { version = "0.1.0", git = "https://github.com/Devolutions/sogar.git", branch = "sogar_registry" }
+sogar-core = "0.1"
 tempfile = "3.0"
 rust-argon2 = "0.8"
 
