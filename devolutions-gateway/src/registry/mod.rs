@@ -57,12 +57,12 @@ impl Registry {
         }
 
         if let Some(true) = config.keep_files {
-            thread::spawn(move || {
-                if let Some(duration) = config.keep_time {
+            if let Some(duration) = config.keep_time {
+                thread::spawn(move || {
                     thread::sleep(Duration::from_secs(duration as u64));
                     remove_files(files);
-                }
-            });
+                });
+            }
         } else {
             remove_files(files);
         }

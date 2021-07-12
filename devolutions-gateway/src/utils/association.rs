@@ -20,7 +20,7 @@ pub async fn remove_jet_association(
             }
         }
         if !association.is_connected() {
-            debug!("Association is removed!");
+            debug!("Association {} is removed!", association_id);
             let removed = jet_associations.remove(&association_id).is_some();
             return removed;
         } else {

@@ -3340,9 +3340,9 @@ dependencies = [
 
 [[package]]
 name = "sogar-core"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c22e32057677b2ae1773e28d709bea34a8d162cd8361e51b0d5e189df633f2"
+checksum = "f03ca9234022941163776929dcdea5c47d14995229138c07cf1c33da8cc84db6"
 dependencies = [
  "clap 2.33.3",
  "config",
