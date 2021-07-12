@@ -61,7 +61,10 @@ impl SogarData {
 
     fn invoke_command(&self, file_path: &str, reference: String) {
         if self.sogar_path.to_str().is_none() || !self.sogar_path.is_file() {
-            error!("Failed to retrieve path string or path is not a file: {}", self.sogar_path.display());
+            error!(
+                "Failed to retrieve path string or path is not a file: {}",
+                self.sogar_path.display()
+            );
             return;
         }
 

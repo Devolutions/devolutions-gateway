@@ -1,9 +1,10 @@
-use crate::{
-    config::{Config, SogarPermission, SogarUser},
-    http::middlewares::auth::{parse_auth_header, AuthHeaderType},
-};
+use crate::config::{Config, SogarPermission, SogarUser};
+use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
 use picky::jose::jwt::{JwtSig, JwtValidator};
-use saphir::{http, http_context::State, prelude::*, response::Builder as ResponseBuilder};
+use saphir::http;
+use saphir::http_context::State;
+use saphir::prelude::*;
+use saphir::response::Builder as ResponseBuilder;
 use slog_scope::error;
 use sogar_core::registry::{
     BLOB_DOWNLOAD_ENDPOINT, BLOB_EXIST_ENDPOINT, BLOB_GET_LOCATION_ENDPOINT, BLOB_UPLOAD_ENDPOINT,

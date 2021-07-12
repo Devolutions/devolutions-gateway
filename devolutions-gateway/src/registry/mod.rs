@@ -1,19 +1,14 @@
 mod push_files;
 
+use crate::config::Config;
+use crate::http::http_server::{NAMESPACE, REGISTRY_NAME};
 use crate::registry::push_files::{get_file_list_from_path, SogarData};
-use crate::{
-    config::Config,
-    http::http_server::{NAMESPACE, REGISTRY_NAME},
-};
 use slog_scope::{debug, error};
 use sogar_core::{create_annotation_for_filename, parse_digest, read_file_data, registry, FileInfo, Layer};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::Arc,
-    thread,
-    time::Duration,
-};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+use std::{fs, thread};
 use tempfile::NamedTempFile;
 
 pub struct Registry {
