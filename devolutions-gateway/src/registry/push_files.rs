@@ -57,16 +57,14 @@ impl SogarData {
         let reference = format!("{}:{}", self.image_name, tag);
         let joined_path: &str = &file_paths.join(";");
         self.invoke_command(joined_path, reference);
-        for filepath in file_paths {
-            if let Err(e) = fs::remove_file(filepath.as_str()) {
-                error!("Failed to delete file {} after push: {}", filepath, e);
-            }
-        }
     }
 
     fn invoke_command(&self, file_path: &str, reference: String) {
         if self.sogar_path.to_str().is_none() || !self.sogar_path.is_file() {
-            error!("Failed to retrieve path string or path is not a file.");
+            error!(
+                "Failed to retrieve path string or path is not a file: {}",
+                self.sogar_path.display()
+            );
             return;
         }
 

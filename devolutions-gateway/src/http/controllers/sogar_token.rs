@@ -1,14 +1,11 @@
 use crate::config::{Config, SogarUser};
-use picky::{
-    jose::{jws::JwsAlg, jwt::JwtSig},
-    key::PrivateKey,
-};
-use saphir::{
-    controller::Controller,
-    http::{Method, StatusCode},
-    macros::controller,
-    prelude::Request,
-};
+use picky::jose::jws::JwsAlg;
+use picky::jose::jwt::JwtSig;
+use picky::key::PrivateKey;
+use saphir::controller::Controller;
+use saphir::http::{Method, StatusCode};
+use saphir::macros::controller;
+use saphir::prelude::Request;
 use serde::{Deserialize, Serialize};
 use slog_scope::error;
 use sogar_core::AccessToken;
