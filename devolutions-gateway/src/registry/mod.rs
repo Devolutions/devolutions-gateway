@@ -38,7 +38,7 @@ impl Registry {
         }
     }
 
-    pub fn manage_files(&self, tag: String, file_pattern: String, recording_dir: &Path) {
+    pub async fn manage_files(&self, tag: String, file_pattern: String, recording_dir: &Path) {
         let config = self.config.sogar_registry_config.clone();
 
         let files = get_file_list_from_path(file_pattern.as_str(), recording_dir);
@@ -48,7 +48,7 @@ impl Registry {
         }
 
         if let Some(true) = config.push_files {
-            self.push_files(file_pattern, recording_dir, tag);
+            self.push_files(file_pattern, recording_dir, tag).await;
         }
 
         if let Some(true) = config.keep_files {
@@ -66,7 +66,7 @@ impl Registry {
     fn move_file_to_registry(&self, files: Vec<String>, tag: &str) {
         let mut layers = Vec::new();
         for file in files {
-            if let Some(file_data) = move_blob(file, self.registry_path.as_path()) {
+            if let Some(file_data) = move_blob(&file, self.registry_path.as_path()) {
                 layers.push(file_data.layer.clone());
             }
         }
@@ -87,14 +87,13 @@ impl Registry {
 
         let manifest_mime = create_and_move_manifest(self.registry_path.as_path(), config_data.unwrap(), layers, tag);
 
-        registry::add_artifacts_info(tag.to_string(), manifest_mime, self.registry_path.as_path());
+        registry::add_artifacts_info(tag, manifest_mime, self.registry_path.as_path());
     }
 
-    fn push_files(&self, file_pattern: String, recording_dir: &Path, tag: String) {
+    async fn push_files(&self, file_pattern: String, recording_dir: &Path, tag: String) {
         let sogar_push_data = self.config.sogar_registry_config.sogar_push_registry_info.clone();
 
         let remote_data = SogarData::new(
-            sogar_push_data.sogar_util_path.clone(),
             sogar_push_data.registry_url,
             sogar_push_data.username.clone(),
             sogar_push_data.password.clone(),
@@ -103,7 +102,7 @@ impl Registry {
         );
 
         if let Some(push_data) = remote_data {
-            push_data.push(recording_dir, tag)
+            push_data.push(recording_dir, tag).await
         };
     }
 }
@@ -153,9 +152,9 @@ fn create_and_move_manifest(
     Some(manifest_file_info.layer.media_type)
 }
 
-fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
-    let file_path = Path::new(file.as_str());
-    let mime_type = sogar_core::config::get_mime_type_from_file_extension(file.clone());
+fn move_blob(file: &str, registry_path: &Path) -> Option<FileInfo> {
+    let file_path = Path::new(file);
+    let mime_type = sogar_core::config::get_mime_type_from_file_extension(file);
     let annotations = create_annotation_for_filename(file_path);
     let file_data = read_file_data(file_path, mime_type, Some(annotations));
 
@@ -168,7 +167,7 @@ fn move_blob(file: String, registry_path: &Path) -> Option<FileInfo> {
     }
 
     let file_data = file_data.unwrap();
-    let digest = parse_digest(file_data.layer.digest.clone());
+    let digest = parse_digest(&file_data.layer.digest);
     if digest.is_none() {
         error!("Failed to parse digest for the file {}", file);
         return None;

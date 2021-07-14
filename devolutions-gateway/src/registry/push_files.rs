@@ -1,10 +1,10 @@
 use slog_scope::{debug, error};
+use sogar_core::config::{get_mime_type_from_file_extension, CommandData, CommandType, Settings};
+use sogar_core::export_sogar_file_artifact;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
 pub struct SogarData {
-    sogar_path: PathBuf,
     registry_url: String,
     username: String,
     password: String,
@@ -14,25 +14,17 @@ pub struct SogarData {
 
 impl SogarData {
     pub fn new(
-        sogar_path: Option<PathBuf>,
         registry_url: Option<String>,
         username: Option<String>,
         password: Option<String>,
         image_name: Option<String>,
         file_pattern: Option<String>,
     ) -> Option<Self> {
-        if let (
-            Some(sogar_path),
-            Some(registry_url),
-            Some(username),
-            Some(password),
-            Some(image_name),
-            Some(file_pattern),
-        ) = (sogar_path, registry_url, username, password, image_name, file_pattern)
+        if let (Some(registry_url), Some(username), Some(password), Some(image_name), Some(file_pattern)) =
+            (registry_url, username, password, image_name, file_pattern)
         {
             debug!("Sogar data created!");
             Some(SogarData {
-                sogar_path,
                 registry_url,
                 username,
                 password,
@@ -44,7 +36,7 @@ impl SogarData {
         }
     }
 
-    pub fn push(&self, path: &Path, tag: String) {
+    pub async fn push(&self, path: &Path, tag: String) {
         let file_paths = get_file_list_from_path(self.file_pattern.as_str(), path);
         if file_paths.is_empty() {
             debug!(
@@ -54,44 +46,23 @@ impl SogarData {
             return;
         }
 
-        let reference = format!("{}:{}", self.image_name, tag);
-        let joined_path: &str = &file_paths.join(";");
-        self.invoke_command(joined_path, reference);
-    }
+        let command_data = CommandData {
+            media_type: get_mime_type_from_file_extension(&file_paths[0]),
+            reference: format!("{}:{}", self.image_name, tag),
+            filepath: file_paths,
+        };
 
-    fn invoke_command(&self, file_path: &str, reference: String) {
-        if self.sogar_path.to_str().is_none() || !self.sogar_path.is_file() {
-            error!(
-                "Failed to retrieve path string or path is not a file: {}",
-                self.sogar_path.display()
-            );
-            return;
-        }
+        let sogar_setting = Settings {
+            registry_url: self.registry_url.clone(),
+            username: self.username.clone(),
+            password: self.password.clone(),
+            command_type: CommandType::Export,
+            command_data,
+            registry_cache: None,
+        };
 
-        let mut command = Command::new(self.sogar_path.to_str().unwrap());
-        let args = command
-            .arg("--registry-url")
-            .arg(self.registry_url.clone().as_str())
-            .arg("--username")
-            .arg(self.username.clone().as_str())
-            .arg("--password")
-            .arg(self.password.clone().as_str())
-            .arg("--export-artifact")
-            .arg("--reference")
-            .arg(reference)
-            .arg("--filepath")
-            .arg(file_path.to_string());
-
-        debug!("Command args for sogar are: {:?}", args);
-
-        match args.output() {
-            Ok(output) => {
-                if !output.status.success() {
-                    error!("Status of the output is fail!");
-                }
-                debug!("Sogar output: {:?}", output);
-            }
-            Err(e) => error!("Command failed with error: {}", e),
+        if let Err(e) = export_sogar_file_artifact(&sogar_setting).await {
+            error!("Export sogar file artifact failed: {}", e);
         }
     }
 }

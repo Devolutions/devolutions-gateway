@@ -269,7 +269,9 @@ async fn handle_jet_connect_impl(
                     if has_interceptor {
                         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
                             let registry = crate::registry::Registry::new(config);
-                            registry.manage_files(association_id.clone().to_string(), pattern, dir.as_path());
+                            registry
+                                .manage_files(association_id.clone().to_string(), pattern, dir.as_path())
+                                .await;
                         };
                     }
 

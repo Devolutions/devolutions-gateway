@@ -147,7 +147,9 @@ async fn handle_build_proxy(
 
         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
             let registry = Registry::new(config);
-            registry.manage_files(association_id.to_string(), pattern, dir.as_path());
+            registry
+                .manage_files(association_id.to_string(), pattern, dir.as_path())
+                .await;
         };
 
         proxy_result
