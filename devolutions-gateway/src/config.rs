@@ -32,7 +32,6 @@ const ARG_LOG_FILE: &str = "log-file";
 const ARG_SERVICE_MODE: &str = "service";
 const ARG_PLUGINS: &str = "plugins";
 const ARG_RECORDING_PATH: &str = "recording-path";
-const ARG_SOGAR_UTIL_PATH: &str = "sogar-path";
 const ARG_SOGAR_REGISTRY_URL: &str = "sogar-registry-url";
 const ARG_SOGAR_USERNAME: &str = "sogar-username";
 const ARG_SOGAR_PASSWORD: &str = "sogar-password";
@@ -82,7 +81,6 @@ pub struct CertificateConfig {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct SogarPushRegistryInfo {
-    pub sogar_util_path: Option<PathBuf>,
     pub registry_url: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
@@ -177,7 +175,6 @@ impl Default for Config {
                 keep_time: None,
                 push_files: None,
                 sogar_push_registry_info: SogarPushRegistryInfo {
-                    sogar_util_path: None,
                     registry_url: None,
                     username: None,
                     password: None,
@@ -259,8 +256,6 @@ pub struct ConfigFile {
     pub plugins: Option<Vec<String>>,
     #[serde(rename = "RecordingPath")]
     pub recording_path: Option<String>,
-    #[serde(rename = "SogarPath")]
-    pub sogar_util_path: Option<String>,
     #[serde(rename = "SogarRegistryUrl")]
     pub registry_url: Option<String>,
     #[serde(rename = "SogarUsername")]
@@ -603,27 +598,6 @@ impl Config {
                     }),
             )
             .arg(
-                Arg::with_name(ARG_SOGAR_UTIL_PATH)
-                    .long(ARG_SOGAR_UTIL_PATH)
-                    .value_name("PATH")
-                    .help("A path where the sogar utility is located including the name and extension.")
-                    .takes_value(true)
-                    .empty_values(false)
-                    .requires_all(&[
-                        ARG_SOGAR_REGISTRY_URL,
-                        ARG_SOGAR_USERNAME,
-                        ARG_SOGAR_PASSWORD,
-                        ARG_SOGAR_IMAGE_NAME,
-                    ])
-                    .validator(|sogar_path| {
-                        if PathBuf::from(sogar_path).is_file() {
-                            Ok(())
-                        } else {
-                            Err(String::from("The value does not exist or is not a file."))
-                        }
-                    }),
-            )
-            .arg(
                 Arg::with_name(ARG_SOGAR_REGISTRY_URL)
                     .long(ARG_SOGAR_REGISTRY_URL)
                     .value_name("URL")
@@ -789,10 +763,6 @@ impl Config {
                     .load_plugin(plugin.as_str())
                     .unwrap_or_else(|e| panic!("Failed to load plugin with error {}", e));
             }
-        }
-
-        if let Some(sogar_path) = matches.value_of(ARG_SOGAR_UTIL_PATH) {
-            config.sogar_registry_config.sogar_push_registry_info.sogar_util_path = Some(PathBuf::from(sogar_path));
         }
 
         if let Some(registry_url) = matches.value_of(ARG_SOGAR_REGISTRY_URL) {
@@ -979,8 +949,6 @@ impl Config {
         let plugins = config_file.plugins;
         let recording_path = config_file.recording_path.map(PathBuf::from);
 
-        let sogar_util_path = config_file.sogar_util_path.map(PathBuf::from);
-
         let registry_url = config_file.registry_url;
         let username = config_file.username;
         let password = config_file.password;
@@ -1024,7 +992,6 @@ impl Config {
                 keep_time,
                 push_files,
                 sogar_push_registry_info: SogarPushRegistryInfo {
-                    sogar_util_path,
                     registry_url,
                     username,
                     password,
