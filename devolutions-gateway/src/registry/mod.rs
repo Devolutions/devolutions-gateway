@@ -152,9 +152,9 @@ fn create_and_move_manifest(
     Some(manifest_file_info.layer.media_type)
 }
 
-fn move_blob(file: &str, registry_path: &Path) -> Option<FileInfo> {
-    let file_path = Path::new(file);
-    let mime_type = sogar_core::config::get_mime_type_from_file_extension(file);
+fn move_blob(file_path: &str, registry_path: &Path) -> Option<FileInfo> {
+    let mime_type = sogar_core::config::get_mime_type_from_file_extension(file_path);
+    let file_path = Path::new(file_path);
     let annotations = create_annotation_for_filename(file_path);
     let file_data = read_file_data(file_path, mime_type, Some(annotations));
 
@@ -169,7 +169,7 @@ fn move_blob(file: &str, registry_path: &Path) -> Option<FileInfo> {
     let file_data = file_data.unwrap();
     let digest = parse_digest(&file_data.layer.digest);
     if digest.is_none() {
-        error!("Failed to parse digest for the file {}", file);
+        error!("Failed to parse digest for the file {}", file_path.display());
         return None;
     }
 
@@ -184,7 +184,7 @@ fn move_blob(file: &str, registry_path: &Path) -> Option<FileInfo> {
             return None;
         }
     } else if blob_path.exists() {
-        debug!("File {} already saved in registry!", file.clone());
+        debug!("File {} already saved in registry!", file_path.display());
         return None;
     }
 
