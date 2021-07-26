@@ -10,13 +10,12 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 
 [dependencies]
 jet-proto = { path = "../jet-proto" }
-picky = { version = "6.0.0", default-features = false, features = ["jose"] }
+picky = { version = "6.3", default-features = false, features = ["jose"] }
 ceviche = "0.4"
 ctrlc = "3.1"
 clap = "2.32"
 cfg-if = "0.1"
-url = "1.7.1"
-url_serde = "0.2.0"
+url = { version = "2", features = ["serde"] }
 hostname = "^0.3"
 lazy_static = "1.2.0"
 tokio = { version = "1", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
@@ -60,6 +59,8 @@ dlopen_derive = "0.1.4"
 sogar-core = "0.2"
 tempfile = "3.0"
 rust-argon2 = "0.8"
+reqwest = "0.10"
+http = "0.2"
 
 [dependencies.saphir]
 version = "2.8"
@@ -73,6 +74,5 @@ winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libload
 embed-resource =  "1.3"
 
 [dev-dependencies]
-reqwest = "0.9.20"
 exitcode = "1.1"
 
