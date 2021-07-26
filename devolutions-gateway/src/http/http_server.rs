@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::http::controllers::health::HealthController;
+use crate::http::controllers::http_bridge::HttpBridgeController;
 use crate::http::controllers::jet::JetController;
 use crate::http::controllers::sessions::SessionsController;
 use crate::http::controllers::sogar_token::TokenController;
@@ -64,13 +65,17 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let sogar = SogarController::new(registry_name.as_str(), registry_namespace.as_str());
             let token_controller = TokenController::new(config.clone());
 
+            let http_bridge = HttpBridgeController::new(config.clone());
+
             info!("Configuring HTTP router");
+
             router
                 .controller(health)
                 .controller(jet)
                 .controller(session)
                 .controller(sogar)
                 .controller(token_controller)
+                .controller(http_bridge)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
         .build_stack_only()
