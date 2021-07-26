@@ -239,11 +239,22 @@ pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
 
-pub fn get_default_port_from_server_url(url: &Url) -> io::Result<u16> {
-    match url.scheme() {
-        "tcp" => Ok(8080),
-        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, "Bad server url")),
-    }
+pub fn url_to_socket_addr(url: &Url) -> io::Result<SocketAddr> {
+    use std::net::ToSocketAddrs;
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "bad host in url"))?;
+
+    let port = url
+        .port_or_known_default()
+        .or_else(|| match url.scheme() {
+            "tcp" => Some(8080),
+            _ => None,
+        })
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad or missing port in url"))?;
+
+    Ok((host, port).to_socket_addrs().unwrap().next().unwrap())
 }
 
 pub fn into_other_io_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {

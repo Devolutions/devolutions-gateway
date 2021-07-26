@@ -12,7 +12,6 @@ use crate::transport::JetTransport;
 #[derive(Serialize, Deserialize)]
 pub struct CandidateResponse {
     id: Uuid,
-    #[serde(with = "url_serde")]
     url: Option<Url>,
     state: CandidateState,
     association_id: Uuid,

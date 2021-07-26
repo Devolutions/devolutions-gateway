@@ -7,9 +7,7 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::JetTransport;
-use crate::utils::{
-    get_default_port_from_server_url, get_pub_key_from_der, load_certs, load_private_key, AsyncReadWrite,
-};
+use crate::utils::{get_pub_key_from_der, load_certs, load_private_key, url_to_socket_addr, AsyncReadWrite};
 use crate::websocket_client::{WebsocketService, WsClient};
 use hyper::service::service_fn;
 use slog::{o, Logger};
@@ -18,7 +16,7 @@ use slog_scope_futures::future03::FutureExt;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::{TcpSocket, TcpStream};
@@ -224,13 +222,7 @@ async fn start_tcp_server(
 
     info!("Starting TCP jet server ({})...", url);
 
-    let socket_addr = url
-        .with_default_port(|url| get_default_port_from_server_url(url).map_err(|_| ()))
-        .expect("invalid URL")
-        .to_socket_addrs()
-        .unwrap()
-        .next()
-        .unwrap();
+    let socket_addr = url_to_socket_addr(&url).expect("invalid url");
 
     let socket = TcpSocket::new_v4().unwrap();
     socket.bind(socket_addr).unwrap();
