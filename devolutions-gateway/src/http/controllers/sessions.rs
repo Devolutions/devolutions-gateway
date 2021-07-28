@@ -1,22 +1,26 @@
-use crate::SESSION_IN_PROGRESS_COUNT;
+use crate::http::HttpErrorStatus;
+use crate::{GatewaySessionInfo, SESSIONS_IN_PROGRESS};
 use saphir::controller::Controller;
 use saphir::http::{Method, StatusCode};
 use saphir::macros::controller;
-use std::sync::atomic::Ordering;
+use saphir::prelude::Json;
 
 pub struct SessionsController;
-
-impl Default for SessionsController {
-    fn default() -> Self {
-        Self
-    }
-}
 
 #[controller(name = "sessions")]
 impl SessionsController {
     #[get("/count")]
     async fn get_count(&self) -> (StatusCode, String) {
-        let sessions_count = SESSION_IN_PROGRESS_COUNT.load(Ordering::Relaxed).to_string();
-        (StatusCode::OK, sessions_count)
+        let sessions = SESSIONS_IN_PROGRESS.read().await;
+        (StatusCode::OK, sessions.len().to_string())
+    }
+
+    #[get("/")]
+    async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
+        let sessions = SESSIONS_IN_PROGRESS.read().await;
+
+        let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().map(|x| x.clone()).collect();
+
+        Ok(Json(sessions_in_progress))
     }
 }

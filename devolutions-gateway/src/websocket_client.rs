@@ -5,8 +5,7 @@ use crate::jet_client::JetAssociationsMap;
 use crate::transport::ws::WsTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::remove_jet_association;
-use crate::Proxy;
-
+use crate::{GatewaySessionInfo, Proxy};
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use saphir::error;
 use slog_scope::{error, info};
@@ -14,7 +13,6 @@ use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_compat_02::FutureExt;
-
 use url::Url;
 use uuid::Uuid;
 
@@ -170,7 +168,6 @@ async fn handle_jet_connect_impl(
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
 ) -> Result<Response<Body>, ()> {
-    use crate::http::controllers::jet::JetTpType;
     use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
     use crate::interceptor::PacketInterceptor;
 
@@ -183,10 +180,10 @@ async fn handle_jet_connect_impl(
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
 
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
-    let version = {
+    let (version, session_token) = {
         let associations = jet_associations.lock().await;
         let association = associations.get(&association_id).ok_or(())?;
-        association.version()
+        (association.version(), association.jet_session_token_claims().clone())
     };
     let res = process_req(&req);
 
@@ -234,7 +231,7 @@ async fn handle_jet_connect_impl(
                     let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
                     let mut has_interceptor = false;
 
-                    if let Some(JetTpType::Record) = assc.get_jet_tp_claim() {
+                    if assc.record_session() {
                         if config.plugins.is_some() {
                             let mut interceptor = PcapRecordingInterceptor::new(
                                 server_transport.peer_addr().unwrap(),
@@ -262,7 +259,7 @@ async fn handle_jet_connect_impl(
                     // Rust does not drop it automatically before end of the function
                     std::mem::drop(jet_assc);
 
-                    let proxy_result = Proxy::new(config.clone())
+                    let proxy_result = Proxy::new(config.clone(), session_token.into())
                         .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
                         .await;
 
@@ -383,7 +380,7 @@ impl WsClient {
         T: 'static + Transport + Send,
     {
         let server_transport = WsTransport::connect(&self.routing_url).await?;
-        Proxy::new(self.config.clone())
+        Proxy::new(self.config.clone(), GatewaySessionInfo::default())
             .build(server_transport, client_transport)
             .await
     }

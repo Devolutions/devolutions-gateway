@@ -1,5 +1,12 @@
+use crate::config::Config;
+use crate::http::controllers::health::build_health_response;
+use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
+use crate::jet::association::{Association, AssociationResponse};
+use crate::jet::candidate::Candidate;
+use crate::jet_client::JetAssociationsMap;
+use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
+use jet_proto::token::JetSessionTokenClaims;
 use jet_proto::JET_VERSION_V2;
-
 use saphir::controller::Controller;
 use saphir::http::{header, Method, StatusCode};
 use saphir::macros::controller;
@@ -9,14 +16,6 @@ use std::sync::Arc;
 use tokio_02::runtime::Handle;
 use tokio_compat_02::FutureExt;
 use uuid::Uuid;
-
-use crate::config::Config;
-use crate::http::controllers::health::build_health_response;
-use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
-use crate::jet::association::{Association, AssociationResponse};
-use crate::jet::candidate::Candidate;
-use crate::jet_client::JetAssociationsMap;
-use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 
 pub struct JetController {
     config: Arc<Config>,
@@ -64,29 +63,24 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
+        let session_token = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, ());
             }
             Ok(expected_token) => {
-                if !self.config.unrestricted
-                    && (expected_token.den_session_id.is_none()
-                        || expected_token.den_session_id.unwrap() != association_id)
-                {
+                if !self.config.unrestricted && (expected_token.jet_aid != association_id) {
                     slog_scope::error!(
-                        "Invalid session token: expected {:?}, got {}",
-                        expected_token.den_session_id,
+                        "Invalid session token: expected {}, got {}",
+                        expected_token.jet_aid.to_string(),
                         association_id
                     );
                     return (StatusCode::FORBIDDEN, ());
                 } else {
-                    expected_token.jet_tp
+                    expected_token
                 }
             }
         };
-
-        slog_scope::debug!("The jet_tp claim is {:?}", jet_tp_claim);
 
         // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
         // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
@@ -95,7 +89,7 @@ impl JetController {
 
         jet_associations.insert(
             association_id,
-            Association::new(association_id, JET_VERSION_V2, jet_tp_claim),
+            Association::new(association_id, JET_VERSION_V2, session_token),
         );
         start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
@@ -114,35 +108,30 @@ impl JetController {
         };
 
         // check the session token is signed by our provider if unrestricted mode is not set
-        let jet_tp_claim = match validate_session_token(self.config.as_ref(), &req) {
+        let session_token = match validate_session_token(self.config.as_ref(), &req) {
             Err(e) => {
                 slog_scope::error!("Couldn't validate session token: {}", e);
                 return (StatusCode::UNAUTHORIZED, None);
             }
             Ok(expected_token) => {
-                if !self.config.unrestricted
-                    && (expected_token.den_session_id.is_none()
-                        || expected_token.den_session_id.unwrap() != association_id)
-                {
+                if !self.config.unrestricted && (expected_token.jet_aid != association_id) {
                     slog_scope::error!(
-                        "Invalid session token: expected {:?}, got {}",
-                        expected_token.den_session_id,
+                        "Invalid session token: expected {}, got {}",
+                        expected_token.jet_aid.to_string(),
                         association_id
                     );
                     return (StatusCode::FORBIDDEN, None);
                 } else {
-                    expected_token.jet_tp
+                    expected_token
                 }
             }
         };
-
-        slog_scope::debug!("The jet_tp claim is {:?}", jet_tp_claim);
 
         // create association
         let mut jet_associations = self.jet_associations.lock().compat().await;
 
         if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
-            e.insert(Association::new(association_id, JET_VERSION_V2, jet_tp_claim));
+            e.insert(Association::new(association_id, JET_VERSION_V2, session_token));
             start_remove_association_future(self.jet_associations.clone(), association_id).await;
         }
 
@@ -185,20 +174,7 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "lowercase")]
-pub enum JetTpType {
-    Relay,
-    Record,
-}
-
-#[derive(Deserialize)]
-struct PartialSessionToken {
-    den_session_id: Option<Uuid>,
-    jet_tp: Option<JetTpType>,
-}
-
-fn validate_session_token(config: &Config, req: &Request) -> Result<PartialSessionToken, String> {
+fn validate_session_token(config: &Config, req: &Request) -> Result<JetSessionTokenClaims, String> {
     let key = config
         .provisioner_public_key
         .as_ref()
@@ -214,13 +190,10 @@ fn validate_session_token(config: &Config, req: &Request) -> Result<PartialSessi
     match parse_auth_header(auth_str) {
         Some((AuthHeaderType::Bearer, token)) => {
             use picky::jose::jwt::{JwtSig, JwtValidator};
-            let jwt = JwtSig::<PartialSessionToken>::decode(&token, key, &JwtValidator::no_check())
+            let jwt = JwtSig::<JetSessionTokenClaims>::decode(&token, key, &JwtValidator::no_check())
                 .map_err(|e| format!("Invalid session token: {:?}", e))?;
 
-            Ok(PartialSessionToken {
-                den_session_id: jwt.claims.den_session_id,
-                jet_tp: jwt.claims.jet_tp,
-            })
+            Ok(jwt.claims)
         }
         _ => Err("Invalid authorization type".to_string()),
     }

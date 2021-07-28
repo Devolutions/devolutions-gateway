@@ -1,23 +1,26 @@
-use crate::config::Config;
-use crate::rdp::RdpIdentity;
+use std::io;
+
 use bytes::BytesMut;
 use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use picky::jose::jwe::Jwe;
 use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
 use sspi::AuthIdentity;
-use std::io;
 use url::Url;
 use uuid::Uuid;
+
+use jet_proto::token::JetSessionTokenClaims;
+
+use crate::config::Config;
+use crate::rdp::RdpIdentity;
+use jet_proto::token::JetConnectionMode;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
 
 const JET_AP_RDP_TCP: &str = "rdp_tcp";
-const JET_CM_RDV: &str = "rdv";
 
 const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_AP_RDP_TCP];
-const EXPECTED_JET_CM_VALUES: [&str; 2] = ["fwd", JET_CM_RDV];
 
 pub enum TokenRoutingMode {
     RdpTcp(Url),
@@ -25,42 +28,12 @@ pub enum TokenRoutingMode {
     RdpTcpRendezvous(Uuid),
 }
 
-#[derive(Deserialize, Debug)]
-pub struct CredsClaims {
-    // Proxy credentials (client <-> jet)
-    prx_usr: String,
-    prx_pwd: String,
-
-    // Target credentials (jet <-> server)
-    dst_usr: String,
-    dst_pwd: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct RoutingClaims {
-    #[serde(flatten)]
-    creds: Option<CredsClaims>,
-
-    /// Destination Host <host>:<port>
-    dst_hst: Option<String>,
-
-    /// Identity connection mode used for Jet association
-    #[serde(default = "get_default_jet_connection_mode")]
-    jet_cm: String,
-
-    /// Application protocol used over Jet transport
-    jet_ap: String,
-
-    /// Jet assassination ID used for RdpTcpRendezvous routing mode
-    jet_aid: Option<String>,
-}
-
 pub fn is_encrypted(token: &str) -> bool {
     let num_dots = token.chars().fold(0, |acc, c| if c == '.' { acc + 1 } else { acc });
     num_dots == 4
 }
 
-pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<TokenRoutingMode, io::Error> {
+pub fn extract_routing_claims(pdu: &PreconnectionPdu, config: &Config) -> Result<JetSessionTokenClaims, io::Error> {
     let payload = pdu
         .payload
         .as_deref()
@@ -104,7 +77,7 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
-    let jwt_token = JwtSig::<RoutingClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
+    let jwt_token = JwtSig::<JetSessionTokenClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Failed to resolve route via JWT routing token: {}", e),
@@ -113,17 +86,21 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
     let claims = jwt_token.claims;
 
+    if claims.creds.is_some() && !is_encrypted {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Received a non encrypted JWT containing credentials. This is bad.",
+        ));
+    }
+
+    Ok(claims)
+}
+
+pub fn resolve_routing_mode(claims: &JetSessionTokenClaims) -> Result<TokenRoutingMode, io::Error> {
     if !EXPECTED_JET_AP_VALUES.contains(&claims.jet_ap.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             "Non-RDP JWT-based routing via preconnection PDU is not supported",
-        ));
-    }
-
-    if !EXPECTED_JET_CM_VALUES.contains(&claims.jet_cm.as_str()) {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "JWT-based routing via preconnection PDU only support Forward and RdpTcpRendezvous communication mode",
         ));
     }
 
@@ -155,8 +132,8 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
         None
     };
 
-    match claims.creds {
-        Some(creds) if is_encrypted => {
+    match &claims.creds {
+        Some(creds) => {
             let dest_host = dest_host.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -166,34 +143,20 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
             Ok(TokenRoutingMode::RdpTls(RdpIdentity {
                 proxy: AuthIdentity {
-                    username: creds.prx_usr,
-                    password: creds.prx_pwd,
+                    username: creds.prx_usr.to_owned(),
+                    password: creds.prx_pwd.to_owned(),
                     domain: None,
                 },
                 target: AuthIdentity {
-                    username: creds.dst_usr,
-                    password: creds.dst_pwd,
+                    username: creds.dst_usr.to_owned(),
+                    password: creds.dst_pwd.to_owned(),
                     domain: None,
                 },
                 dest_host,
             }))
         }
-        None if (claims.jet_ap == JET_AP_RDP_TCP && claims.jet_cm == JET_CM_RDV) => {
-            let jet_aid = claims.jet_aid.ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "RdpTcpRendezvous token routing mode, but Jet AssociationId is missing",
-                )
-            })?;
-
-            let jet_aid = Uuid::parse_str(jet_aid.as_str()).map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse Jet AssociationId: Invalid Uuid value: {}", err),
-                )
-            })?;
-
-            Ok(TokenRoutingMode::RdpTcpRendezvous(jet_aid))
+        None if (claims.jet_ap == JET_AP_RDP_TCP && matches!(claims.jet_cm, JetConnectionMode::Rdv)) => {
+            Ok(TokenRoutingMode::RdpTcpRendezvous(claims.jet_aid))
         }
         None => {
             let dest_host = dest_host.ok_or_else(|| {
@@ -202,10 +165,6 @@ pub fn resolve_routing_mode(pdu: &PreconnectionPdu, config: &Config) -> Result<T
 
             Ok(TokenRoutingMode::RdpTcp(dest_host))
         }
-        Some(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Received a non encrypted JWT containing credentials. This is bad.",
-        )),
     }
 }
 
@@ -222,8 +181,4 @@ pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<Preconnecti
             format!("Failed to parse preconnection PDU: {}", e),
         )),
     }
-}
-
-fn get_default_jet_connection_mode() -> String {
-    "fwd".to_owned()
 }

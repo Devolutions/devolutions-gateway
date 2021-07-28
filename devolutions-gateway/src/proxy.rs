@@ -4,27 +4,30 @@ use crate::interceptor::rdp::RdpMessageReader;
 use crate::interceptor::{MessageReader, PacketInterceptor, UnknownMessageReader, WaykMessageReader};
 use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 use crate::transport::{Transport, BIP_BUFFER_LEN};
-use crate::SESSION_IN_PROGRESS_COUNT;
+use crate::{add_session_in_progress, remove_session_in_progress, GatewaySessionInfo};
 use futures::{select, FutureExt, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 pub struct Proxy {
     config: Arc<Config>,
+    gateway_session_info: GatewaySessionInfo,
 }
 
 impl Proxy {
-    pub fn new(config: Arc<Config>) -> Self {
-        Proxy { config }
+    pub fn new(config: Arc<Config>, gateway_session_info: GatewaySessionInfo) -> Self {
+        Proxy {
+            config,
+            gateway_session_info,
+        }
     }
 
     pub async fn build<T: Transport, U: Transport>(
-        &self,
+        self,
         server_transport: T,
         client_transport: U,
     ) -> Result<(), io::Error> {
@@ -57,7 +60,7 @@ impl Proxy {
     }
 
     pub async fn build_with_message_reader<T: Transport, U: Transport>(
-        &self,
+        self,
         server_transport: T,
         client_transport: U,
         message_reader: Option<Box<dyn MessageReader>>,
@@ -93,7 +96,7 @@ impl Proxy {
     }
 
     pub async fn build_with_packet_interceptor<T: Transport, U: Transport>(
-        &self,
+        self,
         server_transport: T,
         client_transport: U,
         packet_interceptor: Option<Box<dyn PacketInterceptor>>,
@@ -115,7 +118,7 @@ impl Proxy {
         let mut downstream = jet_stream_server.forward(jet_sink_client).fuse();
         let mut upstream = jet_stream_client.forward(jet_sink_server).fuse();
 
-        SESSION_IN_PROGRESS_COUNT.fetch_add(1, Ordering::Relaxed);
+        add_session_in_progress(self.gateway_session_info.clone()).await;
 
         macro_rules! finish_remaining_forward {
             ( $fut:ident ( $stream_name:literal => $sink_name:literal ) ) => {
@@ -172,7 +175,7 @@ impl Proxy {
             },
         };
 
-        SESSION_IN_PROGRESS_COUNT.fetch_sub(1, Ordering::Relaxed);
+        remove_session_in_progress(self.gateway_session_info.id()).await;
 
         Ok(())
     }

@@ -207,7 +207,7 @@ mod tests {
         let file_name = "test1.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path_buf = PathBuf::from("test_registry1/test_image1").join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry1/test_image1").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
@@ -222,7 +222,11 @@ mod tests {
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
 
-        registry.manage_files(String::from("tag"), String::from("test1"), Path::new(files_dir_name));
+        tokio_test::block_on(registry.manage_files(
+            String::from("tag"),
+            String::from("test1"),
+            Path::new(files_dir_name),
+        ));
 
         assert_eq!(path_buf.join("tag").exists(), true);
         assert_eq!(path_buf.join("sha256").exists(), true);
@@ -245,7 +249,7 @@ mod tests {
         let file_name = "test2.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path_buf = PathBuf::from("test_registry2/test_image2").join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry2/test_image2").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
@@ -261,7 +265,11 @@ mod tests {
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
 
-        registry.manage_files(String::from("tag"), String::from("test2"), Path::new(files_dir_name));
+        tokio_test::block_on(registry.manage_files(
+            String::from("tag"),
+            String::from("test2"),
+            Path::new(files_dir_name),
+        ));
 
         assert_eq!(path_buf.join("tag").exists(), true);
         assert_eq!(path_buf.join("sha256").exists(), true);
@@ -284,7 +292,7 @@ mod tests {
         let file_name = "test3.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
 
-        let path_buf = PathBuf::from("test_registry3/test_image3").join(sogar_registry::ARTIFACTS_DIR);
+        let path_buf = PathBuf::from("test_registry3/test_image3").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
@@ -300,7 +308,11 @@ mod tests {
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
 
-        registry.manage_files(String::from("tag"), String::from("test3"), Path::new(files_dir_name));
+        tokio_test::block_on(registry.manage_files(
+            String::from("tag"),
+            String::from("test3"),
+            Path::new(files_dir_name),
+        ));
 
         assert_eq!(path_buf.join("tag").exists(), true);
         assert_eq!(path_buf.join("sha256").exists(), true);
