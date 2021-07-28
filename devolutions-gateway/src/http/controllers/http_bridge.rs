@@ -41,7 +41,7 @@ impl HttpBridgeController {
             .duration_since(UNIX_EPOCH)
             .expect("UNIX EPOCH is in the past")
             .as_secs();
-        let date = jwt::JwtDate::new(i64::try_from(numeric_date).unwrap());
+        let date = jwt::JwtDate::new_with_leeway(i64::try_from(numeric_date).unwrap(), 60);
         let validator = jwt::JwtValidator::strict(&date);
 
         let jws = jwt::JwtSig::decode(token_str, key, &validator).map_err(|e| (StatusCode::FORBIDDEN, e))?;
