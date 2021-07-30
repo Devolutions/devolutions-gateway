@@ -3,23 +3,29 @@ use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
 pub struct JetSessionTokenClaims {
-    /// Jet association ID
+    /// Jet Association ID
     #[serde(default = "Uuid::new_v4")]
     pub jet_aid: Uuid,
+
+    /// Jet Application protocol
+    pub jet_ap: String,
 
     /// Destination Host <host>:<port>
     pub dst_hst: Option<String>,
 
-    /// Application protocol
-    pub jet_ap: String,
-
-    #[serde(default)]
-    pub jet_rec: bool,
-
-    /// Connection Mode
+    /// Jet Connection Mode
     #[serde(default)]
     pub jet_cm: JetConnectionMode,
 
+    /// Jet Recording Policy
+    #[serde(default)]
+    pub jet_rec: bool,
+
+    /// Jet Filtering Policy
+    #[serde(default)]
+    pub jet_flt: bool,
+
+    /// Jet Creds
     #[serde(flatten)]
     pub creds: Option<CredsClaims>,
 }

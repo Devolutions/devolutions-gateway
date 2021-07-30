@@ -78,7 +78,7 @@ impl From<JetSessionTokenClaims> for GatewaySessionInfo {
             destination_host: session_token.dst_hst.clone(),
             connection_mode: session_token.jet_cm,
             recording_policy: session_token.jet_rec,
-            filtering_policy: false,
+            filtering_policy: session_token.jet_flt,
             start_timestamp: Utc::now(),
         }
     }
