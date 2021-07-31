@@ -1,8 +1,12 @@
+#[macro_use]
+extern crate serde_derive;
+
 pub mod accept;
 pub mod connect;
 pub mod test;
 pub mod token;
 pub mod utils;
+
 
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
