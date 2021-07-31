@@ -239,7 +239,7 @@ dependencies = [
  "http 0.1.21",
  "jet-proto",
  "structopt",
- "uuid 0.7.4",
+ "uuid 0.8.2",
 ]
 
 [[package]]
