@@ -7,7 +7,6 @@ pub mod test;
 pub mod token;
 pub mod utils;
 
-
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
