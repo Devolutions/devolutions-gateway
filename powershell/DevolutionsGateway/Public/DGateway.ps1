@@ -620,17 +620,23 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        # public claims
+        [ValidateSet('session', 'scope')]
+        [Parameter(Mandatory = $true)]
+        [string] $Type, #type
+
+        # public common claims
         [DateTime] $ExpirationTime, # exp
         [DateTime] $NotBefore, # nbf
         [DateTime] $IssuedAt, # iat
 
-        # private claims
+        # private session claims
         [string] $DestinationHost, # dst_hst
         [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
+        
+        #private scope claims
         [string] $Scope, # scope
 
         # signature parameters
@@ -664,25 +670,6 @@ function New-DGatewayToken {
         $ExpirationTime = $CurrentTime.AddMinutes(2)
     }
 
-    # If a scope is specified, connection mode and application protocol don't have to be set
-    if (-Not $Scope) {
-        if (-Not $ConnectionMode) {
-            if ($DestinationHost) {
-                $ConnectionMode = 'fwd'
-            } else {
-                $ConnectionMode = 'rdv'
-            }
-        }
-
-        if (-Not $ApplicationProtocol) {
-            if ($ConnectionMode -eq 'fwd') {
-                $ApplicationProtocol = 'rdp'
-            } else {
-                $ApplicationProtocol = 'wayk'
-            }
-        }
-    }
-    
     $iat = [System.DateTimeOffset]::new($IssuedAt).ToUnixTimeSeconds()
     $nbf = [System.DateTimeOffset]::new($NotBefore).ToUnixTimeSeconds()
     $exp = [System.DateTimeOffset]::new($ExpirationTime).ToUnixTimeSeconds()
@@ -696,21 +683,36 @@ function New-DGatewayToken {
         iat    = $iat
         nbf    = $nbf
         exp    = $exp
+        type   = $Type
     }
 
-    if ($ApplicationProtocol) {
+    if ($Type -eq 'session') {
+        if (-Not $ApplicationProtocol) {
+            if ($ConnectionMode -eq 'fwd') {
+                $ApplicationProtocol = 'rdp'
+            } else {
+                $ApplicationProtocol = 'wayk'
+            }
+        }
+
+        if (-Not $ConnectionMode) {
+            if ($DestinationHost) {
+                $ConnectionMode = 'fwd'
+            } else {
+                $ConnectionMode = 'rdv'
+            }
+        }
+            
         $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
-    }
-
-    if ($ConnectionMode) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'jet_cm' -Value $ConnectionMode
+
+        if ($DestinationHost) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+        }    
     }
 
-    if ($DestinationHost) {
-        $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
-    }
 
-    if ($Scope) {
+    if (($Type -eq 'scope') -and ($Scope)) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'scope' -Value $Scope
     }
 

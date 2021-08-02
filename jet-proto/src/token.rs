@@ -1,7 +1,8 @@
 use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type")]
+#[serde(rename_all = "lowercase")]
 pub enum JetAccessTokenClaims {
     Session(JetSessionTokenClaims),
     Scope(JetScopeTokenClaims),
