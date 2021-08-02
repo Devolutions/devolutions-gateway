@@ -631,6 +631,7 @@ function New-DGatewayToken {
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
+        [string] $Scope, # scope
 
         # signature parameters
         [string] $PrivateKeyFile
@@ -663,19 +664,22 @@ function New-DGatewayToken {
         $ExpirationTime = $CurrentTime.AddMinutes(2)
     }
 
-    if (-Not $ConnectionMode) {
-        if ($DestinationHost) {
-            $ConnectionMode = 'fwd'
-        } else {
-            $ConnectionMode = 'rdv'
+    # If a scope is specified, connection mode and application protocol don't have to be set
+    if (-Not $Scope) {
+        if (-Not $ConnectionMode) {
+            if ($DestinationHost) {
+                $ConnectionMode = 'fwd'
+            } else {
+                $ConnectionMode = 'rdv'
+            }
         }
-    }
 
-    if (-Not $ApplicationProtocol) {
-        if ($ConnectionMode -eq 'fwd') {
-            $ApplicationProtocol = 'rdp'
-        } else {
-            $ApplicationProtocol = 'wayk'
+        if (-Not $ApplicationProtocol) {
+            if ($ConnectionMode -eq 'fwd') {
+                $ApplicationProtocol = 'rdp'
+            } else {
+                $ApplicationProtocol = 'wayk'
+            }
         }
     }
     
@@ -692,12 +696,22 @@ function New-DGatewayToken {
         iat    = $iat
         nbf    = $nbf
         exp    = $exp
-        jet_ap = $ApplicationProtocol
-        jet_cm = $ConnectionMode
+    }
+
+    if ($ApplicationProtocol) {
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
+    }
+
+    if ($ConnectionMode) {
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_cm' -Value $ConnectionMode
     }
 
     if ($DestinationHost) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+    }
+
+    if ($Scope) {
+        $Payload | Add-Member -MemberType NoteProperty -Name 'scope' -Value $Scope
     }
 
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey

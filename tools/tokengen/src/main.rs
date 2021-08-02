@@ -29,6 +29,7 @@ enum SubCommand {
     RdpTcp(RdpTcpParams),
     RdpTls(RdpTlsIdentity),
     RdpTcpRendezvous(RdpTcpRendezvousJetAID),
+    Scope(ScopeParams),
 }
 
 #[derive(Clap)]
@@ -61,6 +62,19 @@ struct RdpTcpRendezvousJetAID {
     jet_aid: Uuid,
 }
 
+#[derive(Clap)]
+struct ScopeParams {
+    #[clap(long)]
+    scope: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(untagged)]
+enum GatewayAccessClaims {
+    RoutingClaims(RoutingClaims),
+    ScopeClaims(ScopeClaims),
+}
+
 #[derive(Clone, Serialize)]
 struct RoutingClaims {
     exp: i64,
@@ -71,6 +85,13 @@ struct RoutingClaims {
     dst_hst: Option<String>,
     #[serde(flatten)]
     identity: Option<RdpTlsIdentity>,
+}
+
+#[derive(Clone, Serialize)]
+struct ScopeClaims {
+    exp: i64,
+    nbf: i64,
+    scope: String,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -111,23 +132,34 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => None,
     };
 
-    let claims = RoutingClaims {
-        exp: exp as i64,
-        nbf: now.as_secs() as i64,
-        dst_hst,
-        jet_cm,
-        jet_ap,
-        jet_aid,
-        identity,
+    let claims = match &app.subcmd {
+        SubCommand::Scope(params) => GatewayAccessClaims::ScopeClaims(ScopeClaims {
+            exp: exp as i64,
+            nbf: now.as_secs() as i64,
+            scope: params.scope.clone(),
+        }),
+        _ => GatewayAccessClaims::RoutingClaims(RoutingClaims {
+            exp: exp as i64,
+            nbf: now.as_secs() as i64,
+            dst_hst,
+            jet_cm,
+            jet_ap,
+            jet_aid,
+            identity,
+        }),
     };
 
     let signed = JwtSig::new(JwsAlg::RS256, claims.clone()).encode(&private_key)?;
 
-    let result = if let Some(RdpTlsIdentity { jet_public_key, .. }) = claims.identity {
-        let public_key_str = std::fs::read_to_string(&jet_public_key)?;
-        let public_key_pem = public_key_str.parse::<Pem>()?;
-        let public_key = PublicKey::from_pem(&public_key_pem)?;
-        Jwe::new(JweAlg::RsaOaep256, JweEnc::Aes256Gcm, signed.into_bytes()).encode(&public_key)?
+    let result = if let GatewayAccessClaims::RoutingClaims(routing_claims) = claims {
+        if let Some(RdpTlsIdentity { jet_public_key, .. }) = routing_claims.identity {
+            let public_key_str = std::fs::read_to_string(&jet_public_key)?;
+            let public_key_pem = public_key_str.parse::<Pem>()?;
+            let public_key = PublicKey::from_pem(&public_key_pem)?;
+            Jwe::new(JweAlg::RsaOaep256, JweEnc::Aes256Gcm, signed.into_bytes()).encode(&public_key)?
+        } else {
+            signed
+        }
     } else {
         signed
     };
