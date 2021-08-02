@@ -33,7 +33,7 @@ impl JetRendezvousTcpProxy {
             association_id,
         } = self;
 
-        let mut server_transport = {
+        let (mut server_transport, session_token) = {
             let mut jet_associations = jet_associations.lock().await;
 
             let assc = jet_associations.get_mut(&association_id).ok_or_else(|| {
@@ -58,7 +58,7 @@ impl JetRendezvousTcpProxy {
             candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
             candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-            transport
+            (transport, assc.jet_session_token_claims().clone())
         };
 
         server_transport.write_buf(&mut leftover_request).await.map_err(|e| {
@@ -66,7 +66,7 @@ impl JetRendezvousTcpProxy {
             e
         })?;
 
-        let proxy_result = Proxy::new(config)
+        let proxy_result = Proxy::new(config, session_token.into())
             .build_with_message_reader(server_transport, client_transport, None)
             .await
             .map_err(|e| {

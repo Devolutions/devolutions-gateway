@@ -1,12 +1,11 @@
-use std::io;
-use std::sync::Arc;
-
-use url::Url;
-
 use crate::config::Config;
 use crate::proxy::Proxy;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::Transport;
+use crate::GatewaySessionInfo;
+use std::io;
+use std::sync::Arc;
+use url::Url;
 
 pub struct Client {
     routing_url: Url,
@@ -23,7 +22,7 @@ impl Client {
     {
         let server_transport = TcpTransport::connect(&self.routing_url).await?;
 
-        Proxy::new(self.config.clone())
+        Proxy::new(self.config.clone(), GatewaySessionInfo::default())
             .build(server_transport, client_transport)
             .await
     }

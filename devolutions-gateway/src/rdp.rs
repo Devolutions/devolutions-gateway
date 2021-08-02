@@ -91,10 +91,11 @@ impl RdpClient {
             jet_associations,
         } = self;
 
-        let (client, mode) = AcceptConnectionFuture::new(client, config.clone()).await.map_err(|e| {
-            error!("Accept connection failed: {}", e);
-            e
-        })?;
+        let (client, mode, jet_session_token_claims) =
+            AcceptConnectionFuture::new(client, config.clone()).await.map_err(|e| {
+                error!("Accept connection failed: {}", e);
+                e
+            })?;
 
         match mode {
             AcceptConnectionMode::RdpTcp {
@@ -110,13 +111,16 @@ impl RdpClient {
                     error!("Failed to write leftover request: {}", e);
                     e
                 })?;
-                Proxy::new(config)
-                    .build_with_message_reader(server_conn, client_transport, None)
+
+                let result = Proxy::new(config, jet_session_token_claims.into())
+                    .build_with_packet_interceptor(server_conn, client_transport, None)
                     .await
                     .map_err(|e| {
                         error!("Encountered a failure during plain tcp traffic proxying: {}", e);
                         e
-                    })
+                    });
+
+                result
             }
             AcceptConnectionMode::RdpTcpRendezvous {
                 association_id,
@@ -132,7 +136,7 @@ impl RdpClient {
                 info!("Starting RDP-TLS redirection");
 
                 let proxy_connection =
-                    ConnectionSequenceFuture::new(client, request, tls_public_key, tls_acceptor, identity)
+                    ConnectionSequenceFuture::new(client, request, tls_public_key, tls_acceptor, identity.clone())
                         .await
                         .map_err(|e| {
                             error!("RDP Connection Sequence failed: {}", e);
@@ -178,7 +182,7 @@ impl RdpClient {
                 let client_tls = client_transport.into_inner();
                 let server_tls = server_transport.into_inner();
 
-                Proxy::new(config)
+                Proxy::new(config, jet_session_token_claims.into())
                     .build_with_message_reader(
                         TcpTransport::new_tls(server_tls),
                         TcpTransport::new_tls(client_tls),

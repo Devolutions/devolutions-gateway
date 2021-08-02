@@ -8,17 +8,16 @@ use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::test::{JetTestReq, JetTestRsp};
-use jet_proto::{JetMessage, StatusCode, JET_VERSION_V1, JET_VERSION_V2};
+use jet_proto::{JetMessage, StatusCode, JET_VERSION_V2};
 use slog_scope::{debug, error};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::http::controllers::jet::{remove_association, JetTpType};
 use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
 use crate::jet::association::Association;
-use crate::jet::candidate::{Candidate, CandidateState};
+use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::registry::Registry;
 use crate::transport::tcp::TcpTransport;
@@ -26,6 +25,7 @@ use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::Proxy;
+use jet_proto::token::JetSessionTokenClaims;
 use std::path::PathBuf;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
@@ -94,7 +94,7 @@ async fn handle_build_tls_proxy(
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
 
-        Proxy::new(config)
+        Proxy::new(config, response.session_token.into())
             .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
             .await
     } else {
@@ -118,7 +118,7 @@ async fn handle_build_proxy(
 
     let associations = jet_associations.lock().await;
     if let Some(association) = associations.get(&association_id) {
-        if let Some(JetTpType::Record) = association.get_jet_tp_claim() {
+        if association.record_session() {
             if config.plugins.is_some() {
                 let mut interceptor = PcapRecordingInterceptor::new(
                     response.server_transport.peer_addr().unwrap(),
@@ -154,7 +154,7 @@ async fn handle_build_proxy(
 
         proxy_result
     } else {
-        Proxy::new(config)
+        Proxy::new(config, response.session_token.into())
             .build(response.server_transport, response.client_transport)
             .await
     }
@@ -239,24 +239,13 @@ impl HandleAcceptJetMsg {
     }
 
     async fn handle_create_response(&mut self) -> Result<Vec<u8>, io::Error> {
-        let (status_code, association) = {
+        let (status_code, association_id) = {
             let mut jet_associations = self.jet_associations.lock().await;
 
             match self.request_msg.version {
                 1 => {
-                    // Candidate creation
-                    let mut candidate = Candidate::new_v1();
-                    candidate.set_state(CandidateState::Accepted);
-
-                    // Association creation
-                    let uuid = Uuid::new_v4();
-                    let mut association = Association::new(uuid, JET_VERSION_V1, None);
-                    association.add_candidate(candidate);
-
-                    self.association_uuid.replace(uuid);
-                    jet_associations.insert(uuid, association);
-
-                    (StatusCode::OK, uuid)
+                    // Not supported anymore
+                    (StatusCode::BAD_REQUEST, Uuid::nil())
                 }
                 2 => {
                     let mut status_code = StatusCode::BAD_REQUEST;
@@ -279,21 +268,17 @@ impl HandleAcceptJetMsg {
                 }
                 _ => {
                     // No jet message exist with version different than 1 or 2
+                    // TODO : Could we crash if somebody send something else ?
                     unreachable!()
                 }
             }
         };
 
-        if self.request_msg.version == 1 && status_code == StatusCode::OK {
-            self.remove_association_future
-                .replace(Box::pin(remove_association(self.jet_associations.clone(), association)));
-        }
-
         // Build response
         let response_msg = JetMessage::JetAcceptRsp(JetAcceptRsp {
             status_code,
             version: self.request_msg.version,
-            association,
+            association: association_id,
             instance: self.config.hostname.clone(),
             timeout: ACCEPT_REQUEST_TIMEOUT.as_secs() as u32,
         });
@@ -362,12 +347,16 @@ async fn handle_connect_jet_msg(
     let mut server_transport = None;
     let mut association_id = None;
     let mut candidate_id = None;
+    let mut session_token = None;
+
     // Find the server transport
     let mut status_code = StatusCode::BAD_REQUEST;
 
     let mut jet_associations = jet_associations.lock().await;
 
     if let Some(association) = jet_associations.get_mut(&request_msg.association) {
+        session_token = Some(association.jet_session_token_claims().clone());
+
         let candidate = match (association.version(), request_msg.version) {
             (1, 1) => {
                 // Only one candidate exists in version 1 and there is no candidate id.
@@ -432,13 +421,21 @@ async fn handle_connect_jet_msg(
     client_transport.write(&response_msg).await?;
 
     // If server stream found, start the proxy
-    match (server_transport.take(), association_id.take(), candidate_id.take()) {
-        (Some(server_transport), Some(association_id), Some(candidate_id)) => Ok(HandleConnectJetMsgResponse {
-            client_transport,
-            server_transport,
-            association_id,
-            candidate_id,
-        }),
+    match (
+        server_transport.take(),
+        association_id.take(),
+        candidate_id.take(),
+        session_token.take(),
+    ) {
+        (Some(server_transport), Some(association_id), Some(candidate_id), Some(session_token)) => {
+            Ok(HandleConnectJetMsgResponse {
+                client_transport,
+                server_transport,
+                association_id,
+                candidate_id,
+                session_token,
+            })
+        }
         _ => Err(error_other(format!(
             "Invalid association ID received: {}",
             request_msg.association
@@ -451,6 +448,7 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: JetTransport,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
+    pub session_token: JetSessionTokenClaims,
 }
 
 async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {

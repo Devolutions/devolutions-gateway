@@ -48,7 +48,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             info!("Loading HTTP controllers");
             let health = HealthController::new(config.clone());
             let jet = JetController::new(config.clone(), jet_associations.clone());
-            let session = SessionsController::default();
+            let session = SessionsController;
 
             let registry_name = config
                 .sogar_registry_config

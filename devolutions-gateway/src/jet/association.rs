@@ -1,9 +1,9 @@
-use crate::http::controllers::jet::JetTpType;
 use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
 use crate::jet::TransportType;
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use jet_proto::token::JetSessionTokenClaims;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -12,17 +12,17 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
-    jet_tp: Option<JetTpType>,
+    session_token: JetSessionTokenClaims,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8, jet_tp: Option<JetTpType>) -> Self {
+    pub fn new(id: Uuid, version: u8, session_token: JetSessionTokenClaims) -> Self {
         Association {
             id,
             version,
             creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
-            jet_tp,
+            session_token,
         }
     }
 
@@ -92,8 +92,12 @@ impl Association {
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 
-    pub fn get_jet_tp_claim(&self) -> Option<JetTpType> {
-        self.jet_tp.clone()
+    pub fn jet_session_token_claims(&self) -> &JetSessionTokenClaims {
+        &self.session_token
+    }
+
+    pub fn record_session(&self) -> bool {
+        self.session_token.jet_rec
     }
 }
 

@@ -5,6 +5,7 @@ use crate::transport::x224::NegotiationWithClientTransport;
 use bytes::BytesMut;
 use futures::ready;
 use ironrdp::{nego, PduBufferParsing};
+use jet_proto::token::JetSessionTokenClaims;
 use std::future::Future;
 use std::io;
 use std::ops::DerefMut;
@@ -39,7 +40,7 @@ pub struct AcceptConnectionFuture {
     nego_transport: NegotiationWithClientTransport,
     client: Option<TcpStream>,
     buffer: BytesMut,
-    rdp_identity: Option<RdpIdentity>,
+    rdp_identity: Option<(RdpIdentity, JetSessionTokenClaims)>,
     config: Arc<Config>,
 }
 
@@ -88,7 +89,7 @@ impl AcceptConnectionFuture {
 }
 
 impl Future for AcceptConnectionFuture {
-    type Output = Result<(TcpStream, AcceptConnectionMode), io::Error>;
+    type Output = Result<(TcpStream, AcceptConnectionMode, JetSessionTokenClaims), io::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut more_data_required = true;
@@ -101,12 +102,14 @@ impl Future for AcceptConnectionFuture {
                 None => match decode_preconnection_pdu(&mut self.buffer) {
                     Ok(Some(pdu)) => {
                         let leftover_request = self.buffer.split_off(pdu.buffer_length());
-                        let mode = preconnection_pdu::resolve_routing_mode(&pdu, &self.config)?;
+                        let routing_claims = preconnection_pdu::extract_routing_claims(&pdu, &self.config)?;
+                        let mode = preconnection_pdu::resolve_routing_mode(&routing_claims)?;
                         match mode {
                             TokenRoutingMode::RdpTcp(url) => {
                                 return Poll::Ready(Ok((
                                     self.client.take().unwrap(),
                                     AcceptConnectionMode::RdpTcp { url, leftover_request },
+                                    routing_claims.into(),
                                 )));
                             }
                             TokenRoutingMode::RdpTcpRendezvous(association_id) => {
@@ -116,11 +119,12 @@ impl Future for AcceptConnectionFuture {
                                         association_id,
                                         leftover_request,
                                     },
+                                    routing_claims.into(),
                                 )));
                             }
                             TokenRoutingMode::RdpTls(identity) => {
                                 self.buffer = leftover_request;
-                                self.rdp_identity = Some(identity);
+                                self.rdp_identity = Some((identity, routing_claims.into()));
                                 // assume that we received connection request in the same buffer
                                 // as preconnection_pdu
                                 more_data_required = false;
@@ -141,7 +145,7 @@ impl Future for AcceptConnectionFuture {
                         )));
                     }
                 },
-                Some(identity) => {
+                Some((identity, claims)) => {
                     let Self {
                         nego_transport,
                         buffer,
@@ -154,11 +158,12 @@ impl Future for AcceptConnectionFuture {
                             return Poll::Ready(Ok((
                                 client.take().unwrap(),
                                 AcceptConnectionMode::RdpTls { identity, request },
+                                claims,
                             )));
                         }
                         Ok(None) => {
                             // Read more data, keep the same state
-                            *rdp_identity = Some(identity);
+                            *rdp_identity = Some((identity, claims));
                             more_data_required = true;
                         }
                         Err(e) => {
