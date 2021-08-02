@@ -1,4 +1,5 @@
 pub mod controllers;
+pub mod guards;
 pub mod http_server;
 pub mod middlewares;
 

@@ -1,6 +1,13 @@
 use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
+#[serde(untagged)]
+pub enum JetAccessTokenClaims {
+    Session(JetSessionTokenClaims),
+    Scope(JetScopeTokenClaims),
+}
+
+#[derive(Clone, Deserialize)]
 pub struct JetSessionTokenClaims {
     /// Jet Association ID
     #[serde(default = "Uuid::new_v4")]
@@ -35,7 +42,7 @@ impl JetSessionTokenClaims {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum JetConnectionMode {
     Rdv,
@@ -57,4 +64,15 @@ pub struct CredsClaims {
     // Target credentials (jet <-> server)
     pub dst_usr: String,
     pub dst_pwd: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetScopeTokenClaims {
+    pub scope: JetAccessScope,
+}
+
+#[derive(Clone, Deserialize, PartialEq)]
+pub enum JetAccessScope {
+    #[serde(rename = "gateway.sessions.read")]
+    GatewaySessionsRead,
 }

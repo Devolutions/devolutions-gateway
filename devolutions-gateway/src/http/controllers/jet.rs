@@ -1,14 +1,14 @@
 use crate::config::Config;
 use crate::http::controllers::health::build_health_response;
-use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
+use crate::http::guards::access::{AccessGuard, JetAccessType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAccessTokenClaims;
 use jet_proto::JET_VERSION_V2;
 use saphir::controller::Controller;
-use saphir::http::{header, Method, StatusCode};
+use saphir::http::{Method, StatusCode};
 use saphir::macros::controller;
 use saphir::request::Request;
 use slog_scope::info;
@@ -52,102 +52,91 @@ impl JetController {
     }
 
     #[post("/association/<association_id>")]
+    #[guard(AccessGuard, init_expr = r#"JetAccessType::Session"#)]
     async fn create_association(&self, req: Request) -> (StatusCode, ()) {
-        let association_id = match req
-            .captures()
-            .get("association_id")
-            .and_then(|id| Uuid::parse_str(id).ok())
-        {
-            Some(id) => id,
-            None => return (StatusCode::BAD_REQUEST, ()),
-        };
+        if let Some(JetAccessTokenClaims::Session(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+            let association_id = match req
+                .captures()
+                .get("association_id")
+                .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                Some(id) => id,
+                None => return (StatusCode::BAD_REQUEST, ()),
+            };
 
-        // check the session token is signed by our provider if unrestricted mode is not set
-        let session_token = match validate_session_token(self.config.as_ref(), &req) {
-            Err(e) => {
-                slog_scope::error!("Couldn't validate session token: {}", e);
-                return (StatusCode::UNAUTHORIZED, ());
+            if session_token.jet_aid != association_id {
+                slog_scope::error!(
+                    "Invalid session token: expected {}, got {}",
+                    session_token.jet_aid.to_string(),
+                    association_id
+                );
+                return (StatusCode::FORBIDDEN, ());
             }
-            Ok(expected_token) => {
-                if !self.config.unrestricted && (expected_token.jet_aid != association_id) {
-                    slog_scope::error!(
-                        "Invalid session token: expected {}, got {}",
-                        expected_token.jet_aid.to_string(),
-                        association_id
-                    );
-                    return (StatusCode::FORBIDDEN, ());
-                } else {
-                    expected_token
-                }
-            }
-        };
 
-        // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
-        // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
-        // when saphir perform transition to tokio 0.3
-        let mut jet_associations = self.jet_associations.lock().compat().await;
+            // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
+            // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
+            // when saphir perform transition to tokio 0.3
+            let mut jet_associations = self.jet_associations.lock().compat().await;
 
-        jet_associations.insert(
-            association_id,
-            Association::new(association_id, JET_VERSION_V2, session_token),
-        );
-        start_remove_association_future(self.jet_associations.clone(), association_id).await;
+            jet_associations.insert(
+                association_id,
+                Association::new(association_id, JET_VERSION_V2, session_token.clone()),
+            );
+            start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
-        (StatusCode::OK, ())
+            (StatusCode::OK, ())
+        } else {
+            (StatusCode::UNAUTHORIZED, ())
+        }
     }
 
     #[post("/association/<association_id>/candidates")]
+    #[guard(AccessGuard, init_expr = r#"JetAccessType::Session"#)]
     async fn gather_association_candidates(&self, req: Request) -> (StatusCode, Option<String>) {
-        let association_id = match req
-            .captures()
-            .get("association_id")
-            .and_then(|id| Uuid::parse_str(id).ok())
-        {
-            Some(id) => id,
-            None => return (StatusCode::BAD_REQUEST, None),
-        };
+        if let Some(JetAccessTokenClaims::Session(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+            let association_id = match req
+                .captures()
+                .get("association_id")
+                .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                Some(id) => id,
+                None => return (StatusCode::BAD_REQUEST, None),
+            };
 
-        // check the session token is signed by our provider if unrestricted mode is not set
-        let session_token = match validate_session_token(self.config.as_ref(), &req) {
-            Err(e) => {
-                slog_scope::error!("Couldn't validate session token: {}", e);
-                return (StatusCode::UNAUTHORIZED, None);
+            if session_token.jet_aid != association_id {
+                slog_scope::error!(
+                    "Invalid session token: expected {}, got {}",
+                    session_token.jet_aid.to_string(),
+                    association_id
+                );
+                return (StatusCode::FORBIDDEN, None);
             }
-            Ok(expected_token) => {
-                if !self.config.unrestricted && (expected_token.jet_aid != association_id) {
-                    slog_scope::error!(
-                        "Invalid session token: expected {}, got {}",
-                        expected_token.jet_aid.to_string(),
-                        association_id
-                    );
-                    return (StatusCode::FORBIDDEN, None);
-                } else {
-                    expected_token
+
+            // create association if needed
+
+            let mut jet_associations = self.jet_associations.lock().compat().await;
+
+            if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
+                e.insert(Association::new(association_id, JET_VERSION_V2, session_token.clone()));
+                start_remove_association_future(self.jet_associations.clone(), association_id).await;
+            }
+
+            let association = jet_associations
+                .get_mut(&association_id)
+                .expect("presence is checked above");
+
+            if association.get_candidates().is_empty() {
+                for listener in &self.config.listeners {
+                    if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches('/')) {
+                        association.add_candidate(candidate);
+                    }
                 }
             }
-        };
 
-        // create association
-        let mut jet_associations = self.jet_associations.lock().compat().await;
-
-        if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
-            e.insert(Association::new(association_id, JET_VERSION_V2, session_token));
-            start_remove_association_future(self.jet_associations.clone(), association_id).await;
+            (StatusCode::OK, Some(association.gather_candidate().to_string()))
+        } else {
+            (StatusCode::UNAUTHORIZED, None)
         }
-
-        let association = jet_associations
-            .get_mut(&association_id)
-            .expect("presence is checked above");
-
-        if association.get_candidates().is_empty() {
-            for listener in &self.config.listeners {
-                if let Some(candidate) = Candidate::new(&listener.external_url.to_string().trim_end_matches('/')) {
-                    association.add_candidate(candidate);
-                }
-            }
-        }
-
-        (StatusCode::OK, Some(association.gather_candidate().to_string()))
     }
 
     #[get("/health")]
@@ -171,30 +160,5 @@ pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid
                 );
             }
         });
-    }
-}
-
-fn validate_session_token(config: &Config, req: &Request) -> Result<JetSessionTokenClaims, String> {
-    let key = config
-        .provisioner_public_key
-        .as_ref()
-        .ok_or_else(|| "Provisioner public key is missing".to_string())?;
-
-    let auth_header = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .ok_or_else(|| "Authorization header not present in request.".to_string())?;
-
-    let auth_str = auth_header.to_str().map_err(|e| e.to_string())?;
-
-    match parse_auth_header(auth_str) {
-        Some((AuthHeaderType::Bearer, token)) => {
-            use picky::jose::jwt::{JwtSig, JwtValidator};
-            let jwt = JwtSig::<JetSessionTokenClaims>::decode(&token, key, &JwtValidator::no_check())
-                .map_err(|e| format!("Invalid session token: {:?}", e))?;
-
-            Ok(jwt.claims)
-        }
-        _ => Err("Invalid authorization type".to_string()),
     }
 }
