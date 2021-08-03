@@ -620,7 +620,7 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        [ValidateSet('session', 'scope')]
+        [ValidateSet('association', 'scope')]
         [Parameter(Mandatory = $true)]
         [string] $Type, #type
 
@@ -629,7 +629,7 @@ function New-DGatewayToken {
         [DateTime] $NotBefore, # nbf
         [DateTime] $IssuedAt, # iat
 
-        # private session claims
+        # private association claims
         [string] $DestinationHost, # dst_hst
         [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string] $ApplicationProtocol, # jet_ap
@@ -686,7 +686,7 @@ function New-DGatewayToken {
         type   = $Type
     }
 
-    if ($Type -eq 'session') {
+    if ($Type -eq 'association') {
         if (-Not $ApplicationProtocol) {
             if ($ConnectionMode -eq 'fwd') {
                 $ApplicationProtocol = 'rdp'

@@ -39,6 +39,11 @@ impl HttpErrorStatus {
     }
 
     #[track_caller]
+    fn unauthorized<T: Display + Send + 'static>(source: T) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, source)
+    }
+
+    #[track_caller]
     fn internal<T: Display + Send + 'static>(source: T) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, source)
     }

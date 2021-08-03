@@ -25,7 +25,7 @@ use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::Proxy;
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 use std::path::PathBuf;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
@@ -448,7 +448,7 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: JetTransport,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
-    pub session_token: JetSessionTokenClaims,
+    pub session_token: JetAssociationTokenClaims,
 }
 
 async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {

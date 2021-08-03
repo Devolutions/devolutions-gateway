@@ -4,12 +4,13 @@ use uuid::Uuid;
 #[serde(tag = "type")]
 #[serde(rename_all = "lowercase")]
 pub enum JetAccessTokenClaims {
-    Session(JetSessionTokenClaims),
+    Association(JetAssociationTokenClaims),
     Scope(JetScopeTokenClaims),
+    Bridge(JetBridgeTokenClaims),
 }
 
 #[derive(Clone, Deserialize)]
-pub struct JetSessionTokenClaims {
+pub struct JetAssociationTokenClaims {
     /// Jet Association ID
     #[serde(default = "Uuid::new_v4")]
     pub jet_aid: Uuid,
@@ -37,7 +38,7 @@ pub struct JetSessionTokenClaims {
     pub creds: Option<CredsClaims>,
 }
 
-impl JetSessionTokenClaims {
+impl JetAssociationTokenClaims {
     pub fn get_jet_ap(&self) -> String {
         self.jet_ap.clone()
     }
@@ -76,4 +77,11 @@ pub struct JetScopeTokenClaims {
 pub enum JetAccessScope {
     #[serde(rename = "gateway.sessions.read")]
     GatewaySessionsRead,
+    #[serde(rename = "gateway.associations.read")]
+    GatewayAssociationsRead,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetBridgeTokenClaims {
+    pub target: String,
 }

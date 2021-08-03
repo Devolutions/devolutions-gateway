@@ -3,7 +3,7 @@ use crate::jet::TransportType;
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -12,11 +12,11 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
-    session_token: JetSessionTokenClaims,
+    session_token: JetAssociationTokenClaims,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8, session_token: JetSessionTokenClaims) -> Self {
+    pub fn new(id: Uuid, version: u8, session_token: JetAssociationTokenClaims) -> Self {
         Association {
             id,
             version,
@@ -92,7 +92,7 @@ impl Association {
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 
-    pub fn jet_session_token_claims(&self) -> &JetSessionTokenClaims {
+    pub fn jet_session_token_claims(&self) -> &JetAssociationTokenClaims {
         &self.session_token
     }
 

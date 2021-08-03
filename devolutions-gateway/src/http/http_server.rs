@@ -55,7 +55,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let sogar = SogarController::new(registry_name.as_str(), registry_namespace.as_str());
             let token_controller = TokenController::new(config.clone());
 
-            let http_bridge = HttpBridgeController::new(config.clone());
+            let http_bridge = HttpBridgeController::new();
 
             info!("Configuring HTTP router");
 

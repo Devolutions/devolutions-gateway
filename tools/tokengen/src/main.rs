@@ -71,7 +71,7 @@ struct ScopeParams {
 #[derive(Clone, Serialize)]
 #[serde(tag = "type")]
 enum GatewayAccessClaims {
-    #[serde(rename = "session")]
+    #[serde(rename = "association")]
     RoutingClaims(RoutingClaims),
     #[serde(rename = "scope")]
     ScopeClaims(ScopeClaims),

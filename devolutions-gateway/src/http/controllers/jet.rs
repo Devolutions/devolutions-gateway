@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::http::controllers::health::build_health_response;
-use crate::http::guards::access::{AccessGuard, JetAccessType};
+use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
-use jet_proto::token::JetAccessTokenClaims;
+use jet_proto::token::{JetAccessScope, JetAccessTokenClaims};
 use jet_proto::JET_VERSION_V2;
 use saphir::controller::Controller;
 use saphir::http::{Method, StatusCode};
@@ -34,6 +34,10 @@ impl JetController {
 #[controller(name = "jet")]
 impl JetController {
     #[get("/association")]
+    #[guard(
+        AccessGuard,
+        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewayAssociationsRead)"#
+    )]
     async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
         let associations_response: Vec<AssociationResponse>;
@@ -52,9 +56,9 @@ impl JetController {
     }
 
     #[post("/association/<association_id>")]
-    #[guard(AccessGuard, init_expr = r#"JetAccessType::Session"#)]
+    #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn create_association(&self, req: Request) -> (StatusCode, ()) {
-        if let Some(JetAccessTokenClaims::Session(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+        if let Some(JetAccessTokenClaims::Association(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
             let association_id = match req
                 .captures()
                 .get("association_id")
@@ -91,9 +95,9 @@ impl JetController {
     }
 
     #[post("/association/<association_id>/candidates")]
-    #[guard(AccessGuard, init_expr = r#"JetAccessType::Session"#)]
+    #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn gather_association_candidates(&self, req: Request) -> (StatusCode, Option<String>) {
-        if let Some(JetAccessTokenClaims::Session(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+        if let Some(JetAccessTokenClaims::Association(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
             let association_id = match req
                 .captures()
                 .get("association_id")

@@ -5,7 +5,7 @@ use crate::transport::x224::NegotiationWithClientTransport;
 use bytes::BytesMut;
 use futures::ready;
 use ironrdp::{nego, PduBufferParsing};
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 use std::future::Future;
 use std::io;
 use std::ops::DerefMut;
@@ -40,7 +40,7 @@ pub struct AcceptConnectionFuture {
     nego_transport: NegotiationWithClientTransport,
     client: Option<TcpStream>,
     buffer: BytesMut,
-    rdp_identity: Option<(RdpIdentity, JetSessionTokenClaims)>,
+    rdp_identity: Option<(RdpIdentity, JetAssociationTokenClaims)>,
     config: Arc<Config>,
 }
 
@@ -89,7 +89,7 @@ impl AcceptConnectionFuture {
 }
 
 impl Future for AcceptConnectionFuture {
-    type Output = Result<(TcpStream, AcceptConnectionMode, JetSessionTokenClaims), io::Error>;
+    type Output = Result<(TcpStream, AcceptConnectionMode, JetAssociationTokenClaims), io::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut more_data_required = true;

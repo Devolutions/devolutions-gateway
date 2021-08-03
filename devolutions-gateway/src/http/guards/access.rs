@@ -1,37 +1,44 @@
+use crate::http::HttpErrorStatus;
 use jet_proto::token::{JetAccessScope, JetAccessTokenClaims};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
-pub enum JetAccessType {
+pub enum JetTokenType {
     Scope(JetAccessScope),
-    Session,
+    Bridge,
+    Association,
 }
 
 pub struct AccessGuard {
-    access_type: JetAccessType,
+    token_type: JetTokenType,
 }
 
 #[guard]
 impl AccessGuard {
-    pub fn new(access_type: JetAccessType) -> Self {
-        AccessGuard { access_type }
+    pub fn new(token_type: JetTokenType) -> Self {
+        AccessGuard { token_type }
     }
 
-    async fn validate(&self, req: Request) -> Result<Request, StatusCode> {
+    async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
         if let Some(claims) = req.extensions().get::<JetAccessTokenClaims>() {
-            match (claims, &self.access_type) {
-                (JetAccessTokenClaims::Session(_), JetAccessType::Session) => {
+            match (claims, &self.token_type) {
+                (JetAccessTokenClaims::Association(_), JetTokenType::Association) => {
                     return Ok(req);
                 }
-                (JetAccessTokenClaims::Scope(scope_from_request), JetAccessType::Scope(scope_needed))
+                (JetAccessTokenClaims::Scope(scope_from_request), JetTokenType::Scope(scope_needed))
                     if scope_from_request.scope == *scope_needed =>
                 {
+                    return Ok(req);
+                }
+                (JetAccessTokenClaims::Bridge(_), JetTokenType::Bridge) => {
                     return Ok(req);
                 }
                 _ => {}
             }
         }
 
-        Err(StatusCode::FORBIDDEN)
+        Err(HttpErrorStatus::forbidden(
+            "Token provided can't be used to access the route",
+        ))
     }
 }

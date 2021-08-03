@@ -9,7 +9,7 @@ use sspi::AuthIdentity;
 use url::Url;
 use uuid::Uuid;
 
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 
 use crate::config::Config;
 use crate::rdp::RdpIdentity;
@@ -33,7 +33,7 @@ pub fn is_encrypted(token: &str) -> bool {
     num_dots == 4
 }
 
-pub fn extract_routing_claims(pdu: &PreconnectionPdu, config: &Config) -> Result<JetSessionTokenClaims, io::Error> {
+pub fn extract_routing_claims(pdu: &PreconnectionPdu, config: &Config) -> Result<JetAssociationTokenClaims, io::Error> {
     let payload = pdu
         .payload
         .as_deref()
@@ -77,12 +77,13 @@ pub fn extract_routing_claims(pdu: &PreconnectionPdu, config: &Config) -> Result
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
-    let jwt_token = JwtSig::<JetSessionTokenClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Failed to resolve route via JWT routing token: {}", e),
-        )
-    })?;
+    let jwt_token =
+        JwtSig::<JetAssociationTokenClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to resolve route via JWT routing token: {}", e),
+            )
+        })?;
 
     let claims = jwt_token.claims;
 
@@ -96,7 +97,7 @@ pub fn extract_routing_claims(pdu: &PreconnectionPdu, config: &Config) -> Result
     Ok(claims)
 }
 
-pub fn resolve_routing_mode(claims: &JetSessionTokenClaims) -> Result<TokenRoutingMode, io::Error> {
+pub fn resolve_routing_mode(claims: &JetAssociationTokenClaims) -> Result<TokenRoutingMode, io::Error> {
     if !EXPECTED_JET_AP_VALUES.contains(&claims.jet_ap.as_str()) {
         return Err(io::Error::new(
             io::ErrorKind::Other,
