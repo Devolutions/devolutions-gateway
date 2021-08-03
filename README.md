@@ -20,9 +20,6 @@ FLAGS:
         --service
             Enable service mode
 
-        --unrestricted
-            Remove API key validation on some HTTP routes
-
     -v, --version
             Prints version information
 
