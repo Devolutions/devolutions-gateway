@@ -12,17 +12,17 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
-    session_token: JetAssociationTokenClaims,
+    association_token: JetAssociationTokenClaims,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8, session_token: JetAssociationTokenClaims) -> Self {
+    pub fn new(id: Uuid, version: u8, association_token: JetAssociationTokenClaims) -> Self {
         Association {
             id,
             version,
             creation_timestamp: Utc::now(),
             candidates: IndexMap::new(),
-            session_token,
+            association_token,
         }
     }
 
@@ -92,12 +92,12 @@ impl Association {
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 
-    pub fn jet_session_token_claims(&self) -> &JetAssociationTokenClaims {
-        &self.session_token
+    pub fn get_token_claims(&self) -> &JetAssociationTokenClaims {
+        &self.association_token
     }
 
     pub fn record_session(&self) -> bool {
-        self.session_token.jet_rec
+        self.association_token.jet_rec
     }
 }
 

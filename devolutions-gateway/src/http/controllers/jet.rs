@@ -58,7 +58,9 @@ impl JetController {
     #[post("/association/<association_id>")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn create_association(&self, req: Request) -> StatusCode {
-        if let Some(JetAccessTokenClaims::Association(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+        if let Some(JetAccessTokenClaims::Association(association_token)) =
+            req.extensions().get::<JetAccessTokenClaims>()
+        {
             let association_id = match req
                 .captures()
                 .get("association_id")
@@ -70,10 +72,10 @@ impl JetController {
                 }
             };
 
-            if session_token.jet_aid != association_id {
+            if association_token.jet_aid != association_id {
                 slog_scope::error!(
                     "Invalid session token: expected {}, got {}",
-                    session_token.jet_aid.to_string(),
+                    association_token.jet_aid.to_string(),
                     association_id
                 );
                 return StatusCode::FORBIDDEN;
@@ -86,7 +88,7 @@ impl JetController {
 
             jet_associations.insert(
                 association_id,
-                Association::new(association_id, JET_VERSION_V2, session_token.clone()),
+                Association::new(association_id, JET_VERSION_V2, association_token.clone()),
             );
             start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
@@ -99,7 +101,9 @@ impl JetController {
     #[post("/association/<association_id>/candidates")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn gather_association_candidates(&self, req: Request) -> (StatusCode, Option<String>) {
-        if let Some(JetAccessTokenClaims::Association(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
+        if let Some(JetAccessTokenClaims::Association(association_token)) =
+            req.extensions().get::<JetAccessTokenClaims>()
+        {
             let association_id = match req
                 .captures()
                 .get("association_id")
@@ -109,10 +113,10 @@ impl JetController {
                 None => return (StatusCode::BAD_REQUEST, None),
             };
 
-            if session_token.jet_aid != association_id {
+            if association_token.jet_aid != association_id {
                 slog_scope::error!(
                     "Invalid session token: expected {}, got {}",
-                    session_token.jet_aid.to_string(),
+                    association_token.jet_aid.to_string(),
                     association_id
                 );
                 return (StatusCode::FORBIDDEN, None);
@@ -123,7 +127,11 @@ impl JetController {
             let mut jet_associations = self.jet_associations.lock().compat().await;
 
             if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
-                e.insert(Association::new(association_id, JET_VERSION_V2, session_token.clone()));
+                e.insert(Association::new(
+                    association_id,
+                    JET_VERSION_V2,
+                    association_token.clone(),
+                ));
                 start_remove_association_future(self.jet_associations.clone(), association_id).await;
             }
 

@@ -180,10 +180,10 @@ async fn handle_jet_connect_impl(
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
 
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
-    let (version, session_token) = {
+    let (version, association_token) = {
         let associations = jet_associations.lock().await;
         let association = associations.get(&association_id).ok_or(())?;
-        (association.version(), association.jet_session_token_claims().clone())
+        (association.version(), association.get_token_claims().clone())
     };
     let res = process_req(&req);
 
@@ -259,7 +259,7 @@ async fn handle_jet_connect_impl(
                     // Rust does not drop it automatically before end of the function
                     std::mem::drop(jet_assc);
 
-                    let proxy_result = Proxy::new(config.clone(), session_token.into())
+                    let proxy_result = Proxy::new(config.clone(), association_token.into())
                         .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
                         .await;
 
