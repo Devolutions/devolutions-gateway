@@ -38,12 +38,6 @@ pub struct JetAssociationTokenClaims {
     pub creds: Option<CredsClaims>,
 }
 
-impl JetAssociationTokenClaims {
-    pub fn get_jet_ap(&self) -> String {
-        self.jet_ap.clone()
-    }
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum JetConnectionMode {

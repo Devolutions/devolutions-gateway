@@ -630,11 +630,12 @@ function New-DGatewayToken {
         [DateTime] $IssuedAt, # iat
 
         # private association claims
-        [string] $DestinationHost, # dst_hst
+        [string] $AssociationId, # jet_aid
         [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
+        [string] $DestinationHost, # dst_hst
         
         #private scope claims
         [string] $Scope, # scope
@@ -695,6 +696,8 @@ function New-DGatewayToken {
             }
         }
 
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
+        
         if (-Not $ConnectionMode) {
             if ($DestinationHost) {
                 $ConnectionMode = 'fwd'
@@ -703,12 +706,15 @@ function New-DGatewayToken {
             }
         }
             
-        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
         $Payload | Add-Member -MemberType NoteProperty -Name 'jet_cm' -Value $ConnectionMode
+
+        if ($AssociationId) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
+        }    
 
         if ($DestinationHost) {
             $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
-        }    
+        }
     }
 
 

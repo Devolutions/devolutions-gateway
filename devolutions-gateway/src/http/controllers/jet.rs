@@ -57,7 +57,7 @@ impl JetController {
 
     #[post("/association/<association_id>")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
-    async fn create_association(&self, req: Request) -> (StatusCode, ()) {
+    async fn create_association(&self, req: Request) -> StatusCode {
         if let Some(JetAccessTokenClaims::Association(session_token)) = req.extensions().get::<JetAccessTokenClaims>() {
             let association_id = match req
                 .captures()
@@ -65,7 +65,9 @@ impl JetController {
                 .and_then(|id| Uuid::parse_str(id).ok())
             {
                 Some(id) => id,
-                None => return (StatusCode::BAD_REQUEST, ()),
+                None => {
+                    return StatusCode::BAD_REQUEST;
+                }
             };
 
             if session_token.jet_aid != association_id {
@@ -74,7 +76,7 @@ impl JetController {
                     session_token.jet_aid.to_string(),
                     association_id
                 );
-                return (StatusCode::FORBIDDEN, ());
+                return StatusCode::FORBIDDEN;
             }
 
             // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
@@ -88,9 +90,9 @@ impl JetController {
             );
             start_remove_association_future(self.jet_associations.clone(), association_id).await;
 
-            (StatusCode::OK, ())
+            StatusCode::OK
         } else {
-            (StatusCode::UNAUTHORIZED, ())
+            StatusCode::UNAUTHORIZED
         }
     }
 
