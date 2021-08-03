@@ -73,6 +73,8 @@ pub enum JetAccessScope {
     GatewaySessionsRead,
     #[serde(rename = "gateway.associations.read")]
     GatewayAssociationsRead,
+    #[serde(rename = "gateway.diagnostics.read")]
+    GatewayDiagnosticsRead,
 }
 
 #[derive(Clone, Deserialize)]
