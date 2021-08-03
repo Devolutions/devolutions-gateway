@@ -25,7 +25,7 @@ use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::Proxy;
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 use std::path::PathBuf;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 
@@ -94,7 +94,7 @@ async fn handle_build_tls_proxy(
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
 
-        Proxy::new(config, response.session_token.into())
+        Proxy::new(config, response.association_token.into())
             .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
             .await
     } else {
@@ -154,7 +154,7 @@ async fn handle_build_proxy(
 
         proxy_result
     } else {
-        Proxy::new(config, response.session_token.into())
+        Proxy::new(config, response.association_token.into())
             .build(response.server_transport, response.client_transport)
             .await
     }
@@ -347,7 +347,7 @@ async fn handle_connect_jet_msg(
     let mut server_transport = None;
     let mut association_id = None;
     let mut candidate_id = None;
-    let mut session_token = None;
+    let mut association_token = None;
 
     // Find the server transport
     let mut status_code = StatusCode::BAD_REQUEST;
@@ -355,7 +355,7 @@ async fn handle_connect_jet_msg(
     let mut jet_associations = jet_associations.lock().await;
 
     if let Some(association) = jet_associations.get_mut(&request_msg.association) {
-        session_token = Some(association.jet_session_token_claims().clone());
+        association_token = Some(association.get_token_claims().clone());
 
         let candidate = match (association.version(), request_msg.version) {
             (1, 1) => {
@@ -425,15 +425,15 @@ async fn handle_connect_jet_msg(
         server_transport.take(),
         association_id.take(),
         candidate_id.take(),
-        session_token.take(),
+        association_token.take(),
     ) {
-        (Some(server_transport), Some(association_id), Some(candidate_id), Some(session_token)) => {
+        (Some(server_transport), Some(association_id), Some(candidate_id), Some(token)) => {
             Ok(HandleConnectJetMsgResponse {
                 client_transport,
                 server_transport,
                 association_id,
                 candidate_id,
-                session_token,
+                association_token: token,
             })
         }
         _ => Err(error_other(format!(
@@ -448,7 +448,7 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: JetTransport,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
-    pub session_token: JetSessionTokenClaims,
+    pub association_token: JetAssociationTokenClaims,
 }
 
 async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {

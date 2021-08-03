@@ -10,7 +10,7 @@ use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
 use slog_scope::info;
-use sogar_core::registry::{SogarController, BLOB_GET_LOCATION_PATH, BLOB_PATH, MANIFEST_PATH, UPLOAD_BLOB_PATH};
+use sogar_core::registry::SogarController;
 use std::sync::Arc;
 
 pub const REGISTRY_NAME: &str = "devolutions_registry";
@@ -21,25 +21,15 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
         .configure_middlewares(|middlewares| {
             info!("Loading HTTP middlewares");
 
-            // Only the "create association" should requires authorization.
-            let mut auth_include_path = vec!["/jet/association"];
-            let mut auth_exclude_path = vec!["/jet/association/<association_id>/<anything>"];
-
-            if config.unrestricted {
-                auth_exclude_path.push("/jet/association/<association_id>");
-            } else {
-                auth_include_path.push("/jet/association/<association_id>");
-            }
-
             middlewares
                 .apply(
                     AuthMiddleware::new(config.clone()),
-                    auth_include_path,
-                    Some(auth_exclude_path),
+                    vec!["/"],
+                    vec!["/registry", "/health"],
                 )
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
-                    vec![BLOB_PATH, BLOB_GET_LOCATION_PATH, UPLOAD_BLOB_PATH, MANIFEST_PATH],
+                    vec!["/registry"],
                     vec!["registry/oauth2/token"],
                 )
                 .apply(LogMiddleware, vec!["/"], None)
@@ -65,7 +55,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let sogar = SogarController::new(registry_name.as_str(), registry_namespace.as_str());
             let token_controller = TokenController::new(config.clone());
 
-            let http_bridge = HttpBridgeController::new(config.clone());
+            let http_bridge = HttpBridgeController::new();
 
             info!("Configuring HTTP router");
 

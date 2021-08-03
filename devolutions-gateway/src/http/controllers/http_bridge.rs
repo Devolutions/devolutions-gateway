@@ -1,112 +1,87 @@
-use crate::config::Config;
+use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::http::HttpErrorStatus;
-use saphir::http::StatusCode;
+use jet_proto::token::JetAccessTokenClaims;
 use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
-use std::sync::Arc;
 
-pub const GATEWAY_BRIDGE_TOKEN_HDR_NAME: &str = "Gateway-Bridge-Token";
-
-#[derive(Deserialize)]
-struct HttpBridgeClaims {
-    target: url::Url,
-}
+pub const REQUEST_AUTHORIZATION_TOKEN_HDR_NAME: &str = "Request-Authorization-Token";
 
 pub struct HttpBridgeController {
-    config: Arc<Config>,
     client: reqwest::Client,
 }
 
 impl HttpBridgeController {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new() -> Self {
         let client = reqwest::Client::new();
-        Self { config, client }
-    }
-}
-
-impl HttpBridgeController {
-    fn h_decode_claims(&self, token_str: &str) -> Result<HttpBridgeClaims, HttpErrorStatus> {
-        use core::convert::TryFrom;
-        use picky::jose::jwt;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let key = self
-            .config
-            .provisioner_public_key
-            .as_ref()
-            .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "provisioner public key is missing"))?;
-
-        let numeric_date = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("UNIX EPOCH is in the past")
-            .as_secs();
-        let date = jwt::JwtDate::new_with_leeway(i64::try_from(numeric_date).unwrap(), 60);
-        let validator = jwt::JwtValidator::strict(&date);
-
-        let jws = jwt::JwtSig::decode(token_str, key, &validator).map_err(HttpErrorStatus::forbidden)?;
-
-        Ok(jws.claims)
+        Self { client }
     }
 }
 
 #[controller(name = "bridge")]
 impl HttpBridgeController {
     #[post("/message")]
+    #[guard(AccessGuard, init_expr = r#"JetTokenType::Bridge"#)]
     async fn message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
         use core::convert::TryFrom;
 
-        // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
-        // Use https://docs.rs/reqwest/0.11.4/reqwest/struct.Body.html#impl-From%3CBody%3E
-        // to get a streaming reqwest Request instead of loading the whole body in memory.
-        let req = req.load_body().await.map_err(HttpErrorStatus::internal)?;
-        let req: saphir::request::Request<reqwest::Body> = req.map(reqwest::Body::from);
-        let mut req: http::Request<reqwest::Body> = http::Request::from(req);
-
-        // === Filter and validate request to forward === //
-
-        let mut rsp = {
-            // Gateway Bridge Claims
-            let headers = req.headers_mut();
-            let token_hdr = headers
-                .remove(GATEWAY_BRIDGE_TOKEN_HDR_NAME)
-                .ok_or((StatusCode::BAD_REQUEST, "Gateway-Bridge-Token header is missing"))?;
-            let token_str = token_hdr.to_str().map_err(HttpErrorStatus::bad_request)?;
-            let claims = self.h_decode_claims(token_str)?;
-
-            // Update request destination
-            let uri = http::Uri::try_from(claims.target.as_str()).map_err(HttpErrorStatus::bad_request)?;
-            *req.uri_mut() = uri;
-
-            // Forward
-            slog_scope::debug!("Forward HTTP request to {}", req.uri());
-            let req = reqwest::Request::try_from(req).map_err(HttpErrorStatus::internal)?;
-            self.client.execute(req).await.map_err(HttpErrorStatus::bad_gateway)?
-        };
-
-        // === Create HTTP response using target response === //
-
-        let mut rsp_builder = Builder::new();
-
+        if let Some(JetAccessTokenClaims::Bridge(claims)) = req
+            .extensions()
+            .get::<JetAccessTokenClaims>()
+            .map(|claim| claim.clone())
         {
-            // Status code
-            rsp_builder = rsp_builder.status(rsp.status());
+            // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
+            // Use https://docs.rs/reqwest/0.11.4/reqwest/struct.Body.html#impl-From%3CBody%3E
+            // to get a streaming reqwest Request instead of loading the whole body in memory.
+            let req = req.load_body().await.map_err(HttpErrorStatus::internal)?;
+            let req: saphir::request::Request<reqwest::Body> = req.map(reqwest::Body::from);
+            let mut req: http::Request<reqwest::Body> = http::Request::from(req);
 
-            // Headers
-            let headers = rsp_builder.headers_mut().unwrap();
-            rsp.headers_mut().drain().for_each(|(name, value)| {
-                if let Some(name) = name {
-                    headers.insert(name, value);
+            // === Replace Authorization header (used to be authorized on the gateway) with the request authorization token === //
+
+            let mut rsp = {
+                let headers = req.headers_mut();
+                headers.remove(http::header::AUTHORIZATION);
+                if let Some(auth_token) = headers.remove(REQUEST_AUTHORIZATION_TOKEN_HDR_NAME) {
+                    headers.insert(http::header::AUTHORIZATION, auth_token);
                 }
-            });
 
-            // Body
-            match rsp.bytes().await {
-                Ok(body) => rsp_builder = rsp_builder.body(body),
-                Err(e) => slog_scope::warn!("Couldn’t get bytes from response body: {}", e),
+                // Update request destination
+                let uri = http::Uri::try_from(claims.target.as_str()).map_err(HttpErrorStatus::bad_request)?;
+                *req.uri_mut() = uri;
+
+                // Forward
+                slog_scope::debug!("Forward HTTP request to {}", req.uri());
+                let req = reqwest::Request::try_from(req).map_err(HttpErrorStatus::internal)?;
+                self.client.execute(req).await.map_err(HttpErrorStatus::bad_gateway)?
+            };
+
+            // === Create HTTP response using target response === //
+
+            let mut rsp_builder = Builder::new();
+
+            {
+                // Status code
+                rsp_builder = rsp_builder.status(rsp.status());
+
+                // Headers
+                let headers = rsp_builder.headers_mut().unwrap();
+                rsp.headers_mut().drain().for_each(|(name, value)| {
+                    if let Some(name) = name {
+                        headers.insert(name, value);
+                    }
+                });
+
+                // Body
+                match rsp.bytes().await {
+                    Ok(body) => rsp_builder = rsp_builder.body(body),
+                    Err(e) => slog_scope::warn!("Couldn’t get bytes from response body: {}", e),
+                }
             }
-        }
 
-        Ok(rsp_builder)
+            Ok(rsp_builder)
+        } else {
+            Err(HttpErrorStatus::unauthorized("Bridge token is mandatory"))
+        }
     }
 }

@@ -11,9 +11,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use url::Url;
 
-const ARG_API_KEY: &str = "api-key";
 const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
-const ARG_UNRESTRICTED: &str = "unrestricted";
 const ARG_LISTENERS: &str = "listeners";
 const ARG_HOSTNAME: &str = "hostname";
 const ARG_FARM_NAME: &str = "farm-name";
@@ -118,8 +116,6 @@ pub struct Config {
     pub display_name: String,
     pub description: String,
     pub company_name: String,
-    pub unrestricted: bool,
-    pub api_key: Option<String>,
     pub listeners: Vec<ListenerConfig>,
     pub farm_name: String,
     pub hostname: String,
@@ -147,8 +143,6 @@ impl Default for Config {
             display_name: DISPLAY_NAME.to_string(),
             description: DESCRIPTION.to_string(),
             company_name: COMPANY_NAME.to_string(),
-            unrestricted: true, // TODO: Should be false by default in a future version
-            api_key: None,
             listeners: Vec::new(),
             farm_name: default_hostname.clone(),
             hostname: default_hostname,
@@ -280,14 +274,10 @@ pub struct ConfigFile {
     pub push_files: Option<bool>,
 
     // unstable options (subject to change)
-    #[serde(rename = "ApiKey")]
-    pub api_key: Option<String>,
     #[serde(rename = "LogFile")]
     pub log_file: Option<String>,
     #[serde(rename = "CapturePath")]
     pub capture_path: Option<String>,
-    #[serde(rename = "Unrestricted")]
-    pub unrestricted: Option<bool>,
 }
 
 fn get_config_path() -> PathBuf {
@@ -354,22 +344,6 @@ impl Config {
             .version(concat!(crate_version!(), "\n"))
             .version_short("v")
             .about(DISPLAY_NAME)
-            .arg(
-                Arg::with_name(ARG_API_KEY)
-                    .long("api-key")
-                    .value_name("KEY")
-                    .env("DGATEWAY_API_KEY")
-                    .help("The API key used by the server to authenticate client queries.")
-                    .takes_value(true)
-                    .empty_values(false),
-            )
-            .arg(
-                Arg::with_name(ARG_UNRESTRICTED)
-                    .long("unrestricted")
-                    .env("DGATEWAY_UNRESTRICTED")
-                    .help("Remove API key validation on some HTTP routes")
-                    .takes_value(false),
-            )
             .arg(
                 Arg::with_name(ARG_LISTENERS)
                     .short("l")
@@ -640,14 +614,6 @@ impl Config {
             config.log_file = Some(log_file.to_owned());
         }
 
-        if let Some(api_key) = matches.value_of(ARG_API_KEY) {
-            config.api_key = Some(api_key.to_owned());
-        }
-
-        if matches.is_present(ARG_UNRESTRICTED) {
-            config.unrestricted = true;
-        }
-
         if let Some(farm_name) = matches.value_of(ARG_FARM_NAME) {
             config.farm_name = farm_name.to_owned();
         }
@@ -848,8 +814,8 @@ impl Config {
         }
 
         // early fail if we start as restricted without provisioner key
-        if !config.unrestricted && config.provisioner_public_key.is_none() {
-            panic!("provisioner public key is missing in unrestricted mode");
+        if config.provisioner_public_key.is_none() {
+            panic!("provisioner public key is missing");
         }
 
         if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
@@ -962,13 +928,9 @@ impl Config {
         let sogar_user = config_file.sogar_users_list.unwrap_or_default();
 
         // unstable options (subject to change)
-        let api_key = config_file.api_key;
-        let unrestricted = config_file.unrestricted.unwrap_or(true);
         let capture_path = config_file.capture_path;
 
         Some(Config {
-            unrestricted,
-            api_key,
             listeners,
             farm_name,
             hostname,

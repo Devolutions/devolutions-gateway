@@ -620,17 +620,25 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        # public claims
+        [ValidateSet('association', 'scope')]
+        [Parameter(Mandatory = $true)]
+        [string] $Type, #type
+
+        # public common claims
         [DateTime] $ExpirationTime, # exp
         [DateTime] $NotBefore, # nbf
         [DateTime] $IssuedAt, # iat
 
-        # private claims
-        [string] $DestinationHost, # dst_hst
+        # private association claims
+        [string] $AssociationId, # jet_aid
         [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
+        [string] $DestinationHost, # dst_hst
+        
+        #private scope claims
+        [string] $Scope, # scope
 
         # signature parameters
         [string] $PrivateKeyFile
@@ -663,22 +671,6 @@ function New-DGatewayToken {
         $ExpirationTime = $CurrentTime.AddMinutes(2)
     }
 
-    if (-Not $ConnectionMode) {
-        if ($DestinationHost) {
-            $ConnectionMode = 'fwd'
-        } else {
-            $ConnectionMode = 'rdv'
-        }
-    }
-
-    if (-Not $ApplicationProtocol) {
-        if ($ConnectionMode -eq 'fwd') {
-            $ApplicationProtocol = 'rdp'
-        } else {
-            $ApplicationProtocol = 'wayk'
-        }
-    }
-    
     $iat = [System.DateTimeOffset]::new($IssuedAt).ToUnixTimeSeconds()
     $nbf = [System.DateTimeOffset]::new($NotBefore).ToUnixTimeSeconds()
     $exp = [System.DateTimeOffset]::new($ExpirationTime).ToUnixTimeSeconds()
@@ -692,12 +684,42 @@ function New-DGatewayToken {
         iat    = $iat
         nbf    = $nbf
         exp    = $exp
-        jet_ap = $ApplicationProtocol
-        jet_cm = $ConnectionMode
+        type   = $Type
     }
 
-    if ($DestinationHost) {
-        $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+    if ($Type -eq 'association') {
+        if (-Not $ApplicationProtocol) {
+            if ($ConnectionMode -eq 'fwd') {
+                $ApplicationProtocol = 'rdp'
+            } else {
+                $ApplicationProtocol = 'wayk'
+            }
+        }
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
+        
+        if (-Not $ConnectionMode) {
+            if ($DestinationHost) {
+                $ConnectionMode = 'fwd'
+            } else {
+                $ConnectionMode = 'rdv'
+            }
+        }
+            
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_cm' -Value $ConnectionMode
+
+        if ($AssociationId) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
+        }    
+
+        if ($DestinationHost) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+        }
+    }
+
+
+    if (($Type -eq 'scope') -and ($Scope)) {
+        $Payload | Add-Member -MemberType NoteProperty -Name 'scope' -Value $Scope
     }
 
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey

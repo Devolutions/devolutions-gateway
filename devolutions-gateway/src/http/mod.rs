@@ -1,4 +1,5 @@
 pub mod controllers;
+pub mod guards;
 pub mod http_server;
 pub mod middlewares;
 
@@ -35,6 +36,11 @@ impl HttpErrorStatus {
     #[track_caller]
     fn forbidden<T: Display + Send + 'static>(source: T) -> Self {
         Self::new(StatusCode::FORBIDDEN, source)
+    }
+
+    #[track_caller]
+    fn unauthorized<T: Display + Send + 'static>(source: T) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, source)
     }
 
     #[track_caller]

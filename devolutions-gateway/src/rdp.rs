@@ -91,7 +91,7 @@ impl RdpClient {
             jet_associations,
         } = self;
 
-        let (client, mode, jet_session_token_claims) =
+        let (client, mode, association_token_claims) =
             AcceptConnectionFuture::new(client, config.clone()).await.map_err(|e| {
                 error!("Accept connection failed: {}", e);
                 e
@@ -112,7 +112,7 @@ impl RdpClient {
                     e
                 })?;
 
-                let result = Proxy::new(config, jet_session_token_claims.into())
+                let result = Proxy::new(config, association_token_claims.into())
                     .build_with_packet_interceptor(server_conn, client_transport, None)
                     .await
                     .map_err(|e| {
@@ -182,7 +182,7 @@ impl RdpClient {
                 let client_tls = client_transport.into_inner();
                 let server_tls = server_transport.into_inner();
 
-                Proxy::new(config, jet_session_token_claims.into())
+                Proxy::new(config, association_token_claims.into())
                     .build_with_message_reader(
                         TcpTransport::new_tls(server_tls),
                         TcpTransport::new_tls(client_tls),

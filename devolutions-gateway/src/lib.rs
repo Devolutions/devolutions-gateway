@@ -12,7 +12,7 @@ use lazy_static::lazy_static;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use jet_proto::token::JetSessionTokenClaims;
+use jet_proto::token::JetAssociationTokenClaims;
 pub use proxy::Proxy;
 
 use jet_proto::token::JetConnectionMode;
@@ -70,15 +70,15 @@ impl GatewaySessionInfo {
     }
 }
 
-impl From<JetSessionTokenClaims> for GatewaySessionInfo {
-    fn from(session_token: JetSessionTokenClaims) -> Self {
+impl From<JetAssociationTokenClaims> for GatewaySessionInfo {
+    fn from(association_token: JetAssociationTokenClaims) -> Self {
         GatewaySessionInfo {
-            association_id: session_token.jet_aid,
-            application_protocol: session_token.jet_ap.clone(),
-            destination_host: session_token.dst_hst.clone(),
-            connection_mode: session_token.jet_cm,
-            recording_policy: session_token.jet_rec,
-            filtering_policy: session_token.jet_flt,
+            association_id: association_token.jet_aid,
+            application_protocol: association_token.jet_ap.clone(),
+            destination_host: association_token.dst_hst.clone(),
+            connection_mode: association_token.jet_cm,
+            recording_policy: association_token.jet_rec,
+            filtering_policy: association_token.jet_flt,
             start_timestamp: Utc::now(),
         }
     }

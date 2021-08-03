@@ -1,7 +1,16 @@
 use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
-pub struct JetSessionTokenClaims {
+#[serde(tag = "type")]
+#[serde(rename_all = "lowercase")]
+pub enum JetAccessTokenClaims {
+    Association(JetAssociationTokenClaims),
+    Scope(JetScopeTokenClaims),
+    Bridge(JetBridgeTokenClaims),
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetAssociationTokenClaims {
     /// Jet Association ID
     #[serde(default = "Uuid::new_v4")]
     pub jet_aid: Uuid,
@@ -29,13 +38,7 @@ pub struct JetSessionTokenClaims {
     pub creds: Option<CredsClaims>,
 }
 
-impl JetSessionTokenClaims {
-    pub fn get_jet_ap(&self) -> String {
-        self.jet_ap.clone()
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum JetConnectionMode {
     Rdv,
@@ -57,4 +60,22 @@ pub struct CredsClaims {
     // Target credentials (jet <-> server)
     pub dst_usr: String,
     pub dst_pwd: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetScopeTokenClaims {
+    pub scope: JetAccessScope,
+}
+
+#[derive(Clone, Deserialize, PartialEq)]
+pub enum JetAccessScope {
+    #[serde(rename = "gateway.sessions.read")]
+    GatewaySessionsRead,
+    #[serde(rename = "gateway.associations.read")]
+    GatewayAssociationsRead,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetBridgeTokenClaims {
+    pub target: String,
 }
