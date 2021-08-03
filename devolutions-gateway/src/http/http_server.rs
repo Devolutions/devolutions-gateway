@@ -24,8 +24,8 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             middlewares
                 .apply(
                     AuthMiddleware::new(config.clone()),
-                    vec!["/jet", "/sessions", "/bridge"],
-                    None,
+                    vec!["/"],
+                    vec!["/registry", "/health"],
                 )
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
