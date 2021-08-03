@@ -5,8 +5,6 @@ use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
 
-pub const REQUEST_AUTHORIZATION_TOKEN_HDR_NAME: &str = "Request-Authorization-Token";
-
 pub struct HttpBridgeController {
     client: reqwest::Client,
 }
@@ -20,7 +18,11 @@ impl HttpBridgeController {
 
 #[controller(name = "bridge")]
 impl HttpBridgeController {
+    #[get("/message")]
     #[post("/message")]
+    #[put("/message")]
+    #[patch("/message")]
+    #[delete("/message")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Bridge"#)]
     async fn message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
         use core::convert::TryFrom;
@@ -37,15 +39,7 @@ impl HttpBridgeController {
             let req: saphir::request::Request<reqwest::Body> = req.map(reqwest::Body::from);
             let mut req: http::Request<reqwest::Body> = http::Request::from(req);
 
-            // === Replace Authorization header (used to be authorized on the gateway) with the request authorization token === //
-
             let mut rsp = {
-                let headers = req.headers_mut();
-                headers.remove(http::header::AUTHORIZATION);
-                if let Some(auth_token) = headers.remove(REQUEST_AUTHORIZATION_TOKEN_HDR_NAME) {
-                    headers.insert(http::header::AUTHORIZATION, auth_token);
-                }
-
                 // Update request destination
                 let uri = http::Uri::try_from(claims.target.as_str()).map_err(HttpErrorStatus::bad_request)?;
                 *req.uri_mut() = uri;

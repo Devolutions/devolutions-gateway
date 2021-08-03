@@ -620,7 +620,7 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        [ValidateSet('association', 'scope')]
+        [ValidateSet('association', 'scope', 'bridge')]
         [Parameter(Mandatory = $true)]
         [string] $Type, #type
 
@@ -639,6 +639,9 @@ function New-DGatewayToken {
         
         #private scope claims
         [string] $Scope, # scope
+
+        #private bridge claims
+        [string] $Target, # target
 
         # signature parameters
         [string] $PrivateKeyFile
@@ -720,6 +723,10 @@ function New-DGatewayToken {
 
     if (($Type -eq 'scope') -and ($Scope)) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'scope' -Value $Scope
+    }
+
+    if (($Type -eq 'bridge') -and ($Target)) {
+        $Payload | Add-Member -MemberType NoteProperty -Name 'target' -Value $Target
     }
 
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey

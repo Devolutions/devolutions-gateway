@@ -11,6 +11,8 @@ use saphir::response::Builder as ResponseBuilder;
 use slog_scope::error;
 use std::sync::Arc;
 
+const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
+
 pub struct AuthMiddleware {
     config: Arc<Config>,
 }
@@ -38,7 +40,10 @@ async fn auth_middleware(
 ) -> Result<HttpContext, SaphirError> {
     let request = ctx.state.request_unchecked_mut();
 
-    let auth_header = request.headers().get(http::header::AUTHORIZATION);
+    let gateway_auth_header = request.headers_mut().remove(GATEWAY_AUTHORIZATION_HDR_NAME);
+    let auth_header = gateway_auth_header
+        .as_ref()
+        .or_else(|| request.headers().get(http::header::AUTHORIZATION));
 
     let auth_header = match auth_header {
         Some(header) => header.clone(),
