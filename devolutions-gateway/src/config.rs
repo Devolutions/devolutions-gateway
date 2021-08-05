@@ -63,7 +63,7 @@ pub enum Protocol {
     Unknown,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ListenerConfig {
     pub internal_url: Url,
     pub external_url: Url,
