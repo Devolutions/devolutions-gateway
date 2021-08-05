@@ -231,28 +231,26 @@ async fn handle_jet_connect_impl(
                     let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
                     let mut has_interceptor = false;
 
-                    if assc.record_session() {
-                        if config.plugins.is_some() {
-                            let mut interceptor = PcapRecordingInterceptor::new(
-                                server_transport.peer_addr().unwrap(),
-                                client_addr,
-                                association_id.clone().to_string(),
-                                candidate_id.to_string(),
-                            );
+                    if assc.record_session() && config.plugins.is_some() {
+                        let mut interceptor = PcapRecordingInterceptor::new(
+                            server_transport.peer_addr().unwrap(),
+                            client_addr,
+                            association_id.clone().to_string(),
+                            candidate_id.to_string(),
+                        );
 
-                            recording_dir = match &config.recording_path {
-                                Some(path) if path.to_str().is_some() => {
-                                    interceptor.set_recording_directory(path.to_str().unwrap());
-                                    Some(std::path::PathBuf::from(path))
-                                }
-                                _ => interceptor.get_recording_directory(),
-                            };
+                        recording_dir = match &config.recording_path {
+                            Some(path) if path.to_str().is_some() => {
+                                interceptor.set_recording_directory(path.to_str().unwrap());
+                                Some(std::path::PathBuf::from(path))
+                            }
+                            _ => interceptor.get_recording_directory(),
+                        };
 
-                            file_pattern = Some(interceptor.get_filename_pattern());
+                        file_pattern = Some(interceptor.get_filename_pattern());
 
-                            recording_interceptor = Some(Box::new(interceptor));
-                            has_interceptor = true;
-                        }
+                        recording_interceptor = Some(Box::new(interceptor));
+                        has_interceptor = true;
                     }
 
                     // We need to manually drop mutex lock to avoid deadlock below;
