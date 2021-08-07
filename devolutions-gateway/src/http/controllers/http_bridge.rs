@@ -16,6 +16,12 @@ impl HttpBridgeController {
     }
 }
 
+impl Default for HttpBridgeController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[controller(name = "bridge")]
 impl HttpBridgeController {
     #[get("/message")]
@@ -27,11 +33,7 @@ impl HttpBridgeController {
     async fn message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
         use core::convert::TryFrom;
 
-        if let Some(JetAccessTokenClaims::Bridge(claims)) = req
-            .extensions()
-            .get::<JetAccessTokenClaims>()
-            .map(|claim| claim.clone())
-        {
+        if let Some(JetAccessTokenClaims::Bridge(claims)) = req.extensions().get::<JetAccessTokenClaims>().cloned() {
             // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
             // Use https://docs.rs/reqwest/0.11.4/reqwest/struct.Body.html#impl-From%3CBody%3E
             // to get a streaming reqwest Request instead of loading the whole body in memory.

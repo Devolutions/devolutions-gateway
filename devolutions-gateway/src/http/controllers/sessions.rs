@@ -29,7 +29,7 @@ impl SessionsController {
     async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
         let sessions = SESSIONS_IN_PROGRESS.read().await;
 
-        let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().map(|x| x.clone()).collect();
+        let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();
 
         Ok(Json(sessions_in_progress))
     }

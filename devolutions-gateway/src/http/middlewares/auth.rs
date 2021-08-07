@@ -87,7 +87,8 @@ async fn auth_middleware(
 
     let mut ctx = ctx.clone_with_empty_state();
     ctx.state = State::After(Box::new(response));
-    return Ok(ctx);
+
+    Ok(ctx)
 }
 
 #[derive(PartialEq)]

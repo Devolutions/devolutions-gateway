@@ -109,7 +109,7 @@ impl Future for AcceptConnectionFuture {
                                 return Poll::Ready(Ok((
                                     self.client.take().unwrap(),
                                     AcceptConnectionMode::RdpTcp { url, leftover_request },
-                                    routing_claims.into(),
+                                    routing_claims,
                                 )));
                             }
                             TokenRoutingMode::RdpTcpRendezvous(association_id) => {
@@ -119,12 +119,12 @@ impl Future for AcceptConnectionFuture {
                                         association_id,
                                         leftover_request,
                                     },
-                                    routing_claims.into(),
+                                    routing_claims,
                                 )));
                             }
                             TokenRoutingMode::RdpTls(identity) => {
                                 self.buffer = leftover_request;
-                                self.rdp_identity = Some((identity, routing_claims.into()));
+                                self.rdp_identity = Some((identity, routing_claims));
                                 // assume that we received connection request in the same buffer
                                 // as preconnection_pdu
                                 more_data_required = false;
