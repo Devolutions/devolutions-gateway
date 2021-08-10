@@ -308,7 +308,7 @@ stages:
 
   - stage: 'Devolutions_Gateway'
     jobs:
-      - job: Linux_x86_64
+      - job: Linux_64_bit
         pool:
           name: 'Devolutions - Linux containers'
 
@@ -370,7 +370,7 @@ stages:
               pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway
 
-      - job: Windows_x86_64
+      - job: Windows_64_bit
         pool:
           name: 'Devolutions - Windows containers'
 
