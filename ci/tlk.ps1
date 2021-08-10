@@ -184,7 +184,9 @@ class TlkTarget
         switch ($this.Architecture) {
             "x86" { "i686" }
             "x86_64" { "x86_64" }
+            "x64" { "x86_64" }
             "aarch64" { "aarch64" }
+            "arm64" { "aarch64" }
         }
 
         $CargoPlatform = `
@@ -248,9 +250,11 @@ class TlkRecipe
     }
 
     [void] Build() {
-        $OPENSSL_VERSION = '1.1.1b-5'
+        $OPENSSL_VERSION = '1.1.1d-4'
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
+
+        Write-Host "conan profile: $ConanProfile"
     
         $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
 
@@ -258,7 +262,7 @@ class TlkRecipe
             $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
         }
 
-        if (-Not $this.Target.IsMacOS()) {
+        #if (-Not $this.Target.IsMacOS()) {
             # FIXME: this fails on CI build machines for macOS, maybe conan is outdated?
             
             & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
@@ -270,7 +274,7 @@ class TlkRecipe
         
             $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
             $Env:OPENSSL_DIR = $OPENSSL_DIR
-        }
+        #}
     
         if ($this.Target.IsWindows()) {
             $Env:RUSTFLAGS = "-C target-feature=+crt-static"
@@ -289,6 +293,7 @@ class TlkRecipe
         Set-Location -Path $CargoPackage
 
         $CargoTarget = $this.Target.CargoTarget()
+        Write-Host "CargoTarget: $CargoTarget"
 
         $CargoArgs = @('build', '--release')
         $CargoArgs += @('--target', $CargoTarget)
