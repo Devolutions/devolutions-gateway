@@ -7,8 +7,6 @@ trigger:
 
 variables:
   - group: wayknow
-  - name: openssl_version
-    value: 1.1.1b-5
 
 stages:
   - stage: Get_version
@@ -264,9 +262,53 @@ stages:
               pathToPublish: $(Build.StagingDirectory)
               artifactName: jetsocat
 
+      - job: Macos_arm64
+        pool:
+          name: 'Devolutions - macOS'
+
+        workspace:
+          clean: all
+
+        variables:
+          TargetPlatform: "macos"
+          TargetArchitecture: "arm64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
   - stage: 'Devolutions_Gateway'
     jobs:
-      - job: Linux_64_bit
+      - job: Linux_x86_64
         pool:
           name: 'Devolutions - Linux containers'
 
@@ -328,7 +370,7 @@ stages:
               pathToPublish: $(Build.StagingDirectory)
               artifactName: devolutions-gateway
 
-      - job: Windows_64_bit
+      - job: Windows_x86_64
         pool:
           name: 'Devolutions - Windows containers'
 
