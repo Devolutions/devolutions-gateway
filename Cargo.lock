@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2021.1.5"
+version = "2021.1.6"
 dependencies = [
  "base64 0.9.3",
  "byteorder",
@@ -1516,6 +1516,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "idalloc"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "559e07f7d3b6a6543b8f3a3f09fef45c468e3b6a1d49dd02369fb79363fae3a8"
+
+[[package]]
 name = "idna"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1640,16 +1646,19 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2021.1.5"
+version = "2021.1.6"
 dependencies = [
  "anyhow",
  "async-tungstenite",
+ "byteorder",
  "dirs-next",
  "futures-channel",
  "futures-io",
  "futures-util",
+ "idalloc",
  "jet-proto",
  "jetsocat-proxy",
+ "min-max",
  "proxy_cfg",
  "seahorse",
  "slog",
@@ -1837,6 +1846,15 @@ checksum = "2684d4c2e97d99848d30b324b00c8fcc7e5c897b7cbb5819b09e7c90e8baf212"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "min-max"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe75516622e34f7e712e0f60b6a9bb1b2df281d1985c11a21fa5dabc1e34885f"
+dependencies = [
+ "partial-min-max",
 ]
 
 [[package]]
@@ -2258,6 +2276,12 @@ dependencies = [
  "smallvec 1.6.1",
  "winapi 0.3.9",
 ]
+
+[[package]]
+name = "partial-min-max"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6448add382c60bbbc64f9dab41309a12ec530c05191601042f911356ac09758c"
 
 [[package]]
 name = "pcap-file"

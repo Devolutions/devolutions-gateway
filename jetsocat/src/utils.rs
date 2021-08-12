@@ -5,6 +5,7 @@ use async_tungstenite::tungstenite::client::IntoClientRequest;
 use async_tungstenite::tungstenite::handshake::client::Response;
 use futures_util::future;
 use jetsocat_proxy::{DestAddr, ToDestAddr};
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -112,4 +113,11 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
             Ok((read, write, rsp))
         }
     })
+}
+
+pub fn error_kind_to_socks5_error(e: ErrorKind) -> u32 {
+    match e {
+        ErrorKind::ConnectionRefused => 5,
+        _ => 1,
+    }
 }

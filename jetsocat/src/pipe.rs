@@ -1,12 +1,22 @@
-use crate::proxy::ProxyConfig;
+use std::cmp::PartialEq;
+
 use anyhow::Result;
 use slog::{debug, info, o, Logger};
 use std::any::Any;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
+use crate::jmux;
+use crate::proxy::ProxyConfig;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MultiplexingMode {
+    On,
+    Off,
+}
+
 #[derive(Debug, Clone)]
-pub enum PipeMode {
+pub enum PipeType {
     Stdio,
     ProcessCmd {
         command: String,
@@ -35,28 +45,45 @@ pub enum PipeMode {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct PipeMode {
+    pub pipe_type: PipeType,
+    pub multiplexing_mode: MultiplexingMode,
+}
+
 pub struct Pipe {
-    name: &'static str,
-    read: Box<dyn AsyncRead + Unpin>,
-    write: Box<dyn AsyncWrite + Unpin>,
+    pub name: &'static str,
+    pub read: Box<dyn AsyncRead + Unpin>,
+    pub write: Box<dyn AsyncWrite + Unpin>,
 
     // Useful when we don't want to drop something before the Pipe
     _handle: Option<Box<dyn Any>>,
 }
 
-pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<Pipe> {
+impl Pipe {
+    pub fn new(name: &'static str, read: Box<dyn AsyncRead + Unpin>, write: Box<dyn AsyncWrite + Unpin>) -> Self {
+        Self {
+            name,
+            read,
+            write,
+            _handle: None,
+        }
+    }
+}
+
+async fn open_simple_pipe(mode: PipeType, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<Pipe> {
     use anyhow::Context as _;
     use std::process::Stdio;
     use tokio::process::Command;
 
     match mode {
-        PipeMode::Stdio => Ok(Pipe {
+        PipeType::Stdio => Ok(Pipe {
             name: "stdio",
             read: Box::new(tokio::io::stdin()),
             write: Box::new(tokio::io::stdout()),
             _handle: None,
         }),
-        PipeMode::ProcessCmd { command } => {
+        PipeType::ProcessCmd { command } => {
             info!(log, "Spawn process with command: {}", command);
 
             #[cfg(target_os = "windows")]
@@ -87,7 +114,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
-        PipeMode::TcpListen { bind_addr } => {
+        PipeType::TcpListen { bind_addr } => {
             use tokio::net::TcpListener;
 
             info!(log, "Listening for TCP on {}", bind_addr);
@@ -111,7 +138,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
-        PipeMode::Tcp { addr } => {
+        PipeType::Tcp { addr } => {
             use crate::utils::tcp_connect;
 
             info!(log, "Connecting TCP to {}", addr);
@@ -129,7 +156,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
-        PipeMode::JetTcpAccept {
+        PipeType::JetTcpAccept {
             addr,
             association_id,
             candidate_id,
@@ -161,7 +188,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
-        PipeMode::JetTcpConnect {
+        PipeType::JetTcpConnect {
             addr,
             association_id,
             candidate_id,
@@ -193,7 +220,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
-        PipeMode::WebSocket { url } => {
+        PipeType::WebSocket { url } => {
             use crate::utils::ws_connect;
 
             info!(log, "Connecting WebSocket at {}", url);
@@ -211,7 +238,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
-        PipeMode::WebSocketListen { bind_addr } => {
+        PipeType::WebSocketListen { bind_addr } => {
             use crate::io::{ReadableWebSocketHalf, WritableWebSocketHalf};
             use async_tungstenite::tokio::accept_async;
             use futures_util::StreamExt as _;
@@ -245,6 +272,22 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 _handle: None,
             })
         }
+    }
+}
+
+async fn open_jpipe(mode: PipeType, log: Logger) -> Result<Pipe> {
+    match mode {
+        PipeType::TcpListen { bind_addr } => jmux::jmux_listen_loop(bind_addr, log).await,
+        PipeType::Tcp { addr } => jmux::jmux_connect_loop(addr, log).await,
+        _ => Err(anyhow::anyhow!("Multiplexing mode only allowed for TCP for now")),
+    }
+}
+
+pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<Pipe> {
+    if mode.multiplexing_mode == MultiplexingMode::Off {
+        open_simple_pipe(mode.pipe_type, proxy_cfg, log).await
+    } else {
+        open_jpipe(mode.pipe_type, log.clone()).await
     }
 }
 
