@@ -28,7 +28,7 @@ impl DestAddr {
 
     pub fn as_domain(&self) -> Option<(&str, u16)> {
         match self {
-            DestAddr::Domain(dns, port) => Some((&dns, *port)),
+            DestAddr::Domain(dns, port) => Some((dns, *port)),
             _ => None,
         }
     }

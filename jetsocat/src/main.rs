@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use jetsocat::pipe::PipeMode;
+use jetsocat::pipe::{MultiplexingMode, PipeMode, PipeType};
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{crit, info, o, Logger};
@@ -90,11 +90,13 @@ fn forward_command() -> Command {
     let usage = format!(
         r##"{command} forward <PIPE A> <PIPE B>
 
+Note: The pipe names listed below that use the optional multiplexing suffix imply the use of the JMUX multiplexing protocol
+
 Pipe formats:
     `stdio` or `-`: Standard input output
-    `tcp-listen://<BINDING ADDRESS>`: TCP listener
     `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
-    `tcp://<ADDRESS>`: Plain TCP stream
+    `tcp[-multiplexing]://<ADDRESS>`: Plain TCP stream
+    `tcp-listen[-multiplexing]://<BINDING ADDRESS>`: TCP listener
     `jet-tcp-connect://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as client
     `jet-tcp-accept://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as server
     `ws://<URL>`: WebSocket
@@ -286,15 +288,27 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     use uuid::Uuid;
 
     if arg == "stdio" || arg == "-" {
-        return Ok(PipeMode::Stdio);
+        return Ok(PipeMode {
+            pipe_type: PipeType::Stdio,
+            multiplexing_mode: MultiplexingMode::Off,
+        });
     }
 
     const SCHEME_SEPARATOR: &str = "://";
+    const MULTIPLEX_SUFFIX: &str = "-multiplexing";
 
     let scheme_end_idx = arg
         .find(SCHEME_SEPARATOR)
         .context("Invalid format: missing scheme (e.g.: tcp://<ADDRESS>)")?;
     let scheme = &arg[..scheme_end_idx];
+    let (scheme, multiplex) = match scheme.find(MULTIPLEX_SUFFIX) {
+        Some(idx) => {
+            let (scheme, _) = scheme.split_at(idx);
+            (scheme, MultiplexingMode::On)
+        }
+        None => (scheme, MultiplexingMode::Off),
+    };
+
     let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
 
     fn parse_jet_pipe_format(value: &str) -> anyhow::Result<(String, Uuid, Uuid)> {
@@ -311,32 +325,53 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     }
 
     match scheme {
-        "tcp-listen" => Ok(PipeMode::TcpListen {
-            bind_addr: value.to_owned(),
+        "tcp-listen" => Ok(PipeMode {
+            pipe_type: PipeType::TcpListen {
+                bind_addr: value.to_owned(),
+            },
+            multiplexing_mode: multiplex,
         }),
-        "cmd" => Ok(PipeMode::ProcessCmd {
-            command: value.to_owned(),
+        "cmd" => Ok(PipeMode {
+            pipe_type: PipeType::ProcessCmd {
+                command: value.to_owned(),
+            },
+            multiplexing_mode: MultiplexingMode::Off,
         }),
-        "tcp" => Ok(PipeMode::Tcp { addr: value.to_owned() }),
+        "tcp" => Ok(PipeMode {
+            pipe_type: PipeType::Tcp { addr: value.to_owned() },
+            multiplexing_mode: multiplex,
+        }),
         "jet-tcp-connect" => {
             let (addr, association_id, candidate_id) = parse_jet_pipe_format(value)?;
-            Ok(PipeMode::JetTcpConnect {
-                addr,
-                association_id,
-                candidate_id,
+            Ok(PipeMode {
+                pipe_type: PipeType::JetTcpConnect {
+                    addr,
+                    association_id,
+                    candidate_id,
+                },
+                multiplexing_mode: MultiplexingMode::Off,
             })
         }
         "jet-tcp-accept" => {
             let (addr, association_id, candidate_id) = parse_jet_pipe_format(value)?;
-            Ok(PipeMode::JetTcpAccept {
-                addr,
-                association_id,
-                candidate_id,
+            Ok(PipeMode {
+                pipe_type: PipeType::JetTcpAccept {
+                    addr,
+                    association_id,
+                    candidate_id,
+                },
+                multiplexing_mode: MultiplexingMode::Off,
             })
         }
-        "ws" | "wss" => Ok(PipeMode::WebSocket { url: arg }),
-        "ws-listen" => Ok(PipeMode::WebSocketListen {
-            bind_addr: value.to_owned(),
+        "ws" | "wss" => Ok(PipeMode {
+            pipe_type: PipeType::WebSocket { url: arg },
+            multiplexing_mode: MultiplexingMode::Off,
+        }),
+        "ws-listen" => Ok(PipeMode {
+            pipe_type: PipeType::WebSocketListen {
+                bind_addr: value.to_owned(),
+            },
+            multiplexing_mode: MultiplexingMode::Off,
         }),
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
     }
