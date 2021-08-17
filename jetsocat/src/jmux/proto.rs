@@ -3,12 +3,12 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::convert::TryFrom;
 use std::io::{Cursor, Read};
 
-pub trait Marshaler {
-    fn marshal_mux(&self) -> Vec<u8>;
+pub trait Marshall {
+    fn marshall(&self) -> Vec<u8>;
 }
 
-pub trait Unmarshaler {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error>
+pub trait Unmarshall {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error>
     where
         Self: Sized;
 
@@ -17,7 +17,7 @@ pub trait Unmarshaler {
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq)]
-pub enum JMUXChannelMessageType {
+pub enum JmuxChannelMessageType {
     Open = 100,
     OpenSuccess,
     OpenFailure,
@@ -27,17 +27,17 @@ pub enum JMUXChannelMessageType {
     Close,
 }
 
-impl TryFrom<u8> for JMUXChannelMessageType {
+impl TryFrom<u8> for JmuxChannelMessageType {
     type Error = anyhow::Error;
-    fn try_from(val: u8) -> Result<JMUXChannelMessageType, anyhow::Error> {
+    fn try_from(val: u8) -> Result<JmuxChannelMessageType, anyhow::Error> {
         match val {
-            100 => Ok(JMUXChannelMessageType::Open),
-            101 => Ok(JMUXChannelMessageType::OpenSuccess),
-            102 => Ok(JMUXChannelMessageType::OpenFailure),
-            103 => Ok(JMUXChannelMessageType::WindowAdjust),
-            104 => Ok(JMUXChannelMessageType::Data),
-            105 => Ok(JMUXChannelMessageType::Eof),
-            106 => Ok(JMUXChannelMessageType::Close),
+            100 => Ok(JmuxChannelMessageType::Open),
+            101 => Ok(JmuxChannelMessageType::OpenSuccess),
+            102 => Ok(JmuxChannelMessageType::OpenFailure),
+            103 => Ok(JmuxChannelMessageType::WindowAdjust),
+            104 => Ok(JmuxChannelMessageType::Data),
+            105 => Ok(JmuxChannelMessageType::Eof),
+            106 => Ok(JmuxChannelMessageType::Close),
             _ => Err(anyhow!("Incorrect JMUXChannelMessageType value: {}", val)),
         }
     }
@@ -45,13 +45,13 @@ impl TryFrom<u8> for JMUXChannelMessageType {
 
 #[derive(Debug, PartialEq)]
 pub struct CommonDefinitions {
-    pub msg_type: JMUXChannelMessageType,
+    pub msg_type: JmuxChannelMessageType,
     pub msg_flags: u8,
     pub msg_size: u16,
 }
 
-impl Marshaler for CommonDefinitions {
-    fn marshal_mux(&self) -> Vec<u8> {
+impl Marshall for CommonDefinitions {
+    fn marshall(&self) -> Vec<u8> {
         let msg_type = self.msg_type.clone() as u8;
         let msg_flags = self.msg_flags;
 
@@ -62,8 +62,8 @@ impl Marshaler for CommonDefinitions {
     }
 }
 
-impl Unmarshaler for CommonDefinitions {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for CommonDefinitions {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() == Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal CommonDefinitions. Expected {} bytes, but got:{}",
@@ -71,7 +71,7 @@ impl Unmarshaler for CommonDefinitions {
             buf.len()
         );
 
-        let msg_type = JMUXChannelMessageType::try_from(buf[0])?;
+        let msg_type = JmuxChannelMessageType::try_from(buf[0])?;
         let msg_flags = buf[1];
         let msg_size = u16::from_be_bytes([buf[2], buf[3]]);
 
@@ -101,7 +101,7 @@ impl JmuxMsgChannelOpen {
     pub fn new(sender_channel_id: u32) -> Self {
         Self {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
                 msg_flags: 0,
                 msg_size: Self::get_size_of_fixed_part() as u16,
             },
@@ -113,9 +113,9 @@ impl JmuxMsgChannelOpen {
     }
 }
 
-impl Marshaler for JmuxMsgChannelOpen {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelOpen {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.sender_channel_id.to_be_bytes());
         packet.extend_from_slice(&self.initial_window_size.to_be_bytes());
@@ -125,8 +125,8 @@ impl Marshaler for JmuxMsgChannelOpen {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelOpen {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelOpen {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() >= Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelOpen. Expected at least {} bytes, but got:{}",
@@ -136,7 +136,7 @@ impl Unmarshaler for JmuxMsgChannelOpen {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
         let sender_channel_id = buf.read_u32::<BigEndian>().unwrap();
         let initial_window_size = buf.read_u32::<BigEndian>().unwrap();
         let maximum_packet_size = buf.read_u32::<BigEndian>().unwrap();
@@ -172,7 +172,7 @@ impl JmuxMsgChannelOpenSuccess {
     pub fn new(recipient_channel_id: u32, sender_channel_id: u32) -> Self {
         Self {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::OpenSuccess,
+                msg_type: JmuxChannelMessageType::OpenSuccess,
                 msg_flags: 0,
                 msg_size: Self::get_size_of_fixed_part() as u16,
             },
@@ -184,9 +184,9 @@ impl JmuxMsgChannelOpenSuccess {
     }
 }
 
-impl Marshaler for JmuxMsgChannelOpenSuccess {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelOpenSuccess {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
         packet.extend_from_slice(&self.sender_channel_id.to_be_bytes());
@@ -197,8 +197,8 @@ impl Marshaler for JmuxMsgChannelOpenSuccess {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelOpenSuccess {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelOpenSuccess {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() == Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelOpenSuccess. Expected {} bytes, but got:{}",
@@ -207,7 +207,7 @@ impl Unmarshaler for JmuxMsgChannelOpenSuccess {
         );
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
 
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
         let sender_channel_id = buf.read_u32::<BigEndian>().unwrap();
@@ -242,7 +242,7 @@ impl JmuxMsgChannelOpenFailure {
     pub fn new(recipient_channel_id: u32, reason_code: u32, description: String) -> Self {
         Self {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::OpenFailure,
+                msg_type: JmuxChannelMessageType::OpenFailure,
                 msg_flags: 0,
                 msg_size: (Self::get_size_of_fixed_part() + description.len()) as u16,
             },
@@ -253,9 +253,9 @@ impl JmuxMsgChannelOpenFailure {
     }
 }
 
-impl Marshaler for JmuxMsgChannelOpenFailure {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelOpenFailure {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
         packet.extend_from_slice(&self.reason_code.to_be_bytes());
@@ -265,8 +265,8 @@ impl Marshaler for JmuxMsgChannelOpenFailure {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelOpenFailure {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelOpenFailure {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() >= Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelOpenFailure. Expected at least {} bytes, but got:{}",
@@ -276,7 +276,7 @@ impl Unmarshaler for JmuxMsgChannelOpenFailure {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
 
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
         let reason_code = buf.read_u32::<BigEndian>().unwrap();
@@ -308,7 +308,7 @@ impl JmuxMsgChannelWindowAdjust {
     pub fn new(recipient_channel_id: u32, window_adjustment: u32) -> Self {
         JmuxMsgChannelWindowAdjust {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::WindowAdjust,
+                msg_type: JmuxChannelMessageType::WindowAdjust,
                 msg_flags: 0,
                 msg_size: Self::get_size_of_fixed_part() as u16,
             },
@@ -318,9 +318,9 @@ impl JmuxMsgChannelWindowAdjust {
     }
 }
 
-impl Marshaler for JmuxMsgChannelWindowAdjust {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelWindowAdjust {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
         packet.extend_from_slice(&self.window_adjustment.to_be_bytes());
@@ -329,8 +329,8 @@ impl Marshaler for JmuxMsgChannelWindowAdjust {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelWindowAdjust {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelWindowAdjust {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() == Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelWindowAdjust. Expected {} bytes, but got:{}",
@@ -340,7 +340,7 @@ impl Unmarshaler for JmuxMsgChannelWindowAdjust {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
 
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
         let window_adjustment = buf.read_u32::<BigEndian>().unwrap();
@@ -376,7 +376,7 @@ impl JmuxMsgChannelData {
         );
         JmuxMsgChannelData {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::Data,
+                msg_type: JmuxChannelMessageType::Data,
                 msg_flags: 0,
                 msg_size: (Self::get_size_of_fixed_part() + vec.len()) as u16,
             },
@@ -387,9 +387,9 @@ impl JmuxMsgChannelData {
     }
 }
 
-impl Marshaler for JmuxMsgChannelData {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelData {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
         packet.extend_from_slice(&self.data_length.to_be_bytes());
@@ -399,8 +399,8 @@ impl Marshaler for JmuxMsgChannelData {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelData {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelData {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() >= Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelData. Expected at least {} bytes, but got:{}",
@@ -410,7 +410,7 @@ impl Unmarshaler for JmuxMsgChannelData {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
 
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
         let data_length = buf.read_u32::<BigEndian>().unwrap();
@@ -441,7 +441,7 @@ impl JmuxMsgChannelEof {
     pub fn new(recipient_channel_id: u32) -> Self {
         Self {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::Eof,
+                msg_type: JmuxChannelMessageType::Eof,
                 msg_flags: 0,
                 msg_size: Self::get_size_of_fixed_part() as u16,
             },
@@ -450,9 +450,9 @@ impl JmuxMsgChannelEof {
     }
 }
 
-impl Marshaler for JmuxMsgChannelEof {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelEof {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
 
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
 
@@ -460,8 +460,8 @@ impl Marshaler for JmuxMsgChannelEof {
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelEof {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelEof {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() == Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelEof. Expected {} bytes, but got:{}",
@@ -471,7 +471,7 @@ impl Unmarshaler for JmuxMsgChannelEof {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
 
         Ok(Self {
@@ -496,7 +496,7 @@ impl JmuxMsgChannelClose {
     pub fn new(recipient_channel_id: u32) -> Self {
         Self {
             common_defs: CommonDefinitions {
-                msg_type: JMUXChannelMessageType::Close,
+                msg_type: JmuxChannelMessageType::Close,
                 msg_flags: 0,
                 msg_size: Self::get_size_of_fixed_part() as u16,
             },
@@ -505,17 +505,17 @@ impl JmuxMsgChannelClose {
     }
 }
 
-impl Marshaler for JmuxMsgChannelClose {
-    fn marshal_mux(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshal_mux();
+impl Marshall for JmuxMsgChannelClose {
+    fn marshall(&self) -> Vec<u8> {
+        let mut packet = self.common_defs.marshall();
         packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
 
         packet
     }
 }
 
-impl Unmarshaler for JmuxMsgChannelClose {
-    fn unmarshal_mux(buf: &[u8]) -> Result<Self, anyhow::Error> {
+impl Unmarshall for JmuxMsgChannelClose {
+    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
         ensure!(
             buf.len() == Self::get_size_of_fixed_part(),
             "Incoming data too short to unmarshal JmuxMsgChannelClose. Expected {} bytes, but got:{}",
@@ -525,7 +525,7 @@ impl Unmarshaler for JmuxMsgChannelClose {
 
         let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
         let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshal_mux(common_defs_buffer)?;
+        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
         let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
 
         Ok(Self {
@@ -543,48 +543,48 @@ impl Unmarshaler for JmuxMsgChannelClose {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommonDefinitions, JMUXChannelMessageType, JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof,
-        JmuxMsgChannelOpenFailure, JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust,
+        CommonDefinitions, JmuxChannelMessageType, JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof,
+        JmuxMsgChannelOpen, JmuxMsgChannelOpenFailure, JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust, Marshall,
+        Unmarshall,
     };
-    use super::{JmuxMsgChannelOpen, Marshaler, Unmarshaler};
     use std::convert::TryFrom;
 
     #[test]
     fn try_from_should_return_correct_message_type_on_valid_bytes() {
-        let msg_type = JMUXChannelMessageType::try_from(100);
+        let msg_type = JmuxChannelMessageType::try_from(100);
         assert!(msg_type.is_ok());
-        assert_eq!(JMUXChannelMessageType::Open, msg_type.unwrap());
+        assert_eq!(JmuxChannelMessageType::Open, msg_type.unwrap());
 
-        let msg_type = JMUXChannelMessageType::try_from(103);
+        let msg_type = JmuxChannelMessageType::try_from(103);
         assert!(msg_type.is_ok());
-        assert_eq!(JMUXChannelMessageType::WindowAdjust, msg_type.unwrap());
+        assert_eq!(JmuxChannelMessageType::WindowAdjust, msg_type.unwrap());
 
-        let msg_type = JMUXChannelMessageType::try_from(106);
+        let msg_type = JmuxChannelMessageType::try_from(106);
         assert!(msg_type.is_ok());
-        assert_eq!(JMUXChannelMessageType::Close, msg_type.unwrap());
+        assert_eq!(JmuxChannelMessageType::Close, msg_type.unwrap());
     }
 
     #[test]
     fn try_from_should_return_err_on_invalid_bytes() {
-        let msg_type = JMUXChannelMessageType::try_from(99);
+        let msg_type = JmuxChannelMessageType::try_from(99);
         assert!(msg_type.is_err());
 
-        let msg_type = JMUXChannelMessageType::try_from(107);
+        let msg_type = JmuxChannelMessageType::try_from(107);
         assert!(msg_type.is_err());
     }
 
     #[test]
     fn common_definitions_unmarshal_return_err_on_short_buf() {
-        assert!(CommonDefinitions::unmarshal_mux(&[]).is_err());
+        assert!(CommonDefinitions::unmarshall(&[]).is_err());
     }
 
     #[test]
     fn common_definitions_unmarshal_return_correct_message() {
-        let msg = CommonDefinitions::unmarshal_mux(&[102, 0, 7, 16]);
+        let msg = CommonDefinitions::unmarshall(&[102, 0, 7, 16]);
         assert!(msg.is_ok());
         assert_eq!(
             CommonDefinitions {
-                msg_type: JMUXChannelMessageType::OpenFailure,
+                msg_type: JmuxChannelMessageType::OpenFailure,
                 msg_flags: 0,
                 msg_size: 1808
             },
@@ -595,16 +595,16 @@ mod tests {
     #[test]
     fn common_definitions_marshal_return_correct_buf() {
         let raw_mgs = CommonDefinitions {
-            msg_type: JMUXChannelMessageType::OpenSuccess,
+            msg_type: JmuxChannelMessageType::OpenSuccess,
             msg_flags: 0,
             msg_size: 512,
         };
-        assert_eq!(vec![101, 0, 2, 0], raw_mgs.marshal_mux());
+        assert_eq!(vec![101, 0, 2, 0], raw_mgs.marshall());
     }
 
     #[test]
     fn jmux_msg_channel_open_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpen::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelOpen::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -624,14 +624,14 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 36,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
             },
             sender_channel_id: 1,
             maximum_packet_size: 1024,
             destination_url: "tcp://google.com:443".to_owned(),
         };
 
-        let msg = JmuxMsgChannelOpen::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelOpen::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
     }
@@ -653,18 +653,18 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 36,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
             },
             sender_channel_id: 1,
             maximum_packet_size: 1024,
             destination_url: "tcp://google.com:443".to_owned(),
         };
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
     pub fn jmux_msg_channel_open_success_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpenSuccess::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelOpenSuccess::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -683,14 +683,14 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 20,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::OpenSuccess,
+                msg_type: JmuxChannelMessageType::OpenSuccess,
             },
             sender_channel_id: 2,
             maximum_packet_size: 32767,
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelOpenSuccess::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelOpenSuccess::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
     }
@@ -711,19 +711,19 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 20,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::OpenSuccess,
+                msg_type: JmuxChannelMessageType::OpenSuccess,
             },
             sender_channel_id: 2,
             maximum_packet_size: 32767,
             recipient_channel_id: 1,
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
     pub fn jmux_msg_channel_open_failure_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpenFailure::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelOpenFailure::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -740,18 +740,18 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 17,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::OpenFailure,
+                msg_type: JmuxChannelMessageType::OpenFailure,
             },
             recipient_channel_id: 1,
             reason_code: 2,
             description: "error".to_owned(),
         };
 
-        let msg = JmuxMsgChannelOpenFailure::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelOpenFailure::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
 
-        let raw_example = msg_example.marshal_mux();
+        let raw_example = msg_example.marshall();
         assert_eq!(raw_mgs.to_vec(), raw_example);
     }
 
@@ -769,19 +769,19 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 17,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::OpenFailure,
+                msg_type: JmuxChannelMessageType::OpenFailure,
             },
             recipient_channel_id: 1,
             reason_code: 2,
             description: "error".to_owned(),
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
     pub fn jmux_msg_channel_window_adjust_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelWindowAdjust::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelWindowAdjust::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -797,17 +797,17 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 12,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::WindowAdjust,
+                msg_type: JmuxChannelMessageType::WindowAdjust,
             },
             recipient_channel_id: 1,
             window_adjustment: 512,
         };
 
-        let msg = JmuxMsgChannelWindowAdjust::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelWindowAdjust::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
 
-        let raw_example = msg_example.marshal_mux();
+        let raw_example = msg_example.marshall();
         assert_eq!(raw_mgs.to_vec(), raw_example);
     }
 
@@ -824,13 +824,13 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 12,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::WindowAdjust,
+                msg_type: JmuxChannelMessageType::WindowAdjust,
             },
             recipient_channel_id: 1,
             window_adjustment: 512,
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod tests {
 
     #[test]
     pub fn jmux_msg_channel_data_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelData::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelData::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -858,14 +858,14 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 16,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Data,
+                msg_type: JmuxChannelMessageType::Data,
             },
             recipient_channel_id: 1,
             data_length: 4,
             transfer_data: vec![11, 12, 13, 14],
         };
 
-        let msg = JmuxMsgChannelData::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelData::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
     }
@@ -884,19 +884,19 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 16,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Data,
+                msg_type: JmuxChannelMessageType::Data,
             },
             recipient_channel_id: 1,
             data_length: 4,
             transfer_data: vec![11, 12, 13, 14],
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
     pub fn jmux_msg_channel_eof_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelEof::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelEof::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -911,16 +911,16 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 8,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Eof,
+                msg_type: JmuxChannelMessageType::Eof,
             },
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelEof::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelEof::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
 
-        let raw_example = msg_example.marshal_mux();
+        let raw_example = msg_example.marshall();
         assert_eq!(raw_mgs.to_vec(), raw_example);
     }
 
@@ -936,17 +936,17 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 8,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Eof,
+                msg_type: JmuxChannelMessageType::Eof,
             },
             recipient_channel_id: 1,
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 
     #[test]
     pub fn jmux_msg_channel_close_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelClose::unmarshal_mux(&[32, 42]).is_err());
+        assert!(JmuxMsgChannelClose::unmarshall(&[32, 42]).is_err());
     }
 
     #[test]
@@ -961,16 +961,16 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 8,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Close,
+                msg_type: JmuxChannelMessageType::Close,
             },
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelClose::unmarshal_mux(&raw_mgs);
+        let msg = JmuxMsgChannelClose::unmarshall(&raw_mgs);
         assert!(msg.is_ok());
         assert_eq!(msg_example, msg.unwrap());
 
-        let raw_example = msg_example.marshal_mux();
+        let raw_example = msg_example.marshall();
         assert_eq!(raw_mgs.to_vec(), raw_example);
     }
 
@@ -986,11 +986,11 @@ mod tests {
             common_defs: CommonDefinitions {
                 msg_size: 8,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Close,
+                msg_type: JmuxChannelMessageType::Close,
             },
             recipient_channel_id: 1,
         };
 
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshal_mux());
+        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
     }
 }

@@ -1,25 +1,22 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+pub mod packets_processing;
+pub mod proto;
 
+use crate::jmux::packets_processing::{JmuxChannelMsg, JmuxReceiver, JmuxSender};
+use crate::jmux::proto::{
+    JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof, JmuxMsgChannelOpen, JmuxMsgChannelOpenFailure,
+    JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust,
+};
+use crate::pipe::Pipe;
 use anyhow::Result;
 use idalloc::Slab;
 use slog::{debug, info, trace, Logger};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::io::duplex;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{Mutex, Notify};
-
-pub mod jmux_proto;
-pub mod packets_processing;
-
-use crate::pipe::Pipe;
-use crate::utils::error_kind_to_socks5_error;
-use jmux_proto::{
-    JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof, JmuxMsgChannelOpen, JmuxMsgChannelOpenFailure,
-    JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust,
-};
-use packets_processing::{JMUXChannelMsg, JMUXReceiver, JMUXSender};
 
 const DUPLEX_BUF_SIZE: usize = 64 * 1024;
 
@@ -37,7 +34,7 @@ pub async fn jmux_listen_loop(arg: String, log: Logger) -> Result<Pipe> {
         .with_context(|| "Failed to bind TCP listener")?;
 
     let clients: Arc<Mutex<HashMap<u32, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
-    let jmux_sender = JMUXSender::new(Box::new(incoming_write_pipe));
+    let jmux_sender = JmuxSender::new(Box::new(incoming_write_pipe));
     let id_allocator = Arc::new(Mutex::new(idalloc::Slab::<u32>::new()));
 
     // Listen Task
@@ -67,14 +64,14 @@ pub async fn jmux_listen_loop(arg: String, log: Logger) -> Result<Pipe> {
     // Jmux receiver task
     tokio::spawn({
         let log = log.clone();
-        let jmux_receiver = JMUXReceiver::new(Box::new(incoming_read_pipe));
+        let jmux_receiver = JmuxReceiver::new(Box::new(incoming_read_pipe));
         let jmux_context = JmuxContext::new(jmux_sender, id_allocator.clone(), log.clone());
 
         async move {
             loop {
                 match jmux_receiver.receive().await {
                     Ok(result) => match result {
-                        JMUXChannelMsg::OpenSuccess(msg) => {
+                        JmuxChannelMsg::OpenSuccess(msg) => {
                             debug!(log, "Listen Loop - got {:?}", msg);
 
                             let connection_id = msg.sender_channel_id;
@@ -101,7 +98,7 @@ pub async fn jmux_listen_loop(arg: String, log: Logger) -> Result<Pipe> {
                                 .await;
                             jmux_context.channel_forward_write(write_half, connection_id).await;
                         }
-                        JMUXChannelMsg::OpenFailure(msg) => {
+                        JmuxChannelMsg::OpenFailure(msg) => {
                             debug!(log, "Listen Loop - got {:?}", msg);
 
                             let connection_id = msg.recipient_channel_id;
@@ -113,7 +110,7 @@ pub async fn jmux_listen_loop(arg: String, log: Logger) -> Result<Pipe> {
                             let mut id_allocator = id_allocator.as_ref().lock().await;
                             id_allocator.free(connection_id);
                         }
-                        JMUXChannelMsg::Open(msg) => panic!("Unexpect {:?}", msg),
+                        JmuxChannelMsg::Open(msg) => panic!("Unexpect {:?}", msg),
                         msg => jmux_context.handle_general_jmux_message(msg).await,
                     },
                     Err(e) => panic!("Unexpect error from jmux receiver {:?}", e),
@@ -136,8 +133,8 @@ pub async fn jmux_connect_loop(address: String, log: Logger) -> Result<Pipe> {
     let (incoming_read_pipe, outgoing_write_pipe) = duplex(DUPLEX_BUF_SIZE);
 
     tokio::spawn({
-        let jmux_receiver = JMUXReceiver::new(Box::new(incoming_read_pipe));
-        let jmux_sender = JMUXSender::new(Box::new(incoming_write_pipe));
+        let jmux_receiver = JmuxReceiver::new(Box::new(incoming_read_pipe));
+        let jmux_sender = JmuxSender::new(Box::new(incoming_write_pipe));
         let id_allocator = Arc::new(Mutex::new(idalloc::Slab::<u32>::new()));
 
         let jmux_context = JmuxContext::new(jmux_sender.clone(), id_allocator.clone(), log.clone());
@@ -147,7 +144,7 @@ pub async fn jmux_connect_loop(address: String, log: Logger) -> Result<Pipe> {
                 match jmux_receiver.receive().await {
                     Ok(msg) => {
                         match msg {
-                            JMUXChannelMsg::Open(msg) => {
+                            JmuxChannelMsg::Open(msg) => {
                                 debug!(log, "Accept Loop - got {:?}", msg);
 
                                 let recipient_channel_id = { id_allocator.lock().await.next() };
@@ -167,7 +164,7 @@ pub async fn jmux_connect_loop(address: String, log: Logger) -> Result<Pipe> {
                                                 jmux_sender
                                                     .send(&JmuxMsgChannelOpenFailure::new(
                                                         connection_id,
-                                                        error_kind_to_socks5_error(e.kind()),
+                                                        h_error_kind_to_socks5_error(e.kind()),
                                                         e.to_string(),
                                                     ))
                                                     .await
@@ -195,7 +192,7 @@ pub async fn jmux_connect_loop(address: String, log: Logger) -> Result<Pipe> {
                                     }
                                 });
                             }
-                            JMUXChannelMsg::OpenSuccess(_) | JMUXChannelMsg::OpenFailure(_) => {
+                            JmuxChannelMsg::OpenSuccess(_) | JmuxChannelMsg::OpenFailure(_) => {
                                 panic!("Unexpect {:?}", msg)
                             }
                             other_msg => jmux_context.handle_general_jmux_message(other_msg).await,
@@ -219,7 +216,7 @@ pub async fn jmux_connect_loop(address: String, log: Logger) -> Result<Pipe> {
 
 #[derive(Clone)]
 struct JmuxContext {
-    pub jmux_sender: JMUXSender,
+    pub jmux_sender: JmuxSender,
     pub adjust_window_event_senders: Arc<Mutex<HashMap<u32, UnboundedSender<u32>>>>,
     pub message_data_event_senders: Arc<Mutex<HashMap<u32, UnboundedSender<JmuxMsgChannelData>>>>,
     pub read_stop_signal: Arc<Mutex<HashMap<u32, Arc<Notify>>>>,
@@ -228,7 +225,7 @@ struct JmuxContext {
 }
 
 impl JmuxContext {
-    fn new(jmux_sender: JMUXSender, id_allocator: Arc<Mutex<Slab<u32>>>, log: Logger) -> Self {
+    fn new(jmux_sender: JmuxSender, id_allocator: Arc<Mutex<Slab<u32>>>, log: Logger) -> Self {
         Self {
             jmux_sender,
             adjust_window_event_senders: Default::default(),
@@ -356,9 +353,9 @@ impl JmuxContext {
         });
     }
 
-    async fn handle_general_jmux_message(&self, general_jmux_message: JMUXChannelMsg) {
+    async fn handle_general_jmux_message(&self, general_jmux_message: JmuxChannelMsg) {
         match general_jmux_message {
-            JMUXChannelMsg::WindowAdjust(window_adjust) => {
+            JmuxChannelMsg::WindowAdjust(window_adjust) => {
                 trace!(
                     self.log,
                     "Received WindowAdjust message for {}",
@@ -371,20 +368,20 @@ impl JmuxContext {
                     adjust_window_event_sender.send(window_adjust.window_adjustment).ok();
                 }
             }
-            JMUXChannelMsg::Data(data) => {
+            JmuxChannelMsg::Data(data) => {
                 trace!(self.log, "Received Data message for {}", data.recipient_channel_id);
 
                 let message_data_event_senders = self.message_data_event_senders.lock().await;
                 let message_data_event_sender = message_data_event_senders.get(&data.recipient_channel_id).unwrap();
                 message_data_event_sender.send(data).ok();
             }
-            JMUXChannelMsg::Eof(eof) => {
+            JmuxChannelMsg::Eof(eof) => {
                 debug!(self.log, "Received Eof message for {}", eof.recipient_channel_id);
 
                 let mut message_data_event_senders = self.message_data_event_senders.lock().await;
                 message_data_event_senders.remove(&eof.recipient_channel_id);
             }
-            JMUXChannelMsg::Close(close) => {
+            JmuxChannelMsg::Close(close) => {
                 debug!(self.log, "Received Close message for {}", close.recipient_channel_id);
 
                 let recipient_channel_id = close.recipient_channel_id;
@@ -407,5 +404,12 @@ impl JmuxContext {
                 panic!("Got unexpected JMUX non-general message {:?}", msg)
             }
         }
+    }
+}
+
+fn h_error_kind_to_socks5_error(e: std::io::ErrorKind) -> u32 {
+    match e {
+        std::io::ErrorKind::ConnectionRefused => 5,
+        _ => 1,
     }
 }

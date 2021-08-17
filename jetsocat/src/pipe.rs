@@ -1,13 +1,11 @@
-use std::cmp::PartialEq;
-
+use crate::jmux;
+use crate::proxy::ProxyConfig;
 use anyhow::Result;
 use slog::{debug, info, o, Logger};
 use std::any::Any;
+use std::cmp::PartialEq;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
-
-use crate::jmux;
-use crate::proxy::ProxyConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MultiplexingMode {

@@ -1,18 +1,16 @@
+use super::proto::{
+    JmuxChannelMessageType, JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof, JmuxMsgChannelOpen,
+    JmuxMsgChannelOpenFailure, JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust,
+};
+use crate::jmux::proto::{CommonDefinitions, Marshall, Unmarshall};
+use anyhow::anyhow;
 use std::convert::TryFrom;
 use std::sync::Arc;
-
-use anyhow::anyhow;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::Mutex;
 
-use super::jmux_proto::{
-    JMUXChannelMessageType, JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof, JmuxMsgChannelOpen,
-    JmuxMsgChannelOpenFailure, JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust,
-};
-use crate::jmux::jmux_proto::{CommonDefinitions, Marshaler, Unmarshaler};
-
 #[derive(Debug, PartialEq)]
-pub enum JMUXChannelMsg {
+pub enum JmuxChannelMsg {
     Open(JmuxMsgChannelOpen),
     OpenSuccess(JmuxMsgChannelOpenSuccess),
     OpenFailure(JmuxMsgChannelOpenFailure),
@@ -23,21 +21,21 @@ pub enum JMUXChannelMsg {
 }
 
 #[derive(Clone)]
-pub struct JMUXSender {
+pub struct JmuxSender {
     writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
 }
 
-impl JMUXSender {
-    pub fn new(write: Box<dyn AsyncWrite + Unpin + Send>) -> JMUXSender {
-        JMUXSender {
+impl JmuxSender {
+    pub fn new(write: Box<dyn AsyncWrite + Unpin + Send>) -> JmuxSender {
+        JmuxSender {
             writer: Arc::new(Mutex::new(write)),
         }
     }
 
-    pub async fn send<T: Marshaler>(&self, msg: &T) -> Result<(), anyhow::Error> {
+    pub async fn send<T: Marshall>(&self, msg: &T) -> Result<(), anyhow::Error> {
         use tokio::io::AsyncWriteExt;
 
-        let packet = msg.marshal_mux();
+        let packet = msg.marshall();
 
         let writer = &mut *self.writer.lock().await;
         writer
@@ -47,18 +45,18 @@ impl JMUXSender {
     }
 }
 
-pub struct JMUXReceiver {
+pub struct JmuxReceiver {
     reader: Arc<Mutex<Box<dyn AsyncRead + Unpin + Send>>>,
 }
 
-impl JMUXReceiver {
-    pub fn new(reader: Box<dyn AsyncRead + Unpin + Send>) -> JMUXReceiver {
-        JMUXReceiver {
+impl JmuxReceiver {
+    pub fn new(reader: Box<dyn AsyncRead + Unpin + Send>) -> JmuxReceiver {
+        JmuxReceiver {
             reader: Arc::new(Mutex::new(reader)),
         }
     }
 
-    pub async fn receive(&self) -> Result<JMUXChannelMsg, anyhow::Error> {
+    pub async fn receive(&self) -> Result<JmuxChannelMsg, anyhow::Error> {
         let packet = self
             .read_packet()
             .await
@@ -84,21 +82,21 @@ impl JMUXReceiver {
         Ok(packet)
     }
 
-    fn parse_channel_message(&self, packet: &[u8]) -> Result<JMUXChannelMsg, anyhow::Error> {
-        let message = match JMUXChannelMessageType::try_from(packet[0])? {
-            JMUXChannelMessageType::Open => JMUXChannelMsg::Open(JmuxMsgChannelOpen::unmarshal_mux(packet)?),
-            JMUXChannelMessageType::Data => JMUXChannelMsg::Data(JmuxMsgChannelData::unmarshal_mux(packet)?),
-            JMUXChannelMessageType::OpenSuccess => {
-                JMUXChannelMsg::OpenSuccess(JmuxMsgChannelOpenSuccess::unmarshal_mux(packet)?)
+    fn parse_channel_message(&self, packet: &[u8]) -> Result<JmuxChannelMsg, anyhow::Error> {
+        let message = match JmuxChannelMessageType::try_from(packet[0])? {
+            JmuxChannelMessageType::Open => JmuxChannelMsg::Open(JmuxMsgChannelOpen::unmarshall(packet)?),
+            JmuxChannelMessageType::Data => JmuxChannelMsg::Data(JmuxMsgChannelData::unmarshall(packet)?),
+            JmuxChannelMessageType::OpenSuccess => {
+                JmuxChannelMsg::OpenSuccess(JmuxMsgChannelOpenSuccess::unmarshall(packet)?)
             }
-            JMUXChannelMessageType::OpenFailure => {
-                JMUXChannelMsg::OpenFailure(JmuxMsgChannelOpenFailure::unmarshal_mux(packet)?)
+            JmuxChannelMessageType::OpenFailure => {
+                JmuxChannelMsg::OpenFailure(JmuxMsgChannelOpenFailure::unmarshall(packet)?)
             }
-            JMUXChannelMessageType::WindowAdjust => {
-                JMUXChannelMsg::WindowAdjust(JmuxMsgChannelWindowAdjust::unmarshal_mux(packet)?)
+            JmuxChannelMessageType::WindowAdjust => {
+                JmuxChannelMsg::WindowAdjust(JmuxMsgChannelWindowAdjust::unmarshall(packet)?)
             }
-            JMUXChannelMessageType::Eof => JMUXChannelMsg::Eof(JmuxMsgChannelEof::unmarshal_mux(packet)?),
-            JMUXChannelMessageType::Close => JMUXChannelMsg::Close(JmuxMsgChannelClose::unmarshal_mux(packet)?),
+            JmuxChannelMessageType::Eof => JmuxChannelMsg::Eof(JmuxMsgChannelEof::unmarshall(packet)?),
+            JmuxChannelMessageType::Close => JmuxChannelMsg::Close(JmuxMsgChannelClose::unmarshall(packet)?),
         };
 
         Ok(message)
@@ -107,8 +105,10 @@ impl JMUXReceiver {
 
 #[cfg(test)]
 pub mod tests {
-    use super::{CommonDefinitions, JMUXChannelMessageType, JmuxMsgChannelOpen, Marshaler, Unmarshaler};
-    use super::{JMUXChannelMsg, JMUXReceiver, JMUXSender};
+    use super::{
+        CommonDefinitions, JmuxChannelMessageType, JmuxChannelMsg, JmuxMsgChannelOpen, JmuxReceiver, JmuxSender,
+        Marshall, Unmarshall,
+    };
     use min_max::min;
     use std::cell::RefCell;
     use std::io::Error;
@@ -141,15 +141,15 @@ pub mod tests {
         is_marsial_mux_called: RefCell<bool>,
     }
 
-    impl Marshaler for TestJmuxMsg {
-        fn marshal_mux(&self) -> Vec<u8> {
+    impl Marshall for TestJmuxMsg {
+        fn marshall(&self) -> Vec<u8> {
             *self.is_marsial_mux_called.borrow_mut() = true;
             Vec::new()
         }
     }
 
-    impl Unmarshaler for TestJmuxMsg {
-        fn unmarshal_mux(_buf: &[u8]) -> Result<Self, anyhow::Error>
+    impl Unmarshall for TestJmuxMsg {
+        fn unmarshall(_buf: &[u8]) -> Result<Self, anyhow::Error>
         where
             Self: Sized,
         {
@@ -188,7 +188,7 @@ pub mod tests {
         let writer = MockAsyncWriter {
             is_called: Arc::new(AtomicBool::new(false)),
         };
-        let jmux_sender = JMUXSender::new(Box::new(writer));
+        let jmux_sender = JmuxSender::new(Box::new(writer));
         let msg_example = TestJmuxMsg {
             is_marsial_mux_called: RefCell::new(false),
         };
@@ -205,13 +205,13 @@ pub mod tests {
         let writer = MockAsyncWriter {
             is_called: Arc::clone(&is_called),
         };
-        let jmux_sender = JMUXSender::new(Box::new(writer));
+        let jmux_sender = JmuxSender::new(Box::new(writer));
         let msg_example = JmuxMsgChannelOpen {
             initial_window_size: 1024,
             common_defs: CommonDefinitions {
                 msg_size: 36,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
             },
             sender_channel_id: 1,
             maximum_packet_size: 1024,
@@ -236,7 +236,7 @@ pub mod tests {
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];
-        let receiver = JMUXReceiver::new(Box::new(MockAsyncReader {
+        let receiver = JmuxReceiver::new(Box::new(MockAsyncReader {
             raw_msg: raw_mgs.to_vec(),
         }));
 
@@ -258,18 +258,18 @@ pub mod tests {
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];
-        let msg_example = JMUXChannelMsg::Open(JmuxMsgChannelOpen {
+        let msg_example = JmuxChannelMsg::Open(JmuxMsgChannelOpen {
             initial_window_size: 1024,
             common_defs: CommonDefinitions {
                 msg_size: 36,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
             },
             sender_channel_id: 1,
             maximum_packet_size: 1024,
             destination_url: "tcp://google.com:443".to_owned(),
         });
-        let receiver = JMUXReceiver::new(Box::new(MockAsyncReader {
+        let receiver = JmuxReceiver::new(Box::new(MockAsyncReader {
             raw_msg: raw_mgs.to_vec(),
         }));
 
@@ -291,18 +291,18 @@ pub mod tests {
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];
-        let msg_example = JMUXChannelMsg::Open(JmuxMsgChannelOpen {
+        let msg_example = JmuxChannelMsg::Open(JmuxMsgChannelOpen {
             initial_window_size: 1024,
             common_defs: CommonDefinitions {
                 msg_size: 36,
                 msg_flags: 0,
-                msg_type: JMUXChannelMessageType::Open,
+                msg_type: JmuxChannelMessageType::Open,
             },
             sender_channel_id: 1,
             maximum_packet_size: 1024,
             destination_url: "tcp://google.com:443".to_owned(),
         });
-        let receiver = JMUXReceiver::new(Box::new(MockAsyncReader {
+        let receiver = JmuxReceiver::new(Box::new(MockAsyncReader {
             raw_msg: raw_mgs.to_vec(),
         }));
 

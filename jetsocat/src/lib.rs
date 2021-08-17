@@ -1,8 +1,9 @@
-mod io;
 pub mod jet;
 pub mod jmux;
 pub mod pipe;
 pub mod proxy;
+
+mod io;
 mod utils;
 
 use slog::*;
