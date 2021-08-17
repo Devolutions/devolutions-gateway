@@ -9,7 +9,7 @@ description = "WebSocket toolkit for jet protocol related operations"
 default = ["rustls", "detect-proxy"]
 verbose = ["slog/max_level_trace"]
 detect-proxy = ["proxy_cfg"]
-rustls = ["async-tungstenite/tokio-rustls"]
+rustls = ["async-tungstenite/tokio-rustls-webpki-roots"]
 native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
@@ -20,21 +20,21 @@ uuid = "0.8"
 
 # proxy support
 jetsocat-proxy = { path = "./proxy" }
-proxy_cfg = { version = "0.3.6", optional = true }
+proxy_cfg = { version = "0.4", optional = true }
 
 # cli
 seahorse = "1.1"
 
 # async
-tokio = { version = "1.6", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio = { version = "1.10", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
 futures-util = "0.3"
 futures-channel = "0.3"
 futures-io = "0.3"
-async-tungstenite = "0.13"
+async-tungstenite = "0.14"
 
 # logging
 slog = "2.7"
-slog-async = "2.5"
+slog-async = "2.7"
 slog-term = "2.8"
 
 # error handling
@@ -43,7 +43,8 @@ anyhow = "1"
 # location of special directories
 dirs-next = "2"
 
-idalloc = "0.1.1"
-min-max = "0.1.8"
+# utils
+idalloc = "0.1"
+min-max = "0.1"
+byteorder = "1.4"
 
-byteorder = "1.4.3"

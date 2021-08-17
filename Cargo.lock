@@ -141,16 +141,16 @@ dependencies = [
 
 [[package]]
 name = "async-tungstenite"
-version = "0.13.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07b30ef0ea5c20caaa54baea49514a206308989c68be7ecd86c7f956e4da6378"
+checksum = "8645e929ec7964448a901db9da30cd2ae8c7fecf4d6176af427837531dbbb63b"
 dependencies = [
  "futures-io",
  "futures-util",
  "log",
  "native-tls",
  "pin-project-lite 0.2.7",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-native-tls",
  "tokio-rustls 0.22.0",
  "tungstenite",
@@ -802,7 +802,7 @@ dependencies = [
  "sspi",
  "tempfile",
  "tokio 0.2.25",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-compat-02",
  "tokio-rustls 0.22.0",
  "tokio-test",
@@ -1241,7 +1241,7 @@ dependencies = [
  "http 0.2.4",
  "indexmap",
  "slab",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-util 0.6.7",
  "tracing",
 ]
@@ -1470,7 +1470,7 @@ dependencies = [
  "itoa",
  "pin-project-lite 0.2.7",
  "socket2 0.4.0",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tower-service",
  "tracing",
  "want 0.3.0",
@@ -1511,7 +1511,7 @@ dependencies = [
  "bytes 1.0.1",
  "hyper 0.14.11",
  "native-tls",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-native-tls",
 ]
 
@@ -1664,7 +1664,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "uuid 0.8.2",
 ]
 
@@ -1672,7 +1672,7 @@ dependencies = [
 name = "jetsocat-proxy"
 version = "0.1.0"
 dependencies = [
- "tokio 1.9.0",
+ "tokio 1.10.0",
 ]
 
 [[package]]
@@ -2512,15 +2512,15 @@ dependencies = [
 
 [[package]]
 name = "proxy_cfg"
-version = "0.3.6"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb2fc88689c67c50b7d78763f338bc227a1ab58322b97ccc5b5cb7ef70536652"
+checksum = "79e3c793b3a90f966b2bd0917300bc0cb676b805a3bab4f55fa91c56123f3e0a"
 dependencies = [
  "core-foundation 0.6.4",
  "system-configuration-sys 0.3.0",
  "url 2.2.2",
  "winapi 0.3.9",
- "winreg 0.7.0",
+ "winreg 0.9.0",
 ]
 
 [[package]]
@@ -2886,7 +2886,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded 0.7.0",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-native-tls",
  "url 2.2.2",
  "wasm-bindgen",
@@ -3306,9 +3306,9 @@ checksum = "8347046d4ebd943127157b94d63abb990fcf729dc4e9978927fdf4ac3c998d06"
 
 [[package]]
 name = "slog-async"
-version = "2.6.0"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c60813879f820c85dbc4eabf3269befe374591289019775898d56a81a804fbdc"
+checksum = "766c59b252e62a34651412870ff55d8c4e6d04df19b43eecb2703e417b097ffe"
 dependencies = [
  "crossbeam-channel",
  "slog",
@@ -3450,7 +3450,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio 0.2.25",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-util 0.6.7",
  "url 1.7.2",
 ]
@@ -3836,9 +3836,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.9.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b7b349f11a7047e6d1276853e612d152f5e8a352c61917887cc2169e2366b4c"
+checksum = "01cf844b23c6131f624accf65ce0e4e9956a8bb329400ea5bcc26ae3a5c20b0b"
 dependencies = [
  "autocfg 1.0.1",
  "bytes 1.0.1",
@@ -3874,7 +3874,7 @@ dependencies = [
  "once_cell",
  "pin-project-lite 0.2.7",
  "tokio 0.2.25",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-stream",
 ]
 
@@ -3938,7 +3938,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
 dependencies = [
  "native-tls",
- "tokio 1.9.0",
+ "tokio 1.10.0",
 ]
 
 [[package]]
@@ -3989,7 +3989,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
 dependencies = [
  "rustls 0.19.1",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "webpki",
 ]
 
@@ -4001,7 +4001,7 @@ checksum = "7b2f3f698253f03119ac0102beaa64f67a67e08074d03a22d18784104543727f"
 dependencies = [
  "futures-core",
  "pin-project-lite 0.2.7",
- "tokio 1.9.0",
+ "tokio 1.10.0",
 ]
 
 [[package]]
@@ -4037,7 +4037,7 @@ dependencies = [
  "async-stream",
  "bytes 1.0.1",
  "futures-core",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tokio-stream",
 ]
 
@@ -4098,7 +4098,7 @@ dependencies = [
  "futures-util",
  "log",
  "pin-project",
- "tokio 1.9.0",
+ "tokio 1.10.0",
  "tungstenite",
 ]
 
@@ -4127,7 +4127,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite 0.2.7",
- "tokio 1.9.0",
+ "tokio 1.10.0",
 ]
 
 [[package]]
