@@ -38,3 +38,42 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[derive(Debug)]
+pub struct JmuxProxyCfg {
+    pub pipe_mode: pipe::PipeMode,
+    pub proxy_cfg: Option<proxy::ProxyConfig>,
+    pub listener_modes: Vec<jmux::listener::ListenerMode>,
+}
+
+pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
+    use self::jmux::listener::{tcp_listener_task, ListenerMode};
+    use tokio::sync::mpsc;
+
+    let (jmux_api_request_sender, jmux_api_request_receiver) = mpsc::unbounded_channel();
+
+    for listener_mode in cfg.listener_modes {
+        match listener_mode {
+            ListenerMode::Tcp {
+                bind_addr,
+                destination_url,
+            } => {
+                let listener_log = log.new(o!("TCP listener" => bind_addr.clone()));
+                let jmux_api_request_sender = jmux_api_request_sender.clone();
+                tokio::spawn(async move {
+                    tcp_listener_task(jmux_api_request_sender, bind_addr, destination_url, listener_log).await
+                });
+            }
+            ListenerMode::Socks5 { .. } => anyhow::bail!("SOCKS5 listener is not supported yet"),
+        }
+    }
+
+    self::jmux::start_proxy(
+        jmux_api_request_sender,
+        jmux_api_request_receiver,
+        cfg.pipe_mode,
+        cfg.proxy_cfg,
+        log,
+    )
+    .await
+}

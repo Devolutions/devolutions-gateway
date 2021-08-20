@@ -168,7 +168,7 @@ impl JetMessage {
         stream.write_u16::<BigEndian>(size)?;
         stream.write_u8(flags)?;
         stream.write_u8(mask)?;
-        stream.write_all(&payload)?;
+        stream.write_all(payload)?;
 
         Ok(())
     }

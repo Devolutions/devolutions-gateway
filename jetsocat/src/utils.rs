@@ -78,19 +78,23 @@ macro_rules! impl_tcp_connect {
     }};
 }
 
-type TcpConnectOutput = (Box<dyn AsyncRead + Unpin>, Box<dyn AsyncWrite + Unpin>);
+type TcpConnectOutput = (Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>);
 
 pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<TcpConnectOutput> {
     impl_tcp_connect!(req_addr, proxy_cfg, Result<TcpConnectOutput>, |stream| {
         let (read, write) = tokio::io::split(stream);
         future::ready(Ok((
-            Box::new(read) as Box<dyn AsyncRead + Unpin>,
-            Box::new(write) as Box<dyn AsyncWrite + Unpin>,
+            Box::new(read) as Box<dyn AsyncRead + Unpin + Send>,
+            Box::new(write) as Box<dyn AsyncWrite + Unpin + Send>,
         )))
     })
 }
 
-type WebSocketConnectOutput = (Box<dyn AsyncRead + Unpin>, Box<dyn AsyncWrite + Unpin>, Response);
+type WebSocketConnectOutput = (
+    Box<dyn AsyncRead + Unpin + Send>,
+    Box<dyn AsyncWrite + Unpin + Send>,
+    Response,
+);
 
 pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<WebSocketConnectOutput> {
     use async_tungstenite::tokio::client_async_tls;
@@ -107,8 +111,8 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
                 .await
                 .context("WebSocket handshake failed")?;
             let (sink, stream) = ws.split();
-            let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin>;
-            let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin>;
+            let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin + Send>;
+            let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin + Send>;
             Ok((read, write, rsp))
         }
     })

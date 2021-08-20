@@ -1,615 +1,594 @@
-use anyhow::{anyhow, ensure};
-use byteorder::{BigEndian, ReadBytesExt};
+use crate::jmux::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
+use crate::jmux::id::{DistantChannelId, LocalChannelId};
+use anyhow::{bail, ensure, Context as _};
+use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use std::convert::TryFrom;
-use std::io::{Cursor, Read};
+use std::fmt;
 
-pub trait Marshall {
-    fn marshall(&self) -> Vec<u8>;
+#[derive(Debug, PartialEq)]
+pub enum Message {
+    Open(ChannelOpen),
+    OpenSuccess(ChannelOpenSuccess),
+    OpenFailure(ChannelOpenFailure),
+    WindowAdjust(ChannelWindowAdjust),
+    Data(ChannelData),
+    Eof(ChannelEof),
+    Close(ChannelClose),
 }
 
-pub trait Unmarshall {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error>
-    where
-        Self: Sized;
+impl Message {
+    pub fn open(id: LocalChannelId, destination_url: impl Into<String>) -> Self {
+        Self::Open(ChannelOpen::new(id, destination_url))
+    }
 
-    fn get_size_of_fixed_part() -> usize;
+    pub fn open_success(
+        distant_id: DistantChannelId,
+        local_id: LocalChannelId,
+        initial_window_size: u32,
+        maximum_packet_size: u32,
+    ) -> Self {
+        Self::OpenSuccess(ChannelOpenSuccess::new(
+            distant_id,
+            local_id,
+            initial_window_size,
+            maximum_packet_size,
+        ))
+    }
+
+    pub fn open_failure(distant_id: DistantChannelId, reason_code: ReasonCode, description: impl Into<String>) -> Self {
+        Self::OpenFailure(ChannelOpenFailure::new(distant_id, reason_code, description))
+    }
+
+    pub fn window_adjust(distant_id: DistantChannelId, window_adjustment: u32) -> Self {
+        Self::WindowAdjust(ChannelWindowAdjust::new(distant_id, window_adjustment))
+    }
+
+    pub fn data(id: DistantChannelId, data: Vec<u8>) -> Self {
+        Self::Data(ChannelData::new(id, data))
+    }
+
+    pub fn eof(distant_id: DistantChannelId) -> Self {
+        Self::Eof(ChannelEof::new(distant_id))
+    }
+
+    pub fn close(distant_id: DistantChannelId) -> Self {
+        Self::Close(ChannelClose::new(distant_id))
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Message::Open(msg) => Header::SIZE + msg.len(),
+            Message::OpenSuccess(_) => Header::SIZE + ChannelOpenSuccess::SIZE,
+            Message::OpenFailure(msg) => Header::SIZE + msg.len(),
+            Message::WindowAdjust(_) => Header::SIZE + ChannelWindowAdjust::SIZE,
+            Message::Data(msg) => Header::SIZE + msg.len(),
+            Message::Eof(_) => Header::SIZE + ChannelEof::SIZE,
+            Message::Close(_) => Header::SIZE + ChannelClose::SIZE,
+        }
+    }
+
+    pub fn encode(&self, buf: &mut BytesMut) -> anyhow::Result<()> {
+        macro_rules! reserve_and_encode_header {
+            ($buf:ident, $len:expr, $ty:expr) => {
+                let len = $len;
+                if $buf.len() < len {
+                    $buf.reserve(len - $buf.len());
+                }
+                let header = Header {
+                    ty: $ty,
+                    flags: 0,
+                    size: u16::try_from(len)
+                        .with_context(|| format!("Packet oversized: max is {}, got {}", u16::MAX, len))?,
+                };
+                header.encode(buf);
+            };
+        }
+
+        match self {
+            Message::Open(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::Open);
+                msg.encode(buf)
+            }
+            Message::OpenSuccess(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + ChannelOpenSuccess::SIZE, MessageType::OpenSuccess);
+                msg.encode(buf)
+            }
+            Message::OpenFailure(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::OpenFailure);
+                msg.encode(buf)
+            }
+            Message::WindowAdjust(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + ChannelWindowAdjust::SIZE, MessageType::WindowAdjust);
+                msg.encode(buf)
+            }
+            Message::Data(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::Data);
+                msg.encode(buf)
+            }
+            Message::Eof(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + ChannelEof::SIZE, MessageType::Eof);
+                msg.encode(buf)
+            }
+            Message::Close(msg) => {
+                reserve_and_encode_header!(buf, Header::SIZE + ChannelClose::SIZE, MessageType::Close);
+                msg.encode(buf)
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
+        ensure!(
+            buf.len() >= Header::SIZE,
+            "Not enough bytes provided to decode message header"
+        );
+
+        let header = Header::decode(buf.split_to(Header::SIZE)).context("Couldn’t decode HEADER")?;
+        let header_size = header.size as usize;
+
+        let body_size = header_size - Header::SIZE;
+
+        ensure!(
+            buf.len() >= body_size,
+            "Not enough bytes provided to decode message body"
+        );
+
+        let body_bytes = buf.split_to(body_size);
+
+        let message = match header.ty {
+            MessageType::Open => Self::Open(ChannelOpen::decode(body_bytes).context("OPEN")?),
+            MessageType::Data => Self::Data(ChannelData::decode(body_bytes).context("DATA")?),
+            MessageType::OpenSuccess => {
+                Self::OpenSuccess(ChannelOpenSuccess::decode(body_bytes).context("OPEN SUCCESS")?)
+            }
+            MessageType::OpenFailure => {
+                Self::OpenFailure(ChannelOpenFailure::decode(body_bytes).context("OPEN FAILURE")?)
+            }
+            MessageType::WindowAdjust => {
+                Self::WindowAdjust(ChannelWindowAdjust::decode(body_bytes).context("WINDOW ADJUST")?)
+            }
+            MessageType::Eof => Self::Eof(ChannelEof::decode(body_bytes).context("EOF")?),
+            MessageType::Close => Self::Close(ChannelClose::decode(body_bytes).context("CLOSE")?),
+        };
+
+        Ok(message)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReasonCode(pub u32);
+
+impl fmt::Display for ReasonCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "0x{:08X}", self.0)
+    }
+}
+
+impl ReasonCode {
+    /// General server failure
+    pub const GENERAL_FAILURE: Self = ReasonCode(0x01);
+
+    /// Connection not allowed by the rule set
+    pub const CONNECTION_NOT_ALLOWED_BY_RULESET: Self = ReasonCode(0x02);
+
+    /// Destination network is unreachable
+    pub const NETWORK_UNREACHABLE: Self = ReasonCode(0x03);
+
+    /// Destination host is unreachable
+    pub const HOST_UNREACHABLE: Self = ReasonCode(0x04);
+
+    /// Connection refused by the remote host
+    pub const CONNECTION_REFUSED: Self = ReasonCode(0x05);
+
+    /// TTL expired (the remote host is too far away)
+    pub const TTL_EXPIRED: Self = ReasonCode(0x06);
+
+    /// Address type is not supported
+    pub const ADDRESS_TYPE_NOT_SUPPORTED: Self = ReasonCode(0x08);
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq)]
-pub enum JmuxChannelMessageType {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageType {
     Open = 100,
-    OpenSuccess,
-    OpenFailure,
-    WindowAdjust,
-    Data,
-    Eof,
-    Close,
+    OpenSuccess = 101,
+    OpenFailure = 102,
+    WindowAdjust = 103,
+    Data = 104,
+    Eof = 105,
+    Close = 106,
 }
 
-impl TryFrom<u8> for JmuxChannelMessageType {
+impl TryFrom<u8> for MessageType {
     type Error = anyhow::Error;
-    fn try_from(val: u8) -> Result<JmuxChannelMessageType, anyhow::Error> {
-        match val {
-            100 => Ok(JmuxChannelMessageType::Open),
-            101 => Ok(JmuxChannelMessageType::OpenSuccess),
-            102 => Ok(JmuxChannelMessageType::OpenFailure),
-            103 => Ok(JmuxChannelMessageType::WindowAdjust),
-            104 => Ok(JmuxChannelMessageType::Data),
-            105 => Ok(JmuxChannelMessageType::Eof),
-            106 => Ok(JmuxChannelMessageType::Close),
-            _ => Err(anyhow!("Incorrect JMUXChannelMessageType value: {}", val)),
+
+    fn try_from(v: u8) -> Result<MessageType, anyhow::Error> {
+        match v {
+            100 => Ok(MessageType::Open),
+            101 => Ok(MessageType::OpenSuccess),
+            102 => Ok(MessageType::OpenFailure),
+            103 => Ok(MessageType::WindowAdjust),
+            104 => Ok(MessageType::Data),
+            105 => Ok(MessageType::Eof),
+            106 => Ok(MessageType::Close),
+            _ => bail!("Unknown `msgType` value: {}", v),
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct CommonDefinitions {
-    pub msg_type: JmuxChannelMessageType,
-    pub msg_flags: u8,
-    pub msg_size: u16,
+pub struct Header {
+    pub ty: MessageType,
+    pub flags: u8,
+    pub size: u16,
 }
 
-impl Marshall for CommonDefinitions {
-    fn marshall(&self) -> Vec<u8> {
-        let msg_type = self.msg_type.clone() as u8;
-        let msg_flags = self.msg_flags;
+impl Header {
+    pub const SIZE: usize = 1 /* msgType */ + 1 /* msgFlags */ + 2 /* msgSize */;
 
-        let mut packet = vec![msg_type, msg_flags];
-        packet.extend_from_slice(&self.msg_size.to_be_bytes());
-
-        packet
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u8(self.ty as u8);
+        buf.put_u8(0);
+        buf.put_u16(self.size);
     }
-}
 
-impl Unmarshall for CommonDefinitions {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
-        ensure!(
-            buf.len() == Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal CommonDefinitions. Expected {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
-        );
-
-        let msg_type = JmuxChannelMessageType::try_from(buf[0])?;
-        let msg_flags = buf[1];
-        let msg_size = u16::from_be_bytes([buf[2], buf[3]]);
-
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
+        ensure!(buf.len() >= Self::SIZE, "Not enough bytes provided to decode HEADER");
         Ok(Self {
-            msg_type,
-            msg_flags,
-            msg_size,
+            ty: MessageType::try_from(buf.get_u8())?,
+            flags: buf.get_u8(),
+            size: buf.get_u16(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        1 /*msg_type*/ + 1 /*msg_flags*/ + 2 /*msg_size*/
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelOpen {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelOpen {
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
     pub maximum_packet_size: u32,
     pub destination_url: String,
 }
 
-impl JmuxMsgChannelOpen {
-    pub fn new(sender_channel_id: u32) -> Self {
+impl ChannelOpen {
+    pub const DEFAULT_INITIAL_WINDOW_SIZE: usize = 32_768;
+    pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 4 /* maximumPacketSize */;
+
+    pub fn new(id: LocalChannelId, destination_url: impl Into<String>) -> Self {
         Self {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::Open,
-                msg_flags: 0,
-                msg_size: Self::get_size_of_fixed_part() as u16,
-            },
-            sender_channel_id,
-            destination_url: "".to_string(),
-            initial_window_size: 1 << 15,
-            maximum_packet_size: 4096,
+            sender_channel_id: u32::from(id),
+            initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE as u32,
+            maximum_packet_size: MAXIMUM_PACKET_SIZE_IN_BYTES as u32,
+            destination_url: destination_url.into(),
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelOpen {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.sender_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.initial_window_size.to_be_bytes());
-        packet.extend_from_slice(&self.maximum_packet_size.to_be_bytes());
-        packet.extend_from_slice(self.destination_url.as_bytes());
-        packet
+    pub fn len(&self) -> usize {
+        Self::FIXED_PART_SIZE + self.destination_url.as_bytes().len()
     }
-}
 
-impl Unmarshall for JmuxMsgChannelOpen {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.sender_channel_id);
+        buf.put_u32(self.initial_window_size);
+        buf.put_u32(self.maximum_packet_size);
+        buf.put(self.destination_url.as_bytes());
+    }
+
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() >= Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelOpen. Expected at least {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() >= Self::FIXED_PART_SIZE,
+            "Not enough bytes provided to decode CHANNEL OPEN",
         );
 
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-        let sender_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let initial_window_size = buf.read_u32::<BigEndian>().unwrap();
-        let maximum_packet_size = buf.read_u32::<BigEndian>().unwrap();
-        let mut destination_url = "".to_owned();
-        buf.read_to_string(&mut destination_url).unwrap();
+        let sender_channel_id = buf.get_u32();
+        let initial_window_size = buf.get_u32();
+        let maximum_packet_size = buf.get_u32();
+
+        let destination_url = std::str::from_utf8(&buf)
+            .context("`destinationUrl` field is not valid UTF-8")?
+            .to_owned();
 
         Ok(Self {
-            common_defs,
             sender_channel_id,
             initial_window_size,
             maximum_packet_size,
             destination_url,
         })
     }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*common_defs*/ + 4 /*sender_channel_id*/ + 4 /*initial_window_size*/
-            + 4 /*maximum_packet_size*/
-    }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelOpenSuccess {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelOpenSuccess {
     pub recipient_channel_id: u32,
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
     pub maximum_packet_size: u32,
 }
 
-impl JmuxMsgChannelOpenSuccess {
-    pub fn new(recipient_channel_id: u32, sender_channel_id: u32) -> Self {
+impl ChannelOpenSuccess {
+    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*senderChannelId*/ + 4 /*initialWindowSize*/ + 4 /*maximumPacketSize*/;
+
+    pub fn new(
+        distant_id: DistantChannelId,
+        local_id: LocalChannelId,
+        initial_window_size: u32,
+        maximum_packet_size: u32,
+    ) -> Self {
         Self {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::OpenSuccess,
-                msg_flags: 0,
-                msg_size: Self::get_size_of_fixed_part() as u16,
-            },
-            recipient_channel_id,
-            sender_channel_id,
-            initial_window_size: 64 * (1 << 15),
-            maximum_packet_size: 4096,
+            recipient_channel_id: u32::from(distant_id),
+            sender_channel_id: u32::from(local_id),
+            initial_window_size,
+            maximum_packet_size: std::cmp::min(maximum_packet_size, MAXIMUM_PACKET_SIZE_IN_BYTES as u32),
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelOpenSuccess {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.sender_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.initial_window_size.to_be_bytes());
-        packet.extend_from_slice(&self.maximum_packet_size.to_be_bytes());
-
-        packet
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
+        buf.put_u32(self.sender_channel_id);
+        buf.put_u32(self.initial_window_size);
+        buf.put_u32(self.maximum_packet_size);
     }
-}
 
-impl Unmarshall for JmuxMsgChannelOpenSuccess {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() == Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelOpenSuccess. Expected {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() >= Self::SIZE,
+            "Not enough bytes provided to decode CHANNEL OPEN SUCCESS",
         );
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let sender_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let initial_window_size = buf.read_u32::<BigEndian>().unwrap();
-        let maximum_packet_size = buf.read_u32::<BigEndian>().unwrap();
 
         Ok(Self {
-            common_defs,
-            recipient_channel_id,
-            sender_channel_id,
-            initial_window_size,
-            maximum_packet_size,
+            recipient_channel_id: buf.get_u32(),
+            sender_channel_id: buf.get_u32(),
+            initial_window_size: buf.get_u32(),
+            maximum_packet_size: buf.get_u32(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*CommonDefinitions*/ + 4 /*recipient_channel_id*/ + 4 /*sender_channel_id*/ +
-            4 /*initial_window_size*/ + 4 /*maximum_packet_size*/
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelOpenFailure {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelOpenFailure {
     pub recipient_channel_id: u32,
-    pub reason_code: u32,
+    pub reason_code: ReasonCode,
     pub description: String,
 }
 
-impl JmuxMsgChannelOpenFailure {
-    pub fn new(recipient_channel_id: u32, reason_code: u32, description: String) -> Self {
+impl ChannelOpenFailure {
+    pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/ + 4 /*reasonCode*/;
+
+    pub fn new(distant_id: DistantChannelId, reason_code: ReasonCode, description: impl Into<String>) -> Self {
         Self {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::OpenFailure,
-                msg_flags: 0,
-                msg_size: (Self::get_size_of_fixed_part() + description.len()) as u16,
-            },
-            recipient_channel_id,
+            recipient_channel_id: u32::from(distant_id),
             reason_code,
-            description,
+            description: description.into(),
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelOpenFailure {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.reason_code.to_be_bytes());
-        packet.extend_from_slice(self.description.as_bytes());
-
-        packet
+    pub fn len(&self) -> usize {
+        Self::FIXED_PART_SIZE + self.description.as_bytes().len()
     }
-}
 
-impl Unmarshall for JmuxMsgChannelOpenFailure {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
+        buf.put_u32(self.reason_code.0);
+        buf.put(self.description.as_bytes());
+    }
+
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() >= Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelOpenFailure. Expected at least {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() >= Self::FIXED_PART_SIZE,
+            "Not enough bytes provided to decode CHANNEL OPEN FAILURE",
         );
 
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let reason_code = buf.read_u32::<BigEndian>().unwrap();
-        let mut description = "".to_owned();
-        buf.read_to_string(&mut description).unwrap();
+        let recipient_channel_id = buf.get_u32();
+        let reason_code = ReasonCode(buf.get_u32());
+        let description = std::str::from_utf8(&buf)
+            .context("`description` field is not valid UTF-8")?
+            .to_owned();
 
         Ok(Self {
-            common_defs,
             recipient_channel_id,
             reason_code,
             description,
         })
     }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*CommonDefinitions*/ + 4 /*recipient_channel_id*/ + 4 /*reason_code*/
-    }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelWindowAdjust {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelWindowAdjust {
     pub recipient_channel_id: u32,
     pub window_adjustment: u32,
 }
 
-impl JmuxMsgChannelWindowAdjust {
-    pub fn new(recipient_channel_id: u32, window_adjustment: u32) -> Self {
-        JmuxMsgChannelWindowAdjust {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::WindowAdjust,
-                msg_flags: 0,
-                msg_size: Self::get_size_of_fixed_part() as u16,
-            },
-            recipient_channel_id,
+impl ChannelWindowAdjust {
+    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*windowAdjustement*/;
+
+    pub fn new(distant_id: DistantChannelId, window_adjustment: u32) -> Self {
+        ChannelWindowAdjust {
+            recipient_channel_id: u32::from(distant_id),
             window_adjustment,
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelWindowAdjust {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.window_adjustment.to_be_bytes());
-
-        packet
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
+        buf.put_u32(self.window_adjustment);
     }
-}
 
-impl Unmarshall for JmuxMsgChannelWindowAdjust {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() == Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelWindowAdjust. Expected {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() >= Self::SIZE,
+            "Not enough bytes provided to decode CHANNEL WINDOW ADJUST",
         );
-
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let window_adjustment = buf.read_u32::<BigEndian>().unwrap();
-
         Ok(Self {
-            common_defs,
-            recipient_channel_id,
-            window_adjustment,
+            recipient_channel_id: buf.get_u32(),
+            window_adjustment: buf.get_u32(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*CommonDefinitions*/ + 4 /*recipient_channel_id*/ + 4 /*window_adjustment*/
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelData {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelData {
     pub recipient_channel_id: u32,
-    pub data_length: u32,
     pub transfer_data: Vec<u8>,
 }
 
-impl JmuxMsgChannelData {
-    pub fn new(id: u32, vec: Vec<u8>) -> Self {
-        assert!(
-            vec.len() < (u16::MAX as usize - Self::get_size_of_fixed_part()),
-            "Data buffer too large for JmuxMsgChannelData, maximum allowed {}, get {}",
-            u16::MAX,
-            vec.len()
-        );
-        JmuxMsgChannelData {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::Data,
-                msg_flags: 0,
-                msg_size: (Self::get_size_of_fixed_part() + vec.len()) as u16,
-            },
-            recipient_channel_id: id,
-            data_length: vec.len() as u32,
-            transfer_data: vec,
+impl ChannelData {
+    const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
+
+    pub fn new(id: DistantChannelId, data: Vec<u8>) -> Self {
+        ChannelData {
+            recipient_channel_id: u32::from(id),
+            transfer_data: data,
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelData {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-        packet.extend_from_slice(&self.data_length.to_be_bytes());
-        packet.extend_from_slice(&self.transfer_data);
-
-        packet
+    pub fn len(&self) -> usize {
+        Self::FIXED_PART_SIZE + self.transfer_data.len()
     }
-}
 
-impl Unmarshall for JmuxMsgChannelData {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
+        buf.put(self.transfer_data.as_slice());
+    }
+
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() >= Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelData. Expected at least {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() >= Self::FIXED_PART_SIZE,
+            "Not enough bytes provided to decode CHANNEL DATA",
         );
-
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-        let data_length = buf.read_u32::<BigEndian>().unwrap();
-        let mut transfer_data = Vec::new();
-        buf.read_to_end(&mut transfer_data).unwrap();
-
         Ok(Self {
-            common_defs,
-            recipient_channel_id,
-            data_length,
-            transfer_data,
+            recipient_channel_id: buf.get_u32(),
+            transfer_data: buf.to_vec(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*CommonDefinitions*/ + 4 /*recipient_channel_id*/ + 4 /*data_length*/
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelEof {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelEof {
     pub recipient_channel_id: u32,
 }
 
-impl JmuxMsgChannelEof {
-    pub fn new(recipient_channel_id: u32) -> Self {
+impl ChannelEof {
+    pub const SIZE: usize = 4 /*recipientChannelId*/;
+
+    pub fn new(distant_id: DistantChannelId) -> Self {
         Self {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::Eof,
-                msg_flags: 0,
-                msg_size: Self::get_size_of_fixed_part() as u16,
-            },
-            recipient_channel_id,
+            recipient_channel_id: u32::from(distant_id),
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelEof {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-
-        packet
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
     }
-}
 
-impl Unmarshall for JmuxMsgChannelEof {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() == Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelEof. Expected {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() == Self::SIZE,
+            "Not enough bytes provided to decode CHANNEL EOF",
         );
-
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-
         Ok(Self {
-            common_defs,
-            recipient_channel_id,
+            recipient_channel_id: buf.get_u32(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*common_defs*/ + 4 /*recipient_channel_id*/
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct JmuxMsgChannelClose {
-    pub common_defs: CommonDefinitions,
+pub struct ChannelClose {
     pub recipient_channel_id: u32,
 }
 
-impl JmuxMsgChannelClose {
-    pub fn new(recipient_channel_id: u32) -> Self {
+impl ChannelClose {
+    pub const SIZE: usize = 4 /*recipientChannelId*/;
+
+    pub fn new(distant_id: DistantChannelId) -> Self {
         Self {
-            common_defs: CommonDefinitions {
-                msg_type: JmuxChannelMessageType::Close,
-                msg_flags: 0,
-                msg_size: Self::get_size_of_fixed_part() as u16,
-            },
-            recipient_channel_id,
+            recipient_channel_id: u32::from(distant_id),
         }
     }
-}
 
-impl Marshall for JmuxMsgChannelClose {
-    fn marshall(&self) -> Vec<u8> {
-        let mut packet = self.common_defs.marshall();
-        packet.extend_from_slice(&self.recipient_channel_id.to_be_bytes());
-
-        packet
+    pub fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u32(self.recipient_channel_id);
     }
-}
 
-impl Unmarshall for JmuxMsgChannelClose {
-    fn unmarshall(buf: &[u8]) -> Result<Self, anyhow::Error> {
+    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(
-            buf.len() == Self::get_size_of_fixed_part(),
-            "Incoming data too short to unmarshal JmuxMsgChannelClose. Expected {} bytes, but got:{}",
-            Self::get_size_of_fixed_part(),
-            buf.len()
+            buf.len() == Self::SIZE,
+            "Not enough bytes provided to decode CHANNEL CLOSE",
         );
-
-        let (common_defs_buffer, buf) = buf.split_at(CommonDefinitions::get_size_of_fixed_part());
-        let mut buf = Cursor::new(buf);
-        let common_defs = CommonDefinitions::unmarshall(common_defs_buffer)?;
-        let recipient_channel_id = buf.read_u32::<BigEndian>().unwrap();
-
         Ok(Self {
-            common_defs,
-            recipient_channel_id,
+            recipient_channel_id: buf.get_u32(),
         })
-    }
-
-    #[inline]
-    fn get_size_of_fixed_part() -> usize {
-        4 /*common_defs*/ + 4 /*recipient_channel_id*/
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CommonDefinitions, JmuxChannelMessageType, JmuxMsgChannelClose, JmuxMsgChannelData, JmuxMsgChannelEof,
-        JmuxMsgChannelOpen, JmuxMsgChannelOpenFailure, JmuxMsgChannelOpenSuccess, JmuxMsgChannelWindowAdjust, Marshall,
-        Unmarshall,
-    };
-    use std::convert::TryFrom;
+    use super::*;
 
     #[test]
-    fn try_from_should_return_correct_message_type_on_valid_bytes() {
-        let msg_type = JmuxChannelMessageType::try_from(100);
-        assert!(msg_type.is_ok());
-        assert_eq!(JmuxChannelMessageType::Open, msg_type.unwrap());
+    fn message_type_try_from() {
+        let msg_type = MessageType::try_from(100).unwrap();
+        assert_eq!(MessageType::Open, msg_type);
 
-        let msg_type = JmuxChannelMessageType::try_from(103);
-        assert!(msg_type.is_ok());
-        assert_eq!(JmuxChannelMessageType::WindowAdjust, msg_type.unwrap());
+        let msg_type = MessageType::try_from(103).unwrap();
+        assert_eq!(MessageType::WindowAdjust, msg_type);
 
-        let msg_type = JmuxChannelMessageType::try_from(106);
-        assert!(msg_type.is_ok());
-        assert_eq!(JmuxChannelMessageType::Close, msg_type.unwrap());
+        let msg_type = MessageType::try_from(106).unwrap();
+        assert_eq!(MessageType::Close, msg_type);
     }
 
     #[test]
-    fn try_from_should_return_err_on_invalid_bytes() {
-        let msg_type = JmuxChannelMessageType::try_from(99);
-        assert!(msg_type.is_err());
+    fn message_type_try_err_on_invalid_bytes() {
+        let msg_type_res = MessageType::try_from(99);
+        assert!(msg_type_res.is_err());
 
-        let msg_type = JmuxChannelMessageType::try_from(107);
-        assert!(msg_type.is_err());
+        let msg_type_res = MessageType::try_from(107);
+        assert!(msg_type_res.is_err());
     }
 
     #[test]
-    fn common_definitions_unmarshal_return_err_on_short_buf() {
-        assert!(CommonDefinitions::unmarshall(&[]).is_err());
+    fn header_decode_buffer_too_short_err() {
+        let err = Header::decode(Bytes::from_static(&[])).err().unwrap();
+        assert_eq!("Not enough bytes provided to decode HEADER", err.to_string());
     }
 
     #[test]
-    fn common_definitions_unmarshal_return_correct_message() {
-        let msg = CommonDefinitions::unmarshall(&[102, 0, 7, 16]);
-        assert!(msg.is_ok());
+    fn header_decode() {
+        let msg = Header::decode(Bytes::from_static(&[102, 0, 7, 16])).unwrap();
         assert_eq!(
-            CommonDefinitions {
-                msg_type: JmuxChannelMessageType::OpenFailure,
-                msg_flags: 0,
-                msg_size: 1808
+            Header {
+                ty: MessageType::OpenFailure,
+                flags: 0,
+                size: 1808
             },
-            msg.unwrap()
+            msg
         );
     }
 
     #[test]
-    fn common_definitions_marshal_return_correct_buf() {
-        let raw_mgs = CommonDefinitions {
-            msg_type: JmuxChannelMessageType::OpenSuccess,
-            msg_flags: 0,
-            msg_size: 512,
+    fn header_encode() {
+        let header = Header {
+            ty: MessageType::OpenSuccess,
+            flags: 0,
+            size: 512,
         };
-        assert_eq!(vec![101, 0, 2, 0], raw_mgs.marshall());
+        let mut buf = BytesMut::new();
+        header.encode(&mut buf);
+        assert_eq!(vec![101, 0, 2, 0], buf);
+    }
+
+    fn check_encode_decode(sample_msg: Message, raw_msg: &[u8]) {
+        let mut encoded = BytesMut::new();
+        sample_msg.encode(&mut encoded).unwrap();
+        assert_eq!(raw_msg.to_vec(), encoded.to_vec());
+
+        let decoded = Message::decode(Bytes::copy_from_slice(raw_msg)).unwrap();
+        assert_eq!(sample_msg, decoded);
     }
 
     #[test]
-    fn jmux_msg_channel_open_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpen::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    fn test_jmux_msg_channel_open_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    fn channel_open() {
+        let raw_msg = &[
             100, // msg type
             0,   // msg flags
             0, 36, // msg size
@@ -619,57 +598,17 @@ mod tests {
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];
-        let msg_example = JmuxMsgChannelOpen {
-            initial_window_size: 1024,
-            common_defs: CommonDefinitions {
-                msg_size: 36,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Open,
-            },
-            sender_channel_id: 1,
-            maximum_packet_size: 1024,
-            destination_url: "tcp://google.com:443".to_owned(),
-        };
 
-        let msg = JmuxMsgChannelOpen::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
+        let mut msg_sample = ChannelOpen::new(LocalChannelId::from(1), "tcp://google.com:443");
+        msg_sample.initial_window_size = 1024;
+        msg_sample.maximum_packet_size = 1024;
+
+        check_encode_decode(Message::Open(msg_sample), raw_msg);
     }
 
     #[test]
-    fn test_jmux_msg_channel_open_marshal_return_correct_buf() {
-        let raw_mgs = [
-            100, // msg type
-            0,   // msg flags
-            0, 36, // msg size
-            0, 0, 0, 1, // sender channel id
-            0, 0, 4, 0, // initial window size
-            0, 0, 4, 0, // maximum packet size
-            116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
-            51, // destination url: tcp://google.com:443
-        ];
-        let msg_example = JmuxMsgChannelOpen {
-            initial_window_size: 1024,
-            common_defs: CommonDefinitions {
-                msg_size: 36,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Open,
-            },
-            sender_channel_id: 1,
-            maximum_packet_size: 1024,
-            destination_url: "tcp://google.com:443".to_owned(),
-        };
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_open_success_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpenSuccess::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_open_success_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    pub fn channel_open_success() {
+        let raw_msg = &[
             101, // msg type
             0,   // msg flags
             0, 20, // msg size
@@ -678,57 +617,20 @@ mod tests {
             0, 0, 4, 0, // initial window size
             0, 0, 127, 255, // maximum packet size
         ];
-        let msg_example = JmuxMsgChannelOpenSuccess {
+
+        let msg = ChannelOpenSuccess {
             initial_window_size: 1024,
-            common_defs: CommonDefinitions {
-                msg_size: 20,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::OpenSuccess,
-            },
             sender_channel_id: 2,
             maximum_packet_size: 32767,
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelOpenSuccess::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
+        check_encode_decode(Message::OpenSuccess(msg), raw_msg);
     }
 
     #[test]
-    pub fn jmux_msg_channel_open_success_marshal_return_correct_buf() {
-        let raw_mgs = [
-            101, // msg type
-            0,   // msg flags
-            0, 20, // msg size
-            0, 0, 0, 1, // recipient channel id
-            0, 0, 0, 2, // sender channel id
-            0, 0, 4, 0, // initial window size
-            0, 0, 127, 255, // maximum packet size
-        ];
-        let msg_example = JmuxMsgChannelOpenSuccess {
-            initial_window_size: 1024,
-            common_defs: CommonDefinitions {
-                msg_size: 20,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::OpenSuccess,
-            },
-            sender_channel_id: 2,
-            maximum_packet_size: 32767,
-            recipient_channel_id: 1,
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_open_failure_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelOpenFailure::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_open_failure_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    pub fn channel_open_failure() {
+        let raw_msg = &[
             102, // msg type
             0,   // msg flags
             0, 17, // msg size
@@ -736,261 +638,91 @@ mod tests {
             0, 0, 0, 2, // reason code
             101, 114, 114, 111, 114, // failure description
         ];
-        let msg_example = JmuxMsgChannelOpenFailure {
-            common_defs: CommonDefinitions {
-                msg_size: 17,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::OpenFailure,
-            },
+
+        let msg_example = ChannelOpenFailure {
             recipient_channel_id: 1,
-            reason_code: 2,
+            reason_code: ReasonCode(2),
             description: "error".to_owned(),
         };
 
-        let msg = JmuxMsgChannelOpenFailure::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
-
-        let raw_example = msg_example.marshall();
-        assert_eq!(raw_mgs.to_vec(), raw_example);
+        check_encode_decode(Message::OpenFailure(msg_example), raw_msg);
     }
 
     #[test]
-    pub fn jmux_msg_channel_open_failure_marshal_return_correct_buf() {
-        let raw_mgs = [
-            102, // msg type
-            0,   // msg flags
-            0, 17, // msg size
-            0, 0, 0, 1, // recipient channel id
-            0, 0, 0, 2, // reason code
-            101, 114, 114, 111, 114, // failure description
-        ];
-        let msg_example = JmuxMsgChannelOpenFailure {
-            common_defs: CommonDefinitions {
-                msg_size: 17,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::OpenFailure,
-            },
-            recipient_channel_id: 1,
-            reason_code: 2,
-            description: "error".to_owned(),
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_window_adjust_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelWindowAdjust::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_window_adjust_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    pub fn channel_window_adjust() {
+        let raw_msg = &[
             103, // msg type
             0,   // msg flags
             0, 12, // msg size
             0, 0, 0, 1, // recipient channel id
             0, 0, 2, 0, // window adjustment
         ];
-        let msg_example = JmuxMsgChannelWindowAdjust {
-            common_defs: CommonDefinitions {
-                msg_size: 12,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::WindowAdjust,
-            },
+
+        let msg_example = ChannelWindowAdjust {
             recipient_channel_id: 1,
             window_adjustment: 512,
         };
 
-        let msg = JmuxMsgChannelWindowAdjust::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
-
-        let raw_example = msg_example.marshall();
-        assert_eq!(raw_mgs.to_vec(), raw_example);
+        check_encode_decode(Message::WindowAdjust(msg_example), raw_msg);
     }
 
     #[test]
-    pub fn jmux_msg_channel_window_adjust_marshal_return_correct_buf() {
-        let raw_mgs = [
-            103, // msg type
+    pub fn error_on_oversized_packet() {
+        let mut buf = BytesMut::new();
+        let err = Message::data(DistantChannelId::from(1), vec![0; u16::MAX as usize])
+            .encode(&mut buf)
+            .err()
+            .unwrap();
+        assert_eq!("Packet oversized: max is 65535, got 65543", err.to_string());
+    }
+
+    #[test]
+    pub fn channel_data() {
+        let raw_msg = &[
+            104, // msg type
             0,   // msg flags
             0, 12, // msg size
             0, 0, 0, 1, // recipient channel id
-            0, 0, 2, 0, // window adjustment
-        ];
-        let msg_example = JmuxMsgChannelWindowAdjust {
-            common_defs: CommonDefinitions {
-                msg_size: 12,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::WindowAdjust,
-            },
-            recipient_channel_id: 1,
-            window_adjustment: 512,
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    #[should_panic]
-    pub fn panic_when_reached_max_size_of_jmux_msg_channel_data() {
-        JmuxMsgChannelData::new(1, vec![0; u16::MAX as usize]);
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_data_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelData::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_data_unmarshal_return_correct_message() {
-        let raw_mgs = [
-            104, // msg type
-            0,   // msg flags
-            0, 16, // msg size
-            0, 0, 0, 1, // recipient channel id
-            0, 0, 0, 4, // data length
             11, 12, 13, 14, // transfer data
         ];
-        let msg_example = JmuxMsgChannelData {
-            common_defs: CommonDefinitions {
-                msg_size: 16,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Data,
-            },
+
+        let msg_example = ChannelData {
             recipient_channel_id: 1,
-            data_length: 4,
             transfer_data: vec![11, 12, 13, 14],
         };
 
-        let msg = JmuxMsgChannelData::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
+        check_encode_decode(Message::Data(msg_example), raw_msg);
     }
 
     #[test]
-    pub fn jmux_msg_channel_data_marshal_return_correct_buf() {
-        let raw_mgs = [
-            104, // msg type
-            0,   // msg flags
-            0, 16, // msg size
-            0, 0, 0, 1, // recipient channel id
-            0, 0, 0, 4, // data length
-            11, 12, 13, 14, // transfer data
-        ];
-        let msg_example = JmuxMsgChannelData {
-            common_defs: CommonDefinitions {
-                msg_size: 16,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Data,
-            },
-            recipient_channel_id: 1,
-            data_length: 4,
-            transfer_data: vec![11, 12, 13, 14],
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_eof_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelEof::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_eof_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    pub fn channel_eof() {
+        let raw_msg = &[
             105, // msg type
             0,   // msg flags
             0, 8, // msg size
             0, 0, 0, 1, // recipient channel id
         ];
-        let msg_example = JmuxMsgChannelEof {
-            common_defs: CommonDefinitions {
-                msg_size: 8,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Eof,
-            },
+
+        let msg_example = ChannelEof {
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelEof::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
-
-        let raw_example = msg_example.marshall();
-        assert_eq!(raw_mgs.to_vec(), raw_example);
+        check_encode_decode(Message::Eof(msg_example), raw_msg);
     }
 
     #[test]
-    pub fn jmux_msg_channel_eof_marsal_return_correct_buf() {
-        let raw_mgs = [
-            105, // msg type
-            0,   // msg flags
-            0, 8, // msg size
-            0, 0, 0, 1, // recipient channel id
-        ];
-        let msg_example = JmuxMsgChannelEof {
-            common_defs: CommonDefinitions {
-                msg_size: 8,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Eof,
-            },
-            recipient_channel_id: 1,
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_close_unmarshal_return_err_on_short_buf() {
-        assert!(JmuxMsgChannelClose::unmarshall(&[32, 42]).is_err());
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_close_unmarshal_return_correct_message() {
-        let raw_mgs = [
+    pub fn channel_close() {
+        let raw_msg = &[
             106, // msg type
             0,   // msg flags
             0, 8, // msg size
             0, 0, 0, 1, // recipient channel id
         ];
-        let msg_example = JmuxMsgChannelClose {
-            common_defs: CommonDefinitions {
-                msg_size: 8,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Close,
-            },
+
+        let msg_example = ChannelClose {
             recipient_channel_id: 1,
         };
 
-        let msg = JmuxMsgChannelClose::unmarshall(&raw_mgs);
-        assert!(msg.is_ok());
-        assert_eq!(msg_example, msg.unwrap());
-
-        let raw_example = msg_example.marshall();
-        assert_eq!(raw_mgs.to_vec(), raw_example);
-    }
-
-    #[test]
-    pub fn jmux_msg_channel_close_marshal_return_correct_buf() {
-        let raw_mgs = [
-            106, // msg type
-            0,   // msg flags
-            0, 8, // msg size
-            0, 0, 0, 1, // recipient channel id
-        ];
-        let msg_example = JmuxMsgChannelClose {
-            common_defs: CommonDefinitions {
-                msg_size: 8,
-                msg_flags: 0,
-                msg_type: JmuxChannelMessageType::Close,
-            },
-            recipient_channel_id: 1,
-        };
-
-        assert_eq!(raw_mgs.to_vec(), msg_example.marshall());
+        check_encode_decode(Message::Close(msg_example), raw_msg);
     }
 }
