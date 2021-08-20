@@ -1,5 +1,6 @@
 use anyhow::Context as _;
-use jetsocat::pipe::{MultiplexingMode, PipeMode, PipeType};
+use jetsocat::jmux::listener::ListenerMode;
+use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{crit, info, o, Logger};
@@ -23,7 +24,8 @@ fn main() {
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("CARGO_PKG_VERSION"))
         .usage(generate_usage())
-        .command(forward_command());
+        .command(forward_command())
+        .command(jmux_proxy());
 
     app.run(args);
 }
@@ -84,40 +86,44 @@ pub fn exit(res: anyhow::Result<()>) -> ! {
     }
 }
 
-// forward
-
-fn forward_command() -> Command {
-    let usage = format!(
-        r##"{command} forward <PIPE A> <PIPE B>
-
-Note: The pipe names listed below that use the optional multiplexing suffix imply the use of the JMUX multiplexing protocol
-
-Pipe formats:
+const PIPE_FORMATS: &str = r#"Pipe formats:
     `stdio` or `-`: Standard input output
     `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
-    `tcp[-multiplexing]://<ADDRESS>`: Plain TCP stream
-    `tcp-listen[-multiplexing]://<BINDING ADDRESS>`: TCP listener
+    `tcp://<ADDRESS>`: Plain TCP stream
+    `tcp-listen://<BINDING ADDRESS>`: TCP listener
     `jet-tcp-connect://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as client
     `jet-tcp-accept://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as server
     `ws://<URL>`: WebSocket
     `wss://<URL>`: WebSocket Secure
-    `ws-listen://<BINDING ADDRESS>`: WebSocket listener"
+    `ws-listen://<BINDING ADDRESS>`: WebSocket listener"#;
+
+// forward
+
+const FORWARD_SUBCOMMAND: &str = "forward";
+
+fn forward_command() -> Command {
+    let usage = format!(
+        r##"{command} {subcommand} <PIPE A> <PIPE B>
+
+{pipe_formats}
 
 Example: unauthenticated PowerShell server
 
-    {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'
+    {command} {subcommand} tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'
 
 Example: unauthenticated sftp server
 
-    {command} forward tcp-listen://0.0.0.0:2222 cmd://'/usr/lib/openssh/sftp-server'
+    {command} {subcommand} tcp-listen://0.0.0.0:2222 cmd://'/usr/lib/openssh/sftp-server'
 
 Example: unauthenticated sftp client
 
-    JETSOCAT_ARGS="forward - tcp://192.168.122.178:2222" sftp -D {command}"##,
-        command = env!("CARGO_PKG_NAME")
+    JETSOCAT_ARGS="{subcommand} - tcp://192.168.122.178:2222" sftp -D {command}"##,
+        command = env!("CARGO_PKG_NAME"),
+        pipe_formats = PIPE_FORMATS,
+        subcommand = FORWARD_SUBCOMMAND,
     );
 
-    let cmd = Command::new("forward")
+    let cmd = Command::new(FORWARD_SUBCOMMAND)
         .description("Pipe two streams together")
         .alias("f")
         .usage(usage)
@@ -127,7 +133,7 @@ Example: unauthenticated sftp client
 }
 
 pub fn forward_action(c: &Context) {
-    let res = ForwardArgs::parse("forward", c).and_then(|args| {
+    let res = ForwardArgs::parse(c).and_then(|args| {
         let log = setup_logger(args.common.logging);
 
         let cfg = jetsocat::ForwardCfg {
@@ -140,6 +146,62 @@ pub fn forward_action(c: &Context) {
         let forward_log = log.new(o!("action" => "forward"));
 
         run(forward_log.clone(), jetsocat::forward(cfg, forward_log))
+    });
+    exit(res);
+}
+
+// jmux-proxy
+
+const JMUX_PROXY_SUBCOMMAND: &str = "jmux-proxy";
+
+fn jmux_proxy() -> Command {
+    let usage = format!(
+        r##"{command} {subcommand} <PIPE> [<LISTENER> ...]
+
+{pipe_formats}
+
+Listener format:
+    - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
+    - socks5-listen://<BINDING ADDRESS>
+
+Example: JMUX proxy
+
+    {command} {subcommand} tcp-listen://0.0.0.0:7772
+
+Example: TCP to JMUX proxy
+
+    {command} {subcommand} tcp://127.0.0.1:7772 tcp-listen://0.0.0.0:5002/neverssl.com:80 tcp-listen://0.0.0.0:5003/crates.io:443
+
+Example: SOCKS5 to JMUX proxy
+
+    {command} {subcommand} tcp://127.0.0.1:7772 socks5-listen://0.0.0.0:2222"##,
+        command = env!("CARGO_PKG_NAME"),
+        subcommand = JMUX_PROXY_SUBCOMMAND,
+        pipe_formats = PIPE_FORMATS,
+    );
+
+    let cmd = Command::new(JMUX_PROXY_SUBCOMMAND)
+        .description("Start a JMUX proxy redirecting TCP streams")
+        .alias("jp")
+        .usage(usage)
+        .action(jmux_proxy_action);
+
+    apply_common_flags(cmd)
+}
+
+pub fn jmux_proxy_action(c: &Context) {
+    let res = JmuxProxyArgs::parse(c).and_then(|args| {
+        let log = setup_logger(args.common.logging);
+
+        let cfg = jetsocat::JmuxProxyCfg {
+            pipe_mode: args.pipe_mode,
+            proxy_cfg: args.common.proxy_cfg,
+            listener_modes: args.listener_modes,
+        };
+
+        let jmux_proxy_log = log.new(o!("action" => JMUX_PROXY_SUBCOMMAND));
+
+        run(jmux_proxy_log.clone(), jetsocat::jmux_proxy(cfg, jmux_proxy_log))
     });
     exit(res);
 }
@@ -261,10 +323,10 @@ struct ForwardArgs {
 }
 
 impl ForwardArgs {
-    fn parse(action: &str, c: &Context) -> anyhow::Result<Self> {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
         use std::convert::TryFrom;
 
-        let common = CommonArgs::parse(action, c)?;
+        let common = CommonArgs::parse(FORWARD_SUBCOMMAND, c)?;
 
         let repeat_count =
             usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("Bad repeat-count value")?;
@@ -284,31 +346,47 @@ impl ForwardArgs {
     }
 }
 
+struct JmuxProxyArgs {
+    common: CommonArgs,
+    pipe_mode: PipeMode,
+    listener_modes: Vec<ListenerMode>,
+}
+
+impl JmuxProxyArgs {
+    fn parse(c: &Context) -> anyhow::Result<Self> {
+        let common = CommonArgs::parse(JMUX_PROXY_SUBCOMMAND, c)?;
+
+        let arg_pipe = c.args.get(0).context("<PIPE> is missing")?.clone();
+        let pipe_mode = parse_pipe_mode(arg_pipe).context("Bad <PIPE>")?;
+
+        let listener_modes = c
+            .args
+            .iter()
+            .skip(1)
+            .map(|arg| parse_listener_mode(&arg).with_context(|| format!("Bad <LISTENER>: `{}`", arg)))
+            .collect::<anyhow::Result<Vec<ListenerMode>>>()?;
+
+        Ok(Self {
+            common,
+            pipe_mode,
+            listener_modes,
+        })
+    }
+}
+
 fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     use uuid::Uuid;
 
     if arg == "stdio" || arg == "-" {
-        return Ok(PipeMode {
-            pipe_type: PipeType::Stdio,
-            multiplexing_mode: MultiplexingMode::Off,
-        });
+        return Ok(PipeMode::Stdio);
     }
 
     const SCHEME_SEPARATOR: &str = "://";
-    const MULTIPLEX_SUFFIX: &str = "-multiplexing";
 
     let scheme_end_idx = arg
         .find(SCHEME_SEPARATOR)
         .context("Invalid format: missing scheme (e.g.: tcp://<ADDRESS>)")?;
     let scheme = &arg[..scheme_end_idx];
-    let (scheme, multiplex) = match scheme.find(MULTIPLEX_SUFFIX) {
-        Some(idx) => {
-            let (scheme, _) = scheme.split_at(idx);
-            (scheme, MultiplexingMode::On)
-        }
-        None => (scheme, MultiplexingMode::Off),
-    };
-
     let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
 
     fn parse_jet_pipe_format(value: &str) -> anyhow::Result<(String, Uuid, Uuid)> {
@@ -325,55 +403,61 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
     }
 
     match scheme {
-        "tcp-listen" => Ok(PipeMode {
-            pipe_type: PipeType::TcpListen {
-                bind_addr: value.to_owned(),
-            },
-            multiplexing_mode: multiplex,
+        "tcp-listen" => Ok(PipeMode::TcpListen {
+            bind_addr: value.to_owned(),
         }),
-        "cmd" => Ok(PipeMode {
-            pipe_type: PipeType::ProcessCmd {
-                command: value.to_owned(),
-            },
-            multiplexing_mode: MultiplexingMode::Off,
+        "cmd" => Ok(PipeMode::ProcessCmd {
+            command: value.to_owned(),
         }),
-        "tcp" => Ok(PipeMode {
-            pipe_type: PipeType::Tcp { addr: value.to_owned() },
-            multiplexing_mode: multiplex,
-        }),
+        "tcp" => Ok(PipeMode::Tcp { addr: value.to_owned() }),
         "jet-tcp-connect" => {
             let (addr, association_id, candidate_id) = parse_jet_pipe_format(value)?;
-            Ok(PipeMode {
-                pipe_type: PipeType::JetTcpConnect {
-                    addr,
-                    association_id,
-                    candidate_id,
-                },
-                multiplexing_mode: MultiplexingMode::Off,
+            Ok(PipeMode::JetTcpConnect {
+                addr,
+                association_id,
+                candidate_id,
             })
         }
         "jet-tcp-accept" => {
             let (addr, association_id, candidate_id) = parse_jet_pipe_format(value)?;
-            Ok(PipeMode {
-                pipe_type: PipeType::JetTcpAccept {
-                    addr,
-                    association_id,
-                    candidate_id,
-                },
-                multiplexing_mode: MultiplexingMode::Off,
+            Ok(PipeMode::JetTcpAccept {
+                addr,
+                association_id,
+                candidate_id,
             })
         }
-        "ws" | "wss" => Ok(PipeMode {
-            pipe_type: PipeType::WebSocket { url: arg },
-            multiplexing_mode: MultiplexingMode::Off,
-        }),
-        "ws-listen" => Ok(PipeMode {
-            pipe_type: PipeType::WebSocketListen {
-                bind_addr: value.to_owned(),
-            },
-            multiplexing_mode: MultiplexingMode::Off,
+        "ws" | "wss" => Ok(PipeMode::WebSocket { url: arg }),
+        "ws-listen" => Ok(PipeMode::WebSocketListen {
+            bind_addr: value.to_owned(),
         }),
         _ => anyhow::bail!("Unknown pipe scheme: {}", scheme),
+    }
+}
+
+fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
+    const SCHEME_SEPARATOR: &str = "://";
+
+    let scheme_end_idx = arg
+        .find(SCHEME_SEPARATOR)
+        .context("Invalid format: missing scheme (e.g.: socks5-listener://<BINDING ADDRESS>)")?;
+    let scheme = &arg[..scheme_end_idx];
+    let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
+
+    match scheme {
+        "tcp-listen" => {
+            let mut it = value.splitn(2, '/');
+            let bind_addr = it.next().context("Binding address is missing")?;
+            let destination_url = it.next().context("Destination URL is missing")?;
+
+            Ok(ListenerMode::Tcp {
+                bind_addr: bind_addr.to_owned(),
+                destination_url: destination_url.to_owned(),
+            })
+        }
+        "socks5-listener" => Ok(ListenerMode::Socks5 {
+            bind_addr: value.to_owned(),
+        }),
+        _ => anyhow::bail!("Unknown listener scheme: {}", scheme),
     }
 }
 

@@ -23,19 +23,18 @@ jetsocat-proxy = { path = "./proxy" }
 proxy_cfg = { version = "0.4", optional = true }
 
 # cli
-seahorse = "1.1"
+seahorse = "1"
 
 # async
-tokio = { version = "1.10", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio-util = { version = "0.6", features = ["codec"] }
 futures-util = "0.3"
-futures-channel = "0.3"
-futures-io = "0.3"
 async-tungstenite = "0.14"
 
 # logging
-slog = "2.7"
-slog-async = "2.7"
-slog-term = "2.8"
+slog = "2"
+slog-async = "2"
+slog-term = "2"
 
 # error handling
 anyhow = "1"
@@ -44,7 +43,6 @@ anyhow = "1"
 dirs-next = "2"
 
 # utils
-idalloc = "0.1"
-min-max = "0.1"
-byteorder = "1.4"
+bytes = "1"
+bitvec = "0.22"
 
