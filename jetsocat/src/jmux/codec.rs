@@ -20,7 +20,7 @@ impl Decoder for JmuxCodec {
 
         // Read length marker
         let mut lenght_bytes = [0u8; 2];
-        lenght_bytes.copy_from_slice(&src[2..4]);
+        lenght_bytes.copy_from_slice(&src[1..3]);
         let length = u16::from_be_bytes(lenght_bytes) as usize;
 
         if length > MAXIMUM_PACKET_SIZE_IN_BYTES {
@@ -104,11 +104,11 @@ pub mod tests {
     async fn jmux_decoder() {
         let raw_msg = &[
             100, // msg type
-            0,   // msg flags
-            0, 36, // msg size
+            0, 34, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // sender channel id
             0, 0, 4, 0, // initial window size
-            0, 0, 4, 0, // maximum packet size
+            4, 0, // maximum packet size
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];

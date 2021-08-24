@@ -1,4 +1,4 @@
-//! [Specification document](https://github.com/awakecoding/qmux/blob/eb1261cb3f78599c13834a3c260c5e50dfc31145/SPEC.md)
+//! [Specification document](https://github.com/awakecoding/qmux/blob/protocol-update/SPEC.md)
 
 pub mod listener;
 
@@ -323,7 +323,7 @@ async fn jmux_receiver_task<T: AsyncRead + Unpin>(
                             distant_id: peer_id,
                             distant_state: JmuxChannelState::Streaming,
 
-                            local_id: local_id,
+                            local_id,
                             local_state: JmuxChannelState::Streaming,
 
                             window_size_updated: window_size_updated.clone(),
@@ -356,7 +356,7 @@ async fn jmux_receiver_task<T: AsyncRead + Unpin>(
                             distant_id: peer_id,
                             distant_state: JmuxChannelState::Streaming,
 
-                            local_id: local_id,
+                            local_id,
                             local_state: JmuxChannelState::Streaming,
 
                             window_size_updated: window_size_updated.clone(),
@@ -385,6 +385,11 @@ async fn jmux_receiver_task<T: AsyncRead + Unpin>(
                     Message::Data(msg) => {
                         let id = LocalChannelId::from(msg.recipient_channel_id);
 
+                        // TODO: writer task
+                        // ^ Maybe a single task managing a given peer’s writer and reader to be spawned
+                        // and communicated with using a mpsc channel.
+                        // Current task should be a kind of "jmux scheduler" or "jmux orchestrator"
+                        // handling the JMUX context and communicating to the other tasks.
                         if let Some(writer) = writers.get_mut(&id) {
                             // TODO: Here, just close the channel or something on error
                             writer.write_all(&msg.transfer_data).await?;
@@ -477,7 +482,7 @@ async fn forward_stream_data_task(
     distant_id: DistantChannelId,
     window_size_updated: Arc<Notify>,
     window_size: Arc<AtomicUsize>,
-    maximum_packet_size: u32,
+    maximum_packet_size: u16,
     jmux_msg_to_send_sender: UnboundedSender<Message>,
     jmux_api_request_sender: UnboundedSender<JmuxApiRequest>,
     log: Logger,

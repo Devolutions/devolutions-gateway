@@ -25,7 +25,7 @@ impl Message {
         distant_id: DistantChannelId,
         local_id: LocalChannelId,
         initial_window_size: u32,
-        maximum_packet_size: u32,
+        maximum_packet_size: u16,
     ) -> Self {
         Self::OpenSuccess(ChannelOpenSuccess::new(
             distant_id,
@@ -76,9 +76,9 @@ impl Message {
                 }
                 let header = Header {
                     ty: $ty,
-                    flags: 0,
                     size: u16::try_from(len)
                         .with_context(|| format!("Packet oversized: max is {}, got {}", u16::MAX, len))?,
+                    flags: 0,
                 };
                 header.encode(buf);
             };
@@ -127,7 +127,9 @@ impl Message {
         let header = Header::decode(buf.split_to(Header::SIZE)).context("Couldn’t decode HEADER")?;
         let header_size = header.size as usize;
 
-        let body_size = header_size - Header::SIZE;
+        let body_size = header_size
+            .checked_sub(Header::SIZE)
+            .context("Invalid `msgSize` in message HEADER")?;
 
         ensure!(
             buf.len() >= body_size,
@@ -220,25 +222,25 @@ impl TryFrom<u8> for MessageType {
 #[derive(Debug, PartialEq)]
 pub struct Header {
     pub ty: MessageType,
-    pub flags: u8,
     pub size: u16,
+    pub flags: u8,
 }
 
 impl Header {
-    pub const SIZE: usize = 1 /* msgType */ + 1 /* msgFlags */ + 2 /* msgSize */;
+    pub const SIZE: usize = 1 /* msgType */ + 2 /* msgSize */ + 1 /* msgFlags */;
 
     pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u8(self.ty as u8);
-        buf.put_u8(0);
         buf.put_u16(self.size);
+        buf.put_u8(0);
     }
 
     pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
         ensure!(buf.len() >= Self::SIZE, "Not enough bytes provided to decode HEADER");
         Ok(Self {
             ty: MessageType::try_from(buf.get_u8())?,
-            flags: buf.get_u8(),
             size: buf.get_u16(),
+            flags: buf.get_u8(),
         })
     }
 }
@@ -247,19 +249,19 @@ impl Header {
 pub struct ChannelOpen {
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
-    pub maximum_packet_size: u32,
+    pub maximum_packet_size: u16,
     pub destination_url: String,
 }
 
 impl ChannelOpen {
-    pub const DEFAULT_INITIAL_WINDOW_SIZE: usize = 32_768;
-    pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 4 /* maximumPacketSize */;
+    pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 32_768;
+    pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
     pub fn new(id: LocalChannelId, destination_url: impl Into<String>) -> Self {
         Self {
             sender_channel_id: u32::from(id),
-            initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE as u32,
-            maximum_packet_size: MAXIMUM_PACKET_SIZE_IN_BYTES as u32,
+            initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE,
+            maximum_packet_size: MAXIMUM_PACKET_SIZE_IN_BYTES as u16,
             destination_url: destination_url.into(),
         }
     }
@@ -271,7 +273,7 @@ impl ChannelOpen {
     pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u32(self.sender_channel_id);
         buf.put_u32(self.initial_window_size);
-        buf.put_u32(self.maximum_packet_size);
+        buf.put_u16(self.maximum_packet_size);
         buf.put(self.destination_url.as_bytes());
     }
 
@@ -283,7 +285,7 @@ impl ChannelOpen {
 
         let sender_channel_id = buf.get_u32();
         let initial_window_size = buf.get_u32();
-        let maximum_packet_size = buf.get_u32();
+        let maximum_packet_size = buf.get_u16();
 
         let destination_url = std::str::from_utf8(&buf)
             .context("`destinationUrl` field is not valid UTF-8")?
@@ -303,23 +305,23 @@ pub struct ChannelOpenSuccess {
     pub recipient_channel_id: u32,
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
-    pub maximum_packet_size: u32,
+    pub maximum_packet_size: u16,
 }
 
 impl ChannelOpenSuccess {
-    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*senderChannelId*/ + 4 /*initialWindowSize*/ + 4 /*maximumPacketSize*/;
+    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*senderChannelId*/ + 4 /*initialWindowSize*/ + 2 /*maximumPacketSize*/;
 
     pub fn new(
         distant_id: DistantChannelId,
         local_id: LocalChannelId,
         initial_window_size: u32,
-        maximum_packet_size: u32,
+        maximum_packet_size: u16,
     ) -> Self {
         Self {
             recipient_channel_id: u32::from(distant_id),
             sender_channel_id: u32::from(local_id),
             initial_window_size,
-            maximum_packet_size: std::cmp::min(maximum_packet_size, MAXIMUM_PACKET_SIZE_IN_BYTES as u32),
+            maximum_packet_size: std::cmp::min(maximum_packet_size, MAXIMUM_PACKET_SIZE_IN_BYTES as u16),
         }
     }
 
@@ -327,7 +329,7 @@ impl ChannelOpenSuccess {
         buf.put_u32(self.recipient_channel_id);
         buf.put_u32(self.sender_channel_id);
         buf.put_u32(self.initial_window_size);
-        buf.put_u32(self.maximum_packet_size);
+        buf.put_u16(self.maximum_packet_size);
     }
 
     pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
@@ -340,7 +342,7 @@ impl ChannelOpenSuccess {
             recipient_channel_id: buf.get_u32(),
             sender_channel_id: buf.get_u32(),
             initial_window_size: buf.get_u32(),
-            maximum_packet_size: buf.get_u32(),
+            maximum_packet_size: buf.get_u16(),
         })
     }
 }
@@ -554,12 +556,12 @@ mod tests {
 
     #[test]
     fn header_decode() {
-        let msg = Header::decode(Bytes::from_static(&[102, 0, 7, 16])).unwrap();
+        let msg = Header::decode(Bytes::from_static(&[102, 7, 16, 0])).unwrap();
         assert_eq!(
             Header {
                 ty: MessageType::OpenFailure,
+                size: 1808,
                 flags: 0,
-                size: 1808
             },
             msg
         );
@@ -569,12 +571,12 @@ mod tests {
     fn header_encode() {
         let header = Header {
             ty: MessageType::OpenSuccess,
-            flags: 0,
             size: 512,
+            flags: 0,
         };
         let mut buf = BytesMut::new();
         header.encode(&mut buf);
-        assert_eq!(vec![101, 0, 2, 0], buf);
+        assert_eq!(vec![101, 2, 0, 0], buf);
     }
 
     fn check_encode_decode(sample_msg: Message, raw_msg: &[u8]) {
@@ -590,11 +592,11 @@ mod tests {
     fn channel_open() {
         let raw_msg = &[
             100, // msg type
-            0,   // msg flags
-            0, 36, // msg size
+            0, 34, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // sender channel id
             0, 0, 4, 0, // initial window size
-            0, 0, 4, 0, // maximum packet size
+            4, 0, // maximum packet size
             116, 99, 112, 58, 47, 47, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 58, 52, 52,
             51, // destination url: tcp://google.com:443
         ];
@@ -610,12 +612,12 @@ mod tests {
     pub fn channel_open_success() {
         let raw_msg = &[
             101, // msg type
-            0,   // msg flags
-            0, 20, // msg size
+            0, 18, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // recipient channel id
             0, 0, 0, 2, // sender channel id
             0, 0, 4, 0, // initial window size
-            0, 0, 127, 255, // maximum packet size
+            127, 255, // maximum packet size
         ];
 
         let msg = ChannelOpenSuccess {
@@ -632,8 +634,8 @@ mod tests {
     pub fn channel_open_failure() {
         let raw_msg = &[
             102, // msg type
-            0,   // msg flags
             0, 17, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // recipient channel id
             0, 0, 0, 2, // reason code
             101, 114, 114, 111, 114, // failure description
@@ -652,8 +654,8 @@ mod tests {
     pub fn channel_window_adjust() {
         let raw_msg = &[
             103, // msg type
-            0,   // msg flags
             0, 12, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // recipient channel id
             0, 0, 2, 0, // window adjustment
         ];
@@ -680,8 +682,8 @@ mod tests {
     pub fn channel_data() {
         let raw_msg = &[
             104, // msg type
-            0,   // msg flags
             0, 12, // msg size
+            0,  // msg flags
             0, 0, 0, 1, // recipient channel id
             11, 12, 13, 14, // transfer data
         ];
@@ -698,8 +700,8 @@ mod tests {
     pub fn channel_eof() {
         let raw_msg = &[
             105, // msg type
-            0,   // msg flags
             0, 8, // msg size
+            0, // msg flags
             0, 0, 0, 1, // recipient channel id
         ];
 
@@ -714,8 +716,8 @@ mod tests {
     pub fn channel_close() {
         let raw_msg = &[
             106, // msg type
-            0,   // msg flags
             0, 8, // msg size
+            0, // msg flags
             0, 0, 0, 1, // recipient channel id
         ];
 
