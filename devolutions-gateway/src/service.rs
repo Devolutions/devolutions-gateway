@@ -22,7 +22,6 @@ use std::sync::Arc;
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
-use tokio_compat_02::{FutureExt as _, IoCompat};
 use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
 use url::Url;
 
@@ -390,14 +389,9 @@ async fn start_websocket_server(
             });
 
             tokio::spawn(async move {
-                let conn = IoCompat::new(connection);
-                let serve_connection = http.serve_connection(conn, service).with_upgrades();
+                let serve_connection = http.serve_connection(connection, service).with_upgrades();
                 // use .compat to run 0.2 hyper on tokio 0.3 runtime
-                let _ = serve_connection
-                    .with_logger(listener_logger)
-                    .compat()
-                    .await
-                    .map_err(|_| ());
+                let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
             });
         };
 

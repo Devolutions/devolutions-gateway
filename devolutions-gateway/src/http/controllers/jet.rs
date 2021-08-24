@@ -13,8 +13,7 @@ use saphir::macros::controller;
 use saphir::request::Request;
 use slog_scope::info;
 use std::sync::Arc;
-use tokio_02::runtime::Handle;
-use tokio_compat_02::FutureExt;
+use tokio::runtime::Handle;
 use uuid::Uuid;
 
 pub struct JetController {
@@ -41,7 +40,7 @@ impl JetController {
     async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
         let associations_response: Vec<AssociationResponse>;
-        let associations = self.jet_associations.lock().compat().await;
+        let associations = self.jet_associations.lock().await;
 
         associations_response = associations
             .values()
@@ -84,7 +83,7 @@ impl JetController {
             // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
             // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
             // when saphir perform transition to tokio 0.3
-            let mut jet_associations = self.jet_associations.lock().compat().await;
+            let mut jet_associations = self.jet_associations.lock().await;
 
             jet_associations.insert(
                 association_id,
@@ -124,7 +123,7 @@ impl JetController {
 
             // create association if needed
 
-            let mut jet_associations = self.jet_associations.lock().compat().await;
+            let mut jet_associations = self.jet_associations.lock().await;
 
             if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
                 e.insert(Association::new(
@@ -166,8 +165,8 @@ pub async fn start_remove_association_future(jet_associations: JetAssociationsMa
 pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
     if let Ok(runtime_handle) = Handle::try_current() {
         runtime_handle.spawn(async move {
-            tokio_02::time::delay_for(ACCEPT_REQUEST_TIMEOUT).await;
-            if remove_jet_association(jet_associations, uuid, None).compat().await {
+            tokio::time::sleep(ACCEPT_REQUEST_TIMEOUT).await;
+            if remove_jet_association(jet_associations, uuid, None).await {
                 info!(
                     "No connect request received with association {}. Association removed!",
                     uuid

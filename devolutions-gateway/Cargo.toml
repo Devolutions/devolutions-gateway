@@ -19,10 +19,8 @@ url = { version = "2", features = ["serde"] }
 hostname = "^0.3"
 lazy_static = "1.2.0"
 tokio = { version = "1", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
-tokio_02 = {version = "0.2", package = "tokio", features = ["rt-core", "time"]}
 tokio-util = { version = "0.6", features = ["codec"] }
 tokio-tungstenite = "0.14"
-tokio-compat-02 = "0.2"
 tokio-rustls = { version = "0.22", features = ["dangerous_configuration"] }
 futures = "0.3"
 webpki = "0.21.0"
@@ -47,7 +45,7 @@ failure = "0.1"
 x509-parser = "0.6.0"
 sspi = "0.3.0"
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
-hyper = "0.13"
+hyper = "0.14"
 sha1 = "0.6.0"
 base64 = "0.9.1"
 slog-stdlog = "4.0"
@@ -56,16 +54,19 @@ spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", 
 indexmap = "1.0"
 dlopen = "0.1.8"
 dlopen_derive = "0.1.4"
-sogar-core = "0.2"
+sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
 tempfile = "3.0"
 rust-argon2 = "0.8"
-reqwest = "0.10"
+reqwest = "0.11"
 http = "0.2"
 
 [dependencies.saphir]
 version = "2.8"
 default-features = false
-features = ["https", "json", "macro", "form", "operation"]
+features = ["https", "json", "macro", "form", "operation", "file"]
+# FIXME: update once next saphir version is published
+git = "https://github.com/CBenoit/saphir"
+branch = "hyper-update"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }

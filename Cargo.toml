@@ -15,7 +15,6 @@ default-members = [
 
 [patch.crates-io]
 rustls = { git = "https://github.com/Devolutions/rustls.git", branch = "v0.18.1-patched", features = ["dangerous_configuration"] }
-saphir = { git = "https://github.com/richerarc/saphir", rev = "1caa12d" } # FIXME: update once next saphir version is published
 
 [profile.release]
 lto = true
