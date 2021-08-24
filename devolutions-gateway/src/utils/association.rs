@@ -1,7 +1,7 @@
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
 use slog_scope::debug;
-use std::time::Duration;
+use tokio::time::Duration;
 use uuid::Uuid;
 
 pub const ACCEPT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);

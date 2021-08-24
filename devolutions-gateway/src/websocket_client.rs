@@ -12,7 +12,6 @@ use slog_scope::{error, info};
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio_compat_02::FutureExt;
 use url::Url;
 use uuid::Uuid;
 
@@ -40,7 +39,7 @@ impl WebsocketService {
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else {
-            saphir::server::inject_raw(req).compat().await.map_err(|err| match err {
+            saphir::server::inject_raw(req).await.map_err(|err| match err {
                 error::SaphirError::Io(err) => err,
                 err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
             })
@@ -100,7 +99,7 @@ async fn handle_jet_accept(
 }
 
 async fn handle_jet_accept_impl(
-    req: Request<Body>,
+    mut req: Request<Body>,
     client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
 ) -> Result<Response<Body>, ()> {
@@ -124,9 +123,7 @@ async fn handle_jet_accept_impl(
     match version {
         2 | 3 => {
             tokio::spawn(async move {
-                let upgrade = req
-                    .into_body()
-                    .on_upgrade()
+                let upgraded = hyper::upgrade::on(&mut req)
                     .await
                     .map_err(|e| error!("upgrade error: {}", e))?;
 
@@ -134,7 +131,7 @@ async fn handle_jet_accept_impl(
                 if let Some(assc) = jet_assc.get_mut(&association_id) {
                     if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                         candidate.set_state(CandidateState::Accepted);
-                        let ws_transport = WsTransport::new_http(upgrade, Some(client_addr)).await;
+                        let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
                         candidate.set_transport(JetTransport::Ws(ws_transport));
                     }
                 }
@@ -163,7 +160,7 @@ async fn handle_jet_connect(
 }
 
 async fn handle_jet_connect_impl(
-    req: Request<Body>,
+    mut req: Request<Body>,
     client_addr: SocketAddr,
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
@@ -190,9 +187,7 @@ async fn handle_jet_connect_impl(
     match version {
         2 | 3 => {
             tokio::spawn(async move {
-                let upgrade = req
-                    .into_body()
-                    .on_upgrade()
+                let upgraded = hyper::upgrade::on(&mut req)
                     .await
                     .map_err(|e| error!("upgrade error: {}", e))?;
 
@@ -217,7 +212,7 @@ async fn handle_jet_connect_impl(
                     let server_transport = candidate
                         .take_transport()
                         .expect("Candidate cannot be created without a transport");
-                    let ws_transport = WsTransport::new_http(upgrade, Some(client_addr)).await;
+                    let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
                     let client_transport = JetTransport::Ws(ws_transport);
                     candidate.set_state(CandidateState::Connected);
                     candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());

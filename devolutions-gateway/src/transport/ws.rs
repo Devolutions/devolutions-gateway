@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use tokio_compat_02::IoCompat;
 use tokio_rustls::{rustls, TlsConnector, TlsStream};
 use tokio_tungstenite::tungstenite::handshake::client::Request;
 use tokio_tungstenite::tungstenite::protocol::Role;
@@ -199,7 +198,7 @@ impl AsyncWrite for WsStream {
 
 #[allow(clippy::large_enum_variant)]
 pub enum WsStreamWrapper {
-    Http((WebSocketStream<IoCompat<Upgraded>>, Option<SocketAddr>)),
+    Http((WebSocketStream<Upgraded>, Option<SocketAddr>)),
     Tcp((WebSocketStream<TcpStream>, Option<SocketAddr>)),
     Tls((WebSocketStream<TlsStream<TcpStream>>, Option<SocketAddr>)),
 }
@@ -239,10 +238,9 @@ pub struct WsTransport {
 
 impl WsTransport {
     pub async fn new_http(upgraded: Upgraded, addr: Option<SocketAddr>) -> Self {
-        let compat_stream = IoCompat::new(upgraded);
         WsTransport {
             stream: WsStreamWrapper::Http((
-                WebSocketStream::from_raw_socket(compat_stream, Role::Server, None).await,
+                WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
                 addr,
             ))
             .into(),
