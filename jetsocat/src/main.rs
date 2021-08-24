@@ -363,7 +363,7 @@ impl JmuxProxyArgs {
             .args
             .iter()
             .skip(1)
-            .map(|arg| parse_listener_mode(&arg).with_context(|| format!("Bad <LISTENER>: `{}`", arg)))
+            .map(|arg| parse_listener_mode(arg).with_context(|| format!("Bad <LISTENER>: `{}`", arg)))
             .collect::<anyhow::Result<Vec<ListenerMode>>>()?;
 
         Ok(Self {
