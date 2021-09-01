@@ -53,6 +53,11 @@ impl GatewayService {
         let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("failed to init logger");
 
+        if let Err(e) = config.validate() {
+            error!("Devolutions Gateway can't be launched. Invalid configuration: {}", e);
+            return None;
+        }
+
         Some(GatewayService {
             config,
             logger,
