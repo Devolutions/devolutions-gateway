@@ -4,7 +4,6 @@ use clap::{crate_name, crate_version, App, Arg};
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
-use slog_scope::debug;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -720,17 +719,6 @@ impl Config {
             config.plugins = Some(plugins);
         }
 
-        // early fail if the specified plugin is not exist
-        if let Some(plugins) = &config.plugins {
-            let mut manager = PLUGIN_MANAGER.lock().unwrap();
-            for plugin in plugins {
-                debug!("Plugin path: {}", plugin);
-                manager
-                    .load_plugin(plugin.as_str())
-                    .unwrap_or_else(|e| panic!("Failed to load plugin with error {}", e));
-            }
-        }
-
         if let Some(registry_url) = matches.value_of(ARG_SOGAR_REGISTRY_URL) {
             config.sogar_registry_config.sogar_push_registry_info.registry_url = Some(registry_url.to_owned());
         }
@@ -800,29 +788,43 @@ impl Config {
             config.listeners = listeners;
         }
 
-        // early fail if we start without any listeners
-        if config.listeners.is_empty() {
-            panic!("At least one listener has to be specified.");
-        }
-
-        if !config
-            .listeners
-            .iter()
-            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
-        {
-            panic!("At least one HTTP listener is required");
-        }
-
-        // early fail if we start as restricted without provisioner key
-        if config.provisioner_public_key.is_none() {
-            panic!("provisioner public key is missing");
-        }
-
         if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
             config.recording_path = Some(PathBuf::from(recording_path));
         }
 
         config
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        // early fail if specified plugins can't be loaded
+        if let Some(plugins) = &self.plugins {
+            let mut manager = PLUGIN_MANAGER.lock().unwrap();
+            for plugin in plugins {
+                manager
+                    .load_plugin(plugin.as_str())
+                    .map_err(|e| format!("Plugin {} failed to be loaded: {}", plugin, e))?;
+            }
+        }
+
+        // early fail if we start without any listeners
+        if self.listeners.is_empty() {
+            return Err("At least one listener has to be specified.".to_string());
+        }
+
+        if !self
+            .listeners
+            .iter()
+            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
+        {
+            return Err("At least one HTTP listener is required".to_string());
+        }
+
+        // early fail if we start as restricted without provisioner key
+        if self.provisioner_public_key.is_none() {
+            return Err("provisioner public key is missing".to_string());
+        }
+
+        Ok(())
     }
 
     pub fn load_from_file(file_path: PathBuf) -> Option<Self> {
