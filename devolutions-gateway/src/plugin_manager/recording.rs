@@ -109,11 +109,11 @@ impl Recorder {
     }
 
     pub fn get_filepath(&self) -> Result<PathBuf, FromUtf8Error> {
-        let mut path_array = vec![0i8; MAX_PATH_LEN];
+        let mut path_array = vec![0; MAX_PATH_LEN];
         let path_size = unsafe { (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), MAX_PATH_LEN) };
 
         if path_size > MAX_PATH_LEN {
-            path_array.resize(path_size, 0i8);
+            path_array.resize(path_size, 0);
             unsafe {
                 (self.api.NowRecording_GetPath)(self.ctx, path_array.as_mut_ptr(), path_array.len());
             }
