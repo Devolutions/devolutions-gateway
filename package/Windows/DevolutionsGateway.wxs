@@ -48,9 +48,6 @@
     <!-- And ALWAYS install per machine!!! -->
     <Package Id="*" InstallerVersion="200" Compressed="yes" InstallScope="perMachine" InstallPrivileges="elevated" Description="!(loc.ProductDescription)" Platform="$(var.Platform)" Languages="!(loc.Language)"/>
 
-    <!-- License agreement text: dummy. Real text is set in WXS file -->
-    <WixVariable Id="WixUILicenseRtf" Value="$(var.WixUILicenseRtf)" />
-
     <!-- UI customization -->
     <WixVariable Id="WixUIBannerBmp" Value="WixUIBanner.jpg" />
     <WixVariable Id="WixUIDialogBmp" Value="WixUiDialog.jpg" />
@@ -223,8 +220,8 @@
       <ComponentGroupRef Id="DGatewayPSComponentGroup"/>
     </Feature>
 
-    <UI Id="MyWixUI_InstallDir">
-      <UIRef Id="WixUI_InstallDir"/>
+    <UI>
+      <UIRef Id="WixUI_CustomInstallDir"/>
     </UI>
 
     <UI>
