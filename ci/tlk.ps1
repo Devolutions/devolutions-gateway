@@ -250,7 +250,7 @@ class TlkRecipe
     }
 
     [void] Build() {
-        $OPENSSL_VERSION = '1.1.1d-4'
+        $OPENSSL_VERSION = '1.1.1l'
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
 
@@ -262,19 +262,15 @@ class TlkRecipe
             $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
         }
 
-        #if (-Not $this.Target.IsMacOS()) {
-            # FIXME: this fails on CI build machines for macOS, maybe conan is outdated?
-            
-            & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile
-            $dotenv = Get-DotEnvFile ".\environment.sh.env"
-        
-            Get-ChildItem 'conanbuildinfo.*' | Remove-Item
-            Get-ChildItem 'environment.*.env' | Remove-Item
-            Get-ChildItem '*activate.*' | Remove-Item
-        
-            $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
-            $Env:OPENSSL_DIR = $OPENSSL_DIR
-        #}
+        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release'
+        $dotenv = Get-DotEnvFile ".\environment.sh.env"
+    
+        Get-ChildItem 'conanbuildinfo.*' | Remove-Item
+        Get-ChildItem 'environment.*.env' | Remove-Item
+        Get-ChildItem '*activate.*' | Remove-Item
+    
+        $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
+        $Env:OPENSSL_DIR = $OPENSSL_DIR
     
         if ($this.Target.IsWindows()) {
             $Env:RUSTFLAGS = "-C target-feature=+crt-static"
@@ -333,7 +329,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/tr', $TimestampServer,
-		    '/td', 'sha256',
+                    '/td', 'sha256',
                     $DestinationExecutable
                 )
                 & 'signtool' $SignToolArgs
@@ -386,7 +382,7 @@ class TlkRecipe
             "-dDGatewayExecutable=$DGatewayExecutable",
             "-dVersion=$ShortVersion", "-v")
         
-        $WixFiles = @('DevolutionsGateway', "DevolutionsGateway-$TargetArch")
+        $WixFiles = @('DevolutionsGateway', "DevolutionsGateway-$TargetArch", "WixUI_CustomInstallDir")
         
         $HeatArgs = @('dir', "$DGatewayPSModulePath",
             "-dr", "DGATEWAYPSROOTDIRECTORY",
@@ -398,13 +394,11 @@ class TlkRecipe
         
         $InputFiles = $WixFiles | ForEach-Object { "$_.wxs" }
         $ObjectFiles = $WixFiles | ForEach-Object { "$_.wixobj" }
-        
+
         $Cultures = @('en-US', 'fr-FR')
         
         foreach ($Culture in $Cultures) {
-            & 'candle.exe' "-nologo" $InputFiles $WixArgs "-dPlatform=$TargetArch" `
-                "-dWixUILicenseRtf=$($this.PackageName)_EULA_${Culture}.rtf"
-        
+            & 'candle.exe' "-nologo" $InputFiles $WixArgs "-dPlatform=$TargetArch"
             $OutputFile = "$($this.PackageName)_${Culture}.msi"
         
             if ($Culture -eq 'en-US') {
@@ -437,7 +431,7 @@ class TlkRecipe
                     'sign', '/fd', 'SHA256', '/v',
                     '/n', $SignToolName,
                     '/tr', $TimestampServer,
-		    '/td', 'sha256',
+                    '/td', 'sha256',
                     $DGatewayPackage
                 )
                 & 'signtool' $SignToolArgs

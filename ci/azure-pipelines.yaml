@@ -62,6 +62,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
             displayName: Load dynamic variables
 
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
@@ -128,6 +133,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
               Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
             displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
 
           - task: PowerShell@2
             inputs:
@@ -199,6 +209,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
             displayName: Load dynamic variables
 
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
@@ -246,6 +261,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
             displayName: Load dynamic variables
 
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
           - task: PowerShell@2
             inputs:
               targetType: 'filePath'
@@ -289,6 +309,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
               Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
             displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
 
           - task: PowerShell@2
             inputs:
@@ -344,6 +369,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
               Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
             displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
 
           - task: PowerShell@2
             inputs:
@@ -421,6 +451,11 @@ stages:
               Write-Host "##vso[task.setvariable variable=DGatewayPSModulePath]$DGatewayPSModulePath"
               Write-Host "##vso[task.setvariable variable=DGatewayPackage]$DGatewayPackage"
             displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
 
           - task: PowerShell@2
             inputs:
