@@ -5,7 +5,7 @@ on:
 
 jobs:
   jetsocat:
-    name: jetsocat [${{ matrix.os }} (${{ matrix.os }})]
+    name: jetsocat [${{ matrix.os }} (${{ matrix.arch }})]
     runs-on: ${{ matrix.runner }}
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
@@ -52,6 +52,12 @@ jobs:
           echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
           echo "::set-output name=cargo-package::$CargoPackage"
 
+      - name: Configure Linux runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install python3-wget python3-setuptools
+
       - name: Configure conan
         run: |
           pip3 install conan==1.40.0 --upgrade
@@ -65,7 +71,7 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           JETSOCAT_EXECUTABLE: ${{ steps.load-variables.outputs.jetsocat-executable }}
           CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
-        run: ./ci/tlk.ps1 build -Platform ${{ runner.os }} -Architecture ${{ runner.arch }}
+        run: ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
 
       - name: upload artifacts
         uses: actions/upload-artifact@v2
