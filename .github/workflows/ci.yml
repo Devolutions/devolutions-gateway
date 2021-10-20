@@ -4,9 +4,71 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  jetsocat:
+    name: jetsocat [${{ matrix.os }} (${{ matrix.os }})]
+    runs-on: ${{ matrix.runner }}
+    env:
+      CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86, x86_64, arm64 ]
+        os: [ windows, macos, linux ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: macos
+            runner: macos-10.15
+          - os: linux
+            runner: ubuntu-18.04
+        exclude:
+          - arch: x86
+            os: macos
+          - arch: x86
+            os: linux
+          - arch: arm64
+            os: windows
+          - arch: arm64
+            os: linux
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Load dynamic variables
+        id: load-variables
+        shell: pwsh
+        run: |
+          $PackageVersion = Get-Content "./VERSION"
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ runner.arch }}"
+          $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
+          $CargoPackage = "jetsocat"
+          echo "::set-output name=package-version::$PackageVersion"
+          echo "::set-output name=target-staging-path::$StagingPath"
+          echo "::set-output name=target-output-path::$TargetOutputPath"
+          echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
+          echo "::set-output name=cargo-package::$CargoPackage"
+
+      - name: Configure conan
+        run: |
+          pip3 install conan==1.40.0 --upgrade
+          conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+          conan remote clean
+          conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          JETSOCAT_EXECUTABLE: ${{ steps.load-variables.outputs.jetsocat-executable }}
+          CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
+        run: ./ci/tlk.ps1 build -Platform ${{ runner.os }} -Architecture ${{ runner.arch }}
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: jetsocat
+          path: ${{ steps.load-variables.outputs.staging-path }}
