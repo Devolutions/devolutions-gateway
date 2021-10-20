@@ -66,7 +66,7 @@ jobs:
           $PackageVersion = Get-Content "./VERSION"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ runner.arch }}"
+          $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
           $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
           $CargoPackage = "jetsocat"
           echo "::set-output name=staging-path::$StagingPath"
@@ -150,11 +150,11 @@ jobs:
           $PackageVersion = Get-Content "./VERSION"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ runner.arch }}"
+          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
-            $PackageFileName = "DevolutionsGateway-${{ runner.arch }}-${PackageVersion}.msi"
+            $PackageFileName = "DevolutionsGateway-${{ matrix.arch }}-${PackageVersion}.msi"
             $PSModuleOutputPath = Join-Path $StagingPath PowerShell
             $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
             $DGatewayPackage = Join-Path $TargetOutputPath $PackageFileName
