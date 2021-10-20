@@ -8,9 +8,10 @@ use saphir::http::{self, StatusCode};
 use saphir::http_context::{HttpContext, State};
 use saphir::middleware::{Middleware, MiddlewareChain};
 use saphir::response::Builder as ResponseBuilder;
-use slog_scope::error;
+use slog_scope::{error, warn};
 use std::sync::Arc;
 
+// FIXME: we should probably use the same name that we had in Bastion ("Http-Authorization")
 const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
 
 pub struct AuthMiddleware {
@@ -40,6 +41,8 @@ async fn auth_middleware(
 ) -> Result<HttpContext, SaphirError> {
     let request = ctx.state.request_unchecked_mut();
 
+    // FIXME: we should proceed like we did in Bastion (collect all the authorizations in a
+    // loop instead of only take the first)
     let gateway_auth_header = request.headers_mut().remove(GATEWAY_AUTHORIZATION_HDR_NAME);
     let auth_header = gateway_auth_header
         .as_ref()
@@ -93,24 +96,26 @@ async fn auth_middleware(
 
 #[derive(PartialEq)]
 pub enum AuthHeaderType {
-    Basic,
     Bearer,
     Signature,
 }
 
-pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, String)> {
+pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, &str)> {
     let auth_vec = auth_header.trim().split(' ').collect::<Vec<&str>>();
 
-    if auth_vec.len() == 2 {
-        return match auth_vec[0].to_lowercase().as_ref() {
-            "basic" => Some((AuthHeaderType::Basic, auth_vec[1].to_string())),
-            "bearer" => Some((AuthHeaderType::Bearer, auth_vec[1].to_string())),
-            "signature" => Some((AuthHeaderType::Signature, auth_vec[1].to_string())),
-            _ => None,
-        };
+    if auth_vec.len() >= 2 {
+        match auth_vec[0].to_lowercase().as_ref() {
+            "bearer" => Some((AuthHeaderType::Bearer, auth_vec[1])),
+            "signature" => Some((AuthHeaderType::Signature, auth_header)),
+            unexpected => {
+                warn!("unexpected auth method: {}", unexpected);
+                None
+            }
+        }
+    } else {
+        warn!("invalid auth header: {}", auth_header);
+        None
     }
-
-    None
 }
 
 fn validate_bearer_token(config: &Config, token: &str) -> Result<JetAccessTokenClaims, String> {

@@ -79,5 +79,5 @@ pub enum JetAccessScope {
 
 #[derive(Clone, Deserialize)]
 pub struct JetBridgeTokenClaims {
-    pub target: String,
+    pub target_host: String,
 }

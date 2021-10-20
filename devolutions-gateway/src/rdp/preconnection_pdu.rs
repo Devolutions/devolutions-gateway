@@ -138,7 +138,7 @@ pub fn resolve_routing_mode(claims: &JetAssociationTokenClaims) -> Result<TokenR
             let dest_host = dest_host.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "dest_host claim is missing for RdpTls mode".to_string(),
+                    "dst_hst claim is missing for RdpTls mode".to_string(),
                 )
             })?;
 
@@ -161,7 +161,7 @@ pub fn resolve_routing_mode(claims: &JetAssociationTokenClaims) -> Result<TokenR
         }
         None => {
             let dest_host = dest_host.ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "dest_host claim is missing for RdpTcp mode")
+                io::Error::new(io::ErrorKind::InvalidData, "dst_hst claim is missing for RdpTcp mode")
             })?;
 
             Ok(TokenRoutingMode::RdpTcp(dest_host))

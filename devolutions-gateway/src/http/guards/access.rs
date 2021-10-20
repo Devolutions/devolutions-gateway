@@ -9,36 +9,45 @@ pub enum JetTokenType {
     Association,
 }
 
+impl From<JetTokenType> for Vec<JetTokenType> {
+    fn from(ty: JetTokenType) -> Self {
+        vec![ty]
+    }
+}
+
 pub struct AccessGuard {
-    token_type: JetTokenType,
+    authorized_types: Vec<JetTokenType>,
 }
 
 #[guard]
 impl AccessGuard {
-    pub fn new(token_type: JetTokenType) -> Self {
-        AccessGuard { token_type }
+    pub fn new(types: impl Into<Vec<JetTokenType>>) -> Self {
+        AccessGuard {
+            authorized_types: types.into(),
+        }
     }
 
     async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
-        if let Some(claims) = req.extensions().get::<JetAccessTokenClaims>() {
-            match (claims, &self.token_type) {
-                (JetAccessTokenClaims::Association(_), JetTokenType::Association) => {
-                    return Ok(req);
-                }
-                (JetAccessTokenClaims::Scope(scope_from_request), JetTokenType::Scope(scope_needed))
-                    if scope_from_request.scope == *scope_needed =>
-                {
-                    return Ok(req);
-                }
-                (JetAccessTokenClaims::Bridge(_), JetTokenType::Bridge) => {
-                    return Ok(req);
-                }
-                _ => {}
-            }
-        }
+        let claims = req
+            .extensions()
+            .get::<JetAccessTokenClaims>()
+            .ok_or_else(|| HttpErrorStatus::unauthorized("identity missing (no token provided)"))?;
 
-        Err(HttpErrorStatus::forbidden(
-            "Token provided can't be used to access the route",
-        ))
+        let allowed = self.authorized_types.iter().any(|ty| match (ty, claims) {
+            (JetTokenType::Association, JetAccessTokenClaims::Association(_)) => true,
+            (JetTokenType::Scope(scope_needed), JetAccessTokenClaims::Scope(scope_from_request))
+                if scope_from_request.scope == *scope_needed =>
+            {
+                true
+            }
+            (JetTokenType::Bridge, JetAccessTokenClaims::Bridge(_)) => true,
+            _ => false,
+        });
+
+        if allowed {
+            Ok(req)
+        } else {
+            Err(HttpErrorStatus::forbidden("token not allowed"))
+        }
     }
 }

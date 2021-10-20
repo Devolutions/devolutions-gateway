@@ -65,7 +65,7 @@ async fn auth_middleware(
         let private_key = config.delegation_private_key.clone();
         if let (Some((AuthHeaderType::Bearer, token)), Some(private_key)) = (parse_auth_header(auth_str), private_key) {
             let public_key = private_key.to_public_key();
-            match JwtSig::<SogarUser>::decode(token.as_str(), &public_key, &JwtValidator::no_check()) {
+            match JwtSig::<SogarUser>::decode(token, &public_key, &JwtValidator::no_check()) {
                 Ok(user) => {
                     if let Some(permission) = user.claims.permission {
                         if metadata == BLOB_EXIST_ENDPOINT || metadata == MANIFEST_EXIST_ENDPOINT {
