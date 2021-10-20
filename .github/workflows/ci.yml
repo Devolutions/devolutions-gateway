@@ -5,7 +5,7 @@ on:
 
 jobs:
   jetsocat:
-    name: jetsocat [${{ matrix.os }} (${{ matrix.arch }})]
+    name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
@@ -47,7 +47,7 @@ jobs:
           $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
           $CargoPackage = "jetsocat"
           echo "::set-output name=package-version::$PackageVersion"
-          echo "::set-output name=target-staging-path::$StagingPath"
+          echo "::set-output name=staging-path::$StagingPath"
           echo "::set-output name=target-output-path::$TargetOutputPath"
           echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
           echo "::set-output name=cargo-package::$CargoPackage"
@@ -57,6 +57,17 @@ jobs:
         run: |
           sudo apt update
           sudo apt install python3-wget python3-setuptools
+
+      - name: configure Windows x86 runner
+        if: matrix.os == 'windows' && matrix.arch == 'x86'
+        run: |
+          rustup target add i686-pc-windows-msvc
+
+      - name: configure macOS arm64 runner
+        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        run: |
+          sudo rm -rf /Library/Developer/CommandLineTools
+          rustup target add aarch64-apple-darwin
 
       - name: Configure conan
         run: |
