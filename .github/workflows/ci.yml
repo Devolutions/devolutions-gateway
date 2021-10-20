@@ -175,13 +175,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt update
-          sudo apt install dh_make python3-wget python3-setuptools libsystemd-dev
+          sudo apt install dh-make python3-wget python3-setuptools libsystemd-dev
 
-      - name: Configure Windows runner
-        if: runner.os == 'Windows'
-        run: |
-          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "C:\Program Files (x86)\Windows Kits\10\include\10.0.17763.0\um" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # - name: Configure Windows runner
+      #   if: runner.os == 'Windows'
+      #   run: |
+      #     echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      #     echo "C:\Program Files (x86)\Windows Kits\10\include\10.0.17763.0" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup code signing
         if: matrix.os == 'windows'
