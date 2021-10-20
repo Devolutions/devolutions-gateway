@@ -69,6 +69,17 @@ jobs:
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
 
+      - name: configure Windows signing certificate
+        if: matrix.os == 'windows'
+        env:
+          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: |
+          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
+          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
+          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
+          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
       - name: Configure conan
         run: |
           pip3 install conan==1.40.0 --upgrade
@@ -82,7 +93,14 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           JETSOCAT_EXECUTABLE: ${{ steps.load-variables.outputs.jetsocat-executable }}
           CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
-        run: ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:CARGO_NO_DEFAULT_FEATURES = "true"
+            $Env:CARGO_FEATURES = "native-tls"
+            $Env:SIGNTOOL_NAME = "Devolutions"
+          }
+
+          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
 
       - name: upload artifacts
         uses: actions/upload-artifact@v2
