@@ -72,6 +72,7 @@ branch = "hyper-update"
 winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
 
 [target.'cfg(windows)'.build-dependencies]
+# FIXME: update once next embed-resource version is published
 embed-resource =  { git = "https://github.com/thenextman/rust-embed-resource" }
 
 [dev-dependencies]
