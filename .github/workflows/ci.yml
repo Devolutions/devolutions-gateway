@@ -175,7 +175,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt update
-          sudo apt install python3-wget python3-setuptools
+          sudo apt install python3-wget python3-setuptools libsystemd-dev
 
       - name: Setup code signing
         if: matrix.os == 'windows'
