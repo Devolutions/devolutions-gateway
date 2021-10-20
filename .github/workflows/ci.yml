@@ -216,7 +216,7 @@ jobs:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
-            $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}""
+            $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
             $Env:DGATEWAY_PSMODULE_CLEAN = "1"
           }
