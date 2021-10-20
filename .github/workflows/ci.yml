@@ -58,27 +58,20 @@ jobs:
           sudo apt update
           sudo apt install python3-wget python3-setuptools
 
-      - name: configure Windows x86 runner
+      - name: Configure Windows x86 runner
         if: matrix.os == 'windows' && matrix.arch == 'x86'
         run: |
           rustup target add i686-pc-windows-msvc
 
-      - name: configure macOS arm64 runner
+      - name: Configure macOS arm64 runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
 
-      - name: configure Windows signing certificate
-        if: matrix.os == 'windows'
-        env:
-          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
-        run: |
-          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
-          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
-          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
-          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+      - name: Setup code signing
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        run: echo "::warning::Artifacts not code-signed, to be implemented"
 
       - name: Configure conan
         run: |
@@ -97,12 +90,11 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:CARGO_NO_DEFAULT_FEATURES = "true"
             $Env:CARGO_FEATURES = "native-tls"
-            $Env:SIGNTOOL_NAME = "Devolutions"
           }
 
           ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
 
-      - name: upload artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
           name: jetsocat
