@@ -1,104 +1,116 @@
-use jetsocat_proxy::socks5::Socks5Stream;
-use std::collections::HashMap;
+use jetsocat_proxy::Socks5Stream;
 use std::{env, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-macro_rules! test {
-    ( $test:expr ) => {{
-        let expr_str = stringify!($test);
-        let parenthesis_idx = expr_str.find('(').unwrap_or(expr_str.len());
-        let test_name = &expr_str[..parenthesis_idx];
-
-        println!("⇢ test `{}` ...", test_name);
-        let res = ::std::panic::catch_unwind(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(async { $test });
-        });
-        match res {
-            Ok(()) => println!("◉ test `{}` succeeded!\n", test_name),
-            Err(_) => println!("✗ test `{}` failed!\n", test_name),
-        }
-    }};
-    ($( $test:expr ; )+) => {{
-        $( test!( $test ); )+
-    }}
-}
-
 const GOOGLE_ADDR: &str = "www.google.com:80";
-const USAGE: &str = "--mode <TEST_MODE> --addr <PROXY_ADDR> [--pass <PASSWORD> --user <USERNAME>]";
-
-fn usage() {
-    let prgm_name = env::args().next().unwrap();
-    println!("Usage: {} {}", prgm_name, USAGE);
-}
-
-fn parse_args() -> HashMap<String, String> {
-    let mut args = HashMap::new();
-    let mut iter = env::args().skip(1);
-    loop {
-        match (iter.next(), iter.next()) {
-            (Some(key), Some(value)) => {
-                args.insert(key, value);
-            }
-            (None, None) => break,
-            _ => {
-                eprintln!("Invalid argument");
-                usage();
-                std::process::exit(1);
-            }
-        }
-    }
-    args
-}
-
-trait OkOrUsage {
-    type T;
-    fn ok_or_usage(self, msg: &str) -> Self::T;
-}
-
-impl<T> OkOrUsage for Option<T> {
-    type T = T;
-
-    fn ok_or_usage(self, msg: &str) -> Self::T {
-        match self {
-            Some(v) => v,
-            None => {
-                eprintln!("{}", msg);
-                usage();
-                std::process::exit(1);
-            }
-        }
-    }
-}
+const USAGE: &str = "[--mode <TEST_MODE>] [--addr <PROXY_ADDR>] [--user <USERNAME>,<PASSWORD>]";
 
 fn main() {
-    let args = parse_args();
+    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
+    let args = parse_args(&args).expect("bad argument");
 
-    let mode = args
-        .get("--mode")
-        .ok_or_usage("argument --mode is missing [possible values: socks, http]");
-    let addr = args.get("--addr").ok_or_usage("argument --addr is missing");
+    if args.show_usage {
+        let prgm_name = env::args().next().unwrap();
+        println!("Usage: {} {}", prgm_name, USAGE);
+        return;
+    } else {
+        println!("{:?}", args);
+    }
 
-    match mode.as_str() {
+    match args.mode {
         "socks" => {
-            if let (Some(username), Some(password)) = (args.get("--user"), args.get("--pass")) {
-                socks_password::test(addr, username, password);
+            if let Some((username, password)) = args.user {
+                socks5_password::test(args.addr, username, password);
             } else {
-                socks_no_password::test(addr);
+                socks5_no_password::test(args.addr);
+                socks4::test(args.addr);
+            }
+        }
+        "socks5" => {
+            if let Some((username, password)) = args.user {
+                socks5_password::test(args.addr, username, password);
+            } else {
+                socks5_no_password::test(args.addr);
+            }
+        }
+        "socks4" => {
+            if args.user.is_some() {
+                eprintln!("socks4 doesn't support authentication");
+                std::process::exit(1);
+            } else {
+                socks4::test(args.addr);
             }
         }
         "http" => {
-            http::test(addr);
+            http::test(args.addr);
         }
-        _ => {
-            eprintln!("{}", "invalid mode provided");
-            usage();
+        invalid_mode => {
+            eprintln!(
+                "invalid mode provided: {} (possible values: socks, socks4, socks5, http)",
+                invalid_mode
+            );
+            std::process::exit(1);
         }
     }
+}
+
+#[derive(Debug)]
+struct Args<'a> {
+    mode: &'a str,
+    addr: &'a str,
+    user: Option<(&'a str, &'a str)>,
+    show_usage: bool,
+}
+
+impl<'a> Default for Args<'a> {
+    fn default() -> Self {
+        Self {
+            mode: "socks5",
+            addr: "localhost:1080",
+            user: None,
+            show_usage: false,
+        }
+    }
+}
+
+fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
+    let mut args = Args::default();
+
+    loop {
+        match input {
+            ["--mode" | "-m", value, rest @ ..] => {
+                args.mode = value;
+                input = rest;
+            }
+            ["--addr", value, rest @ ..] => {
+                args.addr = value;
+                input = rest;
+            }
+            ["--user" | "-u", value, rest @ ..] => {
+                let idx = value.find(',').ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {}", value))
+                })?;
+                let (user, pass) = value.split_at(idx);
+                args.user = Some((user, &pass[1..]));
+                input = rest;
+            }
+            ["--help" | "-h", rest @ ..] => {
+                args.show_usage = true;
+                input = rest;
+            }
+            [unexpected_arg, ..] => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("unexpected argument: {}", unexpected_arg),
+                ))
+            }
+            [] => break,
+        }
+    }
+
+    Ok(args)
 }
 
 async fn ping_google<S>(mut stream: S)
@@ -127,27 +139,42 @@ async fn socks5_connect_with_password(
     Socks5Stream::connect_with_password(socket, GOOGLE_ADDR, username, password).await
 }
 
-mod socks_no_password {
-    use super::*;
+macro_rules! test {
+    ( $test:expr ) => {{
+        let expr_str = stringify!($test);
+        let parenthesis_idx = expr_str.find('(').unwrap_or(expr_str.len());
+        let test_name = &expr_str[..parenthesis_idx];
 
-    use jetsocat_proxy::socks4::Socks4Stream;
+        println!("⇢ test `{}` ...", test_name);
+        let res = ::std::panic::catch_unwind(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async { $test });
+        });
+        match res {
+            Ok(()) => println!("◉ test `{}` succeeded!\n", test_name),
+            Err(_) => println!("✗ test `{}` failed!\n", test_name),
+        }
+    }};
+    ($( $test:expr ; )+) => {{
+        $( test!( $test ); )+
+    }}
+}
+
+mod socks5_no_password {
+    use super::*;
 
     pub fn test(addr: &str) {
         test! {
             socks5_no_auth_connect(addr).await;
             socks5_unrequired_username_password_pair(addr).await;
-            socks4_connect(addr).await;
         }
     }
 
     async fn socks5_no_auth_connect(addr: &str) {
         let stream = socks5_connect(addr).await.unwrap();
-        crate::ping_google(stream).await;
-    }
-
-    async fn socks4_connect(addr: &str) {
-        let socket = TcpStream::connect(addr).await.unwrap();
-        let stream = Socks4Stream::connect(socket, GOOGLE_ADDR, "david").await.unwrap();
         crate::ping_google(stream).await;
     }
 
@@ -159,7 +186,24 @@ mod socks_no_password {
     }
 }
 
-mod socks_password {
+mod socks4 {
+    use super::*;
+    use jetsocat_proxy::Socks4Stream;
+
+    pub fn test(addr: &str) {
+        test! {
+            socks4_connect(addr).await;
+        }
+    }
+
+    async fn socks4_connect(addr: &str) {
+        let socket = TcpStream::connect(addr).await.unwrap();
+        let stream = Socks4Stream::connect(socket, GOOGLE_ADDR, "david").await.unwrap();
+        crate::ping_google(stream).await;
+    }
+}
+
+mod socks5_password {
     use super::*;
 
     pub fn test(addr: &str, username: &str, password: &str) {
@@ -192,7 +236,7 @@ mod socks_password {
 
 mod http {
     use super::*;
-    use jetsocat_proxy::http::HttpProxyStream;
+    use jetsocat_proxy::HttpProxyStream;
 
     pub fn test(addr: &str) {
         test! {
