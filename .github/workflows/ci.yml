@@ -4,9 +4,226 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+
+  preflight:
+    name: preflight
+    runs-on: ubuntu-18.04
+
     steps:
-      - uses: actions/checkout@v2
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Check formatting
+        run: |
+          cargo fmt --all -- --check
+          if ! [ $? -eq 0 ] ; then
+              echo "::error::Bad formatting, please run 'cargo +stable fmt --all'"
+              exit 1
+          fi
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: version
+          path: VERSION
+
+  jetsocat:
+    name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    env:
+      CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86, x86_64, arm64 ]
+        os: [ windows, macos, linux ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: macos
+            runner: macos-10.15
+          - os: linux
+            runner: ubuntu-18.04
+        exclude:
+          - arch: x86
+            os: macos
+          - arch: x86
+            os: linux
+          - arch: arm64
+            os: windows
+          - arch: arm64
+            os: linux
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Load dynamic variables
+        id: load-variables
+        shell: pwsh
+        run: |
+          $PackageVersion = Get-Content "./VERSION"
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+          $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
+          $CargoPackage = "jetsocat"
+          echo "::set-output name=staging-path::$StagingPath"
+          echo "::set-output name=target-output-path::$TargetOutputPath"
+          echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
+          echo "::set-output name=cargo-package::$CargoPackage"
+
+      - name: Configure Linux runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install python3-wget python3-setuptools
+
+      - name: Configure Windows x86 runner
+        if: matrix.os == 'windows' && matrix.arch == 'x86'
+        run: |
+          rustup target add i686-pc-windows-msvc
+
+      - name: Configure macOS arm64 runner
+        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        run: |
+          sudo rm -rf /Library/Developer/CommandLineTools
+          rustup target add aarch64-apple-darwin
+
+      - name: Setup code signing
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        run: echo "::warning::Artifacts not code-signed, to be implemented"
+
+      - name: Configure conan
+        run: |
+          pip3 install conan==1.40.0 --upgrade
+          conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+          conan remote clean
+          conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          JETSOCAT_EXECUTABLE: ${{ steps.load-variables.outputs.jetsocat-executable }}
+          CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:CARGO_NO_DEFAULT_FEATURES = "true"
+            $Env:CARGO_FEATURES = "native-tls"
+          }
+
+          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: jetsocat
+          path: ${{ steps.load-variables.outputs.staging-path }}
+
+  devolutions-gateway:
+    name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    env:
+      CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86_64 ]
+        os: [ windows, linux ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: linux
+            runner: ubuntu-18.04
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Load dynamic variables
+        id: load-variables
+        shell: pwsh
+        run: |
+          $PackageVersion = Get-Content "./VERSION"
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $ExecutableFileName = "$($ExecutableFileName).exe"
+            $PackageFileName = "DevolutionsGateway-${{ matrix.arch }}-${PackageVersion}.msi"
+            $PSModuleOutputPath = Join-Path $StagingPath PowerShell
+            $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
+            $DGatewayPackage = Join-Path $TargetOutputPath $PackageFileName
+
+            echo "::set-output name=psmodule-output-path::$PSModuleOutputPath"
+            echo "::set-output name=dgateway-psmodule-output-path::$DGatewayPSModulePath"
+            echo "::set-output name=dgateway-package::$DGatewayPackage"
+          }
+
+          $DGatewayExecutable = Join-Path $TargetOutputPath $ExecutableFileName
+          $CargoPackage = "devolutions-gateway"
+          echo "::set-output name=staging-path::$StagingPath"
+          echo "::set-output name=target-output-path::$TargetOutputPath"
+          echo "::set-output name=dgateway-executable::$DGatewayExecutable"
+          echo "::set-output name=cargo-package::$CargoPackage"
+
+      - name: Configure Linux runner
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt update
+          sudo apt install dh-make python3-wget python3-setuptools libsystemd-dev
+
+      - name: Configure Windows runner
+        if: runner.os == 'Windows'
+        run: |
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup code signing
+        if: matrix.os == 'windows'
+        run: echo "::warning::Artifacts not code-signed, to be implemented"
+
+      - name: Configure conan
+        run: |
+          pip3 install conan==1.40.0 --upgrade
+          conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+          conan remote clean
+          conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
+          CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
+        run: |
+          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+
+      - name: Build PowerShell module
+        if: matrix.os == 'windows'
+        env:
+          PSMODULE_OUTPUT_PATH: ${{ steps.load-variables.outputs.psmodule-output-path }}
+        run: .\powershell\build.ps1
+
+      - name: Package
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
+            $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
+            $Env:DGATEWAY_PSMODULE_CLEAN = "1"
+          }
+
+          ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: devolutions-gateway
+          path: ${{ steps.load-variables.outputs.staging-path }}
