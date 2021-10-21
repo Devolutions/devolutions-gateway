@@ -1,4 +1,4 @@
-use crate::{DestAddr, ToDestAddr};
+use crate::{DestAddr, ReadWriteStream, ToDestAddr};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::pin::Pin;
@@ -13,7 +13,7 @@ pub struct Socks4Stream<S> {
 
 impl<S> Socks4Stream<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + Send,
 {
     /// Initiates a CONNECT request to the specified proxy.
     pub async fn connect(mut stream: S, dest: impl ToDestAddr, userid: &str) -> io::Result<Self> {
@@ -81,10 +81,7 @@ where
     }
 }
 
-async fn write_socks_request<S>(stream: &mut S, dest: &DestAddr, userid: &str) -> io::Result<()>
-where
-    S: AsyncWrite + Unpin,
-{
+async fn write_socks_request(stream: &mut dyn ReadWriteStream, dest: &DestAddr, userid: &str) -> io::Result<()> {
     // https://www.openssh.com/txt/socks4.protocol
     //             +----+----+----+----+----+----+----+----+----+----+....+----+
     //             | VN | CD | DSTPORT |      DSTIP        | USERID       |NULL|
@@ -128,10 +125,7 @@ where
     Ok(())
 }
 
-async fn read_socks_reply<S>(stream: &mut S) -> io::Result<SocketAddrV4>
-where
-    S: AsyncRead + Unpin,
-{
+async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<SocketAddrV4> {
     // https://www.openssh.com/txt/socks4.protocol
     //	        	+----+----+----+----+----+----+----+----+
     //	        	| VN | CD | DSTPORT |      DSTIP        |
@@ -177,10 +171,9 @@ mod tests {
     use crate::test_utils::AsyncStdIo;
 
     async fn assert_encoding(addr: DestAddr, userid: &str, encoded: &[u8]) {
-        let mut buf = Vec::new();
-        let mut writer = AsyncStdIo(&mut buf);
+        let mut writer = AsyncStdIo(io::Cursor::new(Vec::new()));
         write_socks_request(&mut writer, &addr, userid).await.unwrap();
-        assert_eq!(buf.as_slice(), encoded);
+        assert_eq!(writer.0.into_inner().as_slice(), encoded);
     }
 
     #[tokio::test]

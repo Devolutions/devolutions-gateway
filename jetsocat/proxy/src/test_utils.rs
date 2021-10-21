@@ -28,9 +28,9 @@ impl AsyncRead for DummyStream {
 }
 
 #[derive(Debug, Clone)]
-pub struct AsyncStdIo<T>(pub T);
+pub struct AsyncStdIo<T: Send>(pub T);
 
-impl<T> Unpin for AsyncStdIo<T> {}
+impl<T: Send> Unpin for AsyncStdIo<T> {}
 
 macro_rules! try_with_interrupt {
     ($e:expr) => {
@@ -52,7 +52,7 @@ macro_rules! try_with_interrupt {
 
 impl<T> io::Write for AsyncStdIo<T>
 where
-    T: io::Write,
+    T: io::Write + Send,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.0.write(buf)
@@ -77,7 +77,7 @@ where
 
 impl<T> AsyncWrite for AsyncStdIo<T>
 where
-    T: io::Write,
+    T: io::Write + Send,
 {
     fn poll_write(mut self: Pin<&mut Self>, _: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
         Poll::Ready(Ok(try_with_interrupt!(self.0.write(buf))))
@@ -95,7 +95,7 @@ where
 
 impl<T> io::Read for AsyncStdIo<T>
 where
-    T: io::Read,
+    T: io::Read + Send,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.0.read(buf)
@@ -120,7 +120,7 @@ where
 
 impl<T> AsyncRead for AsyncStdIo<T>
 where
-    T: io::Read,
+    T: io::Read + Send,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,

@@ -1,4 +1,4 @@
-use crate::{DestAddr, ToDestAddr};
+use crate::{DestAddr, ReadWriteStream, ToDestAddr};
 use std::io;
 use std::io::Write;
 use std::pin::Pin;
@@ -14,7 +14,7 @@ pub struct HttpProxyStream<S> {
 
 impl<S> HttpProxyStream<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + Send,
 {
     pub async fn connect(mut stream: S, dest: impl ToDestAddr) -> io::Result<Self> {
         let dest = dest.to_dest_addr()?;
@@ -75,10 +75,7 @@ where
     }
 }
 
-fn write_request<S>(writer: &mut S, dest: &DestAddr) -> io::Result<()>
-where
-    S: Write,
-{
+fn write_request(writer: &mut dyn Write, dest: &DestAddr) -> io::Result<()> {
     let host = match dest {
         DestAddr::Ip(addr) => addr.to_string(),
         DestAddr::Domain(domain, port) => {
@@ -101,23 +98,21 @@ where
     Ok(())
 }
 
-async fn check_reply<S>(stream: &mut S) -> io::Result<()>
-where
-    S: AsyncRead + Unpin,
-{
-    let mut buf = Vec::new();
+async fn check_reply(stream: &mut dyn ReadWriteStream) -> io::Result<()> {
+    let mut reply = Vec::new();
+    let mut buf = [0; 256];
 
     loop {
-        stream.read_buf(&mut buf).await?;
+        let n = stream.read(&mut buf).await?;
+        reply.extend_from_slice(&buf[..n]);
 
-        let msg = buf.as_slice();
-        let len = msg.len();
-        if len > 4 && &msg[msg.len() - 4..] == b"\r\n\r\n" {
+        let len = reply.len();
+        if len > 4 && &reply[len - 4..] == b"\r\n\r\n" {
             break;
         }
     }
 
-    let reply = String::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let reply = String::from_utf8(reply).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     let status = reply
         .split("\r\n")
@@ -129,7 +124,7 @@ where
         .nth(1)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid status"))?;
 
-    // Any 2xx (Successful) response indicates that the sender (and all inbound proxies)
+    // Any 2xx (successful) response indicates that the sender (and all inbound proxies)
     // will switch to tunnel mode immediately after the
     // blank line that concludes the successful response's header section
     if !code.starts_with('2') {

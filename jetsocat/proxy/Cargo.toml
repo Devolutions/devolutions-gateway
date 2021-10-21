@@ -5,6 +5,14 @@ authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
 edition = "2018"
 description = "SOCKS proxy clients implementation for jetsocat"
 
+[[bin]]
+name = "socks5_server"
+required-features = ["tokio/rt", "tokio/net", "tokio/rt-multi-thread", "tokio/macros", "tokio/io-util"]
+
+[[bin]]
+name = "tester"
+required-features = ["tokio/rt", "tokio/net"]
+
 [dependencies]
 tokio = { version = "1", features = ["io-util"] }
 

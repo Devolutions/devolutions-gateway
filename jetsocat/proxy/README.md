@@ -1,6 +1,6 @@
-# SOCKS4, SOCKS4a, SOCKS5, SOCKS5H, HTTPS implementation for jetsocat
+# SOCKS4, SOCKS4a, SOCKS5, SOCKS5H, HTTP(S) proxy implementation for jetsocat
 
-## Testing
+## Testing client-side
 
 Offline tests can be performed using standard `cargo test` command.
 
@@ -17,13 +17,13 @@ Let's assume proxy address for SOCKS is `192.168.122.70:1080`.
 SOCKS tests are run by running
 
 ```
-cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080
+$ cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080
 ```
 
 HTTP proxy tests are run by using
 
 ```
-cargo run --bin tester -- --mode http --addr 192.168.122.70:808
+$ cargo run --bin tester -- --mode http --addr 192.168.122.70:808
 ```
 
 ### Username/Password authentication method testing
@@ -37,6 +37,29 @@ Let's assume proxy address for SOCKS is `192.168.122.70:1080` and credential pai
 SOCKS tests are run by running
 
 ```
-cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080 --pass username --pass password
+$ cargo run --bin tester -- --mode socks --addr 192.168.122.70:1080 --user username,password
 ```
 
+## Testing server-side
+
+A demonstration SOCKS5 server is provided as an additional binary.
+
+This server may be run using
+
+```
+$ cargo run --bin socks5_server -- --port 1080 --no-auth-required
+```
+
+or
+
+```
+$ cargo run --bin socks5_server -- --port 1080 --user username,password
+```
+
+`tester` binary may be used to test this server (please enable socks5 tests only).
+
+```
+$ cargo run --bin tester -- --mode socks5 --addr localhost:1080 [--user username,password]
+```
+
+Alternatively, you can configure your browser to use it ("Network Settings" menu in Firefox).
