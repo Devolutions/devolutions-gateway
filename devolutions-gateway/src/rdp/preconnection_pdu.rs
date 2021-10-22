@@ -18,7 +18,7 @@ use jet_proto::token::JetConnectionMode;
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 const DEFAULT_RDP_PORT: u16 = 3389;
 
-const JET_AP_RDP_TCP: &str = "rdp_tcp";
+const JET_AP_RDP_TCP: &str = "rdp_tcp"; // support rdp-tcp
 
 const EXPECTED_JET_AP_VALUES: [&str; 2] = ["rdp", JET_AP_RDP_TCP];
 

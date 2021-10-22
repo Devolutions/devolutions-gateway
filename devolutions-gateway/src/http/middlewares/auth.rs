@@ -11,7 +11,6 @@ use saphir::response::Builder as ResponseBuilder;
 use slog_scope::{error, warn};
 use std::sync::Arc;
 
-// FIXME: we should probably use the same name that we had in Bastion ("Http-Authorization")
 const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
 
 pub struct AuthMiddleware {
@@ -40,39 +39,39 @@ async fn auth_middleware(
     chain: &'static dyn MiddlewareChain,
 ) -> Result<HttpContext, SaphirError> {
     let request = ctx.state.request_unchecked_mut();
+    let headers = request.headers_mut();
 
-    // FIXME: we should proceed like we did in Bastion (collect all the authorizations in a
-    // loop instead of only take the first)
-    let gateway_auth_header = request.headers_mut().remove(GATEWAY_AUTHORIZATION_HDR_NAME);
-    let auth_header = gateway_auth_header
-        .as_ref()
-        .or_else(|| request.headers().get(http::header::AUTHORIZATION));
+    // Authorization header used for authentication is removed from the request so that we don't
+    // forward it mistakenly (currently only a concern for the HTTP bridge).
+    let auth_value = headers
+        .remove(GATEWAY_AUTHORIZATION_HDR_NAME)
+        .or_else(|| headers.remove(http::header::AUTHORIZATION));
 
-    let auth_header = match auth_header {
-        Some(header) => header.clone(),
+    // TODO: we could probably use an Error implementing the right saphir trait and `?` on error
+    // (IRCC we did something similar in Bastion).
+    let auth_value = match auth_value {
+        Some(value) => value,
         None => {
-            error!("Authorization header not present in request.");
+            error!("Authorization header missing");
             let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
-
             let mut ctx = ctx.clone_with_empty_state();
             ctx.state = State::After(Box::new(response));
             return Ok(ctx);
         }
     };
 
-    let auth_str = match auth_header.to_str() {
-        Ok(s) => s,
+    let auth_value = match auth_value.to_str() {
+        Ok(v) => v,
         Err(_) => {
-            error!("Authorization header wrong format");
+            error!("non-ASCII value in Authorization header");
             let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
-
             let mut ctx = ctx.clone_with_empty_state();
             ctx.state = State::After(Box::new(response));
             return Ok(ctx);
         }
     };
 
-    if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_str) {
+    if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
         match validate_bearer_token(&config, &token) {
             Ok(jet_token) => {
                 request.extensions_mut().insert(jet_token);
@@ -86,11 +85,11 @@ async fn auth_middleware(
         error!("Invalid authorization type");
     }
 
-    let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+    // At this point, authentication failed…
 
+    let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
     let mut ctx = ctx.clone_with_empty_state();
     ctx.state = State::After(Box::new(response));
-
     Ok(ctx)
 }
 

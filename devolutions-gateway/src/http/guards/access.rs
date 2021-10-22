@@ -9,22 +9,14 @@ pub enum JetTokenType {
     Association,
 }
 
-impl From<JetTokenType> for Vec<JetTokenType> {
-    fn from(ty: JetTokenType) -> Self {
-        vec![ty]
-    }
-}
-
 pub struct AccessGuard {
-    authorized_types: Vec<JetTokenType>,
+    token_type: JetTokenType,
 }
 
 #[guard]
 impl AccessGuard {
-    pub fn new(types: impl Into<Vec<JetTokenType>>) -> Self {
-        AccessGuard {
-            authorized_types: types.into(),
-        }
+    pub fn new(token_type: JetTokenType) -> Self {
+        AccessGuard { token_type }
     }
 
     async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
@@ -33,7 +25,7 @@ impl AccessGuard {
             .get::<JetAccessTokenClaims>()
             .ok_or_else(|| HttpErrorStatus::unauthorized("identity missing (no token provided)"))?;
 
-        let allowed = self.authorized_types.iter().any(|ty| match (ty, claims) {
+        let allowed = match (&self.token_type, claims) {
             (JetTokenType::Association, JetAccessTokenClaims::Association(_)) => true,
             (JetTokenType::Scope(scope_needed), JetAccessTokenClaims::Scope(scope_from_request))
                 if scope_from_request.scope == *scope_needed =>
@@ -42,7 +34,7 @@ impl AccessGuard {
             }
             (JetTokenType::Bridge, JetAccessTokenClaims::Bridge(_)) => true,
             _ => false,
-        });
+        };
 
         if allowed {
             Ok(req)
