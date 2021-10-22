@@ -54,8 +54,10 @@ impl Default for GatewaySessionInfo {
     fn default() -> Self {
         GatewaySessionInfo {
             association_id: Uuid::new_v4(),
-            application_protocol: "unknown".to_string(),
+            application_protocol: "unknown".to_owned(),
             destination_host: None,
+            // FIXME: we actually don't know the jet connection mode at this point.
+            // A "default" session info is not very useful.
             connection_mode: JetConnectionMode::default(),
             recording_policy: false,
             filtering_policy: false,

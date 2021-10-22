@@ -20,25 +20,26 @@ impl AccessGuard {
     }
 
     async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
-        if let Some(claims) = req.extensions().get::<JetAccessTokenClaims>() {
-            match (claims, &self.token_type) {
-                (JetAccessTokenClaims::Association(_), JetTokenType::Association) => {
-                    return Ok(req);
-                }
-                (JetAccessTokenClaims::Scope(scope_from_request), JetTokenType::Scope(scope_needed))
-                    if scope_from_request.scope == *scope_needed =>
-                {
-                    return Ok(req);
-                }
-                (JetAccessTokenClaims::Bridge(_), JetTokenType::Bridge) => {
-                    return Ok(req);
-                }
-                _ => {}
-            }
-        }
+        let claims = req
+            .extensions()
+            .get::<JetAccessTokenClaims>()
+            .ok_or_else(|| HttpErrorStatus::unauthorized("identity missing (no token provided)"))?;
 
-        Err(HttpErrorStatus::forbidden(
-            "Token provided can't be used to access the route",
-        ))
+        let allowed = match (&self.token_type, claims) {
+            (JetTokenType::Association, JetAccessTokenClaims::Association(_)) => true,
+            (JetTokenType::Scope(scope_needed), JetAccessTokenClaims::Scope(scope_from_request))
+                if scope_from_request.scope == *scope_needed =>
+            {
+                true
+            }
+            (JetTokenType::Bridge, JetAccessTokenClaims::Bridge(_)) => true,
+            _ => false,
+        };
+
+        if allowed {
+            Ok(req)
+        } else {
+            Err(HttpErrorStatus::forbidden("token not allowed"))
+        }
     }
 }
