@@ -13,7 +13,6 @@ use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use tokio::io::{AsyncRead, AsyncWrite};
 
-/// Destination address to connect to through the proxy (used in requests)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestAddr {
     Ip(SocketAddr),
