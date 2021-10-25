@@ -439,7 +439,7 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
 
     let scheme_end_idx = arg
         .find(SCHEME_SEPARATOR)
-        .context("Invalid format: missing scheme (e.g.: socks5-listener://<BINDING ADDRESS>)")?;
+        .context("Invalid format: missing scheme (e.g.: socks5-listen://<BINDING ADDRESS>)")?;
     let scheme = &arg[..scheme_end_idx];
     let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
 
@@ -454,7 +454,7 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
                 destination_url: destination_url.to_owned(),
             })
         }
-        "socks5-listener" => Ok(ListenerMode::Socks5 {
+        "socks5-listen" => Ok(ListenerMode::Socks5 {
             bind_addr: value.to_owned(),
         }),
         _ => anyhow::bail!("Unknown listener scheme: {}", scheme),

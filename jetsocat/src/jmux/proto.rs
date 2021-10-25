@@ -125,9 +125,9 @@ impl Message {
         );
 
         let header = Header::decode(buf.split_to(Header::SIZE)).context("Couldn’t decode HEADER")?;
-        let header_size = header.size as usize;
+        let total_size = header.size as usize;
 
-        let body_size = header_size
+        let body_size = total_size
             .checked_sub(Header::SIZE)
             .context("Invalid `msgSize` in message HEADER")?;
 
@@ -188,6 +188,32 @@ impl ReasonCode {
 
     /// Address type is not supported
     pub const ADDRESS_TYPE_NOT_SUPPORTED: Self = ReasonCode(0x08);
+}
+
+impl From<std::io::ErrorKind> for ReasonCode {
+    fn from(kind: std::io::ErrorKind) -> ReasonCode {
+        match kind {
+            std::io::ErrorKind::ConnectionRefused => ReasonCode::CONNECTION_REFUSED,
+            std::io::ErrorKind::TimedOut => ReasonCode::TTL_EXPIRED,
+            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
+            std::io::ErrorKind::HostUnreachable => ReasonCode::HOST_UNREACHABLE,
+            #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
+            std::io::ErrorKind::NetworkUnreachable => ReasonCode::NETWORK_UNREACHABLE,
+            _ => ReasonCode::GENERAL_FAILURE,
+        }
+    }
+}
+
+impl From<std::io::Error> for ReasonCode {
+    fn from(e: std::io::Error) -> ReasonCode {
+        ReasonCode::from(e.kind())
+    }
+}
+
+impl From<&std::io::Error> for ReasonCode {
+    fn from(e: &std::io::Error) -> ReasonCode {
+        ReasonCode::from(e.kind())
+    }
 }
 
 #[repr(u8)]
@@ -435,7 +461,7 @@ pub struct ChannelData {
 }
 
 impl ChannelData {
-    const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
+    pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
 
     pub fn new(id: DistantChannelId, data: Vec<u8>) -> Self {
         ChannelData {
