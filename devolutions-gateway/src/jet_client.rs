@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ use jet_proto::{JetMessage, StatusCode, JET_VERSION_V2};
 use slog_scope::{debug, error};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+use tokio_rustls::{TlsAcceptor, TlsStream};
 use uuid::Uuid;
 
 use crate::config::Config;
@@ -20,30 +22,23 @@ use crate::jet::association::Association;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::registry::Registry;
+use crate::token::JetAssociationTokenClaims;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::Proxy;
-use jet_proto::token::JetAssociationTokenClaims;
-use std::path::PathBuf;
-use tokio_rustls::{TlsAcceptor, TlsStream};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
+// FIXME? why "client"? Wouldn't `JetServer` be more appropriate naming?
+
 pub struct JetClient {
-    config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
+    pub config: Arc<Config>,
+    pub jet_associations: JetAssociationsMap,
 }
 
 impl JetClient {
-    pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> Self {
-        JetClient {
-            config,
-            jet_associations,
-        }
-    }
-
     pub async fn serve(self, transport: JetTransport, tls_acceptor: TlsAcceptor) -> Result<(), io::Error> {
         let jet_associations = self.jet_associations.clone();
         let config = self.config;
