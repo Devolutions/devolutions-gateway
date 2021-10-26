@@ -1,9 +1,9 @@
 use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
 use crate::jet::TransportType;
+use crate::token::JetAssociationTokenClaims;
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use jet_proto::token::JetAssociationTokenClaims;
 use serde_json::Value;
 use uuid::Uuid;
 

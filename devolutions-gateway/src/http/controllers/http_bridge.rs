@@ -1,6 +1,6 @@
 use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::http::HttpErrorStatus;
-use jet_proto::token::JetAccessTokenClaims;
+use crate::token::JetAccessTokenClaims;
 use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;

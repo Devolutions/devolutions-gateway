@@ -1,17 +1,15 @@
-#[macro_use]
-extern crate serde_derive;
-
 pub mod accept;
 pub mod connect;
 pub mod test;
-pub mod token;
-pub mod utils;
+
+pub use http::StatusCode;
+
+mod utils;
 
 use crate::accept::{JetAcceptReq, JetAcceptRsp};
 use crate::connect::{JetConnectReq, JetConnectRsp};
 use crate::utils::RequestHelper;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-pub use http::StatusCode;
 use log::trace;
 use std::env;
 use std::io::{self, Read};

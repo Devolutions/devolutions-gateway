@@ -1,7 +1,7 @@
 use crate::config::{Config, ListenerConfig};
 use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::http::HttpErrorStatus;
-use jet_proto::token::JetAccessScope;
+use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use std::sync::Arc;
 

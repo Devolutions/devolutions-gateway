@@ -1,7 +1,7 @@
 use crate::config::Config;
+use crate::token::JetAccessTokenClaims;
 use chrono::Utc;
 use futures::future::{BoxFuture, FutureExt};
-use jet_proto::token::JetAccessTokenClaims;
 use picky::jose::jwt::JwtDate;
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};

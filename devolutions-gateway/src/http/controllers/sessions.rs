@@ -1,7 +1,7 @@
 use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::http::HttpErrorStatus;
+use crate::token::JetAccessScope;
 use crate::{GatewaySessionInfo, SESSIONS_IN_PROGRESS};
-use jet_proto::token::JetAccessScope;
 use saphir::controller::Controller;
 use saphir::http::{Method, StatusCode};
 use saphir::macros::controller;
