@@ -1,6 +1,6 @@
 use std::str::from_utf8;
 
-pub trait RequestHelper {
+pub(crate) trait RequestHelper {
     fn is_get_method(&self) -> bool;
     fn get_header_value(&self, header_name: &str) -> Option<&str>;
 }
@@ -26,7 +26,7 @@ impl<'h, 'b> RequestHelper for httparse::Request<'h, 'b> {
     }
 }
 
-pub trait ResponseHelper {
+pub(crate) trait ResponseHelper {
     fn get_header_value(&self, header_name: &str) -> Option<&str>;
 }
 

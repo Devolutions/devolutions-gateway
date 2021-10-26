@@ -7,7 +7,6 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
-
 use common::run_proxy;
 use jet_proto::accept::JetAcceptReq;
 use jet_proto::connect::JetConnectReq;

@@ -59,6 +59,7 @@ tempfile = "3.0"
 rust-argon2 = "0.8"
 reqwest = "0.11"
 http = "0.2"
+zeroize = "1.4"
 
 [dependencies.saphir]
 version = "2.8"

@@ -1,5 +1,5 @@
 use crate::http::HttpErrorStatus;
-use jet_proto::token::{JetAccessScope, JetAccessTokenClaims};
+use crate::token::{JetAccessScope, JetAccessTokenClaims};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
