@@ -35,11 +35,7 @@ pub mod danger_transport {
 pub async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
-    lookup_host(format!("{}:{}", host, port))
-        .await
-        .ok()
-        .map(|mut it| it.next())
-        .flatten()
+    lookup_host((host, port)).await.ok().map(|mut it| it.next()).flatten()
 }
 
 #[macro_export]

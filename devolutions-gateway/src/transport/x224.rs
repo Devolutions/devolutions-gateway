@@ -16,7 +16,6 @@ macro_rules! negotiation_try {
     };
 }
 
-#[derive(Default)]
 pub struct NegotiationWithClientTransport;
 
 impl Decoder for NegotiationWithClientTransport {

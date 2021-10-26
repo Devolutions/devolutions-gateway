@@ -70,7 +70,7 @@ impl ConnectionSequenceFuture {
         SequenceFuture::with_parse_state(
             NegotiationWithClientFuture::new(),
             ParseStateArgs {
-                client: Some(NegotiationWithClientTransport::default().framed(client)),
+                client: Some(NegotiationWithClientTransport.framed(client)),
                 server: None,
                 pdu: negotiation_request,
                 phantom_data: PhantomData,

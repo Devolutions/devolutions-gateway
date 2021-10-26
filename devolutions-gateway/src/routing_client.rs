@@ -16,6 +16,7 @@ impl Client {
     pub fn new(routing_url: Url, config: Arc<Config>) -> Self {
         Client { routing_url, config }
     }
+
     pub async fn serve<T>(self, client_transport: T) -> Result<(), io::Error>
     where
         T: 'static + Transport + Send,

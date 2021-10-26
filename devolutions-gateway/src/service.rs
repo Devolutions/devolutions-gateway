@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::generic_client::GenericClient;
 use crate::http::http_server::configure_http_server;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::logger;
@@ -289,12 +290,12 @@ async fn start_tcp_server(
                                 Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
                             }
                             "rdp" => Box::pin(
-                                RdpClient::new(
-                                    config.clone(),
-                                    tls_public_key.clone(),
-                                    tls_acceptor.clone(),
-                                    jet_associations.clone(),
-                                )
+                                RdpClient {
+                                    config: config.clone(),
+                                    tls_public_key: tls_public_key.clone(),
+                                    tls_acceptor: tls_acceptor.clone(),
+                                    jet_associations: jet_associations.clone(),
+                                }
                                 .serve(conn),
                             ),
                             scheme => panic!("Unsupported routing URL scheme {}", scheme),
@@ -304,28 +305,44 @@ async fn start_tcp_server(
                         let jet_associations = jet_associations.clone();
                         let config = config.clone();
                         let tls_acceptor = tls_acceptor.clone();
+
                         async {
                             let mut peeked = [0; 4];
                             let _ = conn.peek(&mut peeked).await;
 
-                            if peeked == [74, 69, 84, 0] {
-                                // four first bytes matching JET protocol
-                                let jet_client = JetClient::new(config, jet_associations);
-                                jet_client.serve(JetTransport::new_tcp(conn), tls_acceptor).await
-                            } else {
-                                let rdp_client = RdpClient::new(
-                                    config.clone(),
-                                    tls_public_key,
-                                    tls_acceptor.clone(),
-                                    jet_associations.clone(),
-                                );
-                                rdp_client.serve(conn).await
+                            // Check if first four bytes contains some protocol magic bytes
+                            match peeked {
+                                [b'J', b'E', b'T', b'\0'] => {
+                                    JetClient {
+                                        config,
+                                        jet_associations,
+                                    }
+                                    .serve(JetTransport::new_tcp(conn), tls_acceptor)
+                                    .await
+                                }
+                                [b'J', b'M', b'U', b'X'] => {
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::Other,
+                                        "JMUX listener not yet implemented",
+                                    ));
+                                }
+                                _ => {
+                                    GenericClient {
+                                        config,
+                                        tls_public_key,
+                                        tls_acceptor,
+                                        jet_associations,
+                                    }
+                                    .serve(conn)
+                                    .await
+                                }
                             }
                         }
                         .boxed()
                     };
 
                 let client_fut = client_fut.with_logger(logger);
+
                 tokio::spawn(async move {
                     match client_fut.await {
                         Ok(_) => {}
