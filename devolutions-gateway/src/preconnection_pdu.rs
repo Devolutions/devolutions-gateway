@@ -14,7 +14,10 @@ pub fn is_encrypted(token: &str) -> bool {
     num_dots == 4
 }
 
-pub fn extract_association_claims(pdu: &PreconnectionPdu, config: &Config) -> Result<JetAssociationTokenClaims, io::Error> {
+pub fn extract_association_claims(
+    pdu: &PreconnectionPdu,
+    config: &Config,
+) -> Result<JetAssociationTokenClaims, io::Error> {
     let payload = pdu
         .payload
         .as_deref()
