@@ -1,19 +1,19 @@
 mod common;
 
-use jet_proto::JetMessage;
-use std::io::{Read, Write};
-use std::net::TcpStream;
-use std::sync::mpsc::channel;
-use std::thread;
-use std::time::Duration;
-use uuid::Uuid;
 use common::run_proxy;
 use jet_proto::accept::JetAcceptReq;
 use jet_proto::connect::JetConnectReq;
+use jet_proto::JetMessage;
 use reqwest::{Client, StatusCode};
 use serde_derive::Deserialize;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::str::FromStr;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time::Duration;
 use url::Url;
+use uuid::Uuid;
 
 const HTTP_URL: &str = "http://127.0.0.1:10256";
 const SERVER_DATA: &str = "Server Response";

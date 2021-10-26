@@ -17,6 +17,7 @@ use crate::transport::tcp::TcpTransport;
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::{utils, Proxy};
+use bytes::BytesMut;
 use slog_scope::{error, info};
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
@@ -28,7 +29,6 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::Decoder;
 use url::Url;
 use uuid::Uuid;
-use bytes::BytesMut;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
 pub const USER_CHANNEL_NAME: &str = "USER";

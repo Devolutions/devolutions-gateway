@@ -62,7 +62,10 @@ impl GenericClient {
                     .proxy(config, &*leftover_bytes)
                     .await
                 }
-                ConnectionMode::Fwd { ref dst_hst, creds: None } => {
+                ConnectionMode::Fwd {
+                    ref dst_hst,
+                    creds: None,
+                } => {
                     info!(
                         "Starting plain TCP forward redirection for application protocol {:?}",
                         association_claims.jet_ap
