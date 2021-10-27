@@ -12,7 +12,7 @@ use crate::interceptor::rdp::RdpMessageReader;
 use crate::jet_client::JetAssociationsMap;
 use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
-use crate::token::{ConnectionMode, JetAssociationTokenClaims};
+use crate::token::{ApplicationProtocol, ConnectionMode, JetAssociationTokenClaims};
 use crate::transport::tcp::TcpTransport;
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::transport::{JetTransport, Transport};
@@ -228,7 +228,7 @@ fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRou
     const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
     const DEFAULT_RDP_PORT: u16 = 3389;
 
-    if !claims.jet_ap.is_rdp() {
+    if claims.jet_ap != ApplicationProtocol::Rdp {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!(

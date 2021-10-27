@@ -40,43 +40,17 @@ impl JetAssociationTokenClaims {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationProtocol {
     Wayk,
-
     Pwsh,
-
-    #[serde(alias = "rdp_tcp")]
-    RdpTcp,
     Rdp,
-
-    #[serde(alias = "ard_tcp")]
-    ArdTcp,
     Ard,
-
-    #[serde(alias = "ssh_tcp")]
-    SshTcp,
     Ssh,
-
     Sftp,
-
     #[serde(other)]
     Unknown,
-}
-
-impl ApplicationProtocol {
-    pub fn is_rdp(self) -> bool {
-        matches!(self, Self::Rdp | Self::RdpTcp)
-    }
-
-    pub fn is_ard(self) -> bool {
-        matches!(self, Self::Ard | Self::ArdTcp)
-    }
-
-    pub fn is_ssh(self) -> bool {
-        matches!(self, Self::Ssh | Self::SshTcp)
-    }
 }
 
 #[derive(Deserialize, Clone)]

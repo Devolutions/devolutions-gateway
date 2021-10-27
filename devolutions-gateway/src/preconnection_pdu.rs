@@ -39,14 +39,14 @@ pub fn extract_association_claims(
         jwe_token = Jwe::decode(&encrypted_jwt, &delegation_key).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Failed to resolve route via JWT routing token: {}", e),
+                format!("Failed to decode encrypted JWT routing token: {}", e),
             )
         })?;
 
         signed_jwt = std::str::from_utf8(&jwe_token.payload).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Failed to resolve route via JWT routing token: {}", e),
+                format!("Failed to decode encrypted JWT routing token payload: {}", e),
             )
         })?;
     } else {
@@ -65,7 +65,7 @@ pub fn extract_association_claims(
         JwtSig::<JetAssociationTokenClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Failed to resolve route via JWT routing token: {}", e),
+                format!("Failed to decode signed payload of JWT routing token: {}", e),
             )
         })?;
 
