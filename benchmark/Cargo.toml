@@ -3,7 +3,7 @@ name = "benchmark"
 version = "0.1.0"
 authors = ["Vlad Alex <vlad.al.dp@gmail.com>",
             "Vladyslav Hordiienko <hord.vlad@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 structopt = "0.3"

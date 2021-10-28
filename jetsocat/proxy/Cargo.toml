@@ -2,7 +2,7 @@
 name = "jetsocat-proxy"
 version = "0.1.0"
 authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
-edition = "2018"
+edition = "2021"
 description = "SOCKS proxy clients implementation for jetsocat"
 
 [[bin]]

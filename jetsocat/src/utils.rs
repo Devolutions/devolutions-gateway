@@ -22,9 +22,7 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
 
 macro_rules! impl_tcp_connect {
     ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, $operation:expr) => {{
-        use jetsocat_proxy::HttpProxyStream;
-        use jetsocat_proxy::Socks4Stream;
-        use jetsocat_proxy::Socks5Stream;
+        use jetsocat_proxy::{HttpProxyStream, Socks4Stream, Socks5Stream};
 
         let out: $output_ty = match $proxy_cfg {
             Some(ProxyConfig {
