@@ -2,7 +2,7 @@
 name = "jetsocat"
 version = "2021.1.6"
 authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
-edition = "2018"
+edition = "2021"
 description = "WebSocket toolkit for jet protocol related operations"
 
 [features]

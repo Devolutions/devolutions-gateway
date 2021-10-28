@@ -2,7 +2,7 @@
 name = "tokengen"
 version = "0.1.0"
 authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 picky = { version = "6.0.0-beta4", default-features = false, features = ["jose"] }

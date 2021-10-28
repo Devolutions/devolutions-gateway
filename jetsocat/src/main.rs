@@ -324,8 +324,6 @@ struct ForwardArgs {
 
 impl ForwardArgs {
     fn parse(c: &Context) -> anyhow::Result<Self> {
-        use std::convert::TryFrom;
-
         let common = CommonArgs::parse(FORWARD_SUBCOMMAND, c)?;
 
         let repeat_count =
