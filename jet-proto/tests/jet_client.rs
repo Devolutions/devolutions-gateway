@@ -4,7 +4,6 @@ use common::run_proxy;
 use jet_proto::accept::JetAcceptReq;
 use jet_proto::connect::JetConnectReq;
 use jet_proto::JetMessage;
-use reqwest::{Client, StatusCode};
 use serde_derive::Deserialize;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -12,7 +11,6 @@ use std::str::FromStr;
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
-use url::Url;
 use uuid::Uuid;
 
 const HTTP_URL: &str = "http://127.0.0.1:10256";
@@ -192,18 +190,14 @@ fn smoke_tcp_v2() {
 
     // Association creation
     let association_id = Uuid::new_v4();
-    let client = Client::new();
-    let url = HTTP_URL.parse::<Url>().unwrap();
-    let create_url = url.join(&format!("/jet/association/{}", association_id)).unwrap();
-    assert_eq!(client.post(create_url).send().unwrap().status(), StatusCode::OK);
+    let create_url = format!("{}/jet/association/{}", HTTP_URL, association_id);
+    assert_eq!(ureq::post(&create_url).call().unwrap().status(), 200);
 
     // Candidate gathering
-    let gather_url = url
-        .join(&format!("/jet/association/{}/candidates", association_id))
-        .unwrap();
-    let mut result = client.post(gather_url).send().unwrap();
-    assert_eq!(result.status(), StatusCode::OK);
-    let association_info: AssociationInfo = result.json().unwrap();
+    let gather_url = format!("{}/jet/association/{}/candidates", HTTP_URL, association_id);
+    let result = ureq::post(&gather_url).call().unwrap();
+    assert_eq!(result.status(), 200);
+    let association_info: AssociationInfo = result.into_json().unwrap();
     assert_eq!(Uuid::from_str(&association_info.id).unwrap(), association_id);
 
     let mut candidate_id_opt = None;
