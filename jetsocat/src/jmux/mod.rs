@@ -94,11 +94,9 @@ pub async fn start_proxy(
     tokio::select! {
         receiver_task_result = scheduler_task_handle => {
             receiver_task_result.context("Couldn't join on scheduler task")?.context("Receiver task failed")?;
-            info!(log, "Scheduler task ended first.");
         }
         sender_task_result = sender_task_handle => {
             sender_task_result.context("Couldn’t join on sender task")?.context("Sender task failed")?;
-            info!(log, "Sender task ended first.");
         }
     }
 
@@ -249,7 +247,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
     let mut jmux_ctx = JmuxCtx::new();
     let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
-    let mut pending_channels: HashMap<LocalChannelId, ApiResponseSender> = HashMap::new();
+    let mut pending_channels: HashMap<LocalChannelId, (String, ApiResponseSender)> = HashMap::new();
     let (internal_sender, mut internal_receiver) = mpsc::unbounded_channel::<InternalMessage>();
 
     loop {
@@ -267,16 +265,16 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                 match request {
                     JmuxApiRequest::OpenChannel { destination_url, api_response_sender } => {
-                        info!(log, "Received request for redirection towards {}", destination_url);
                         match jmux_ctx.allocate_id() {
                             Some(id) => {
-                                info!(log, "Allocated ID {} for channel towards {}", id, destination_url);
-                                pending_channels.insert(id, api_response_sender);
+                                debug!(log, "Allocated local ID {}", id);
+                                debug!(log, "{} request {}", id, destination_url);
+                                pending_channels.insert(id, (destination_url.clone(), api_response_sender));
                                 msg_sender
                                     .send(Message::open(id, destination_url))
                                     .context("Couldn’t send CHANNEL OPEN message through mpsc channel")?;
                             }
-                            None => warn!(log, "Couldn’t allocate ID for channel towards {}", destination_url),
+                            None => warn!(log, "Couldn’t allocate ID for API request: {}", destination_url),
                         }
                     }
                     JmuxApiRequest::Start { id, stream } => {
@@ -317,6 +315,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                 match internal_msg {
                     InternalMessage::Eof { id } => {
                         let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
+                        let channel_log = channel.log.clone();
                         let local_id = channel.local_id;
                         let distant_id = channel.distant_id;
 
@@ -338,7 +337,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 msg_sender
                                     .send(Message::close(distant_id))
                                     .context("Couldn’t send CLOSE message")?;
-                                info!(log, "Closed channel ({} {})", local_id, distant_id);
+                                debug!(channel_log, "Channel closed");
                             },
                         }
                     }
@@ -365,6 +364,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             .send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size))
                             .context("Couldn’t send OPEN SUCCESS message through mpsc channel")?;
 
+                        debug!(channel_log, "Channel accepted");
+
                         let (reader, writer) = stream.into_split();
 
                         DataWriterTask {
@@ -386,8 +387,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         };
 
                         reader_task.spawn();
-
-                        info!(log, "Accepted new channel ({} {})", local_id, distant_id);
                     }
                 }
             }
@@ -414,6 +413,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     Message::Open(msg) => {
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
+                        info!(log, "{} request {}", peer_id, msg.destination_url);
                         let local_id = match jmux_ctx.allocate_id() {
                             Some(id) => id,
                             None => {
@@ -424,13 +424,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 continue;
                             }
                         };
-                        info!(log, "Allocated ID {} for peer {}", local_id, peer_id);
+                        debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
 
 
                         let window_size_updated = Arc::new(Notify::new());
                         let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id)));
+                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.clone()));
 
                         let channel = JmuxChannelCtx {
                             distant_id: peer_id,
@@ -460,17 +460,17 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let local_id = LocalChannelId::from(msg.recipient_channel_id);
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
-                        let api_response_sender = match pending_channels.remove(&local_id) {
-                            Some(sender) => sender,
+                        let (destination_url, api_response_sender) = match pending_channels.remove(&local_id) {
+                            Some(pending) => pending,
                             None => {
                                 warn!(log, "Couldn’t find pending channel for {}", local_id);
                                 continue;
                             },
                         };
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id)));
+                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url));
 
-                        info!(channel_log, "Successfully opened channel");
+                        debug!(channel_log, "Successfully opened channel");
 
                         if let Err(e) = api_response_sender.send(JmuxApiResponse::Success { id: local_id }) {
                             warn!(channel_log, "Couldn’t send success API response through mpsc channel: {}", e);
@@ -543,7 +543,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         };
 
                         channel.distant_state = JmuxChannelState::Eof;
-                        info!(channel.log, "Distant peer EOFed");
+                        debug!(channel.log, "Distant peer EOFed");
 
                         // Remove associated data sender
                         data_senders.remove(&id);
@@ -567,7 +567,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         jmux_ctx.unregister(id);
 
                         let api_response_sender = match pending_channels.remove(&id) {
-                            Some(sender) => sender,
+                            Some((_, sender)) => sender,
                             None => {
                                 warn!(log, "Couldn’t find pending channel {}", id);
                                 continue;
@@ -587,9 +587,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             },
                         };
                         let distant_id = channel.distant_id;
+                        let channel_log = channel.log.clone();
 
                         channel.distant_state = JmuxChannelState::Closed;
-                        info!(channel.log, "Distant peer closed");
+                        debug!(channel_log, "Distant peer closed");
 
                         // This will also shutdown the associated TCP stream.
                         data_senders.remove(&local_id);
@@ -603,7 +604,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         if channel.local_state == JmuxChannelState::Closed {
                             jmux_ctx.unregister(local_id);
-                            info!(log, "Closed channel ({} {})", local_id, distant_id);
+                            debug!(channel_log, "Channel closed");
                         }
                     }
                 }

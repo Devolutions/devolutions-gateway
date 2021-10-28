@@ -31,9 +31,7 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
         let pipe_b_log = log.new(o!("open pipe" => "B"));
         let pipe_b = open_pipe(cfg.pipe_b_mode.clone(), cfg.proxy_cfg.clone(), pipe_b_log).await?;
 
-        pipe(pipe_a, pipe_b, log.clone())
-            .await
-            .with_context(|| "Failed to pipe")?;
+        pipe(pipe_a, pipe_b, log.clone()).await.context("Failed to pipe")?;
     }
 
     Ok(())
@@ -59,17 +57,23 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
                 destination_url,
             } => {
                 let listener_log = log.new(o!("TCP listener" => bind_addr.clone()));
-                let jmux_api_request_sender = request_sender.clone();
+                let request_sender = request_sender.clone();
                 tokio::spawn(async move {
-                    tcp_listener_task(jmux_api_request_sender, bind_addr, destination_url, listener_log).await
+                    if let Err(e) =
+                        tcp_listener_task(request_sender, bind_addr, destination_url, listener_log.clone()).await
+                    {
+                        error!(listener_log, "Task failed: {:?}", e);
+                    }
                 });
             }
             ListenerMode::Socks5 { bind_addr } => {
                 let listener_log = log.new(o!("SOCKS5 listener" => bind_addr.clone()));
-                let jmux_api_request_sender = request_sender.clone();
-                tokio::spawn(
-                    async move { socks5_listener_task(jmux_api_request_sender, bind_addr, listener_log).await },
-                );
+                let request_sender = request_sender.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = socks5_listener_task(request_sender, bind_addr, listener_log.clone()).await {
+                        error!(listener_log, "Task failed: {:?}", e);
+                    }
+                });
             }
         }
     }
