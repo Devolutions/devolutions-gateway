@@ -1,55 +1,10 @@
 use bitvec::prelude::*;
+use jmux_proto::LocalChannelId;
 use std::convert::TryFrom;
 
 pub trait Id: Copy + From<u32> + Into<u32> {}
 
-/// Distant identifier for a channel
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub struct DistantChannelId(u32);
-
-impl From<u32> for DistantChannelId {
-    fn from(v: u32) -> Self {
-        Self(v)
-    }
-}
-
-impl From<DistantChannelId> for u32 {
-    fn from(id: DistantChannelId) -> Self {
-        id.0
-    }
-}
-
-impl Id for DistantChannelId {}
-
-impl std::fmt::Display for DistantChannelId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "d#{}", self.0)
-    }
-}
-
-/// Local identifier for a channel
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub struct LocalChannelId(u32);
-
-impl From<u32> for LocalChannelId {
-    fn from(v: u32) -> Self {
-        Self(v)
-    }
-}
-
-impl From<LocalChannelId> for u32 {
-    fn from(id: LocalChannelId) -> Self {
-        id.0
-    }
-}
-
 impl Id for LocalChannelId {}
-
-impl std::fmt::Display for LocalChannelId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "l#{}", self.0)
-    }
-}
 
 pub struct IdAllocator<T: Id> {
     taken: BitVec,

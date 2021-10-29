@@ -1,0 +1,8 @@
+[package]
+name = "jmux-proto"
+version = "0.1.0"
+authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
+edition = "2021"
+
+[dependencies]
+bytes = "1"

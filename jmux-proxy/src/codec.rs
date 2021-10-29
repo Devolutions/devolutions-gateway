@@ -1,8 +1,9 @@
-use crate::jmux::proto::{Header, Message};
 use anyhow::Context as _;
 use bytes::BytesMut;
+use jmux_proto::{Header, Message};
 use tokio_util::codec::{Decoder, Encoder};
 
+/// This is a purely arbitrary number
 pub const MAXIMUM_PACKET_SIZE_IN_BYTES: usize = 4096;
 
 pub struct JmuxCodec;
@@ -55,10 +56,10 @@ impl Encoder<Message> for JmuxCodec {
     type Error = anyhow::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        if item.len() > MAXIMUM_PACKET_SIZE_IN_BYTES {
+        if item.size() > MAXIMUM_PACKET_SIZE_IN_BYTES {
             anyhow::bail!(
                 "Attempted to send a JMUX packet whose size is too big: {} (max is {})",
-                item.len(),
+                item.size(),
                 MAXIMUM_PACKET_SIZE_IN_BYTES
             );
         }

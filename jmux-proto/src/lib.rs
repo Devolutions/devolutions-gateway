@@ -1,9 +1,111 @@
-use crate::jmux::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
-use crate::jmux::id::{DistantChannelId, LocalChannelId};
-use anyhow::{bail, ensure, Context as _};
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
-use std::convert::TryFrom;
-use std::fmt;
+use core::fmt;
+
+/// Distant identifier for a channel
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct DistantChannelId(u32);
+
+impl From<u32> for DistantChannelId {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<DistantChannelId> for u32 {
+    fn from(id: DistantChannelId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for DistantChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "d#{}", self.0)
+    }
+}
+
+/// Local identifier for a channel
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub struct LocalChannelId(u32);
+
+impl From<u32> for LocalChannelId {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
+
+impl From<LocalChannelId> for u32 {
+    fn from(id: LocalChannelId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for LocalChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "l#{}", self.0)
+    }
+}
+
+#[derive(Debug)]
+pub enum Error {
+    PacketOversized {
+        packet_size: usize,
+        max: usize,
+    },
+    NotEnoughBytes {
+        name: &'static str,
+        received: usize,
+        expected: usize,
+    },
+    InvalidPacket {
+        name: &'static str,
+        field: &'static str,
+        reason: &'static str,
+    },
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::PacketOversized { packet_size, max } => {
+                write!(f, "Packet oversized: max is {}, got {}", max, packet_size)
+            }
+            Error::NotEnoughBytes {
+                name,
+                received,
+                expected,
+            } => write!(
+                f,
+                "Not enough bytes provided to decode {}: received {} bytes, expected {} bytes",
+                name, received, expected
+            ),
+            Error::InvalidPacket { name, field, reason } => {
+                write!(f, "Invalid `{}` in {}: {}", field, name, reason)
+            }
+        }
+    }
+}
+
+macro_rules! ensure_size {
+    ($buf:ident [$expected:expr] for $name:expr) => {{
+        let received = $buf.len();
+        let expected = $expected;
+        if !(received >= expected) {
+            return Err(Error::NotEnoughBytes {
+                name: $name,
+                received,
+                expected,
+            });
+        }
+    }};
+    (plain $packet_struct:ident in $buf:ident) => {{
+        ensure_size!($buf[$packet_struct::SIZE] for $packet_struct::NAME)
+    }};
+    (fixed $packet_struct:ident in $buf:ident) => {{
+        ensure_size!($buf[$packet_struct::FIXED_PART_SIZE] for $packet_struct::NAME)
+    }};
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Message {
@@ -17,8 +119,8 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn open(id: LocalChannelId, destination_url: impl Into<String>) -> Self {
-        Self::Open(ChannelOpen::new(id, destination_url))
+    pub fn open(id: LocalChannelId, maximum_packet_size: u16, destination_url: impl Into<String>) -> Self {
+        Self::Open(ChannelOpen::new(id, maximum_packet_size, destination_url))
     }
 
     pub fn open_success(
@@ -55,19 +157,19 @@ impl Message {
         Self::Close(ChannelClose::new(distant_id))
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         match self {
-            Message::Open(msg) => Header::SIZE + msg.len(),
+            Message::Open(msg) => Header::SIZE + msg.size(),
             Message::OpenSuccess(_) => Header::SIZE + ChannelOpenSuccess::SIZE,
-            Message::OpenFailure(msg) => Header::SIZE + msg.len(),
+            Message::OpenFailure(msg) => Header::SIZE + msg.size(),
             Message::WindowAdjust(_) => Header::SIZE + ChannelWindowAdjust::SIZE,
-            Message::Data(msg) => Header::SIZE + msg.len(),
+            Message::Data(msg) => Header::SIZE + msg.size(),
             Message::Eof(_) => Header::SIZE + ChannelEof::SIZE,
             Message::Close(_) => Header::SIZE + ChannelClose::SIZE,
         }
     }
 
-    pub fn encode(&self, buf: &mut BytesMut) -> anyhow::Result<()> {
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), Error> {
         macro_rules! reserve_and_encode_header {
             ($buf:ident, $len:expr, $ty:expr) => {
                 let len = $len;
@@ -76,8 +178,10 @@ impl Message {
                 }
                 let header = Header {
                     ty: $ty,
-                    size: u16::try_from(len)
-                        .with_context(|| format!("Packet oversized: max is {}, got {}", u16::MAX, len))?,
+                    size: u16::try_from(len).map_err(|_| Error::PacketOversized {
+                        packet_size: len,
+                        max: usize::from(u16::MAX),
+                    })?,
                     flags: 0,
                 };
                 header.encode(buf);
@@ -86,7 +190,7 @@ impl Message {
 
         match self {
             Message::Open(msg) => {
-                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::Open);
+                reserve_and_encode_header!(buf, Header::SIZE + msg.size(), MessageType::Open);
                 msg.encode(buf)
             }
             Message::OpenSuccess(msg) => {
@@ -94,7 +198,7 @@ impl Message {
                 msg.encode(buf)
             }
             Message::OpenFailure(msg) => {
-                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::OpenFailure);
+                reserve_and_encode_header!(buf, Header::SIZE + msg.size(), MessageType::OpenFailure);
                 msg.encode(buf)
             }
             Message::WindowAdjust(msg) => {
@@ -102,7 +206,7 @@ impl Message {
                 msg.encode(buf)
             }
             Message::Data(msg) => {
-                reserve_and_encode_header!(buf, Header::SIZE + msg.len(), MessageType::Data);
+                reserve_and_encode_header!(buf, Header::SIZE + msg.size(), MessageType::Data);
                 msg.encode(buf)
             }
             Message::Eof(msg) => {
@@ -118,40 +222,29 @@ impl Message {
         Ok(())
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Header::SIZE,
-            "Not enough bytes provided to decode message header"
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Header in buf);
 
-        let header = Header::decode(buf.split_to(Header::SIZE)).context("Couldn’t decode HEADER")?;
+        let header = Header::decode(buf.split_to(Header::SIZE))?;
         let total_size = header.size as usize;
 
-        let body_size = total_size
-            .checked_sub(Header::SIZE)
-            .context("Invalid `msgSize` in message HEADER")?;
+        let body_size = total_size.checked_sub(Header::SIZE).ok_or(Error::InvalidPacket {
+            name: Header::NAME,
+            field: "msgSize",
+            reason: "too small",
+        })?;
 
-        ensure!(
-            buf.len() >= body_size,
-            "Not enough bytes provided to decode message body"
-        );
-
+        ensure_size!(buf[body_size] for "BODY");
         let body_bytes = buf.split_to(body_size);
 
         let message = match header.ty {
-            MessageType::Open => Self::Open(ChannelOpen::decode(body_bytes).context("OPEN")?),
-            MessageType::Data => Self::Data(ChannelData::decode(body_bytes).context("DATA")?),
-            MessageType::OpenSuccess => {
-                Self::OpenSuccess(ChannelOpenSuccess::decode(body_bytes).context("OPEN SUCCESS")?)
-            }
-            MessageType::OpenFailure => {
-                Self::OpenFailure(ChannelOpenFailure::decode(body_bytes).context("OPEN FAILURE")?)
-            }
-            MessageType::WindowAdjust => {
-                Self::WindowAdjust(ChannelWindowAdjust::decode(body_bytes).context("WINDOW ADJUST")?)
-            }
-            MessageType::Eof => Self::Eof(ChannelEof::decode(body_bytes).context("EOF")?),
-            MessageType::Close => Self::Close(ChannelClose::decode(body_bytes).context("CLOSE")?),
+            MessageType::Open => Self::Open(ChannelOpen::decode(body_bytes)?),
+            MessageType::Data => Self::Data(ChannelData::decode(body_bytes)?),
+            MessageType::OpenSuccess => Self::OpenSuccess(ChannelOpenSuccess::decode(body_bytes)?),
+            MessageType::OpenFailure => Self::OpenFailure(ChannelOpenFailure::decode(body_bytes)?),
+            MessageType::WindowAdjust => Self::WindowAdjust(ChannelWindowAdjust::decode(body_bytes)?),
+            MessageType::Eof => Self::Eof(ChannelEof::decode(body_bytes)?),
+            MessageType::Close => Self::Close(ChannelClose::decode(body_bytes)?),
         };
 
         Ok(message)
@@ -229,9 +322,9 @@ pub enum MessageType {
 }
 
 impl TryFrom<u8> for MessageType {
-    type Error = anyhow::Error;
+    type Error = Error;
 
-    fn try_from(v: u8) -> Result<MessageType, anyhow::Error> {
+    fn try_from(v: u8) -> Result<MessageType, Error> {
         match v {
             100 => Ok(MessageType::Open),
             101 => Ok(MessageType::OpenSuccess),
@@ -240,7 +333,11 @@ impl TryFrom<u8> for MessageType {
             104 => Ok(MessageType::Data),
             105 => Ok(MessageType::Eof),
             106 => Ok(MessageType::Close),
-            _ => bail!("Unknown `msgType` value: {}", v),
+            _ => Err(Error::InvalidPacket {
+                name: Header::NAME,
+                field: "msgType",
+                reason: "unknown value",
+            }),
         }
     }
 }
@@ -253,6 +350,7 @@ pub struct Header {
 }
 
 impl Header {
+    pub const NAME: &'static str = "HEADER";
     pub const SIZE: usize = 1 /* msgType */ + 2 /* msgSize */ + 1 /* msgFlags */;
 
     pub fn encode(&self, buf: &mut BytesMut) {
@@ -261,8 +359,8 @@ impl Header {
         buf.put_u8(0);
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(buf.len() >= Self::SIZE, "Not enough bytes provided to decode HEADER");
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Self in buf);
         Ok(Self {
             ty: MessageType::try_from(buf.get_u8())?,
             size: buf.get_u16(),
@@ -280,19 +378,20 @@ pub struct ChannelOpen {
 }
 
 impl ChannelOpen {
+    pub const NAME: &'static str = "CHANNEL OPEN";
     pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 32_768;
     pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
-    pub fn new(id: LocalChannelId, destination_url: impl Into<String>) -> Self {
+    pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: impl Into<String>) -> Self {
         Self {
             sender_channel_id: u32::from(id),
             initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE,
-            maximum_packet_size: MAXIMUM_PACKET_SIZE_IN_BYTES as u16,
+            maximum_packet_size,
             destination_url: destination_url.into(),
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         Self::FIXED_PART_SIZE + self.destination_url.as_bytes().len()
     }
 
@@ -303,18 +402,19 @@ impl ChannelOpen {
         buf.put(self.destination_url.as_bytes());
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Self::FIXED_PART_SIZE,
-            "Not enough bytes provided to decode CHANNEL OPEN",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(fixed Self in buf);
 
         let sender_channel_id = buf.get_u32();
         let initial_window_size = buf.get_u32();
         let maximum_packet_size = buf.get_u16();
 
         let destination_url = std::str::from_utf8(&buf)
-            .context("`destinationUrl` field is not valid UTF-8")?
+            .map_err(|_| Error::InvalidPacket {
+                name: Self::NAME,
+                field: "destinationUrl",
+                reason: "not valid UTF-8",
+            })?
             .to_owned();
 
         Ok(Self {
@@ -335,6 +435,7 @@ pub struct ChannelOpenSuccess {
 }
 
 impl ChannelOpenSuccess {
+    pub const NAME: &'static str = "CHANNEL OPEN SUCCESS";
     pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*senderChannelId*/ + 4 /*initialWindowSize*/ + 2 /*maximumPacketSize*/;
 
     pub fn new(
@@ -347,7 +448,7 @@ impl ChannelOpenSuccess {
             recipient_channel_id: u32::from(distant_id),
             sender_channel_id: u32::from(local_id),
             initial_window_size,
-            maximum_packet_size: std::cmp::min(maximum_packet_size, MAXIMUM_PACKET_SIZE_IN_BYTES as u16),
+            maximum_packet_size,
         }
     }
 
@@ -358,11 +459,8 @@ impl ChannelOpenSuccess {
         buf.put_u16(self.maximum_packet_size);
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Self::SIZE,
-            "Not enough bytes provided to decode CHANNEL OPEN SUCCESS",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Self in buf);
 
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
@@ -381,6 +479,7 @@ pub struct ChannelOpenFailure {
 }
 
 impl ChannelOpenFailure {
+    pub const NAME: &'static str = "CHANNEL OPEN FAILURE";
     pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/ + 4 /*reasonCode*/;
 
     pub fn new(distant_id: DistantChannelId, reason_code: ReasonCode, description: impl Into<String>) -> Self {
@@ -391,7 +490,7 @@ impl ChannelOpenFailure {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         Self::FIXED_PART_SIZE + self.description.as_bytes().len()
     }
 
@@ -401,16 +500,17 @@ impl ChannelOpenFailure {
         buf.put(self.description.as_bytes());
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Self::FIXED_PART_SIZE,
-            "Not enough bytes provided to decode CHANNEL OPEN FAILURE",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(fixed Self in buf);
 
         let recipient_channel_id = buf.get_u32();
         let reason_code = ReasonCode(buf.get_u32());
         let description = std::str::from_utf8(&buf)
-            .context("`description` field is not valid UTF-8")?
+            .map_err(|_| Error::InvalidPacket {
+                name: Self::NAME,
+                field: "description",
+                reason: "not valid UTF-8",
+            })?
             .to_owned();
 
         Ok(Self {
@@ -428,6 +528,7 @@ pub struct ChannelWindowAdjust {
 }
 
 impl ChannelWindowAdjust {
+    pub const NAME: &'static str = "CHANNEL WINDOW ADJUST";
     pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*windowAdjustement*/;
 
     pub fn new(distant_id: DistantChannelId, window_adjustment: u32) -> Self {
@@ -442,11 +543,8 @@ impl ChannelWindowAdjust {
         buf.put_u32(self.window_adjustment);
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Self::SIZE,
-            "Not enough bytes provided to decode CHANNEL WINDOW ADJUST",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
             window_adjustment: buf.get_u32(),
@@ -461,6 +559,7 @@ pub struct ChannelData {
 }
 
 impl ChannelData {
+    pub const NAME: &'static str = "CHANNEL DATA";
     pub const FIXED_PART_SIZE: usize = 4 /*recipientChannelId*/;
 
     pub fn new(id: DistantChannelId, data: Vec<u8>) -> Self {
@@ -470,7 +569,7 @@ impl ChannelData {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         Self::FIXED_PART_SIZE + self.transfer_data.len()
     }
 
@@ -479,11 +578,8 @@ impl ChannelData {
         buf.put(self.transfer_data.as_slice());
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() >= Self::FIXED_PART_SIZE,
-            "Not enough bytes provided to decode CHANNEL DATA",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(fixed Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
             transfer_data: buf.to_vec(),
@@ -497,6 +593,7 @@ pub struct ChannelEof {
 }
 
 impl ChannelEof {
+    pub const NAME: &'static str = "CHANNEL EOF";
     pub const SIZE: usize = 4 /*recipientChannelId*/;
 
     pub fn new(distant_id: DistantChannelId) -> Self {
@@ -509,11 +606,8 @@ impl ChannelEof {
         buf.put_u32(self.recipient_channel_id);
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() == Self::SIZE,
-            "Not enough bytes provided to decode CHANNEL EOF",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
         })
@@ -526,6 +620,7 @@ pub struct ChannelClose {
 }
 
 impl ChannelClose {
+    pub const NAME: &'static str = "CHANNEL CLOSE";
     pub const SIZE: usize = 4 /*recipientChannelId*/;
 
     pub fn new(distant_id: DistantChannelId) -> Self {
@@ -538,11 +633,8 @@ impl ChannelClose {
         buf.put_u32(self.recipient_channel_id);
     }
 
-    pub fn decode(mut buf: Bytes) -> anyhow::Result<Self> {
-        ensure!(
-            buf.len() == Self::SIZE,
-            "Not enough bytes provided to decode CHANNEL CLOSE",
-        );
+    pub fn decode(mut buf: Bytes) -> Result<Self, Error> {
+        ensure_size!(plain Self in buf);
         Ok(Self {
             recipient_channel_id: buf.get_u32(),
         })
@@ -627,7 +719,7 @@ mod tests {
             51, // destination url: tcp://google.com:443
         ];
 
-        let mut msg_sample = ChannelOpen::new(LocalChannelId::from(1), "tcp://google.com:443");
+        let mut msg_sample = ChannelOpen::new(LocalChannelId::from(1), 4096, "tcp://google.com:443");
         msg_sample.initial_window_size = 1024;
         msg_sample.maximum_packet_size = 1024;
 

@@ -1,6 +1,6 @@
-use crate::jmux::{JmuxApiRequest, JmuxApiResponse};
 use anyhow::Context;
 use jetsocat_proxy::Socks5AcceptorConfig;
+use jmux_proxy::{JmuxApiRequest, JmuxApiResponse};
 use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -13,7 +13,7 @@ pub enum ListenerMode {
 }
 
 pub async fn tcp_listener_task(
-    api_request_sender: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
     bind_addr: String,
     destination_url: String,
     log: Logger,
@@ -36,9 +36,9 @@ pub async fn tcp_listener_task(
 
                 let (sender, mut receiver) = mpsc::unbounded_channel();
 
-                match api_request_sender.send(JmuxApiRequest::OpenChannel {
+                match api_request_tx.send(JmuxApiRequest::OpenChannel {
                     destination_url: destination_url.clone(),
-                    api_response_sender: sender,
+                    api_response_tx: sender,
                 }) {
                     Ok(()) => {}
                     Err(e) => {
@@ -48,11 +48,11 @@ pub async fn tcp_listener_task(
                 }
 
                 let log = log.clone();
-                let api_request_sender = api_request_sender.clone();
+                let api_request_tx = api_request_tx.clone();
                 tokio::spawn(async move {
                     match receiver.recv().await {
                         Some(JmuxApiResponse::Success { id }) => {
-                            let _ = api_request_sender.send(JmuxApiRequest::Start { id, stream });
+                            let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream });
                         }
                         Some(JmuxApiResponse::Failure { id, reason_code }) => {
                             warn!(log, "Channel {} failed with reason code: {}", id, reason_code);
@@ -72,7 +72,7 @@ pub async fn tcp_listener_task(
 }
 
 pub async fn socks5_listener_task(
-    api_request_sender: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
     bind_addr: String,
     log: Logger,
 ) -> anyhow::Result<()> {
@@ -93,7 +93,7 @@ pub async fn socks5_listener_task(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let api_request_sender = api_request_sender.clone();
+                let api_request_sender = api_request_tx.clone();
                 let log = log.new(o!("addr" => addr));
                 let conf = Arc::clone(&conf);
                 tokio::spawn(async move {
@@ -113,7 +113,7 @@ pub async fn socks5_listener_task(
 }
 
 async fn socks5_process_socket(
-    api_request_sender: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
     incoming: TcpStream,
     conf: Arc<Socks5AcceptorConfig>,
     log: Logger,
@@ -132,9 +132,9 @@ async fn socks5_process_socket(
 
         let (sender, mut receiver) = mpsc::unbounded_channel();
 
-        match api_request_sender.send(JmuxApiRequest::OpenChannel {
+        match api_request_tx.send(JmuxApiRequest::OpenChannel {
             destination_url,
-            api_response_sender: sender,
+            api_response_tx: sender,
         }) {
             Ok(()) => {}
             Err(e) => {
@@ -159,7 +159,7 @@ async fn socks5_process_socket(
         let dummy_local_addr = "0.0.0.0:0";
         let stream = acceptor.connected(dummy_local_addr).await?;
 
-        let _ = api_request_sender.send(JmuxApiRequest::Start { id, stream });
+        let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream });
     } else {
         acceptor.failed(Socks5FailureCode::CommandNotSupported).await?;
     }

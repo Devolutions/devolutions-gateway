@@ -14,9 +14,12 @@ native-tls = ["async-tungstenite/tokio-native-tls"]
 
 [dependencies]
 
-# jet protocol for TCP transport
+# jet protocol support
 jet-proto = { path = "../jet-proto" }
 uuid = "0.8"
+
+# jmux protocol support
+jmux-proxy = { path = "../jmux-proxy" }
 
 # proxy support
 jetsocat-proxy = { path = "./proxy" }
@@ -27,7 +30,6 @@ seahorse = "1"
 
 # async
 tokio = { version = "1", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-tokio-util = { version = "0.6", features = ["codec"] }
 futures-util = "0.3"
 async-tungstenite = "0.14"
 
@@ -41,8 +43,3 @@ anyhow = "1"
 
 # location of special directories
 dirs-next = "2"
-
-# utils
-bytes = "1"
-bitvec = "0.22"
-

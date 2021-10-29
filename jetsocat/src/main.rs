@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use jetsocat::jmux::listener::ListenerMode;
+use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
 use seahorse::{App, Command, Context, Flag, FlagType};
