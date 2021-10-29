@@ -1,5 +1,5 @@
 pub mod jet;
-pub mod jmux;
+pub mod listener;
 pub mod pipe;
 pub mod proxy;
 
@@ -41,11 +41,12 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
 pub struct JmuxProxyCfg {
     pub pipe_mode: pipe::PipeMode,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
-    pub listener_modes: Vec<jmux::listener::ListenerMode>,
+    pub listener_modes: Vec<self::listener::ListenerMode>,
 }
 
 pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
-    use self::jmux::listener::{socks5_listener_task, tcp_listener_task, ListenerMode};
+    use self::listener::{socks5_listener_task, tcp_listener_task, ListenerMode};
+    use pipe::open_pipe;
     use tokio::sync::mpsc;
 
     let (request_sender, request_receiver) = mpsc::unbounded_channel();
@@ -78,5 +79,10 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
         }
     }
 
-    self::jmux::start_proxy(request_sender, request_receiver, cfg.pipe_mode, cfg.proxy_cfg, log).await
+    // Open generic pipe to exchange JMUX channel messages on
+    let pipe_log = log.new(o!("open pipe" => "JMUX pipe"));
+    let pipe = open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log).await?;
+
+    // Start JMUX proxy over this pipe
+    jmux_proxy::start(request_sender, request_receiver, pipe.read, pipe.write, log).await
 }

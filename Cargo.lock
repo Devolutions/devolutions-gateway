@@ -1390,19 +1390,17 @@ version = "2021.1.6"
 dependencies = [
  "anyhow",
  "async-tungstenite",
- "bitvec 0.22.3",
- "bytes 1.0.1",
  "dirs-next",
  "futures-util",
  "jet-proto",
  "jetsocat-proxy",
+ "jmux-proxy",
  "proxy_cfg",
  "seahorse",
  "slog",
  "slog-async",
  "slog-term",
  "tokio 1.10.1",
- "tokio-util",
  "uuid",
 ]
 
@@ -1411,6 +1409,27 @@ name = "jetsocat-proxy"
 version = "0.1.0"
 dependencies = [
  "tokio 1.10.1",
+]
+
+[[package]]
+name = "jmux-proto"
+version = "0.1.0"
+dependencies = [
+ "bytes 1.0.1",
+]
+
+[[package]]
+name = "jmux-proxy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitvec 0.22.3",
+ "bytes 1.0.1",
+ "futures-util",
+ "jmux-proto",
+ "slog",
+ "tokio 1.10.1",
+ "tokio-util",
 ]
 
 [[package]]

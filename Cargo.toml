@@ -5,6 +5,8 @@ members = [
     "jet-proto",
     "jetsocat",
     "jetsocat/proxy",
+    "jmux-proto",
+    "jmux-proxy",
     "benchmark",
     "tools/*"
 ]

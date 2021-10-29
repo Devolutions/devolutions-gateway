@@ -1,0 +1,26 @@
+[package]
+name = "jmux-proxy"
+version = "0.1.0"
+authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
+edition = "2021"
+description = "JMUX proxy server implementation"
+
+[dependencies]
+
+# jmux
+jmux-proto = { path = "../jmux-proto" }
+
+# async
+tokio = { version = "1", features = ["net", "rt", "io-util", "macros"] }
+tokio-util = { version = "0.6", features = ["codec"] }
+futures-util = { version = "0.3", features = ["sink"] }
+
+# error handling
+anyhow = "1"
+
+# logging
+slog = "2"
+
+# codec implementation
+bytes = "1"
+bitvec = "0.22"
