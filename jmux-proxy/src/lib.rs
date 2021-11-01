@@ -411,7 +411,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     Message::Open(msg) => {
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
-                        if let Err(e) = cfg.filtering.validate_target(&msg.destination_url) {
+                        if let Err(e) = cfg.filtering.validate_destination(&msg.destination_url) {
                             debug!(log, "Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
                             msg_to_send_tx
                                 .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, e.to_string()))
@@ -765,7 +765,11 @@ impl StreamResolverTask {
             msg_to_send_tx,
         } = self;
 
-        let mut addrs = match tokio::net::lookup_host(&destination_url).await {
+        let (scheme, target) = destination_url
+            .split_once("://")
+            .context("invalid destination URL format")?;
+
+        let mut addrs = match tokio::net::lookup_host(target).await {
             Ok(addrs) => addrs,
             Err(e) => {
                 msg_to_send_tx
@@ -775,28 +779,31 @@ impl StreamResolverTask {
                         e.to_string(),
                     ))
                     .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("Couldn't resolve host {}: {}", destination_url, e);
+                anyhow::bail!("Couldn't resolve host {}: {}", target, e);
             }
         };
         let socket_addr = addrs.next().expect("at least one resolved address should be present");
 
-        match TcpStream::connect(socket_addr).await {
-            Ok(stream) => {
-                internal_msg_tx
-                    .send(InternalMessage::StreamResolved { channel, stream })
-                    .context("Could't send back resolved stream through internal mpsc channel")?;
-            }
-            Err(e) => {
-                msg_to_send_tx
-                    .send(Message::open_failure(
-                        channel.distant_id,
-                        ReasonCode::from(e.kind()),
-                        e.to_string(),
-                    ))
-                    .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("Couldn’t connect TCP socket to {}: {}", destination_url, e);
-            }
-        };
+        match scheme {
+            "tcp" => match TcpStream::connect(socket_addr).await {
+                Ok(stream) => {
+                    internal_msg_tx
+                        .send(InternalMessage::StreamResolved { channel, stream })
+                        .context("Could't send back resolved stream through internal mpsc channel")?;
+                }
+                Err(e) => {
+                    msg_to_send_tx
+                        .send(Message::open_failure(
+                            channel.distant_id,
+                            ReasonCode::from(e.kind()),
+                            e.to_string(),
+                        ))
+                        .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                    anyhow::bail!("Couldn’t connect TCP socket to {}: {}", target, e);
+                }
+            },
+            _ => anyhow::bail!("unsupported scheme: {}", scheme),
+        }
 
         Ok(())
     }

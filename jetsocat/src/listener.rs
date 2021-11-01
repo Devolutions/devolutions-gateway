@@ -21,6 +21,8 @@ pub async fn tcp_listener_task(
     use anyhow::Context as _;
     use tokio::net::TcpListener;
 
+    let destination_url = format!("tcp://{}", destination_url);
+
     let listener = TcpListener::bind(&bind_addr)
         .await
         .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
@@ -124,8 +126,8 @@ async fn socks5_process_socket(
 
     if acceptor.is_connect_command() {
         let destination_url = match acceptor.dest_addr() {
-            jetsocat_proxy::DestAddr::Ip(addr) => addr.to_string(),
-            jetsocat_proxy::DestAddr::Domain(domain, port) => format!("{}:{}", domain, port),
+            jetsocat_proxy::DestAddr::Ip(addr) => format!("tcp://{}", addr),
+            jetsocat_proxy::DestAddr::Domain(domain, port) => format!("tcp://{}:{}", domain, port),
         };
 
         debug!(log, "Request {}", destination_url);
@@ -150,7 +152,7 @@ async fn socks5_process_socket(
             }
         };
 
-        // Dummy local address required for SOCKS5 response (JMUX doesn't send this information).
+        // Dummy local address required for SOCKS5 response (JMUX protocol doesn't include this information).
         // It appears to not be an issue in general: it's used to act as if the SOCKS5 client opened a
         // socket stream as usual with a local bound address [provided by TcpStream::local_addr],
         // but I'm not aware of many application relying on this. If this become an issue we may
