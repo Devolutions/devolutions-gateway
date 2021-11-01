@@ -30,6 +30,7 @@ enum SubCommand {
     RdpTls(TlsParams),
     RdpTcpRendezvous,
     Scope(ScopeParams),
+    Jmux,
 }
 
 #[derive(Clap)]
@@ -65,11 +66,11 @@ struct ScopeParams {
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type")]
+#[serde(rename_all = "kebab-case")]
 enum GatewayAccessClaims<'a> {
-    #[serde(rename = "association")]
     RoutingClaims(RoutingClaims<'a>),
-    #[serde(rename = "scope")]
     ScopeClaims(ScopeClaims),
+    Jmux(JmuxClaims),
 }
 
 #[derive(Clone, Serialize)]
@@ -89,6 +90,12 @@ struct ScopeClaims {
     exp: i64,
     nbf: i64,
     scope: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct JmuxClaims {
+    exp: i64,
+    nbf: i64,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -128,6 +135,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
             scope: params.scope.clone(),
+        }),
+        SubCommand::Jmux => GatewayAccessClaims::Jmux(JmuxClaims {
+            exp: exp as i64,
+            nbf: now.as_secs() as i64,
         }),
         _ => GatewayAccessClaims::RoutingClaims(RoutingClaims {
             exp: exp as i64,
