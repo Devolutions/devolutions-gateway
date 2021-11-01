@@ -695,7 +695,10 @@ mod tests {
     #[test]
     fn header_decode_buffer_too_short_err() {
         let err = Header::decode(Bytes::from_static(&[])).err().unwrap();
-        assert_eq!("Not enough bytes provided to decode HEADER: received 0 bytes, expected 4 bytes", err.to_string());
+        assert_eq!(
+            "Not enough bytes provided to decode HEADER: received 0 bytes, expected 4 bytes",
+            err.to_string()
+        );
     }
 
     #[test]

@@ -38,6 +38,11 @@ impl WebsocketService {
             handle_jet_test(req, self.jet_associations.clone())
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
+        } else if req.method() == Method::GET && req.uri().path().starts_with("/jmux") {
+            info!("{} {}", req.method(), req.uri().path());
+            handle_jmux(req, client_addr, self.config.clone())
+                .await
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:?}", err)))
         } else {
             saphir::server::inject_raw(req).await.map_err(|err| match err {
                 error::SaphirError::Io(err) => err,
@@ -358,6 +363,92 @@ fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
     }
 }
 
+async fn handle_jmux(
+    mut req: Request<Body>,
+    client_addr: SocketAddr,
+    config: Arc<Config>,
+) -> io::Result<Response<Body>> {
+    use crate::http::middlewares::auth::{parse_auth_header, validate_bearer_token, AuthHeaderType};
+    use crate::token::JetAccessTokenClaims;
+
+    let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
+        let authorization_value = authorization_value
+            .to_str()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "bad authorization header value"))?;
+        match parse_auth_header(authorization_value) {
+            Some((AuthHeaderType::Bearer, token)) => token,
+            _ => return Err(io::Error::new(io::ErrorKind::Other, "bad authorization header value")),
+        }
+    } else if let Some(token) = req.uri().query().and_then(|q| {
+        q.split('&')
+            .filter_map(|segment| segment.split_once('='))
+            .find_map(|(key, val)| key.eq("token").then(|| val))
+    }) {
+        token
+    } else {
+        return Err(io::Error::new(io::ErrorKind::Other, "missing authorization"));
+    };
+
+    match validate_bearer_token(&config, token) {
+        Ok(JetAccessTokenClaims::Jmux(_)) => {}
+        Ok(_) => {
+            return Err(io::Error::new(io::ErrorKind::Other, "wrong access token"));
+        }
+        Err(e) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("couldn't validate token: {}", e),
+            ));
+        }
+    }
+
+    if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
+        if upgrade_val != "websocket" {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("unexpected upgrade header value: {}", upgrade_val),
+            ));
+        }
+    }
+
+    let rsp = process_req(&req);
+
+    tokio::spawn(async move {
+        use jmux_proxy::JmuxConfig;
+        use slog::o;
+        use tokio::sync::mpsc;
+
+        let upgraded = hyper::upgrade::on(&mut req)
+            .await
+            .map_err(|e| error!("upgrade error: {}", e))?;
+
+        let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
+
+        let (read, write) = tokio::io::split(ws_transport);
+
+        // We don't actually use the request API in Gateway.
+        // This might be an improvement point in jmux_proxy crate API.
+        let (api_request_tx, api_request_rx) = mpsc::unbounded_channel();
+
+        let jmux_proxy_log = slog_scope::logger().new(o!("client_addr" => client_addr));
+
+        jmux_proxy::start(
+            JmuxConfig::permissive(),
+            api_request_tx,
+            api_request_rx,
+            Box::new(read),
+            Box::new(write),
+            jmux_proxy_log,
+        )
+        .await
+        .map_err(|e| error!("JMUX proxy error: {}", e))?;
+
+        Ok::<(), ()>(())
+    });
+
+    Ok(rsp)
+}
+
 pub struct WsClient {
     routing_url: Url,
     config: Arc<Config>,
@@ -368,7 +459,7 @@ impl WsClient {
         WsClient { routing_url, config }
     }
 
-    pub async fn serve<T>(self, client_transport: T) -> Result<(), io::Error>
+    pub async fn serve<T>(self, client_transport: T) -> io::Result<()>
     where
         T: 'static + Transport + Send,
     {

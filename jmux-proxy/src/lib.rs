@@ -86,13 +86,14 @@ pub async fn start(
     }
     .spawn();
 
-    tokio::select! {
-        receiver_task_result = scheduler_task_handle => {
-            receiver_task_result.context("Couldn't join on scheduler task")?.context("Receiver task failed")?;
+    match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
+        (Ok(_), Err(e)) => debug!(log, "Sender task failed: {}", e),
+        (Err(e), Ok(_)) => debug!(log, "Scheduler task failed: {}", e),
+        (Err(scheduler_e), Err(sender_e)) => {
+            // Usually, it's only of interest when both tasks are failed.
+            anyhow::bail!("Both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
         }
-        sender_task_result = sender_task_handle => {
-            sender_task_result.context("Couldn’t join on sender task")?.context("Sender task failed")?;
-        }
+        (Ok(_), Ok(_)) => {}
     }
 
     Ok(())
@@ -248,6 +249,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
     let mut pending_channels: HashMap<LocalChannelId, (String, ApiResponseSender)> = HashMap::new();
     let (internal_msg_tx, mut internal_msg_rx) = mpsc::unbounded_channel::<InternalMessage>();
 
+    // Safety net against poor AsyncRead trait implementations.
+    const MAX_CONSECUTIVE_PIPE_FAILURES: u8 = 5;
+    let mut nb_consecutive_pipe_failures = 0;
+
     loop {
         // NOTE: Current task is the "jmux scheduler" or "jmux orchestrator".
         // It handles the JMUX context and communicates with other tasks.
@@ -398,10 +403,23 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                 };
 
                 let msg = match msg {
-                    Ok(msg) => msg,
+                    Ok(msg) => {
+                        nb_consecutive_pipe_failures = 0;
+                        msg
+                    },
                     Err(e) => {
                         error!(log, "JMUX pipe error: {:?}", e);
-                        continue;
+
+                        nb_consecutive_pipe_failures += 1;
+                        if nb_consecutive_pipe_failures > MAX_CONSECUTIVE_PIPE_FAILURES {
+                            // Some underlying `AsyncRead` implementations might handle errors poorly
+                            // and cause infinite polling on errors such as broken pipe (this should
+                            // stop instead of returning the same error indefinitely).
+                            // Hence, this safety net to escape from such infinite loops.
+                            anyhow::bail!("forced JMUX proxy shutdown because of too many consecutive pipe failures");
+                        } else {
+                            continue;
+                        }
                     }
                 };
 
