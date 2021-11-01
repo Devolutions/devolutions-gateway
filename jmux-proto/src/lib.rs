@@ -1,3 +1,5 @@
+//! [Specification document](https://github.com/awakecoding/qmux/blob/protocol-update/SPEC.md)
+
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use core::fmt;
 
@@ -256,7 +258,17 @@ pub struct ReasonCode(pub u32);
 
 impl fmt::Display for ReasonCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{:08X}", self.0)
+        let desc = match self.0 {
+            0x01 => "GENERAL_FAILURE",
+            0x02 => "CONNECTION_NOT_ALLOWED_BY_RULESET",
+            0x03 => "NETWORK_UNREACHABLE",
+            0x04 => "HOST_UNREACHABLE",
+            0x05 => "CONNECTION_REFUSED",
+            0x06 => "TTL_EXPIRED",
+            0x08 => "ADDRESS_TYPE_NOT_SUPPORTED",
+            0x00 | 0x07 | 0x09.. => "OTHER",
+        };
+        write!(f, "{} (0x{:08X})", desc, self.0)
     }
 }
 
@@ -552,10 +564,20 @@ impl ChannelWindowAdjust {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct ChannelData {
     pub recipient_channel_id: u32,
     pub transfer_data: Vec<u8>,
+}
+
+// We don't want to print `transfer_data` content (usually too big)
+impl fmt::Debug for ChannelData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ChannelData")
+            .field("recipient_channel_id", &self.recipient_channel_id)
+            .field("transfer_data.len()", &self.transfer_data.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ChannelData {

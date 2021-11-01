@@ -55,7 +55,7 @@ pub async fn tcp_listener_task(
                             let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream });
                         }
                         Some(JmuxApiResponse::Failure { id, reason_code }) => {
-                            warn!(log, "Channel {} failed with reason code: {}", id, reason_code);
+                            debug!(log, "Channel {} failure: {}", id, reason_code);
                         }
                         None => {}
                     }
@@ -146,8 +146,7 @@ async fn socks5_process_socket(
         let id = match receiver.recv().await.context("negotiation interrupted")? {
             JmuxApiResponse::Success { id } => id,
             JmuxApiResponse::Failure { id, reason_code } => {
-                warn!(log, "Channel {} failed with reason code: {}", id, reason_code);
-                anyhow::bail!("Channel creation failed");
+                anyhow::bail!("Channel {} failure: {}", id, reason_code);
             }
         };
 

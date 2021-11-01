@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
+use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
 use slog::{crit, info, o, Logger};
 use std::env;
@@ -186,7 +187,7 @@ Example: SOCKS5 to JMUX proxy
         .usage(usage)
         .action(jmux_proxy_action);
 
-    apply_common_flags(cmd)
+    apply_jmux_flags(apply_common_flags(cmd))
 }
 
 pub fn jmux_proxy_action(c: &Context) {
@@ -197,6 +198,7 @@ pub fn jmux_proxy_action(c: &Context) {
             pipe_mode: args.pipe_mode,
             proxy_cfg: args.common.proxy_cfg,
             listener_modes: args.listener_modes,
+            jmux_cfg: args.jmux_cfg,
         };
 
         let jmux_proxy_log = log.new(o!("action" => JMUX_PROXY_SUBCOMMAND));
@@ -344,15 +346,26 @@ impl ForwardArgs {
     }
 }
 
+fn apply_jmux_flags(cmd: Command) -> Command {
+    cmd.flag(Flag::new("allow-all", FlagType::Bool).description("Allow all redirections"))
+}
+
 struct JmuxProxyArgs {
     common: CommonArgs,
     pipe_mode: PipeMode,
     listener_modes: Vec<ListenerMode>,
+    jmux_cfg: JmuxConfig,
 }
 
 impl JmuxProxyArgs {
     fn parse(c: &Context) -> anyhow::Result<Self> {
         let common = CommonArgs::parse(JMUX_PROXY_SUBCOMMAND, c)?;
+
+        let jmux_cfg = if c.bool_flag("allow-all") {
+            JmuxConfig::permissive()
+        } else {
+            JmuxConfig::client()
+        };
 
         let arg_pipe = c.args.get(0).context("<PIPE> is missing")?.clone();
         let pipe_mode = parse_pipe_mode(arg_pipe).context("Bad <PIPE>")?;
@@ -368,6 +381,7 @@ impl JmuxProxyArgs {
             common,
             pipe_mode,
             listener_modes,
+            jmux_cfg,
         })
     }
 }
