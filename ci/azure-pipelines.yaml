@@ -15,477 +15,477 @@ stages:
 
          container: devolutions/toolbox:latest
 
-        #  steps:
-        #   - checkout: self
-        #     clean: true
-        #     fetchDepth: 1
-
-        #   - task: PublishBuildArtifacts@1
-        #     inputs:
-        #       pathToPublish: VERSION
-        #       artifactName: version
-
-  # - stage: jetsocat
-  #   jobs:
-  #     - job: Linux_x86_64
-  #       pool:
-  #         name: 'Devolutions - Linux containers'
-
-  #       workspace:
-  #         clean: all
-
-  #       container: devolutions/waykbuilder:linux
-
-  #       variables:
-  #         TargetPlatform: "linux"
-  #         TargetArchitecture: "x86_64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
-  #             $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $CargoPackage = "jetsocat"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
-  #             Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
-  #             CARGO_PACKAGE: "$(CargoPackage)"
-  #           displayName: Building jetsocat
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: jetsocat
-
-  #     - job: Windows_x86_64
-  #       pool:
-  #         name: 'Devolutions - Windows containers'
-
-  #       workspace:
-  #         clean: all
-
-  #       container: devolutions/waykbuilder:vstools2k19
-
-  #       variables:
-  #         TargetPlatform: "windows"
-  #         TargetArchitecture: "x86_64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - task: DownloadSecureFile@1
-  #           inputs:
-  #             secureFile: CodeSigningCertificateUnsecure.pfx
-
-  #         - task: CopyFiles@1
-  #           inputs:
-  #             sourceFolder: $(Agent.TempDirectory)
-  #             targetFolder: $(Build.Repository.LocalPath)
-  #             contents: 'CodeSigningCertificateUnsecure.pfx'
-
-  #         - powershell: |
-  #             $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-  #             Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
-  #           displayName: Import signing certificate
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
-  #             $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $CargoPackage = "jetsocat"
-  #             $CargoNoDefaultFeatures = "true"
-  #             $CargoFeatures = "native-tls"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
-  #             Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
-  #             Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
-  #             Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
-  #             CARGO_PACKAGE: "$(CargoPackage)"
-  #             CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
-  #             CARGO_FEATURES: "$(CargoFeatures)"
-  #             SIGNTOOL_NAME: "$(SignToolName)"
-  #           displayName: Building jetsocat
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: jetsocat
-
-  #     - job: Windows_x86
-  #       pool:
-  #         name: 'Devolutions - Windows containers'
-
-  #       workspace:
-  #         clean: all
-
-  #       container: devolutions/waykbuilder:vstools2k19
-
-  #       variables:
-  #         TargetPlatform: "windows"
-  #         TargetArchitecture: "x86"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - task: DownloadSecureFile@1
-  #           inputs:
-  #             secureFile: CodeSigningCertificateUnsecure.pfx
-
-  #         - task: CopyFiles@1
-  #           inputs:
-  #             sourceFolder: $(Agent.TempDirectory)
-  #             targetFolder: $(Build.Repository.LocalPath)
-  #             contents: 'CodeSigningCertificateUnsecure.pfx'
-
-  #         - powershell: |
-  #             $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-  #             Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
-  #           displayName: Import signing certificate
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
-  #             $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $CargoPackage = "jetsocat"
-  #             $CargoNoDefaultFeatures = "true"
-  #             $CargoFeatures = "native-tls"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
-  #             Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
-  #             Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
-  #             Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
-  #             CARGO_PACKAGE: "$(CargoPackage)"
-  #             CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
-  #             CARGO_FEATURES: "$(CargoFeatures)"
-  #             SIGNTOOL_NAME: "$(SignToolName)"
-  #           displayName: Building jetsocat
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: jetsocat
-
-  #     - job: Macos_x86_64
-  #       pool:
-  #         name: 'Devolutions - macOS'
-
-  #       workspace:
-  #         clean: all
-
-  #       variables:
-  #         TargetPlatform: "macos"
-  #         TargetArchitecture: "x86_64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
-  #             $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $CargoPackage = "jetsocat"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
-  #             Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
-  #             CARGO_PACKAGE: "$(CargoPackage)"
-  #           displayName: Building jetsocat
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: jetsocat
-
-  #     - job: Macos_arm64
-  #       pool:
-  #         name: 'Devolutions - macOS'
-
-  #       workspace:
-  #         clean: all
-
-  #       variables:
-  #         TargetPlatform: "macos"
-  #         TargetArchitecture: "arm64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
-  #             $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $CargoPackage = "jetsocat"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
-  #             Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
-  #             CARGO_PACKAGE: "$(CargoPackage)"
-  #           displayName: Building jetsocat
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: jetsocat
-
-  # - stage: 'Devolutions_Gateway'
-  #   jobs:
-  #     - job: Linux_64_bit
-  #       pool:
-  #         name: 'Devolutions - Linux containers'
-
-  #       workspace:
-  #         clean: all
-
-  #       container: devolutions/waykbuilder:linux
-
-  #       variables:
-  #         TargetPlatform: "linux"
-  #         TargetArchitecture: "x86_64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - script: |
-  #             echo "Check formatting"
-  #             cargo fmt --all -- --check
-  #             if ! [ $? -eq 0 ] ; then
-  #                 echo "Bad formatting, please run 'cargo +stable fmt --all'"
-  #                 exit 1
-  #             fi
-  #           displayName: Checking code format
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
-  #             $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
-  #           displayName: Building Devolutions Gateway
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
-  #             arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
-  #           displayName: Packaging Devolutions Gateway
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: devolutions-gateway
-
-  #     - job: Windows_64_bit
-  #       pool:
-  #         name: 'Devolutions - Windows containers'
-
-  #       workspace:
-  #         clean: all
-
-  #       container: devolutions/waykbuilder:vstools2k19
-
-  #       variables:
-  #         TargetPlatform: "windows"
-  #         TargetArchitecture: "x86_64"
-
-  #       steps:
-  #         - checkout: self
-  #           clean: true
-  #           fetchDepth: 1
-
-  #         - task: DownloadSecureFile@1
-  #           inputs:
-  #             secureFile: CodeSigningCertificateUnsecure.pfx
-
-  #         - task: CopyFiles@1
-  #           inputs:
-  #             sourceFolder: $(Agent.TempDirectory)
-  #             targetFolder: $(Build.Repository.LocalPath)
-  #             contents: 'CodeSigningCertificateUnsecure.pfx'
-
-  #         - powershell: |
-  #             $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
-  #             Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
-  #             Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
-  #           displayName: Import signing certificate
-
-  #         - powershell: |
-  #             $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
-  #             $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
-  #             $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
-  #             $PackageFileName = "DevolutionsGateway-$(TargetArchitecture)-${PackageVersion}.msi"
-  #             $PSModuleOutputPath = "$(Build.StagingDirectory)/PowerShell"
-  #             $DGatewayPSModulePath = "$PSModuleOutputPath/DevolutionsGateway"
-  #             $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
-  #             $DGatewayPackage = "$TargetOutputPath/$PackageFileName"
-  #             Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
-  #             Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=PSModuleOutputPath]$PSModuleOutputPath"
-  #             Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
-  #             Write-Host "##vso[task.setvariable variable=DGatewayPSModulePath]$DGatewayPSModulePath"
-  #             Write-Host "##vso[task.setvariable variable=DGatewayPackage]$DGatewayPackage"
-  #           displayName: Load dynamic variables
-
-  #         - powershell: |
-  #             pip3 install conan==1.40.0
-  #             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-  #           displayName: Install conan settings
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
-  #             arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
-  #             SIGNTOOL_NAME: "$(SignToolName)"
-  #           displayName: Building Devolutions Gateway
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)\powershell\build.ps1
-  #           env:
-  #             PSMODULE_OUTPUT_PATH: "$(PSModuleOutputPath)"
-  #           displayName: Building PowerShell Module
-
-  #         - task: PowerShell@2
-  #           inputs:
-  #             targetType: 'filePath'
-  #             filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
-  #             arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
-  #           env:
-  #             TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
-  #             DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
-  #             DGATEWAY_PACKAGE: "$(DGatewayPackage)"
-  #             DGATEWAY_PSMODULE_PATH: "$(DGatewayPSModulePath)"
-  #             DGATEWAY_PSMODULE_CLEAN: "1"
-  #             SIGNTOOL_NAME: "$(SignToolName)"
-  #           displayName: Packaging Devolutions Gateway
-
-  #         - task: PublishBuildArtifacts@1
-  #           inputs:
-  #             pathToPublish: $(Build.StagingDirectory)
-  #             artifactName: devolutions-gateway
+         steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: VERSION
+              artifactName: version
+
+  - stage: jetsocat
+    jobs:
+      - job: Linux_x86_64
+        pool:
+          name: 'Devolutions - Linux containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:linux
+
+        variables:
+          TargetPlatform: "linux"
+          TargetArchitecture: "x86_64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
+      - job: Windows_x86_64
+        pool:
+          name: 'Devolutions - Windows containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86_64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              $CargoNoDefaultFeatures = "true"
+              $CargoFeatures = "native-tls"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+              Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
+              Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+              CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
+              CARGO_FEATURES: "$(CargoFeatures)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
+      - job: Windows_x86
+        pool:
+          name: 'Devolutions - Windows containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              $CargoNoDefaultFeatures = "true"
+              $CargoFeatures = "native-tls"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+              Write-Host "##vso[task.setvariable variable=CargoNoDefaultFeatures]$CargoNoDefaultFeatures"
+              Write-Host "##vso[task.setvariable variable=CargoFeatures]$CargoFeatures"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+              CARGO_NO_DEFAULT_FEATURES: "$(CargoNoDefaultFeatures)"
+              CARGO_FEATURES: "$(CargoFeatures)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
+      - job: Macos_x86_64
+        pool:
+          name: 'Devolutions - macOS'
+
+        workspace:
+          clean: all
+
+        variables:
+          TargetPlatform: "macos"
+          TargetArchitecture: "x86_64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
+      - job: Macos_arm64
+        pool:
+          name: 'Devolutions - macOS'
+
+        workspace:
+          clean: all
+
+        variables:
+          TargetPlatform: "macos"
+          TargetArchitecture: "arm64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "jetsocat_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $JetsocatExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $CargoPackage = "jetsocat"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=JetsocatExecutable]$JetsocatExecutable"
+              Write-Host "##vso[task.setvariable variable=CargoPackage]$CargoPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              JETSOCAT_EXECUTABLE: "$(JetsocatExecutable)"
+              CARGO_PACKAGE: "$(CargoPackage)"
+            displayName: Building jetsocat
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: jetsocat
+
+  - stage: 'Devolutions_Gateway'
+    jobs:
+      - job: Linux_64_bit
+        pool:
+          name: 'Devolutions - Linux containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:linux
+
+        variables:
+          TargetPlatform: "linux"
+          TargetArchitecture: "x86_64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - script: |
+              echo "Check formatting"
+              cargo fmt --all -- --check
+              if ! [ $? -eq 0 ] ; then
+                  echo "Bad formatting, please run 'cargo +stable fmt --all'"
+                  exit 1
+              fi
+            displayName: Checking code format
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture)"
+              $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+            displayName: Building Devolutions Gateway
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)/ci/tlk.ps1
+              arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+            displayName: Packaging Devolutions Gateway
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: devolutions-gateway
+
+      - job: Windows_64_bit
+        pool:
+          name: 'Devolutions - Windows containers'
+
+        workspace:
+          clean: all
+
+        container: devolutions/waykbuilder:vstools2k19
+
+        variables:
+          TargetPlatform: "windows"
+          TargetArchitecture: "x86_64"
+
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 1
+
+          - task: DownloadSecureFile@1
+            inputs:
+              secureFile: CodeSigningCertificateUnsecure.pfx
+
+          - task: CopyFiles@1
+            inputs:
+              sourceFolder: $(Agent.TempDirectory)
+              targetFolder: $(Build.Repository.LocalPath)
+              contents: 'CodeSigningCertificateUnsecure.pfx'
+
+          - powershell: |
+              $secureString = ConvertTo-SecureString "$(WINDOWS_SIGNING_PASSPHRASE)" -AsPlainText -Force
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\LocalMachine\My -Password $secureString
+              Import-PfxCertificate -FilePath CodeSigningCertificateUnsecure.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secureString
+              Write-Host "##vso[task.setvariable variable=SignToolName]Devolutions"
+            displayName: Import signing certificate
+
+          - powershell: |
+              $PackageVersion = Get-Content "$(Build.Repository.LocalPath)\VERSION"
+              $TargetOutputPath = "$(Build.StagingDirectory)/$(TargetPlatform)/$(TargetArchitecture)"
+              $ExecutableFileName = "DevolutionsGateway_$(TargetPlatform)_${PackageVersion}_$(TargetArchitecture).exe"
+              $PackageFileName = "DevolutionsGateway-$(TargetArchitecture)-${PackageVersion}.msi"
+              $PSModuleOutputPath = "$(Build.StagingDirectory)/PowerShell"
+              $DGatewayPSModulePath = "$PSModuleOutputPath/DevolutionsGateway"
+              $DGatewayExecutable = "$TargetOutputPath/$ExecutableFileName"
+              $DGatewayPackage = "$TargetOutputPath/$PackageFileName"
+              Write-Host "##vso[task.setvariable variable=PackageVersion]$PackageVersion"
+              Write-Host "##vso[task.setvariable variable=TargetOutputPath]$TargetOutputPath"
+              Write-Host "##vso[task.setvariable variable=PSModuleOutputPath]$PSModuleOutputPath"
+              Write-Host "##vso[task.setvariable variable=DGatewayExecutable]$DGatewayExecutable"
+              Write-Host "##vso[task.setvariable variable=DGatewayPSModulePath]$DGatewayPSModulePath"
+              Write-Host "##vso[task.setvariable variable=DGatewayPackage]$DGatewayPackage"
+            displayName: Load dynamic variables
+
+          - powershell: |
+              pip3 install conan==1.40.0
+              conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            displayName: Install conan settings
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: build -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Building Devolutions Gateway
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\powershell\build.ps1
+            env:
+              PSMODULE_OUTPUT_PATH: "$(PSModuleOutputPath)"
+            displayName: Building PowerShell Module
+
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: $(System.DefaultWorkingDirectory)\ci\tlk.ps1
+              arguments: package -Platform $(TargetPlatform) -Architecture $(TargetArchitecture)
+            env:
+              TARGET_OUTPUT_PATH: "$(TargetOutputPath)"
+              DGATEWAY_EXECUTABLE: "$(DGatewayExecutable)"
+              DGATEWAY_PACKAGE: "$(DGatewayPackage)"
+              DGATEWAY_PSMODULE_PATH: "$(DGatewayPSModulePath)"
+              DGATEWAY_PSMODULE_CLEAN: "1"
+              SIGNTOOL_NAME: "$(SignToolName)"
+            displayName: Packaging Devolutions Gateway
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: $(Build.StagingDirectory)
+              artifactName: devolutions-gateway

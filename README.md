@@ -1,7 +1,6 @@
 # devolutions-gateway
 
-[![Build Status](https://travis-ci.com/vaffeine/devolutions-jet.svg?token=FxErzCAno8oL7CSUGoD1&branch=rdp)](https://travis-ci.com/vaffeine/devolutions-jet)
-[![codecov](https://codecov.io/gh/vaffeine/devolutions-jet/branch/rdp/graph/badge.svg?token=eXgEoo0BnD)](https://codecov.io/gh/vaffeine/devolutions-jet)
+[![Build Status](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml)
 
 A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
 
