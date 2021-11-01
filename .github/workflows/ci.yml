@@ -97,6 +97,11 @@ jobs:
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
           $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $ExecutableFileName = "$($ExecutableFileName).exe"
+          }
+
           $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
           $CargoPackage = "jetsocat"
           echo "::set-output name=staging-path::$StagingPath"
