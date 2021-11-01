@@ -126,7 +126,7 @@ jobs:
       - name: Publish PowerShell module
         shell: pwsh
         run: |
-          $StagingPath = ${{ steps.download-artifacts.outputs.staging-path }}
+          $StagingPath = "${{ steps.download-artifacts.outputs.staging-path }}""
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
           $Module = Join-Path $StagingPath PowerShell
           Expand-Archive -Path $Archive -DestinationPath $Module
