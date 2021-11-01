@@ -3,23 +3,24 @@ name: CI
 on:
   workflow_dispatch:
 
-env:
-  rust_toolchain: 1.56
-
 jobs:
 
   preflight:
     name: preflight
     runs-on: ubuntu-18.04
+    outputs:
+      rust-channel: ${{ steps.rust-toolchain.outputs.rust-channel }}
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
-      - name: Configure Rust toolchain
+      - name: Configure rust toolchain
+        id: rust-toolchain
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }} --component rustfmt
-          rustup default ${{ env.rust_toolchain }}
+          $Channel = Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData
+          rustup toolchain install $Channel
+          echo "::set-output name=rust-channel::$Channel"
 
       - name: Check formatting
         run: |
@@ -38,6 +39,7 @@ jobs:
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
+    needs: preflight
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
       CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
@@ -95,26 +97,24 @@ jobs:
           echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
           echo "::set-output name=cargo-package::$CargoPackage"
 
+      - name: Configure rust toolchain
+        run: |
+          rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+
       - name: Configure Linux runner
         if: runner.os == 'Linux'
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }}
-          rustup default ${{ env.rust_toolchain }}
           sudo apt update
           sudo apt install python3-wget python3-setuptools
 
       - name: Configure Windows runner
         if: matrix.os == 'windows'
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }}
-          rustup default ${{ env.rust_toolchain }}
           rustup target add i686-pc-windows-msvc
 
       - name: Configure macOS runner
         if: matrix.os == 'macos'
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }}
-          rustup default ${{ env.rust_toolchain }}
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
 
@@ -152,6 +152,7 @@ jobs:
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
+    needs: preflight
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
       CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
@@ -211,19 +212,19 @@ jobs:
           echo "::set-output name=dgateway-executable::$DGatewayExecutable"
           echo "::set-output name=cargo-package::$CargoPackage"
 
+      - name: Configure rust toolchain
+        run: |
+          rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+
       - name: Configure Linux runner
         if: runner.os == 'Linux'
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }}
-          rustup default ${{ env.rust_toolchain }}
           sudo apt update
           sudo apt install dh-make python3-wget python3-setuptools libsystemd-dev
 
       - name: Configure Windows runner
         if: runner.os == 'Windows'
         run: |
-          rustup toolchain install ${{ env.rust_toolchain }}
-          rustup default ${{ env.rust_toolchain }}
           echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup code signing
