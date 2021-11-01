@@ -320,12 +320,10 @@ async fn start_tcp_server(
                                     .serve(JetTransport::new_tcp(conn), tls_acceptor)
                                     .await
                                 }
-                                [b'J', b'M', b'U', b'X'] => {
-                                    return Err(io::Error::new(
-                                        io::ErrorKind::Other,
-                                        "JMUX listener not yet implemented",
-                                    ));
-                                }
+                                [b'J', b'M', b'U', b'X'] => Err(io::Error::new(
+                                    io::ErrorKind::Other,
+                                    "JMUX TCP listener not yet implemented",
+                                )),
                                 _ => {
                                     GenericClient {
                                         config,

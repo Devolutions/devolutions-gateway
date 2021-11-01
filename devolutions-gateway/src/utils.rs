@@ -52,7 +52,7 @@ macro_rules! io_try {
 }
 
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
-    let der = get_der_cert_from_stream(&stream)?;
+    let der = get_der_cert_from_stream(stream)?;
     get_pub_key_from_der(&der)
 }
 

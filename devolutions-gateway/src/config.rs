@@ -126,6 +126,7 @@ pub struct Config {
     pub certificate: CertificateConfig,
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
+    // FIXME: these are plugin paths, type should be `PathBuf`
     pub plugins: Option<Vec<String>>,
     pub recording_path: Option<PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
@@ -711,8 +712,8 @@ impl Config {
         // plugins parsing
         let plugins = matches
             .values_of(ARG_PLUGINS)
-            .unwrap_or_else(Default::default)
-            .map(|plugin| plugin.to_string())
+            .unwrap_or_default()
+            .map(|plugin_path| plugin_path.to_owned())
             .collect::<Vec<String>>();
 
         if !plugins.is_empty() {
@@ -738,7 +739,7 @@ impl Config {
         // listeners parsing
 
         let mut listeners = Vec::new();
-        for listener in matches.values_of(ARG_LISTENERS).unwrap_or_else(Default::default) {
+        for listener in matches.values_of(ARG_LISTENERS).unwrap_or_default() {
             let mut internal_url;
             let mut external_url;
 
@@ -853,13 +854,11 @@ impl Config {
             url_map_scheme_ws_to_http(&mut listener.external_url);
         }
 
-        let http_listeners: Vec<ListenerConfig> = listeners
+        let has_at_least_one_http_listener = listeners
             .iter()
-            .filter(|listener| matches!(listener.internal_url.scheme(), "http" | "https"))
-            .cloned()
-            .collect();
+            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https"));
 
-        if http_listeners.is_empty() {
+        if !has_at_least_one_http_listener {
             eprintln!("At least one HTTP listener is required");
             return None;
         }
