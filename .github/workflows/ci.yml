@@ -19,7 +19,7 @@ jobs:
         id: rust-toolchain
         shell: pwsh
         run: |
-          $Channel = Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData
+          $Channel = (Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData).channel
           rustup toolchain install $Channel
           echo "::set-output name=rust-channel::$Channel"
 
