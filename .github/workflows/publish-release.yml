@@ -1,11 +1,134 @@
 name: publish-release
 on:
   workflow_dispatch:
+    inputs:
+      run-number:
+        description: 'run id'
+        default: "1409947010"
+        required: true
+
+concurrency: publish-release
 
 jobs:
-  todo:
+  containers:
+    name: container [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [ x86_64 ]
+        os: [ windows, linux ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: linux
+            runner: ubuntu-18.04
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+
+      - name: Download artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download ${{ github.events.inputs.run-number }} -n devolutions-gateway -D $Env:RUNNER_TEMP -R Devolutions/devolutions-gateway
+
+      - name: Deploy artifacts
+        id: deploy-artifacts
+        shell: pwsh
+        run: |
+          $PkgDir = Join-Path $pwd package $Env:RUNNER_OS # RUNNER_OS is camelcase
+          echo "::set-output name=package-path::$PkgDir"
+          
+          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $SourceFileName = "$($SourceFileName).exe"
+            $TargetFileName = "DevolutionsGateway.exe"
+          } else { 
+            $TargetFileName = "devolutions-gateway"
+          }
+
+          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path $Env:RUNNER_TEMP
+          $TargetPath = Join-Path $PkgDir $TargetFileName
+          Copy-Item $SourcePath $TargetPath
+
+          if ($Env:RUNNER_OS -eq "Linux") {
+            Invoke-Expression "chmod +x $TargetPath"
+          }
+
+      - name: Build and publish Linux container
+        shell: pwsh
+        if: matrix.os == 'linux'
+        working-directory: ${{ steps.deploy-artifacts.outputs.package-path }}
+        run: |
+          docker build -t devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-buster .
+
+      - name: Build and publish servercore container
+        shell: pwsh
+        if: matrix.os == 'windows'
+        working-directory: ${{ steps.deploy-artifacts.outputs.package-path }}
+        run: |
+          docker build -t devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-servercore-ltsc2019 .
+
+      - name: Build and publish nanoserver container
+        shell: pwsh
+        if: matrix.os == 'windows'
+        working-directory: ${{ steps.deploy-artifacts.outputs.package-path }}
+        run: |
+          docker build --build-arg FROM_IMAGE=mcr.microsoft.com/windows/nanoserver:1809 -t devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-nanoserver-1809 .
+
+  release:
+    name: release
     runs-on: ubuntu-18.04
 
     steps:
-      - name: todo
-        run: echo "hello world"
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+
+      - name: Download artifacts
+        id: download-artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $StagingPath = Join-Path $Env:RUNNER_TEMP artifacts
+          echo "::set-output name=staging-path::$StagingPath"
+          gh run download ${{ github.events.inputs.run-number }} -D $StagingPath -R Devolutions/devolutions-gateway
+
+      - name: Create GitHub release
+        shell: pwsh
+        run: |
+          $StagingPath = ${{ steps.download-artifacts.outputs.staging-path }}
+          $HashPath = Join-Path $StagingPath checksums
+          $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
+
+          $GhCmd = $(@('gh', 'release', 'create', 'v${{ steps.get-version.outputs.version }}', $HashPath) + $Files.Path) -Join ' '
+          Write-Host $GhCmd
+
+      - name: Publish PowerShell module
+        shell: pwsh
+        run: |
+          $StagingPath = ${{ steps.download-artifacts.outputs.staging-path }}
+          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
+          $Module = Join-Path $StagingPath PowerShell
+          Expand-Archive -Path $Archive -DestinationPath $Module
+
+          Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey 123456 -WhatIf
