@@ -22,6 +22,8 @@ enum WsStreamSendState {
     SendInProgress,
 }
 
+// FIXME: re-use implementation from jetsocat (it is more robust)
+
 pub struct WsStream {
     inner: WsStreamWrapper,
     previous_message: Option<Cursor<Vec<u8>>>,
@@ -74,15 +76,17 @@ impl AsyncRead for WsStream {
                 Poll::Ready(Ok(()))
             }
             None => {
-                let message_result = match self.inner {
+                let message = match self.inner {
                     WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
                     WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
                     WsStreamWrapper::Tls((ref mut stream, _)) => Pin::new(stream).poll_next(cx),
                 };
 
-                let message = ready!(message_result)
-                    .map(|e| e.map_err(tungstenite_err_to_io_err))
-                    .unwrap_or_else(|| Err(io::Error::new(io::ErrorKind::Other, "Connection closed".to_string())))?;
+                let message = match ready!(message) {
+                    Some(Ok(m)) => m,
+                    Some(Err(e)) => return Poll::Ready(Err(tungstenite_err_to_io_err(e))),
+                    None => return Poll::Ready(Ok(())),
+                };
 
                 slog_scope::trace!(
                     "New {} message received (length: {} bytes)",

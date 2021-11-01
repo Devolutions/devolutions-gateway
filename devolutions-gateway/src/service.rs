@@ -405,12 +405,18 @@ async fn start_websocket_server(
 
             let service = service_fn(move |req| {
                 let mut ws_serve = websocket_service.clone();
-                async move { ws_serve.handle(req, remote_addr).await }
+                async move {
+                    {
+                        ws_serve.handle(req, remote_addr).await.map_err(|e| {
+                            debug!("WebSocket HTTP server error: {}", e);
+                            e
+                        })
+                    }
+                }
             });
 
             tokio::spawn(async move {
                 let serve_connection = http.serve_connection(connection, service).with_upgrades();
-                // use .compat to run 0.2 hyper on tokio 0.3 runtime
                 let _ = serve_connection.with_logger(listener_logger).await.map_err(|_| ());
             });
         };

@@ -117,7 +117,7 @@ pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, &str)> {
     }
 }
 
-fn validate_bearer_token(config: &Config, token: &str) -> Result<JetAccessTokenClaims, String> {
+pub fn validate_bearer_token(config: &Config, token: &str) -> Result<JetAccessTokenClaims, String> {
     use picky::jose::jwt::{JwtSig, JwtValidator};
 
     let key = config

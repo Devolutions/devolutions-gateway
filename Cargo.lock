@@ -695,6 +695,7 @@ dependencies = [
  "indexmap",
  "ironrdp",
  "jet-proto",
+ "jmux-proxy",
  "lazy_static",
  "native-tls",
  "packet",

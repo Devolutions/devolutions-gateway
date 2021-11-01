@@ -8,6 +8,7 @@ pub enum JetAccessTokenClaims {
     Association(JetAssociationTokenClaims),
     Scope(JetScopeTokenClaims),
     Bridge(JetBridgeTokenClaims),
+    Jmux(JetJmuxTokenClaims),
 }
 
 #[derive(Deserialize, Clone)]
@@ -98,4 +99,9 @@ pub enum JetAccessScope {
 #[derive(Clone, Deserialize)]
 pub struct JetBridgeTokenClaims {
     pub target_host: String, // "<HOST>:<PORT>"
+}
+
+#[derive(Clone, Deserialize)]
+pub struct JetJmuxTokenClaims {
+    filtering: Option<()>, // TODO
 }

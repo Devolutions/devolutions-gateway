@@ -10,6 +10,7 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 
 [dependencies]
 jet-proto = { path = "../jet-proto" }
+jmux-proxy = { path = "../jmux-proxy" }
 picky = { version = "6.3", default-features = false, features = ["jose"] }
 ceviche = "0.4"
 ctrlc = "3.1"
