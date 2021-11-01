@@ -21,6 +21,7 @@ jobs:
         run: |
           $Channel = (Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData).channel
           rustup toolchain install $Channel
+          rustup component add rustfmt
           echo "::set-output name=rust-channel::$Channel"
 
       - name: Check formatting
