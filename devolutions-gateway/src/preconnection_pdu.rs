@@ -36,7 +36,7 @@ pub fn extract_association_claims(
             .as_ref()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Delegation key is missing"))?;
 
-        jwe_token = Jwe::decode(&encrypted_jwt, &delegation_key).map_err(|e| {
+        jwe_token = Jwe::decode(encrypted_jwt, delegation_key).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Failed to decode encrypted JWT routing token: {}", e),
@@ -62,7 +62,7 @@ pub fn extract_association_claims(
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
     let jwt_token =
-        JwtSig::<JetAssociationTokenClaims>::decode(signed_jwt, &provisioner_key, &validator).map_err(|e| {
+        JwtSig::<JetAssociationTokenClaims>::decode(signed_jwt, provisioner_key, &validator).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Failed to decode signed payload of JWT routing token: {}", e),

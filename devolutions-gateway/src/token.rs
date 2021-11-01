@@ -33,10 +33,7 @@ pub struct JetAssociationTokenClaims {
 
 impl JetAssociationTokenClaims {
     pub fn contains_secrets(&self) -> bool {
-        match &self.jet_cm {
-            ConnectionMode::Fwd { creds: Some(_), .. } => true,
-            _ => false,
-        }
+        matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
     }
 }
 

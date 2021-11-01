@@ -72,7 +72,7 @@ async fn auth_middleware(
     };
 
     if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
-        match validate_bearer_token(&config, &token) {
+        match validate_bearer_token(&config, token) {
             Ok(jet_token) => {
                 request.extensions_mut().insert(jet_token);
                 return chain.next(ctx).await;
@@ -128,7 +128,7 @@ fn validate_bearer_token(config: &Config, token: &str) -> Result<JetAccessTokenC
     let now = JwtDate::new_with_leeway(Utc::now().timestamp(), 10 * 60);
     let validator = JwtValidator::strict(&now);
 
-    let jwt = JwtSig::<JetAccessTokenClaims>::decode(&token, key, &validator)
+    let jwt = JwtSig::<JetAccessTokenClaims>::decode(token, key, &validator)
         .map_err(|e| format!("Invalid jet token: {:?}", e))?;
 
     Ok(jwt.claims)
