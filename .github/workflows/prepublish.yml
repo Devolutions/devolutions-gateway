@@ -1,0 +1,23 @@
+name: pre-publish
+on:
+  workflow_dispatch:
+    inputs:
+      run-number:
+        description: 'run id'
+        default: "1408819576"
+        required: true
+
+jobs:
+  codesign:
+    runs-on: windows-2019
+    #environment: build-and-publish
+
+    steps:
+      - name: Download artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run:
+          gh run download ${{ github.events.inputs.run-number }}
+
+      - name: list
+        run: ls -lR

@@ -274,3 +274,4 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
+
