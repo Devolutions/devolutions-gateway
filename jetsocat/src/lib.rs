@@ -6,6 +6,7 @@ pub mod proxy;
 mod io;
 mod utils;
 
+use jmux_proxy::JmuxConfig;
 use slog::*;
 
 #[derive(Debug)]
@@ -42,6 +43,7 @@ pub struct JmuxProxyCfg {
     pub pipe_mode: pipe::PipeMode,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
     pub listener_modes: Vec<self::listener::ListenerMode>,
+    pub jmux_cfg: JmuxConfig,
 }
 
 pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
@@ -49,7 +51,9 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
     use pipe::open_pipe;
     use tokio::sync::mpsc;
 
-    let (request_sender, request_receiver) = mpsc::unbounded_channel();
+    debug!(log, "Configuration: {:?}", cfg);
+
+    let (api_request_tx, api_request_rx) = mpsc::unbounded_channel();
 
     for listener_mode in cfg.listener_modes {
         match listener_mode {
@@ -58,10 +62,10 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
                 destination_url,
             } => {
                 let listener_log = log.new(o!("TCP listener" => bind_addr.clone()));
-                let request_sender = request_sender.clone();
+                let api_request_tx = api_request_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) =
-                        tcp_listener_task(request_sender, bind_addr, destination_url, listener_log.clone()).await
+                        tcp_listener_task(api_request_tx, bind_addr, destination_url, listener_log.clone()).await
                     {
                         error!(listener_log, "Task failed: {:?}", e);
                     }
@@ -69,9 +73,9 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
             }
             ListenerMode::Socks5 { bind_addr } => {
                 let listener_log = log.new(o!("SOCKS5 listener" => bind_addr.clone()));
-                let request_sender = request_sender.clone();
+                let api_request_tx = api_request_tx.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = socks5_listener_task(request_sender, bind_addr, listener_log.clone()).await {
+                    if let Err(e) = socks5_listener_task(api_request_tx, bind_addr, listener_log.clone()).await {
                         error!(listener_log, "Task failed: {:?}", e);
                     }
                 });
@@ -84,5 +88,5 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
     let pipe = open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log).await?;
 
     // Start JMUX proxy over this pipe
-    jmux_proxy::start(request_sender, request_receiver, pipe.read, pipe.write, log).await
+    jmux_proxy::start(cfg.jmux_cfg, api_request_tx, api_request_rx, pipe.read, pipe.write, log).await
 }

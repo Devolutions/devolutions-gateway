@@ -103,14 +103,12 @@ impl<'a> ToDestAddr for &'a str {
             return addr.to_dest_addr();
         }
 
-        let parts: Vec<&str> = self.rsplitn(2, ':').collect();
+        let (host, port) = self
+            .rsplit_once(':')
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad socket address format"))?;
 
-        if parts.len() < 2 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "bad socket address format"));
-        }
-
-        let host = parts[1].to_owned();
-        let port = parts[0]
+        let host = host.to_owned();
+        let port = port
             .parse()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid port value: {}", e)))?;
 

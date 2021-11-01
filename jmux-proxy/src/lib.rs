@@ -4,7 +4,10 @@
 extern crate slog;
 
 mod codec;
+mod config;
 mod id_allocator;
+
+pub use self::config::{FilteringRule, JmuxConfig};
 
 use self::codec::JmuxCodec;
 use self::id_allocator::IdAllocator;
@@ -54,6 +57,7 @@ pub enum JmuxApiResponse {
 }
 
 pub async fn start(
+    cfg: JmuxConfig,
     api_request_tx: ApiRequestSender,
     api_request_rx: ApiRequestReceiver,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
@@ -73,6 +77,7 @@ pub async fn start(
     .spawn();
 
     let scheduler_task_handle = JmuxSchedulerTask {
+        cfg,
         jmux_stream,
         msg_to_send_tx,
         api_request_tx,
@@ -196,6 +201,7 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
         } = self;
 
         while let Some(msg) = msg_to_send_rx.recv().await {
+            trace!(log, "Send channel message: {:?}", msg);
             jmux_sink.feed(msg).await?;
             jmux_sink.flush().await?;
         }
@@ -209,6 +215,7 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 // ---------------------- //
 
 struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
+    cfg: JmuxConfig,
     jmux_stream: FramedRead<T, JmuxCodec>,
     msg_to_send_tx: MessageSender,
     api_request_tx: ApiRequestSender,
@@ -225,6 +232,7 @@ impl<T: AsyncRead + Unpin + Send + 'static> JmuxSchedulerTask<T> {
 
 async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSchedulerTask<T>) -> anyhow::Result<()> {
     let JmuxSchedulerTask {
+        cfg,
         mut jmux_stream,
         msg_to_send_tx,
         api_request_tx,
@@ -380,8 +388,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 }
             }
-            channel_msg = jmux_stream.next() => {
-                let channel_msg = match channel_msg {
+            msg = jmux_stream.next() => {
+                let msg = match msg {
                     Some(msg) => msg,
                     None => {
                         info!(log, "JMUX pipe was closed by peer");
@@ -389,7 +397,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 };
 
-                let channel_msg = match channel_msg {
+                let msg = match msg {
                     Ok(msg) => msg,
                     Err(e) => {
                         error!(log, "JMUX pipe error: {:?}", e);
@@ -397,13 +405,20 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 };
 
-                trace!(log, "Received channel message: {:?}", channel_msg);
+                trace!(log, "Received channel message: {:?}", msg);
 
-                match channel_msg {
+                match msg {
                     Message::Open(msg) => {
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
-                        info!(log, "{} request {}", peer_id, msg.destination_url);
+                        if let Err(e) = cfg.filtering.validate_target(&msg.destination_url) {
+                            debug!(log, "Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
+                            msg_to_send_tx
+                                .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, e.to_string()))
+                                .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                            continue;
+                        }
+
                         let local_id = match jmux_ctx.allocate_id() {
                             Some(id) => id,
                             None => {
@@ -414,13 +429,14 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 continue;
                             }
                         };
-                        debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
 
+                        debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
+                        info!(log, "({} {}) request {}", local_id, peer_id, msg.destination_url);
+
+                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.clone()));
 
                         let window_size_updated = Arc::new(Notify::new());
                         let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
-
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.clone()));
 
                         let channel = JmuxChannelCtx {
                             distant_id: peer_id,
@@ -552,17 +568,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     Message::OpenFailure(msg) => {
                         let id = LocalChannelId::from(msg.recipient_channel_id);
 
-                        warn!(log, "Couldn’t open channel for {} because of error {}: {}", id, msg.reason_code, msg.description);
-
-                        jmux_ctx.unregister(id);
-
-                        let api_response_tx = match pending_channels.remove(&id) {
-                            Some((_, sender)) => sender,
+                        let (destination_url, api_response_tx) = match pending_channels.remove(&id) {
+                            Some(pending) => pending,
                             None => {
                                 warn!(log, "Couldn’t find pending channel {}", id);
                                 continue;
                             },
                         };
+
+                        warn!(log, "{} -> {} channel opening failed [{}]: {}", id, destination_url, msg.reason_code, msg.description);
 
                         // It's fine to just ignore error here since the channel is closed anyway
                         let _ = api_response_tx.send(JmuxApiResponse::Failure { id, reason_code: msg.reason_code });
