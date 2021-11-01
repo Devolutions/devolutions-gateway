@@ -115,7 +115,7 @@ jobs:
       - name: Create GitHub release
         shell: pwsh
         run: |
-          $StagingPath = ${{ steps.download-artifacts.outputs.staging-path }}
+          $StagingPath = "${{ steps.download-artifacts.outputs.staging-path }}""
           $HashPath = Join-Path $StagingPath checksums
           $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
