@@ -48,8 +48,8 @@ jobs:
         run: |
           $PkgDir = Join-Path $pwd Package $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "::set-output name=package-path::$PkgDir"
-
-          $SourceFileName = "DevolutionsGateway_${{ matrix.os }}_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
+          
+          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $SourceFileName = "$($SourceFileName).exe"
