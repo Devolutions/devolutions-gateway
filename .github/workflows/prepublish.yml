@@ -39,7 +39,7 @@ jobs:
         run: |
           Get-ChildItem -Path devolutions-gateway -Recurse -Include "*.exe", "*.msi" | % { 
             Write-Host "Signing $_.FullName"
-            $SignCmd = @(
+            $SignCmd = $(@(
               'signtool', 
               'sign', 
               '/fd', 'SHA256', 
@@ -48,10 +48,10 @@ jobs:
               '/tr', 'http://timestamp.comodoca.com/?td=sha256',
               '/td', 'sha256',
               $_.FullName
-            ) -Join ' '
+            )) -Join ' '
 
             Write-Host $SignCmd
-            Invoke-Expression @SignCmd
+            Invoke-Expression $SignCmd
           }
 
       - name: Upload artifacts
