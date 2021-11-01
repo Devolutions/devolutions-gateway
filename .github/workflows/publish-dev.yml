@@ -46,7 +46,7 @@ jobs:
         id: deploy-artifacts
         shell: pwsh
         run: |
-          $PkgDir = Join-Path $pwd Package $Env:RUNNER_OS # RUNNER_OS is camelcase
+          $PkgDir = Join-Path $pwd package $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "::set-output name=package-path::$PkgDir"
           
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
