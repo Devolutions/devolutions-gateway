@@ -4,7 +4,7 @@ on:
     inputs:
       run-number:
         description: 'run id'
-        default: "1408819576"
+        default: "1409026854"
         required: true
 
 jobs:
@@ -20,4 +20,4 @@ jobs:
           gh run download ${{ github.events.inputs.run-number }} -R Devolutions/devolutions-gateway
 
       - name: list
-        run: ls -lR
+        run: Get-ChildItem -Recurse
