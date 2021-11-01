@@ -7,17 +7,55 @@ on:
         default: "1409026854"
         required: true
 
+concurrency: pre-publish
+
 jobs:
   codesign:
     runs-on: windows-2019
-    #environment: build-and-publish
+    environment: build-and-publish
 
     steps:
+      - name: Configure certificates
+        env:
+          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: |
+          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
+          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
+          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
+          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
+      - name: Configure runner
+        run: |
+          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Download artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run:
           gh run download ${{ github.events.inputs.run-number }} -R Devolutions/devolutions-gateway
 
-      - name: list
-        run: Get-ChildItem -Recurse
+      - name: Sign executables
+        run: |
+          Get-ChildItem -Path devolutions-gateway -Recurse -Include "*.exe", "*.msi" | % { 
+            Write-Host "Signing $_.FullName"
+            $SignCmd = @(
+              'signtool', 
+              'sign', 
+              '/fd', 'SHA256', 
+              '/v', 
+              '/n', 'Devolutions', 
+              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/td', 'sha256',
+              $_.FullName
+            ) -Join ' '
+
+            Write-Host $SignCmd
+            Invoke-Expression @SignCmd
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: devolutions-gateway
+          path: devolutions-gateway
