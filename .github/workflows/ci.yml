@@ -67,6 +67,19 @@ jobs:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
+      - name: set lto
+        shell: pwsh
+        if: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
+          echo "::notice::Building master; LTO is enabled" 
+
+      - name: set lto
+        shell: pwsh
+        if: ${{ github.ref != 'refs/heads/master' }}
+        run: |
+          echo "::warning::Building branch; LTO is disabled" 
+
       - name: Load dynamic variables
         id: load-variables
         shell: pwsh
@@ -156,6 +169,19 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
+
+      - name: set lto
+        shell: pwsh
+        if: ${{ github.ref == 'refs/heads/master' }}
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
+          echo "::notice::Building master; LTO is enabled" 
+
+      - name: set lto
+        shell: pwsh
+        if: ${{ github.ref != 'refs/heads/master' }}
+        run: |
+          echo "::warning::Building branch; LTO is disabled" 
 
       - name: Load dynamic variables
         id: load-variables

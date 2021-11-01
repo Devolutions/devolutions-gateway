@@ -16,7 +16,3 @@ default-members = [
 
 [patch.crates-io]
 rustls = { git = "https://github.com/Devolutions/rustls.git", branch = "v0.18.1-patched" }
-
-[profile.release]
-lto = true
-
