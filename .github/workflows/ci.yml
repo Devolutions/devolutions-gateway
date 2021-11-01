@@ -17,6 +17,7 @@ jobs:
 
       - name: Configure rust toolchain
         id: rust-toolchain
+        shell: pwsh
         run: |
           $Channel = Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData
           rustup toolchain install $Channel
