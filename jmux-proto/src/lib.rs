@@ -395,11 +395,15 @@ impl ChannelOpen {
     pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
     pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: impl Into<String>) -> Self {
+        let destination_url = destination_url.into();
+        // Debug-only sanity checks
+        debug_assert!(destination_url.contains("://"));
+        debug_assert!(destination_url.rfind(':').is_some());
         Self {
             sender_channel_id: u32::from(id),
             initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE,
             maximum_packet_size,
-            destination_url: destination_url.into(),
+            destination_url,
         }
     }
 
@@ -691,7 +695,7 @@ mod tests {
     #[test]
     fn header_decode_buffer_too_short_err() {
         let err = Header::decode(Bytes::from_static(&[])).err().unwrap();
-        assert_eq!("Not enough bytes provided to decode HEADER", err.to_string());
+        assert_eq!("Not enough bytes provided to decode HEADER: received 0 bytes, expected 4 bytes", err.to_string());
     }
 
     #[test]
