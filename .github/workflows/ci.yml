@@ -351,7 +351,6 @@ jobs:
         arch: [ x86_64 ]
         os: [ windows, linux ]
         base-image: [buster, servercore-ltsc2019, nanoserver-1809 ]
-        type: [ dev, prod ]
 
         include:
           - os: windows
@@ -413,11 +412,14 @@ jobs:
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}"
-
-          if ("${{ matrix.type }}" -Eq "dev") {
-            $ImageName += "-dev"
-          }
-
           docker build -t $ImageName .
-
           echo "::set-output name=image-name::$ImageName"
+
+      - name: Push container
+        shell: pwsh
+        working-directory: ${{ steps.move-artifacts.outputs.package-path }}
+        run: |
+          echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u devolutionsbot --password-stdin
+          Write-Host "${{ steps.build-container.outputs.image-name }}" #docker push "${{ steps.build-container.outputs.image-name }}"
+
+
