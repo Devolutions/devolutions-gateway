@@ -411,7 +411,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
-          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u devolutionsbot --password-stdin
+          echo ${{ secrets.DOCKER_HUB_BOT_PASSWORD }} | docker login -u devolutionsbot --password-stdin
           Write-Host "${{ steps.build-container.outputs.image-name }}" #docker push "${{ steps.build-container.outputs.image-name }}"
 
   github-release:
