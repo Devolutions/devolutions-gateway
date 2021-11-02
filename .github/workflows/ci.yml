@@ -340,3 +340,105 @@ jobs:
         with:
           name: jetsocat
           path: jetsocat
+
+  containers:
+    name: containers [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    needs: codesign
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [ x86_64 ]
+        os: [ windows, linux ]
+        base-image: [buster, servercore-ltsc2019, nanoserver-1809 ]
+        type: [ dev, prod ]
+
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: linux
+            runner: ubuntu-18.04
+        exclude:
+          - os: windows
+            base-image: buster
+          - os: linux
+            base-image: servercore-ltsc2019
+          - os: linux
+            base-image: nanoserver-1809
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v2
+        with:
+          name: devolutions-gateway
+
+      - name: Move artifacts
+        id: move-artifacts
+        shell: pwsh
+        run: |
+          $PkgDir = Join-Path $pwd package $Env:RUNNER_OS # RUNNER_OS is camelcase
+          echo "::set-output name=package-path::$PkgDir"
+          
+          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $SourceFileName = "$($SourceFileName).exe"
+            $TargetFileName = "DevolutionsGateway.exe"
+          } else { 
+            $TargetFileName = "devolutions-gateway"
+          }
+
+          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path ${{ steps.download.outputs.download-path }}
+          $TargetPath = Join-Path $PkgDir $TargetFileName
+          Copy-Item $SourcePath $TargetPath
+
+          if ($Env:RUNNER_OS -eq "Linux") {
+            Invoke-Expression "chmod +x $TargetPath"
+          }
+
+      - name: Build container
+        id: build-container
+        shell: pwsh
+        working-directory: ${{ steps.move-artifacts.outputs.package-path }}
+        run: |
+          $ImageName = devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}
+
+          if (${{ matrix.type }} -Eq "dev") {
+            $ImageName += "-dev"
+          }
+
+          docker build -t $ImageName .
+
+          echo "::set-output name=image-name::$ImageName"
+
+
+  # containers:
+  #   name: containers [${{ matrix.os }} ${{ matrix.arch }}]
+  #   runs-on: ${{ matrix.runner }}
+  #   needs: codesign
+  #   # if: ${{ github.ref == 'refs/heads/master' }}
+  #   strategy:
+  #     fail-fast: true
+  #     matrix:
+  #       arch: [ x86_64 ]
+  #       os: [ windows, linux ]
+  #       include:
+  #         - os: windows
+  #           runner: windows-2019
+  #         - os: linux
+  #           runner: ubuntu-18.04
+
+  #   steps:
+  #     - name: Checkout ${{ github.repository }}
+  #       uses: actions/checkout@v2
