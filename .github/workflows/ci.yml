@@ -414,7 +414,7 @@ jobs:
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}"
 
-          if (${{ matrix.type }} -Eq "dev") {
+          if ("${{ matrix.type }}" -Eq "dev") {
             $ImageName += "-dev"
           }
 
