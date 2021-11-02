@@ -412,7 +412,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
-          $ImageName = devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}
+          $ImageName = "devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}"
 
           if (${{ matrix.type }} -Eq "dev") {
             $ImageName += "-dev"
@@ -421,24 +421,3 @@ jobs:
           docker build -t $ImageName .
 
           echo "::set-output name=image-name::$ImageName"
-
-
-  # containers:
-  #   name: containers [${{ matrix.os }} ${{ matrix.arch }}]
-  #   runs-on: ${{ matrix.runner }}
-  #   needs: codesign
-  #   # if: ${{ github.ref == 'refs/heads/master' }}
-  #   strategy:
-  #     fail-fast: true
-  #     matrix:
-  #       arch: [ x86_64 ]
-  #       os: [ windows, linux ]
-  #       include:
-  #         - os: windows
-  #           runner: windows-2019
-  #         - os: linux
-  #           runner: ubuntu-18.04
-
-  #   steps:
-  #     - name: Checkout ${{ github.repository }}
-  #       uses: actions/checkout@v2
