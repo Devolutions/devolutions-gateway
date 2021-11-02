@@ -45,6 +45,12 @@ jobs:
               exit 1
           fi
 
+      - name: Check lto
+        shell: pwsh
+        if: ${{ github.ref != 'refs/heads/master' }}
+        run: |
+          echo "::warning::Building branch; LTO will not be enabled" 
+
       - name: Upload version artifact
         uses: actions/upload-artifact@v2
         with:
@@ -84,18 +90,12 @@ jobs:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
-      - name: set lto
+      - name: Enable lto
         shell: pwsh
         if: ${{ github.ref == 'refs/heads/master' }}
         run: |
           echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
           echo "::notice::Building master; LTO is enabled" 
-
-      - name: set lto
-        shell: pwsh
-        if: ${{ github.ref != 'refs/heads/master' }}
-        run: |
-          echo "::warning::Building branch; LTO is disabled" 
 
       - name: Load dynamic variables
         id: load-variables
@@ -137,10 +137,6 @@ jobs:
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
-
-      - name: Setup code signing
-        if: matrix.os == 'windows' || matrix.os == 'macos'
-        run: echo "::warning::Artifacts not code-signed, to be implemented"
 
       - name: Configure conan
         run: |
@@ -191,18 +187,12 @@ jobs:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
-      - name: set lto
+      - name: Enable lto
         shell: pwsh
         if: ${{ github.ref == 'refs/heads/master' }}
         run: |
           echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
           echo "::notice::Building master; LTO is enabled" 
-
-      - name: set lto
-        shell: pwsh
-        if: ${{ github.ref != 'refs/heads/master' }}
-        run: |
-          echo "::warning::Building branch; LTO is disabled" 
 
       - name: Load dynamic variables
         id: load-variables
@@ -242,14 +232,11 @@ jobs:
           sudo apt update
           sudo apt install dh-make python3-wget python3-setuptools libsystemd-dev
 
+      # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
         if: runner.os == 'Windows'
         run: |
           echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup code signing
-        if: matrix.os == 'windows'
-        run: echo "::warning::Artifacts not code-signed, to be implemented"
 
       - name: Configure conan
         run: |
@@ -293,6 +280,7 @@ jobs:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
 
+  # TODO: code sign (and notarize?) jetsocat on macOS
   codesign:
     runs-on: windows-2019
     environment: build-and-publish
@@ -353,7 +341,7 @@ jobs:
     name: containers [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
-    needs: codesign
+    needs: [preflight, codesign]
     # if: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: true
@@ -385,6 +373,7 @@ jobs:
         with:
           name: devolutions-gateway
 
+      # Copy the built and signed Devolutions Gateway binary into the packaging location
       - name: Move artifacts
         id: move-artifacts
         shell: pwsh
@@ -428,7 +417,7 @@ jobs:
   github-release:
     runs-on: ubuntu-18.04
     environment: build-and-publish
-    needs: codesign
+    needs: [preflight, codesign]
     # if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
@@ -439,12 +428,13 @@ jobs:
       - name: Create GitHub release
         shell: pwsh
         run: |
+          $Version = "${{ needs.preflight.outputs.version }}"
           $StagingPath = "${{ steps.download.outputs.download-path }}"
           $HashPath = Join-Path $StagingPath checksums
           $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
-          $GhCmd = $(@('gh', 'release', 'create', 'v${{ needs.preflight.outputs.version }}', $HashPath) + $Files.Path) -Join ' '
+          $GhCmd = $(@('gh', 'release', 'create', "v$Version", $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
 
   psgallery-release:
