@@ -345,6 +345,7 @@ jobs:
     name: containers [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: codesign
+    # if: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: true
       matrix:
@@ -422,4 +423,65 @@ jobs:
           echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u devolutionsbot --password-stdin
           Write-Host "${{ steps.build-container.outputs.image-name }}" #docker push "${{ steps.build-container.outputs.image-name }}"
 
+  github-release:
+    runs-on: ubuntu-18.04
+    environment: build-and-publish
+    needs: codesign
+    # if: ${{ github.ref == 'refs/heads/master' }}
 
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v2
+
+      - name: Create GitHub release
+        shell: pwsh
+        run: |
+          $StagingPath = "${{ steps.download.outputs.download-path }}"
+          $HashPath = Join-Path $StagingPath checksums
+          $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
+
+          $GhCmd = $(@('gh', 'release', 'create', 'v${{ steps.get-version.outputs.version }}', $HashPath) + $Files.Path) -Join ' '
+          Write-Host $GhCmd
+
+  psgallery-release:
+    runs-on: ubuntu-18.04
+    environment: build-and-publish
+    needs: codesign
+    # if: ${{ github.ref == 'refs/heads/master' }}
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+
+      - name: Download artifacts
+        id: download
+        uses: actions/download-artifact@v2
+
+      - name: Publish PowerShell module
+        shell: pwsh
+        run: |
+          $StagingPath = "${{ steps.download-artifacts.outputs.staging-path }}"
+          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
+          $Module = Join-Path $StagingPath PowerShell
+          Expand-Archive -Path $Archive -DestinationPath $Module
+
+          Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}" -WhatIf
