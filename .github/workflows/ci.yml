@@ -14,11 +14,19 @@ jobs:
     name: preflight
     runs-on: ubuntu-18.04
     outputs:
+      version: ${{ steps.get-version.outputs.version }}
       rust-channel: ${{ steps.rust-toolchain.outputs.rust-channel }}
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
+
+      - name: Get version
+        id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
 
       - name: Configure rust toolchain
         id: rust-toolchain
@@ -93,7 +101,7 @@ jobs:
         id: load-variables
         shell: pwsh
         run: |
-          $PackageVersion = Get-Content "./VERSION"
+          $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
           $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
@@ -200,7 +208,7 @@ jobs:
         id: load-variables
         shell: pwsh
         run: |
-          $PackageVersion = Get-Content "./VERSION"
+          $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
           $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
@@ -344,6 +352,7 @@ jobs:
   containers:
     name: containers [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
+    environment: build-and-publish
     needs: codesign
     # if: ${{ github.ref == 'refs/heads/master' }}
     strategy:
@@ -370,13 +379,6 @@ jobs:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
-      - name: Get version
-        id: get-version
-        shell: pwsh
-        run: |
-          $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
-
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v2
@@ -390,7 +392,7 @@ jobs:
           $PkgDir = Join-Path $pwd package $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "::set-output name=package-path::$PkgDir"
           
-          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ steps.get-version.outputs.version }}_${{ matrix.arch }}"
+          $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $SourceFileName = "$($SourceFileName).exe"
@@ -412,7 +414,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
-          $ImageName = "devolutions/devolutions-gateway:${{ steps.get-version.outputs.version }}-${{ matrix.base-image }}"
+          $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
           docker build -t $ImageName .
           echo "::set-output name=image-name::$ImageName"
 
@@ -420,7 +422,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
-          echo ${{ secrets.DOCKERHUB_PASSWORD }} | docker login -u devolutionsbot --password-stdin
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u devolutionsbot --password-stdin
           Write-Host "${{ steps.build-container.outputs.image-name }}" #docker push "${{ steps.build-container.outputs.image-name }}"
 
   github-release:
@@ -430,16 +432,6 @@ jobs:
     # if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
-
-      - name: Get version
-        id: get-version
-        shell: pwsh
-        run: |
-          $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
-
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v2
@@ -452,7 +444,7 @@ jobs:
           $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
-          $GhCmd = $(@('gh', 'release', 'create', 'v${{ steps.get-version.outputs.version }}', $HashPath) + $Files.Path) -Join ' '
+          $GhCmd = $(@('gh', 'release', 'create', 'v${{ needs.preflight.outputs.version }}', $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
 
   psgallery-release:
@@ -462,26 +454,17 @@ jobs:
     # if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
-
-      - name: Get version
-        id: get-version
-        shell: pwsh
-        run: |
-          $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
-
       - name: Download artifacts
         id: download
         uses: actions/download-artifact@v2
+        with:
+          name: devolutions-gateway
 
       - name: Publish PowerShell module
         shell: pwsh
         run: |
-          $StagingPath = "${{ steps.download-artifacts.outputs.staging-path }}"
+          $StagingPath = "${{ steps.download.outputs.download-path }}"
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
           $Module = Join-Path $StagingPath PowerShell
           Expand-Archive -Path $Archive -DestinationPath $Module
-
           Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}" -WhatIf
