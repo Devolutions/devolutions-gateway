@@ -196,7 +196,16 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
         PipeMode::WebSocket { url } => {
             use crate::utils::ws_connect;
 
-            info!(log, "Connecting WebSocket at {}", url);
+            info!(
+                log,
+                "Connecting WebSocket at {}",
+                // Do not log the query part at info level
+                if let Some((without_query, _)) = url.split_once('?') {
+                    without_query
+                } else {
+                    &url
+                }
+            );
 
             let (read, write, rsp) = ws_connect(url, proxy_cfg)
                 .await
