@@ -8,12 +8,13 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::JetTransport;
-use crate::utils::{get_pub_key_from_der, load_certs, load_private_key, url_to_socket_addr, AsyncReadWrite};
+use crate::utils::{get_pub_key_from_der, load_cert, load_private_key, url_to_socket_addr, AsyncReadWrite};
 use crate::websocket_client::{WebsocketService, WsClient};
 use hyper::service::service_fn;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future03::FutureExt;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::io;
@@ -118,7 +119,7 @@ pub struct GatewayContext {
     pub futures: VecOfFuturesType,
 }
 
-pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, &'static str> {
+pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, Cow<'static, str>> {
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()
@@ -152,17 +153,18 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
     })?;
 
     // Create the TLS acceptor.
-    let client_no_auth = rustls::NoClientAuth::new();
-    let mut server_config = rustls::ServerConfig::new(client_no_auth);
-    let certs = load_certs(&config.certificate).map_err(|_| "could not load certs")?;
-    let tls_public_key = get_pub_key_from_der(&certs[0].0).map_err(|_| "could not parse TLS public key")?;
-    let priv_key = load_private_key(&config.certificate).map_err(|_| "could not load private key")?;
-    server_config
-        .set_single_cert(certs, priv_key)
-        .map_err(|_| "couldn't set server config cert")?;
+    let cert = load_cert(&config.certificate).map_err(|e| format!("could not load cert: {}", e))?;
+    let tls_public_key = get_pub_key_from_der(&cert.0).map_err(|e| format!("could not parse TLS public key: {}", e))?;
+    let priv_key = load_private_key(&config.certificate).map_err(|e| format!("could not load private key: {}", e))?;
 
-    let config_ref = Arc::new(server_config);
-    let tls_acceptor = TlsAcceptor::from(config_ref);
+    let rustls_config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], priv_key)
+        .map_err(|e| format!("couldn't set server config cert: {}", e))?;
+    let rustls_config = Arc::new(rustls_config);
+
+    let tls_acceptor = TlsAcceptor::from(rustls_config);
 
     let listeners_count = websocket_listeners.len() + tcp_listeners.len();
     let mut futures: VecOfFuturesType = Vec::with_capacity(listeners_count);

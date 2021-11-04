@@ -6,7 +6,7 @@ authors = ["Vlad Alex <vlad.al.dp@gmail.com>",
 edition = "2021"
 
 [dependencies]
-structopt = "0.3"
-uuid = "0.8"
-http = "0.1"
+structopt = "0.3.25"
+uuid = "0.8.2"
+http = "0.2.5"
 jet-proto = { path = "../jet-proto" }

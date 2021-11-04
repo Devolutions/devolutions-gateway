@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser;
 use humantime::parse_duration;
 use picky::jose::jwe::{Jwe, JweAlg, JweEnc};
 use picky::jose::jws::JwsAlg;
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use uuid::Uuid;
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct App {
     #[clap(long, default_value = "15m")]
     validity_duration: String,
@@ -24,7 +24,7 @@ struct App {
 // clippy: All enumeration variants that are prefixed with `Rdp`; this produces the clippy error.
 // It will be marked as allowed as we may add new non-RDP related protocols in the future
 #[allow(clippy::enum_variant_names)]
-#[derive(Clap)]
+#[derive(Parser)]
 enum SubCommand {
     RdpTcp(TcpParams),
     RdpTls(TlsParams),
@@ -33,13 +33,13 @@ enum SubCommand {
     Jmux,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct TcpParams {
     #[clap(long)]
     dst_hst: String,
 }
 
-#[derive(Clone, Clap, Serialize)]
+#[derive(Clone, Parser, Serialize)]
 struct TlsParams {
     #[serde(skip_serializing)]
     #[clap(long)]
@@ -58,7 +58,7 @@ struct TlsParams {
     dst_pwd: String,
 }
 
-#[derive(Clap)]
+#[derive(Parser)]
 struct ScopeParams {
     #[clap(long)]
     scope: String,

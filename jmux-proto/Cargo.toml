@@ -5,4 +5,4 @@ authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
 edition = "2021"
 
 [dependencies]
-bytes = "1"
+bytes = "1.1.0"
