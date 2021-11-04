@@ -120,7 +120,8 @@ impl PacketInterceptor for PcapInterceptor {
                 if let Err(e) = pcap_writer.write(
                     since_epoch.as_secs() as u32,
                     since_epoch.subsec_micros(),
-                    tcpip_packet.as_ref(),
+                    &tcpip_packet,
+                    tcpip_packet.len() as u32,
                 ) {
                     error!("Error writting pcap file: {}", e);
                 }

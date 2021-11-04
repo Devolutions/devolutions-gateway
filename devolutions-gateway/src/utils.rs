@@ -1,10 +1,11 @@
 pub mod association;
 
 use crate::config::CertificateConfig;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::hash::Hash;
-use std::io::{self, BufReader};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -12,22 +13,25 @@ use tokio::net::{lookup_host, TcpStream};
 use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
-use x509_parser::parse_x509_der;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::traits::FromDer;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
 
     pub struct NoCertificateVerification;
 
-    impl rustls::ServerCertVerifier for NoCertificateVerification {
+    impl rustls::client::ServerCertVerifier for NoCertificateVerification {
         fn verify_server_cert(
             &self,
-            _roots: &rustls::RootCertStore,
-            _presented_certs: &[rustls::Certificate],
-            _dns_name: webpki::DNSNameRef<'_>,
-            _ocsp: &[u8],
-        ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
-            Ok(rustls::ServerCertVerified::assertion())
+            _end_entity: &rustls::Certificate,
+            _intermediates: &[rustls::Certificate],
+            _server_name: &rustls::ServerName,
+            _scts: &mut dyn Iterator<Item = &[u8]>,
+            _ocsp_response: &[u8],
+            _now: std::time::SystemTime,
+        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::ServerCertVerified::assertion())
         }
     }
 }
@@ -57,7 +61,7 @@ pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result
 }
 
 pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
-    let res = parse_x509_der(cert)
+    let res = X509Certificate::from_der(cert)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
     let public_key = res.1.tbs_certificate.subject_pki.subject_public_key;
 
@@ -67,7 +71,7 @@ pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
 fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
     let (_, session) = stream.get_ref();
     let payload = session
-        .get_peer_certificates()
+        .peer_certificates()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate."))?;
 
     let cert = payload
@@ -77,128 +81,44 @@ fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Resul
     Ok(cert.as_ref().to_vec())
 }
 
-pub fn load_certs(config: &CertificateConfig) -> io::Result<Vec<rustls::Certificate>> {
-    if let Some(filename) = &config.certificate_file {
-        let certfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open certificate file {}", filename));
-        let mut reader = BufReader::new(certfile);
-
-        rustls::internal::pemfile::certs(&mut reader)
-            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
+pub fn load_cert(config: &CertificateConfig) -> io::Result<rustls::Certificate> {
+    let data = if let Some(filename) = &config.certificate_file {
+        Cow::Owned(fs::read_to_string(filename)?)
     } else if let Some(data) = &config.certificate_data {
-        load_certs_from_data(data)
-            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate data"))
+        Cow::Borrowed(data)
     } else {
-        let certfile = include_bytes!("../cert/publicCert.pem");
-        let mut reader = BufReader::new(certfile.as_ref());
+        return Err(io::Error::new(io::ErrorKind::Other, "certificate is missing"));
+    };
 
-        rustls::internal::pemfile::certs(&mut reader)
-            .map_err(|()| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse certificate"))
+    let pem = picky::pem::parse_pem(data.as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    if pem.label() != "CERTIFICATE" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("bad label for certificate pem: {}", pem.label()),
+        ));
     }
+
+    Ok(rustls::Certificate(pem.into_data().into_owned()))
 }
 
 pub fn load_private_key(config: &CertificateConfig) -> io::Result<rustls::PrivateKey> {
-    let mut pkcs8_keys = load_pkcs8_private_key(config)?;
-
-    // prefer to load pkcs8 keys
-    if !pkcs8_keys.is_empty() {
-        Ok(pkcs8_keys.remove(0))
-    } else {
-        let mut rsa_keys = load_rsa_private_key(config)?;
-
-        assert!(!rsa_keys.is_empty());
-        Ok(rsa_keys.remove(0))
-    }
-}
-
-fn load_rsa_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
-    if let Some(filename) = &config.private_key_file {
-        let keyfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open private key file {}", filename));
-        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
+    let data = if let Some(filename) = &config.private_key_file {
+        Cow::Owned(fs::read_to_string(filename)?)
     } else if let Some(data) = &config.private_key_data {
-        load_rsa_private_key_from_data(data)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid rsa private key"))
+        Cow::Borrowed(data)
     } else {
-        let keyfile = include_bytes!("../cert/private.pem");
-        rustls::internal::pemfile::rsa_private_keys(&mut BufReader::new(keyfile.as_ref()))
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File contains invalid rsa private key"))
-    }
-}
+        return Err(io::Error::new(io::ErrorKind::Other, "private key is missing"));
+    };
 
-fn load_pkcs8_private_key(config: &CertificateConfig) -> io::Result<Vec<rustls::PrivateKey>> {
-    if let Some(filename) = &config.private_key_file {
-        let keyfile = fs::File::open(filename).unwrap_or_else(|_| panic!("cannot open private key file {}", filename));
-        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile)).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "File contains invalid pkcs8 private key (encrypted keys not supported)",
-            )
-        })
-    } else if let Some(data) = &config.private_key_data {
-        load_pkcs8_private_key_from_data(data)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid pkcs8 private key"))
-    } else {
-        let keyfile = include_bytes!("../cert/private.pem");
-        rustls::internal::pemfile::pkcs8_private_keys(&mut BufReader::new(keyfile.as_ref())).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "File contains invalid pkcs8 private key (encrypted keys not supported)",
-            )
-        })
-    }
-}
-
-fn load_certs_from_data(data: &str) -> Result<Vec<rustls::Certificate>, ()> {
-    extract_der_data(
-        data.to_string(),
-        "-----BEGIN CERTIFICATE-----",
-        "-----END CERTIFICATE-----",
-        &|v| rustls::Certificate(v),
-    )
-}
-
-fn load_rsa_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
-    extract_der_data(
-        data.to_string(),
-        "-----BEGIN RSA PRIVATE KEY-----",
-        "-----END RSA PRIVATE KEY-----",
-        &|v| rustls::PrivateKey(v),
-    )
-}
-
-fn load_pkcs8_private_key_from_data(data: &str) -> Result<Vec<rustls::PrivateKey>, ()> {
-    extract_der_data(
-        data.to_string(),
-        "-----BEGIN PRIVATE KEY-----",
-        "-----END PRIVATE KEY-----",
-        &|v| rustls::PrivateKey(v),
-    )
-}
-
-fn extract_der_data<A>(
-    mut data: String,
-    start_mark: &str,
-    end_mark: &str,
-    f: &dyn Fn(Vec<u8>) -> A,
-) -> Result<Vec<A>, ()> {
-    let mut ders = Vec::new();
-
-    while let Some(start_index) = data.find(start_mark) {
-        let drain_index = start_index + start_mark.len();
-        data.drain(..drain_index);
-        if let Some(index) = data.find(end_mark) {
-            let base64_buf = &data[..index];
-            let der = base64::decode(&base64_buf).map_err(|_| ())?;
-            ders.push(f(der));
-
-            let drain_index = index + end_mark.len();
-            data.drain(..drain_index);
-        } else {
-            break;
-        }
+    let pem = picky::pem::parse_pem(data.as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    if pem.label() != "PRIVATE KEY" && pem.label() != "RSA PRIVATE KEY" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("bad label for private key pem: {}", pem.label()),
+        ));
     }
 
-    Ok(ders)
+    Ok(rustls::PrivateKey(pem.into_data().into_owned()))
 }
 
 pub fn update_framed_codec<Io, OldCodec, NewCodec, OldDecodedType, NewDecodedType>(
@@ -258,12 +178,14 @@ pub fn into_other_io_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(de
 }
 
 pub fn create_tls_connector(socket: TcpStream) -> Connect<TcpStream> {
-    let mut client_config = tokio_rustls::rustls::ClientConfig::default();
-    client_config
-        .dangerous()
-        .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification {}));
-    let config_ref = Arc::new(client_config);
-    let tls_connector = TlsConnector::from(config_ref);
-    let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
-    tls_connector.connect(dns_name, socket)
+    let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
+
+    let rustls_client_conf = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_custom_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification))
+        .with_no_client_auth();
+    let rustls_client_conf = Arc::new(rustls_client_conf);
+
+    let connector = TlsConnector::from(rustls_client_conf);
+    connector.connect(dns_name, socket)
 }

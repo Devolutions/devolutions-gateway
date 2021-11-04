@@ -308,14 +308,14 @@ impl WsTransport {
                     .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-                let mut client_config = rustls::ClientConfig::default();
-                client_config
-                    .dangerous()
-                    .set_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification));
-                let config_ref = Arc::new(client_config);
-                let cx = TlsConnector::from(config_ref);
-                let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
+                let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
 
+                let rustls_client_conf = rustls::ClientConfig::builder()
+                    .with_safe_defaults()
+                    .with_custom_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification))
+                    .with_no_client_auth();
+                let rustls_client_conf = Arc::new(rustls_client_conf);
+                let cx = TlsConnector::from(rustls_client_conf);
                 let tls_stream = cx.connect(dns_name, tcp_stream).await?;
                 let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
 

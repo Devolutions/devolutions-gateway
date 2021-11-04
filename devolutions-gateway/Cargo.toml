@@ -11,56 +11,54 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 [dependencies]
 jet-proto = { path = "../jet-proto" }
 jmux-proxy = { path = "../jmux-proxy" }
-picky = { version = "6.3", default-features = false, features = ["jose"] }
-ceviche = "0.4"
-ctrlc = "3.1"
-clap = "2.32"
-cfg-if = "0.1"
-url = { version = "2", features = ["serde"] }
-hostname = "^0.3"
-lazy_static = "1.2.0"
-tokio = { version = "1", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"]}
-tokio-util = { version = "0.6", features = ["codec"] }
-tokio-tungstenite = "0.14"
-tokio-rustls = { version = "0.22", features = ["dangerous_configuration"] }
-futures = "0.3"
-webpki = "0.21.0"
-native-tls = "0.2"
-byteorder = "1.2.7"
-bytes = "1"
-uuid = { version = "0.8", features = ["v4", "serde"] }
-pcap-file = "0.10.0"
+picky = { version = "6.3.0", default-features = false, features = ["jose"] }
+ceviche = "0.4.5"
+ctrlc = "3.2.1"
+clap = "2.33"
+cfg-if = "1.0.0"
+url = { version = "2.2.2", features = ["serde"] }
+hostname = "0.3.1"
+lazy_static = "1.4.0"
+tokio = { version = "1.13.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
+tokio-util = { version = "0.6.9", features = ["codec"] }
+tokio-tungstenite = "0.15.0" # TODO: switch to `async-tungstenite`
+tokio-rustls = { version = "0.23.1", features = ["dangerous_configuration"] }
+futures = "0.3.17"
+native-tls = "0.2.8"
+byteorder = "1.4.3"
+bytes = "1.1.0"
+uuid = { version = "0.8.2", features = ["v4", "serde"] }
+pcap-file = "1.1.1"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"
-serde_urlencoded = "0.5.3"
-slog = { version = "2.5", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.4"
-slog-async = "2.3"
-slog-scope = "4.3"
-slog-envlogger = "2.2"
+serde = "1.0.130"
+serde_derive = "1.0.130"
+serde_json = "1.0.68"
+serde_urlencoded = "0.7.0"
+slog = { version = "2.7.0", features = ["max_level_trace", "release_max_level_debug"] }
+slog-term = "2.8.0"
+slog-async = "2.7.0"
+slog-scope = "4.4.0"
+slog-envlogger = "2.2.0"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
-chrono = { version = "0.4", features = ["serde"] }
-failure = "0.1"
-x509-parser = "0.6.0"
-sspi = "0.3.0"
+chrono = { version = "0.4.19", features = ["serde"] }
+x509-parser = "0.12.0"
+sspi = "0.3.2"
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
-hyper = "0.14"
+hyper = "0.14.14"
 sha1 = "0.6.0"
-base64 = "0.9.1"
-slog-stdlog = "4.0"
-ring = "0.16.0"
+base64 = "0.13.0"
+slog-stdlog = "4.1.0"
+ring = "0.16.20"
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
-indexmap = "1.0"
+indexmap = "1.7.0"
 dlopen = "0.1.8"
 dlopen_derive = "0.1.4"
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
-tempfile = "3.0"
-rust-argon2 = "0.8"
-reqwest = "0.11"
-http = "0.2"
-zeroize = "1.4"
+tempfile = "3.2.0"
+rust-argon2 = "0.8.3"
+reqwest = "0.11.6"
+http = "0.2.5"
+zeroize = "1.4.2"
 
 [dependencies.saphir]
 version = "2.8"
@@ -71,12 +69,11 @@ git = "https://github.com/CBenoit/saphir"
 branch = "hyper-update"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
+winapi = { version = "0.3.9", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource =  "1.6.5"
+embed-resource = "1.6.5"
 
 [dev-dependencies]
-exitcode = "1.1"
-tokio-test = "0.4"
-
+exitcode = "1.1.2"
+tokio-test = "0.4.2"

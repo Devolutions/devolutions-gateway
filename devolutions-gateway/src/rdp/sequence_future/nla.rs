@@ -147,15 +147,17 @@ impl NlaWithServerFuture {
         target_credentials: AuthIdentity,
         accept_invalid_certs_and_host_names: bool,
     ) -> io::Result<Self> {
-        let mut client_config = rustls::ClientConfig::default();
-        if accept_invalid_certs_and_host_names {
-            client_config
-                .dangerous()
-                .set_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification {}));
-        }
-        let config_ref = Arc::new(client_config);
-        let tls_connector = TlsConnector::from(config_ref);
-        let dns_name = webpki::DNSNameRef::try_from_ascii_str("stub_string").unwrap();
+        let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
+
+        let rustls_config = rustls::ClientConfig::builder().with_safe_defaults();
+        let rustls_config = if accept_invalid_certs_and_host_names {
+            rustls_config.with_custom_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification))
+        } else {
+            return Err(io::Error::new(io::ErrorKind::Other, "root cert is not supported"));
+        };
+        let rustls_config = rustls_config.with_no_client_auth();
+        let rustls_config = Arc::new(rustls_config);
+        let tls_connector = TlsConnector::from(rustls_config);
 
         Ok(Self {
             state: NlaWithServerFutureState::Tls(tls_connector.connect(dns_name, server)),
