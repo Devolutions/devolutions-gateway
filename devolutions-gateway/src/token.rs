@@ -14,6 +14,7 @@ pub enum JetAccessTokenClaims {
 #[derive(Deserialize, Clone)]
 pub struct JetAssociationTokenClaims {
     /// Jet Association ID
+    #[serde(default = "Uuid::new_v4")] // legacy: DVLS up to 2021.2.10 do not generate this claim.
     pub jet_aid: Uuid,
 
     /// Jet Application protocol
