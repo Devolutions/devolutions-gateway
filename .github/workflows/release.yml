@@ -24,7 +24,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          $RunJson = gh api /repos/devolutions/picky-rs/actions/runs/${{ github.event.inputs.run-id }}
+          $RunJson = gh api /repos/devolutions/devolutions-gateway/actions/runs/${{ github.event.inputs.run-id }}
           $Run = $RunJson | ConvertFrom-Json
           echo "::set-output name=commit::$($Run.head_sha)"
 
@@ -46,8 +46,10 @@ jobs:
 
   # TODO: code sign (and notarize?) jetsocat on macOS
   codesign:
+    name: Codesign
     runs-on: windows-2019
     environment: build-and-publish
+    needs: preflight
 
     steps:
       - name: Configure certificates
@@ -68,7 +70,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run-id }}
+        run: gh run download ${{ github.event.inputs.run-id }} --repo Devolutions/devolutions-gateway
 
       - name: Sign executables
         run: |
@@ -101,11 +103,10 @@ jobs:
           path: jetsocat
 
   containers:
-    name: containers [${{ matrix.os }} ${{ matrix.arch }}]
+    name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight, codesign]
-    if: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: true
       matrix:
@@ -182,10 +183,10 @@ jobs:
           # docker push ${{ steps.build-container.outputs.image-name }}
 
   github-release:
+    name: GitHub release
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight, codesign]
-    if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Download artifacts
@@ -205,10 +206,10 @@ jobs:
           # Invoke-Expression @GhCmd
 
   psgallery-release:
+    name: PowerShell release
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: codesign
-    if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Download artifacts
