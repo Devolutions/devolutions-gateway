@@ -410,7 +410,11 @@ jobs:
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
-          docker build -t $ImageName .
+          if ("${{ matrix.base-image }}" -Eq "nanoserver-1809") {
+            docker build --build-arg FROM_IMAGE=mcr.microsoft.com/windows/nanoserver:1809 -t "$ImageName" .
+          } else {
+            docker build -t "$ImageName" .
+          }
           echo "::set-output name=image-name::$ImageName"
 
       - name: Push container
