@@ -24,7 +24,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          $RunJson = gh api /repos/devolutions/picky-rs/actions/runs/${{ github.event.inputs.run-id }}
+          $RunJson = gh api /repos/devolutions/devolutions-gateway/actions/runs/${{ github.event.inputs.run-id }}
           $Run = $RunJson | ConvertFrom-Json
           echo "::set-output name=commit::$($Run.head_sha)"
 
@@ -48,6 +48,7 @@ jobs:
   codesign:
     runs-on: windows-2019
     environment: build-and-publish
+    needs: preflight
 
     steps:
       - name: Configure certificates
@@ -105,7 +106,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight, codesign]
-    if: ${{ github.ref == 'refs/heads/master' }}
     strategy:
       fail-fast: true
       matrix:
@@ -185,7 +185,6 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight, codesign]
-    if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Download artifacts
@@ -208,7 +207,6 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: codesign
-    if: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Download artifacts
