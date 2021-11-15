@@ -1,14 +1,22 @@
 use crate::plugin_manager::PLUGIN_MANAGER;
+use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
+use core::fmt;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio_rustls::{rustls, TlsAcceptor};
 use url::Url;
+
+pub const SERVICE_NAME: &str = "devolutions-gateway";
+pub const DISPLAY_NAME: &str = "Devolutions Gateway";
+pub const DESCRIPTION: &str = "Devolutions Gateway service";
+pub const COMPANY_NAME: &str = "Devolutions";
 
 const ARG_APPLICATION_PROTOCOLS: &str = "application-protocols";
 const ARG_LISTENERS: &str = "listeners";
@@ -34,10 +42,8 @@ const ARG_SOGAR_USERNAME: &str = "sogar-username";
 const ARG_SOGAR_PASSWORD: &str = "sogar-password";
 const ARG_SOGAR_IMAGE_NAME: &str = "sogar-image-name";
 
-pub const SERVICE_NAME: &str = "devolutions-gateway";
-pub const DISPLAY_NAME: &str = "Devolutions Gateway";
-pub const DESCRIPTION: &str = "Devolutions Gateway service";
-pub const COMPANY_NAME: &str = "Devolutions";
+const CERTIFICATE_LABEL: &str = "CERTIFICATE";
+const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY"];
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -68,12 +74,50 @@ pub struct ListenerConfig {
     pub external_url: Url,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct CertificateConfig {
-    pub certificate_file: Option<String>,
-    pub certificate_data: Option<String>,
-    pub private_key_file: Option<String>,
-    pub private_key_data: Option<String>,
+#[derive(Debug, Clone)]
+pub struct TlsPublicKey(pub Vec<u8>);
+
+#[derive(Clone)]
+pub struct TlsConfig {
+    pub acceptor: TlsAcceptor,
+    pub certificate: rustls::Certificate,
+    pub private_key: rustls::PrivateKey,
+    pub public_key: TlsPublicKey,
+}
+
+impl fmt::Debug for TlsConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TlsConfig")
+            .field("certificate", &self.certificate)
+            .field("private_key", &self.private_key)
+            .field("public_key", &self.public_key)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TlsConfig {
+    fn init(certificate: rustls::Certificate, private_key: rustls::PrivateKey) -> Result<Self, String> {
+        let public_key = {
+            let cert = picky::x509::Cert::from_der(&certificate.0)
+                .map_err(|e| format!("couldn't parse TLS certificate: {}", e))?;
+            TlsPublicKey(cert.public_key().to_der().unwrap())
+        };
+
+        let rustls_config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(vec![certificate.clone()], private_key.clone())
+            .map_err(|e| format!("couldn't set server config cert: {}", e))?;
+
+        let acceptor = TlsAcceptor::from(Arc::new(rustls_config));
+
+        Ok(Self {
+            acceptor,
+            certificate,
+            private_key,
+            public_key,
+        })
+    }
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -121,28 +165,27 @@ pub struct Config {
     pub routing_url: Option<Url>,
     pub capture_path: Option<String>,
     pub protocol: Protocol,
-    pub log_file: Option<String>,
+    pub log_file: Option<Utf8PathBuf>,
     pub application_protocols: Vec<String>,
-    pub certificate: CertificateConfig,
+    pub tls: Option<TlsConfig>,
     pub provisioner_public_key: Option<PublicKey>,
     pub delegation_private_key: Option<PrivateKey>,
-    // FIXME: these are plugin paths, type should be `PathBuf`
-    pub plugins: Option<Vec<String>>,
-    pub recording_path: Option<PathBuf>,
+    pub plugins: Option<Vec<Utf8PathBuf>>,
+    pub recording_path: Option<Utf8PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
+        let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_owned());
 
         Config {
             service_mode: false,
-            service_name: SERVICE_NAME.to_string(),
-            display_name: DISPLAY_NAME.to_string(),
-            description: DESCRIPTION.to_string(),
-            company_name: COMPANY_NAME.to_string(),
+            service_name: SERVICE_NAME.to_owned(),
+            display_name: DISPLAY_NAME.to_owned(),
+            description: DESCRIPTION.to_owned(),
+            company_name: COMPANY_NAME.to_owned(),
             listeners: Vec::new(),
             farm_name: default_hostname.clone(),
             hostname: default_hostname,
@@ -151,12 +194,7 @@ impl Default for Config {
             protocol: Protocol::Unknown,
             log_file: None,
             application_protocols: Vec::new(),
-            certificate: CertificateConfig {
-                certificate_file: None,
-                certificate_data: None,
-                private_key_file: None,
-                private_key_data: None,
-            },
+            tls: None,
             provisioner_public_key: None,
             delegation_private_key: None,
             plugins: None,
@@ -239,15 +277,15 @@ pub struct ConfigFile {
     #[serde(rename = "ApplicationProtocols")]
     pub application_protocols: Option<Vec<String>>,
     #[serde(rename = "CertificateFile")]
-    pub certificate_file: Option<String>,
+    pub certificate_file: Option<Utf8PathBuf>,
     #[serde(rename = "PrivateKeyFile")]
-    pub private_key_file: Option<String>,
+    pub private_key_file: Option<Utf8PathBuf>,
     #[serde(rename = "ProvisionerPublicKeyFile")]
-    pub provisioner_public_key_file: Option<String>,
+    pub provisioner_public_key_file: Option<Utf8PathBuf>,
     #[serde(rename = "DelegationPrivateKeyFile")]
-    pub delegation_private_key_file: Option<String>,
+    pub delegation_private_key_file: Option<Utf8PathBuf>,
     #[serde(rename = "Plugins")]
-    pub plugins: Option<Vec<String>>,
+    pub plugins: Option<Vec<Utf8PathBuf>>,
     #[serde(rename = "RecordingPath")]
     pub recording_path: Option<String>,
     #[serde(rename = "SogarRegistryUrl")]
@@ -280,15 +318,15 @@ pub struct ConfigFile {
     pub capture_path: Option<String>,
 }
 
-fn get_config_path() -> PathBuf {
+fn get_config_path() -> Utf8PathBuf {
     if let Ok(config_path_env) = env::var("DGATEWAY_CONFIG_PATH") {
-        Path::new(&config_path_env).to_path_buf()
+        Utf8PathBuf::from(config_path_env)
     } else {
-        let mut config_path = PathBuf::new();
+        let mut config_path = Utf8PathBuf::new();
 
         if cfg!(target_os = "windows") {
             let program_data_env = env::var("ProgramData").unwrap();
-            config_path.push(Path::new(program_data_env.as_str()));
+            config_path.push(program_data_env);
             config_path.push(COMPANY_DIR);
             config_path.push(PROGRAM_DIR);
         } else if cfg!(target_os = "macos") {
@@ -303,29 +341,28 @@ fn get_config_path() -> PathBuf {
     }
 }
 
-fn get_config_file_path() -> PathBuf {
+fn get_config_file_path() -> Utf8PathBuf {
     let mut config_file_path = get_config_path();
     config_file_path.push("gateway.json");
     config_file_path
 }
 
-fn load_config_file(file_path: PathBuf) -> Option<ConfigFile> {
+fn load_config_file(file_path: Utf8PathBuf) -> Option<ConfigFile> {
     let file = File::open(file_path.as_path()).ok()?;
 
     match serde_json::from_reader(BufReader::new(file)) {
         Ok(config_file) => Some(config_file),
         Err(e) => panic!(
             "A configuration file has been provided ({}), but it can't be used: {}",
-            file_path.to_str().unwrap_or("unknown file path"),
-            e
+            file_path, e
         ),
     }
 }
 
-pub fn get_program_data_file_path(filename: &str) -> PathBuf {
-    let file_path = PathBuf::from(filename);
+pub fn get_program_data_file_path(file_path: impl AsRef<Utf8Path>) -> Utf8PathBuf {
+    let file_path = file_path.as_ref();
     if file_path.is_absolute() {
-        file_path
+        file_path.to_owned()
     } else {
         get_config_path().join(file_path.file_name().unwrap())
     }
@@ -496,10 +533,13 @@ impl Config {
                     .takes_value(true)
                     .empty_values(false)
                     .validator(|v| {
-                        if std::path::PathBuf::from(v).is_dir() {
-                            Ok(())
+                        let path = Utf8Path::new(&v);
+                        if !path.is_dir() {
+                            Err("Not a path".into())
+                        } else if !path.exists() {
+                            Err("Path doesn't exist".into())
                         } else {
-                            Err(String::from("The value does not exist or is not a path"))
+                            Ok(())
                         }
                     }),
             )
@@ -564,7 +604,7 @@ impl Config {
                     .takes_value(true)
                     .empty_values(false)
                     .validator(|v| {
-                        if PathBuf::from(v).is_dir() {
+                        if Utf8PathBuf::from(v).is_dir() {
                             Ok(())
                         } else {
                             Err(String::from("The value does not exist or is not a path"))
@@ -611,7 +651,7 @@ impl Config {
         }
 
         if let Some(log_file) = matches.value_of(ARG_LOG_FILE) {
-            config.log_file = Some(log_file.to_owned());
+            config.log_file = Some(Utf8PathBuf::from(log_file));
         }
 
         if let Some(farm_name) = matches.value_of(ARG_FARM_NAME) {
@@ -646,75 +686,113 @@ impl Config {
             }
         };
 
-        if let Some(certificate_file) = matches.value_of(ARG_CERTIFICATE_FILE) {
-            config.certificate.certificate_file = Some(
-                get_program_data_file_path(certificate_file)
-                    .as_path()
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-            );
-        }
-        if let Some(certificate_data) = matches.value_of(ARG_CERTIFICATE_DATA) {
-            config.certificate.certificate_data = Some(certificate_data.to_owned());
-        }
-        if let Some(private_key_file) = matches.value_of(ARG_PRIVATE_KEY_FILE) {
-            config.certificate.private_key_file = Some(
-                get_program_data_file_path(private_key_file)
-                    .as_path()
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-            );
-        }
-        if let Some(private_key_data) = matches.value_of(ARG_PRIVATE_KEY_DATA) {
-            config.certificate.private_key_data = Some(private_key_data.to_owned());
-        }
+        // TLS configuration
+
+        let tls_certificate = matches
+            .value_of(ARG_CERTIFICATE_DATA)
+            .map(|val| {
+                if val.starts_with("-----BEGIN") {
+                    val.to_owned()
+                } else {
+                    format!("-----BEGIN CERTIFICATE-----{}-----END CERTIFICATE-----", val)
+                }
+            })
+            .or_else(|| {
+                let file_path = matches.value_of(ARG_CERTIFICATE_FILE)?;
+                let file_path = get_program_data_file_path(file_path);
+                Some(std::fs::read_to_string(file_path).expect("couldn't read TLS certificate file"))
+            })
+            .map(|pem_str| {
+                let pem = pem_str.parse::<Pem>().expect("couldn't parse TLS certificate pem");
+                if pem.label() != CERTIFICATE_LABEL {
+                    panic!("bad pem label for TLS certificate (expected {})", CERTIFICATE_LABEL);
+                }
+                rustls::Certificate(pem.into_data().into_owned())
+            });
+
+        let tls_private_key = matches
+            .value_of(ARG_PRIVATE_KEY_DATA)
+            .map(|val| {
+                if val.starts_with("-----BEGIN") {
+                    val.to_owned()
+                } else {
+                    format!("-----BEGIN PRIVATE KEY-----{}-----END PRIVATE KEY-----", val)
+                }
+            })
+            .or_else(|| {
+                let file_path = matches.value_of(ARG_PRIVATE_KEY_FILE)?;
+                let file_path = get_program_data_file_path(file_path);
+                Some(std::fs::read_to_string(file_path).expect("couldn't read TLS private key file"))
+            })
+            .map(|pem_str| {
+                let pem = pem_str.parse::<Pem>().expect("couldn't parse TLS private key pem");
+                if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
+                    panic!("bad pem label for TLS private key (expected {:?})", PRIVATE_KEY_LABELS);
+                }
+                rustls::PrivateKey(pem.into_data().into_owned())
+            });
+
+        config.tls = tls_certificate
+            .zip(tls_private_key)
+            .map(|(certificate, key)| TlsConfig::init(certificate, key).expect("couldn't init TLS config"));
 
         // provisioner key
 
-        let pem_opt = if let Some(pem_str) = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_DATA) {
-            Some(format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", pem_str))
-        } else if let Some(file) = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE) {
-            let file_path = get_program_data_file_path(file).as_path().to_str().unwrap().to_string();
-            Some(std::fs::read_to_string(file_path).expect("couldn't read provisioner public path key file"))
-        } else {
-            None
-        };
-
-        if let Some(pem_str) = pem_opt {
-            let pem = pem_str
-                .parse::<Pem>()
-                .expect("couldn't parse provisioner public key pem");
-            let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
-            config.provisioner_public_key = Some(public_key);
-        }
+        matches
+            .value_of(ARG_PROVISIONER_PUBLIC_KEY_DATA)
+            .map(|val| {
+                if val.starts_with("-----BEGIN") {
+                    val.to_owned()
+                } else {
+                    format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", val)
+                }
+            })
+            .or_else(|| {
+                let file_path = matches.value_of(ARG_PROVISIONER_PUBLIC_KEY_FILE)?;
+                let file_path = get_program_data_file_path(file_path);
+                Some(std::fs::read_to_string(file_path).expect("couldn't read provisioner public key file"))
+            })
+            .into_iter()
+            .for_each(|pem_str| {
+                let pem = pem_str
+                    .parse::<Pem>()
+                    .expect("couldn't parse provisioner public key pem");
+                let public_key = PublicKey::from_pem(&pem).expect("couldn't parse provisioner public key");
+                config.provisioner_public_key = Some(public_key);
+            });
 
         // delegation key
 
-        let delegation_private_key_pem_opt = if let Some(pem_str) = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_DATA) {
-            Some(format!("-----BEGIN PUBLIC KEY-----{}-----END PUBLIC KEY-----", pem_str))
-        } else if let Some(file) = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE) {
-            let file_path = get_program_data_file_path(file).as_path().to_str().unwrap().to_string();
-            Some(std::fs::read_to_string(file_path).expect("couldn't read delegation private path key file"))
-        } else {
-            None
-        };
+        matches
+            .value_of(ARG_DELEGATION_PRIVATE_KEY_DATA)
+            .map(|val| {
+                if val.starts_with("-----BEGIN") {
+                    val.to_owned()
+                } else {
+                    format!("-----BEGIN PRIVATE KEY-----{}-----END PRIVATE KEY-----", val)
+                }
+            })
+            .or_else(|| {
+                let file_path = matches.value_of(ARG_DELEGATION_PRIVATE_KEY_FILE)?;
+                let file_path = get_program_data_file_path(file_path);
+                Some(std::fs::read_to_string(file_path).expect("couldn't read delegation private key file"))
+            })
+            .into_iter()
+            .for_each(|pem_str| {
+                let pem = pem_str
+                    .parse::<Pem>()
+                    .expect("couldn't parse delegation private key pem");
+                let private_key = PrivateKey::from_pem(&pem).expect("couldn't parse delegation public key");
+                config.delegation_private_key = Some(private_key);
+            });
 
-        if let Some(delegation_private_key_pem) = delegation_private_key_pem_opt {
-            let pem = delegation_private_key_pem
-                .parse::<Pem>()
-                .expect("couldn't parse delegation private key pem");
-            let private_key = PrivateKey::from_pem(&pem).expect("couldn't parse delegation private key");
-            config.delegation_private_key = Some(private_key);
-        }
+        // plugins
 
-        // plugins parsing
         let plugins = matches
             .values_of(ARG_PLUGINS)
             .unwrap_or_default()
-            .map(|plugin_path| plugin_path.to_owned())
-            .collect::<Vec<String>>();
+            .map(Utf8PathBuf::from)
+            .collect::<Vec<Utf8PathBuf>>();
 
         if !plugins.is_empty() {
             config.plugins = Some(plugins);
@@ -790,7 +868,7 @@ impl Config {
         }
 
         if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
-            config.recording_path = Some(PathBuf::from(recording_path));
+            config.recording_path = Some(Utf8PathBuf::from(recording_path));
         }
 
         config
@@ -802,7 +880,7 @@ impl Config {
             let mut manager = PLUGIN_MANAGER.lock().unwrap();
             for plugin in plugins {
                 manager
-                    .load_plugin(plugin.as_str())
+                    .load_plugin(plugin.as_std_path())
                     .map_err(|e| format!("Plugin {} failed to be loaded: {}", plugin, e))?;
             }
         }
@@ -828,7 +906,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn load_from_file(file_path: PathBuf) -> Option<Self> {
+    pub fn load_from_file(file_path: Utf8PathBuf) -> Option<Self> {
         let config_file = load_config_file(file_path)?;
 
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
@@ -871,50 +949,47 @@ impl Config {
 
         let application_protocols = config_file.application_protocols.unwrap_or_default();
 
-        let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_string());
-        let log_file = get_program_data_file_path(gateway_log_file.as_str())
-            .to_str()
-            .unwrap()
-            .to_string();
+        let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_owned());
+        let log_file = get_program_data_file_path(&gateway_log_file);
 
-        let certificate_file = config_file
-            .certificate_file
-            .as_ref()
-            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let tls_certificate = config_file.certificate_file.map(|file| {
+            let file = get_program_data_file_path(&file);
+            let pem_str = std::fs::read_to_string(file).expect("bad provisioner public key file");
+            let pem = pem_str.parse::<Pem>().expect("bad TLS certificate pem");
+            if pem.label() != CERTIFICATE_LABEL {
+                panic!("bad pem label for TLS certificate (expected {})", CERTIFICATE_LABEL);
+            }
+            rustls::Certificate(pem.into_data().into_owned())
+        });
 
-        let private_key_file = config_file
-            .private_key_file
-            .as_ref()
-            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let tls_private_key = config_file.private_key_file.map(|file| {
+            let file = get_program_data_file_path(&file);
+            let pem_str = std::fs::read_to_string(file).expect("bad provisioner public key file");
+            let pem = pem_str.parse::<Pem>().expect("bad TLS certificate pem");
+            if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
+                panic!("bad pem label for TLS private key (expected {:?})", PRIVATE_KEY_LABELS);
+            }
+            rustls::PrivateKey(pem.into_data().into_owned())
+        });
 
-        let provisioner_public_key_file = config_file
-            .provisioner_public_key_file
-            .as_ref()
-            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
+        let tls_conf = tls_certificate
+            .zip(tls_private_key)
+            .map(|(certificate, key)| TlsConfig::init(certificate, key).expect("couldn't init TLS config"));
 
-        let provisioner_public_key_pem = provisioner_public_key_file
-            .as_ref()
-            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
-        let provisioner_public_key = provisioner_public_key_pem
-            .map(|pem| pem.parse::<Pem>().unwrap())
-            .as_ref()
-            .map(|pem| PublicKey::from_pem(pem).unwrap());
+        let provisioner_public_key = config_file.provisioner_public_key_file.map(|file| {
+            let file = get_program_data_file_path(&file);
+            let pem_str = std::fs::read_to_string(file).expect("bad provisioner public key file");
+            PublicKey::from_pem_str(&pem_str).expect("bad provisioner public key")
+        });
 
-        let delegation_private_key_file = config_file
-            .delegation_private_key_file
-            .as_ref()
-            .map(|file| get_program_data_file_path(file).as_path().to_str().unwrap().to_string());
-
-        let delegation_private_key_pem = delegation_private_key_file
-            .as_ref()
-            .map(|file| std::fs::read_to_string(Path::new(file)).unwrap());
-        let delegation_private_key = delegation_private_key_pem
-            .map(|pem| pem.parse::<Pem>().unwrap())
-            .as_ref()
-            .map(|pem| PrivateKey::from_pem(pem).unwrap());
+        let delegation_private_key = config_file.delegation_private_key_file.map(|file| {
+            let file = get_program_data_file_path(&file);
+            let pem_str = std::fs::read_to_string(file).expect("bad delegation private key file");
+            PrivateKey::from_pem_str(&pem_str).expect("bad delegation private key")
+        });
 
         let plugins = config_file.plugins;
-        let recording_path = config_file.recording_path.map(PathBuf::from);
+        let recording_path = config_file.recording_path.map(Utf8PathBuf::from);
 
         let registry_url = config_file.registry_url;
         let username = config_file.username;
@@ -938,11 +1013,7 @@ impl Config {
             capture_path,
             log_file: Some(log_file),
             application_protocols,
-            certificate: CertificateConfig {
-                certificate_file,
-                private_key_file,
-                ..Default::default()
-            },
+            tls: tls_conf,
             provisioner_public_key,
             delegation_private_key,
             plugins,

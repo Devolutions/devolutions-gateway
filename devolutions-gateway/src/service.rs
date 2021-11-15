@@ -8,7 +8,7 @@ use crate::routing_client::Client;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::ws::WsTransport;
 use crate::transport::JetTransport;
-use crate::utils::{get_pub_key_from_der, load_cert, load_private_key, url_to_socket_addr, AsyncReadWrite};
+use crate::utils::{url_to_socket_addr, AsyncReadWrite};
 use crate::websocket_client::{WebsocketService, WsClient};
 use hyper::service::service_fn;
 use slog::{o, Logger};
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
-use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
+use tokio_rustls::TlsStream;
 use url::Url;
 
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
@@ -51,7 +51,7 @@ pub struct GatewayService {
 impl GatewayService {
     pub fn load() -> Option<Self> {
         let config = Arc::new(Config::init());
-        let logger = logger::init(config.log_file.as_deref()).expect("failed to setup logger");
+        let logger = logger::init(config.log_file.as_ref().map(|o| o.as_std_path())).expect("failed to setup logger");
         let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().expect("failed to init logger");
 
@@ -120,6 +120,18 @@ pub struct GatewayContext {
 }
 
 pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, Cow<'static, str>> {
+    let requires_tls = {
+        if let Some("tls") = config.routing_url.as_ref().map(|o| o.scheme()) {
+            true
+        } else {
+            config.listeners.iter().any(|l| l.internal_url.scheme() == "wss")
+        }
+    };
+
+    if requires_tls && config.tls.is_none() {
+        return Err("configuration imply TLS usage but TLS certificate or/and private key are missing".into());
+    }
+
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()
@@ -152,20 +164,6 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
         "failed to configure http server"
     })?;
 
-    // Create the TLS acceptor.
-    let cert = load_cert(&config.certificate).map_err(|e| format!("could not load cert: {}", e))?;
-    let tls_public_key = get_pub_key_from_der(&cert.0).map_err(|e| format!("could not parse TLS public key: {}", e))?;
-    let priv_key = load_private_key(&config.certificate).map_err(|e| format!("could not load private key: {}", e))?;
-
-    let rustls_config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert], priv_key)
-        .map_err(|e| format!("couldn't set server config cert: {}", e))?;
-    let rustls_config = Arc::new(rustls_config);
-
-    let tls_acceptor = TlsAcceptor::from(rustls_config);
-
     let listeners_count = websocket_listeners.len() + tcp_listeners.len();
     let mut futures: VecOfFuturesType = Vec::with_capacity(listeners_count);
 
@@ -174,7 +172,6 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
             url.clone(),
             config.clone(),
             jet_associations.clone(),
-            tls_acceptor.clone(),
             logger.clone(),
         )));
     }
@@ -184,8 +181,6 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
             url.clone(),
             config.clone(),
             jet_associations.clone(),
-            tls_acceptor.clone(),
-            tls_public_key.clone(),
             logger.clone(),
         )));
     }
@@ -221,8 +216,6 @@ async fn start_tcp_server(
     url: Url,
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
-    tls_acceptor: TlsAcceptor,
-    tls_public_key: Vec<u8>,
     logger: Logger,
 ) -> Result<(), String> {
     use futures::FutureExt as _;
@@ -260,7 +253,11 @@ async fn start_tcp_server(
                                 Box::pin(Client::new(routing_url.clone(), config.clone()).serve(transport))
                             }
                             "tls" => {
-                                let tls_stream = tls_acceptor
+                                let tls_stream = config
+                                    .tls
+                                    .as_ref()
+                                    .unwrap()
+                                    .acceptor
                                     .accept(conn)
                                     .await
                                     .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
@@ -278,7 +275,11 @@ async fn start_tcp_server(
                                 Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
                             }
                             "wss" => {
-                                let tls_stream = tls_acceptor
+                                let tls_stream = config
+                                    .tls
+                                    .as_ref()
+                                    .unwrap()
+                                    .acceptor
                                     .accept(conn)
                                     .await
                                     .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
@@ -294,8 +295,6 @@ async fn start_tcp_server(
                             "rdp" => Box::pin(
                                 RdpClient {
                                     config: config.clone(),
-                                    tls_public_key: tls_public_key.clone(),
-                                    tls_acceptor: tls_acceptor.clone(),
                                     jet_associations: jet_associations.clone(),
                                 }
                                 .serve(conn),
@@ -303,10 +302,8 @@ async fn start_tcp_server(
                             scheme => panic!("Unsupported routing URL scheme {}", scheme),
                         }
                     } else {
-                        let tls_public_key = tls_public_key.clone();
                         let jet_associations = jet_associations.clone();
                         let config = config.clone();
-                        let tls_acceptor = tls_acceptor.clone();
 
                         async {
                             let mut peeked = [0; 4];
@@ -319,7 +316,7 @@ async fn start_tcp_server(
                                         config,
                                         jet_associations,
                                     }
-                                    .serve(JetTransport::new_tcp(conn), tls_acceptor)
+                                    .serve(JetTransport::new_tcp(conn))
                                     .await
                                 }
                                 [b'J', b'M', b'U', b'X'] => Err(io::Error::new(
@@ -329,8 +326,6 @@ async fn start_tcp_server(
                                 _ => {
                                     GenericClient {
                                         config,
-                                        tls_public_key,
-                                        tls_acceptor,
                                         jet_associations,
                                     }
                                     .serve(conn)
@@ -359,7 +354,6 @@ async fn start_websocket_server(
     websocket_url: Url,
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
-    tls_acceptor: TlsAcceptor,
     logger: slog::Logger,
 ) -> Result<(), String> {
     info!("Starting websocket server ({})...", websocket_url);
@@ -387,6 +381,8 @@ async fn start_websocket_server(
     socket.bind(websocket_addr).unwrap();
     set_socket_option(&socket, &logger);
     let websocket_listener = socket.listen(1024).unwrap();
+
+    let tls_conf = config.tls.clone();
 
     let websocket_service = WebsocketService {
         jet_associations,
@@ -444,7 +440,7 @@ async fn start_websocket_server(
                 Ok((tcp, remote_addr)) => {
                     set_stream_option(&tcp, &logger);
 
-                    match tls_acceptor.accept(tcp).await {
+                    match tls_conf.as_ref().unwrap().acceptor.accept(tcp).await {
                         Ok(tls) => {
                             let conn = Box::new(tls) as ConnectionType;
                             connection_process(conn, remote_addr, websocket_service.clone());

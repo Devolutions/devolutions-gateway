@@ -43,7 +43,9 @@ impl DiagnosticsController {
             .log_file
             .as_ref()
             .ok_or_else(|| HttpErrorStatus::not_found("Log file is not configured"))?;
-        File::open(log_file_path).await.map_err(HttpErrorStatus::internal)
+        File::open(log_file_path.as_str())
+            .await
+            .map_err(HttpErrorStatus::internal)
     }
 
     #[get("/configuration")]

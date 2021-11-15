@@ -1,9 +1,6 @@
 pub mod association;
 
-use crate::config::CertificateConfig;
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fs;
 use std::hash::Hash;
 use std::io;
 use std::net::SocketAddr;
@@ -13,8 +10,6 @@ use tokio::net::{lookup_host, TcpStream};
 use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
-use x509_parser::certificate::X509Certificate;
-use x509_parser::traits::FromDer;
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
@@ -57,15 +52,22 @@ macro_rules! io_try {
 
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
     let der = get_der_cert_from_stream(stream)?;
-    get_pub_key_from_der(&der)
-}
 
-pub fn get_pub_key_from_der(cert: &[u8]) -> io::Result<Vec<u8>> {
-    let res = X509Certificate::from_der(cert)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Utils: invalid der certificate."))?;
-    let public_key = res.1.tbs_certificate.subject_pki.subject_public_key;
+    let cert = picky::x509::Cert::from_der(&der).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("couldn't parse TLS certificate: {}", e),
+        )
+    })?;
 
-    Ok(public_key.data.to_vec())
+    let key_der = cert.public_key().to_der().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Couldn't get der for public key contained in TLS certificate: {}", e),
+        )
+    })?;
+
+    Ok(key_der)
 }
 
 fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
@@ -79,46 +81,6 @@ fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Resul
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates"))?;
 
     Ok(cert.as_ref().to_vec())
-}
-
-pub fn load_cert(config: &CertificateConfig) -> io::Result<rustls::Certificate> {
-    let data = if let Some(filename) = &config.certificate_file {
-        Cow::Owned(fs::read_to_string(filename)?)
-    } else if let Some(data) = &config.certificate_data {
-        Cow::Borrowed(data)
-    } else {
-        return Err(io::Error::new(io::ErrorKind::Other, "certificate is missing"));
-    };
-
-    let pem = picky::pem::parse_pem(data.as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    if pem.label() != "CERTIFICATE" {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("bad label for certificate pem: {}", pem.label()),
-        ));
-    }
-
-    Ok(rustls::Certificate(pem.into_data().into_owned()))
-}
-
-pub fn load_private_key(config: &CertificateConfig) -> io::Result<rustls::PrivateKey> {
-    let data = if let Some(filename) = &config.private_key_file {
-        Cow::Owned(fs::read_to_string(filename)?)
-    } else if let Some(data) = &config.private_key_data {
-        Cow::Borrowed(data)
-    } else {
-        return Err(io::Error::new(io::ErrorKind::Other, "private key is missing"));
-    };
-
-    let pem = picky::pem::parse_pem(data.as_bytes()).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    if pem.label() != "PRIVATE KEY" && pem.label() != "RSA PRIVATE KEY" {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("bad label for private key pem: {}", pem.label()),
-        ));
-    }
-
-    Ok(rustls::PrivateKey(pem.into_data().into_owned()))
 }
 
 pub fn update_framed_codec<Io, OldCodec, NewCodec, OldDecodedType, NewDecodedType>(

@@ -12,6 +12,7 @@ use crate::utils::into_other_io_error;
 pub use packets_parsing::PacketsParser;
 use plugin_info::{PluginCapabilities, PluginInformation};
 pub use recording::Recorder;
+use std::path::Path;
 
 #[derive(Clone)]
 struct Plugin {
@@ -54,7 +55,7 @@ impl PluginManager {
         None
     }
 
-    pub fn load_plugin(&mut self, path: &str) -> Result<(), Error> {
+    pub fn load_plugin(&mut self, path: &Path) -> Result<(), Error> {
         let lib = Arc::new(Library::open(path)?);
         match PluginInformation::new(lib.clone()) {
             Ok(info) => {

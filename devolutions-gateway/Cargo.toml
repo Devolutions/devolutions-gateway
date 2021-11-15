@@ -11,7 +11,7 @@ authors = ["François Dubois <fdubois@devolutions.net>",
 [dependencies]
 jet-proto = { path = "../jet-proto" }
 jmux-proxy = { path = "../jmux-proxy" }
-picky = { version = "6.3.0", default-features = false, features = ["jose"] }
+picky = { version = "6.3.0", default-features = false, features = ["jose", "x509"] }
 ceviche = "0.4.5"
 ctrlc = "3.2.1"
 clap = "2.33"
@@ -41,7 +41,6 @@ slog-scope = "4.4.0"
 slog-envlogger = "2.2.0"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
 chrono = { version = "0.4.19", features = ["serde"] }
-x509-parser = "0.12.0"
 sspi = "0.3.2"
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
 hyper = "0.14.14"
@@ -59,6 +58,7 @@ rust-argon2 = "0.8.3"
 reqwest = "0.11.6"
 http = "0.2.5"
 zeroize = "1.4.2"
+camino = { version = "1.0.5", features = ["serde1"] }
 
 [dependencies.saphir]
 version = "2.8"

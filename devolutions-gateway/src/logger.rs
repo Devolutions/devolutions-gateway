@@ -5,6 +5,7 @@ use slog_term::{Decorator, FullFormat, PlainDecorator, TermDecorator};
 use std::fs::OpenOptions;
 use std::result::Result;
 use std::{env, io};
+use std::path::Path;
 
 const LOGGER_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M:%S:%6f";
 const DEFAULT_CHAN_SIZE: usize = 256;
@@ -42,7 +43,7 @@ impl<D1: Drain<Ok = (), Err = Never>, D2: Drain<Ok = (), Err = Never>> Drain for
     }
 }
 
-pub fn init(file_path: Option<&str>) -> io::Result<Logger> {
+pub fn init(file_path: Option<&Path>) -> io::Result<Logger> {
     let term_decorator = TermDecorator::new().build();
     let term_fmt = format_decorator(term_decorator);
 
