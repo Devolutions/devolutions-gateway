@@ -120,18 +120,6 @@ pub struct GatewayContext {
 }
 
 pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, Cow<'static, str>> {
-    let requires_tls = {
-        if let Some("tls") = config.routing_url.as_ref().map(|o| o.scheme()) {
-            true
-        } else {
-            config.listeners.iter().any(|l| l.internal_url.scheme() == "wss")
-        }
-    };
-
-    if requires_tls && config.tls.is_none() {
-        return Err("configuration imply TLS usage but TLS certificate or/and private key are missing".into());
-    }
-
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()

@@ -246,24 +246,13 @@ impl GatewayListener {
     }
 }
 
-fn url_map_scheme_ws_to_http(url: &mut Url) {
-    let scheme = url.scheme().to_string();
-    let scheme = match scheme.as_str() {
-        "ws" => "http",
-        "wss" => "https",
-        scheme => scheme,
-    };
-    let _ = url.set_scheme(scheme);
-}
-
 fn url_map_scheme_http_to_ws(url: &mut Url) {
-    let scheme = url.scheme().to_string();
-    let scheme = match scheme.as_str() {
+    let scheme = match url.scheme() {
         "http" => "ws",
         "https" => "wss",
-        scheme => scheme,
+        _ => return,
     };
-    let _ = url.set_scheme(scheme);
+    url.set_scheme(scheme).expect("couldn't update scheme");
 }
 
 #[derive(Serialize, Deserialize)]
@@ -898,9 +887,20 @@ impl Config {
             return Err("At least one HTTP listener is required".to_string());
         }
 
-        // early fail if we start as restricted without provisioner key
         if self.provisioner_public_key.is_none() {
             return Err("provisioner public key is missing".to_string());
+        }
+
+        let requires_tls = {
+            if let Some("tls") = self.routing_url.as_ref().map(|o| o.scheme()) {
+                true
+            } else {
+                self.listeners.iter().any(|l| l.internal_url.scheme() == "wss")
+            }
+        };
+
+        if requires_tls && self.tls.is_none() {
+            return Err("TLS usage implied but TLS certificate or/and private key are missing".into());
         }
 
         Ok(())
@@ -926,15 +926,12 @@ impl Config {
             }
         }
 
-        for listener in listeners.iter_mut() {
-            // normalize all listeners to http/https
-            url_map_scheme_ws_to_http(&mut listener.internal_url);
-            url_map_scheme_ws_to_http(&mut listener.external_url);
-        }
+        // NOTE: we allow configs to specify "http" or "https" scheme if it's clearer,
+        // but this is ultimately identical to "ws" and "wss" respectively.
 
         let has_at_least_one_http_listener = listeners
             .iter()
-            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https"));
+            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"));
 
         if !has_at_least_one_http_listener {
             eprintln!("At least one HTTP listener is required");
