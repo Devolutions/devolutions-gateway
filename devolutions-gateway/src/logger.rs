@@ -3,6 +3,7 @@ use slog::{o, Drain, Duplicate, FilterLevel, Level, Logger, Never, OwnedKVList, 
 use slog_async::{Async, OverflowStrategy};
 use slog_term::{Decorator, FullFormat, PlainDecorator, TermDecorator};
 use std::fs::OpenOptions;
+use std::path::Path;
 use std::result::Result;
 use std::{env, io};
 
@@ -42,7 +43,7 @@ impl<D1: Drain<Ok = (), Err = Never>, D2: Drain<Ok = (), Err = Never>> Drain for
     }
 }
 
-pub fn init(file_path: Option<&str>) -> io::Result<Logger> {
+pub fn init(file_path: Option<&Path>) -> io::Result<Logger> {
     let term_decorator = TermDecorator::new().build();
     let term_fmt = format_decorator(term_decorator);
 

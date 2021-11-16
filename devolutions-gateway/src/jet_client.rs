@@ -39,7 +39,7 @@ pub struct JetClient {
 }
 
 impl JetClient {
-    pub async fn serve(self, transport: JetTransport, tls_acceptor: TlsAcceptor) -> Result<(), io::Error> {
+    pub async fn serve(self, transport: JetTransport) -> Result<(), io::Error> {
         let jet_associations = self.jet_associations.clone();
         let config = self.config;
 
@@ -58,7 +58,7 @@ impl JetClient {
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
 
-                let proxy_result = handle_build_proxy(jet_associations.clone(), config, response, tls_acceptor).await;
+                let proxy_result = handle_build_proxy(jet_associations.clone(), config, response).await;
 
                 remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
 
@@ -75,7 +75,7 @@ async fn handle_build_tls_proxy(
     config: Arc<Config>,
     response: HandleConnectJetMsgResponse,
     interceptor: PcapRecordingInterceptor,
-    tls_acceptor: TlsAcceptor,
+    tls_acceptor: &TlsAcceptor,
 ) -> Result<(), io::Error> {
     let client_stream = response.client_transport.get_tcp_stream();
     let server_stream = response.server_transport.get_tcp_stream();
@@ -104,7 +104,6 @@ async fn handle_build_proxy(
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
     response: HandleConnectJetMsgResponse,
-    tls_acceptor: TlsAcceptor,
 ) -> Result<(), io::Error> {
     let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
     let association_id = response.association_id;
@@ -122,8 +121,8 @@ async fn handle_build_proxy(
             );
 
             recording_dir = match &config.recording_path {
-                Some(path) if path.to_str().is_some() => {
-                    interceptor.set_recording_directory(path.to_str().unwrap());
+                Some(path) => {
+                    interceptor.set_recording_directory(path.as_str());
                     Some(PathBuf::from(path))
                 }
                 _ => interceptor.get_recording_directory(),
@@ -136,13 +135,17 @@ async fn handle_build_proxy(
     }
 
     if let Some(interceptor) = recording_interceptor {
+        let tls_acceptor = config
+            .tls
+            .as_ref()
+            .map(|conf| &conf.acceptor)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "TLS configuration is missing"))?;
+
         let proxy_result = handle_build_tls_proxy(config.clone(), response, interceptor, tls_acceptor).await;
 
         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
             let registry = Registry::new(config);
-            registry
-                .manage_files(association_id.to_string(), pattern, dir.as_path())
-                .await;
+            registry.manage_files(association_id.to_string(), pattern, &dir).await;
         };
 
         proxy_result

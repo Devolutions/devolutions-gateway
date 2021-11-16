@@ -25,7 +25,6 @@ use std::io;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::Decoder;
 use url::Url;
 use uuid::Uuid;
@@ -63,8 +62,6 @@ impl credssp::CredentialsProxy for RdpIdentity {
 
 pub struct RdpClient {
     pub config: Arc<Config>,
-    pub tls_public_key: Vec<u8>,
-    pub tls_acceptor: TlsAcceptor,
     pub jet_associations: JetAssociationsMap,
 }
 
@@ -84,8 +81,6 @@ impl RdpClient {
     ) -> io::Result<()> {
         let Self {
             config,
-            tls_acceptor,
-            tls_public_key,
             jet_associations,
         } = self;
 
@@ -115,6 +110,11 @@ impl RdpClient {
             }
             RdpRoutingMode::Tls(identity) => {
                 info!("Starting RDP-TLS redirection");
+
+                let tls_conf = config
+                    .tls
+                    .clone()
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "TLS configuration is missing"))?;
 
                 // We can't use FramedRead directly here, because we still have to use
                 // the leftover bytes. As an alternative, the decoder could be modified to use the
@@ -147,8 +147,8 @@ impl RdpClient {
                 let proxy_connection = ConnectionSequenceFuture::new(
                     client_stream,
                     request,
-                    tls_public_key,
-                    tls_acceptor,
+                    tls_conf.public_key.0,
+                    tls_conf.acceptor,
                     identity.clone(),
                 )
                 .await

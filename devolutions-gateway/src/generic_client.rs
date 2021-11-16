@@ -11,15 +11,12 @@ use std::io;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio_rustls::TlsAcceptor;
 use url::Url;
 
 const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 
 pub struct GenericClient {
     pub config: Arc<Config>,
-    pub tls_public_key: Vec<u8>,
-    pub tls_acceptor: TlsAcceptor,
     pub jet_associations: JetAssociationsMap,
 }
 
@@ -27,8 +24,6 @@ impl GenericClient {
     pub async fn serve(self, mut client_stream: TcpStream) -> io::Result<()> {
         let Self {
             config,
-            tls_public_key,
-            tls_acceptor,
             jet_associations,
         } = self;
 
@@ -40,8 +35,6 @@ impl GenericClient {
             ApplicationProtocol::Rdp => {
                 RdpClient {
                     config,
-                    tls_public_key,
-                    tls_acceptor,
                     jet_associations,
                 }
                 .serve_with_association_claims_and_leftover_bytes(client_stream, association_claims, leftover_bytes)

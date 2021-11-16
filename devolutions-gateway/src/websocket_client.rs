@@ -240,8 +240,8 @@ async fn handle_jet_connect_impl(
                         );
 
                         recording_dir = match &config.recording_path {
-                            Some(path) if path.to_str().is_some() => {
-                                interceptor.set_recording_directory(path.to_str().unwrap());
+                            Some(path) => {
+                                interceptor.set_recording_directory(path.as_str());
                                 Some(std::path::PathBuf::from(path))
                             }
                             _ => interceptor.get_recording_directory(),
