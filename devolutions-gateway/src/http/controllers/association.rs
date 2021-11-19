@@ -1,5 +1,4 @@
 use crate::config::Config;
-use crate::http::controllers::health::build_health_response;
 use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
@@ -16,12 +15,12 @@ use std::sync::Arc;
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
-pub struct JetController {
+pub struct AssociationController {
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
 }
 
-impl JetController {
+impl AssociationController {
     pub fn new(config: Arc<Config>, jet_associations: JetAssociationsMap) -> Self {
         Self {
             config,
@@ -30,9 +29,9 @@ impl JetController {
     }
 }
 
-#[controller(name = "jet")]
-impl JetController {
-    #[get("/association")]
+#[controller(name = "jet/association")]
+impl AssociationController {
+    #[get("/")]
     #[guard(
         AccessGuard,
         init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewayAssociationsRead)"#
@@ -54,7 +53,7 @@ impl JetController {
         (StatusCode::BAD_REQUEST, None)
     }
 
-    #[post("/association/<association_id>")]
+    #[post("/<association_id>")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn create_association(&self, mut req: Request) -> StatusCode {
         if let Some(JetAccessTokenClaims::Association(association_claims)) =
@@ -96,7 +95,7 @@ impl JetController {
         }
     }
 
-    #[post("/association/<association_id>/candidates")]
+    #[post("/<association_id>/candidates")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
     async fn gather_association_candidates(&self, mut req: Request) -> (StatusCode, Option<String>) {
         if let Some(JetAccessTokenClaims::Association(association_claims)) =
@@ -145,11 +144,6 @@ impl JetController {
         } else {
             (StatusCode::UNAUTHORIZED, None)
         }
-    }
-
-    #[get("/health")]
-    async fn health(&self) -> (StatusCode, String) {
-        build_health_response(&self.config)
     }
 }
 

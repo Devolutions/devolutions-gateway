@@ -1,6 +1,6 @@
 use crate::config::Config;
 use saphir::controller::Controller;
-use saphir::http::{Method, StatusCode};
+use saphir::http::Method;
 use saphir::macros::controller;
 use std::sync::Arc;
 
@@ -9,21 +9,39 @@ pub struct HealthController {
 }
 
 impl HealthController {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub fn new(config: Arc<Config>) -> (Self, LegacyHealthController) {
+        (
+            Self { config: config.clone() },
+            LegacyHealthController { inner: Self { config } },
+        )
     }
+}
+
+#[controller(name = "jet/health")]
+impl HealthController {
+    #[get("/")]
+    async fn get_health(&self) -> String {
+        get_health_stub(self)
+    }
+}
+
+fn get_health_stub(controller: &HealthController) -> String {
+    format!(
+        "Devolutions Gateway \"{}\" is alive and healthy.",
+        controller.config.hostname
+    )
+}
+
+// TODO: remove legacy controller after 2022/11/19
+
+pub struct LegacyHealthController {
+    inner: HealthController,
 }
 
 #[controller(name = "health")]
-impl HealthController {
+impl LegacyHealthController {
     #[get("/")]
-    async fn get_health(&self) -> (StatusCode, String) {
-        build_health_response(&self.config)
+    async fn get_health(&self) -> String {
+        get_health_stub(&self.inner)
     }
-}
-
-pub fn build_health_response(config: &Config) -> (StatusCode, String) {
-    let hostname = &config.hostname;
-    let response_body = format!("Devolutions Gateway \"{}\" is alive and healthy.", hostname);
-    (StatusCode::OK, response_body)
 }
