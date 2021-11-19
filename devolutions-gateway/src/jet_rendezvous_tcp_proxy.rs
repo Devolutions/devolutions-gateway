@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::http::controllers::jet::start_remove_association_future;
+use crate::http::controllers::association::start_remove_association_future;
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;

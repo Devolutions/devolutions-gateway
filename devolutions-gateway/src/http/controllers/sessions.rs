@@ -9,7 +9,7 @@ use saphir::prelude::Json;
 
 pub struct SessionsController;
 
-#[controller(name = "sessions")]
+#[controller(name = "jet/sessions")]
 impl SessionsController {
     #[get("/count")]
     #[guard(
@@ -17,8 +17,7 @@ impl SessionsController {
         init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
     )]
     async fn get_count(&self) -> (StatusCode, String) {
-        let sessions = SESSIONS_IN_PROGRESS.read().await;
-        (StatusCode::OK, sessions.len().to_string())
+        get_count_stub().await
     }
 
     #[get("/")]
@@ -27,10 +26,44 @@ impl SessionsController {
         init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
     )]
     async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
-        let sessions = SESSIONS_IN_PROGRESS.read().await;
+        get_sessions_stub().await
+    }
+}
 
-        let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();
+async fn get_count_stub() -> (StatusCode, String) {
+    let sessions = SESSIONS_IN_PROGRESS.read().await;
+    (StatusCode::OK, sessions.len().to_string())
+}
 
-        Ok(Json(sessions_in_progress))
+async fn get_sessions_stub() -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
+    let sessions = SESSIONS_IN_PROGRESS.read().await;
+
+    let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();
+
+    Ok(Json(sessions_in_progress))
+}
+
+// TODO: remove legacy controller after 2022/11/19
+
+pub struct LegacySessionsController;
+
+#[controller(name = "sessions")]
+impl LegacySessionsController {
+    #[get("/count")]
+    #[guard(
+        AccessGuard,
+        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
+    )]
+    async fn get_count(&self) -> (StatusCode, String) {
+        get_count_stub().await
+    }
+
+    #[get("/")]
+    #[guard(
+        AccessGuard,
+        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
+    )]
+    async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
+        get_sessions_stub().await
     }
 }

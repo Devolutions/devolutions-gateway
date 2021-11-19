@@ -22,7 +22,7 @@ impl Default for HttpBridgeController {
     }
 }
 
-#[controller(name = "bridge")]
+#[controller(name = "jet/bridge")]
 impl HttpBridgeController {
     #[get("/message")]
     #[post("/message")]
