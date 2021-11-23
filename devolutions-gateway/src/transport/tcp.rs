@@ -1,17 +1,15 @@
+use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
+use crate::utils;
+use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-
-use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
 use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use url::Url;
-
-use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
-use crate::utils::{create_tls_connector, resolve_url_to_socket_arr};
 
 #[allow(clippy::large_enum_variant)]
 pub enum TcpStreamWrapper {
@@ -136,7 +134,7 @@ impl AsyncWrite for TcpTransport {
 
 impl TcpTransport {
     async fn create_connect_impl_future(url: Url) -> Result<TcpTransport, std::io::Error> {
-        let socket_addr = resolve_url_to_socket_arr(&url).await.ok_or_else(|| {
+        let socket_addr = utils::resolve_url_to_socket_addr(&url).await.ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 format!("couldn't resolve {}", url),
@@ -148,7 +146,7 @@ impl TcpTransport {
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr).await?;
 
-                let tls_handshake = create_tls_connector(socket)
+                let tls_handshake = utils::create_tls_connector(socket)
                     .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 

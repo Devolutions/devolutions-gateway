@@ -2,10 +2,12 @@ use crate::config::Config;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
+use crate::token::ApplicationProtocol;
 use crate::transport::ws::WsTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::remove_jet_association;
-use crate::{GatewaySessionInfo, Proxy};
+use crate::utils::TargetAddr;
+use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use saphir::error;
 use slog_scope::{error, info};
@@ -182,11 +184,14 @@ async fn handle_jet_connect_impl(
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
 
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
-    let (version, association_token) = {
+    let (version, association_claims) = {
         let associations = jet_associations.lock().await;
         let association = associations.get(&association_id).ok_or(())?;
         (association.version(), association.get_token_claims().clone())
     };
+
+    let association_id = association_claims.jet_aid;
+
     let res = process_req(&req);
 
     match version {
@@ -253,11 +258,15 @@ async fn handle_jet_connect_impl(
                         has_interceptor = true;
                     }
 
-                    // We need to manually drop mutex lock to avoid deadlock below;
-                    // Rust does not drop it automatically before end of the function
+                    // We need to manually drop mutex lock to avoid deadlock below
                     std::mem::drop(jet_assc);
 
-                    let proxy_result = Proxy::new(config.clone(), association_token.into())
+                    let info =
+                        GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
+                            .with_recording_policy(association_claims.jet_rec)
+                            .with_filtering_policy(association_claims.jet_flt);
+
+                    let proxy_result = Proxy::new(config.clone(), info)
                         .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
                         .await;
 
@@ -464,8 +473,19 @@ impl WsClient {
         T: 'static + Transport + Send,
     {
         let server_transport = WsTransport::connect(&self.routing_url).await?;
-        Proxy::new(self.config.clone(), GatewaySessionInfo::default())
-            .build(server_transport, client_transport)
-            .await
+
+        let destination_host =
+            TargetAddr::try_from(&self.routing_url).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Proxy::new(
+            self.config.clone(),
+            GatewaySessionInfo::new(
+                Uuid::new_v4(),
+                ApplicationProtocol::Unknown,
+                ConnectionModeDetails::Fwd { destination_host },
+            ),
+        )
+        .build(server_transport, client_transport)
+        .await
     }
 }

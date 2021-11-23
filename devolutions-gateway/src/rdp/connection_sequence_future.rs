@@ -8,7 +8,7 @@ use crate::rdp::RdpIdentity;
 use crate::transport::mcs::{McsTransport, SendDataContextTransport};
 use crate::transport::rdp::{RdpPdu, RdpTransport};
 use crate::transport::x224::{DataTransport, NegotiationWithClientTransport, NegotiationWithServerTransport};
-use crate::utils;
+use crate::utils::{self, TargetAddr};
 use bytes::BytesMut;
 use futures::{ready, SinkExt};
 use ironrdp::nego;
@@ -20,7 +20,6 @@ use std::task::{Context, Poll};
 use tokio::net::TcpStream;
 use tokio_rustls::{TlsAcceptor, TlsStream};
 use tokio_util::codec::{Decoder, Framed};
-use utils::resolve_url_to_socket_arr;
 
 pub struct ConnectionSequenceFuture {
     state: ConnectionSequenceFutureState,
@@ -32,12 +31,14 @@ pub struct ConnectionSequenceFuture {
     response_protocol: Option<nego::SecurityProtocol>,
     filter_config: Option<FilterConfig>,
     joined_static_channels: Option<StaticChannels>,
+    selected_target: Option<TargetAddr>,
 }
 
 pub struct RdpProxyConnection {
     pub client: Framed<TlsStream<TcpStream>, RdpTransport>,
     pub server: Framed<TlsStream<TcpStream>, RdpTransport>,
     pub channels: StaticChannels,
+    pub selected_target: TargetAddr,
 }
 
 impl ConnectionSequenceFuture {
@@ -60,6 +61,7 @@ impl ConnectionSequenceFuture {
             response_protocol: None,
             filter_config: None,
             joined_static_channels: None,
+            selected_target: None,
         }
     }
 
@@ -278,23 +280,19 @@ impl Future for ConnectionSequenceFuture {
                     let client_transport = ready!(nla_future.as_mut().poll(cx))?;
                     self.client_nla_transport = Some(client_transport);
 
-                    let dest_host = self.identity.dest_host.clone();
-                    let future = async {
-                        let dest_host = dest_host;
-                        let socket_addr = resolve_url_to_socket_arr(&dest_host).await.ok_or_else(|| {
-                            io::Error::new(
-                                io::ErrorKind::ConnectionRefused,
-                                format!("couldn't resolve {}", dest_host),
-                            )
-                        })?;
-
-                        TcpStream::connect(socket_addr).await
+                    let destinations = self.identity.targets.clone();
+                    let future = async move {
+                        let destinations = destinations;
+                        utils::successive_try(&destinations, utils::tcp_stream_connect)
+                            .await
+                            .map(|(stream, selected)| (stream, selected.clone()))
                     };
 
                     self.state = ConnectionSequenceFutureState::ConnectToServer(Box::pin(future));
                 }
                 ConnectionSequenceFutureState::ConnectToServer(connect_future) => {
-                    let server = ready!(connect_future.as_mut().poll(cx))?;
+                    let (server, selected_target) = ready!(connect_future.as_mut().poll(cx))?;
+                    self.selected_target = Some(selected_target);
 
                     self.state = ConnectionSequenceFutureState::NegotiationWithServer(Box::pin(
                         self.create_server_negotiation_future(server)?,
@@ -357,6 +355,10 @@ impl Future for ConnectionSequenceFuture {
                         channels: self.joined_static_channels.take().expect(
                             "During RDP connection sequence, the joined static channels must exist in the RDP state",
                         ),
+                        selected_target: self
+                            .selected_target
+                            .take()
+                            .expect("During RDP connection sequence, a target is selected"),
                     }));
                 }
             }
@@ -379,7 +381,7 @@ enum ConnectionSequenceFutureState {
 type NegotiationWithClientT =
     Pin<Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>>>;
 type NlaWithClientT = Pin<Box<NlaWithClientFuture>>;
-type ConnectToServerT = Pin<Box<dyn Future<Output = Result<TcpStream, io::Error>> + Send>>;
+type ConnectToServerT = Pin<Box<dyn Future<Output = Result<(TcpStream, TargetAddr), io::Error>> + Send>>;
 type NegotiationWithServerT =
     Pin<Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>>;
 type NlaWithServerT = Pin<Box<NlaWithServerFuture>>;

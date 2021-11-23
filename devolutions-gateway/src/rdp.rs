@@ -15,8 +15,9 @@ use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pd
 use crate::token::{ApplicationProtocol, ConnectionMode, JetAssociationTokenClaims};
 use crate::transport::tcp::TcpTransport;
 use crate::transport::x224::NegotiationWithClientTransport;
-use crate::transport::{JetTransport, Transport};
-use crate::{utils, Proxy};
+use crate::transport::JetTransport;
+use crate::utils::{self, TargetAddr};
+use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use bytes::BytesMut;
 use slog_scope::{error, info};
 use sspi::internal::credssp;
@@ -26,7 +27,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::Decoder;
-use url::Url;
 use uuid::Uuid;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
@@ -37,7 +37,7 @@ pub const DR_DYN_VC_CHANNEL_NAME: &str = "drdynvc";
 pub struct RdpIdentity {
     pub proxy: AuthIdentity,
     pub target: AuthIdentity,
-    pub dest_host: Url,
+    pub targets: Vec<TargetAddr>,
 }
 
 impl credssp::CredentialsProxy for RdpIdentity {
@@ -87,10 +87,12 @@ impl RdpClient {
         let routing_mode = resolve_rdp_routing_mode(&association_claims)?;
 
         match routing_mode {
-            RdpRoutingMode::Tcp(url) => {
+            RdpRoutingMode::Tcp(targets) => {
                 info!("Starting RDP-TCP redirection");
 
-                let mut server_conn = TcpTransport::connect(&url).await?;
+                let (mut server_conn, destination_host) =
+                    utils::successive_try(&targets, utils::tcp_transport_connect).await?;
+
                 let client_transport = TcpTransport::new(client_stream);
 
                 server_conn.write_buf(&mut leftover_bytes).await.map_err(|e| {
@@ -98,7 +100,17 @@ impl RdpClient {
                     e
                 })?;
 
-                let result = Proxy::new(config, association_claims.into())
+                let info = GatewaySessionInfo::new(
+                    association_claims.jet_aid,
+                    association_claims.jet_ap,
+                    ConnectionModeDetails::Fwd {
+                        destination_host: destination_host.clone(),
+                    },
+                )
+                .with_recording_policy(association_claims.jet_rec)
+                .with_filtering_policy(association_claims.jet_flt);
+
+                let result = Proxy::new(config, info)
                     .build(server_conn, client_transport)
                     .await
                     .map_err(|e| {
@@ -157,6 +169,7 @@ impl RdpClient {
                     io::Error::new(io::ErrorKind::Other, e)
                 })?;
 
+                let destination_host = proxy_connection.selected_target;
                 let client_transport = proxy_connection.client;
                 let server_transport = proxy_connection.server;
                 let joined_static_channels = proxy_connection.channels;
@@ -196,7 +209,15 @@ impl RdpClient {
                 let client_tls = client_transport.into_inner();
                 let server_tls = server_transport.into_inner();
 
-                Proxy::new(config, association_claims.into())
+                let info = GatewaySessionInfo::new(
+                    association_claims.jet_aid,
+                    association_claims.jet_ap,
+                    ConnectionModeDetails::Fwd { destination_host },
+                )
+                .with_recording_policy(association_claims.jet_rec)
+                .with_filtering_policy(association_claims.jet_flt);
+
+                Proxy::new(config, info)
                     .build_with_message_reader(
                         TcpTransport::new_tls(server_tls),
                         TcpTransport::new_tls(client_tls),
@@ -219,15 +240,12 @@ impl RdpClient {
 }
 
 enum RdpRoutingMode {
-    Tcp(Url),
+    Tcp(Vec<TargetAddr>),
     Tls(RdpIdentity),
     TcpRendezvous(Uuid),
 }
 
 fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRoutingMode, io::Error> {
-    const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
-    const DEFAULT_RDP_PORT: u16 = 3389;
-
     if claims.jet_ap != ApplicationProtocol::Rdp {
         return Err(io::Error::new(
             io::ErrorKind::Other,
@@ -240,28 +258,14 @@ fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRou
 
     match &claims.jet_cm {
         ConnectionMode::Rdv => Ok(RdpRoutingMode::TcpRendezvous(claims.jet_aid)),
-        ConnectionMode::Fwd { dst_hst, creds } => {
-            let route_url = if dst_hst.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
-                dst_hst.to_owned()
-            } else {
-                format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, dst_hst)
-            };
-
-            let mut dst_hst = Url::parse(&route_url).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse routing URL in JWT token: {}", e),
-                )
-            })?;
-
-            if dst_hst.port().is_none() {
-                dst_hst.set_port(Some(DEFAULT_RDP_PORT)).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "Invalid URL: couldn't set default port for routing URL",
-                    )
-                })?;
-            }
+        ConnectionMode::Fwd {
+            dst_hst,
+            creds,
+            dst_alt,
+        } => {
+            let mut targets = Vec::with_capacity(dst_alt.len() + 1);
+            targets.push(dst_hst.clone());
+            targets.extend(dst_alt.clone());
 
             if let Some(creds) = creds {
                 Ok(RdpRoutingMode::Tls(RdpIdentity {
@@ -275,10 +279,10 @@ fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRou
                         password: creds.dst_pwd.to_owned(),
                         domain: None,
                     },
-                    dest_host: dst_hst,
+                    targets,
                 }))
             } else {
-                Ok(RdpRoutingMode::Tcp(dst_hst))
+                Ok(RdpRoutingMode::Tcp(targets))
             }
         }
     }

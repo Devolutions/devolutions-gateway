@@ -1,8 +1,10 @@
 use crate::config::Config;
 use crate::proxy::Proxy;
+use crate::token::ApplicationProtocol;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::Transport;
-use crate::GatewaySessionInfo;
+use crate::utils::TargetAddr;
+use crate::{ConnectionModeDetails, GatewaySessionInfo};
 use std::io;
 use std::sync::Arc;
 use url::Url;
@@ -23,8 +25,18 @@ impl Client {
     {
         let server_transport = TcpTransport::connect(&self.routing_url).await?;
 
-        Proxy::new(self.config.clone(), GatewaySessionInfo::default())
-            .build(server_transport, client_transport)
-            .await
+        let destination_host =
+            TargetAddr::try_from(&self.routing_url).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        Proxy::new(
+            self.config.clone(),
+            GatewaySessionInfo::new(
+                uuid::Uuid::new_v4(),
+                ApplicationProtocol::Unknown,
+                ConnectionModeDetails::Fwd { destination_host },
+            ),
+        )
+        .build(server_transport, client_transport)
+        .await
     }
 }

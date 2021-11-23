@@ -61,9 +61,12 @@ impl HttpBridgeController {
                 .next()
                 .expect("Split always returns at least one element");
 
-            format!("http://{}{}", claims.target_host, request_target)
-                .parse()
-                .map_err(HttpErrorStatus::bad_request)?
+            claims
+                .target_host
+                .to_uri_with_path_and_query(request_target)
+                .map_err(|e| {
+                    HttpErrorStatus::bad_request(format!("Request-Target header has an invalid value: {}", e))
+                })?
         } else {
             return Err(HttpErrorStatus::forbidden("token not allowed"));
         };

@@ -4,7 +4,7 @@ use crate::http::guards::access::{AccessGuard, JetTokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
-use crate::token::{JetAccessScope, JetAccessTokenClaims};
+use crate::token::{ConnectionMode, JetAccessScope, JetAccessTokenClaims};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use jet_proto::JET_VERSION_V2;
 use saphir::controller::Controller;
@@ -56,9 +56,9 @@ impl JetController {
 
     #[post("/association/<association_id>")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
-    async fn create_association(&self, req: Request) -> StatusCode {
-        if let Some(JetAccessTokenClaims::Association(association_token)) =
-            req.extensions().get::<JetAccessTokenClaims>()
+    async fn create_association(&self, mut req: Request) -> StatusCode {
+        if let Some(JetAccessTokenClaims::Association(association_claims)) =
+            req.extensions_mut().remove::<JetAccessTokenClaims>()
         {
             let association_id = match req
                 .captures()
@@ -71,25 +71,24 @@ impl JetController {
                 }
             };
 
-            if association_token.jet_aid != association_id {
-                slog_scope::error!(
-                    "Invalid session token: expected {}, got {}",
-                    association_token.jet_aid.to_string(),
-                    association_id
-                );
-                return StatusCode::FORBIDDEN;
+            match association_claims.jet_cm {
+                ConnectionMode::Rdv if association_claims.jet_aid == association_id => {}
+                _ => {
+                    slog_scope::error!(
+                        "Invalid session token: expected rendezvous token for {}",
+                        association_id
+                    );
+                    return StatusCode::FORBIDDEN;
+                }
             }
 
-            // Controller runs by Saphir via tokio 0.2 runtime, we need to use .compat()
-            // to run Mutex from tokio 0.3 via Saphir's tokio 0.2 runtime. This code should be upgraded
-            // when saphir perform transition to tokio 0.3
             let mut jet_associations = self.jet_associations.lock().await;
 
             jet_associations.insert(
                 association_id,
-                Association::new(association_id, JET_VERSION_V2, association_token.clone()),
+                Association::new(association_id, JET_VERSION_V2, association_claims),
             );
-            start_remove_association_future(self.jet_associations.clone(), association_id).await;
+            start_remove_association_future(self.jet_associations.clone(), association_id);
 
             StatusCode::OK
         } else {
@@ -99,9 +98,9 @@ impl JetController {
 
     #[post("/association/<association_id>/candidates")]
     #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
-    async fn gather_association_candidates(&self, req: Request) -> (StatusCode, Option<String>) {
-        if let Some(JetAccessTokenClaims::Association(association_token)) =
-            req.extensions().get::<JetAccessTokenClaims>()
+    async fn gather_association_candidates(&self, mut req: Request) -> (StatusCode, Option<String>) {
+        if let Some(JetAccessTokenClaims::Association(association_claims)) =
+            req.extensions_mut().remove::<JetAccessTokenClaims>()
         {
             let association_id = match req
                 .captures()
@@ -112,31 +111,27 @@ impl JetController {
                 None => return (StatusCode::BAD_REQUEST, None),
             };
 
-            if association_token.jet_aid != association_id {
-                slog_scope::error!(
-                    "Invalid session token: expected {}, got {}",
-                    association_token.jet_aid.to_string(),
-                    association_id
-                );
-                return (StatusCode::FORBIDDEN, None);
+            match association_claims.jet_cm {
+                ConnectionMode::Rdv if association_claims.jet_aid == association_id => {}
+                _ => {
+                    slog_scope::error!(
+                        "Invalid session token: expected rendezvous token for {}",
+                        association_id
+                    );
+                    return (StatusCode::FORBIDDEN, None);
+                }
             }
 
             // create association if needed
 
             let mut jet_associations = self.jet_associations.lock().await;
 
-            if let std::collections::hash_map::Entry::Vacant(e) = jet_associations.entry(association_id) {
-                e.insert(Association::new(
-                    association_id,
-                    JET_VERSION_V2,
-                    association_token.clone(),
-                ));
-                start_remove_association_future(self.jet_associations.clone(), association_id).await;
-            }
-
-            let association = jet_associations
-                .get_mut(&association_id)
-                .expect("presence is checked above");
+            let association = if let Some(association) = jet_associations.get_mut(&association_id) {
+                association
+            } else {
+                slog_scope::error!("Association {} not found", association_id);
+                return (StatusCode::INTERNAL_SERVER_ERROR, None);
+            };
 
             if association.get_candidates().is_empty() {
                 for listener in &self.config.listeners {
@@ -158,11 +153,7 @@ impl JetController {
     }
 }
 
-pub async fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
-    remove_association(jet_associations, uuid).await;
-}
-
-pub async fn remove_association(jet_associations: JetAssociationsMap, uuid: Uuid) {
+pub fn start_remove_association_future(jet_associations: JetAssociationsMap, uuid: Uuid) {
     if let Ok(runtime_handle) = Handle::try_current() {
         runtime_handle.spawn(async move {
             tokio::time::sleep(ACCEPT_REQUEST_TIMEOUT).await;
