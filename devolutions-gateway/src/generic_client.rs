@@ -5,15 +5,12 @@ use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pd
 use crate::rdp::RdpClient;
 use crate::token::{ApplicationProtocol, ConnectionMode};
 use crate::transport::tcp::TcpTransport;
-use crate::transport::{JetTransport, Transport as _};
-use crate::Proxy;
+use crate::transport::JetTransport;
+use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use std::io;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use url::Url;
-
-const DEFAULT_ROUTING_HOST_SCHEME: &str = "tcp://";
 
 pub struct GenericClient {
     pub config: Arc<Config>,
@@ -41,70 +38,75 @@ impl GenericClient {
                 .await
             }
             // everything else is pretty much the same
-            _ => match association_claims.jet_cm {
-                ConnectionMode::Rdv => {
-                    info!(
-                        "Starting TCP rendezvous redirection for application protocol {:?}",
-                        association_claims.jet_ap
-                    );
-                    JetRendezvousTcpProxy::new(
-                        jet_associations,
-                        JetTransport::new_tcp(client_stream),
-                        association_claims.jet_aid,
-                    )
-                    .proxy(config, &*leftover_bytes)
-                    .await
-                }
-                ConnectionMode::Fwd {
-                    ref dst_hst,
-                    creds: None,
-                } => {
-                    info!(
-                        "Starting plain TCP forward redirection for application protocol {:?}",
-                        association_claims.jet_ap
-                    );
+            _ => {
+                let association_id = association_claims.jet_aid;
+                let connection_mode = association_claims.jet_cm;
+                let application_protocol = association_claims.jet_ap;
+                let recording_policy = association_claims.jet_rec;
+                let filtering_policy = association_claims.jet_flt;
 
-                    let dst_hst = if dst_hst.starts_with(DEFAULT_ROUTING_HOST_SCHEME) {
-                        dst_hst.clone()
-                    } else {
-                        format!("{}{}", DEFAULT_ROUTING_HOST_SCHEME, dst_hst)
-                    };
-
-                    let dst_hst = Url::parse(&dst_hst).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("Failed to parse routing URL in JWT token: {}", e),
+                match connection_mode {
+                    ConnectionMode::Rdv => {
+                        info!(
+                            "Starting TCP rendezvous redirection for application protocol {:?}",
+                            application_protocol
+                        );
+                        JetRendezvousTcpProxy::new(
+                            jet_associations,
+                            JetTransport::new_tcp(client_stream),
+                            association_id,
                         )
-                    })?;
-
-                    if dst_hst.port().is_none() {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Invalid dst_hst claim: destination port is missing",
-                        ));
-                    }
-
-                    let mut server_conn = TcpTransport::connect(&dst_hst).await?;
-                    let client_transport = TcpTransport::new(client_stream);
-
-                    server_conn.write_buf(&mut leftover_bytes).await.map_err(|e| {
-                        error!("Failed to write leftover bytes: {}", e);
-                        e
-                    })?;
-
-                    Proxy::new(config, association_claims.into())
-                        .build(server_conn, client_transport)
+                        .proxy(config, &*leftover_bytes)
                         .await
-                        .map_err(|e| {
-                            error!("Encountered a failure during plain tcp traffic proxying: {}", e);
+                    }
+                    ConnectionMode::Fwd {
+                        dst_hst,
+                        creds: None,
+                        dst_alt,
+                    } => {
+                        info!(
+                            "Starting plain TCP forward redirection for application protocol {:?}",
+                            application_protocol
+                        );
+
+                        let mut dest_host = Vec::with_capacity(dst_alt.len() + 1);
+                        dest_host.push(dst_hst);
+                        dest_host.extend(dst_alt);
+
+                        let (mut server_conn, selected_target) =
+                            utils::successive_try(&dest_host, utils::tcp_transport_connect).await?;
+
+                        let client_transport = TcpTransport::new(client_stream);
+
+                        server_conn.write_buf(&mut leftover_bytes).await.map_err(|e| {
+                            error!("Failed to write leftover bytes: {}", e);
                             e
-                        })
+                        })?;
+
+                        let info = GatewaySessionInfo::new(
+                            association_id,
+                            application_protocol,
+                            ConnectionModeDetails::Fwd {
+                                destination_host: selected_target.clone(),
+                            },
+                        )
+                        .with_recording_policy(recording_policy)
+                        .with_filtering_policy(filtering_policy);
+
+                        Proxy::new(config, info)
+                            .build(server_conn, client_transport)
+                            .await
+                            .map_err(|e| {
+                                error!("Encountered a failure during plain tcp traffic proxying: {}", e);
+                                e
+                            })
+                    }
+                    ConnectionMode::Fwd { creds: Some(_), .. } => {
+                        // Credentials handling should be special cased (e.g.: RDP-TLS)
+                        Err(io::Error::new(io::ErrorKind::Other, "unexpected credentials"))
+                    }
                 }
-                ConnectionMode::Fwd { creds: Some(_), .. } => {
-                    // Credentials handling should be special cased (e.g.: RDP-TLS)
-                    Err(io::Error::new(io::ErrorKind::Other, "unexpected credentials"))
-                }
-            },
+            }
         }
     }
 }

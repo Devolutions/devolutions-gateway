@@ -1,5 +1,5 @@
 use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
-use crate::utils::{danger_transport, resolve_url_to_socket_arr};
+use crate::utils;
 use futures::{ready, Sink, Stream};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
@@ -278,7 +278,7 @@ impl WsTransport {
     }
 
     async fn async_connect(url: Url) -> Result<Self, std::io::Error> {
-        let socket_addr = if let Some(addr) = resolve_url_to_socket_arr(&url).await {
+        let socket_addr = if let Some(addr) = utils::resolve_url_to_socket_addr(&url).await {
             addr
         } else {
             return Err(io::Error::new(
@@ -312,7 +312,7 @@ impl WsTransport {
 
                 let rustls_client_conf = rustls::ClientConfig::builder()
                     .with_safe_defaults()
-                    .with_custom_certificate_verifier(Arc::new(danger_transport::NoCertificateVerification))
+                    .with_custom_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification))
                     .with_no_client_auth();
                 let rustls_client_conf = Arc::new(rustls_client_conf);
                 let cx = TlsConnector::from(rustls_client_conf);

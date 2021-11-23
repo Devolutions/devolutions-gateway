@@ -5,6 +5,7 @@ use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
 use crate::transport::JetTransport;
 use crate::utils::into_other_io_error;
+use crate::{ConnectionModeDetails, GatewaySessionInfo};
 use slog_scope::error;
 use std::io;
 use std::sync::Arc;
@@ -33,7 +34,7 @@ impl JetRendezvousTcpProxy {
             association_id,
         } = self;
 
-        let (mut server_transport, association_token) = {
+        let (mut server_transport, info) = {
             let mut jet_associations = jet_associations.lock().await;
 
             let assc = jet_associations.get_mut(&association_id).ok_or_else(|| {
@@ -42,6 +43,12 @@ impl JetRendezvousTcpProxy {
                     association_id
                 ))
             })?;
+
+            let claims = assc.get_token_claims();
+
+            let info = GatewaySessionInfo::new(association_id, claims.jet_ap, ConnectionModeDetails::Rdv)
+                .with_recording_policy(claims.jet_rec)
+                .with_filtering_policy(claims.jet_flt);
 
             let candidate = assc.get_first_accepted_tcp_candidate().ok_or_else(|| {
                 into_other_io_error(format!(
@@ -58,7 +65,7 @@ impl JetRendezvousTcpProxy {
             candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
             candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-            (transport, assc.get_token_claims().clone())
+            (transport, info)
         };
 
         server_transport.write_buf(&mut leftover_request).await.map_err(|e| {
@@ -66,7 +73,7 @@ impl JetRendezvousTcpProxy {
             e
         })?;
 
-        let proxy_result = Proxy::new(config, association_token.into())
+        let proxy_result = Proxy::new(config, info)
             .build_with_message_reader(server_transport, client_transport, None)
             .await
             .map_err(|e| {
@@ -75,7 +82,7 @@ impl JetRendezvousTcpProxy {
             });
 
         // remove association after a few minutes of inactivity
-        start_remove_association_future(jet_associations, association_id).await;
+        start_remove_association_future(jet_associations, association_id);
 
         proxy_result
     }

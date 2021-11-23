@@ -1,15 +1,33 @@
 pub mod association;
 
+use crate::transport::tcp::TcpTransport;
+use core::fmt;
+use serde::{de, ser};
+use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{lookup_host, TcpStream};
 use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
+
+#[macro_export]
+macro_rules! io_try {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        }
+    };
+}
 
 pub mod danger_transport {
     use tokio_rustls::rustls;
@@ -31,23 +49,52 @@ pub mod danger_transport {
     }
 }
 
-pub async fn resolve_url_to_socket_arr(url: &Url) -> Option<SocketAddr> {
+pub async fn resolve_url_to_socket_addr(url: &Url) -> Option<SocketAddr> {
     let host = url.host_str()?;
     let port = url.port()?;
-    lookup_host((host, port)).await.ok().map(|mut it| it.next()).flatten()
+    lookup_host((host, port)).await.ok()?.next()
 }
 
-#[macro_export]
-macro_rules! io_try {
-    ($e:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                return Ok(None);
-            }
-            Err(e) => return Err(e),
+pub async fn resolve_target_to_socket_addr(dest: &TargetAddr) -> Option<SocketAddr> {
+    match &dest.host {
+        HostRepr::Domain(domain, port) => lookup_host((domain.as_str(), *port)).await.ok()?.next(),
+        HostRepr::Ip(addr) => Some(*addr),
+    }
+}
+
+pub async fn tcp_stream_connect(dest: &TargetAddr) -> io::Result<TcpStream> {
+    let socket_addr = resolve_target_to_socket_addr(dest)
+        .await
+        .ok_or_else(|| io::Error::new(io::ErrorKind::ConnectionRefused, format!("couldn't resolve {}", dest)))?;
+    TcpStream::connect(socket_addr).await
+}
+
+pub async fn tcp_transport_connect(target: &TargetAddr) -> io::Result<TcpTransport> {
+    use crate::transport::Transport as _;
+    let url = target
+        .to_url()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("bad target {}: {}", target, e)))?;
+    TcpTransport::connect(&url).await
+}
+
+pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> io::Result<(Out, &'a In)>
+where
+    F: Fn(&'a In) -> Fut + 'a,
+    Fut: core::future::Future<Output = io::Result<Out>>,
+{
+    let mut errors = Vec::with_capacity(inputs.len());
+
+    for input in inputs {
+        match func(input).await {
+            Ok(o) => return Ok((o, input)),
+            Err(e) => errors.push(e),
         }
-    };
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::Other,
+        display_utils::join(&errors, ",").to_string(),
+    ))
 }
 
 pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
@@ -150,4 +197,186 @@ pub fn create_tls_connector(socket: TcpStream) -> Connect<TcpStream> {
 
     let connector = TlsConnector::from(rustls_client_conf);
     connector.connect(dns_name, socket)
+}
+
+#[derive(Debug)]
+pub enum BadTargetAddr {
+    HostMissing,
+    PortMissing,
+    BadPort { value: SmolStr },
+}
+
+impl fmt::Display for BadTargetAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BadTargetAddr::HostMissing => write!(f, "host is missing"),
+            BadTargetAddr::PortMissing => write!(f, "port is missing"),
+            BadTargetAddr::BadPort { value } => write!(f, "bad port value: {}", value),
+        }
+    }
+}
+
+impl std::error::Error for BadTargetAddr {}
+
+/// <SCHEME>://<ADDR>:<PORT>
+///
+/// Similar to `url::Url`, but doesn't contain any route.
+/// Also, when parsing, default scheme is `tcp`.
+#[derive(Clone)]
+pub struct TargetAddr {
+    serialization: SmolStr,
+    scheme: SmolStr,
+    host: HostRepr,
+}
+
+#[derive(Clone)]
+pub enum HostRepr {
+    Domain(SmolStr, u16),
+    Ip(SocketAddr),
+}
+
+impl fmt::Display for HostRepr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HostRepr::Domain(domain, port) => write!(f, "{}:{}", domain, port),
+            HostRepr::Ip(ip) => ip.fmt(f),
+        }
+    }
+}
+
+impl TargetAddr {
+    const DEFAULT_SCHEME: &'static str = "tcp";
+
+    pub fn as_str(&self) -> &str {
+        &self.serialization
+    }
+
+    pub fn scheme(&self) -> &str {
+        &self.scheme
+    }
+
+    pub fn host(&self) -> &HostRepr {
+        &self.host
+    }
+
+    pub fn to_url(&self) -> Result<url::Url, url::ParseError> {
+        self.serialization.parse()
+    }
+
+    pub fn to_uri(&self) -> Result<http::Uri, http::uri::InvalidUri> {
+        self.serialization.parse()
+    }
+
+    pub fn to_uri_with_path_and_query(&self, path_and_query: &str) -> Result<http::Uri, http::uri::InvalidUri> {
+        format!("{}{}", self.serialization, path_and_query).parse()
+    }
+}
+
+impl TryFrom<&url::Url> for TargetAddr {
+    type Error = BadTargetAddr;
+
+    fn try_from(url: &url::Url) -> Result<Self, Self::Error> {
+        let scheme = SmolStr::from(url.scheme());
+
+        let port = url.port().ok_or(BadTargetAddr::PortMissing)?;
+
+        let host = match url.host().ok_or(BadTargetAddr::HostMissing)? {
+            url::Host::Domain(domain) => HostRepr::Domain(domain.into(), port),
+            url::Host::Ipv4(ipv4) => HostRepr::Ip(SocketAddr::new(IpAddr::V4(ipv4), port)),
+            url::Host::Ipv6(ipv6) => HostRepr::Ip(SocketAddr::new(IpAddr::V6(ipv6), port)),
+        };
+
+        let serialization = SmolStr::from(format!("{}://{}", scheme, host));
+
+        Ok(Self {
+            serialization,
+            scheme,
+            host,
+        })
+    }
+}
+
+impl TryFrom<url::Url> for TargetAddr {
+    type Error = BadTargetAddr;
+
+    fn try_from(url: url::Url) -> Result<Self, Self::Error> {
+        TargetAddr::try_from(&url)
+    }
+}
+
+impl fmt::Display for TargetAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.serialization)
+    }
+}
+
+impl ser::Serialize for TargetAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.serialization)
+    }
+}
+
+impl FromStr for TargetAddr {
+    type Err = BadTargetAddr;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (scheme, rest) = if let Some(scheme_end_idx) = s.find("://") {
+            (SmolStr::new(&s[..scheme_end_idx]), &s[scheme_end_idx + "://".len()..])
+        } else {
+            (SmolStr::new_inline(Self::DEFAULT_SCHEME), s)
+        };
+
+        if let Ok(addr) = rest.parse::<SocketAddr>() {
+            Ok(Self {
+                serialization: SmolStr::from(format!("{}://{}", scheme, addr)),
+                scheme,
+                host: HostRepr::Ip(addr),
+            })
+        } else {
+            let domain_end_idx = rest.find(':').ok_or(BadTargetAddr::PortMissing)?;
+
+            let domain = &rest[..domain_end_idx];
+            let domain = SmolStr::new(domain);
+
+            let port = &rest[domain_end_idx + 1..];
+            let port = port
+                .parse::<u16>()
+                .map_err(|_| BadTargetAddr::BadPort { value: port.into() })?;
+
+            Ok(Self {
+                serialization: SmolStr::from(format!("{}://{}:{}", scheme, domain, port)),
+                scheme,
+                host: HostRepr::Domain(domain, port),
+            })
+        }
+    }
+}
+
+impl<'de> de::Deserialize<'de> for TargetAddr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct V;
+
+        impl<'de> de::Visitor<'de> for V {
+            type Value = TargetAddr;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a destination host such as <SCHEME>://<HOST>:<PORT>")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                s.parse::<Self::Value>().map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_str(V)
+    }
 }

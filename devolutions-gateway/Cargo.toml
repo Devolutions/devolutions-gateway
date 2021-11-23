@@ -59,6 +59,8 @@ reqwest = "0.11.6"
 http = "0.2.5"
 zeroize = "1.4.2"
 camino = { version = "1.0.5", features = ["serde1"] }
+smol_str = "0.1.21"
+display_utils = "0.4.0"
 
 [dependencies.saphir]
 version = "2.8"

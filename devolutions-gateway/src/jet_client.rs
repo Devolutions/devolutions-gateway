@@ -27,7 +27,7 @@ use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
-use crate::Proxy;
+use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
@@ -89,7 +89,15 @@ async fn handle_build_tls_proxy(
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         let server_transport = TcpTransport::new_tls(TlsStream::Client(tls_handshake));
 
-        Proxy::new(config, response.association_token.into())
+        let info = GatewaySessionInfo::new(
+            response.association_id,
+            response.association_claims.jet_ap,
+            ConnectionModeDetails::Rdv,
+        )
+        .with_recording_policy(response.association_claims.jet_rec)
+        .with_filtering_policy(response.association_claims.jet_flt);
+
+        Proxy::new(config, info)
             .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
             .await
     } else {
@@ -150,7 +158,15 @@ async fn handle_build_proxy(
 
         proxy_result
     } else {
-        Proxy::new(config, response.association_token.into())
+        let info = GatewaySessionInfo::new(
+            response.association_id,
+            response.association_claims.jet_ap,
+            ConnectionModeDetails::Rdv,
+        )
+        .with_recording_policy(response.association_claims.jet_rec)
+        .with_filtering_policy(response.association_claims.jet_flt);
+
+        Proxy::new(config, info)
             .build(response.server_transport, response.client_transport)
             .await
     }
@@ -429,7 +445,7 @@ async fn handle_connect_jet_msg(
                 server_transport,
                 association_id,
                 candidate_id,
-                association_token: token,
+                association_claims: token,
             })
         }
         _ => Err(error_other(format!(
@@ -444,7 +460,7 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: JetTransport,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
-    pub association_token: JetAssociationTokenClaims,
+    pub association_claims: JetAssociationTokenClaims,
 }
 
 async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {

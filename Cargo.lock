@@ -707,6 +707,7 @@ dependencies = [
  "chrono",
  "clap 2.33.3",
  "ctrlc",
+ "display_utils",
  "dlopen",
  "dlopen_derive",
  "embed-resource",
@@ -740,6 +741,7 @@ dependencies = [
  "slog-scope-futures 0.1.1 (git+https://github.com/Devolutions/slog-scope-futures.git)",
  "slog-stdlog",
  "slog-term",
+ "smol_str",
  "sogar-core",
  "spsc-bip-buffer",
  "sspi",
@@ -793,6 +795,12 @@ dependencies = [
  "redox_users",
  "winapi",
 ]
+
+[[package]]
+name = "display_utils"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1cabb9d45c20801e16b8483e998bd1ebe4a07bc56406135ded5b4e3ad140c30"
 
 [[package]]
 name = "dlopen"
@@ -2944,6 +2952,15 @@ name = "smallvec"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
+
+[[package]]
+name = "smol_str"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61d15c83e300cce35b7c8cd39ff567c1ef42dde6d4a1a38dbdbf9a59902261bd"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "socket2"
