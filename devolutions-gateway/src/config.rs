@@ -721,9 +721,11 @@ impl Config {
                 rustls::PrivateKey(pem.into_data().into_owned())
             });
 
-        config.tls = tls_certificate
+        tls_certificate
             .zip(tls_private_key)
-            .map(|(certificate, key)| TlsConfig::init(certificate, key).expect("couldn't init TLS config"));
+            .map(|(certificate, key)| TlsConfig::init(certificate, key).expect("couldn't init TLS config"))
+            .into_iter()
+            .for_each(|tls_conf| config.tls = Some(tls_conf));
 
         // provisioner key
 
