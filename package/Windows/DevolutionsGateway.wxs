@@ -15,9 +15,9 @@
   <?define UpgradeCode="db3903d6-c451-4393-bd80-eb9f45b90214" ?>
 
   <!-- The URL for add/remove programs -->
-  <?define InfoURL="https://wayk.devolutions.net" ?>
+  <?define InfoURL="https://server.devolutions.net" ?>
 
-  <!-- SDDL string representing desired %programdata%\wayk ACL -->
+  <!-- SDDL string representing desired %programdata%\devolutions\gateway ACL -->
   <!-- SYSTEM/BuiltInAdministrators = Full Control, BuiltInUsers - Read/Execute -->
   <?define ProgramDataSddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" ?>
 
@@ -197,8 +197,8 @@
 
     <Component Id="cmpDGatewayService" Guid="31eaa967-64e3-469c-b0c9-c9ecea61b7d3" Win64="$(var.Win64)" Directory="INSTALLDIR">
       <File Name="DevolutionsGateway.exe" Source="$(var.DGatewayExecutable)" Id="DevolutionsGateway.exe" ProcessorArchitecture="$(var.ProcessorArchitecture)" KeyPath="yes" Vital="yes" DiskId="1">
-        <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Wayk Now Service TCP" Description="Wayk Now Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
-        <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Wayk Now Service UDP" Description="Wayk Now Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
+        <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Devolutions Gateway Service TCP" Description="Devolutions Gateway Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
+        <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Devolutions Gateway Service UDP" Description="Devolutions Gateway Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
       </File>
       <ServiceInstall Id="DGatewayServiceControl" Type="ownProcess" Interactive="no" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
         DisplayName="$(var.ServiceDisplayName)" Description="$(var.ServiceDescription)" Start="demand" ErrorControl="ignore">
