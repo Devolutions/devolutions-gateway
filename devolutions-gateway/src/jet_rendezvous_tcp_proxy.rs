@@ -50,6 +50,10 @@ impl JetRendezvousTcpProxy {
                 .with_recording_policy(claims.jet_rec)
                 .with_filtering_policy(claims.jet_flt);
 
+            if claims.jet_rec {
+                return Err(into_other_io_error("can't meet recording policy"));
+            }
+
             let candidate = assc.get_first_accepted_tcp_candidate().ok_or_else(|| {
                 into_other_io_error(format!(
                     "There is not any candidates in {} JetAssociations map",

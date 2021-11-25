@@ -69,6 +69,10 @@ impl GenericClient {
                             application_protocol
                         );
 
+                        if association_claims.jet_rec {
+                            return Err(utils::into_other_io_error("can't meet recording policy"));
+                        }
+
                         let mut dest_host = Vec::with_capacity(dst_alt.len() + 1);
                         dest_host.push(dst_hst);
                         dest_host.extend(dst_alt);

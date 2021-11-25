@@ -84,6 +84,10 @@ impl RdpClient {
             jet_associations,
         } = self;
 
+        if association_claims.jet_rec {
+            return Err(io::Error::new(io::ErrorKind::Other, "can't meet recording policy"));
+        }
+
         let routing_mode = resolve_rdp_routing_mode(&association_claims)?;
 
         match routing_mode {
@@ -126,7 +130,7 @@ impl RdpClient {
                 let tls_conf = config
                     .tls
                     .clone()
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "TLS configuration is missing"))?;
+                    .ok_or_else(|| utils::into_other_io_error("TLS configuration is missing"))?;
 
                 // We can't use FramedRead directly here, because we still have to use
                 // the leftover bytes. As an alternative, the decoder could be modified to use the
