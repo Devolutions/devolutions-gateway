@@ -201,46 +201,56 @@ async fn handle_jet_connect_impl(
                     .await
                     .map_err(|e| error!("upgrade error: {}", e))?;
 
-                let mut jet_assc = jet_associations.lock().await;
-                let assc = if let Some(assc) = jet_assc.get_mut(&association_id) {
-                    assc
+                let mut associations = jet_associations.lock().await;
+                let association = if let Some(assoc) = associations.get_mut(&association_id) {
+                    assoc
                 } else {
                     error!("Failed to get association");
                     return Err(());
                 };
 
-                let candidate = if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+                let candidate = if let Some(candidate) = association.get_candidate_mut(candidate_id) {
                     candidate
                 } else {
                     error!("Failed to get candidate");
                     return Err(());
                 };
 
-                if (candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss)
-                    && candidate.state() == CandidateState::Accepted
-                {
-                    let server_transport = candidate
-                        .take_transport()
-                        .expect("Candidate cannot be created without a transport");
-                    let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
-                    let client_transport = JetTransport::Ws(ws_transport);
-                    candidate.set_state(CandidateState::Connected);
-                    candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
-                    candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+                // Sanity checks
+                let is_websocket =
+                    candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss;
+                let is_accepted = candidate.state() != CandidateState::Accepted;
+                if !is_websocket || !is_accepted {
+                    error!(
+                        "Unexpected candidate properties [is websocket? {}] [is accepted? {}]",
+                        is_websocket, is_accepted
+                    );
+                    return Err(());
+                }
 
-                    let association_id = candidate.association_id();
-                    let candidate_id = candidate.id();
+                let server_transport = candidate
+                    .take_transport()
+                    .expect("Candidate cannot be created without a transport");
+                let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
+                let client_transport = JetTransport::Ws(ws_transport);
+                candidate.set_state(CandidateState::Connected);
+                candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+                candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-                    let mut file_pattern = None;
-                    let mut recording_dir = None;
-                    let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
-                    let mut has_interceptor = false;
+                let association_id = candidate.association_id();
+                let candidate_id = candidate.id();
 
-                    if assc.record_session() && config.plugins.is_some() {
+                let mut file_pattern = None;
+                let mut recording_dir = None;
+                let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
+                let mut has_interceptor = false;
+
+                match (association.record_session(), config.plugins.is_some()) {
+                    (true, true) => {
                         let mut interceptor = PcapRecordingInterceptor::new(
                             server_transport.peer_addr().unwrap(),
                             client_addr,
-                            association_id.clone().to_string(),
+                            association_id.to_string(),
                             candidate_id.to_string(),
                         );
 
@@ -257,34 +267,39 @@ async fn handle_jet_connect_impl(
                         recording_interceptor = Some(Box::new(interceptor));
                         has_interceptor = true;
                     }
-
-                    // We need to manually drop mutex lock to avoid deadlock below
-                    std::mem::drop(jet_assc);
-
-                    let info =
-                        GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
-                            .with_recording_policy(association_claims.jet_rec)
-                            .with_filtering_policy(association_claims.jet_flt);
-
-                    let proxy_result = Proxy::new(config.clone(), info)
-                        .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
-                        .await;
-
-                    if has_interceptor {
-                        if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
-                            let registry = crate::registry::Registry::new(config);
-                            registry
-                                .manage_files(association_id.clone().to_string(), pattern, dir.as_path())
-                                .await;
-                        };
+                    (true, false) => {
+                        error!("Can't meet recording policy");
+                        return Err(());
                     }
-
-                    if let Err(e) = proxy_result {
-                        error!("failed to build Proxy for WebSocket connection: {}", e)
-                    }
-
-                    remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
+                    (false, _) => {}
                 }
+
+                // We need to manually drop mutex lock to avoid deadlock below
+                std::mem::drop(associations);
+
+                let info =
+                    GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
+                        .with_recording_policy(association_claims.jet_rec)
+                        .with_filtering_policy(association_claims.jet_flt);
+
+                let proxy_result = Proxy::new(config.clone(), info)
+                    .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
+                    .await;
+
+                if has_interceptor {
+                    if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
+                        let registry = crate::registry::Registry::new(config);
+                        registry
+                            .manage_files(association_id.to_string(), pattern, dir.as_path())
+                            .await;
+                    };
+                }
+
+                if let Err(e) = proxy_result {
+                    error!("failed to build Proxy for WebSocket connection: {}", e)
+                }
+
+                remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
 
                 Ok::<(), ()>(())
             });

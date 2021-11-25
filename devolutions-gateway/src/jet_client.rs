@@ -118,27 +118,30 @@ async fn handle_build_proxy(
     let mut recording_dir = None;
     let mut file_pattern = None;
 
-    let associations = jet_associations.lock().await;
-    if let Some(association) = associations.get(&association_id) {
-        if association.record_session() && config.plugins.is_some() {
-            let mut interceptor = PcapRecordingInterceptor::new(
-                response.server_transport.peer_addr().unwrap(),
-                response.client_transport.peer_addr().unwrap(),
-                association_id.clone().to_string(),
-                response.candidate_id.clone().to_string(),
-            );
+    if let Some(association) = jet_associations.lock().await.get(&association_id) {
+        match (association.record_session(), config.plugins.is_some()) {
+            (true, true) => {
+                let mut interceptor = PcapRecordingInterceptor::new(
+                    response.server_transport.peer_addr().unwrap(),
+                    response.client_transport.peer_addr().unwrap(),
+                    association_id.clone().to_string(),
+                    response.candidate_id.clone().to_string(),
+                );
 
-            recording_dir = match &config.recording_path {
-                Some(path) => {
-                    interceptor.set_recording_directory(path.as_str());
-                    Some(PathBuf::from(path))
-                }
-                _ => interceptor.get_recording_directory(),
-            };
+                recording_dir = match &config.recording_path {
+                    Some(path) => {
+                        interceptor.set_recording_directory(path.as_str());
+                        Some(PathBuf::from(path))
+                    }
+                    _ => interceptor.get_recording_directory(),
+                };
 
-            file_pattern = Some(interceptor.get_filename_pattern());
+                file_pattern = Some(interceptor.get_filename_pattern());
 
-            recording_interceptor = Some(interceptor);
+                recording_interceptor = Some(interceptor);
+            }
+            (true, false) => return Err(io::Error::new(io::ErrorKind::Other, "can't meet recording policy")),
+            (false, _) => {}
         }
     }
 
