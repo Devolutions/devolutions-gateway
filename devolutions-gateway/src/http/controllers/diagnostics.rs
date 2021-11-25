@@ -71,7 +71,7 @@ async fn get_configuration_stub(controller: &DiagnosticsController) -> Json<Gate
     Json(controller.config.clone().into())
 }
 
-// TODO: remove legacy controller after 2022/11/19
+// NOTE: legacy controller starting 2021/11/25
 
 pub struct LegacyDiagnosticsController {
     inner: DiagnosticsController,
