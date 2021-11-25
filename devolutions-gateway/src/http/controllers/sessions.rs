@@ -43,7 +43,7 @@ async fn get_sessions_stub() -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorS
     Ok(Json(sessions_in_progress))
 }
 
-// TODO: remove legacy controller after 2022/11/19
+// NOTE: legacy controller starting 2021/11/25
 
 pub struct LegacySessionsController;
 
