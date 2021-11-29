@@ -9,6 +9,7 @@ use crate::utils::association::remove_jet_association;
 use crate::utils::TargetAddr;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
+use jmux_proxy::JmuxProxy;
 use saphir::error;
 use slog_scope::{error, info};
 use std::io::{self, ErrorKind};
@@ -440,7 +441,6 @@ async fn handle_jmux(
     tokio::spawn(async move {
         use jmux_proxy::JmuxConfig;
         use slog::o;
-        use tokio::sync::mpsc;
 
         let upgraded = hyper::upgrade::on(&mut req)
             .await
@@ -450,22 +450,14 @@ async fn handle_jmux(
 
         let (read, write) = tokio::io::split(ws_transport);
 
-        // We don't actually use the request API in Gateway.
-        // This might be an improvement point in jmux_proxy crate API.
-        let (api_request_tx, api_request_rx) = mpsc::unbounded_channel();
-
         let jmux_proxy_log = slog_scope::logger().new(o!("client_addr" => client_addr));
 
-        jmux_proxy::start(
-            JmuxConfig::permissive(),
-            api_request_tx,
-            api_request_rx,
-            Box::new(read),
-            Box::new(write),
-            jmux_proxy_log,
-        )
-        .await
-        .map_err(|e| error!("JMUX proxy error: {}", e))?;
+        JmuxProxy::new(Box::new(read), Box::new(write))
+            .with_config(JmuxConfig::permissive())
+            .with_logger(jmux_proxy_log)
+            .run()
+            .await
+            .map_err(|e| error!("JMUX proxy error: {}", e))?;
 
         Ok::<(), ()>(())
     });

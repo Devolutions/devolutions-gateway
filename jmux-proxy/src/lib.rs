@@ -23,15 +23,14 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Notify;
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-pub type ApiResponseSender = UnboundedSender<JmuxApiResponse>;
-pub type ApiResponseReceiver = UnboundedReceiver<JmuxApiResponse>;
-pub type ApiRequestSender = UnboundedSender<JmuxApiRequest>;
-pub type ApiRequestReceiver = UnboundedReceiver<JmuxApiRequest>;
+pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
+pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;
+pub type ApiRequestSender = mpsc::Sender<JmuxApiRequest>;
+pub type ApiRequestReceiver = mpsc::Receiver<JmuxApiRequest>;
 
 #[derive(Debug)]
 pub enum JmuxApiRequest {
@@ -56,47 +55,97 @@ pub enum JmuxApiResponse {
     },
 }
 
-pub async fn start(
+pub struct JmuxProxy {
     cfg: JmuxConfig,
-    api_request_tx: ApiRequestSender,
-    api_request_rx: ApiRequestReceiver,
+    api_request_rx: Option<ApiRequestReceiver>,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     log: Logger,
-) -> anyhow::Result<()> {
-    let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
+}
 
-    let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
-    let jmux_sink = FramedWrite::new(jmux_writer, JmuxCodec);
-
-    let sender_task_handle = JmuxSenderTask {
-        jmux_sink,
-        msg_to_send_rx,
-        log: log.new(o!("JMUX task" => "sender")),
-    }
-    .spawn();
-
-    let scheduler_task_handle = JmuxSchedulerTask {
-        cfg,
-        jmux_stream,
-        msg_to_send_tx,
-        api_request_tx,
-        api_request_rx,
-        log: log.new(o!("JMUX task" => "scheduler")),
-    }
-    .spawn();
-
-    match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
-        (Ok(_), Err(e)) => debug!(log, "Sender task failed: {}", e),
-        (Err(e), Ok(_)) => debug!(log, "Scheduler task failed: {}", e),
-        (Err(scheduler_e), Err(sender_e)) => {
-            // Usually, it's only of interest when both tasks are failed.
-            anyhow::bail!("Both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
+impl JmuxProxy {
+    pub fn new(
+        jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
+        jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
+    ) -> Self {
+        let log = slog::Logger::root(slog::Discard, o!());
+        Self {
+            cfg: JmuxConfig::default(),
+            api_request_rx: None,
+            jmux_reader,
+            jmux_writer,
+            log,
         }
-        (Ok(_), Ok(_)) => {}
     }
 
-    Ok(())
+    pub fn with_config(mut self, cfg: JmuxConfig) -> Self {
+        self.cfg = cfg;
+        self
+    }
+
+    pub fn with_requester_api(mut self, api_request_rx: ApiRequestReceiver) -> Self {
+        self.api_request_rx = Some(api_request_rx);
+        self
+    }
+
+    pub fn with_logger(mut self, log: Logger) -> Self {
+        self.log = log;
+        self
+    }
+
+    pub fn spawn(self) -> JoinHandle<anyhow::Result<()>> {
+        let fut = self.run();
+        tokio::spawn(fut)
+    }
+
+    pub async fn run(self) -> anyhow::Result<()> {
+        let Self {
+            cfg,
+            api_request_rx,
+            jmux_reader,
+            jmux_writer,
+            log,
+        } = self;
+
+        let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
+
+        let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
+        let jmux_sink = FramedWrite::new(jmux_writer, JmuxCodec);
+
+        let sender_task_handle = JmuxSenderTask {
+            jmux_sink,
+            msg_to_send_rx,
+            log: log.new(o!("JMUX task" => "sender")),
+        }
+        .spawn();
+
+        let api_request_rx = if let Some(rx) = api_request_rx {
+            rx
+        } else {
+            mpsc::channel(1).1
+        };
+
+        let scheduler_task_handle = JmuxSchedulerTask {
+            cfg,
+            jmux_stream,
+            msg_to_send_tx,
+            api_request_rx,
+            log: log.new(o!("JMUX task" => "scheduler")),
+        }
+        .spawn();
+
+        match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
+            (Ok(_), Err(e)) => debug!(log, "Sender task failed: {}", e),
+            (Err(e), Ok(_)) => debug!(log, "Scheduler task failed: {}", e),
+            (Err(scheduler_e), Err(sender_e)) => {
+                // Usually, it's only of interest when both tasks are failed.
+                anyhow::bail!("Both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
+            }
+            (Ok(_), Ok(_)) => {}
+        }
+
+        Ok(())
+    }
 }
 
 // === implementation details === //
@@ -166,11 +215,11 @@ impl JmuxCtx {
     }
 }
 
-type MessageReceiver = UnboundedReceiver<Message>;
-type MessageSender = UnboundedSender<Message>;
-type DataReceiver = UnboundedReceiver<Vec<u8>>;
-type DataSender = UnboundedSender<Vec<u8>>;
-type InternalMessageSender = UnboundedSender<InternalMessage>;
+type MessageReceiver = mpsc::UnboundedReceiver<Message>;
+type MessageSender = mpsc::UnboundedSender<Message>;
+type DataReceiver = mpsc::UnboundedReceiver<Vec<u8>>;
+type DataSender = mpsc::UnboundedSender<Vec<u8>>;
+type InternalMessageSender = mpsc::UnboundedSender<InternalMessage>;
 
 #[derive(Debug)]
 enum InternalMessage {
@@ -219,7 +268,6 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     cfg: JmuxConfig,
     jmux_stream: FramedRead<T, JmuxCodec>,
     msg_to_send_tx: MessageSender,
-    api_request_tx: ApiRequestSender,
     api_request_rx: ApiRequestReceiver,
     log: Logger,
 }
@@ -236,13 +284,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         cfg,
         mut jmux_stream,
         msg_to_send_tx,
-        api_request_tx,
         mut api_request_rx,
         log,
     } = task;
-
-    // Keep the handle in current scope but prevent usage
-    let _ = api_request_tx;
 
     let mut jmux_ctx = JmuxCtx::new();
     let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
@@ -262,10 +306,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         // unrecoverable failures.
 
         tokio::select! {
-            request = api_request_rx.recv() => {
-                // This should never panic as long as we have a sender handle always in scope
-                let request = request.expect("ran out of senders");
-
+            Some(request) = api_request_rx.recv() => {
                 match request {
                     JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
                         match jmux_ctx.allocate_id() {
@@ -311,10 +352,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 }
             }
-            internal_msg = internal_msg_rx.recv() => {
-                // This should never panic as long as we don't drop `internal_msg_tx` handle explicitely
-                let internal_msg = internal_msg.expect("ran out of senders");
-
+            Some(internal_msg) = internal_msg_rx.recv() => {
                 match internal_msg {
                     InternalMessage::Eof { id } => {
                         let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
@@ -496,8 +534,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         debug!(channel_log, "Successfully opened channel");
 
-                        if let Err(e) = api_response_tx.send(JmuxApiResponse::Success { id: local_id }) {
-                            warn!(channel_log, "Couldn’t send success API response through mpsc channel: {}", e);
+                        if api_response_tx.send(JmuxApiResponse::Success { id: local_id }).is_err() {
+                            warn!(channel_log, "Couldn’t send success API response through mpsc channel");
                             continue;
                         }
 
@@ -596,7 +634,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         warn!(log, "{} -> {} channel opening failed [{}]: {}", id, destination_url, msg.reason_code, msg.description);
 
-                        // It's fine to just ignore error here since the channel is closed anyway
                         let _ = api_response_tx.send(JmuxApiResponse::Failure { id, reason_code: msg.reason_code });
                     }
                     Message::Close(msg) => {

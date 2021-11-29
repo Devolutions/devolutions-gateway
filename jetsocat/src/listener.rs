@@ -1,10 +1,10 @@
 use anyhow::Context;
 use jetsocat_proxy::Socks5AcceptorConfig;
-use jmux_proxy::{JmuxApiRequest, JmuxApiResponse};
+use jmux_proxy::{ApiRequestSender, JmuxApiRequest, JmuxApiResponse};
 use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 #[derive(Debug, Clone)]
 pub enum ListenerMode {
@@ -13,7 +13,7 @@ pub enum ListenerMode {
 }
 
 pub async fn tcp_listener_task(
-    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: ApiRequestSender,
     bind_addr: String,
     destination_url: String,
     log: Logger,
@@ -33,33 +33,38 @@ pub async fn tcp_listener_task(
         match listener.accept().await {
             Ok((stream, addr)) => {
                 let log = log.new(o!("addr" => addr));
-
-                debug!(log, "Request {}", destination_url);
-
-                let (sender, mut receiver) = mpsc::unbounded_channel();
-
-                match api_request_tx.send(JmuxApiRequest::OpenChannel {
-                    destination_url: destination_url.clone(),
-                    api_response_tx: sender,
-                }) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        warn!(log, "Couldn’t send JMUX API request: {}", e);
-                        continue;
-                    }
-                }
-
-                let log = log.clone();
                 let api_request_tx = api_request_tx.clone();
+                let destination_url = destination_url.clone();
+
                 tokio::spawn(async move {
-                    match receiver.recv().await {
-                        Some(JmuxApiResponse::Success { id }) => {
-                            let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream });
+                    debug!(log, "Request {}", destination_url);
+
+                    let (sender, receiver) = oneshot::channel();
+
+                    match api_request_tx
+                        .send(JmuxApiRequest::OpenChannel {
+                            destination_url: destination_url.clone(),
+                            api_response_tx: sender,
+                        })
+                        .await
+                    {
+                        Ok(()) => {}
+                        Err(e) => {
+                            warn!(log, "Couldn’t send JMUX API request: {}", e);
+                            return;
                         }
-                        Some(JmuxApiResponse::Failure { id, reason_code }) => {
+                    }
+
+                    match receiver.await {
+                        Ok(JmuxApiResponse::Success { id }) => {
+                            let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream }).await;
+                        }
+                        Ok(JmuxApiResponse::Failure { id, reason_code }) => {
                             debug!(log, "Channel {} failure: {}", id, reason_code);
                         }
-                        None => {}
+                        Err(e) => {
+                            debug!(log, "Couldn't receive API response: {}", e);
+                        }
                     }
                 });
             }
@@ -74,7 +79,7 @@ pub async fn tcp_listener_task(
 }
 
 pub async fn socks5_listener_task(
-    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: ApiRequestSender,
     bind_addr: String,
     log: Logger,
 ) -> anyhow::Result<()> {
@@ -115,7 +120,7 @@ pub async fn socks5_listener_task(
 }
 
 async fn socks5_process_socket(
-    api_request_tx: mpsc::UnboundedSender<JmuxApiRequest>,
+    api_request_tx: ApiRequestSender,
     incoming: TcpStream,
     conf: Arc<Socks5AcceptorConfig>,
     log: Logger,
@@ -132,12 +137,15 @@ async fn socks5_process_socket(
 
         debug!(log, "Request {}", destination_url);
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = oneshot::channel();
 
-        match api_request_tx.send(JmuxApiRequest::OpenChannel {
-            destination_url,
-            api_response_tx: sender,
-        }) {
+        match api_request_tx
+            .send(JmuxApiRequest::OpenChannel {
+                destination_url,
+                api_response_tx: sender,
+            })
+            .await
+        {
             Ok(()) => {}
             Err(e) => {
                 warn!(log, "Couldn’t send JMUX API request: {}", e);
@@ -145,7 +153,7 @@ async fn socks5_process_socket(
             }
         }
 
-        let id = match receiver.recv().await.context("negotiation interrupted")? {
+        let id = match receiver.await.context("negotiation interrupted")? {
             JmuxApiResponse::Success { id } => id,
             JmuxApiResponse::Failure { id, reason_code } => {
                 anyhow::bail!("Channel {} failure: {}", id, reason_code);
@@ -160,7 +168,7 @@ async fn socks5_process_socket(
         let dummy_local_addr = "0.0.0.0:0";
         let stream = acceptor.connected(dummy_local_addr).await?;
 
-        let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream });
+        let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream }).await;
     } else {
         acceptor.failed(Socks5FailureCode::CommandNotSupported).await?;
     }

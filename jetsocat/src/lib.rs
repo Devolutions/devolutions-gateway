@@ -48,12 +48,13 @@ pub struct JmuxProxyCfg {
 
 pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
     use self::listener::{socks5_listener_task, tcp_listener_task, ListenerMode};
+    use jmux_proxy::JmuxProxy;
     use pipe::open_pipe;
     use tokio::sync::mpsc;
 
     debug!(log, "Configuration: {:?}", cfg);
 
-    let (api_request_tx, api_request_rx) = mpsc::unbounded_channel();
+    let (api_request_tx, api_request_rx) = mpsc::channel(10);
 
     for listener_mode in cfg.listener_modes {
         match listener_mode {
@@ -87,6 +88,11 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
     let pipe_log = log.new(o!("open pipe" => "JMUX pipe"));
     let pipe = open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log).await?;
 
-    // Start JMUX proxy over this pipe
-    jmux_proxy::start(cfg.jmux_cfg, api_request_tx, api_request_rx, pipe.read, pipe.write, log).await
+    // Start JMUX proxy over the pipe
+    JmuxProxy::new(pipe.read, pipe.write)
+        .with_config(cfg.jmux_cfg)
+        .with_requester_api(api_request_rx)
+        .with_logger(log)
+        .run()
+        .await
 }
