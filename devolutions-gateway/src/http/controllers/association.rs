@@ -134,7 +134,7 @@ impl AssociationController {
 
             if association.get_candidates().is_empty() {
                 for listener in &self.config.listeners {
-                    if let Some(candidate) = Candidate::new(listener.external_url.to_string().trim_end_matches('/')) {
+                    if let Some(candidate) = Candidate::new(listener.external_url.as_str().trim_end_matches('/')) {
                         association.add_candidate(candidate);
                     }
                 }
