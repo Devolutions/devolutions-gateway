@@ -29,6 +29,7 @@ use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::{create_tls_connector, into_other_io_error as error_other};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 
+// FIXME: tokio sync primitives is overkill here (use `parking_lot`'s Mutex or RwLock as appropriate)
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
 
 // FIXME? why "client"? Wouldn't `JetServer` be more appropriate naming?
@@ -232,7 +233,6 @@ struct HandleAcceptJetMsg {
     transport: Option<JetTransport>,
     request_msg: JetAcceptReq,
     jet_associations: JetAssociationsMap,
-    association_uuid: Option<Uuid>,
     remove_association_future: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
@@ -248,21 +248,15 @@ impl HandleAcceptJetMsg {
             transport: Some(transport),
             request_msg: msg,
             jet_associations,
-            association_uuid: None,
             remove_association_future: None,
         }
     }
 
     async fn handle_create_response(&mut self) -> Result<Vec<u8>, io::Error> {
         let (status_code, association_id) = {
-            let mut jet_associations = self.jet_associations.lock().await;
-
             match self.request_msg.version {
-                1 => {
-                    // Not supported anymore
-                    (StatusCode::BAD_REQUEST, Uuid::nil())
-                }
                 2 => {
+                    let mut jet_associations = self.jet_associations.lock().await;
                     let mut status_code = StatusCode::BAD_REQUEST;
 
                     if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
@@ -281,11 +275,7 @@ impl HandleAcceptJetMsg {
 
                     (status_code, Uuid::nil())
                 }
-                _ => {
-                    // No jet message exist with version different than 1 or 2
-                    // TODO : Could we crash if somebody send something else ?
-                    unreachable!()
-                }
+                _ => (StatusCode::BAD_REQUEST, Uuid::nil()),
             }
         };
 
@@ -306,32 +296,11 @@ impl HandleAcceptJetMsg {
     async fn handle_set_transport(&mut self) -> Result<(), io::Error> {
         let mut jet_associations = self.jet_associations.lock().await;
 
-        match self.request_msg.version {
-            1 => {
-                let association = jet_associations
-                    .get_mut(
-                        self.association_uuid
-                            .as_ref()
-                            .expect("Must be set during parsing of the request"),
-                    )
-                    .expect("Was checked during parsing the request");
-                let candidate = association
-                    .get_candidate_by_index(0)
-                    .expect("Only one candidate exists in version 1 and there is no candidate id");
-                candidate.set_transport(self.transport.take().expect("Must be set in the constructor"));
-            }
-            2 => {
-                if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
-                    if association.version() == JET_VERSION_V2 {
-                        if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
-                            candidate.set_transport(self.transport.take().expect("Must be set in the constructor"));
-                        }
-                    }
+        if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
+            if association.version() == JET_VERSION_V2 {
+                if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
+                    candidate.set_transport(self.transport.take().expect("Must be set in the constructor"));
                 }
-            }
-            _ => {
-                // No jet message exist with version different than 1 or 2
-                unreachable!()
             }
         }
 
@@ -373,18 +342,6 @@ async fn handle_connect_jet_msg(
         association_token = Some(association.get_token_claims().clone());
 
         let candidate = match (association.version(), request_msg.version) {
-            (1, 1) => {
-                // Only one candidate exists in version 1 and there is no candidate id.
-                if let Some(candidate) = association.get_candidate_by_index(0) {
-                    if candidate.state() == CandidateState::Accepted {
-                        Some(candidate)
-                    } else {
-                        None
-                    }
-                } else {
-                    unreachable!("No candidate found for an association version 1. Should never happen.");
-                }
-            }
             (2, 2) => {
                 if let Some(candidate) = association.get_candidate_mut(request_msg.candidate) {
                     if candidate.transport_type() == TransportType::Tcp && candidate.state() == CandidateState::Accepted
