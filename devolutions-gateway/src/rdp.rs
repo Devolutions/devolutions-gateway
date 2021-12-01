@@ -68,7 +68,8 @@ pub struct RdpClient {
 impl RdpClient {
     pub async fn serve(self, mut client_stream: TcpStream) -> io::Result<()> {
         let (pdu, leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
-        let association_claims = extract_association_claims(&pdu, &self.config)?;
+        let source_ip = client_stream.peer_addr()?.ip();
+        let association_claims = extract_association_claims(&pdu, source_ip, &self.config)?;
         self.serve_with_association_claims_and_leftover_bytes(client_stream, association_claims, leftover_bytes)
             .await
     }

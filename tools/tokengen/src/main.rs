@@ -68,13 +68,13 @@ struct ScopeParams {
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
 enum GatewayAccessClaims<'a> {
-    RoutingClaims(RoutingClaims<'a>),
-    ScopeClaims(ScopeClaims),
+    Association(AssociationClaims<'a>),
+    Scope(ScopeClaims),
     Jmux(JmuxClaims),
 }
 
 #[derive(Clone, Serialize)]
-struct RoutingClaims<'a> {
+struct AssociationClaims<'a> {
     exp: i64,
     nbf: i64,
     jet_cm: &'a str,
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let claims = match &app.subcmd {
-        SubCommand::Scope(params) => GatewayAccessClaims::ScopeClaims(ScopeClaims {
+        SubCommand::Scope(params) => GatewayAccessClaims::Scope(ScopeClaims {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
             scope: params.scope.clone(),
@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
         }),
-        _ => GatewayAccessClaims::RoutingClaims(RoutingClaims {
+        _ => GatewayAccessClaims::Association(AssociationClaims {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
             dst_hst,
@@ -153,7 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let signed = JwtSig::new(JwsAlg::RS256, claims.clone()).encode(&private_key)?;
 
-    let result = if let GatewayAccessClaims::RoutingClaims(routing_claims) = claims {
+    let result = if let GatewayAccessClaims::Association(routing_claims) = claims {
         if let Some(TlsParams { jet_public_key, .. }) = routing_claims.identity {
             let public_key_str = std::fs::read_to_string(&jet_public_key)?;
             let public_key_pem = public_key_str.parse::<Pem>()?;
