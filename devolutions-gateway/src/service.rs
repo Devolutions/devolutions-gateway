@@ -27,18 +27,10 @@ use tokio::sync::Mutex;
 use tokio_rustls::TlsStream;
 use url::Url;
 
-type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
-
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
-pub enum GatewayState {
+enum GatewayState {
     Stopped,
     Running { runtime: Runtime },
-}
-
-impl Default for GatewayState {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 pub struct GatewayService {
@@ -86,12 +78,15 @@ impl GatewayService {
         let config = self.config.clone();
         let logger = self.logger.clone();
 
-        let context = create_context(config, logger).expect("failed to create gateway context");
+        let futures = create_futures(config, logger).expect("failed to initiate gateway");
 
-        let join_all = futures::future::join_all(context.futures);
+        let join_all = futures::future::join_all(futures);
+
         runtime.spawn(async {
-            join_all.await.into_iter().for_each(|future_result| {
-                let _ = future_result.map_err(|err| error!("{}", format!("Listeners failed: {}", err)));
+            join_all.await.into_iter().for_each(|result| {
+                if let Err(e) = result {
+                    error!("Listeners failed: {}", e)
+                }
             });
         });
 
@@ -99,9 +94,9 @@ impl GatewayService {
     }
 
     pub fn stop(&mut self) {
-        match std::mem::take(&mut self.state) {
+        match std::mem::replace(&mut self.state, GatewayState::Stopped) {
             GatewayState::Stopped => {
-                info!("Attempted to stop gateway service, but it isn't started");
+                info!("Attempted to stop gateway service, but it's already stopped");
             }
             GatewayState::Running { runtime } => {
                 info!("Stopping gateway service");
@@ -115,11 +110,10 @@ impl GatewayService {
     }
 }
 
-pub struct GatewayContext {
-    pub futures: VecOfFuturesType,
-}
+// TODO: when benchmarking facility is ready, use Handle instead of pinned futures
+type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
 
-pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<GatewayContext, Cow<'static, str>> {
+fn create_futures(config: Arc<Config>, logger: slog::Logger) -> Result<VecOfFuturesType, Cow<'static, str>> {
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()
@@ -173,7 +167,12 @@ pub fn create_context(config: Arc<Config>, logger: slog::Logger) -> Result<Gatew
         )));
     }
 
-    Ok(GatewayContext { futures })
+    futures.push(Box::pin(async {
+        crate::token::cleanup_task().await;
+        Ok(())
+    }));
+
+    Ok(futures)
 }
 
 fn set_socket_option(socket: &TcpSocket, logger: &Logger) {

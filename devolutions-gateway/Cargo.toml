@@ -37,6 +37,7 @@ tempfile = "3.2.0"
 indexmap = "1.7.0"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
+parking_lot = "0.11"
 # TODO: compare performance with `ringbuf` and `sluice`
 # NOTE: check if we actually still need a bip buffer for proxying though (see jetsocat)
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }

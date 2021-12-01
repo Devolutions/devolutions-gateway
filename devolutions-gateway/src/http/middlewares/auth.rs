@@ -1,14 +1,13 @@
 use crate::config::Config;
-use crate::token::JetAccessTokenClaims;
-use chrono::Utc;
+use crate::token::validate_token;
 use futures::future::{BoxFuture, FutureExt};
-use picky::jose::jwt::JwtDate;
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};
 use saphir::http_context::{HttpContext, State};
 use saphir::middleware::{Middleware, MiddlewareChain};
 use saphir::response::Builder as ResponseBuilder;
 use slog_scope::{error, warn};
+use std::io;
 use std::sync::Arc;
 
 const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
@@ -72,7 +71,18 @@ async fn auth_middleware(
     };
 
     if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
-        match validate_bearer_token(&config, token) {
+        let source_addr = request
+            .peer_addr()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address not found"))?;
+
+        let provisioner_key = config
+            .provisioner_public_key
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
+
+        let delegation_key = config.delegation_private_key.as_ref();
+
+        match validate_token(token, source_addr.ip(), provisioner_key, delegation_key) {
             Ok(jet_token) => {
                 request.extensions_mut().insert(jet_token);
                 return chain.next(ctx).await;
@@ -115,21 +125,4 @@ pub fn parse_auth_header(auth_header: &str) -> Option<(AuthHeaderType, &str)> {
         warn!("invalid auth header: {}", auth_header);
         None
     }
-}
-
-pub fn validate_bearer_token(config: &Config, token: &str) -> Result<JetAccessTokenClaims, String> {
-    use picky::jose::jwt::{JwtSig, JwtValidator};
-
-    let key = config
-        .provisioner_public_key
-        .as_ref()
-        .ok_or_else(|| "Provisioner public key is missing".to_string())?;
-
-    let now = JwtDate::new_with_leeway(Utc::now().timestamp(), 10 * 60);
-    let validator = JwtValidator::strict(&now);
-
-    let jwt = JwtSig::<JetAccessTokenClaims>::decode(token, key, &validator)
-        .map_err(|e| format!("Invalid jet token: {:?}", e))?;
-
-    Ok(jwt.claims)
 }

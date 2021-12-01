@@ -25,7 +25,8 @@ impl GenericClient {
         } = self;
 
         let (pdu, mut leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
-        let association_claims = extract_association_claims(&pdu, &config)?;
+        let source_ip = client_stream.peer_addr()?.ip();
+        let association_claims = extract_association_claims(&pdu, source_ip, &config)?;
 
         match association_claims.jet_ap {
             // We currently special case this because it may be the "RDP-TLS" protocol

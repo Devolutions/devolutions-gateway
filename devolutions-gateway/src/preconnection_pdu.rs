@@ -1,21 +1,15 @@
 use crate::config::Config;
-use crate::token::JetAssociationTokenClaims;
+use crate::token::{validate_token, JetAccessTokenClaims, JetAssociationTokenClaims};
 use bytes::BytesMut;
-use chrono::Utc;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
-use picky::jose::jwe::Jwe;
-use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
 use std::io;
+use std::net::IpAddr;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
-pub fn is_encrypted(token: &str) -> bool {
-    let num_dots = token.chars().fold(0, |acc, c| if c == '.' { acc + 1 } else { acc });
-    num_dots == 4
-}
-
 pub fn extract_association_claims(
     pdu: &PreconnectionPdu,
+    source_ip: IpAddr,
     config: &Config,
 ) -> Result<JetAssociationTokenClaims, io::Error> {
     let payload = pdu
@@ -23,62 +17,17 @@ pub fn extract_association_claims(
         .as_deref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Empty preconnection PDU"))?;
 
-    let is_encrypted = is_encrypted(payload);
-
-    let jwe_token; // pre-declaration because we want longer lifetime
-    let signed_jwt;
-
-    if is_encrypted {
-        let encrypted_jwt = payload;
-
-        let delegation_key = config
-            .delegation_private_key
-            .as_ref()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Delegation key is missing"))?;
-
-        jwe_token = Jwe::decode(encrypted_jwt, delegation_key).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to decode encrypted JWT routing token: {}", e),
-            )
-        })?;
-
-        signed_jwt = std::str::from_utf8(&jwe_token.payload).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to decode encrypted JWT routing token payload: {}", e),
-            )
-        })?;
-    } else {
-        signed_jwt = payload;
-    }
-
-    let now = JwtDate::new_with_leeway(Utc::now().timestamp(), 30);
-    let validator = JwtValidator::strict(&now);
-
     let provisioner_key = config
         .provisioner_public_key
         .as_ref()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
 
-    let jwt_token =
-        JwtSig::<JetAssociationTokenClaims>::decode(signed_jwt, provisioner_key, &validator).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to decode signed payload of JWT routing token: {}", e),
-            )
-        })?;
+    let delegation_key = config.delegation_private_key.as_ref();
 
-    let claims = jwt_token.claims;
-
-    if claims.contains_secrets() && !is_encrypted {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Received a non encrypted JWT containing secrets. This is unacceptable, do it right!",
-        ));
+    match validate_token(payload, source_ip, provisioner_key, delegation_key)? {
+        JetAccessTokenClaims::Association(claims) => Ok(claims),
+        _ => Err(io::Error::new(io::ErrorKind::Other, "unexpected token type")),
     }
-
-    Ok(claims)
 }
 
 pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<PreconnectionPdu>, io::Error> {
