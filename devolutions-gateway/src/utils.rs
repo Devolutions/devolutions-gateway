@@ -49,32 +49,54 @@ pub mod danger_transport {
     }
 }
 
-pub async fn resolve_url_to_socket_addr(url: &Url) -> Option<SocketAddr> {
-    let host = url.host_str()?;
-    let port = url.port()?;
-    lookup_host((host, port)).await.ok()?.next()
+pub async fn resolve_url_to_socket_addr(url: &Url) -> io::Result<SocketAddr> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host is missing", url)))?;
+    let port = url
+        .port()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: port is missing", url)))?;
+    lookup_host((host, port))
+        .await?
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host lookup yielded no result", url)))
 }
 
-pub async fn resolve_target_to_socket_addr(dest: &TargetAddr) -> Option<SocketAddr> {
+pub async fn resolve_target_to_socket_addr(dest: &TargetAddr) -> io::Result<SocketAddr> {
     match &dest.host {
-        HostRepr::Domain(domain, port) => lookup_host((domain.as_str(), *port)).await.ok()?.next(),
-        HostRepr::Ip(addr) => Some(*addr),
+        HostRepr::Domain(domain, port) => lookup_host((domain.as_str(), *port))
+            .await?
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host lookup yielded no result", dest))),
+        HostRepr::Ip(addr) => Ok(*addr),
     }
 }
 
+const CONNECTION_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
+
 pub async fn tcp_stream_connect(dest: &TargetAddr) -> io::Result<TcpStream> {
-    let socket_addr = resolve_target_to_socket_addr(dest)
+    let fut = async move {
+        let socket_addr = resolve_target_to_socket_addr(dest).await?;
+        TcpStream::connect(socket_addr).await
+    };
+
+    tokio::time::timeout(CONNECTION_TIMEOUT, fut)
         .await
-        .ok_or_else(|| io::Error::new(io::ErrorKind::ConnectionRefused, format!("couldn't resolve {}", dest)))?;
-    TcpStream::connect(socket_addr).await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}: {}", dest, e)))?
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to connect to {}: {}", dest, e)))
 }
 
 pub async fn tcp_transport_connect(target: &TargetAddr) -> io::Result<TcpTransport> {
     use crate::transport::Transport as _;
+
     let url = target
         .to_url()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("bad target {}: {}", target, e)))?;
-    TcpTransport::connect(&url).await
+
+    tokio::time::timeout(CONNECTION_TIMEOUT, TcpTransport::connect(&url))
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}: {}", target, e)))?
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to connect to {}: {}", target, e)))
 }
 
 pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> io::Result<(Out, &'a In)>
@@ -93,7 +115,7 @@ where
 
     Err(io::Error::new(
         io::ErrorKind::Other,
-        display_utils::join(&errors, ",").to_string(),
+        display_utils::join(&errors, ", ").to_string(),
     ))
 }
 

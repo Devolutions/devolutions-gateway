@@ -278,14 +278,7 @@ impl WsTransport {
     }
 
     async fn async_connect(url: Url) -> Result<Self, std::io::Error> {
-        let socket_addr = if let Some(addr) = utils::resolve_url_to_socket_addr(&url).await {
-            addr
-        } else {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!("couldn't resolve {}", url),
-            ));
-        };
+        let socket_addr = utils::resolve_url_to_socket_addr(&url).await?;
 
         let request = match Request::builder().uri(url.as_str()).body(()) {
             Ok(req) => req,
