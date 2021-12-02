@@ -60,11 +60,7 @@ impl GenericClient {
                         .proxy(config, &*leftover_bytes)
                         .await
                     }
-                    ConnectionMode::Fwd {
-                        dst_hst,
-                        creds: None,
-                        dst_alt,
-                    } => {
+                    ConnectionMode::Fwd { targets, creds: None } => {
                         info!(
                             "Starting plain TCP forward redirection for application protocol {:?}",
                             application_protocol
@@ -74,12 +70,8 @@ impl GenericClient {
                             return Err(utils::into_other_io_error("can't meet recording policy"));
                         }
 
-                        let mut dest_host = Vec::with_capacity(dst_alt.len() + 1);
-                        dest_host.push(dst_hst);
-                        dest_host.extend(dst_alt);
-
                         let (mut server_conn, selected_target) =
-                            utils::successive_try(&dest_host, utils::tcp_transport_connect).await?;
+                            utils::successive_try(&targets, utils::tcp_transport_connect).await?;
 
                         let client_transport = TcpTransport::new(client_stream);
 

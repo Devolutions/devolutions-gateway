@@ -263,31 +263,23 @@ fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRou
 
     match &claims.jet_cm {
         ConnectionMode::Rdv => Ok(RdpRoutingMode::TcpRendezvous(claims.jet_aid)),
-        ConnectionMode::Fwd {
-            dst_hst,
-            creds,
-            dst_alt,
-        } => {
-            let mut targets = Vec::with_capacity(dst_alt.len() + 1);
-            targets.push(dst_hst.clone());
-            targets.extend(dst_alt.clone());
-
+        ConnectionMode::Fwd { targets, creds } => {
             if let Some(creds) = creds {
                 Ok(RdpRoutingMode::Tls(RdpIdentity {
                     proxy: AuthIdentity {
-                        username: creds.prx_usr.to_owned(),
-                        password: creds.prx_pwd.to_owned(),
+                        username: creds.prx_usr.clone(),
+                        password: creds.prx_pwd.clone(),
                         domain: None,
                     },
                     target: AuthIdentity {
-                        username: creds.dst_usr.to_owned(),
-                        password: creds.dst_pwd.to_owned(),
+                        username: creds.dst_usr.clone(),
+                        password: creds.dst_pwd.clone(),
                         domain: None,
                     },
-                    targets,
+                    targets: targets.clone(),
                 }))
             } else {
-                Ok(RdpRoutingMode::Tcp(targets))
+                Ok(RdpRoutingMode::Tcp(targets.clone()))
             }
         }
     }
