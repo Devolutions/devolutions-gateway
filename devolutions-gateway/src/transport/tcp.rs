@@ -134,12 +134,7 @@ impl AsyncWrite for TcpTransport {
 
 impl TcpTransport {
     async fn create_connect_impl_future(url: Url) -> Result<TcpTransport, std::io::Error> {
-        let socket_addr = utils::resolve_url_to_socket_addr(&url).await.ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::ConnectionRefused,
-                format!("couldn't resolve {}", url),
-            )
-        })?;
+        let socket_addr = utils::resolve_url_to_socket_addr(&url).await?;
 
         match url.scheme() {
             "tcp" => TcpStream::connect(&socket_addr).await.map(TcpTransport::new),
