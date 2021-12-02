@@ -1,6 +1,8 @@
 use crate::utils::TargetAddr;
 use parking_lot::Mutex;
 use picky::key::{PrivateKey, PublicKey};
+use serde::de;
+use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
@@ -12,7 +14,9 @@ lazy_static::lazy_static! {
 }
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
-const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30;
+const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
+
+// ----- generic struct -----
 
 #[derive(Deserialize, Clone)]
 #[serde(tag = "type")]
@@ -25,47 +29,17 @@ pub enum JetAccessTokenClaims {
 }
 
 impl JetAccessTokenClaims {
-    pub fn contains_secret(&self) -> bool {
-        if let Self::Association(claims) = &self {
-            claims.contains_secret()
-        } else {
-            false
+    fn contains_secret(&self) -> bool {
+        match &self {
+            JetAccessTokenClaims::Association(claims) => claims.contains_secret(),
+            JetAccessTokenClaims::Scope(_) => false,
+            JetAccessTokenClaims::Bridge(_) => false,
+            JetAccessTokenClaims::Jmux(_) => false,
         }
     }
 }
 
-#[derive(Deserialize, Clone)]
-pub struct JetAssociationTokenClaims {
-    /// Jet Association ID (= Session ID)
-    #[serde(default = "Uuid::new_v4")] // legacy: DVLS up to 2021.2.10 do not generate this claim.
-    pub jet_aid: Uuid,
-
-    /// Jet Application protocol
-    pub jet_ap: ApplicationProtocol,
-
-    /// Jet Connection Mode
-    #[serde(flatten)]
-    pub jet_cm: ConnectionMode,
-
-    /// Jet Recording Policy
-    #[serde(default)]
-    pub jet_rec: bool,
-
-    /// Jet Filtering Policy
-    #[serde(default)]
-    pub jet_flt: bool,
-
-    // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
-    exp: i64,
-}
-
-impl JetAssociationTokenClaims {
-    pub fn contains_secret(&self) -> bool {
-        matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
-    }
-}
+// ----- association claims ----- //
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -80,9 +54,21 @@ pub enum ApplicationProtocol {
     Unknown,
 }
 
-#[derive(Deserialize, Clone)]
-#[serde(rename_all = "kebab-case")]
-#[serde(tag = "jet_cm")]
+impl ApplicationProtocol {
+    pub fn known_default_port(self) -> Option<u16> {
+        match self {
+            ApplicationProtocol::Wayk => None,
+            ApplicationProtocol::Pwsh => None,
+            ApplicationProtocol::Rdp => Some(3389),
+            ApplicationProtocol::Ard => Some(3283),
+            ApplicationProtocol::Ssh => Some(22),
+            ApplicationProtocol::Sftp => Some(22),
+            ApplicationProtocol::Unknown => None,
+        }
+    }
+}
+
+#[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 pub enum ConnectionMode {
     /// Connection should be processed following the rendez-vous protocol
@@ -90,15 +76,10 @@ pub enum ConnectionMode {
 
     /// Connection should be forwared to a given destination host
     Fwd {
-        /// Destination Host
-        dst_hst: TargetAddr,
-
-        /// Alternate Destination Hosts
-        #[serde(default)]
-        dst_alt: Vec<TargetAddr>,
+        /// Forward targets. Should be tried in order.
+        targets: Vec<TargetAddr>,
 
         /// Credentials to use if protocol is wrapped by the Gateway (e.g. RDP TLS)
-        #[serde(flatten)]
         creds: Option<CredsClaims>,
     },
 }
@@ -115,10 +96,107 @@ pub struct CredsClaims {
     pub dst_pwd: String,
 }
 
-#[derive(Clone, Deserialize)]
-pub struct JetScopeTokenClaims {
-    pub scope: JetAccessScope,
+#[derive(Clone)]
+pub struct JetAssociationTokenClaims {
+    /// Jet Association ID (= Session ID)
+    pub jet_aid: Uuid,
+
+    /// Jet Application protocol
+    pub jet_ap: ApplicationProtocol,
+
+    /// Jet Connection Mode
+    pub jet_cm: ConnectionMode,
+
+    /// Jet Recording Policy
+    pub jet_rec: bool,
+
+    /// Jet Filtering Policy
+    pub jet_flt: bool,
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    exp: i64,
 }
+
+impl JetAssociationTokenClaims {
+    fn contains_secret(&self) -> bool {
+        matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
+    }
+}
+
+impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize, Clone)]
+        #[serde(rename_all = "kebab-case")]
+        #[serde(tag = "jet_cm")]
+        #[allow(clippy::large_enum_variant)]
+        enum ConnectionModeHelper {
+            Rdv,
+            Fwd {
+                /// Destination Host
+                dst_hst: SmolStr,
+                /// Alternate Destination Hosts
+                #[serde(default)]
+                dst_alt: Vec<SmolStr>,
+                #[serde(flatten)]
+                creds: Option<CredsClaims>,
+            },
+        }
+
+        #[derive(Deserialize)]
+        struct ClaimsHelper {
+            #[serde(default = "Uuid::new_v4")] // legacy: DVLS up to 2021.2.10 do not generate this claim.
+            jet_aid: Uuid,
+            jet_ap: ApplicationProtocol,
+            #[serde(flatten)]
+            jet_cm: ConnectionModeHelper,
+            #[serde(default)]
+            jet_rec: bool,
+            #[serde(default)]
+            jet_flt: bool,
+            exp: i64,
+        }
+
+        let claims = ClaimsHelper::deserialize(deserializer)?;
+
+        let jet_cm = match claims.jet_cm {
+            ConnectionModeHelper::Rdv => ConnectionMode::Rdv,
+            ConnectionModeHelper::Fwd {
+                dst_hst,
+                dst_alt,
+                creds,
+            } => {
+                let primary_target =
+                    TargetAddr::parse(&dst_hst, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
+
+                let mut targets = Vec::with_capacity(dst_alt.len() + 1);
+                targets.push(primary_target);
+
+                for alt in dst_alt {
+                    let alt = TargetAddr::parse(&alt, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
+                    targets.push(alt);
+                }
+
+                ConnectionMode::Fwd { targets, creds }
+            }
+        };
+
+        Ok(JetAssociationTokenClaims {
+            jet_aid: claims.jet_aid,
+            jet_ap: claims.jet_ap,
+            jet_cm,
+            jet_rec: claims.jet_rec,
+            jet_flt: claims.jet_flt,
+            exp: claims.exp,
+        })
+    }
+}
+
+// ----- scope claims ----- //
 
 #[derive(Clone, Deserialize, PartialEq)]
 pub enum JetAccessScope {
@@ -131,14 +209,25 @@ pub enum JetAccessScope {
 }
 
 #[derive(Clone, Deserialize)]
+pub struct JetScopeTokenClaims {
+    pub scope: JetAccessScope,
+}
+
+// ----- bridge claims ----- //
+
+#[derive(Clone, Deserialize)]
 pub struct JetBridgeTokenClaims {
     pub target_host: TargetAddr,
 }
+
+// ----- jmux claims ----- //
 
 #[derive(Clone, Deserialize)]
 pub struct JetJmuxTokenClaims {
     filtering: Option<()>, // TODO
 }
+
+// ----- validation ----- //
 
 #[derive(Debug, Clone)]
 struct TokenSource {

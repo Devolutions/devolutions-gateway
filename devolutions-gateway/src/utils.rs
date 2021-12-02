@@ -247,6 +247,10 @@ impl fmt::Display for HostRepr {
 impl TargetAddr {
     const DEFAULT_SCHEME: &'static str = "tcp";
 
+    pub fn parse(s: &str, default_port: impl Into<Option<u16>>) -> Result<Self, BadTargetAddr> {
+        target_addr_parse_impl(s, default_port.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.serialization
     }
@@ -269,6 +273,43 @@ impl TargetAddr {
 
     pub fn to_uri_with_path_and_query(&self, path_and_query: &str) -> Result<http::Uri, http::uri::InvalidUri> {
         format!("{}{}", self.serialization, path_and_query).parse()
+    }
+}
+
+fn target_addr_parse_impl(s: &str, default_port: Option<u16>) -> Result<TargetAddr, BadTargetAddr> {
+    let (scheme, rest) = if let Some(scheme_end_idx) = s.find("://") {
+        (SmolStr::new(&s[..scheme_end_idx]), &s[scheme_end_idx + "://".len()..])
+    } else {
+        (SmolStr::new_inline(TargetAddr::DEFAULT_SCHEME), s)
+    };
+
+    if let Ok(addr) = rest.parse::<SocketAddr>() {
+        Ok(TargetAddr {
+            serialization: SmolStr::from(format!("{}://{}", scheme, addr)),
+            scheme,
+            host: HostRepr::Ip(addr),
+        })
+    } else {
+        let (domain, port) = if let Some(domain_end_idx) = rest.find(':') {
+            let domain = SmolStr::new(&rest[..domain_end_idx]);
+
+            let port = &rest[domain_end_idx + 1..];
+            let port = port
+                .parse::<u16>()
+                .map_err(|_| BadTargetAddr::BadPort { value: port.into() })?;
+
+            (domain, port)
+        } else if let Some(default_port) = default_port {
+            (SmolStr::new(rest), default_port)
+        } else {
+            return Err(BadTargetAddr::PortMissing);
+        };
+
+        Ok(TargetAddr {
+            serialization: SmolStr::from(format!("{}://{}:{}", scheme, domain, port)),
+            scheme,
+            host: HostRepr::Domain(domain, port),
+        })
     }
 }
 
@@ -323,35 +364,7 @@ impl FromStr for TargetAddr {
     type Err = BadTargetAddr;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (scheme, rest) = if let Some(scheme_end_idx) = s.find("://") {
-            (SmolStr::new(&s[..scheme_end_idx]), &s[scheme_end_idx + "://".len()..])
-        } else {
-            (SmolStr::new_inline(Self::DEFAULT_SCHEME), s)
-        };
-
-        if let Ok(addr) = rest.parse::<SocketAddr>() {
-            Ok(Self {
-                serialization: SmolStr::from(format!("{}://{}", scheme, addr)),
-                scheme,
-                host: HostRepr::Ip(addr),
-            })
-        } else {
-            let domain_end_idx = rest.find(':').ok_or(BadTargetAddr::PortMissing)?;
-
-            let domain = &rest[..domain_end_idx];
-            let domain = SmolStr::new(domain);
-
-            let port = &rest[domain_end_idx + 1..];
-            let port = port
-                .parse::<u16>()
-                .map_err(|_| BadTargetAddr::BadPort { value: port.into() })?;
-
-            Ok(Self {
-                serialization: SmolStr::from(format!("{}://{}:{}", scheme, domain, port)),
-                scheme,
-                host: HostRepr::Domain(domain, port),
-            })
-        }
+        Self::parse(s, None)
     }
 }
 
