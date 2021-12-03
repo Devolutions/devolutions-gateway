@@ -4,6 +4,9 @@ use ironrdp::{Data, PduParsing};
 use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
+// FIXME: these are not "transport" but codecs to apply above a transport
+// (this is also only used as part of the RDP connection sequence)
+
 macro_rules! negotiation_try {
     ($e:expr) => {
         match $e {

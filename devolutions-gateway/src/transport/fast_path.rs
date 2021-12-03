@@ -5,6 +5,9 @@ use ironrdp::fast_path::{FastPathError, FastPathHeader};
 use ironrdp::PduParsing;
 use tokio_util::codec::{Decoder, Encoder};
 
+// FIXME: this is not a "transport" but a codec to apply above a transport
+// (this is also only used as part of the RDP connection sequence)
+
 #[derive(Default)]
 pub struct FastPathTransport;
 

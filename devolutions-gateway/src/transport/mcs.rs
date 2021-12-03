@@ -6,6 +6,9 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::transport::x224;
 
+// FIXME: these are not "transport" but codecs to apply above a transport
+// (this is also only used as part of the RDP connection sequence)
+
 #[derive(Default)]
 pub struct McsTransport {
     x224_transport: x224::DataTransport,
