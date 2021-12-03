@@ -7,7 +7,7 @@ use crate::token::{ApplicationProtocol, ConnectionMode};
 use crate::transport::tcp::TcpTransport;
 use crate::transport::JetTransport;
 use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
-use std::io;
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -18,7 +18,7 @@ pub struct GenericClient {
 }
 
 impl GenericClient {
-    pub async fn serve(self, mut client_stream: TcpStream) -> io::Result<()> {
+    pub async fn serve(self, mut client_stream: TcpStream) -> anyhow::Result<()> {
         let Self {
             config,
             jet_associations,
@@ -67,7 +67,7 @@ impl GenericClient {
                         );
 
                         if association_claims.jet_rec {
-                            return Err(utils::into_other_io_error("can't meet recording policy"));
+                            anyhow::bail!("can't meet recording policy");
                         }
 
                         let (mut server_conn, selected_target) =
@@ -75,10 +75,10 @@ impl GenericClient {
 
                         let client_transport = TcpTransport::new(client_stream);
 
-                        server_conn.write_buf(&mut leftover_bytes).await.map_err(|e| {
-                            error!("Failed to write leftover bytes: {}", e);
-                            e
-                        })?;
+                        server_conn
+                            .write_buf(&mut leftover_bytes)
+                            .await
+                            .context("Failed to write leftover bytes")?;
 
                         let info = GatewaySessionInfo::new(
                             association_id,
@@ -93,14 +93,11 @@ impl GenericClient {
                         Proxy::new(config, info)
                             .build(server_conn, client_transport)
                             .await
-                            .map_err(|e| {
-                                error!("Encountered a failure during plain tcp traffic proxying: {}", e);
-                                e
-                            })
+                            .context("Encountered a failure during plain tcp traffic proxying")
                     }
                     ConnectionMode::Fwd { creds: Some(_), .. } => {
                         // Credentials handling should be special cased (e.g.: RDP-TLS)
-                        Err(io::Error::new(io::ErrorKind::Other, "unexpected credentials"))
+                        anyhow::bail!("unexpected credentials");
                     }
                 }
             }

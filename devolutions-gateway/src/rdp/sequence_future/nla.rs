@@ -165,7 +165,7 @@ impl NlaWithServerFuture {
 }
 
 impl Future for NlaWithServerFuture {
-    type Output = Result<NlaTransport, io::Error>;
+    type Output = anyhow::Result<NlaTransport>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
@@ -231,16 +231,10 @@ impl Future for NlaWithServerFuture {
                         Some(EarlyUserAuthResult::AccessDenied) => {
                             debug!("The server has denied access via Early User Authorization Result PDU");
 
-                            return Poll::Ready(Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                "The server failed CredSSP phase",
-                            )));
+                            return Poll::Ready(Err(anyhow::Error::msg("The server failed CredSSP phase")));
                         }
                         None => {
-                            return Poll::Ready(Err(io::Error::new(
-                                io::ErrorKind::UnexpectedEof,
-                                "The stream was closed unexpectedly",
-                            )));
+                            return Poll::Ready(Err(anyhow::Error::msg("The stream was closed unexpectedly")));
                         }
                     }
                 }

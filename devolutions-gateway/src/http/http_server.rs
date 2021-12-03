@@ -17,7 +17,7 @@ use std::sync::Arc;
 pub const REGISTRY_NAME: &str = "devolutions_registry";
 pub const NAMESPACE: &str = "videos";
 
-pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociationsMap) -> Result<(), String> {
+pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociationsMap) -> anyhow::Result<()> {
     SaphirServer::builder()
         .configure_middlewares(|middlewares| {
             info!("Loading HTTP middlewares");
@@ -72,6 +72,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 .controller(LegacySessionsController)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
-        .build_stack_only()
-        .map_err(|e| e.to_string())
+        .build_stack_only()?;
+
+    Ok(())
 }

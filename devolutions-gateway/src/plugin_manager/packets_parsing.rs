@@ -1,7 +1,6 @@
-use crate::utils::into_other_io_error;
+use anyhow::Context;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use std::io::Error;
 use std::mem::transmute;
 use std::slice::from_raw_parts;
 use std::sync::Arc;
@@ -66,19 +65,14 @@ impl PacketsParser {
     pub const NOW_SURFACE_MSG_ID: u32 = 65;
     pub const NOW_UPDATE_MSG_ID: u32 = 66;
 
-    pub fn new(lib: Arc<Library>) -> Result<Self, Error> {
+    pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
         unsafe {
-            if let Ok(lib_load) = PacketsParsingApi::load(&lib) {
-                let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
-                let ctx = (api.NowPacketParser_New)();
+            let lib_load = PacketsParsingApi::load(&lib).context("failed to load packets parsing API")?;
+            let api = transmute::<PacketsParsingApi<'_>, PacketsParsingApi<'static>>(lib_load);
+            let ctx = (api.NowPacketParser_New)();
 
-                return Ok(Self { _lib: lib, api, ctx });
-            }
+            Ok(Self { _lib: lib, api, ctx })
         }
-
-        Err(into_other_io_error(String::from(
-            "Failed to load api for recording plugin!",
-        )))
     }
 
     pub fn get_size(&self) -> FrameSize {

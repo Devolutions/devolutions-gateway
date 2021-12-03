@@ -1,18 +1,16 @@
-use dlopen::symbor::Library;
-use dlopen::Error;
-use lazy_static::lazy_static;
-use slog_scope::debug;
-use std::sync::{Arc, Mutex};
-
 mod packets_parsing;
 mod plugin_info;
 mod recording;
 
-use crate::utils::into_other_io_error;
 pub use packets_parsing::PacketsParser;
-use plugin_info::{PluginCapabilities, PluginInformation};
 pub use recording::Recorder;
-use std::path::Path;
+
+use camino::Utf8Path;
+use dlopen::symbor::Library;
+use lazy_static::lazy_static;
+use plugin_info::{PluginCapabilities, PluginInformation};
+use slog_scope::debug;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 struct Plugin {
@@ -52,27 +50,20 @@ impl PluginManager {
                 }
             }
         }
+
         None
     }
 
-    pub fn load_plugin(&mut self, path: &Path) -> Result<(), Error> {
+    pub fn load_plugin(&mut self, path: &Utf8Path) -> anyhow::Result<()> {
         let lib = Arc::new(Library::open(path)?);
-        match PluginInformation::new(lib.clone()) {
-            Ok(info) => {
-                slog_scope::info!("Plugin {} loaded", info.get_name());
+        let info = PluginInformation::new(Arc::clone(&lib))?;
+        slog_scope::info!("Plugin {} loaded", info.get_name());
 
-                let plugin = Plugin {
-                    lib,
-                    info: Arc::new(info),
-                };
+        self.libs.push(Plugin {
+            lib,
+            info: Arc::new(info),
+        });
 
-                self.libs.push(plugin);
-                Ok(())
-            }
-            Err(e) => {
-                slog_scope::error!("{}", e);
-                Err(Error::SymbolGettingError(into_other_io_error(e)))
-            }
-        }
+        Ok(())
     }
 }

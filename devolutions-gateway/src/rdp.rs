@@ -18,8 +18,9 @@ use crate::transport::x224::NegotiationWithClientTransport;
 use crate::transport::JetTransport;
 use crate::utils::{self, TargetAddr};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
+use anyhow::Context;
 use bytes::BytesMut;
-use slog_scope::{error, info};
+use slog_scope::info;
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
 use std::io;
@@ -66,7 +67,7 @@ pub struct RdpClient {
 }
 
 impl RdpClient {
-    pub async fn serve(self, mut client_stream: TcpStream) -> io::Result<()> {
+    pub async fn serve(self, mut client_stream: TcpStream) -> anyhow::Result<()> {
         let (pdu, leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
         let source_ip = client_stream.peer_addr()?.ip();
         let association_claims = extract_association_claims(&pdu, source_ip, &self.config)?;
@@ -79,14 +80,14 @@ impl RdpClient {
         mut client_stream: TcpStream,
         association_claims: JetAssociationTokenClaims,
         mut leftover_bytes: BytesMut,
-    ) -> io::Result<()> {
+    ) -> anyhow::Result<()> {
         let Self {
             config,
             jet_associations,
         } = self;
 
         if association_claims.jet_rec {
-            return Err(io::Error::new(io::ErrorKind::Other, "can't meet recording policy"));
+            anyhow::bail!("can't meet recording policy");
         }
 
         let routing_mode = resolve_rdp_routing_mode(&association_claims)?;
@@ -100,10 +101,10 @@ impl RdpClient {
 
                 let client_transport = TcpTransport::new(client_stream);
 
-                server_conn.write_buf(&mut leftover_bytes).await.map_err(|e| {
-                    error!("Failed to write leftover bytes: {}", e);
-                    e
-                })?;
+                server_conn
+                    .write_buf(&mut leftover_bytes)
+                    .await
+                    .context("Failed to write leftover bytes")?;
 
                 let info = GatewaySessionInfo::new(
                     association_claims.jet_aid,
@@ -115,23 +116,15 @@ impl RdpClient {
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
-                let result = Proxy::new(config, info)
+                Proxy::new(config, info)
                     .build(server_conn, client_transport)
                     .await
-                    .map_err(|e| {
-                        error!("Encountered a failure during plain tcp traffic proxying: {}", e);
-                        e
-                    });
-
-                result
+                    .context("plain tcp traffic proxying failed")
             }
             RdpRoutingMode::Tls(identity) => {
                 info!("Starting RDP-TLS redirection");
 
-                let tls_conf = config
-                    .tls
-                    .clone()
-                    .ok_or_else(|| utils::into_other_io_error("TLS configuration is missing"))?;
+                let tls_conf = config.tls.clone().context("TLS configuration is missing")?;
 
                 // We can't use FramedRead directly here, because we still have to use
                 // the leftover bytes. As an alternative, the decoder could be modified to use the
@@ -169,10 +162,7 @@ impl RdpClient {
                     identity.clone(),
                 )
                 .await
-                .map_err(|e| {
-                    error!("RDP Connection Sequence failed: {}", e);
-                    io::Error::new(io::ErrorKind::Other, e)
-                })?;
+                .context("RDP Connection Sequence failed")?;
 
                 let destination_host = proxy_connection.selected_target;
                 let client_transport = proxy_connection.client;
@@ -194,12 +184,7 @@ impl RdpClient {
                                     DvcManager::with_allowed_channels(vec![RDP8_GRAPHICS_PIPELINE_NAME.to_string()]),
                                 )
                                 .await
-                                .map_err(|e| {
-                                    io::Error::new(
-                                        io::ErrorKind::Other,
-                                        format!("Failed to downgrade DVC capabilities: {}", e),
-                                    )
-                                })?;
+                                .context("Failed to downgrade DVC capabilities")?;
 
                             (
                                 client_transport,
@@ -229,10 +214,7 @@ impl RdpClient {
                         Some(Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager))),
                     )
                     .await
-                    .map_err(move |e| {
-                        error!("Proxy error: {}", e);
-                        e
-                    })
+                    .context("Proxy failed")
             }
             RdpRoutingMode::TcpRendezvous(association_id) => {
                 info!("Starting RdpTcpRendezvous redirection");
@@ -250,15 +232,12 @@ enum RdpRoutingMode {
     TcpRendezvous(Uuid),
 }
 
-fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> Result<RdpRoutingMode, io::Error> {
+fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> anyhow::Result<RdpRoutingMode> {
     if claims.jet_ap != ApplicationProtocol::Rdp {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "Expected RDP association, but found a different application protocol claim: {:?}",
-                claims.jet_ap
-            ),
-        ));
+        anyhow::bail!(
+            "Expected RDP association, but found a different application protocol claim: {:?}",
+            claims.jet_ap
+        );
     }
 
     match &claims.jet_cm {

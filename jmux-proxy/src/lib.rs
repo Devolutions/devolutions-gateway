@@ -446,7 +446,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         msg
                     },
                     Err(e) => {
-                        error!(log, "JMUX pipe error: {:?}", e);
+                        error!(log, "JMUX pipe error: {:#}", e);
 
                         nb_consecutive_pipe_failures += 1;
                         if nb_consecutive_pipe_failures > MAX_CONSECUTIVE_PIPE_FAILURES {

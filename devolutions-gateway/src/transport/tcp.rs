@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use url::Url;
@@ -133,22 +133,21 @@ impl AsyncWrite for TcpTransport {
 }
 
 impl TcpTransport {
-    async fn create_connect_impl_future(url: Url) -> Result<TcpTransport, std::io::Error> {
+    async fn create_connect_impl_future(url: Url) -> anyhow::Result<TcpTransport> {
         let socket_addr = utils::resolve_url_to_socket_addr(&url).await?;
 
         match url.scheme() {
-            "tcp" => TcpStream::connect(&socket_addr).await.map(TcpTransport::new),
+            "tcp" => {
+                let stream = TcpStream::connect(&socket_addr).await?;
+                Ok(TcpTransport::new(stream))
+            }
             "tls" => {
                 let socket = TcpStream::connect(&socket_addr).await?;
-
-                let tls_handshake = utils::create_tls_connector(socket)
-                    .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
+                let tls_handshake = utils::create_tls_connector(socket).await?;
                 Ok(TcpTransport::new_tls(TlsStream::Client(tls_handshake)))
             }
             scheme => {
-                panic!("Unsupported scheme: {}", scheme);
+                anyhow::bail!("Unsupported scheme: {}", scheme);
             }
         }
     }

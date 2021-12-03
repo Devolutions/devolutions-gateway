@@ -1,5 +1,6 @@
 use crate::transport::{JetFuture, JetSinkImpl, JetSinkType, JetStreamImpl, JetStreamType, Transport};
 use crate::utils;
+use anyhow::Context as _;
 use futures::{ready, Sink, Stream};
 use hyper::upgrade::Upgraded;
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
@@ -35,7 +36,7 @@ impl WsStream {
         self.inner.peer_addr()
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), std::io::Error> {
+    pub async fn shutdown(&mut self) -> io::Result<()> {
         self.inner.shutdown().await
     }
 }
@@ -51,11 +52,7 @@ impl From<WsStreamWrapper> for WsStream {
 }
 
 impl AsyncRead for WsStream {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         match self.previous_message.take() {
             Some(mut message) => {
                 ready!(Pin::new(&mut message).poll_read(cx, buf))?;
@@ -131,7 +128,7 @@ impl AsyncRead for WsStream {
 }
 
 impl AsyncWrite for WsStream {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         match self.previous_send_state {
             WsStreamSendState::Idle => {
                 let message = tungstenite::Message::Binary(buf.to_vec());
@@ -179,7 +176,7 @@ impl AsyncWrite for WsStream {
         }
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let result = match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
             WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_flush(cx),
@@ -189,7 +186,7 @@ impl AsyncWrite for WsStream {
         result.map_err(tungstenite_err_to_io_err)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let result = match self.inner {
             WsStreamWrapper::Http((ref mut stream, _)) => Pin::new(stream).poll_close(cx),
             WsStreamWrapper::Tcp((ref mut stream, _)) => Pin::new(stream).poll_close(cx),
@@ -216,7 +213,7 @@ impl WsStreamWrapper {
         }
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), std::io::Error> {
+    pub async fn shutdown(&mut self) -> io::Result<()> {
         match self {
             WsStreamWrapper::Http((stream, _)) => stream
                 .close(None)
@@ -277,29 +274,27 @@ impl WsTransport {
         self.nb_bytes_written.clone()
     }
 
-    async fn async_connect(url: Url) -> Result<Self, std::io::Error> {
-        let socket_addr = utils::resolve_url_to_socket_addr(&url).await?;
+    async fn async_connect(url: Url) -> anyhow::Result<Self> {
+        let socket_addr = utils::resolve_url_to_socket_addr(&url)
+            .await
+            .with_context(|| format!("couldn't resolve {}", url))?;
 
-        let request = match Request::builder().uri(url.as_str()).body(()) {
-            Ok(req) => req,
-            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-        };
+        let request = Request::builder()
+            .uri(url.as_str())
+            .body(())
+            .context("request build failure")?;
 
         match url.scheme() {
             "ws" => {
-                let stream = TcpStream::connect(&socket_addr)
-                    .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let stream = TcpStream::connect(&socket_addr).await?;
                 let peer_addr = stream.peer_addr().ok();
-                match tokio_tungstenite::client_async(request, stream).await {
-                    Ok((stream, _)) => Ok(WsTransport::new_tcp(stream, peer_addr)),
-                    Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-                }
+                let (stream, _) = tokio_tungstenite::client_async(request, stream)
+                    .await
+                    .context("WebSocket handshake failed")?;
+                Ok(WsTransport::new_tcp(stream, peer_addr))
             }
             "wss" => {
-                let tcp_stream = TcpStream::connect(&socket_addr)
-                    .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let tcp_stream = TcpStream::connect(&socket_addr).await?;
 
                 let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
 
@@ -312,13 +307,13 @@ impl WsTransport {
                 let tls_stream = cx.connect(dns_name, tcp_stream).await?;
                 let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
 
-                match tokio_tungstenite::client_async(request, TlsStream::Client(tls_stream)).await {
-                    Ok((stream, _)) => Ok(WsTransport::new_tls(stream, peer_addr)),
-                    Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-                }
+                let (stream, _) = tokio_tungstenite::client_async(request, TlsStream::Client(tls_stream))
+                    .await
+                    .context("WebSocket handshake failed")?;
+                Ok(WsTransport::new_tls(stream, peer_addr))
             }
             scheme => {
-                panic!("Unsupported scheme: {}", scheme);
+                anyhow::bail!("Unsupported scheme: {}", scheme);
             }
         }
     }

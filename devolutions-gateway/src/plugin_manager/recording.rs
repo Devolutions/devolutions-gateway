@@ -1,9 +1,8 @@
 use crate::plugin_manager::packets_parsing::ImageUpdate;
-use crate::utils::into_other_io_error;
+use anyhow::Context;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use std::ffi::CString;
-use std::io::Error;
 use std::mem::transmute;
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -47,19 +46,13 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn new(lib: Arc<Library>) -> Result<Self, Error> {
+    pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
         unsafe {
-            if let Ok(lib_load) = RecordingApi::load(&lib) {
-                let api = transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib_load);
-                let ctx = (api.NowRecording_New)();
-
-                return Ok(Self { _lib: lib, api, ctx });
-            }
+            let lib_load = RecordingApi::load(&lib).context("failed to load recording API")?;
+            let api = transmute::<RecordingApi<'_>, RecordingApi<'static>>(lib_load);
+            let ctx = (api.NowRecording_New)();
+            Ok(Self { _lib: lib, api, ctx })
         }
-
-        Err(into_other_io_error(String::from(
-            "Failed to load api for recording plugin!",
-        )))
     }
 
     pub fn update_recording(&self, mut image_data: ImageUpdate) {
