@@ -33,6 +33,10 @@ pub type JetSinkType<T> = Pin<Box<dyn JetSink<T, Error = io::Error> + Send>>;
 pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
 const PART_LEN: usize = 16 * 1024;
 
+// FIXME: this trait is superfluous and should be refactored out.
+// TODO: check `JetStream` and `JetSink` traits too.
+// TODO: just out of curiosity, run a benchmark before and after the changes
+
 pub trait Transport {
     fn connect(addr: &Url) -> JetFuture<Self>
     where

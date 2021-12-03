@@ -16,19 +16,6 @@ use tokio_rustls::{rustls, Connect, TlsConnector};
 use tokio_util::codec::{Decoder, Encoder, Framed, FramedParts};
 use url::Url;
 
-#[macro_export]
-macro_rules! io_try {
-    ($e:expr) => {
-        match $e {
-            Ok(v) => v,
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                return Ok(None);
-            }
-            Err(e) => return Err(e),
-        }
-    };
-}
-
 pub mod danger_transport {
     use tokio_rustls::rustls;
 

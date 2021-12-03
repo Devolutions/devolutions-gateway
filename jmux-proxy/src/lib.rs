@@ -582,8 +582,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         let _ = data_tx.send(msg.transfer_data);
 
-                        // TODO: implement better flow control logic
-                        // Simplest approach for now: just send back a WINDOW ADJUST message to
+                        // Simplest flow control logic for now: just send back a WINDOW ADJUST message to
                         // increase back peer’s window size.
                         msg_to_send_tx.send(Message::window_adjust(distant_id, data_length))
                             .context("Couldn’t send WINDOW ADJUST message")?;

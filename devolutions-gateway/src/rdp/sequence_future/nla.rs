@@ -1,30 +1,26 @@
+use crate::rdp::sequence_future::{
+    FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
+};
+use crate::rdp::RdpIdentity;
+use crate::transport::tsrequest::TsRequestTransport;
+use crate::utils;
+use bytes::{Buf, BytesMut};
+use futures::{ready, SinkExt, StreamExt};
+use ironrdp::nego;
+use slog_scope::{debug, error, trace};
+use sspi::internal::credssp::{
+    self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest, EARLY_USER_AUTH_RESULT_PDU_SIZE,
+};
+use sspi::AuthIdentity;
 use std::future::Future;
 use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-
-use bytes::{Buf, BytesMut};
-use futures::{ready, SinkExt, StreamExt};
-use ironrdp::nego;
-
-use slog_scope::{debug, error, trace};
-use sspi::internal::credssp::{
-    self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest, EARLY_USER_AUTH_RESULT_PDU_SIZE,
-};
-use sspi::AuthIdentity;
 use tokio::net::TcpStream;
-use tokio_util::codec::{Decoder, Encoder, Framed};
-
 use tokio_rustls::{rustls, Accept, Connect, TlsAcceptor, TlsConnector, TlsStream};
-
-use crate::rdp::sequence_future::{
-    FutureState, GetStateArgs, NextStream, ParseStateArgs, SequenceFuture, SequenceFutureProperties,
-};
-use crate::rdp::RdpIdentity;
-use crate::transport::tsrequest::TsRequestTransport;
-use crate::{io_try, utils};
+use tokio_util::codec::{Decoder, Encoder, Framed};
 
 type TsRequestFutureTransport = Framed<TlsStream<TcpStream>, TsRequestTransport>;
 type EarlyUserAuthResultFutureTransport = Framed<TlsStream<TcpStream>, EarlyUserAuthResultTransport>;
@@ -423,7 +419,13 @@ impl Decoder for EarlyUserAuthResultTransport {
         if buf.len() < EARLY_USER_AUTH_RESULT_PDU_SIZE {
             Ok(None)
         } else {
-            let result = io_try!(EarlyUserAuthResult::from_buffer(buf.as_ref()));
+            let result = match EarlyUserAuthResult::from_buffer(buf.as_ref()) {
+                Ok(v) => v,
+                Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    return Ok(None);
+                }
+                Err(e) => return Err(e),
+            };
             buf.advance(result.buffer_len());
             Ok(Some(result))
         }
