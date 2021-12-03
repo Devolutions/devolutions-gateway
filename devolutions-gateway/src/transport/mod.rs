@@ -1,3 +1,14 @@
+pub mod fast_path;
+pub mod mcs;
+pub mod rdp;
+pub mod tcp;
+pub mod tsrequest;
+pub mod ws;
+pub mod x224;
+
+use crate::interceptor::PacketInterceptor;
+use crate::transport::tcp::TcpTransport;
+use crate::transport::ws::WsTransport;
 use futures::{ready, Sink, Stream};
 use slog_scope::{debug, error, trace};
 use spsc_bip_buffer::{BipBufferReader, BipBufferWriter};
@@ -8,26 +19,12 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::io::{self, AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf};
+use tokio::io::{self, AsyncRead, AsyncWrite, Error, ReadBuf, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use url::Url;
 
-use crate::interceptor::PacketInterceptor;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::ws::WsTransport;
-use tokio::io::Error;
-
-pub mod tcp;
-pub mod ws;
-
-pub mod fast_path;
-pub mod mcs;
-pub mod rdp;
-pub mod tsrequest;
-pub mod x224;
-
-pub type JetFuture<T> = Pin<Box<dyn Future<Output = Result<T, io::Error>> + Send>>;
-pub type JetStreamType<T> = Pin<Box<dyn JetStream<Item = Result<T, io::Error>> + Send>>;
+pub type JetFuture<T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send>>;
+pub type JetStreamType<T> = Pin<Box<dyn JetStream<Item = io::Result<T>> + Send>>;
 pub type JetSinkType<T> = Pin<Box<dyn JetSink<T, Error = io::Error> + Send>>;
 
 pub const BIP_BUFFER_LEN: usize = 8 * PART_LEN;
@@ -179,7 +176,7 @@ impl<T: AsyncRead + Unpin> JetStreamImpl<T> {
 }
 
 impl<T: AsyncRead + Unpin> Stream for JetStreamImpl<T> {
-    type Item = Result<usize, io::Error>;
+    type Item = io::Result<usize>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut written = 0;
@@ -351,7 +348,6 @@ impl<T: AsyncWrite> Sink<usize> for JetSinkImpl<T> {
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         ready!(self.as_mut().poll_flush(cx))?;
-
         Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
@@ -360,6 +356,7 @@ impl<T: AsyncWrite> JetSink<usize> for JetSinkImpl<T> {
     fn nb_bytes_written(self: Pin<&Self>) -> u64 {
         self.nb_bytes_written.load(Ordering::Relaxed)
     }
+
     fn finished(mut self: Pin<&mut Self>) -> bool {
         self.buffer.valid().is_empty()
     }

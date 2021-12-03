@@ -1,4 +1,5 @@
 use crate::plugin_manager::PLUGIN_MANAGER;
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, Arg};
@@ -336,8 +337,8 @@ fn get_config_file_path() -> Utf8PathBuf {
     config_file_path
 }
 
-fn load_config_file(file_path: Utf8PathBuf) -> Option<ConfigFile> {
-    let file = File::open(file_path.as_path()).ok()?;
+fn load_config_file(file_path: &Utf8Path) -> Option<ConfigFile> {
+    let file = File::open(file_path).ok()?;
 
     match serde_json::from_reader(BufReader::new(file)) {
         Ok(config_file) => Some(config_file),
@@ -363,7 +364,7 @@ fn get_default_hostname() -> Option<String> {
 
 impl Config {
     pub fn init() -> Self {
-        let mut config = Config::load_from_file(get_config_file_path()).unwrap_or_default();
+        let mut config = Config::load_from_file(&get_config_file_path()).unwrap_or_default();
 
         let cli_app = App::new(crate_name!())
             .author("Devolutions Inc.")
@@ -865,50 +866,52 @@ impl Config {
         config
     }
 
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         // early fail if specified plugins can't be loaded
         if let Some(plugins) = &self.plugins {
             let mut manager = PLUGIN_MANAGER.lock().unwrap();
             for plugin in plugins {
                 manager
-                    .load_plugin(plugin.as_std_path())
-                    .map_err(|e| format!("Plugin {} failed to be loaded: {}", plugin, e))?;
+                    .load_plugin(plugin)
+                    .with_context(|| format!("Failed to load plugin {}", plugin))?;
             }
         }
 
         // early fail if we start without any listeners
         if self.listeners.is_empty() {
-            return Err("At least one listener has to be specified.".to_string());
+            anyhow::bail!("At least one listener has to be specified.");
         }
 
         if !self
             .listeners
             .iter()
-            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
+            .any(|l| matches!(l.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
         {
-            return Err("At least one HTTP listener is required".to_string());
+            anyhow::bail!("At least one HTTP listener is required");
         }
 
         if self.provisioner_public_key.is_none() {
-            return Err("provisioner public key is missing".to_string());
+            anyhow::bail!("provisioner public key is missing");
         }
 
         let requires_tls = {
             if let Some("tls") = self.routing_url.as_ref().map(|o| o.scheme()) {
                 true
             } else {
-                self.listeners.iter().any(|l| l.internal_url.scheme() == "wss")
+                self.listeners
+                    .iter()
+                    .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"))
             }
         };
 
         if requires_tls && self.tls.is_none() {
-            return Err("TLS usage implied but TLS certificate or/and private key are missing".into());
+            anyhow::bail!("TLS usage implied but TLS certificate or/and private key are missing");
         }
 
         Ok(())
     }
 
-    pub fn load_from_file(file_path: Utf8PathBuf) -> Option<Self> {
+    pub fn load_from_file(file_path: &Utf8Path) -> Option<Self> {
         let config_file = load_config_file(file_path)?;
 
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());

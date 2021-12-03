@@ -254,7 +254,7 @@ impl ConnectionSequenceFuture {
 }
 
 impl Future for ConnectionSequenceFuture {
-    type Output = Result<RdpProxyConnection, io::Error>;
+    type Output = anyhow::Result<RdpProxyConnection>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
@@ -270,8 +270,7 @@ impl Future for ConnectionSequenceFuture {
                             self.create_nla_client_future(client, protocol),
                         ));
                     } else {
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::ConnectionRefused,
+                        return Poll::Ready(Err(anyhow::Error::msg(
                             "The client does not support HYBRID (or HYBRID_EX) protocol",
                         )));
                     }
@@ -381,7 +380,7 @@ enum ConnectionSequenceFutureState {
 type NegotiationWithClientT =
     Pin<Box<SequenceFuture<NegotiationWithClientFuture, TcpStream, NegotiationWithClientTransport, nego::Response>>>;
 type NlaWithClientT = Pin<Box<NlaWithClientFuture>>;
-type ConnectToServerT = Pin<Box<dyn Future<Output = Result<(TcpStream, TargetAddr), io::Error>> + Send>>;
+type ConnectToServerT = Pin<Box<dyn Future<Output = anyhow::Result<(TcpStream, TargetAddr)>> + Send>>;
 type NegotiationWithServerT =
     Pin<Box<SequenceFuture<NegotiationWithServerFuture, TcpStream, NegotiationWithServerTransport, nego::Request>>>;
 type NlaWithServerT = Pin<Box<NlaWithServerFuture>>;

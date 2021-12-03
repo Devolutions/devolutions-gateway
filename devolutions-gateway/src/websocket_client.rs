@@ -482,14 +482,13 @@ impl WsClient {
         WsClient { routing_url, config }
     }
 
-    pub async fn serve<T>(self, client_transport: T) -> io::Result<()>
+    pub async fn serve<T>(self, client_transport: T) -> anyhow::Result<()>
     where
         T: 'static + Transport + Send,
     {
         let server_transport = WsTransport::connect(&self.routing_url).await?;
 
-        let destination_host =
-            TargetAddr::try_from(&self.routing_url).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let destination_host = TargetAddr::try_from(&self.routing_url)?;
 
         Proxy::new(
             self.config.clone(),

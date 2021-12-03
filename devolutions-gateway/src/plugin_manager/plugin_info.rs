@@ -1,14 +1,14 @@
-use crate::utils::into_other_io_error;
+use anyhow::Context;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
 use slog_scope::{debug, error};
 use std::convert::TryFrom;
 use std::ffi::CStr;
-use std::io::Error;
 use std::mem::transmute;
 use std::os::raw::c_char;
 use std::slice::from_raw_parts;
 use std::sync::Arc;
+use tap::TapFallible;
 
 #[derive(Debug, PartialEq)]
 pub enum PluginCapabilities {
@@ -17,13 +17,13 @@ pub enum PluginCapabilities {
 }
 
 impl TryFrom<u32> for PluginCapabilities {
-    type Error = Error;
+    type Error = anyhow::Error;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(PluginCapabilities::PacketsParsing),
             2 => Ok(PluginCapabilities::Recording),
-            _ => Err(into_other_io_error(format!("Unknown capability detected {}", value))),
+            _ => anyhow::bail!("Unknown capability detected {}", value),
         }
     }
 }
@@ -42,26 +42,22 @@ pub struct PluginInformation {
 }
 
 impl PluginInformation {
-    pub fn new(lib: Arc<Library>) -> Result<Self, Error> {
+    pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
         unsafe {
-            if let Ok(lib_load) = PluginInformationApi::load(&lib) {
-                return Ok(Self {
-                    _lib: lib.clone(),
-                    info: transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib_load),
-                });
-            }
+            let lib_load = PluginInformationApi::load(&lib).context("Failed to load plugin information API")?;
+            Ok(Self {
+                _lib: lib.clone(),
+                info: transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib_load),
+            })
         }
-        Err(into_other_io_error(String::from("Failed to load api for info plugin!")))
     }
 
     pub fn get_name(&self) -> String {
         let cstr = unsafe { CStr::from_ptr((self.info.NowPlugin_GetName)()) };
         cstr.to_str()
-            .unwrap_or_else(|e| {
-                error!("Failed to get the plugin name: {}", e);
-                ""
-            })
-            .to_string()
+            .tap_err(|e| error!("bad plugin name: {}", e))
+            .unwrap_or("")
+            .to_owned()
     }
 
     pub fn get_capabilities(&self) -> Vec<PluginCapabilities> {

@@ -4,10 +4,8 @@ use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
 use crate::transport::JetTransport;
-use crate::utils::into_other_io_error;
 use crate::{ConnectionModeDetails, GatewaySessionInfo};
-use slog_scope::error;
-use std::io;
+use anyhow::Context;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -27,7 +25,7 @@ impl JetRendezvousTcpProxy {
         }
     }
 
-    pub async fn proxy(self, config: Arc<Config>, mut leftover_request: &[u8]) -> Result<(), io::Error> {
+    pub async fn proxy(self, config: Arc<Config>, mut leftover_request: &[u8]) -> anyhow::Result<()> {
         let Self {
             jet_associations,
             client_transport,
@@ -37,12 +35,9 @@ impl JetRendezvousTcpProxy {
         let (mut server_transport, info) = {
             let mut jet_associations = jet_associations.lock().await;
 
-            let assc = jet_associations.get_mut(&association_id).ok_or_else(|| {
-                into_other_io_error(format!(
-                    "There is not {} association_id in JetAssociations map",
-                    association_id
-                ))
-            })?;
+            let assc = jet_associations
+                .get_mut(&association_id)
+                .with_context(|| format!("There is not {} association_id in JetAssociations map", association_id))?;
 
             let claims = assc.get_token_claims();
 
@@ -51,15 +46,12 @@ impl JetRendezvousTcpProxy {
                 .with_filtering_policy(claims.jet_flt);
 
             if claims.jet_rec {
-                return Err(into_other_io_error("can't meet recording policy"));
+                anyhow::bail!("can't meet recording policy");
             }
 
-            let candidate = assc.get_first_accepted_tcp_candidate().ok_or_else(|| {
-                into_other_io_error(format!(
-                    "There is not any candidates in {} JetAssociations map",
-                    association_id
-                ))
-            })?;
+            let candidate = assc
+                .get_first_accepted_tcp_candidate()
+                .with_context(|| format!("There is not any candidates in {} JetAssociations map", association_id))?;
 
             let transport = candidate
                 .take_transport()
@@ -72,18 +64,15 @@ impl JetRendezvousTcpProxy {
             (transport, info)
         };
 
-        server_transport.write_buf(&mut leftover_request).await.map_err(|e| {
-            error!("Failed to write leftover request: {}", e);
-            e
-        })?;
+        server_transport
+            .write_buf(&mut leftover_request)
+            .await
+            .context("Failed to write leftover request")?;
 
         let proxy_result = Proxy::new(config, info)
             .build_with_message_reader(server_transport, client_transport, None)
             .await
-            .map_err(|e| {
-                error!("An error occurred while running JetRendezvousTcpProxy: {}", e);
-                e
-            });
+            .context("An error occurred while running JetRendezvousTcpProxy");
 
         // remove association after a few minutes of inactivity
         start_remove_association_future(jet_associations, association_id);

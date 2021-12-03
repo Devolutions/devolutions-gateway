@@ -73,7 +73,7 @@ async fn auth_middleware(
     if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
         let source_addr = request
             .peer_addr()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address not found"))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
 
         let provisioner_key = config
             .provisioner_public_key

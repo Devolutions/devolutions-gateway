@@ -9,7 +9,6 @@ use futures::{select, FutureExt, StreamExt};
 use slog_scope::{info, warn};
 use spsc_bip_buffer::bip_buffer_with_len;
 use std::collections::HashMap;
-use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,7 +29,7 @@ impl Proxy {
         self,
         server_transport: T,
         client_transport: U,
-    ) -> Result<(), io::Error> {
+    ) -> anyhow::Result<()> {
         match self.config.protocol {
             Protocol::Wayk => {
                 info!("WaykMessageReader will be used to interpret application protocol.");
@@ -64,7 +63,7 @@ impl Proxy {
         server_transport: T,
         client_transport: U,
         message_reader: Option<Box<dyn MessageReader>>,
-    ) -> Result<(), io::Error> {
+    ) -> anyhow::Result<()> {
         let mut interceptor: Option<Box<dyn PacketInterceptor>> = None;
         let server_peer_addr = server_transport.peer_addr().unwrap();
         let client_peer_addr = client_transport.peer_addr().unwrap();
@@ -100,7 +99,7 @@ impl Proxy {
         server_transport: T,
         client_transport: U,
         packet_interceptor: Option<Box<dyn PacketInterceptor>>,
-    ) -> Result<(), io::Error> {
+    ) -> anyhow::Result<()> {
         let (client_writer, server_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
         let (server_writer, client_reader) = bip_buffer_with_len(BIP_BUFFER_LEN);
 

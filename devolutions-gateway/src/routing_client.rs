@@ -5,7 +5,6 @@ use crate::transport::tcp::TcpTransport;
 use crate::transport::Transport;
 use crate::utils::TargetAddr;
 use crate::{ConnectionModeDetails, GatewaySessionInfo};
-use std::io;
 use std::sync::Arc;
 use url::Url;
 
@@ -19,14 +18,13 @@ impl Client {
         Client { routing_url, config }
     }
 
-    pub async fn serve<T>(self, client_transport: T) -> Result<(), io::Error>
+    pub async fn serve<T>(self, client_transport: T) -> anyhow::Result<()>
     where
         T: 'static + Transport + Send,
     {
         let server_transport = TcpTransport::connect(&self.routing_url).await?;
 
-        let destination_host =
-            TargetAddr::try_from(&self.routing_url).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let destination_host = TargetAddr::try_from(&self.routing_url)?;
 
         Proxy::new(
             self.config.clone(),

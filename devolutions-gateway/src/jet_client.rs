@@ -1,21 +1,3 @@
-use std::collections::HashMap;
-use std::future::Future;
-use std::io;
-use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
-
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
-use jet_proto::connect::{JetConnectReq, JetConnectRsp};
-use jet_proto::test::{JetTestReq, JetTestRsp};
-use jet_proto::{JetMessage, StatusCode, JET_VERSION_V2};
-use slog_scope::{debug, error};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
-use tokio_rustls::{TlsAcceptor, TlsStream};
-use uuid::Uuid;
-
 use crate::config::Config;
 use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
 use crate::jet::association::Association;
@@ -26,8 +8,25 @@ use crate::token::JetAssociationTokenClaims;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::{JetTransport, Transport};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
-use crate::utils::{create_tls_connector, into_other_io_error as error_other};
+use crate::utils::create_tls_connector;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
+use anyhow::Context;
+use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
+use jet_proto::connect::{JetConnectReq, JetConnectRsp};
+use jet_proto::test::{JetTestReq, JetTestRsp};
+use jet_proto::{JetMessage, StatusCode, JET_VERSION_V2};
+use slog_scope::{debug, error};
+use std::collections::HashMap;
+use std::future::Future;
+use std::io;
+use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
+use tokio_rustls::{TlsAcceptor, TlsStream};
+use uuid::Uuid;
 
 // FIXME: tokio sync primitives is overkill here (use `parking_lot`'s Mutex or RwLock as appropriate)
 pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
@@ -40,7 +39,7 @@ pub struct JetClient {
 }
 
 impl JetClient {
-    pub async fn serve(self, transport: JetTransport) -> Result<(), io::Error> {
+    pub async fn serve(self, transport: JetTransport) -> anyhow::Result<()> {
         let jet_associations = self.jet_associations.clone();
         let config = self.config;
 
@@ -65,9 +64,9 @@ impl JetClient {
 
                 proxy_result
             }
-            JetMessage::JetAcceptRsp(_) => Err(error_other("Jet-Accept response can't be handled by the server.")),
-            JetMessage::JetConnectRsp(_) => Err(error_other("Jet-Accept response can't be handled by the server.")),
-            JetMessage::JetTestRsp(_) => Err(error_other("Jet-Test response can't be handled by the server.")),
+            JetMessage::JetAcceptRsp(_) => anyhow::bail!("Jet-Accept response can't be handled by the server."),
+            JetMessage::JetConnectRsp(_) => anyhow::bail!("Jet-Accept response can't be handled by the server."),
+            JetMessage::JetTestRsp(_) => anyhow::bail!("Jet-Test response can't be handled by the server."),
         }
     }
 }
@@ -77,7 +76,7 @@ async fn handle_build_tls_proxy(
     response: HandleConnectJetMsgResponse,
     interceptor: PcapRecordingInterceptor,
     tls_acceptor: &TlsAcceptor,
-) -> Result<(), io::Error> {
+) -> anyhow::Result<()> {
     let client_stream = response.client_transport.get_tcp_stream();
     let server_stream = response.server_transport.get_tcp_stream();
 
@@ -102,10 +101,7 @@ async fn handle_build_tls_proxy(
             .build_with_packet_interceptor(server_transport, client_transport, Some(Box::new(interceptor)))
             .await
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Failed to retrieve tcp stream to create tls connection!",
-        ))
+        anyhow::bail!("Failed to retrieve tcp stream to create tls connection!",)
     }
 }
 
@@ -113,7 +109,7 @@ async fn handle_build_proxy(
     jet_associations: JetAssociationsMap,
     config: Arc<Config>,
     response: HandleConnectJetMsgResponse,
-) -> Result<(), io::Error> {
+) -> anyhow::Result<()> {
     let mut recording_interceptor: Option<PcapRecordingInterceptor> = None;
     let association_id = response.association_id;
     let mut recording_dir = None;
@@ -141,7 +137,7 @@ async fn handle_build_proxy(
 
                 recording_interceptor = Some(interceptor);
             }
-            (true, false) => return Err(io::Error::new(io::ErrorKind::Other, "can't meet recording policy")),
+            (true, false) => anyhow::bail!("can't meet recording policy"),
             (false, _) => {}
         }
     }
@@ -151,7 +147,7 @@ async fn handle_build_proxy(
             .tls
             .as_ref()
             .map(|conf| &conf.acceptor)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "TLS configuration is missing"))?;
+            .context("TLS configuration is missing")?;
 
         let proxy_result = handle_build_tls_proxy(config.clone(), response, interceptor, tls_acceptor).await;
 
@@ -176,7 +172,7 @@ async fn handle_build_proxy(
     }
 }
 
-async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, JetMessage), io::Error> {
+async fn read_jet_message(mut transport: JetTransport) -> anyhow::Result<(JetTransport, JetMessage)> {
     let mut data_received = Vec::new();
 
     let mut buff = [0u8; 1024];
@@ -185,9 +181,7 @@ async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, 
         let bytes_read = transport.read(&mut buff).await?;
 
         if bytes_read == 0 {
-            return Err(error_other(
-                "Socket closed during Jet header receive, no JetPacket received.",
-            ));
+            anyhow::bail!("Socket closed during Jet header receive, no JetPacket received.",);
         }
 
         data_received.extend_from_slice(&buff[..bytes_read]);
@@ -202,7 +196,7 @@ async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, 
     let mut slice = data_received.as_slice();
     let signature = ReadBytesExt::read_u32::<LittleEndian>(&mut slice)?; // signature
     if signature != jet_proto::JET_MSG_SIGNATURE {
-        return Err(error_other(format!("Invalid JetPacket - Signature = {}.", signature)));
+        anyhow::bail!("Invalid JetPacket - Signature = {}.", signature)
     }
 
     let msg_len = ReadBytesExt::read_u16::<BigEndian>(&mut slice)?;
@@ -211,9 +205,7 @@ async fn read_jet_message(mut transport: JetTransport) -> Result<(JetTransport, 
         let bytes_read = transport.read(&mut buff).await?;
 
         if bytes_read == 0 {
-            return Err(error_other(
-                "Socket closed during Jet message receive, no JetPacket received.",
-            ));
+            anyhow::bail!("Socket closed during Jet message receive, no JetPacket received.");
         }
 
         data_received.extend_from_slice(&buff[..bytes_read]);
@@ -252,7 +244,7 @@ impl HandleAcceptJetMsg {
         }
     }
 
-    async fn handle_create_response(&mut self) -> Result<Vec<u8>, io::Error> {
+    async fn handle_create_response(&mut self) -> anyhow::Result<Vec<u8>> {
         let (status_code, association_id) = {
             match self.request_msg.version {
                 2 => {
@@ -293,7 +285,7 @@ impl HandleAcceptJetMsg {
         Ok(response_msg_buffer)
     }
 
-    async fn handle_set_transport(&mut self) -> Result<(), io::Error> {
+    async fn handle_set_transport(&mut self) -> anyhow::Result<()> {
         let mut jet_associations = self.jet_associations.lock().await;
 
         if let Some(association) = jet_associations.get_mut(&self.request_msg.association) {
@@ -311,7 +303,7 @@ impl HandleAcceptJetMsg {
         Ok(())
     }
 
-    async fn accept(mut self) -> Result<(), io::Error> {
+    async fn accept(mut self) -> anyhow::Result<()> {
         let response_msg = self.handle_create_response().await?;
         let transport = self
             .transport
@@ -326,7 +318,7 @@ async fn handle_connect_jet_msg(
     mut client_transport: JetTransport,
     request_msg: JetConnectReq,
     jet_associations: JetAssociationsMap,
-) -> Result<HandleConnectJetMsgResponse, io::Error> {
+) -> anyhow::Result<HandleConnectJetMsgResponse> {
     let mut response_msg = Vec::with_capacity(512);
     let mut server_transport = None;
     let mut association_id = None;
@@ -408,10 +400,7 @@ async fn handle_connect_jet_msg(
                 association_claims: token,
             })
         }
-        _ => Err(error_other(format!(
-            "Invalid association ID received: {}",
-            request_msg.association
-        ))),
+        _ => anyhow::bail!("Invalid association ID received: {}", request_msg.association),
     }
 }
 
@@ -423,7 +412,7 @@ pub struct HandleConnectJetMsgResponse {
     pub association_claims: JetAssociationTokenClaims,
 }
 
-async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> Result<(), io::Error> {
+async fn handle_test_jet_msg(mut transport: JetTransport, request: JetTestReq) -> anyhow::Result<()> {
     let response_msg = JetMessage::JetTestRsp(JetTestRsp {
         status_code: StatusCode::OK,
         version: request.version,

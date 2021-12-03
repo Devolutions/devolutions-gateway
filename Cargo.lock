@@ -698,6 +698,7 @@ dependencies = [
 name = "devolutions-gateway"
 version = "2021.1.6"
 dependencies = [
+ "anyhow",
  "base64 0.13.0",
  "byteorder",
  "bytes 1.1.0",
@@ -743,6 +744,7 @@ dependencies = [
  "sogar-core",
  "spsc-bip-buffer",
  "sspi",
+ "tap",
  "tempfile",
  "tokio",
  "tokio-rustls 0.23.1",

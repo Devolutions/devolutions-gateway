@@ -1,12 +1,13 @@
 pub mod association;
 
 use crate::transport::tcp::TcpTransport;
+use anyhow::Context;
 use core::fmt;
 use serde::{de, ser};
 use smol_str::SmolStr;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::hash::Hash;
-use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -36,105 +37,87 @@ pub mod danger_transport {
     }
 }
 
-pub async fn resolve_url_to_socket_addr(url: &Url) -> io::Result<SocketAddr> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host is missing", url)))?;
-    let port = url
-        .port()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: port is missing", url)))?;
+pub async fn resolve_url_to_socket_addr(url: &Url) -> anyhow::Result<SocketAddr> {
+    let host = url.host_str().context("bad URL: host missing")?;
+    let port = url.port().context("bad URL: port missing")?;
     lookup_host((host, port))
         .await?
         .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host lookup yielded no result", url)))
+        .context("host lookup yielded no result")
 }
 
-pub async fn resolve_target_to_socket_addr(dest: &TargetAddr) -> io::Result<SocketAddr> {
+pub async fn resolve_target_to_socket_addr(dest: &TargetAddr) -> anyhow::Result<SocketAddr> {
     match &dest.host {
         HostRepr::Domain(domain, port) => lookup_host((domain.as_str(), *port))
             .await?
             .next()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("{}: host lookup yielded no result", dest))),
+            .context("host lookup yielded no result"),
         HostRepr::Ip(addr) => Ok(*addr),
     }
 }
 
 const CONNECTION_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
 
-pub async fn tcp_stream_connect(dest: &TargetAddr) -> io::Result<TcpStream> {
+pub async fn tcp_stream_connect(dest: &TargetAddr) -> anyhow::Result<TcpStream> {
     let fut = async move {
         let socket_addr = resolve_target_to_socket_addr(dest).await?;
-        TcpStream::connect(socket_addr).await
+        TcpStream::connect(socket_addr).await.context("couldn't connect stream")
     };
-
-    tokio::time::timeout(CONNECTION_TIMEOUT, fut)
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}: {}", dest, e)))?
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to connect to {}: {}", dest, e)))
+    let stream = tokio::time::timeout(CONNECTION_TIMEOUT, fut).await??;
+    Ok(stream)
 }
 
-pub async fn tcp_transport_connect(target: &TargetAddr) -> io::Result<TcpTransport> {
+pub async fn tcp_transport_connect(target: &TargetAddr) -> anyhow::Result<TcpTransport> {
     use crate::transport::Transport as _;
-
-    let url = target
-        .to_url()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("bad target {}: {}", target, e)))?;
-
-    tokio::time::timeout(CONNECTION_TIMEOUT, TcpTransport::connect(&url))
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{}: {}", target, e)))?
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("failed to connect to {}: {}", target, e)))
+    let url = target.to_url().context("bad target")?;
+    let transport = tokio::time::timeout(CONNECTION_TIMEOUT, TcpTransport::connect(&url)).await??;
+    Ok(transport)
 }
 
-pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> io::Result<(Out, &'a In)>
+pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> anyhow::Result<(Out, &'a In)>
 where
+    In: Display,
     F: Fn(&'a In) -> Fut + 'a,
-    Fut: core::future::Future<Output = io::Result<Out>>,
+    Fut: core::future::Future<Output = anyhow::Result<Out>>,
 {
-    let mut errors = Vec::with_capacity(inputs.len());
+    let mut error: Option<anyhow::Error> = None;
 
     for input in inputs {
         match func(input).await {
             Ok(o) => return Ok((o, input)),
-            Err(e) => errors.push(e),
+            Err(e) => {
+                let e = e.context(format!("{} failed", input));
+                match error.take() {
+                    Some(prev_err) => error = Some(prev_err.context(e)),
+                    None => error = Some(e),
+                }
+            }
         }
     }
 
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        display_utils::join(&errors, ", ").to_string(),
-    ))
+    Err(error.context("empty input list")?)
 }
 
-pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
+pub fn get_tls_peer_pubkey<S>(stream: &tokio_rustls::TlsStream<S>) -> anyhow::Result<Vec<u8>> {
     let der = get_der_cert_from_stream(stream)?;
 
-    let cert = picky::x509::Cert::from_der(&der).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("couldn't parse TLS certificate: {}", e),
-        )
-    })?;
+    let cert = picky::x509::Cert::from_der(&der).context("couldn't parse TLS certificate")?;
 
-    let key_der = cert.public_key().to_der().map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Couldn't get der for public key contained in TLS certificate: {}", e),
-        )
-    })?;
+    let key_der = cert
+        .public_key()
+        .to_der()
+        .context("Couldn't get der for public key contained in TLS certificate")?;
 
     Ok(key_der)
 }
 
-fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> io::Result<Vec<u8>> {
+fn get_der_cert_from_stream<S>(stream: &tokio_rustls::TlsStream<S>) -> anyhow::Result<Vec<u8>> {
     let (_, session) = stream.get_ref();
     let payload = session
         .peer_certificates()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Failed to get the peer certificate."))?;
+        .context("Failed to get the peer certificate")?;
 
-    let cert = payload
-        .first()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Payload does not contain any certificates"))?;
+    let cert = payload.first().context("Payload does not contain any certificate")?;
 
     Ok(cert.as_ref().to_vec())
 }
@@ -173,12 +156,10 @@ pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite + Send + Sync + 'static {}
 
-pub fn url_to_socket_addr(url: &Url) -> io::Result<SocketAddr> {
+pub fn url_to_socket_addr(url: &Url) -> anyhow::Result<SocketAddr> {
     use std::net::ToSocketAddrs;
 
-    let host = url
-        .host_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "bad host in url"))?;
+    let host = url.host_str().context("bad url: host missing")?;
 
     let port = url
         .port_or_known_default()
@@ -186,13 +167,9 @@ pub fn url_to_socket_addr(url: &Url) -> io::Result<SocketAddr> {
             "tcp" => Some(8080),
             _ => None,
         })
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "bad or missing port in url"))?;
+        .context("bad url: port missing")?;
 
     Ok((host, port).to_socket_addrs().unwrap().next().unwrap())
-}
-
-pub fn into_other_io_error<E: Into<Box<dyn std::error::Error + Send + Sync>>>(desc: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, desc)
 }
 
 pub fn create_tls_connector(socket: TcpStream) -> Connect<TcpStream> {

@@ -10,14 +10,13 @@ use crate::transport::ws::WsTransport;
 use crate::transport::JetTransport;
 use crate::utils::{url_to_socket_addr, AsyncReadWrite};
 use crate::websocket_client::{WebsocketService, WsClient};
+use anyhow::Context;
 use hyper::service::service_fn;
 use slog::{o, Logger};
 use slog_scope::{error, info, slog_error, warn};
 use slog_scope_futures::future03::FutureExt;
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
-use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -41,18 +40,16 @@ pub struct GatewayService {
 }
 
 impl GatewayService {
-    pub fn load() -> Option<Self> {
+    pub fn load() -> anyhow::Result<Self> {
         let config = Arc::new(Config::init());
-        let logger = logger::init(config.log_file.as_ref().map(|o| o.as_std_path())).expect("failed to setup logger");
+        let logger =
+            logger::init(config.log_file.as_ref().map(|o| o.as_std_path())).context("failed to setup logger")?;
         let logger_guard = slog_scope::set_global_logger(logger.clone());
-        slog_stdlog::init().expect("failed to init logger");
+        slog_stdlog::init().context("Failed to init logger")?;
 
-        if let Err(e) = config.validate() {
-            error!("Devolutions Gateway can't be launched. Invalid configuration: {}", e);
-            return None;
-        }
+        config.validate().context("Invalid configuration")?;
 
-        Some(GatewayService {
+        Ok(GatewayService {
             config,
             logger,
             state: GatewayState::Stopped,
@@ -111,9 +108,9 @@ impl GatewayService {
 }
 
 // TODO: when benchmarking facility is ready, use Handle instead of pinned futures
-type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'static>>>;
+type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
 
-fn create_futures(config: Arc<Config>, logger: slog::Logger) -> Result<VecOfFuturesType, Cow<'static, str>> {
+fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<VecOfFuturesType> {
     let tcp_listeners: Vec<Url> = config
         .listeners
         .iter()
@@ -141,10 +138,7 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> Result<VecOfFutu
     let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
 
     // configure http server
-    configure_http_server(config.clone(), jet_associations.clone()).map_err(|e| {
-        error!("{}", e);
-        "failed to configure http server"
-    })?;
+    configure_http_server(config.clone(), jet_associations.clone()).context("failed to configure http server")?;
 
     let listeners_count = websocket_listeners.len() + tcp_listeners.len();
     let mut futures: VecOfFuturesType = Vec::with_capacity(listeners_count);
@@ -204,17 +198,19 @@ async fn start_tcp_server(
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     logger: Logger,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     use futures::FutureExt as _;
 
     info!("Starting TCP jet server ({})...", url);
 
-    let socket_addr = url_to_socket_addr(&url).expect("invalid url");
+    let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
 
-    let socket = TcpSocket::new_v4().unwrap();
-    socket.bind(socket_addr).unwrap();
+    let socket = TcpSocket::new_v4().context("failed to create TCP socket")?;
+    socket.bind(socket_addr).context("failed to bind TCP socket")?;
     set_socket_option(&socket, &logger);
-    let listener = socket.listen(1024).unwrap();
+    let listener = socket
+        .listen(1024)
+        .context("failed to listen with the binded TCP socket")?;
 
     info!("TCP jet server started successfully. Now listening on {}", socket_addr);
 
@@ -232,7 +228,7 @@ async fn start_tcp_server(
 
                 set_stream_option(&conn, &logger);
 
-                let client_fut: Pin<Box<dyn Future<Output = Result<(), io::Error>> + Send + 'static>> =
+                let client_fut: Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>> =
                     if let Some(routing_url) = &config.routing_url {
                         match routing_url.scheme() {
                             "tcp" => {
@@ -247,7 +243,7 @@ async fn start_tcp_server(
                                     .acceptor
                                     .accept(conn)
                                     .await
-                                    .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
+                                    .context("TlsAcceptor handshake failed")?;
                                 let transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
                                 Box::pin(Client::new(routing_url.clone(), config.clone()).serve(transport))
                             }
@@ -256,7 +252,7 @@ async fn start_tcp_server(
 
                                 let stream = tokio_tungstenite::accept_async(conn)
                                     .await
-                                    .map_err(|err| format!("Tokio-tungstenite handshake error - {:?}", err))?;
+                                    .context("WebSocket handshake failed")?;
 
                                 let transport = WsTransport::new_tcp(stream, peer_addr);
                                 Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
@@ -269,12 +265,12 @@ async fn start_tcp_server(
                                     .acceptor
                                     .accept(conn)
                                     .await
-                                    .map_err(|err| format!("TlsAcceptor handshake error - {:?}", err))?;
+                                    .context("TLS handshake failed")?;
 
                                 let peer_addr = tls_stream.get_ref().0.peer_addr().ok();
                                 let stream = tokio_tungstenite::accept_async(TlsStream::Server(tls_stream))
                                     .await
-                                    .map_err(|err| format!("Tokio-tungstenite handshake error - {:?}", err))?;
+                                    .context("WebSocket handshake failed")?;
 
                                 let transport = WsTransport::new_tls(stream, peer_addr);
                                 Box::pin(WsClient::new(routing_url.clone(), config.clone()).serve(transport))
@@ -286,7 +282,7 @@ async fn start_tcp_server(
                                 }
                                 .serve(conn),
                             ),
-                            scheme => panic!("Unsupported routing URL scheme {}", scheme),
+                            scheme => anyhow::bail!("Unsupported routing URL scheme {}", scheme),
                         }
                     } else {
                         let jet_associations = jet_associations.clone();
@@ -306,10 +302,7 @@ async fn start_tcp_server(
                                     .serve(JetTransport::new_tcp(conn))
                                     .await
                                 }
-                                [b'J', b'M', b'U', b'X'] => Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "JMUX TCP listener not yet implemented",
-                                )),
+                                [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
                                 _ => {
                                     GenericClient {
                                         config,
@@ -326,13 +319,12 @@ async fn start_tcp_server(
                 let client_fut = client_fut.with_logger(logger);
 
                 tokio::spawn(async move {
-                    match client_fut.await {
-                        Ok(_) => {}
-                        Err(e) => error!("Error with client: {}", e),
+                    if let Err(e) = client_fut.await {
+                        error!("TCP peer {}: {:#}", peer_addr, e);
                     }
                 });
             }
-            Err(e) => warn!("{}", format!("Tcp listener failed to accept connection - {:?}", e)),
+            Err(e) => warn!("TCP listener failed to accept connection - {:#}", e),
         }
     }
 }
@@ -342,7 +334,7 @@ async fn start_websocket_server(
     config: Arc<Config>,
     jet_associations: JetAssociationsMap,
     logger: slog::Logger,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     info!("Starting websocket server ({})...", websocket_url);
 
     let mut websocket_addr = String::new();
