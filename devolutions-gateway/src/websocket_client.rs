@@ -47,10 +47,12 @@ impl WebsocketService {
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:?}", err)))
         } else {
-            saphir::server::inject_raw(req).await.map_err(|err| match err {
-                error::SaphirError::Io(err) => err,
-                err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
-            })
+            saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
+                .await
+                .map_err(|err| match err {
+                    error::SaphirError::Io(err) => err,
+                    err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
+                })
         }
     }
 }
