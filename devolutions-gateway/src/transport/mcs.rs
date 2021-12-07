@@ -18,8 +18,8 @@ impl Decoder for McsTransport {
     type Item = ironrdp::McsPdu;
     type Error = io::Error;
 
-    fn decode(&mut self, mut buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if let Some(data) = self.x224_transport.decode(&mut buf)? {
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if let Some(data) = self.x224_transport.decode(buf)? {
             Ok(Some(McsPdu::from_buffer(data.as_ref())?))
         } else {
             Ok(None)
@@ -30,12 +30,12 @@ impl Decoder for McsTransport {
 impl Encoder<ironrdp::McsPdu> for McsTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: ironrdp::McsPdu, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: ironrdp::McsPdu, buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut item_buffer = BytesMut::with_capacity(item.buffer_length());
         item_buffer.resize(item.buffer_length(), 0x00);
         item.to_buffer(item_buffer.as_mut())?;
 
-        self.x224_transport.encode(item_buffer, &mut buf)
+        self.x224_transport.encode(item_buffer, buf)
     }
 }
 
@@ -48,8 +48,8 @@ impl Decoder for SendDataContextTransport {
     type Item = (ironrdp::McsPdu, BytesMut);
     type Error = io::Error;
 
-    fn decode(&mut self, mut buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if let Some(mut data) = self.x224_transport.decode(&mut buf)? {
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if let Some(mut data) = self.x224_transport.decode(buf)? {
             let mcs_pdu = McsPdu::from_buffer(data.as_ref())?;
             match mcs_pdu {
                 McsPdu::SendDataIndication(ref send_data_context) | McsPdu::SendDataRequest(ref send_data_context) => {
@@ -72,12 +72,12 @@ impl Decoder for SendDataContextTransport {
 impl Encoder<(ironrdp::McsPdu, Vec<u8>)> for SendDataContextTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: (ironrdp::McsPdu, Vec<u8>), mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: (ironrdp::McsPdu, Vec<u8>), buf: &mut BytesMut) -> Result<(), Self::Error> {
         let mut item_buffer = BytesMut::with_capacity(item.0.buffer_length() + item.1.len());
         item_buffer.resize(item.0.buffer_length(), 0x00);
         item.0.to_buffer(item_buffer.as_mut())?;
         item_buffer.extend_from_slice(&item.1);
 
-        self.x224_transport.encode(item_buffer, &mut buf)
+        self.x224_transport.encode(item_buffer, buf)
     }
 }

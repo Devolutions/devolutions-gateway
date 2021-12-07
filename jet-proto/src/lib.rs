@@ -131,32 +131,14 @@ impl JetMessage {
         let flags: u8 = 0;
         let mask: u8 = get_mask_value();
 
-        let mut v: Vec<u8> = Vec::new();
-        let mut payload = match self {
-            JetMessage::JetTestReq(req) => {
-                req.to_payload(&mut v)?;
-                &mut v
-            }
-            JetMessage::JetTestRsp(rsp) => {
-                rsp.to_payload(&mut v)?;
-                &mut v
-            }
-            JetMessage::JetAcceptReq(req) => {
-                req.to_payload(&mut v)?;
-                &mut v
-            }
-            JetMessage::JetAcceptRsp(rsp) => {
-                rsp.to_payload(&mut v)?;
-                &mut v
-            }
-            JetMessage::JetConnectReq(req) => {
-                req.to_payload(&mut v)?;
-                &mut v
-            }
-            JetMessage::JetConnectRsp(rsp) => {
-                rsp.to_payload(&mut v)?;
-                &mut v
-            }
+        let mut payload: Vec<u8> = Vec::new();
+        match self {
+            JetMessage::JetTestReq(req) => req.write_payload(&mut payload)?,
+            JetMessage::JetTestRsp(rsp) => rsp.write_payload(&mut payload)?,
+            JetMessage::JetAcceptReq(req) => req.write_payload(&mut payload)?,
+            JetMessage::JetAcceptRsp(rsp) => rsp.write_payload(&mut payload)?,
+            JetMessage::JetConnectReq(req) => req.write_payload(&mut payload)?,
+            JetMessage::JetConnectRsp(rsp) => rsp.write_payload(&mut payload)?,
         };
 
         apply_mask(mask, &mut payload);
@@ -166,7 +148,7 @@ impl JetMessage {
         stream.write_u16::<BigEndian>(size)?;
         stream.write_u8(flags)?;
         stream.write_u8(mask)?;
-        stream.write_all(payload)?;
+        stream.write_all(&payload)?;
 
         Ok(())
     }
