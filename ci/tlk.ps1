@@ -293,7 +293,7 @@ class TlkRecipe
         Write-Host "CargoTarget: $CargoTarget"
 
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile": $CargoProfile
+        Write-Host "CargoProfile: $CargoProfile"
 
         $CargoArgs = @('build', '--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
