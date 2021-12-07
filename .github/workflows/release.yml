@@ -206,6 +206,8 @@ jobs:
 
       - name: Create GitHub release
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $StagingPath = "${{ steps.download.outputs.download-path }}"
@@ -237,4 +239,14 @@ jobs:
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
           $Module = Join-Path $StagingPath PowerShell
           Expand-Archive -Path $Archive -DestinationPath $Module
-          Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}"
+          try {
+            Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}"
+          }
+          catch {
+            if ($_.Exception.Message -ilike "*cannot be published as the current version*is already available in the repository*") {
+              echo "::warning::PowerShell module not published; this version is already listed on PSGallery"
+            } else {
+              Write-Error $_
+              exit 1
+            }
+          }
