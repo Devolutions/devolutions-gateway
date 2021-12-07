@@ -2,6 +2,16 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
+## 2021.1.7 (2021-12-07)
+  * JMUX multiplexing protocol implementation for `jetsocat` and gateway server
+  * Improve various startup validations and diagnostics
+  * Support for generic plain TCP forwarding (e.g.: raw `SSH` forwarding)
+    This requires sending a preconnection PDU containing an appropriate token
+  * Duplicate root HTTP endpoints under /jet (this help simplifying routing configurations)
+  * Support for alternative hosts to try in successive order
+  * Token reuse mitigation based on IP address (RDP protocol requires to connect multiple times
+    and previously used token can't just be rejected)
+
 ## 2021.1.6 (2021-08-11)
   * `jetsocat` now builds for Apple Silicon (aarch64-apple-darwin)
   * Update SOGAR and replace sogar-cli with sogar-core
