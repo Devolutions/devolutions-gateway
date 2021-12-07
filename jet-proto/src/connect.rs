@@ -17,7 +17,7 @@ pub struct JetConnectReq {
 }
 
 impl JetConnectReq {
-    pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
+    pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         match self.version {
             1 => {
                 stream.write_fmt(format_args!("GET / HTTP/1.1\r\n"))?;
@@ -116,7 +116,7 @@ pub struct JetConnectRsp {
 }
 
 impl JetConnectRsp {
-    pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
+    pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "HTTP/1.1 {} {}\r\n",
             &self.status_code,

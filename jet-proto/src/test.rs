@@ -13,7 +13,7 @@ pub struct JetTestReq {
 }
 
 impl JetTestReq {
-    pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
+    pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "GET /jet/test/{}/{} HTTP/1.1\r\n",
             &self.association.to_string(),
@@ -60,7 +60,7 @@ pub struct JetTestRsp {
 }
 
 impl JetTestRsp {
-    pub fn to_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
+    pub fn write_payload(&self, mut stream: impl io::Write) -> Result<(), Error> {
         stream.write_fmt(format_args!(
             "HTTP/1.1 {} {}\r\n",
             &self.status_code,

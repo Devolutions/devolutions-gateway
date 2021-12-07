@@ -252,7 +252,6 @@ async fn handle_jet_connect_impl(
                     (true, true) => {
                         let mut interceptor = PcapRecordingInterceptor::new(
                             server_transport.peer_addr().unwrap(),
-                            client_addr,
                             association_id.to_string(),
                             candidate_id.to_string(),
                         );

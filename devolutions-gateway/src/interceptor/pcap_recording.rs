@@ -18,7 +18,6 @@ enum RecordingState {
 #[derive(Clone)]
 pub struct PcapRecordingInterceptor {
     server_info: Arc<Mutex<PeerInfo>>,
-    client_info: Arc<Mutex<PeerInfo>>,
     packets_parser: Arc<Mutex<Option<PacketsParser>>>,
     recorder: Arc<Mutex<Option<Recorder>>>,
     condition_timeout: Arc<(Mutex<RecordingState>, Condvar)>,
@@ -27,7 +26,7 @@ pub struct PcapRecordingInterceptor {
 }
 
 impl PcapRecordingInterceptor {
-    pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, association_id: String, candidate_id: String) -> Self {
+    pub fn new(server_addr: SocketAddr, association_id: String, candidate_id: String) -> Self {
         debug!("Recording Interceptor was created");
         let recording_plugin = PLUGIN_MANAGER.lock().unwrap().get_recording_plugin();
         let file_name = format!("{}-to-{}", association_id, candidate_id);
@@ -74,7 +73,6 @@ impl PcapRecordingInterceptor {
 
         PcapRecordingInterceptor {
             server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
-            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
             packets_parser: Arc::new(Mutex::new(PLUGIN_MANAGER.lock().unwrap().get_parsing_packets_plugin())),
             recorder,
             condition_timeout,

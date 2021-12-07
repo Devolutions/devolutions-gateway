@@ -120,7 +120,6 @@ async fn handle_build_proxy(
             (true, true) => {
                 let mut interceptor = PcapRecordingInterceptor::new(
                     response.server_transport.peer_addr().unwrap(),
-                    response.client_transport.peer_addr().unwrap(),
                     association_id.clone().to_string(),
                     response.candidate_id.clone().to_string(),
                 );

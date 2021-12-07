@@ -224,7 +224,7 @@ pub struct JetBridgeTokenClaims {
 
 #[derive(Clone, Deserialize)]
 pub struct JetJmuxTokenClaims {
-    filtering: Option<()>, // TODO
+    _filtering: Option<()>, // TODO
 }
 
 // ----- validation ----- //

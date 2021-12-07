@@ -445,12 +445,14 @@ enum SequenceState {
     Finished,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum NlaWithClientFutureState {
     Tls(Accept<TcpStream>),
     CredSsp(NlaWithClientFutureT),
     EarlyUserAuthResult(Pin<EarlyClientUserAuthResultFuture>),
 }
 
+#[allow(clippy::large_enum_variant)]
 enum NlaWithServerFutureState {
     Tls(Connect<TcpStream>),
     CredSsp(CredSspWithServerFutureT),

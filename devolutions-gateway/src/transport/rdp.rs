@@ -18,13 +18,13 @@ impl Decoder for RdpTransport {
     type Item = RdpPdu;
     type Error = io::Error;
 
-    fn decode(&mut self, mut buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        match self.data_transport.decode(&mut buf) {
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        match self.data_transport.decode(buf) {
             Ok(Some(data)) => Ok(Some(RdpPdu::Data(data))),
             Ok(None) => Ok(None),
             Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
             Err(_) => {
-                if let Some(fast_path) = self.fast_path_transport.decode(&mut buf)? {
+                if let Some(fast_path) = self.fast_path_transport.decode(buf)? {
                     Ok(Some(RdpPdu::FastPathBytes(fast_path)))
                 } else {
                     Ok(None)
@@ -37,10 +37,10 @@ impl Decoder for RdpTransport {
 impl Encoder<RdpPdu> for RdpTransport {
     type Error = io::Error;
 
-    fn encode(&mut self, item: RdpPdu, mut buf: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: RdpPdu, buf: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
-            RdpPdu::Data(data) => self.data_transport.encode(data, &mut buf),
-            RdpPdu::FastPathBytes(data) => self.fast_path_transport.encode(data, &mut buf),
+            RdpPdu::Data(data) => self.data_transport.encode(data, buf),
+            RdpPdu::FastPathBytes(data) => self.fast_path_transport.encode(data, buf),
         }
     }
 }
