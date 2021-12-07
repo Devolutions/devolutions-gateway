@@ -215,7 +215,7 @@ jobs:
           $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
-          $GhCmd = $(@('gh', 'release', 'create', "v$Version", $HashPath) + $Files.Path) -Join ' '
+          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
           Invoke-Expression $GhCmd
 
