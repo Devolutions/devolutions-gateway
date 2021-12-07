@@ -1,9 +1,4 @@
 # Continuous integration and deploymnent workflow for devolutions-gateway
-# Builds on master will require approval to:
-#  - code sign binaries
-#  - build and upload containers to docker hub
-#  - create a GitHub release
-#  - upload PowerShell module to PSGallery
 
 name: CI
 
@@ -23,6 +18,7 @@ jobs:
     outputs:
       version: ${{ steps.get-version.outputs.version }}
       rust-channel: ${{ steps.rust-toolchain.outputs.rust-channel }}
+      rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -52,11 +48,17 @@ jobs:
               exit 1
           fi
 
-      - name: Check lto
+      - name: Configure rust profile
+        id: rust-profile
         shell: pwsh
-        if: ${{ github.ref != 'refs/heads/master' }}
         run: |
-          echo "::warning::Building branch; LTO will not be enabled" 
+          $CargoProfile = "release"
+          if ("${{ github.ref }}" -Eq "refs/heads/master") {
+            echo "::notice::Building production profile" 
+            $CargoProfile = "production"
+          }
+        
+          echo "::set-output name=rust-profile::$CargoProfile"
 
       - name: Upload version artifact
         uses: actions/upload-artifact@v2
@@ -96,13 +98,6 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-
-      - name: Enable lto
-        shell: pwsh
-        if: ${{ github.ref == 'refs/heads/master' }}
-        run: |
-          echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
-          echo "::notice::Building master; LTO is enabled" 
 
       - name: Load dynamic variables
         id: load-variables
@@ -164,7 +159,7 @@ jobs:
             $Env:CARGO_FEATURES = "native-tls"
           }
 
-          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
@@ -193,13 +188,6 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-
-      - name: Enable lto
-        shell: pwsh
-        if: ${{ github.ref == 'refs/heads/master' }}
-        run: |
-          echo "CARGO_PROFILE_RELEASE_LTO=true" >> $GITHUB_ENV
-          echo "::notice::Building master; LTO is enabled" 
 
       - name: Load dynamic variables
         id: load-variables
@@ -259,7 +247,7 @@ jobs:
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
         run: |
-          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Build PowerShell module
         if: matrix.os == 'windows'
@@ -279,7 +267,7 @@ jobs:
             $Env:DGATEWAY_PSMODULE_CLEAN = "1"
           }
 
-          ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }}
+          ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
