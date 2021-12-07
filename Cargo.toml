@@ -15,3 +15,7 @@ default-members = [
     "jet-proto",
     "jetsocat",
 ]
+
+[profile.production]
+inherits = "release"
+lto = true

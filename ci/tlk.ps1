@@ -148,6 +148,7 @@ class TlkTarget
 {
     [string] $Platform
     [string] $Architecture
+    [string] $CargoProfile
 
     [string] $ExecutableExtension
 
@@ -291,7 +292,10 @@ class TlkRecipe
         $CargoTarget = $this.Target.CargoTarget()
         Write-Host "CargoTarget: $CargoTarget"
 
-        $CargoArgs = @('build', '--release')
+        $CargoProfile = $this.Target.CargoProfile
+        Write-Host "CargoProfile": $CargoProfile
+
+        $CargoArgs = @('build', '--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
         if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
             $CargoArgs += @('--no-default-features')
@@ -303,7 +307,7 @@ class TlkRecipe
         & 'cargo' $CargoArgs
 
         $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
-        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/release/${SrcExecutableName}"
+        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
 
         if (-Not $this.Target.IsWindows()) {
             & 'strip' $SrcExecutablePath
@@ -576,7 +580,9 @@ function Invoke-TlkStep {
 		[ValidateSet('windows','macos','linux')]
 		[string] $Platform,
 		[ValidateSet('x86','x86_64','arm64')]
-		[string] $Architecture
+		[string] $Architecture,
+        [ValidateSet('release', 'production')]
+        [string] $CargoProfile
 	)
 
     if (-Not $Platform) {
@@ -587,12 +593,17 @@ function Invoke-TlkStep {
         $Architecture = Get-TlkArchitecture
     }
 
+    if (-Not $CargoProfile) {
+        $CargoProfile = 'release'
+    }
+
     $RootPath = Split-Path -Parent $PSScriptRoot
 
     $tlk = [TlkRecipe]::new()
     $tlk.SourcePath = $RootPath
     $tlk.Target.Platform = $Platform
     $tlk.Target.Architecture = $Architecture
+    $tlk.Target.CargoProfile = $CargoProfile
 
     switch ($TlkVerb) {
         "build" { $tlk.Build() }
