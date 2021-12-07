@@ -214,7 +214,8 @@ jobs:
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", $HashPath) + $Files.Path) -Join ' '
-          Invoke-Expression @GhCmd
+          Write-Host $GhCmd
+          Invoke-Expression $GhCmd
 
   psgallery-release:
     name: PowerShell release
