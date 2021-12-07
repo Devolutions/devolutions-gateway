@@ -292,7 +292,10 @@ class TlkRecipe
         $CargoTarget = $this.Target.CargoTarget()
         Write-Host "CargoTarget: $CargoTarget"
 
-        $CargoArgs = @('build', '--profile', $this.Target.CargoProfile)
+        $CargoProfile = $this.Target.CargoProfile
+        Write-Host "CargoProfile": $CargoProfile
+
+        $CargoArgs = @('build', '--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
         if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
             $CargoArgs += @('--no-default-features')
@@ -304,7 +307,7 @@ class TlkRecipe
         & 'cargo' $CargoArgs
 
         $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
-        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/$($this.Target.CargoProfile)/${SrcExecutableName}"
+        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
 
         if (-Not $this.Target.IsWindows()) {
             & 'strip' $SrcExecutablePath
