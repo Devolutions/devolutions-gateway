@@ -26,6 +26,17 @@ jobs:
         run: |
           $RunJson = gh api /repos/devolutions/devolutions-gateway/actions/runs/${{ github.event.inputs.run-id }}
           $Run = $RunJson | ConvertFrom-Json
+
+          if ($($Run.head_branch) -Ne "master") {
+            echo "::error::specified run is not on master, exiting..."
+            exit 1
+          }
+
+          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+            echo "::error::specified run is either not complete or not successful, exiting..."            
+            exit 1
+          }
+
           echo "::set-output name=commit::$($Run.head_sha)"
 
       - name: Checkout ${{ github.repository }}
@@ -180,7 +191,7 @@ jobs:
         working-directory: ${{ steps.move-artifacts.outputs.package-path }}
         run: |
           echo ${{ secrets.DOCKER_HUB_BOT_PASSWORD }} | docker login -u devolutionsbot --password-stdin
-          # docker push ${{ steps.build-container.outputs.image-name }}
+          docker push ${{ steps.build-container.outputs.image-name }}
 
   github-release:
     name: GitHub release
@@ -195,6 +206,8 @@ jobs:
 
       - name: Create GitHub release
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $StagingPath = "${{ steps.download.outputs.download-path }}"
@@ -202,8 +215,9 @@ jobs:
           $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
-          $GhCmd = $(@('gh', 'release', 'create', "v$Version", $HashPath) + $Files.Path) -Join ' '
-          # Invoke-Expression @GhCmd
+          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
+          Write-Host $GhCmd
+          Invoke-Expression $GhCmd
 
   psgallery-release:
     name: PowerShell release
@@ -225,4 +239,14 @@ jobs:
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
           $Module = Join-Path $StagingPath PowerShell
           Expand-Archive -Path $Archive -DestinationPath $Module
-          # Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}"
+          try {
+            Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}"
+          }
+          catch {
+            if ($_.Exception.Message -ilike "*cannot be published as the current version*is already available in the repository*") {
+              echo "::warning::PowerShell module not published; this version is already listed on PSGallery"
+            } else {
+              Write-Error $_
+              exit 1
+            }
+          }
