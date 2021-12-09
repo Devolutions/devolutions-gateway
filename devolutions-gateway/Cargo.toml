@@ -87,6 +87,10 @@ dlopen_derive = "0.1.4"
 pcap-file = "1.1.1"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 
+# FIXME: this is required because ceviche's Service! macro is not using the fully qualified path
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.9", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
+
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "1.6.5"
 

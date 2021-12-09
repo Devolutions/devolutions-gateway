@@ -743,6 +743,7 @@ dependencies = [
  "tokio-util",
  "url 2.2.2",
  "uuid",
+ "winapi",
  "zeroize",
 ]
 
