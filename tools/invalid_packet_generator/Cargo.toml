@@ -1,6 +1,0 @@
-[package]
-name = "invalid_packet_generator"
-version = "0.1.0"
-authors = ["Vlad Alex <vlad.al.dp@gmail.com>"]
-edition = "2021"
-

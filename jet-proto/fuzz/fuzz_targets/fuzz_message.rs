@@ -1,4 +1,5 @@
 #![no_main]
+
 use libfuzzer_sys::fuzz_target;
 use jet_proto::JetMessage;
 
