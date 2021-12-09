@@ -1,7 +1,7 @@
 [package]
 name = "jmux-proto"
 version = "0.1.0"
-authors = ["Benoît CORTIER <benoit.cortier@fried-world.eu>"]
+authors = ["Devolutions Inc."]
 edition = "2021"
 
 [dependencies]

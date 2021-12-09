@@ -2,7 +2,7 @@
 name = "jet-proto"
 version = "0.1.0"
 edition = "2021"
-authors = ["Francois Dubois <fdubois@devolutions.net>"]
+authors = ["Devolutions Inc."]
 
 [dependencies]
 log = "0.4.14"

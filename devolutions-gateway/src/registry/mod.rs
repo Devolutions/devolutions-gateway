@@ -299,7 +299,7 @@ mod tests {
         config.sogar_registry_config.serve_as_registry = Some(true);
         config.sogar_registry_config.push_files = Some(false);
         config.sogar_registry_config.keep_files = Some(true);
-        config.sogar_registry_config.keep_time = Some(30);
+        config.sogar_registry_config.keep_time = Some(1);
         config.sogar_registry_config.local_registry_name = Some(String::from("test_registry3"));
         config.sogar_registry_config.local_registry_image = Some(String::from("test_image3"));
 
@@ -325,7 +325,7 @@ mod tests {
         );
         assert_eq!(PathBuf::from(file_path.as_str()).exists(), true);
 
-        std::thread::sleep(Duration::from_secs(40));
+        std::thread::sleep(Duration::from_millis(1100));
         assert_eq!(PathBuf::from(file_path.as_str()).exists(), false);
 
         fs::remove_dir_all(Path::new("test_registry3")).unwrap();

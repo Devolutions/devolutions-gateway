@@ -48,14 +48,14 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let registry_name = config
                 .sogar_registry_config
                 .local_registry_name
-                .clone()
-                .unwrap_or_else(|| String::from(REGISTRY_NAME));
+                .as_deref()
+                .unwrap_or(REGISTRY_NAME);
             let registry_namespace = config
                 .sogar_registry_config
                 .local_registry_image
-                .clone()
-                .unwrap_or_else(|| String::from(NAMESPACE));
-            let sogar = SogarController::new(registry_name.as_str(), registry_namespace.as_str());
+                .as_deref()
+                .unwrap_or(NAMESPACE);
+            let sogar = SogarController::new(registry_name, registry_namespace);
 
             info!("Configuring HTTP router");
 
