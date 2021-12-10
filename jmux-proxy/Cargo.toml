@@ -11,12 +11,12 @@ description = "JMUX proxy server implementation"
 jmux-proto = { path = "../jmux-proto" }
 
 # async
-tokio = { version = "1.13.0", features = ["net", "rt", "io-util", "macros"] }
+tokio = { version = "1.14.0", features = ["net", "rt", "io-util", "macros"] }
 tokio-util = { version = "0.6.9", features = ["codec"] }
-futures-util = { version = "0.3.17", features = ["sink"] }
+futures-util = { version = "0.3.18", features = ["sink"] }
 
 # error handling
-anyhow = "1.0.45"
+anyhow = "1.0.51"
 
 # logging
 slog = "2.7.0"
