@@ -370,7 +370,8 @@ checksum = "22a9137b95ea06864e018375b72adfb7db6e6f68cfc8df5a04d00288050485ee"
 [[package]]
 name = "ceviche"
 version = "0.5.0"
-source = "git+https://github.com/Devolutions/ceviche-rs#e4dbb66f86917a32b62d2380fafb73b30df5a28e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01fa5f4f64791a5ca72daa952e98dc125b5b77c6dd76f01bd59afcb32575a159"
 dependencies = [
  "block",
  "cfg-if 0.1.10",
@@ -696,7 +697,6 @@ dependencies = [
  "cfg-if 1.0.0",
  "chrono",
  "clap 2.34.0",
- "display_utils",
  "dlopen",
  "dlopen_derive",
  "embed-resource",
@@ -783,12 +783,6 @@ dependencies = [
  "redox_users",
  "winapi",
 ]
-
-[[package]]
-name = "display_utils"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1cabb9d45c20801e16b8483e998bd1ebe4a07bc56406135ded5b4e3ad140c30"
 
 [[package]]
 name = "dlopen"
