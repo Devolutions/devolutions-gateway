@@ -28,7 +28,6 @@ serde_json = "1.0.72"
 camino = { version = "1.0.5", features = ["serde1"] }
 smol_str = "0.1.21"
 tap = "1.0.1"
-display_utils = "0.4.0"
 byteorder = "1.4.3"
 lazy_static = "1.4.0"
 bytes = "1.1.0"
