@@ -29,9 +29,9 @@ proxy_cfg = { version = "0.4.0", optional = true }
 seahorse = "1.1.2"
 
 # async
-tokio = { version = "1.13.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-futures-util = "0.3.17"
-async-tungstenite = "0.15.0"
+tokio = { version = "1.14.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+futures-util = "0.3.18"
+async-tungstenite = "0.16.1"
 # TODO: compare with https://lib.rs/crates/tokio-tungstenite (smaller size? compile time?)
 # Also have a look at https://lib.rs/crates/ws_stream_tungstenite (should we use it? is there something to learn from it?)
 
@@ -41,7 +41,7 @@ slog-async = "2.7.0"
 slog-term = "2.8.0"
 
 # error handling
-anyhow = "1.0.45"
+anyhow = "1.0.51"
 
 # location of special directories
 dirs-next = "2.0.0"

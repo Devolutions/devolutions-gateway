@@ -12,17 +12,17 @@ authors = ["Devolutions Inc."]
 jet-proto = { path = "../jet-proto" }
 jmux-proxy = { path = "../jmux-proxy" }
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
-ceviche = "0.4.5"
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
+ceviche = "0.5.0"
 
 # cli
 clap = "2.33"
 hostname = "0.3.1"
 
 # serialization
-serde = "1.0.130"
-serde_derive = "1.0.130"
-serde_json = "1.0.68"
+serde = "1.0.131"
+serde_derive = "1.0.131"
+serde_json = "1.0.72"
 
 # utils, misc
 camino = { version = "1.0.5", features = ["serde1"] }
@@ -38,7 +38,7 @@ tempfile = "3.2.0"
 indexmap = "1.7.0"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
-parking_lot = "0.11"
+parking_lot = "0.11.2"
 anyhow = "1.0.51"
 # TODO: compare performance with `ringbuf` and `sluice`
 # NOTE: check if we actually still need a bip buffer for proxying though (see jetsocat)
@@ -46,7 +46,7 @@ spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", 
 
 # security, crypto…
 native-tls = "0.2.8"
-zeroize = "1.4.2"
+zeroize = "1.4.3"
 rust-argon2 = "0.8.3"
 picky = { version = "6.3.0", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
@@ -67,15 +67,17 @@ slog-envlogger = "2.2.0"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
 
 # async, futures…
-tokio = { version = "1.13.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
+tokio = { version = "1.14.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
 tokio-util = { version = "0.6.9", features = ["codec"] }
-tokio-tungstenite = "0.15.0" # TODO: switch to `async-tungstenite`
+# TODO: switch to `async-tungstenite`? See jetsocat
+tokio-tungstenite = "0.16.1"
 tokio-rustls = { version = "0.23.1", features = ["dangerous_configuration"] }
-futures = "0.3.17"
+futures = "0.3.18"
 
 # http
-hyper = "0.14.14"
-reqwest = "0.11.6" # NOTE: maybe directly use hyper (we already use hyper)
+hyper = "0.14.16"
+# NOTE: maybe directly use hyper (we already use hyper)
+reqwest = "0.11.7"
 http = "0.2.5"
 # FIXME: update once next saphir version is published or use `axum`/`warp`
 saphir = { version = "2.8", default-features = false, features = ["https", "json", "macro", "form", "operation", "file"], git = "https://github.com/CBenoit/saphir", branch = "hyper-update" }
@@ -86,10 +88,6 @@ dlopen_derive = "0.1.4"
 # Dependencies required for PCAP support (FIXME: should we keep that built-in?)
 pcap-file = "1.1.1"
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
-
-# FIXME: this is required because ceviche's Service! macro is not using the fully qualified path
-[target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = ["winbase", "winuser", "winsvc", "libloaderapi", "errhandlingapi", "winerror"] }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "1.6.5"

@@ -8,5 +8,5 @@ edition = "2021"
 picky = { version = "6.3.0", default-features = false, features = ["jose"] }
 clap = "3.0.0-beta.5"
 humantime = "2.1.0"
-serde = "1.0.130"
+serde = "1.0.131"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
