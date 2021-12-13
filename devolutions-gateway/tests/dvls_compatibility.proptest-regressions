@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 229c3ee33947347fe40f4d061636904b5e59f7aa7f58323d502cda6a5f6841f9 # shrinks to claims = AssociationClaims { ty: "association", jet_aid: "83803365-5577-5603-6789-789499930409", jet_ap: "rdp", jet_cm: "fwd", dst_hst: "qjncsynq.p", dst_alt: [], nbf: 1639427462, exp: 1639428462 }

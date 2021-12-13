@@ -39,7 +39,7 @@ lazy_static! {
     pub static ref SESSIONS_IN_PROGRESS: RwLock<HashMap<Uuid, GatewaySessionInfo>> = RwLock::new(HashMap::new());
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 pub struct GatewaySessionInfo {
     association_id: Uuid,
     application_protocol: ApplicationProtocol,
@@ -50,7 +50,7 @@ pub struct GatewaySessionInfo {
     mode_details: ConnectionModeDetails,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(tag = "connection_mode")]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectionModeDetails {
