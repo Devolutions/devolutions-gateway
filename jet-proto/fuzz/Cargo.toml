@@ -8,15 +8,18 @@ edition = "2021"
 [package.metadata]
 cargo-fuzz = true
 
+[dependencies]
+libfuzzer-sys = "0.4"
+
 [dependencies.jet-proto]
 path = ".."
-[dependencies.libfuzzer-sys]
-git = "https://github.com/rust-fuzz/libfuzzer-sys.git"
 
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
 
 [[bin]]
-name = "fuzz_message"
-path = "fuzz_targets/fuzz_message.rs"
+name = "read"
+path = "fuzz_targets/read.rs"
+test = false
+doc = false
