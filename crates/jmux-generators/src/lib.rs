@@ -10,9 +10,12 @@ pub fn distant_channel_id() -> impl Strategy<Value = DistantChannelId> {
     any::<u32>().prop_map(|id| DistantChannelId::from(id))
 }
 
+pub fn destination_url_parts() -> impl Strategy<Value = (String, String, u16)> {
+    (".{1,5}", ".{1,10}", any::<u16>())
+}
+
 pub fn destination_url() -> impl Strategy<Value = DestinationUrl> {
-    ("[a-z]{2,4}", "[a-z]{1,10}", any::<u16>())
-        .prop_map(|(scheme, host, port)| DestinationUrl::new(&scheme, &host, port))
+    destination_url_parts().prop_map(|(scheme, host, port)| DestinationUrl::new(&scheme, &host, port))
 }
 
 pub fn reason_code() -> impl Strategy<Value = ReasonCode> {

@@ -7,7 +7,8 @@ members = [
     "jetsocat/proxy",
     "jmux-proto",
     "jmux-proxy",
-    "tools/*"
+    "tools/*",
+    "crates/*",
 ]
 default-members = [
     "devolutions-gateway",
