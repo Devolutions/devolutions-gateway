@@ -8,10 +8,14 @@ description = "HTTP(S)/SOCKS proxy clients and acceptors implementations for jet
 [[bin]]
 name = "socks5_server"
 required-features = ["tokio/rt", "tokio/net", "tokio/rt-multi-thread", "tokio/macros", "tokio/io-util"]
+test = false
+doc = false
 
 [[bin]]
 name = "tester"
 required-features = ["tokio/rt", "tokio/net"]
+test = false
+doc = false
 
 [dependencies]
 tokio = { version = "1.14.0", features = ["io-util"] }
