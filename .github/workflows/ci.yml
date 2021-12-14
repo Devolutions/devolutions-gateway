@@ -274,3 +274,46 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
+
+  test:
+      name: test [${{ matrix.os }} ${{ matrix.arch }}]
+      runs-on: ${{ matrix.runner }}
+      needs: preflight
+      env:
+        CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+        CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+      strategy:
+        matrix:
+          arch: [ x86_64 ]
+          os: [ windows, linux ]
+          include:
+            - os: windows
+              runner: windows-2019
+            - os: linux
+              runner: ubuntu-18.04
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v2
+
+        - name: Configure rust toolchain
+          run: |
+            rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+
+        - name: Configure Linux runner
+          if: runner.os == 'Linux'
+          run: |
+            sudo apt update
+            sudo apt install python3-wget python3-setuptools libsystemd-dev
+
+        - name: Configure conan
+          run: |
+            pip3 install conan==1.40.0 --upgrade
+            conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            conan remote clean
+            conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+
+        - name: Test
+          shell: pwsh
+          run: |
+            ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

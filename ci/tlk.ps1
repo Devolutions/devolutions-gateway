@@ -149,7 +149,6 @@ class TlkTarget
     [string] $Platform
     [string] $Architecture
     [string] $CargoProfile
-
     [string] $ExecutableExtension
 
     TlkTarget() {
@@ -234,7 +233,6 @@ class TlkRecipe
     [string] $Version
     [string] $SourcePath
     [bool] $Verbose
-
     [TlkTarget] $Target
 
     TlkRecipe() {
@@ -246,22 +244,16 @@ class TlkRecipe
         $this.PackageName = "DevolutionsGateway"
         $this.Version = $(Get-Content -Path "$($this.SourcePath)/VERSION").Trim()
         $this.Verbose = $true
-
         $this.Target = [TlkTarget]::new()
     }
 
-    [void] Build() {
+    [void] BootstrapOpenSSL() {
         $OPENSSL_VERSION = '1.1.1l'
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
 
         Write-Host "conan profile: $ConanProfile"
-    
-        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
 
-        if (Test-Path Env:TARGET_OUTPUT_PATH) {
-            $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
-        }
 
         & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release'
         $dotenv = Get-DotEnvFile ".\environment.sh.env"
@@ -272,6 +264,37 @@ class TlkRecipe
     
         $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
         $Env:OPENSSL_DIR = $OPENSSL_DIR
+    }
+
+    [void] Cargo([string[]]$CargoArgs) {
+        $CargoTarget = $this.Target.CargoTarget()
+        Write-Host "CargoTarget: $CargoTarget"
+
+        $CargoProfile = $this.Target.CargoProfile
+        Write-Host "CargoProfile: $CargoProfile"
+
+        $CargoArgs += @('--profile', $CargoProfile)
+        $CargoArgs += @('--target', $CargoTarget)
+        if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
+            $CargoArgs += @('--no-default-features')
+        }
+        if (Test-Path Env:CARGO_FEATURES) {
+            $CargoArgs += @('--features', $Env:CARGO_FEATURES)
+        }
+
+        $CargoCmd = $(@('cargo') + $CargoArgs) -Join ' '
+        Write-Host $CargoCmd
+        Invoke-Expression $CargoCmd
+    }
+
+    [void] Build() {
+        $this.BootstrapOpenSSL()
+
+        $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
+
+        if (Test-Path Env:TARGET_OUTPUT_PATH) {
+            $BuildStagingDirectory = $Env:TARGET_OUTPUT_PATH
+        }
     
         if ($this.Target.IsWindows()) {
             $Env:RUSTFLAGS = "-C target-feature=+crt-static"
@@ -295,16 +318,7 @@ class TlkRecipe
         $CargoProfile = $this.Target.CargoProfile
         Write-Host "CargoProfile: $CargoProfile"
 
-        $CargoArgs = @('build', '--profile', $CargoProfile)
-        $CargoArgs += @('--target', $CargoTarget)
-        if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
-            $CargoArgs += @('--no-default-features')
-        }
-        if (Test-Path Env:CARGO_FEATURES) {
-            $CargoArgs += @('--features', $Env:CARGO_FEATURES)
-        }
-
-        & 'cargo' $CargoArgs
+        $this.Cargo(@('build'))
 
         $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
         $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
@@ -570,12 +584,38 @@ class TlkRecipe
             $this.Package_Linux()
         }
     }
+
+    [void] Test() {
+        $this.BootstrapOpenSSL()
+    
+        Push-Location
+        Set-Location $this.SourcePath
+
+        $CargoArgs = @('test')
+
+        if (Test-Path Env:CARGO_PACKAGE) {
+            $CargoPackage = $Env:CARGO_PACKAGE
+            Set-Location -Path $CargoPackage
+        } else {
+            $CargoArgs += '--workspace'
+        }
+
+        $CargoTarget = $this.Target.CargoTarget()
+        Write-Host "CargoTarget: $CargoTarget"
+
+        $CargoProfile = $this.Target.CargoProfile
+        Write-Host "CargoProfile: $CargoProfile"
+
+        $this.Cargo($CargoArgs)
+
+        Pop-Location
+    }
 }
 
 function Invoke-TlkStep {
 	param(
         [Parameter(Position=0,Mandatory=$true)]
-		[ValidateSet('build','package')]
+		[ValidateSet('build','package','test')]
 		[string] $TlkVerb,
 		[ValidateSet('windows','macos','linux')]
 		[string] $Platform,
@@ -607,7 +647,8 @@ function Invoke-TlkStep {
 
     switch ($TlkVerb) {
         "build" { $tlk.Build() }
-        "package" {$tlk.Package() }
+        "package" { $tlk.Package() }
+        "test" { $tlk.Test() }
     }
 }
 
