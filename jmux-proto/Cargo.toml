@@ -10,3 +10,4 @@ smol_str = "0.1.21"
 
 [dev-dependencies]
 proptest = "1.0.0"
+jmux-generators = { path = "../crates/jmux-generators" }

@@ -1,3 +1,4 @@
+use devolutions_gateway_generators::*;
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::JwtSig;
 use picky::key::{PrivateKey, PublicKey};
@@ -33,25 +34,6 @@ lj/bWmNq7xu9uVOcBKrboVFGO/n6FXyWZxHPOTdjTkpe8kvvmSwl2iaTNllvSr46
 Z/fDKMxHxeXla54kfV+HiGkH
 -----END PRIVATE KEY-----"#;
 
-prop_compose! {
-    fn uuid()(id in "[[:digit:]]{8}-([[:digit:]]{4}-){3}[[:digit:]]{12}".no_shrink()) -> String {
-        id
-    }
-}
-
-fn gateway_side_application_protocol() -> impl Strategy<Value = devolutions_gateway::token::ApplicationProtocol> {
-    use devolutions_gateway::token::ApplicationProtocol;
-    prop_oneof![
-        Just(ApplicationProtocol::Wayk),
-        Just(ApplicationProtocol::Pwsh),
-        Just(ApplicationProtocol::Rdp),
-        Just(ApplicationProtocol::Ard),
-        Just(ApplicationProtocol::Ssh),
-        Just(ApplicationProtocol::Sftp),
-        Just(ApplicationProtocol::Unknown),
-    ]
-}
-
 /// This emulate a token validation on Gateway side using the provided claims
 fn encode_decode_round_trip<C>(pub_key: &PublicKey, priv_key: &PrivateKey, claims: C) -> anyhow::Result<()>
 where
@@ -76,7 +58,7 @@ mod as_of_v2021_2_13_0 {
     const JET_CM: &str = "fwd";
 
     #[derive(Serialize, Debug)]
-    struct AssociationClaims {
+    struct DvlsAssociationClaims {
         #[serde(rename = "type")]
         ty: &'static str,
         jet_aid: String,
@@ -90,33 +72,33 @@ mod as_of_v2021_2_13_0 {
     }
 
     prop_compose! {
-        fn host()(host in "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?".no_shrink()) -> String {
+        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?") -> String {
             host
         }
     }
 
     prop_compose! {
-        fn application_protocol()(protocol in "(rdp|ssh)".no_shrink()) -> String {
+        fn dvls_application_protocol()(protocol in "(rdp|ssh)") -> String {
             protocol
         }
     }
 
     prop_compose! {
-        fn alternate_hosts()(alternates in vec(host(), 0..4)) -> Vec<String> {
+        fn dvls_alternate_hosts()(alternates in vec(dvls_host(), 0..4)) -> Vec<String> {
             alternates
         }
     }
 
     prop_compose! {
-        fn association_claims(
+        fn dvls_association_claims(
             now: i64
         )(
-            jet_aid in uuid(),
-            jet_ap in application_protocol(),
-            dst_hst in host(),
-            dst_alt in alternate_hosts(),
-        ) -> AssociationClaims {
-            AssociationClaims {
+            jet_aid in uuid_str(),
+            jet_ap in dvls_application_protocol(),
+            dst_hst in dvls_host(),
+            dst_alt in dvls_alternate_hosts(),
+        ) -> DvlsAssociationClaims {
+            DvlsAssociationClaims {
                 ty: TYPE_ASSOCIATION,
                 jet_aid,
                 jet_ap,
@@ -135,14 +117,15 @@ mod as_of_v2021_2_13_0 {
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
-        proptest!(ProptestConfig::with_cases(32), |(claims in association_claims(now))| {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
+    /// DVLS is roughly deserializing using this model (except everything is in C#)
     #[allow(dead_code)]
     #[derive(Deserialize, Debug)]
-    struct SessionInfo {
+    struct DvlsSessionInfo {
         association_id: String,
         application_protocol: String,
         recording_policy: bool,
@@ -152,27 +135,16 @@ mod as_of_v2021_2_13_0 {
         start_timestamp: DateTime<Utc>,
     }
 
-    prop_compose! {
-        fn gateway_side_session_info()(
-            id in uuid(),
-            application_protocol in gateway_side_application_protocol().no_shrink(),
-            destination_host in "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}".no_shrink(),
-        ) -> devolutions_gateway::GatewaySessionInfo {
-            let id = uuid::Uuid::parse_str(&id).unwrap();
-            let destination_host = devolutions_gateway::utils::TargetAddr::parse(&destination_host, None).unwrap();
-            let mode_details = devolutions_gateway::ConnectionModeDetails::Fwd { destination_host };
-            devolutions_gateway::GatewaySessionInfo::new(id, application_protocol, mode_details )
-        }
-    }
-
     /// Make sure current Gateway is serializing the session info structure in a way that is understood by DVLS
+    ///
+    /// NOTE: as of DVLS v2021.2.13.0, only forward sessions are created.
     #[test]
     fn session_info_serialization() {
         proptest!(|(
-            info in gateway_side_session_info(),
+            info in session_info_fwd_only(),
         )| {
             let serialized = serde_json::to_string(&info)?;
-            serde_json::from_str::<SessionInfo>(&serialized)?;
+            serde_json::from_str::<DvlsSessionInfo>(&serialized)?;
         })
     }
 }
@@ -183,7 +155,7 @@ mod as_of_v2021_2_4 {
     const TYPE_SCOPE: &str = "scope";
 
     #[derive(Debug, Serialize)]
-    struct ScopeClaims {
+    struct DvlsScopeClaims {
         #[serde(rename = "type")]
         ty: &'static str,
         scope: String,
@@ -192,16 +164,16 @@ mod as_of_v2021_2_4 {
     }
 
     prop_compose! {
-        fn access_scope()(scope in "(gateway\\.sessions\\.read|gateway\\.associations\\.read|gateway\\.diagnostics\\.read)".no_shrink()) -> String {
+        fn dvls_access_scope()(scope in "(gateway\\.sessions\\.read|gateway\\.associations\\.read|gateway\\.diagnostics\\.read)") -> String {
             scope
         }
     }
 
     prop_compose! {
-        fn scope_claims(now: i64)(
-            scope in access_scope(),
-        ) -> ScopeClaims {
-            ScopeClaims {
+        fn dvls_scope_claims(now: i64)(
+            scope in dvls_access_scope(),
+        ) -> DvlsScopeClaims {
+            DvlsScopeClaims {
                 ty: TYPE_SCOPE,
                 scope,
                 nbf: now,
@@ -216,7 +188,7 @@ mod as_of_v2021_2_4 {
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
-        proptest!(ProptestConfig::with_cases(32), |(claims in scope_claims(now))| {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
@@ -229,7 +201,7 @@ mod as_of_v2021_1_7_0 {
     const JET_AP: &str = "rdp";
 
     #[derive(Serialize, Debug)]
-    struct AssociationClaims {
+    struct DvlsAssociationClaims {
         jet_ap: &'static str,
         jet_cm: &'static str,
         dst_hst: String,
@@ -238,18 +210,18 @@ mod as_of_v2021_1_7_0 {
     }
 
     prop_compose! {
-        fn host_claim()(host in "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}".no_shrink()) -> String {
+        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}") -> String {
             host
         }
     }
 
     prop_compose! {
-        fn association_claims(
+        fn dvls_association_claims(
             now: i64
         )(
-            dst_hst in host_claim(),
-        ) -> AssociationClaims {
-            AssociationClaims {
+            dst_hst in dvls_host(),
+        ) -> DvlsAssociationClaims {
+            DvlsAssociationClaims {
                 jet_ap: JET_AP,
                 jet_cm: JET_CM,
                 dst_hst,
@@ -265,7 +237,7 @@ mod as_of_v2021_1_7_0 {
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
-        proptest!(ProptestConfig::with_cases(32), |(claims in association_claims(now))| {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }

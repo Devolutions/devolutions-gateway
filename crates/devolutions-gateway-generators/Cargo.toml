@@ -1,0 +1,10 @@
+[package]
+name = "devolutions-gateway-generators"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+devolutions-gateway = { path = "../../devolutions-gateway" }
+proptest = "1.0.0"
+uuid = "0.8.2"
