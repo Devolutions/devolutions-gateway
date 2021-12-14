@@ -266,14 +266,13 @@ class TlkRecipe
         $Env:OPENSSL_DIR = $OPENSSL_DIR
     }
 
-    [void] Cargo([string]$Verb) {
+    [void] Cargo([string[]]$CargoArgs) {
         $CargoTarget = $this.Target.CargoTarget()
         Write-Host "CargoTarget: $CargoTarget"
 
         $CargoProfile = $this.Target.CargoProfile
         Write-Host "CargoProfile: $CargoProfile"
 
-        $CargoArgs = @("$Verb")
         $CargoArgs += @('--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
         if (Test-Path Env:CARGO_NO_DEFAULT_FEATURES) {
@@ -283,7 +282,9 @@ class TlkRecipe
             $CargoArgs += @('--features', $Env:CARGO_FEATURES)
         }
 
-        & 'cargo' $CargoArgs
+        $CargoCmd = $(@('cargo') + $CargoArgs) -Join ' '
+        Write-Host $CargoCmd
+        Invoke-Expression $CargoCmd
     }
 
     [void] Build() {
@@ -317,7 +318,7 @@ class TlkRecipe
         $CargoProfile = $this.Target.CargoProfile
         Write-Host "CargoProfile: $CargoProfile"
 
-        $this.Cargo('build')
+        $this.Cargo(@('build'))
 
         $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
         $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
@@ -590,13 +591,22 @@ class TlkRecipe
         Push-Location
         Set-Location $this.SourcePath
 
+        $CargoArgs = @('test')
+
+        if (Test-Path Env:CARGO_PACKAGE) {
+            $CargoPackage = $Env:CARGO_PACKAGE
+            Set-Location -Path $CargoPackage
+        } else {
+            $CargoArgs += '--workspace'
+        }
+
         $CargoTarget = $this.Target.CargoTarget()
         Write-Host "CargoTarget: $CargoTarget"
 
         $CargoProfile = $this.Target.CargoProfile
         Write-Host "CargoProfile: $CargoProfile"
 
-        $this.Cargo('test')
+        $this.Cargo($CargoArgs)
 
         Pop-Location
     }
