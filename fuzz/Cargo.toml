@@ -1,5 +1,5 @@
 [package]
-name = "jet-proto-fuzz"
+name = "fuzz"
 version = "0.0.0"
 authors = ["Automatically generated"]
 publish = false
@@ -9,17 +9,23 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
+jmux-proto = { path = "../jmux-proto" }
+jet-proto = { path = "../jet-proto" }
 libfuzzer-sys = "0.4"
-
-[dependencies.jet-proto]
-path = ".."
+bytes = "1.1.0"
 
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
 
 [[bin]]
-name = "read"
-path = "fuzz_targets/read.rs"
+name = "jmux_message"
+path = "fuzz_targets/jmux_message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jet_message"
+path = "fuzz_targets/jet_message.rs"
 test = false
 doc = false
