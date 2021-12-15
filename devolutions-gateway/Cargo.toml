@@ -71,7 +71,7 @@ tokio-util = { version = "0.6.9", features = ["codec"] }
 # TODO: switch to `async-tungstenite`? See jetsocat
 tokio-tungstenite = "0.16.1"
 tokio-rustls = { version = "0.23.1", features = ["dangerous_configuration"] }
-futures = "0.3.18"
+futures = "0.3.17"
 
 # http
 hyper = "0.14.16"
