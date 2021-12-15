@@ -8,6 +8,7 @@ mod config;
 mod id_allocator;
 
 pub use self::config::{FilteringRule, JmuxConfig};
+pub use jmux_proto::DestinationUrl;
 
 use self::codec::JmuxCodec;
 use self::id_allocator::IdAllocator;
@@ -35,7 +36,7 @@ pub type ApiRequestReceiver = mpsc::Receiver<JmuxApiRequest>;
 #[derive(Debug)]
 pub enum JmuxApiRequest {
     OpenChannel {
-        destination_url: String,
+        destination_url: DestinationUrl,
         api_response_tx: ApiResponseSender,
     },
     Start {
@@ -290,7 +291,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
     let mut jmux_ctx = JmuxCtx::new();
     let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
-    let mut pending_channels: HashMap<LocalChannelId, (String, ApiResponseSender)> = HashMap::new();
+    let mut pending_channels: HashMap<LocalChannelId, (DestinationUrl, ApiResponseSender)> = HashMap::new();
     let (internal_msg_tx, mut internal_msg_rx) = mpsc::unbounded_channel::<InternalMessage>();
 
     // Safety net against poor AsyncRead trait implementations.
@@ -489,7 +490,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
                         info!(log, "({} {}) request {}", local_id, peer_id, msg.destination_url);
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.clone()));
+                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.to_string()));
 
                         let window_size_updated = Arc::new(Notify::new());
                         let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
@@ -530,7 +531,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             },
                         };
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url));
+                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url.to_string()));
 
                         debug!(channel_log, "Successfully opened channel");
 
@@ -796,7 +797,7 @@ impl DataWriterTask {
 
 struct StreamResolverTask {
     channel: JmuxChannelCtx,
-    destination_url: String,
+    destination_url: DestinationUrl,
     internal_msg_tx: InternalMessageSender,
     msg_to_send_tx: MessageSender,
 }
@@ -819,11 +820,11 @@ impl StreamResolverTask {
             msg_to_send_tx,
         } = self;
 
-        let (scheme, target) = destination_url
-            .split_once("://")
-            .context("invalid destination URL format")?;
+        let scheme = destination_url.scheme();
+        let host = destination_url.host();
+        let port = destination_url.port();
 
-        let mut addrs = match tokio::net::lookup_host(target).await {
+        let mut addrs = match tokio::net::lookup_host((host, port)).await {
             Ok(addrs) => addrs,
             Err(e) => {
                 msg_to_send_tx
@@ -833,7 +834,7 @@ impl StreamResolverTask {
                         e.to_string(),
                     ))
                     .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("Couldn't resolve host {}: {}", target, e);
+                anyhow::bail!("Couldn't resolve {}:{}: {}", host, port, e);
             }
         };
         let socket_addr = addrs.next().expect("at least one resolved address should be present");
@@ -853,7 +854,7 @@ impl StreamResolverTask {
                             e.to_string(),
                         ))
                         .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                    anyhow::bail!("Couldn’t connect TCP socket to {}: {}", target, e);
+                    anyhow::bail!("Couldn’t connect TCP socket to {}:{}: {}", host, port, e);
                 }
             },
             _ => anyhow::bail!("unsupported scheme: {}", scheme),
