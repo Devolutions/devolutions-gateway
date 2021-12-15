@@ -30,7 +30,7 @@ seahorse = "1.1.2"
 
 # async
 tokio = { version = "1.14.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-futures-util = "0.3.18"
+futures-util = "0.3.17"
 async-tungstenite = "0.16.1"
 # TODO: compare with https://lib.rs/crates/tokio-tungstenite (smaller size? compile time?)
 # Also have a look at https://lib.rs/crates/ws_stream_tungstenite (should we use it? is there something to learn from it?)
