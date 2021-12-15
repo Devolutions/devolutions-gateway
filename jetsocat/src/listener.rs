@@ -1,6 +1,6 @@
 use anyhow::Context;
 use jetsocat_proxy::Socks5AcceptorConfig;
-use jmux_proxy::{ApiRequestSender, JmuxApiRequest, JmuxApiResponse};
+use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
 use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -39,11 +39,19 @@ pub async fn tcp_listener_task(
                 tokio::spawn(async move {
                     debug!(log, "Request {}", destination_url);
 
+                    let destination_url = match DestinationUrl::parse_str(&destination_url) {
+                        Ok(url) => url,
+                        Err(e) => {
+                            debug!(log, "Bad request: {}", e);
+                            return;
+                        }
+                    };
+
                     let (sender, receiver) = oneshot::channel();
 
                     match api_request_tx
                         .send(JmuxApiRequest::OpenChannel {
-                            destination_url: destination_url.clone(),
+                            destination_url,
                             api_response_tx: sender,
                         })
                         .await
@@ -131,8 +139,12 @@ async fn socks5_process_socket(
 
     if acceptor.is_connect_command() {
         let destination_url = match acceptor.dest_addr() {
-            jetsocat_proxy::DestAddr::Ip(addr) => format!("tcp://{}", addr),
-            jetsocat_proxy::DestAddr::Domain(domain, port) => format!("tcp://{}:{}", domain, port),
+            jetsocat_proxy::DestAddr::Ip(addr) => {
+                let host = addr.ip().to_string();
+                let port = addr.port();
+                DestinationUrl::new("tcp", &host, port)
+            }
+            jetsocat_proxy::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
         };
 
         debug!(log, "Request {}", destination_url);

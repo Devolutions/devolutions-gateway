@@ -2,6 +2,7 @@
 
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use core::fmt;
+use smol_str::SmolStr;
 
 /// Distant identifier for a channel
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -47,7 +48,84 @@ impl fmt::Display for LocalChannelId {
     }
 }
 
+/// JMUX destination URL (<scheme>://<host>:<port>)
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct DestinationUrl {
+    inner: SmolStr,
+    scheme: SmolStr,
+    host: SmolStr,
+    port: u16,
+}
+
+impl DestinationUrl {
+    pub fn new(scheme: &str, host: &str, port: u16) -> Self {
+        Self {
+            inner: SmolStr::new(format!("{}://{}:{}", scheme, host, port)),
+            scheme: SmolStr::new(scheme),
+            host: SmolStr::new(host),
+            port,
+        }
+    }
+
+    pub fn parse_str(s: &str) -> Result<Self, Error> {
+        let scheme_end_idx = s.find("://").ok_or_else(|| Error::InvalidDestinationUrl {
+            value: s.to_owned(),
+            reason: "scheme is missing",
+        })?;
+
+        let host_end_idx = s[scheme_end_idx..]
+            .find(':')
+            .ok_or_else(|| Error::InvalidDestinationUrl {
+                value: s.to_owned(),
+                reason: "port is missing",
+            })?
+            + scheme_end_idx;
+
+        let port = s[host_end_idx..].parse().map_err(|_| Error::InvalidDestinationUrl {
+            value: s.to_owned(),
+            reason: "bad port",
+        })?;
+        let scheme = SmolStr::new(&s[..scheme_end_idx]);
+        let host = SmolStr::new(&s[scheme_end_idx..host_end_idx]);
+        let inner = SmolStr::new(s);
+
+        Ok(Self {
+            inner,
+            scheme,
+            host,
+            port,
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.inner
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.inner.as_bytes()
+    }
+
+    pub fn scheme(&self) -> &str {
+        &self.scheme
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl fmt::Display for DestinationUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     PacketOversized {
         packet_size: usize,
@@ -61,6 +139,10 @@ pub enum Error {
     InvalidPacket {
         name: &'static str,
         field: &'static str,
+        reason: &'static str,
+    },
+    InvalidDestinationUrl {
+        value: String,
         reason: &'static str,
     },
 }
@@ -84,6 +166,9 @@ impl fmt::Display for Error {
             ),
             Error::InvalidPacket { name, field, reason } => {
                 write!(f, "Invalid `{}` in {}: {}", field, name, reason)
+            }
+            Error::InvalidDestinationUrl { value, reason } => {
+                write!(f, "Invalid destination URL `{}`: {}", value, reason)
             }
         }
     }
@@ -121,7 +206,7 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn open(id: LocalChannelId, maximum_packet_size: u16, destination_url: impl Into<String>) -> Self {
+    pub fn open(id: LocalChannelId, maximum_packet_size: u16, destination_url: DestinationUrl) -> Self {
         Self::Open(ChannelOpen::new(id, maximum_packet_size, destination_url))
     }
 
@@ -386,7 +471,7 @@ pub struct ChannelOpen {
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
     pub maximum_packet_size: u16,
-    pub destination_url: String,
+    pub destination_url: DestinationUrl,
 }
 
 impl ChannelOpen {
@@ -394,11 +479,7 @@ impl ChannelOpen {
     pub const DEFAULT_INITIAL_WINDOW_SIZE: u32 = 32_768;
     pub const FIXED_PART_SIZE: usize = 4 /* senderChannelId */ + 4 /* initialWindowSize */ + 2 /* maximumPacketSize */;
 
-    pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: impl Into<String>) -> Self {
-        let destination_url = destination_url.into();
-        // Debug-only sanity checks
-        debug_assert!(destination_url.contains("://"));
-        debug_assert!(destination_url.rfind(':').is_some());
+    pub fn new(id: LocalChannelId, maximum_packet_size: u16, destination_url: DestinationUrl) -> Self {
         Self {
             sender_channel_id: u32::from(id),
             initial_window_size: Self::DEFAULT_INITIAL_WINDOW_SIZE,
@@ -425,13 +506,12 @@ impl ChannelOpen {
         let initial_window_size = buf.get_u32();
         let maximum_packet_size = buf.get_u16();
 
-        let destination_url = std::str::from_utf8(&buf)
-            .map_err(|_| Error::InvalidPacket {
-                name: Self::NAME,
-                field: "destinationUrl",
-                reason: "not valid UTF-8",
-            })?
-            .to_owned();
+        let destination_url = std::str::from_utf8(&buf).map_err(|_| Error::InvalidPacket {
+            name: Self::NAME,
+            field: "destinationUrl",
+            reason: "not valid UTF-8",
+        })?;
+        let destination_url = DestinationUrl::parse_str(destination_url)?;
 
         Ok(Self {
             sender_channel_id,

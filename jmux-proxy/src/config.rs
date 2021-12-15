@@ -1,4 +1,5 @@
 use anyhow::Context;
+use jmux_proto::DestinationUrl;
 
 /// JMUX proxy configuration struct.
 ///
@@ -44,8 +45,8 @@ impl JmuxConfig {
 /// # fn main() -> anyhow::Result<()> {
 /// let always_allow = FilteringRule::Allow;
 ///
-/// always_allow.validate_destination("tcp://devolutions.net:80")?;
-/// always_allow.validate_destination("ws://127.0.0.1:8080")?;
+/// always_allow.validate_destination_str("tcp://devolutions.net:80")?;
+/// always_allow.validate_destination_str("ws://127.0.0.1:8080")?;
 ///
 /// // Let's build this rule:
 /// //   (
@@ -64,29 +65,29 @@ impl JmuxConfig {
 ///     .or(FilteringRule::port(1080).invert().and(FilteringRule::host("sekai.net")))
 ///     .or(FilteringRule::host_and_port("127.0.0.1", 8080).and(FilteringRule::scheme("wss")));
 ///
-/// elaborated_rule.validate_destination("tcp://doc.rust-lang.org:80")?;
-/// elaborated_rule.validate_destination("ws://devolutions.net:80")?;
-/// elaborated_rule.validate_destination("wss://dvls.devolutions.net:80")?;
-/// assert!(elaborated_rule.validate_destination("tcp://devolutions.bad.ninja:80").is_err());
-/// assert!(elaborated_rule.validate_destination("tcp://duckduckgo.com:80").is_err());
+/// elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:80")?;
+/// elaborated_rule.validate_destination_str("ws://devolutions.net:80")?;
+/// elaborated_rule.validate_destination_str("wss://dvls.devolutions.net:80")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://devolutions.bad.ninja:80").is_err());
+/// assert!(elaborated_rule.validate_destination_str("tcp://duckduckgo.com:80").is_err());
 ///
-/// elaborated_rule.validate_destination("tcp://vps.my-web-site.com:22")?;
-/// elaborated_rule.validate_destination("tcp://vps.rust-lang.org:22")?;
-/// elaborated_rule.validate_destination("tcp://super.vps.ninja:22")?;
-/// assert!(elaborated_rule.validate_destination("tcp://vps.my-web-site.com:2222").is_err());
-/// assert!(elaborated_rule.validate_destination("tcp://myvps.ovh.com:22").is_err());
-/// assert!(elaborated_rule.validate_destination("tcp://doc.rust-lang.org:22").is_err());
-/// assert!(elaborated_rule.validate_destination("wss://127.0.0.1:22").is_err());
+/// elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:22")?;
+/// elaborated_rule.validate_destination_str("tcp://vps.rust-lang.org:22")?;
+/// elaborated_rule.validate_destination_str("tcp://super.vps.ninja:22")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:2222").is_err());
+/// assert!(elaborated_rule.validate_destination_str("tcp://myvps.ovh.com:22").is_err());
+/// assert!(elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:22").is_err());
+/// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:22").is_err());
 ///
-/// elaborated_rule.validate_destination("tcp://sekai.net:80")?;
-/// elaborated_rule.validate_destination("tcp://sekai.net:8080")?;
-/// elaborated_rule.validate_destination("tcp://sekai.net:22")?;
-/// assert!(elaborated_rule.validate_destination("tcp://sekai.net:1080").is_err());
+/// elaborated_rule.validate_destination_str("tcp://sekai.net:80")?;
+/// elaborated_rule.validate_destination_str("tcp://sekai.net:8080")?;
+/// elaborated_rule.validate_destination_str("tcp://sekai.net:22")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:1080").is_err());
 ///
-/// elaborated_rule.validate_destination("wss://127.0.0.1:8080")?;
-/// assert!(elaborated_rule.validate_destination("wss://doc.rust-lang.org:8080").is_err());
-/// assert!(elaborated_rule.validate_destination("wss://127.0.0.1:80").is_err());
-/// assert!(elaborated_rule.validate_destination("tcp://127.0.0.1:8080").is_err());
+/// elaborated_rule.validate_destination_str("wss://127.0.0.1:8080")?;
+/// assert!(elaborated_rule.validate_destination_str("wss://doc.rust-lang.org:8080").is_err());
+/// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:80").is_err());
+/// assert!(elaborated_rule.validate_destination_str("tcp://127.0.0.1:8080").is_err());
 /// # Ok(())
 /// # }
 /// ```
@@ -200,12 +201,25 @@ impl FilteringRule {
         }
     }
 
-    pub fn validate_destination(&self, destination_url: impl AsRef<str>) -> anyhow::Result<()> {
-        validate_destination_impl(self, destination_url.as_ref())
+    pub fn validate_destination(&self, destination_url: &DestinationUrl) -> anyhow::Result<()> {
+        if is_valid(
+            self,
+            destination_url.scheme(),
+            destination_url.host(),
+            destination_url.port(),
+        ) {
+            Ok(())
+        } else {
+            anyhow::bail!("target doesn't obey the filtering rule");
+        }
+    }
+
+    pub fn validate_destination_str(&self, destination_url: impl AsRef<str>) -> anyhow::Result<()> {
+        validate_destination_str_impl(self, destination_url.as_ref())
     }
 }
 
-fn validate_destination_impl(rule: &FilteringRule, destination_url: &str) -> anyhow::Result<()> {
+fn validate_destination_str_impl(rule: &FilteringRule, destination_url: &str) -> anyhow::Result<()> {
     let (scheme, target) = destination_url
         .split_once("://")
         .context("invalid destination URL format")?;

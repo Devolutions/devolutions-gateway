@@ -6,3 +6,7 @@ edition = "2021"
 
 [dependencies]
 bytes = "1.1.0"
+smol_str = "0.1.21"
+
+[dev-dependencies]
+proptest = "1.0.0"
