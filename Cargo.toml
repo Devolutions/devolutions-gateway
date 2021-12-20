@@ -9,10 +9,12 @@ members = [
     "jmux-proxy",
     "tools/*",
     "crates/*",
+    "picky-krb",
 ]
 default-members = [
     "devolutions-gateway",
     "jetsocat",
+    "picky-krb",
 ]
 
 [profile.production]
