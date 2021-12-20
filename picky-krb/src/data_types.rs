@@ -161,3 +161,18 @@ pub struct LastReqInner {
 }
 pub type LastReq = Asn1SequenceOf<LastReqInner>;
 
+#[cfg(test)]
+mod tests {
+    use crate::data_types::KerberosStringAsn1;
+
+    #[test]
+    fn test_general_string() {
+        // EXAMPLE.COM
+        let expected = [27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77];
+
+        let s: KerberosStringAsn1 = picky_asn1_der::from_bytes(&expected).unwrap();
+        let data = picky_asn1_der::to_vec(&s).unwrap();
+
+        assert_eq!(data, expected);
+    }
+}
