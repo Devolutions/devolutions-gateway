@@ -22,8 +22,10 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          CI_RUN: ${{ github.event.inputs.run-id }}
         run: |
-          $RunJson = gh api "/repos/$Env:GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.run-id }}"
+          GetRunsCmd = @('gh', 'api', "/repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN")
+          $RunJson = Invoke-Expression ($GetRunsCmd -Join ' ')
           $Run = $RunJson | ConvertFrom-Json
 
           if ($($Run.head_branch) -Ne "master") {
