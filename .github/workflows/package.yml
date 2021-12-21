@@ -57,7 +57,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: | 
           gh run download ${{ github.event.inputs.run-id }} -n devolutions-gateway -D (Join-Path ${{ runner.temp }} devolutions-gateway)
-          Get-ChildItem -Path ${{ runner.temp }} -recurse
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse
 
       # - name: Configure certificates
       #   env:
