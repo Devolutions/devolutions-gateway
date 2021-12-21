@@ -1,5 +1,3 @@
-# Continuous integration and deploymnent workflow for devolutions-gateway
-
 name: CI
 
 on:
@@ -66,6 +64,48 @@ jobs:
           name: version
           path: VERSION
 
+  test:
+      name: test [${{ matrix.os }} ${{ matrix.arch }}]
+      runs-on: ${{ matrix.runner }}
+      needs: preflight
+      env:
+        CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+        CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+      strategy:
+        matrix:
+          arch: [ x86_64 ]
+          os: [ windows, linux ]
+          include:
+            - os: windows
+              runner: windows-2019
+            - os: linux
+              runner: ubuntu-18.04
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v2
+
+        - name: Configure rust toolchain
+          run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+
+        - name: Configure Linux runner
+          if: matrix.os == 'linux'
+          run: |
+            sudo apt update
+            sudo apt install python3-wget python3-setuptools libsystemd-dev
+
+        - name: Configure conan
+          run: |
+            pip3 install conan==1.40.0 --upgrade
+            conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
+            conan remote clean
+            conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+
+        - name: Test
+          shell: pwsh
+          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
@@ -74,7 +114,6 @@ jobs:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
       CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
     strategy:
-      fail-fast: false
       matrix:
         arch: [ x86, x86_64, arm64 ]
         os: [ windows, macos, linux ]
@@ -99,43 +138,21 @@ jobs:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
 
-      - name: Load dynamic variables
-        id: load-variables
-        shell: pwsh
-        run: |
-          $PackageVersion = "${{ needs.preflight.outputs.version }}"
-          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
-          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "jetsocat_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
-
-          if ($Env:RUNNER_OS -eq "Windows") {
-            $ExecutableFileName = "$($ExecutableFileName).exe"
-          }
-
-          $JetsocatExecutable = Join-Path $TargetOutputPath $ExecutableFileName
-          $CargoPackage = "jetsocat"
-          echo "::set-output name=staging-path::$StagingPath"
-          echo "::set-output name=target-output-path::$TargetOutputPath"
-          echo "::set-output name=jetsocat-executable::$JetsocatExecutable"
-          echo "::set-output name=cargo-package::$CargoPackage"
-
       - name: Configure rust toolchain
-        run: |
-          rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+        run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
 
       - name: Configure Linux runner
-        if: runner.os == 'Linux'
+        if: matrix.os == 'linux'
         run: |
           sudo apt update
           sudo apt install python3-wget python3-setuptools
 
       - name: Configure Windows runner
-        if: matrix.os == 'windows'
-        run: |
-          rustup target add i686-pc-windows-msvc
+        if: matrix.os == 'windows' && matrix.arch == 'x86'
+        run: rustup target add i686-pc-windows-msvc
 
       - name: Configure macOS runner
-        if: matrix.os == 'macos'
+        if: matrix.os == 'macos' && matrix.arch == 'arm64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
@@ -148,24 +165,32 @@ jobs:
           conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
 
       - name: Build
+        id: build
         shell: pwsh
-        env:
-          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
-          JETSOCAT_EXECUTABLE: ${{ steps.load-variables.outputs.jetsocat-executable }}
-          CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
         run: |
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = 'jetsocat_${{ runner.os }}_$${{ needs.preflight.outputs.version }}_${{ matrix.arch }}'
+          
           if ($Env:RUNNER_OS -eq "Windows") {
+            $ExecutableFileName = "$($ExecutableFileName).exe"
             $Env:CARGO_NO_DEFAULT_FEATURES = "true"
             $Env:CARGO_FEATURES = "native-tls"
           }
 
+          $Env:TARGET_OUTPUT_PATH = $TargetOutputPath
+          $Env:JETSOCAT_EXECUTABLE = Join-Path $TargetOutputPath $ExecutableFileName
+          $Env:CARGO_PACKAGE = "jetsocat"
+
           ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+          echo "::set-output name=staging-path::$StagingPath"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
           name: jetsocat
-          path: ${{ steps.load-variables.outputs.staging-path }}
+          path: ${{ steps.build.outputs.staging-path }}
 
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
@@ -175,7 +200,6 @@ jobs:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
       CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
     strategy:
-      fail-fast: false
       matrix:
         arch: [ x86_64 ]
         os: [ windows, linux ]
@@ -211,27 +235,23 @@ jobs:
           }
 
           $DGatewayExecutable = Join-Path $TargetOutputPath $ExecutableFileName
-          $CargoPackage = "devolutions-gateway"
           echo "::set-output name=staging-path::$StagingPath"
           echo "::set-output name=target-output-path::$TargetOutputPath"
           echo "::set-output name=dgateway-executable::$DGatewayExecutable"
-          echo "::set-output name=cargo-package::$CargoPackage"
 
       - name: Configure rust toolchain
-        run: |
-          rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
+        run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
 
       - name: Configure Linux runner
-        if: runner.os == 'Linux'
+        if: matrix.os == 'linux'
         run: |
           sudo apt update
-          sudo apt install dh-make python3-wget python3-setuptools libsystemd-dev
+          sudo apt install python3-wget python3-setuptools libsystemd-dev dh-make
 
       # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
-        if: runner.os == 'Windows'
-        run: |
-          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        if: matrix.os == 'windows'
+        run: echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Configure conan
         run: |
@@ -245,9 +265,8 @@ jobs:
         env:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
-          CARGO_PACKAGE: ${{ steps.load-variables.outputs.cargo-package }}
-        run: |
-          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+          CARGO_PACKAGE: devolutions-gateway
+        run: ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Build PowerShell module
         if: matrix.os == 'windows'
@@ -274,46 +293,3 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
-
-  test:
-      name: test [${{ matrix.os }} ${{ matrix.arch }}]
-      runs-on: ${{ matrix.runner }}
-      needs: preflight
-      env:
-        CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-        CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
-      strategy:
-        matrix:
-          arch: [ x86_64 ]
-          os: [ windows, linux ]
-          include:
-            - os: windows
-              runner: windows-2019
-            - os: linux
-              runner: ubuntu-18.04
-
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v2
-
-        - name: Configure rust toolchain
-          run: |
-            rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
-
-        - name: Configure Linux runner
-          if: runner.os == 'Linux'
-          run: |
-            sudo apt update
-            sudo apt install python3-wget python3-setuptools libsystemd-dev
-
-        - name: Configure conan
-          run: |
-            pip3 install conan==1.40.0 --upgrade
-            conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-            conan remote clean
-            conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
-
-        - name: Test
-          shell: pwsh
-          run: |
-            ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

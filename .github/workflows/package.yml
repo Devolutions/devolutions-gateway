@@ -1,0 +1,106 @@
+name: Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'The CI workflow run to package'
+        required: true
+
+concurrency: gateway-package
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-18.04
+    outputs: 
+      commit: ${{ steps.get-commit.outputs.commit }}
+
+    steps:
+      - name: Get commit
+        id: get-commit
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: |
+          $RunJson = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.run-id }}
+          $Run = $RunJson | ConvertFrom-Json
+
+          if ($($Run.head_branch) -Ne "master") {
+            echo "::error::specified run is not on master, exiting..."
+            exit 1
+          }
+
+          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+            echo "::error::specified run is either not complete or not successful, exiting..."            
+            exit 1
+          }
+
+          echo "::set-output name=commit::$($Run.head_sha)"
+          echo "::notice::Packaging commit ${{ steps.get-commit.outputs.commit }} from run ${{ github.event.inputs.run }}"
+
+  codesign:
+    name: Codesign
+    runs-on: windows-2019
+    environment: build-and-publish
+    needs: preflight
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+
+      - name: Download artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: | 
+          gh run download ${{ github.event.inputs.run-id }} -n devolutions-gateway -D (Join-Path ${{ runner.temp }} devolutions-gateway)
+          Get-ChildItem -Path ${{ runner.temp }} -recurse
+
+      # - name: Configure certificates
+      #   env:
+      #     CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+      #     CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+      #   run: |
+      #     $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
+      #     [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
+      #     $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
+      #     Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
+      # - name: Configure runner
+      #   run: |
+      #     echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # - name: Sign executables
+      #   run: |
+      #     Get-ChildItem -Path devolutions-gateway -Recurse -Include "*.exe", "*.msi" | % { 
+      #       Write-Host "Signing $_.FullName"
+      #       $SignCmd = $(@(
+      #         'signtool', 
+      #         'sign', 
+      #         '/fd', 'SHA256', 
+      #         '/v', 
+      #         '/n', 'Devolutions', 
+      #         '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+      #         '/td', 'sha256',
+      #         $_.FullName
+      #       )) -Join ' '
+
+      #       Invoke-Expression $SignCmd
+      #     }
+
+      # - name: Upload artifacts
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: devolutions-gateway
+      #     path: devolutions-gateway
+
+      # - name: Upload artifacts
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     name: jetsocat
+      #     path: jetsocat
+
+  
