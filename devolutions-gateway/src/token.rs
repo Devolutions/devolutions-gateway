@@ -74,7 +74,7 @@ pub enum ConnectionMode {
     /// Connection should be processed following the rendez-vous protocol
     Rdv,
 
-    /// Connection should be forwared to a given destination host
+    /// Connection should be forwarded to a given destination host
     Fwd {
         /// Forward targets. Should be tried in order.
         targets: Vec<TargetAddr>,
