@@ -11,11 +11,20 @@ cargo-fuzz = true
 [dependencies]
 jmux-proto = { path = "../jmux-proto" }
 jet-proto = { path = "../jet-proto" }
+devolutions-gateway = { path = "../devolutions-gateway" }
 libfuzzer-sys = "0.4"
 bytes = "1.1.0"
+url = "2.2.2"
+tokio = "1.14.0"
+slog = "2.7.0"
+anyhow = "1.0.51"
+get-port = "4.0.0"
+tap = "1.0.1"
+tokio-tungstenite = "0.16.1"
 
 # Prevent this from interfering with workspaces
 [workspace]
+resolver = "2"
 members = ["."]
 
 [[bin]]
@@ -27,5 +36,11 @@ doc = false
 [[bin]]
 name = "jet_message"
 path = "fuzz_targets/jet_message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "listeners_raw"
+path = "fuzz_targets/listeners_raw.rs"
 test = false
 doc = false
