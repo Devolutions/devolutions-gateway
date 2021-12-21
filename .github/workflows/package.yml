@@ -24,7 +24,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           CI_RUN: ${{ github.event.inputs.run-id }}
         run: |
-          GetRunsCmd = @('gh', 'api', "/repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN")
+          $GetRunsCmd = @('gh', 'api', "/repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN")
           $RunJson = Invoke-Expression ($GetRunsCmd -Join ' ')
           $Run = $RunJson | ConvertFrom-Json
 
