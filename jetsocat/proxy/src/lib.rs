@@ -130,7 +130,7 @@ impl<T: ToDestAddr + ?Sized> ToDestAddr for &T {
 
 /// We need a super-trait in order to have additional non-auto-trait traits in trait objects.
 ///
-/// The reason for using trait objets is monomorphization prevention in generic code.
+/// The reason for using trait objects is monomorphization prevention in generic code.
 /// This is for reducing code size by avoiding function duplication.
 ///
 /// See:

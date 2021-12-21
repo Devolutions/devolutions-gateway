@@ -3,7 +3,7 @@ use jmux_proto::DestinationUrl;
 
 /// JMUX proxy configuration struct.
 ///
-/// All paramaters are designed to be opt-in rather than opt-out: default values are conservatives
+/// All parameters are designed to be opt-in rather than opt-out: default values are conservatives
 /// and always safe (whitelist approach).
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -99,9 +99,9 @@ pub enum FilteringRule {
     Allow,
     /// Invert the rule
     Not(Box<FilteringRule>),
-    /// Must fullfill every rule.
+    /// Must fulfill every rule.
     All(Vec<FilteringRule>),
-    /// Must fullfill at least one rule.
+    /// Must fulfill at least one rule.
     Any(Vec<FilteringRule>),
     /// Host must match exactly.
     Host(String),
