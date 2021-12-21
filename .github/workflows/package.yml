@@ -24,17 +24,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           CI_RUN: ${{ github.event.inputs.run }}
         run: |
-          $GetRunsCmd = @('gh', 'api', "/repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN")
-          $RunJson = Invoke-Expression ($GetRunsCmd -Join ' ')
-          $Run = $RunJson | ConvertFrom-Json
-
+          $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
           if ($($Run.head_branch) -Ne "master") {
-            echo "::error::specified run is not on master, exiting..."
-            exit 1
+            echo "::notice::specified run is not on master"
           }
-
           if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-            echo "::error::specified run is either not complete or not successful, exiting..."            
+            echo "::error::specified run is either not complete or not successful"            
             exit 1
           }
 
@@ -44,7 +39,7 @@ jobs:
   codesign:
     name: Codesign
     runs-on: windows-2019
-    environment: build-and-publish
+    # environment: build-and-publish
     needs: preflight
 
     steps:
