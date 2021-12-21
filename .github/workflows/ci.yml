@@ -283,7 +283,6 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
-            $Env:DGATEWAY_PSMODULE_CLEAN = "1"
           }
 
           ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
