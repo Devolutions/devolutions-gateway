@@ -23,7 +23,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          $RunJson = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.run-id }}
+          $RunJson = gh api "/repos/$Env:GITHUB_REPOSITORY/actions/runs/${{ github.event.inputs.run-id }}"
           $Run = $RunJson | ConvertFrom-Json
 
           if ($($Run.head_branch) -Ne "master") {
