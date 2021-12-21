@@ -93,6 +93,7 @@ jobs:
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
+          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
           $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_PSMODULE_CLEAN = "1"
