@@ -377,7 +377,11 @@ class TlkRecipe
             throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
         
+        Write-Host $DGatewayExecutable
+        Write-Host $DGatewayPSModulePath
+
         $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
+        Write-Host $PSManifestFile
         $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
         $PSModuleName = $(Get-Item $PSManifestFile).BaseName
         $PSModuleVersion = $PSManifest.ModuleVersion
