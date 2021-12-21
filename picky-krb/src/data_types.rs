@@ -1,6 +1,9 @@
-use picky_asn1::wrapper::{Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3, GeneralizedTimeAsn1, GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional};
+use picky_asn1::wrapper::{
+    Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
+    GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
+};
+use picky_asn1_der::application_tag::ApplicationTag;
 use serde::{Deserialize, Serialize};
-use crate::application_tag::{ApplicationTag, ApplicationTagType};
 
 /// [RFC 4120 5.2.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -130,21 +133,7 @@ pub struct TicketInner {
     enc_part: ExplicitContextTag3<EncryptedData>,
 }
 
-impl ApplicationTagType for TicketInner {
-    fn tag() -> u8 {
-        1
-    }
-
-    fn from_bytes(data: &[u8]) -> Self {
-        picky_asn1_der::from_bytes(data).unwrap()
-    }
-
-    fn to_vec(&self) -> Vec<u8> {
-        picky_asn1_der::to_vec(&self).unwrap()
-    }
-}
-
-pub type Ticket = ApplicationTag<TicketInner>;
+pub type Ticket = ApplicationTag<TicketInner, 1>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -166,7 +155,7 @@ mod tests {
     use crate::data_types::KerberosStringAsn1;
 
     #[test]
-    fn test_general_string() {
+    fn test_kerberos_string() {
         // EXAMPLE.COM
         let expected = [27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77];
 

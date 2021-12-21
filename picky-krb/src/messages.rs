@@ -1,4 +1,3 @@
-use crate::application_tag::ApplicationTagType;
 use crate::data_types::{
     EncryptedData, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, PaData, PrincipalName, Realm, Ticket,
 };
@@ -7,6 +6,8 @@ use picky_asn1::wrapper::{
     ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6,
     ExplicitContextTag7, ExplicitContextTag8, ExplicitContextTag9, IntegerAsn1, OctetStringAsn1, Optional,
 };
+use picky_asn1_der::application_tag::ApplicationTag;
+use picky_asn1_der::Asn1DerError;
 use serde::de::Error;
 use serde::{de, Deserialize, Serialize};
 use std::fmt;
@@ -46,15 +47,15 @@ impl<'de> de::Deserialize<'de> for KdcProxyMessage {
                 A: de::SeqAccess<'de>,
             {
                 let kerb_message: Option<ExplicitContextTag0<OctetStringAsn1>> = seq.next_element()?;
-                let kerb_message = if kerb_message.is_none() {
-                    return Err(A::Error::custom("kerb_message field must present in KdcProxyMessage"));
+                let kerb_message = if let Some(kerb_message) = kerb_message {
+                    kerb_message
                 } else {
-                    kerb_message.unwrap()
+                    return Err(A::Error::custom("kerb_message field must present in KdcProxyMessage"));
                 };
 
-                let target_domain = seq.next_element()?.unwrap_or(Optional::from(None));
+                let target_domain = seq.next_element()?.unwrap_or_else(|| Optional::from(None));
 
-                let dclocator_hint = seq.next_element()?.unwrap_or(Optional::from(None));
+                let dclocator_hint = seq.next_element()?.unwrap_or_else(|| Optional::from(None));
 
                 Ok(KdcProxyMessage {
                     kerb_message,
@@ -69,12 +70,14 @@ impl<'de> de::Deserialize<'de> for KdcProxyMessage {
 }
 
 impl KdcProxyMessage {
-    pub fn from_raw<R: ?Sized + AsRef<[u8]>>(raw: &R) -> Result<KdcProxyMessage, ()> {
-        let mut de = picky_asn1_der::Deserializer::new_from_bytes(raw.as_ref());
-        Ok(KdcProxyMessage::deserialize(&mut de).map_err(|_| ())?)
+    pub fn from_raw<R: ?Sized + AsRef<[u8]>>(raw: &R) -> Result<KdcProxyMessage, Asn1DerError> {
+        let mut deserializer = picky_asn1_der::Deserializer::new_from_bytes(raw.as_ref());
+        KdcProxyMessage::deserialize(&mut deserializer)
     }
 
-    pub fn from_raw_kerb_message<R: ?Sized + AsRef<[u8]>>(raw_kerb_message: &R) -> Result<KdcProxyMessage, ()> {
+    pub fn from_raw_kerb_message<R: ?Sized + AsRef<[u8]>>(
+        raw_kerb_message: &R,
+    ) -> Result<KdcProxyMessage, Asn1DerError> {
         Ok(KdcProxyMessage {
             kerb_message: ExplicitContextTag0::from(OctetStringAsn1(raw_kerb_message.as_ref().to_vec())),
             target_domain: Optional::from(None),
@@ -82,8 +85,8 @@ impl KdcProxyMessage {
         })
     }
 
-    pub fn to_vec(&self) -> Result<Vec<u8>, ()> {
-        Ok(picky_asn1_der::to_vec(self).map_err(|_| ())?)
+    pub fn to_vec(&self) -> Result<Vec<u8>, Asn1DerError> {
+        picky_asn1_der::to_vec(self)
     }
 }
 
@@ -146,21 +149,21 @@ impl<'de> de::Deserialize<'de> for KdcReqBody {
             where
                 A: de::SeqAccess<'de>,
             {
-                let err = |msg| A::Error::custom(msg);
-
                 Ok(KdcReqBody {
-                    kdc_options: seq.next_element()?.ok_or(err("kdc_options must present"))?,
-                    cname: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    realm: seq.next_element()?.ok_or(err("reaml must present"))?,
-                    sname: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    from: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    till: seq.next_element()?.ok_or(err("till must present"))?,
-                    rtime: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    nonce: seq.next_element()?.ok_or(err("nonce must present"))?,
-                    etype: seq.next_element()?.ok_or(err("etype must present"))?,
-                    addresses: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    enc_authorization_data: seq.next_element()?.unwrap_or(Optional::from(None)),
-                    additional_tickets: seq.next_element()?.unwrap_or(Optional::from(None)),
+                    kdc_options: seq
+                        .next_element()?
+                        .ok_or_else(|| A::Error::missing_field("kdc_options"))?,
+                    cname: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    realm: seq.next_element()?.ok_or_else(|| A::Error::missing_field("reaml"))?,
+                    sname: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    from: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    till: seq.next_element()?.ok_or_else(|| A::Error::missing_field("till"))?,
+                    rtime: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    nonce: seq.next_element()?.ok_or_else(|| A::Error::missing_field("nonce"))?,
+                    etype: seq.next_element()?.ok_or_else(|| A::Error::missing_field("etype"))?,
+                    addresses: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    enc_authorization_data: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
+                    additional_tickets: seq.next_element()?.unwrap_or_else(|| Optional::from(None)),
                 })
             }
         }
@@ -193,44 +196,14 @@ pub struct KdcReq {
 /// ```not_rust
 /// AS-REQ          ::= [APPLICATION 10] KDC-REQ
 /// ```
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AsReq(KdcReq);
-
-impl ApplicationTagType for AsReq {
-    fn tag() -> u8 {
-        10
-    }
-
-    fn from_bytes(data: &[u8]) -> Self {
-        Self(picky_asn1_der::from_bytes(data).unwrap())
-    }
-
-    fn to_vec(&self) -> Vec<u8> {
-        picky_asn1_der::to_vec(&self.0).unwrap()
-    }
-}
+pub type AsReq = ApplicationTag<KdcReq, 10>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// TGS-REQ         ::= [APPLICATION 12] KDC-REQ
 /// ```
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TgsReq(KdcReq);
-
-impl ApplicationTagType for TgsReq {
-    fn tag() -> u8 {
-        12
-    }
-
-    fn from_bytes(data: &[u8]) -> Self {
-        Self(picky_asn1_der::from_bytes(data).unwrap())
-    }
-
-    fn to_vec(&self) -> Vec<u8> {
-        picky_asn1_der::to_vec(&self.0).unwrap()
-    }
-}
+pub type TgsReq = ApplicationTag<KdcReq, 12>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -257,18 +230,19 @@ pub struct KdcRep {
     enc_part: ExplicitContextTag6<EncryptedData>,
 }
 
-/// [RFC 4120 5.4.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
-///
-/// ```not_rust
-/// AS-REQ          ::= [APPLICATION 10] KDC-REQ
-/// TGS-REQ         ::= [APPLICATION 12] KDC-REQ
-/// ```
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// AS-REP          ::= [APPLICATION 11] KDC-REP
+/// ```
+pub type AsRep = ApplicationTag<KdcRep, 11>;
+
+/// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
+///
+/// ```not_rust
 /// TGS-REP         ::= [APPLICATION 13] KDC-REP
 /// ```
+pub type TgsRep = ApplicationTag<KdcRep, 13>;
 
 #[cfg(test)]
 mod tests {
@@ -358,7 +332,6 @@ mod tests {
         let kdc_rep: KdcRep = picky_asn1_der::from_bytes(&expected).unwrap();
 
         let kdc_rep_raw = picky_asn1_der::to_vec(&kdc_rep).unwrap();
-        println!("{:?}", kdc_rep_raw);
 
         assert_eq!(expected, kdc_rep_raw);
     }
