@@ -34,7 +34,7 @@ jobs:
           }
 
           echo "::set-output name=commit::$($Run.head_sha)"
-          echo "::notice::Packaging commit ${{ steps.get-commit.outputs.commit }} from run ${{ github.event.inputs.run }}"
+          echo "::notice::Packaging commit $($Run.head_sha) from run ${{ github.event.inputs.run }}"
 
   codesign:
     name: Codesign
@@ -53,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: | 
-          gh run download ${{ github.event.inputs.run-id }} -n devolutions-gateway -D (Join-Path ${{ runner.temp }} devolutions-gateway)
+          gh run download ${{ github.event.inputs.run-id }} -n devolutions-gateway -n jetsocat -D (Join-Path ${{ runner.temp }} devolutions-gateway)
           Get-ChildItem -Path ${{ runner.temp }} -Recurse
 
       # - name: Configure certificates
@@ -65,6 +65,11 @@ jobs:
       #     [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
       #     $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
       #     Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
+      - name: Sign executables
+        shell: pwsh
+        run: |
+            
 
       # - name: Configure runner
       #   run: |
