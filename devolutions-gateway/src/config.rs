@@ -806,9 +806,12 @@ impl Config {
             config.sogar_registry_config.sogar_push_registry_info.image_name = Some(image_name.to_owned());
         }
 
+        if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
+            config.recording_path = Some(Utf8PathBuf::from(recording_path));
+        }
+
         // listeners parsing
 
-        let mut listeners = Vec::new();
         for listener in matches.values_of(ARG_LISTENERS).unwrap_or_default() {
             let mut internal_url;
             let mut external_url;
@@ -849,18 +852,19 @@ impl Config {
                 .unwrap_or_else(|_| panic!("External url can't be built based on listener {}", listener));
             }
 
-            listeners.push(ListenerConfig {
+            config.listeners.push(ListenerConfig {
                 internal_url,
                 external_url,
             });
         }
 
-        if !listeners.is_empty() {
-            config.listeners = listeners;
-        }
+        // NOTE: we allow configs to specify "http" or "https" scheme if it's clearer,
+        // but this is ultimately identical to "ws" and "wss" respectively.
 
-        if let Some(recording_path) = matches.value_of(ARG_RECORDING_PATH) {
-            config.recording_path = Some(Utf8PathBuf::from(recording_path));
+        // Normalize all listeners to ws/wss
+        for listener in config.listeners.iter_mut() {
+            url_map_scheme_http_to_ws(&mut listener.internal_url);
+            url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
         config
@@ -929,24 +933,6 @@ impl Config {
                     listener.external_url.to_string()
                 );
             }
-        }
-
-        // NOTE: we allow configs to specify "http" or "https" scheme if it's clearer,
-        // but this is ultimately identical to "ws" and "wss" respectively.
-
-        let has_at_least_one_http_listener = listeners
-            .iter()
-            .any(|listener| matches!(listener.internal_url.scheme(), "http" | "https" | "ws" | "wss"));
-
-        if !has_at_least_one_http_listener {
-            eprintln!("At least one HTTP listener is required");
-            return None;
-        }
-
-        for listener in listeners.iter_mut() {
-            // normalize all listeners to ws/wss
-            url_map_scheme_http_to_ws(&mut listener.internal_url);
-            url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
         let application_protocols = config_file.application_protocols.unwrap_or_default();
