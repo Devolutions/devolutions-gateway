@@ -70,19 +70,20 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*DevolutionsGateway*.exe', '*jetsocat*.exe' | % { 
-          $SignCmd = $(@(
-            'signtool', 
-            'sign', 
-            '/fd', 'SHA256', 
-            '/v', 
-            '/n', 'Devolutions', 
-            '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-            '/td', 'sha256',
-            $_.FullName
-          )) -Join ' '
+            $SignCmd = $(@(
+              'signtool', 
+              'sign', 
+              '/fd', 'SHA256', 
+              '/v', 
+              '/n', 'Devolutions', 
+              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/td', 'sha256',
+              $_.FullName
+            )) -Join ' '
 
-          Write-Host $SignCmd
-          Invoke-Expression $SignCmd
+            Write-Host $SignCmd
+            Invoke-Expression $SignCmd
+          }
 
       - name: Repackage
         shell: pwsh
@@ -100,19 +101,20 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % { 
-          $SignCmd = $(@(
-            'signtool', 
-            'sign', 
-            '/fd', 'SHA256', 
-            '/v', 
-            '/n', 'Devolutions', 
-            '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-            '/td', 'sha256',
-            $_.FullName
-          )) -Join ' '
+            $SignCmd = $(@(
+              'signtool', 
+              'sign', 
+              '/fd', 'SHA256', 
+              '/v', 
+              '/n', 'Devolutions', 
+              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/td', 'sha256',
+              $_.FullName
+            )) -Join ' '
 
-          Write-Host $SignCmd
-          Invoke-Expression $SignCmd
+            Write-Host $SignCmd
+            Invoke-Expression $SignCmd
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
