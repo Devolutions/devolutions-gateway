@@ -16,7 +16,8 @@ fn gateway_service_main(
     args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let mut service = GatewayService::load().expect("unable to load service");
+    let config = Config::init();
+    let mut service = GatewayService::load(config).expect("unable to load service");
 
     info!("{} service started", service.get_service_name());
     info!("args: {:?}", args);
@@ -41,8 +42,7 @@ fn gateway_service_main(
 
 Service!("gateway", gateway_service_main);
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if (args.len() > 1) && (!args[1].starts_with('-')) {
         let cli_app = App::new(crate_name!())
@@ -96,12 +96,16 @@ async fn main() -> anyhow::Result<()> {
         let config = Config::init();
 
         if !config.service_mode {
-            let mut service = GatewayService::load().context("Service loading failed")?;
+            let mut service = GatewayService::load(config).context("Service loading failed")?;
 
             service.start();
 
-            // future waiting for some stop signals (CTRL-C…)
-            let _ = build_signals_fut().await?;
+            // Waiting for some stop signals (CTRL-C…)
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .unwrap();
+            rt.block_on(build_signals_fut())?;
 
             service.stop();
         } else {

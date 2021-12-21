@@ -250,6 +250,7 @@ impl WsTransport {
         }
     }
 
+    // TODO/FIXME: addr type should probably be `SocketAddr` instead of `Option<SocketAddr>`
     pub fn new_tcp(stream: WebSocketStream<TcpStream>, addr: Option<SocketAddr>) -> Self {
         WsTransport {
             stream: WsStreamWrapper::Tcp((stream, addr)).into(),
