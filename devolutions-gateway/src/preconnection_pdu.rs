@@ -50,14 +50,18 @@ pub async fn read_preconnection_pdu(stream: &mut TcpStream) -> io::Result<(Preco
     let mut buf = BytesMut::with_capacity(512);
 
     loop {
-        stream.read_buf(&mut buf).await?;
+        let n_read = stream.read_buf(&mut buf).await?;
 
-        match decode_preconnection_pdu(&mut buf)? {
-            Some(pdu) => {
-                let leftover_bytes = buf.split_off(pdu.buffer_length());
-                return Ok((pdu, leftover_bytes));
-            }
-            None => continue,
+        if n_read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "not enough bytes to decode preconnection PDU",
+            ));
+        }
+
+        if let Some(pdu) = decode_preconnection_pdu(&mut buf)? {
+            let leftover_bytes = buf.split_off(pdu.buffer_length());
+            return Ok((pdu, leftover_bytes));
         }
     }
 }
