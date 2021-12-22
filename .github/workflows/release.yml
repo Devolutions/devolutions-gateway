@@ -3,9 +3,14 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      run-id:
-        description: 'The CI workflow run ID with the artifacts to release'
+      run:
+        description: 'The Package workflow run to release'
         required: true
+      dry-run:
+        description: 'If true, the workflow only indicates which artifacts would be uploaded'
+        required: true
+        type: boolean
+        default: 'true'
 
 concurrency: gateway-release
 
@@ -14,112 +19,28 @@ jobs:
     name: Preflight
     runs-on: ubuntu-18.04
     outputs: 
-      commit: ${{ steps.get-commit.outputs.commit }}
       version: ${{ steps.get-version.outputs.version }}
 
     steps:
-      - name: Get commit
-        id: get-commit
+      - name: Get version
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          $RunJson = gh api /repos/devolutions/devolutions-gateway/actions/runs/${{ github.event.inputs.run-id }}
-          $Run = $RunJson | ConvertFrom-Json
-
-          if ($($Run.head_branch) -Ne "master") {
-            echo "::error::specified run is not on master, exiting..."
-            exit 1
-          }
-
-          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-            echo "::error::specified run is either not complete or not successful, exiting..."            
-            exit 1
-          }
-
-          echo "::set-output name=commit::$($Run.head_sha)"
-
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
-        with:
-          ref: ${{ steps.get-commit.outputs.commit }}
-
-      - name: Get version
-        id: get-version
-        shell: pwsh
-        run: |
+          gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
           $Version = Get-Content VERSION -TotalCount 1
           echo "::set-output name=version::$Version"
 
       - name: Print output
         shell: pwsh
-        run: Write-Host Version ${{ steps.get-version.outputs.version }} - Run ${{ github.event.inputs.run-id }} - Commit ${{ steps.get-commit.outputs.commit }}
-
-  # TODO: code sign (and notarize?) jetsocat on macOS
-  codesign:
-    name: Codesign
-    runs-on: windows-2019
-    environment: build-and-publish
-    needs: preflight
-
-    steps:
-      - name: Configure certificates
-        env:
-          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
-        run: |
-          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
-          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
-          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
-          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
-
-      - name: Configure runner
-        run: |
-          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Download artifacts
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run-id }} --repo Devolutions/devolutions-gateway
-
-      - name: Sign executables
-        run: |
-          Get-ChildItem -Path devolutions-gateway -Recurse -Include "*.exe", "*.msi" | % { 
-            Write-Host "Signing $_.FullName"
-            $SignCmd = $(@(
-              'signtool', 
-              'sign', 
-              '/fd', 'SHA256', 
-              '/v', 
-              '/n', 'Devolutions', 
-              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-              '/td', 'sha256',
-              $_.FullName
-            )) -Join ' '
-
-            Invoke-Expression $SignCmd
-          }
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: devolutions-gateway
-          path: devolutions-gateway
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: jetsocat
-          path: jetsocat
+        run: echo "::notice::Releasing artifacts for version ${{ steps.get-version.outputs.version }} from run ${{ github.event.inputs.run }}"
 
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
-    needs: [preflight, codesign]
+    needs: [preflight]
     strategy:
-      fail-fast: true
       matrix:
         arch: [ x86_64 ]
         os: [ windows, linux ]
@@ -139,21 +60,17 @@ jobs:
             base-image: nanoserver-1809
 
     steps:
-      - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
-
       - name: Download artifacts
-        id: download
-        uses: actions/download-artifact@v2
-        with:
-          name: devolutions-gateway
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: gh run download ${{ github.event.inputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
-      # Copy the built and signed Devolutions Gateway binary into the packaging location
-      - name: Move artifacts
-        id: move-artifacts
+      - name: Prepare artifacts
+        id: prepare-artifacts
         shell: pwsh
         run: |
-          $PkgDir = Join-Path $pwd package $Env:RUNNER_OS # RUNNER_OS is camelcase
+          $PkgDir = Join-Path docker $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "::set-output name=package-path::$PkgDir"
           
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
@@ -165,7 +82,7 @@ jobs:
             $TargetFileName = "devolutions-gateway"
           }
 
-          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path ${{ steps.download.outputs.download-path }}
+          $SourcePath = Get-ChildItem -Recurse -Filter $SourceFileName -File -Path devolutions-gateway
           $TargetPath = Join-Path $PkgDir $TargetFileName
           Copy-Item $SourcePath $TargetPath
 
@@ -176,7 +93,7 @@ jobs:
       - name: Build container
         id: build-container
         shell: pwsh
-        working-directory: ${{ steps.move-artifacts.outputs.package-path }}
+        working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
           if ("${{ matrix.base-image }}" -Eq "nanoserver-1809") {
@@ -188,16 +105,20 @@ jobs:
 
       - name: Push container
         shell: pwsh
-        working-directory: ${{ steps.move-artifacts.outputs.package-path }}
+        working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           echo ${{ secrets.DOCKER_HUB_BOT_PASSWORD }} | docker login -u devolutionsbot --password-stdin
-          docker push ${{ steps.build-container.outputs.image-name }}
+          $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
+          Write-Host $DockerPushCmd
+          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+            Invoke-Expression $DockerPushCmd
+          }
 
   github-release:
     name: GitHub release
     runs-on: ubuntu-18.04
     environment: build-and-publish
-    needs: [preflight, codesign]
+    needs: [preflight]
 
     steps:
       - name: Download artifacts
@@ -217,13 +138,15 @@ jobs:
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
-          Invoke-Expression $GhCmd
+          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+            Invoke-Expression $GhCmd
+          }
 
   psgallery-release:
     name: PowerShell release
     runs-on: ubuntu-18.04
     environment: build-and-publish
-    needs: codesign
+    needs: preflight
 
     steps:
       - name: Download artifacts
@@ -239,8 +162,16 @@ jobs:
           $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
           $Module = Join-Path $StagingPath PowerShell
           Expand-Archive -Path $Archive -DestinationPath $Module
+
+          $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path $Module DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
+          if ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')) {
+            $PublishCmd += '-WhatIf'
+          }
+          $PublishCmd = $PublishCmd -Join ' '
+          Write-Host $PublishCmd
+
           try {
-            Publish-Module -Force -Path (Join-Path $Module DevolutionsGateway) -NugetApiKey "${{ secrets.PS_GALLERY_NUGET_API_KEY }}"
+            Invoke-Expression $PublishCmd
           }
           catch {
             if ($_.Exception.Message -ilike "*cannot be published as the current version*is already available in the repository*") {
