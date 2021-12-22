@@ -45,10 +45,15 @@ jobs:
       max-parallel: 1
       matrix:
         project: [ jetsocat, devolutions-gateway ]
-        runner: [ windows-2019, macos-10.15 ]
+        os: [ windows, macos ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: macos
+            runner: macos-10.15
         exclude:
           - project: devolutions-gateway
-            runner: macos-10.15
+            os: macos
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -60,10 +65,15 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D $(Join-Path ${{ runner.temp }} ${{ matrix.project }})
+        run: |
+          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
+          gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D "$Destination"
+          if ("${{ matrix.project" -Eq 'jetsocat') {
+            Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
+          }
 
       - name: Configure certificates (Windows)
-        if: matrix.os == 'Windows'
+        if: matrix.os == 'windows'
         env:
           CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
           CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
@@ -73,8 +83,27 @@ jobs:
           $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
           Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
 
+      - name: Configure certificates (macOS)
+        if: matrix.os == 'macos'
+        env:
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=Price2011
+
+          DEVELOPER_ID_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_cert.p12
+          echo -n "$DEVELOPER_ID_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
       - name: Configure runner (Windows)
-        if: matrix.os == 'Windows'
+        if: matrix.os == 'windows'
         run: |
           echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -99,7 +128,13 @@ jobs:
                 $_.FullName
               )) -Join ' '
             } else {
-              $SignCmd = 'Write-Host "hello world"'
+              $SignCmd = $(@(
+                'codesign', 
+                '--timestamp', 
+                '-s', 'Developer ID Application: Devolutions inc. (N592S9ASDB)',
+                '-v', 
+                $_.FullName
+              )) -Join ' '
             }
 
             Write-Host $SignCmd
