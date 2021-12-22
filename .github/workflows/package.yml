@@ -88,7 +88,7 @@ jobs:
           }
           $Executables = Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $Patterm
           foreach ($Executable in $Executables) {
-            if ('Env:RUNNER_OS' -Eq 'Windows') {
+            if ("$Env:RUNNER_OS" -Eq 'Windows') {
               $SignCmd = $(@(
                 'signtool', 
                 'sign', 
