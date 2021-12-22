@@ -37,7 +37,7 @@ jobs:
       - name: Download artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n version
+        run: gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
