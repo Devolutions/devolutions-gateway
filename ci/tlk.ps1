@@ -643,6 +643,9 @@ function Invoke-TlkStep {
         $CargoProfile = 'release'
     }
 
+    Write-Host >>>>>>>>
+    Write-Host $PSScriptRoot
+    Write-Host (Split-Path -Parent $PSScriptRoot)
     $RootPath = Split-Path -Parent $PSScriptRoot
 
     $tlk = [TlkRecipe]::new()
