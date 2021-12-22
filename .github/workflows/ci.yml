@@ -220,7 +220,7 @@ jobs:
           $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_$PackageVersion_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"

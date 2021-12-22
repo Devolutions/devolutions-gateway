@@ -29,7 +29,7 @@ jobs:
             echo "::notice::specified run is not on master"
           }
           if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-            echo "::error::specified run is either not complete or not successful"            
+            echo "::error::specified run is either not complete or not successful"
             exit 1
           }
 
