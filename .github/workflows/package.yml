@@ -38,9 +38,17 @@ jobs:
 
   codesign:
     name: Codesign
-    runs-on: windows-2019
+    runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: preflight
+    strategy:
+      max-parallel: 1
+      matrix:
+        project: [ jetsocat, devolutions-gateway ]
+        runner: [ windows-2019, macos-10.15 ]
+        exclude:
+          - arch: devolutions-gateway
+            runner: macos-10.15
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -52,11 +60,10 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: | 
-          gh run download ${{ github.event.inputs.run }} -n devolutions-gateway -n jetsocat -D ${{ runner.temp }}
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse
+        run: gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D $(Join-Path ${{ runner.temp }} ${{ matrix.project }})
 
-      - name: Configure certificates
+      - name: Configure certificates (Windows)
+        if: matrix.os == 'Windows'
         env:
           CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
           CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
@@ -66,34 +73,42 @@ jobs:
           $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
           Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
 
-      - name: Configure runner
+      - name: Configure runner (Windows)
+        if: matrix.os == 'Windows'
         run: |
           echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      # WiX is installed on Windows runners but not in the PATH
-      - name: Configure runner
-        run: echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Sign executables
         shell: pwsh
         run: |
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*DevolutionsGateway*.exe', '*jetsocat*.exe' | % { 
-            $SignCmd = $(@(
-              'signtool', 
-              'sign', 
-              '/fd', 'SHA256', 
-              '/v', 
-              '/n', 'Devolutions', 
-              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-              '/td', 'sha256',
-              $_.FullName
-            )) -Join ' '
+          $Pattern = switch ('${{ matrix.project }}') {
+            "devolutions-gateway" { 'DevolutionsGateway_.exe' }
+            "jetsocat" { 'jetsocat_*'' }
+          }
+          $Executables = Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $Patterm
+          foreach ($Executable in $Executables) {
+            if ('Env:RUNNER_OS' -Eq 'Windows') {
+              $SignCmd = $(@(
+                'signtool', 
+                'sign', 
+                '/fd', 'SHA256', 
+                '/v', 
+                '/n', 'Devolutions', 
+                '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+                '/td', 'sha256',
+                $_.FullName
+              )) -Join ' '
+            } else {
+              $SignCmd = 'Write-Host "hello world"'
+            }
 
             Write-Host $SignCmd
             Invoke-Expression $SignCmd
           }
 
       - name: Repackage
+        if: matrix.project == 'devolutions-gateway'
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
@@ -109,6 +124,7 @@ jobs:
           ./ci/tlk.ps1 package
 
       - name: Sign packages
+        if: matrix.project == 'devolutions-gateway'
         shell: pwsh
         run: |
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % { 
@@ -119,6 +135,7 @@ jobs:
               '/v', 
               '/n', 'Devolutions', 
               '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/d', '"Devolutions Gateway"',
               '/td', 'sha256',
               $_.FullName
             )) -Join ' '
@@ -127,18 +144,10 @@ jobs:
             Invoke-Expression $SignCmd
           }
 
-      - name: Upload artifacts
+      - name: Upload move-artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: devolutions-gateway
-          path: ${{ runner.temp }}/devolutions-gateway
+          name: ${{ matrix.project }}
+          path: ${{ runner.temp }}/{{ matrix.project }}
           if-no-files-found: error
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: jetsocat
-          path: ${{ runner.temp }}/jetsocat
-          if-no-files-found: error
-
-  
+ 
