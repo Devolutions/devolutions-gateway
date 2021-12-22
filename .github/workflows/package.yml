@@ -116,7 +116,7 @@ jobs:
             "jetsocat" { 'jetsocat_*'' }
           }
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
-            if ($Env:RUNNER_OS -Eq 'Windows') {
+            if ('${{ matrix.os }}' -Eq 'windows') {
               $SignCmd = $(@(
                 'signtool', 
                 'sign', 
