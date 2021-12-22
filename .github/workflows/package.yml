@@ -102,7 +102,7 @@ jobs:
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_PSMODULE_CLEAN = "1"
 
-          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip" -Recurse | % {
+          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
             Remove-Item $_.FullName -Force
           }
 
