@@ -42,7 +42,6 @@ jobs:
     environment: build-and-publish
     needs: preflight
     strategy:
-      max-parallel: 1
       matrix:
         project: [ jetsocat, devolutions-gateway ]
         os: [ windows, macos ]
@@ -131,7 +130,7 @@ jobs:
               $SignCmd = $(@(
                 'codesign', 
                 '--timestamp', 
-                '-s', 'Developer ID Application: Devolutions inc. (N592S9ASDB)',
+                '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
                 '-v', 
                 $_.FullName
               )) -Join ' '
