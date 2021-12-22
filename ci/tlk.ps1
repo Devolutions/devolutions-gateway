@@ -241,6 +241,8 @@ class TlkRecipe
 
     [void] Init() {
         $this.SourcePath = $($PSScriptRoot | Get-Item).Parent.FullName
+        Write-Host >>>>>>
+        Write-Host $this.SourcePath
         $this.PackageName = "DevolutionsGateway"
         $this.Version = $(Get-Content -Path "$($this.SourcePath)/VERSION").Trim()
         $this.Verbose = $true
