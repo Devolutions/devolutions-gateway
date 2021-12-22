@@ -241,7 +241,6 @@ class TlkRecipe
 
     [void] Init() {
         $this.SourcePath = $($PSScriptRoot | Get-Item).Parent.FullName
-        Write-Host >>>>>>
         Write-Host $this.SourcePath
         $this.PackageName = "DevolutionsGateway"
         $this.Version = $(Get-Content -Path "$($this.SourcePath)/VERSION").Trim()
@@ -643,7 +642,6 @@ function Invoke-TlkStep {
         $CargoProfile = 'release'
     }
 
-    Write-Host >>>>>>>>
     Write-Host $PSScriptRoot
     Write-Host (Split-Path -Parent $PSScriptRoot)
     $RootPath = Split-Path -Parent $PSScriptRoot
