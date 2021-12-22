@@ -45,8 +45,8 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-        with:
-          ref: ${{ needs.preflight.outputs.commit }}
+        # with:
+        #   ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Download artifacts
         shell: pwsh
