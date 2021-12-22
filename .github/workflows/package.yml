@@ -34,16 +34,22 @@ jobs:
           echo "::set-output name=commit::$($Run.head_sha)"
           echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ github.event.inputs.run }}"
 
-      - name: Download artifacts
-        env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n version --repo $GITHUB_REPOSITORY
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ steps.get-commit.outputs.commit }}
 
-      - name: Upload artifacts
+      - name: Upload version artifact
         uses: actions/upload-artifact@v2
         with:
           name: version
           path: VERSION
+
+      - name: Upload docker file artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: docker
+          path: package/**/Dockerfile
 
   codesign:
     name: Codesign
@@ -70,8 +76,8 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-        # with:
-        #   ref: ${{ needs.preflight.outputs.commit }}
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Download artifacts
         shell: pwsh
@@ -202,7 +208,7 @@ jobs:
           $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
           if ('${{ matrix.os }}' -Eq 'windows') {
             Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % { 
-              signtool verify /pa "$_.FullName"
+              signtool verify /pa "$($_.FullName)"
               if ($LastExitCode -Ne 0) {
                 echo "::error::failed to verify the signature of $($_.FullName)" 
                 exit 1

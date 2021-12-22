@@ -241,7 +241,6 @@ class TlkRecipe
 
     [void] Init() {
         $this.SourcePath = $($PSScriptRoot | Get-Item).Parent.FullName
-        Write-Host $this.SourcePath
         $this.PackageName = "DevolutionsGateway"
         $this.Version = $(Get-Content -Path "$($this.SourcePath)/VERSION").Trim()
         $this.Verbose = $true
@@ -254,7 +253,6 @@ class TlkRecipe
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
 
         Write-Host "conan profile: $ConanProfile"
-
 
         & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release'
         $dotenv = Get-DotEnvFile ".\environment.sh.env"
@@ -269,10 +267,7 @@ class TlkRecipe
 
     [void] Cargo([string[]]$CargoArgs) {
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $CargoArgs += @('--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
@@ -314,10 +309,7 @@ class TlkRecipe
         Set-Location -Path $CargoPackage
 
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $this.Cargo(@('build'))
 
@@ -377,12 +369,8 @@ class TlkRecipe
         } else {
             throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
-        
-        Write-Host $DGatewayExecutable
-        Write-Host $DGatewayPSModulePath
 
         $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
-        Write-Host $PSManifestFile
         $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
         $PSModuleName = $(Get-Item $PSManifestFile).BaseName
         $PSModuleVersion = $PSManifest.ModuleVersion
@@ -606,10 +594,7 @@ class TlkRecipe
         }
 
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $this.Cargo($CargoArgs)
 
@@ -642,8 +627,6 @@ function Invoke-TlkStep {
         $CargoProfile = 'release'
     }
 
-    Write-Host $PSScriptRoot
-    Write-Host (Split-Path -Parent $PSScriptRoot)
     $RootPath = Split-Path -Parent $PSScriptRoot
 
     $tlk = [TlkRecipe]::new()
