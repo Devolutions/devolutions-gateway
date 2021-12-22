@@ -131,7 +131,7 @@ jobs:
                 '/td', 'sha256',
                 $_.FullName
               )) -Join ' '
-            } else if ('${{ matrix.os }}' -Eq 'macos') {
+            } elseif ('${{ matrix.os }}' -Eq 'macos') {
               $SignCmd = $(@(
                 'codesign', 
                 '--timestamp', 
