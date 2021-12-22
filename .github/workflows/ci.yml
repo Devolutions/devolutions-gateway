@@ -170,7 +170,7 @@ jobs:
         run: |
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = 'jetsocat_${{ runner.os }}_$${{ needs.preflight.outputs.version }}_${{ matrix.arch }}'
+          $ExecutableFileName = 'jetsocat_${{ runner.os }}_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}'
           
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
@@ -220,7 +220,7 @@ jobs:
           $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
-          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_$PackageVersion_${{ matrix.arch }}"
+          $ExecutableFileName = "DevolutionsGateway_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
