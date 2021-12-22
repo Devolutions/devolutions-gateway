@@ -7,8 +7,6 @@ on:
         description: 'The CI workflow run to package'
         required: true
 
-concurrency: gateway-package
-
 jobs:
   preflight:
     name: Preflight
@@ -35,6 +33,17 @@ jobs:
 
           echo "::set-output name=commit::$($Run.head_sha)"
           echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ github.event.inputs.run }}"
+
+      - name: Download artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: gh run download ${{ github.event.inputs.run }} -n version
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: version
+          path: VERSION
 
   codesign:
     name: Codesign
