@@ -86,9 +86,8 @@ jobs:
             "devolutions-gateway" { 'DevolutionsGateway_.exe' }
             "jetsocat" { 'jetsocat_*'' }
           }
-          $Executables = Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $Patterm
-          foreach ($Executable in $Executables) {
-            if ("$Env:RUNNER_OS" -Eq 'Windows') {
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
+            if ($Env:RUNNER_OS -Eq 'Windows') {
               $SignCmd = $(@(
                 'signtool', 
                 'sign', 
