@@ -195,6 +195,29 @@ jobs:
             Invoke-Expression $SignCmd
           }
 
+      - name: Verification
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        shell: pwsh
+        run: |
+          $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
+          if ('${{ matrix.os }}' -Eq 'windows') {
+            Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % { 
+              signtool verify /pa "$_.FullName"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to verify the signature of $($_.FullName)" 
+                exit 1
+              }
+            }
+          } elseif ('${{ matrix.os }}' -Eq 'macos') {
+            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % { 
+              codesign -dvvv "$($_.FullName)"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to verify the signature of $($_.FullName)" 
+                exit 1
+              }
+            }
+          }
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
