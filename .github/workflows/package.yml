@@ -47,7 +47,7 @@ jobs:
         project: [ jetsocat, devolutions-gateway ]
         runner: [ windows-2019, macos-10.15 ]
         exclude:
-          - arch: devolutions-gateway
+          - project: devolutions-gateway
             runner: macos-10.15
 
     steps:
