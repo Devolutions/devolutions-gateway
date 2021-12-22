@@ -125,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $Pattern = switch ('${{ matrix.project }}') {
-            'devolutions-gateway' { 'DevolutionsGateway_.exe' }
+            'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
             'jetsocat' { 'jetsocat_*' }
           }
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
