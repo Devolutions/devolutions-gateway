@@ -178,10 +178,10 @@ jobs:
             Invoke-Expression $SignCmd
           }
 
-      - name: Upload move-artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v2
         with:
           name: ${{ matrix.project }}
-          path: ${{ runner.temp }}/{{ matrix.project }}
+          path: ${{ runner.temp }}/${{ matrix.project }}
           if-no-files-found: error
  
