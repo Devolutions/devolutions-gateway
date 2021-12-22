@@ -102,6 +102,10 @@ jobs:
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_PSMODULE_CLEAN = "1"
 
+          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip" -Recurse | % {
+            Remove-Item $_.FullName -Force
+          }
+
           ./ci/tlk.ps1 package
 
       - name: Sign packages
