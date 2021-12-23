@@ -122,8 +122,10 @@ jobs:
 
     steps:
       - name: Download artifacts
-        id: download
-        uses: actions/download-artifact@v2
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: gh run download ${{ github.event.inputs.run }} -n jetsocat -n devolutions-gateway -n version --repo $Env:GITHUB_REPOSITORY
 
       - name: Create GitHub release
         shell: pwsh
@@ -131,9 +133,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
-          $StagingPath = "${{ steps.download.outputs.download-path }}"
-          $HashPath = Join-Path $StagingPath checksums
-          $Files = Get-ChildItem -Path $StagingPath -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $HashPath = 'checksums'
+          $Files = Get-ChildItem -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
@@ -150,20 +151,19 @@ jobs:
 
     steps:
       - name: Download artifacts
-        id: download
-        uses: actions/download-artifact@v2
-        with:
-          name: devolutions-gateway
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: gh run download ${{ github.event.inputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
 
       - name: Publish PowerShell module
         shell: pwsh
         run: |
-          $StagingPath = "${{ steps.download.outputs.download-path }}"
-          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File -Path $StagingPath
-          $Module = Join-Path $StagingPath PowerShell
-          Expand-Archive -Path $Archive -DestinationPath $Module
+          $Archive = Get-ChildItem -Recurse -Filter "*-ps-*.zip" -File
+          Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
 
-          $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path $Module DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
+          $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
           if ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')) {
             $PublishCmd += '-WhatIf'
           }
