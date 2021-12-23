@@ -254,7 +254,6 @@ class TlkRecipe
 
         Write-Host "conan profile: $ConanProfile"
 
-
         & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release'
         $dotenv = Get-DotEnvFile ".\environment.sh.env"
     
@@ -268,10 +267,7 @@ class TlkRecipe
 
     [void] Cargo([string[]]$CargoArgs) {
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $CargoArgs += @('--profile', $CargoProfile)
         $CargoArgs += @('--target', $CargoTarget)
@@ -313,10 +309,7 @@ class TlkRecipe
         Set-Location -Path $CargoPackage
 
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $this.Cargo(@('build'))
 
@@ -376,7 +369,7 @@ class TlkRecipe
         } else {
             throw ("Specify DGATEWAY_PSMODULE_PATH environment variable")
         }
-        
+
         $PSManifestFile = $(@(Get-ChildItem -Path $DGatewayPSModulePath -Depth 1 -Filter "*.psd1")[0]).FullName
         $PSManifest = Import-PowerShellDataFile -Path $PSManifestFile
         $PSModuleName = $(Get-Item $PSManifestFile).BaseName
@@ -601,10 +594,7 @@ class TlkRecipe
         }
 
         $CargoTarget = $this.Target.CargoTarget()
-        Write-Host "CargoTarget: $CargoTarget"
-
         $CargoProfile = $this.Target.CargoProfile
-        Write-Host "CargoProfile: $CargoProfile"
 
         $this.Cargo($CargoArgs)
 

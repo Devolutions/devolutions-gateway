@@ -1,0 +1,239 @@
+name: Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: 'The CI workflow run to package'
+        required: true
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-18.04
+    outputs: 
+      commit: ${{ steps.get-commit.outputs.commit }}
+
+    steps:
+      - name: Get commit
+        id: get-commit
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          CI_RUN: ${{ github.event.inputs.run }}
+        run: |
+          $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
+          if ($($Run.head_branch) -Ne "master") {
+            echo "::notice::specified run is not on master"
+          }
+          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+            echo "::error::specified run is either not complete or not successful"
+            exit 1
+          }
+
+          echo "::set-output name=commit::$($Run.head_sha)"
+          echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ github.event.inputs.run }}"
+
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ steps.get-commit.outputs.commit }}
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: version
+          path: VERSION
+
+      - name: Upload docker file artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: docker
+          path: package/**/Dockerfile
+
+      - name: Changelog artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: changelog
+          path: CHANGELOG.md
+
+  codesign:
+    name: Codesign
+    runs-on: ${{ matrix.runner }}
+    environment: build-and-publish
+    needs: preflight
+    strategy:
+      matrix:
+        project: [ jetsocat, devolutions-gateway ]
+        os: [ windows, macos, linux ]
+        include:
+          - os: windows
+            runner: windows-2019
+          - os: macos
+            runner: macos-10.15
+          - os: linux
+            runner: ubuntu-18.04
+        exclude:
+          - project: devolutions-gateway
+            os: macos
+          - project: devolutions-gateway
+            os: linux
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+
+      - name: Download artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: |
+          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
+          gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D "$Destination"
+          if ('${{ matrix.project }}' -Eq 'jetsocat') {
+            Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
+          }
+
+      - name: Configure certificates (Windows)
+        if: matrix.os == 'windows'
+        env:
+          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: |
+          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
+          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
+          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
+          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
+      - name: Configure certificates (macOS)
+        if: matrix.os == 'macos'
+        env:
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=Price2011
+
+          DEVELOPER_ID_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_cert.p12
+          echo -n "$DEVELOPER_ID_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+      - name: Configure runner (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Sign executables
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        shell: pwsh
+        run: |
+          $Pattern = switch ('${{ matrix.project }}') {
+            'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
+            'jetsocat' { 'jetsocat_*' }
+          }
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
+            if ('${{ matrix.os }}' -Eq 'windows') {
+              $SignCmd = $(@(
+                'signtool', 
+                'sign', 
+                '/fd', 'SHA256', 
+                '/v', 
+                '/n', 'Devolutions', 
+                '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+                '/td', 'sha256',
+                $_.FullName
+              )) -Join ' '
+            } elseif ('${{ matrix.os }}' -Eq 'macos') {
+              $SignCmd = $(@(
+                'codesign', 
+                '--timestamp', 
+                '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
+                '-v', 
+                $_.FullName
+              )) -Join ' '
+            } else {
+              echo "::debug::nothing to do for ${{ matrix.os }}"
+            }
+
+            if ($SignCmd) {
+              Write-Host $SignCmd
+              Invoke-Expression $SignCmd            
+            }
+          }
+
+      - name: Repackage
+        if: matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
+          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
+          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
+          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
+          $Env:DGATEWAY_PSMODULE_CLEAN = "1"
+
+          Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
+            Remove-Item $_.FullName -Force
+          }
+
+          ./ci/tlk.ps1 package
+
+      - name: Sign packages
+        if: matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % { 
+            $SignCmd = $(@(
+              'signtool', 
+              'sign', 
+              '/fd', 'SHA256', 
+              '/v', 
+              '/n', 'Devolutions', 
+              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/d', '"Devolutions Gateway"',
+              '/td', 'sha256',
+              $_.FullName
+            )) -Join ' '
+
+            Write-Host $SignCmd
+            Invoke-Expression $SignCmd
+          }
+
+      - name: Verification
+        if: matrix.os == 'windows' || matrix.os == 'macos'
+        shell: pwsh
+        run: |
+          $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
+          if ('${{ matrix.os }}' -Eq 'windows') {
+            Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % { 
+              signtool verify /pa "$($_.FullName)"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to verify the signature of $($_.FullName)" 
+                exit 1
+              }
+            }
+          } elseif ('${{ matrix.os }}' -Eq 'macos') {
+            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % { 
+              codesign -dvvv "$($_.FullName)"
+              if ($LastExitCode -Ne 0) {
+                echo "::error::failed to verify the signature of $($_.FullName)" 
+                exit 1
+              }
+            }
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.project }}
+          path: ${{ runner.temp }}/${{ matrix.project }}
+          if-no-files-found: error
+ 
