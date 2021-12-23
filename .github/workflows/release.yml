@@ -144,7 +144,7 @@ jobs:
           echo "::endgroup::"
 
           $ChangesPath = 'changes'
-          parse-changelog CHANGELOG.md $Version | Out-File -Encoding UTF8NoBOM $ChangesPath
+          parse-changelog $(Join-Path changelog CHANGELOG.md) $Version | Out-File -Encoding UTF8NoBOM $ChangesPath
 
           echo "::group::changes"
           Get-Content $ChangesPath
