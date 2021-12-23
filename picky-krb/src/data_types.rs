@@ -1,4 +1,7 @@
-use picky_asn1::wrapper::{Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10, ExplicitContextTag11, ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8, ExplicitContextTag9, GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional, ExplicitContextTag12};
+use picky_asn1::wrapper::{
+    Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
+    GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
+};
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::{Deserialize, Serialize};
 
@@ -22,16 +25,23 @@ pub type Realm = KerberosStringAsn1;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PrincipalName {
-    name_type: ExplicitContextTag0<IntegerAsn1>,
-    name_string: ExplicitContextTag1<Asn1SequenceOf<KerberosStringAsn1>>,
+    pub(crate) name_type: ExplicitContextTag0<IntegerAsn1>,
+    pub(crate) name_string: ExplicitContextTag1<Asn1SequenceOf<KerberosStringAsn1>>,
 }
 
-/// [RFC 4120 1.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
+/// [RFC 4120 5.2.3](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// KerberosTime    ::= GeneralizedTime -- with no fractional seconds
 /// ```
 pub type KerberosTime = GeneralizedTimeAsn1;
+
+/// [RFC 4120 5.2.4](https://www.rfc-editor.org/rfc/rfc4120.txt)
+///
+/// ```not_rust
+/// Microseconds    ::= INTEGER (0..999999)
+/// ```
+pub type Microseconds = IntegerAsn1;
 
 /// [RFC 4120 5.2.5](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -73,8 +83,8 @@ pub type AuthorizationData = Asn1SequenceOf<AuthorizationDataInner>;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaData {
-    padata_type: ExplicitContextTag1<IntegerAsn1>,
-    padata_data: ExplicitContextTag2<OctetStringAsn1>,
+    pub(crate) padata_type: ExplicitContextTag1<IntegerAsn1>,
+    pub(crate) padata_data: ExplicitContextTag2<OctetStringAsn1>,
 }
 
 /// [RFC 4120 5.2.8](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -149,61 +159,11 @@ pub struct LastReqInner {
 }
 pub type LastReq = Asn1SequenceOf<LastReqInner>;
 
-/// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
-///
-/// ```not_rust
-/// EncKDCRepPart   ::= SEQUENCE {
-///         key             [0] EncryptionKey,
-///         last-req        [1] LastReq,
-///         nonce           [2] UInt32,
-///         key-expiration  [3] KerberosTime OPTIONAL,
-///         flags           [4] TicketFlags,
-///         authtime        [5] KerberosTime,
-///         starttime       [6] KerberosTime OPTIONAL,
-///         endtime         [7] KerberosTime,
-///         renew-till      [8] KerberosTime OPTIONAL,
-///         srealm          [9] Realm,
-///         sname           [10] PrincipalName,
-///         caddr           [11] HostAddresses OPTIONAL
-/// }
-/// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub struct EncKdcRepPart {
-    key: ExplicitContextTag0<EncryptionKey>,
-    last_req: ExplicitContextTag1<LastReq>,
-    nonce: ExplicitContextTag2<IntegerAsn1>,
-    key_expiration: Optional<Option<ExplicitContextTag3<KerberosTime>>>,
-    flags: ExplicitContextTag4<KerberosFlags>,
-    auth_time: ExplicitContextTag5<KerberosTime>,
-    start_time: Optional<Option<ExplicitContextTag6<KerberosTime>>>,
-    end_time: ExplicitContextTag7<KerberosTime>,
-    renew_till: Optional<Option<ExplicitContextTag8<KerberosTime>>>,
-    srealm: ExplicitContextTag9<Realm>,
-    sname: ExplicitContextTag10<PrincipalName>,
-    caadr: Optional<Option<ExplicitContextTag11<HostAddress>>>,
-    // this field is not specified in RFC but present in real tickets
-    encrypted_pa_data: Optional<Option<ExplicitContextTag12<Asn1SequenceOf<PaData>>>>
-}
-
-/// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
-///
-/// ```not_rust
-/// EncASRepPart    ::= [APPLICATION 25] EncKDCRepPart
-/// ```
-pub type EncAsRepPart = ApplicationTag<EncKdcRepPart, 25>;
-
-/// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
-///
-/// ```not_rust
-/// EncTGSRepPart   ::= [APPLICATION 26] EncKDCRepPart
-/// ```
-pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
-
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
-        EncKdcRepPart, EncryptedData, EncryptionKey, HostAddress, KerberosStringAsn1, KerberosTime, LastReqInner,
-        PaData, PrincipalName,
+        EncryptedData, EncryptionKey, HostAddress, KerberosStringAsn1, KerberosTime, LastReqInner, PaData,
+        PrincipalName,
     };
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
@@ -266,7 +226,8 @@ mod tests {
     #[test]
     fn test_principal_name_with_two_names() {
         let expected_raw = [
-            48, 30, 160, 3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77
+            48, 30, 160, 3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80,
+            76, 69, 46, 67, 79, 77,
         ];
         let expected = PrincipalName {
             name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
