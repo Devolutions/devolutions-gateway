@@ -51,6 +51,12 @@ jobs:
           name: docker
           path: package/**/Dockerfile
 
+      - name: Changelog artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: changelog
+          path: CHANGELOG.md
+
   codesign:
     name: Codesign
     runs-on: ${{ matrix.runner }}

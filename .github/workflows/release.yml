@@ -120,11 +120,14 @@ jobs:
     needs: [preflight]
 
     steps:
+      - name: Configure runner
+        run: cargo install parse-changelog
+
       - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n jetsocat -n devolutions-gateway -n version --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ github.event.inputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Create GitHub release
         shell: pwsh
@@ -133,12 +136,21 @@ jobs:
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
+          echo "::group::checksums"
           Get-Content $HashPath
+          echo "::endgroup::"
 
-          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
+          $ChangesPath = 'changes'
+          parse-changelog CHANGELOG.md $Version | Out-File -Encoding UTF8NoBOM $ChangesPath
+
+          echo "::group::changes"
+          Get-Content $ChangesPath
+          echo "::endgroup::"
+
+          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo",  "--notes-file", $ChangesPath, "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
           if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
             Invoke-Expression $GhCmd
