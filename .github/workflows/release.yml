@@ -31,10 +31,7 @@ jobs:
           gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
           $Version = Get-Content VERSION -TotalCount 1
           echo "::set-output name=version::$Version"
-
-      - name: Print output
-        shell: pwsh
-        run: echo "::notice::Releasing artifacts for version ${{ steps.get-version.outputs.version }} from run ${{ github.event.inputs.run }}"
+          echo "::notice::Releasing artifacts for version ${{ steps.get-version.outputs.version }} from run ${{ github.event.inputs.run }}"
 
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
@@ -103,6 +100,7 @@ jobs:
             docker build -t "$ImageName" .
           }
           echo "::set-output name=image-name::$ImageName"
+          Get-ChildItem -Recurse
 
       - name: Push container
         shell: pwsh
@@ -138,6 +136,8 @@ jobs:
           $Files = Get-ChildItem -Recurse -File | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
+          Get-Content $HashPath
+
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
           if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
@@ -156,7 +156,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: gh run download ${{ github.event.inputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
-
 
       - name: Publish PowerShell module
         shell: pwsh
