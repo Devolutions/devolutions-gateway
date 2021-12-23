@@ -150,7 +150,7 @@ jobs:
           Get-Content $ChangesPath
           echo "::endgroup::"
 
-          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo",  "--notes-file", $ChangesPath, "Devolutions/devolutions-gateway", $HashPath) + $Files.Path) -Join ' '
+          $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
           if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
             Invoke-Expression $GhCmd
