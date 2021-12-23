@@ -23,6 +23,7 @@ jobs:
 
     steps:
       - name: Get version
+        id: get-version
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
