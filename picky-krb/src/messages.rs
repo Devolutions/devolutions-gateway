@@ -189,7 +189,7 @@ impl<'de> de::Deserialize<'de> for KdcReqBody {
 pub struct KdcReq {
     pvno: ExplicitContextTag1<IntegerAsn1>,
     msg_type: ExplicitContextTag2<IntegerAsn1>,
-    padata: Optional<ExplicitContextTag3<Asn1SequenceOf<PaData>>>,
+    padata: Optional<Option<ExplicitContextTag3<Asn1SequenceOf<PaData>>>>,
     req_body: ExplicitContextTag4<KdcReqBody>,
 }
 
@@ -420,14 +420,15 @@ pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
 #[cfg(test)]
 mod tests {
     use crate::data_types::{KerberosStringAsn1, KerberosTime, PaData, PrincipalName};
-    use crate::messages::{AsRep, AsReq, KdcProxyMessage, KdcRep, KdcReq, KdcReqBody, KrbError};
+    use crate::messages::{AsRep, AsReq, KdcProxyMessage, KdcRep, KdcReq, KdcReqBody, KrbError, KrbErrorInner};
     use picky_asn1::bit_string::BitString;
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
     use picky_asn1::wrapper::{
-        Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2,
-        ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag7, ExplicitContextTag8,
-        GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional,
+        Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10,
+        ExplicitContextTag11, ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5,
+        ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8, ExplicitContextTag9, GeneralStringAsn1,
+        GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
     };
 
     #[test]
@@ -484,7 +485,7 @@ mod tests {
         let expected = KdcReq {
             pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
-            padata: Optional::from(ExplicitContextTag3::from(Asn1SequenceOf(vec![
+            padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf(vec![
                 PaData {
                     padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 150])),
                     padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
@@ -493,7 +494,7 @@ mod tests {
                     padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 149])),
                     padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
                 },
-            ]))),
+            ])))),
             req_body: ExplicitContextTag4::from(KdcReqBody {
                 kdc_options: ExplicitContextTag0::from(BitStringAsn1::from(BitString::with_bytes(vec![0, 0, 0, 16]))),
                 cname: Optional::from(Some(ExplicitContextTag1::from(PrincipalName {
@@ -556,7 +557,6 @@ mod tests {
         ];
 
         let kdc_req: KdcReq = picky_asn1_der::from_bytes(&expected).unwrap();
-
         let kdc_req_raw = picky_asn1_der::to_vec(&kdc_req).unwrap();
 
         assert_eq!(expected, kdc_req_raw);
@@ -573,11 +573,61 @@ mod tests {
             50, 48, 50, 49, 49, 50, 50, 57, 49, 48, 51, 54, 48, 54, 90, 167, 6, 2, 4, 29, 32, 235, 11, 168, 26, 48, 24,
             2, 1, 18, 2, 1, 17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
         ];
-        //ApplicationTag(KdcReq { pvno: ExplicitContextTag1(IntegerAsn1([5])), msg_type: ExplicitContextTag2(IntegerAsn1([10])), padata: Optional(ExplicitContextTag3(Asn1SequenceOf([PaData { padata_type: ExplicitContextTag1(IntegerAsn1([0, 150])), padata_data: ExplicitContextTag2(OctetStringAsn1([])) }, PaData { padata_type: ExplicitContextTag1(IntegerAsn1([0, 149])), padata_data: ExplicitContextTag2(OctetStringAsn1([])) }]))), req_body: ExplicitContextTag4(KdcReqBody { kdc_options: ExplicitContextTag0(BitStringAsn1(BitString { data: [0, 0, 0, 0, 16] })), cname: Optional(Some(ExplicitContextTag1(PrincipalName { name_type: ExplicitContextTag0(IntegerAsn1([1])), name_string: ExplicitContextTag1(Asn1SequenceOf([GeneralStringAsn1(RestrictedString { data: [109, 121, 117, 115, 101, 114], marker: PhantomData })])) }))), realm: ExplicitContextTag2(GeneralStringAsn1(RestrictedString { data: [69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77], marker: PhantomData })), sname: Optional(Some(ExplicitContextTag3(PrincipalName { name_type: ExplicitContextTag0(IntegerAsn1([2])), name_string: ExplicitContextTag1(Asn1SequenceOf([GeneralStringAsn1(RestrictedString { data: [107, 114, 98, 116, 103, 116], marker: PhantomData }), GeneralStringAsn1(RestrictedString { data: [69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77], marker: PhantomData })])) }))), from: Optional(None), till: ExplicitContextTag5(GeneralizedTimeAsn1(Date { year: 2021, month: 12, day: 29, hour: 10, minute: 36, second: 6, _pd: PhantomData })), rtime: Optional(None), nonce: ExplicitContextTag7(IntegerAsn1([29, 32, 235, 11])), etype: ExplicitContextTag8(Asn1SequenceOf([IntegerAsn1([18]), IntegerAsn1([17]), IntegerAsn1([20]), IntegerAsn1([19]), IntegerAsn1([16]), IntegerAsn1([23]), IntegerAsn1([25]), IntegerAsn1([26])])), addresses: Optional(None), enc_authorization_data: Optional(None), additional_tickets: Optional(None) }) })
+        let expected = AsReq::from(KdcReq {
+            pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
+            padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf::from(vec![
+                PaData {
+                    padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 150])),
+                    padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
+                },
+                PaData {
+                    padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 149])),
+                    padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
+                },
+            ])))),
+            req_body: ExplicitContextTag4::from(KdcReqBody {
+                kdc_options: ExplicitContextTag0::from(BitStringAsn1::from(BitString::with_bytes(vec![0, 0, 0, 16]))),
+                cname: Optional::from(Some(ExplicitContextTag1::from(PrincipalName {
+                    name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                    name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![GeneralStringAsn1::from(
+                        IA5String::from_string("myuser".to_owned()).unwrap(),
+                    )])),
+                }))),
+                realm: ExplicitContextTag2::from(GeneralStringAsn1::from(
+                    IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+                )),
+                sname: Optional::from(Some(ExplicitContextTag3::from(PrincipalName {
+                    name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                    name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                        KerberosStringAsn1::from(IA5String::from_string("krbtgt".to_owned()).unwrap()),
+                        KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                    ])),
+                }))),
+                from: Optional::from(None),
+                till: ExplicitContextTag5::from(KerberosTime::from(Date::new(2021, 12, 29, 10, 36, 6).unwrap())),
+                rtime: Optional::from(None),
+                nonce: ExplicitContextTag7::from(IntegerAsn1(vec![29, 32, 235, 11])),
+                etype: ExplicitContextTag8::from(Asn1SequenceOf::from(vec![
+                    IntegerAsn1(vec![18]),
+                    IntegerAsn1(vec![17]),
+                    IntegerAsn1(vec![20]),
+                    IntegerAsn1(vec![19]),
+                    IntegerAsn1(vec![16]),
+                    IntegerAsn1(vec![23]),
+                    IntegerAsn1(vec![25]),
+                    IntegerAsn1(vec![26]),
+                ])),
+                addresses: Optional::from(None),
+                enc_authorization_data: Optional::from(None),
+                additional_tickets: Optional::from(None),
+            }),
+        });
 
         let as_req: AsReq = picky_asn1_der::from_bytes(&expected_raw).unwrap();
         let as_req_raw = picky_asn1_der::to_vec(&as_req).unwrap();
 
+        assert_eq!(expected, as_req);
         assert_eq!(expected_raw, as_req_raw);
     }
 
@@ -626,19 +676,50 @@ mod tests {
     #[test]
     fn test_krb_error() {
         let expected_raw = vec![
-            126, 129, 148, 48, 129, 145, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
-            50, 56, 49, 48, 51, 54, 50, 49, 90, 165, 5, 2, 3, 0, 133, 67, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88, 65,
-            77, 80, 76, 69, 46, 67, 79, 77, 168, 18, 48, 16, 160, 3, 2, 1, 1, 161, 9, 48, 7, 27, 5, 112, 97, 115, 104,
-            97, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 32, 48, 30, 160, 3, 2, 1, 2, 161, 23,
-            48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 171, 18,
-            27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,
+            126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
+            50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
+            65, 77, 80, 76, 69, 46, 67, 79, 77, 168, 21, 48, 19, 160, 3, 2, 1, 1, 161, 12, 48, 10, 27, 8, 98, 97, 100,
+            95, 117, 115, 101, 114, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 32, 48, 30, 160,
+            3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
+            67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,
         ];
-        //ApplicationTag(KrbErrorInner { pvno: ExplicitContextTag0(IntegerAsn1([5])), msg_type: ExplicitContextTag1(IntegerAsn1([30])), ctime: Optional(None), cusec: Optional(None), stime: ExplicitContextTag4(GeneralizedTimeAsn1(Date { year: 2021, month: 12, day: 28, hour: 10, minute: 36, second: 21, _pd: PhantomData })), susec: ExplicitContextTag5(IntegerAsn1([0, 133, 67])), error_code: ExplicitContextTag6(IntegerAsn1([6])), crealm: Optional(Some(ExplicitContextTag7(GeneralStringAsn1(RestrictedString { data: [69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77], marker: PhantomData })))), cname: Optional(Some(ExplicitContextTag8(PrincipalName { name_type: ExplicitContextTag0(IntegerAsn1([1])), name_string: ExplicitContextTag1(Asn1SequenceOf([GeneralStringAsn1(RestrictedString { data: [112, 97, 115, 104, 97], marker: PhantomData })])) }))), realm: ExplicitContextTag9(GeneralStringAsn1(RestrictedString { data: [69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77], marker: PhantomData })), sname: ExplicitContextTag10(PrincipalName { name_type: ExplicitContextTag0(IntegerAsn1([2])), name_string: ExplicitContextTag1(Asn1SequenceOf([GeneralStringAsn1(RestrictedString { data: [107, 114, 98, 116, 103, 116], marker: PhantomData }), GeneralStringAsn1(RestrictedString { data: [69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77], marker: PhantomData })])) }), e_text: Optional(Some(ExplicitContextTag11(GeneralStringAsn1(RestrictedString { data: [67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68], marker: PhantomData })))), e_data: Optional(None) })
+        let expected = KrbError::from(KrbErrorInner {
+            pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
+            ctime: Optional::from(None),
+            cusec: Optional::from(None),
+            stime: ExplicitContextTag4::from(GeneralizedTimeAsn1::from(Date::new(2021, 12, 28, 13, 40, 11).unwrap())),
+            susec: ExplicitContextTag5::from(IntegerAsn1(vec![12, 139, 242])),
+            error_code: ExplicitContextTag6::from(IntegerAsn1(vec![6])),
+            crealm: Optional::from(Some(ExplicitContextTag7::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )))),
+            cname: Optional::from(Some(ExplicitContextTag8::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![GeneralStringAsn1::from(
+                    IA5String::from_string("bad_user".to_owned()).unwrap(),
+                )])),
+            }))),
+            realm: ExplicitContextTag9::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )),
+            sname: ExplicitContextTag10::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                    KerberosStringAsn1::from(IA5String::from_string("krbtgt".to_owned()).unwrap()),
+                    KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                ])),
+            }),
+            e_text: Optional::from(Some(ExplicitContextTag11::from(GeneralStringAsn1::from(
+                IA5String::from_string("CLIENT_NOT_FOUND".to_owned()).unwrap(),
+            )))),
+            e_data: Optional::from(None),
+        });
 
         let krb_error: KrbError = picky_asn1_der::from_bytes(&expected_raw).unwrap();
-        println!("{:?}", krb_error);
         let krb_error_raw = picky_asn1_der::to_vec(&krb_error).unwrap();
 
+        assert_eq!(expected, krb_error);
         assert_eq!(expected_raw, krb_error_raw);
     }
 
