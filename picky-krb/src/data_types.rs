@@ -105,9 +105,9 @@ pub type KerberosFlags = BitStringAsn1;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncryptedData {
-    etype: ExplicitContextTag0<IntegerAsn1>,
-    kvno: Optional<Option<ExplicitContextTag1<IntegerAsn1>>>,
-    cipher: ExplicitContextTag2<OctetStringAsn1>,
+    pub(crate) etype: ExplicitContextTag0<IntegerAsn1>,
+    pub(crate) kvno: Optional<Option<ExplicitContextTag1<IntegerAsn1>>>,
+    pub(crate) cipher: ExplicitContextTag2<OctetStringAsn1>,
 }
 
 /// [RFC 4120 5.2.9](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -136,10 +136,10 @@ pub struct EncryptionKey {
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TicketInner {
-    tkt_vno: ExplicitContextTag0<IntegerAsn1>,
-    realm: ExplicitContextTag1<Realm>,
-    sname: ExplicitContextTag2<PrincipalName>,
-    enc_part: ExplicitContextTag3<EncryptedData>,
+    pub(crate) tkt_vno: ExplicitContextTag0<IntegerAsn1>,
+    pub(crate) realm: ExplicitContextTag1<Realm>,
+    pub(crate) sname: ExplicitContextTag2<PrincipalName>,
+    pub(crate) enc_part: ExplicitContextTag3<EncryptedData>,
 }
 
 pub type Ticket = ApplicationTag<TicketInner, 1>;
