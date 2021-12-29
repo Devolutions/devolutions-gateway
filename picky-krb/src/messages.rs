@@ -10,9 +10,7 @@ use picky_asn1::wrapper::{
 };
 use picky_asn1_der::application_tag::ApplicationTag;
 use picky_asn1_der::Asn1DerError;
-use serde::de::Error;
-use serde::{de, Deserialize, Serialize};
-use std::fmt;
+use serde::{Deserialize, Serialize};
 
 /// [2.2.2 KDC_PROXY_MESSAGE](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-kkdcp/5778aff5-b182-4b97-a970-29c7f911eef2)
 ///
@@ -206,6 +204,7 @@ pub struct KrbErrorInner {
     #[serde(default)]
     e_data: Optional<Option<ExplicitContextTag12<OctetStringAsn1>>>,
 }
+
 pub type KrbError = ApplicationTag<KrbErrorInner, 30>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -292,6 +291,7 @@ mod tests {
             0x01, 0x14, 0x02, 0x01, 0x13, 0x02, 0x01, 0x10, 0x02, 0x01, 0x17, 0x02, 0x01, 0x19, 0x02, 0x01, 0x1a, 0xa1,
             0x0d, 0x1b, 0x0b, 0x45, 0x58, 0x41, 0x4d, 0x50, 0x4c, 0x45, 0x2e, 0x43, 0x4f, 0x4d,
         ];
+
         let expected = KdcProxyMessage {
             kerb_message: ExplicitContextTag0::from(OctetStringAsn1::from(vec![
                 0, 0, 0, 184, 106, 129, 181, 48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10,
@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kdc_req_2() {
+    fn test_kdc_req() {
         let expected_raw = vec![
             48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10, 161, 4, 2, 2, 0, 150, 162, 2, 4,
             0, 48, 10, 161, 4, 2, 2, 0, 149, 162, 2, 4, 0, 164, 129, 137, 48, 129, 134, 160, 7, 3, 5, 0, 0, 0, 0, 16,
@@ -327,6 +327,7 @@ mod tests {
             50, 50, 52, 50, 49, 49, 55, 51, 51, 90, 167, 6, 2, 4, 73, 141, 213, 43, 168, 26, 48, 24, 2, 1, 18, 2, 1,
             17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
         ];
+
         let expected = KdcReq {
             pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
@@ -386,28 +387,6 @@ mod tests {
     }
 
     #[test]
-    fn test_kdc_req() {
-        let expected = vec![
-            0x30, 0x81, 0xb2, 0xa1, 0x03, 0x02, 0x01, 0x05, 0xa2, 0x03, 0x02, 0x01, 0x0a, 0xa3, 0x1a, 0x30, 0x18, 0x30,
-            0x0a, 0xa1, 0x04, 0x02, 0x02, 0x00, 0x96, 0xa2, 0x02, 0x04, 0x00, 0x30, 0x0a, 0xa1, 0x04, 0x02, 0x02, 0x00,
-            0x95, 0xa2, 0x02, 0x04, 0x00, 0xa4, 0x81, 0x89, 0x30, 0x81, 0x86, 0xa0, 0x07, 0x03, 0x05, 0x00, 0x00, 0x00,
-            0x00, 0x10, 0xa1, 0x13, 0x30, 0x11, 0xa0, 0x03, 0x02, 0x01, 0x01, 0xa1, 0x0a, 0x30, 0x08, 0x1b, 0x06, 0x6d,
-            0x79, 0x75, 0x73, 0x65, 0x72, 0xa2, 0x0d, 0x1b, 0x0b, 0x45, 0x58, 0x41, 0x4d, 0x50, 0x4c, 0x45, 0x2e, 0x43,
-            0x4f, 0x4d, 0xa3, 0x20, 0x30, 0x1e, 0xa0, 0x03, 0x02, 0x01, 0x02, 0xa1, 0x17, 0x30, 0x15, 0x1b, 0x06, 0x6b,
-            0x72, 0x62, 0x74, 0x67, 0x74, 0x1b, 0x0b, 0x45, 0x58, 0x41, 0x4d, 0x50, 0x4c, 0x45, 0x2e, 0x43, 0x4f, 0x4d,
-            0xa5, 0x11, 0x18, 0x0f, 0x32, 0x30, 0x32, 0x31, 0x31, 0x32, 0x31, 0x36, 0x31, 0x38, 0x35, 0x35, 0x31, 0x30,
-            0x5a, 0xa7, 0x06, 0x02, 0x04, 0x22, 0x33, 0xc9, 0xe9, 0xa8, 0x1a, 0x30, 0x18, 0x02, 0x01, 0x12, 0x02, 0x01,
-            0x11, 0x02, 0x01, 0x14, 0x02, 0x01, 0x13, 0x02, 0x01, 0x10, 0x02, 0x01, 0x17, 0x02, 0x01, 0x19, 0x02, 0x01,
-            0x1a,
-        ];
-
-        let kdc_req: KdcReq = picky_asn1_der::from_bytes(&expected).unwrap();
-        let kdc_req_raw = picky_asn1_der::to_vec(&kdc_req).unwrap();
-
-        assert_eq!(expected, kdc_req_raw);
-    }
-
-    #[test]
     fn test_as_req() {
         let expected_raw = vec![
             106, 129, 181, 48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10, 161, 4, 2, 2, 0,
@@ -418,6 +397,7 @@ mod tests {
             50, 48, 50, 49, 49, 50, 50, 57, 49, 48, 51, 54, 48, 54, 90, 167, 6, 2, 4, 29, 32, 235, 11, 168, 26, 48, 24,
             2, 1, 18, 2, 1, 17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
         ];
+
         let expected = AsReq::from(KdcReq {
             pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
@@ -510,6 +490,7 @@ mod tests {
             135, 94, 136, 63, 105, 119, 225, 127, 193, 148, 33, 74, 41, 154, 68, 104, 52, 227, 188, 19, 62, 26, 55, 15,
             20, 53, 221, 200, 137, 197, 2, 243,
         ];
+
         let expected = AsRep::from(KdcRep {
             pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![11])),
@@ -598,6 +579,7 @@ mod tests {
             3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
             67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,
         ];
+
         let expected = KrbError::from(KrbErrorInner {
             pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
