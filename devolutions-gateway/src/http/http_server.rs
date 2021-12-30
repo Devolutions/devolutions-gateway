@@ -3,6 +3,7 @@ use crate::http::controllers::association::AssociationController;
 use crate::http::controllers::diagnostics::DiagnosticsController;
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
+use crate::http::controllers::kdc_proxy::KdcProxyController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
 use crate::http::controllers::sogar_token::TokenController;
 use crate::http::middlewares::auth::AuthMiddleware;
@@ -13,7 +14,6 @@ use saphir::server::Server as SaphirServer;
 use slog_scope::info;
 use sogar_core::registry::SogarController;
 use std::sync::Arc;
-use crate::http::controllers::kdc_proxy::KdcProxyController;
 
 pub const REGISTRY_NAME: &str = "devolutions_registry";
 pub const NAMESPACE: &str = "videos";
