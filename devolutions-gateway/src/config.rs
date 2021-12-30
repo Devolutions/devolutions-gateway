@@ -153,6 +153,14 @@ pub struct SogarRegistryConfig {
     pub sogar_push_registry_info: SogarPushRegistryInfo,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KdcProxyConfig {
+    #[serde(rename = "Realm")]
+    pub reaml: String,
+    #[serde(rename = "KdcUrl")]
+    pub kdc: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub service_mode: bool,
@@ -175,6 +183,7 @@ pub struct Config {
     pub recording_path: Option<Utf8PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
+    pub kdc_proxy_config: Option<KdcProxyConfig>,
 }
 
 impl Default for Config {
@@ -215,6 +224,7 @@ impl Default for Config {
                 },
             },
             sogar_user: Vec::new(),
+            kdc_proxy_config: None,
         }
     }
 }
@@ -300,6 +310,8 @@ pub struct ConfigFile {
     pub keep_time: Option<usize>,
     #[serde(rename = "PushFiles")]
     pub push_files: Option<bool>,
+    #[serde(rename = "KdcProxy")]
+    pub kdc_proxy: Option<KdcProxyConfig>,
 
     // unstable options (subject to change)
     #[serde(rename = "LogFile")]
@@ -1016,6 +1028,7 @@ impl Config {
                 },
             },
             sogar_user,
+            kdc_proxy_config: config_file.kdc_proxy,
             ..Default::default()
         })
     }
