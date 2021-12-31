@@ -730,6 +730,8 @@ dependencies = [
  "parking_lot",
  "pcap-file",
  "picky",
+ "picky-krb",
+ "portpicker",
  "proptest",
  "reqwest",
  "ring",
@@ -2132,6 +2134,15 @@ dependencies = [
  "cpufeatures",
  "opaque-debug 0.3.0",
  "universal-hash",
+]
+
+[[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand 0.8.4",
 ]
 
 [[package]]
