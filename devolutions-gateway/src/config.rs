@@ -158,7 +158,7 @@ pub struct KdcProxyConfig {
     #[serde(rename = "Realm")]
     pub reaml: String,
     #[serde(rename = "KdcUrl")]
-    pub kdc: String,
+    pub kdc: Url,
 }
 
 #[derive(Debug, Clone)]
@@ -877,6 +877,15 @@ impl Config {
         for listener in config.listeners.iter_mut() {
             url_map_scheme_http_to_ws(&mut listener.internal_url);
             url_map_scheme_http_to_ws(&mut listener.external_url);
+        }
+
+        // validate KDC Proxy configuration
+
+        if config.kdc_proxy_config.is_some() {
+            let scheme = config.kdc_proxy_config.as_ref().unwrap().kdc.scheme();
+            if scheme != "tcp" && scheme != "udp" {
+                panic!("Unsupported protocol for kdc proxy: {}", scheme);
+            }
         }
 
         config
