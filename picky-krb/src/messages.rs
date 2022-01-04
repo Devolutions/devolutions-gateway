@@ -262,9 +262,10 @@ pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
-        EncryptedData, KerberosStringAsn1, KerberosTime, PaData, PrincipalName, Ticket, TicketInner,
+        EncryptedData, KerberosFlags, KerberosStringAsn1, KerberosTime, PaData, PrincipalName, Realm, Ticket,
+        TicketInner,
     };
-    use crate::messages::{AsRep, AsReq, KdcProxyMessage, KdcRep, KdcReq, KdcReqBody, KrbError, KrbErrorInner};
+    use crate::messages::{AsRep, AsReq, KdcProxyMessage, KdcRep, KdcReq, KdcReqBody, KrbError, KrbErrorInner, TgsReq};
     use picky_asn1::bit_string::BitString;
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
@@ -570,7 +571,53 @@ mod tests {
     }
 
     #[test]
-    fn test_krb_error() {
+    fn test_krb_process_tgs_error() {
+        let expected_raw = vec![
+            126, 129, 146, 48, 129, 143, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50, 51, 49, 49, 49, 48, 54, 48, 49, 90, 165, 5, 2, 3, 10, 12, 135, 166, 3, 2, 1, 50, 167, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 168, 19, 48, 17, 160, 3, 2, 1, 1, 161, 10, 48, 8, 27, 6, 109, 121, 117, 115, 101, 114, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 34, 48, 32, 160, 3, 2, 1, 2, 161, 25, 48, 23, 27, 8, 115, 111, 109, 101, 110, 97, 109, 101, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 171, 13, 27, 11, 80, 82, 79, 67, 69, 83, 83, 95, 84, 71, 83
+        ];
+
+        let expected = KrbError::from(KrbErrorInner {
+            pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
+            ctime: Optional::from(None),
+            cusec: Optional::from(None),
+            stime: ExplicitContextTag4::from(GeneralizedTimeAsn1::from(Date::new(2021, 12, 31, 11, 06, 01).unwrap())),
+            susec: ExplicitContextTag5::from(IntegerAsn1(vec![0x0a, 0x0c, 0x87])),
+            error_code: ExplicitContextTag6::from(IntegerAsn1(vec![50])),
+            crealm: Optional::from(Some(ExplicitContextTag7::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )))),
+            cname: Optional::from(Some(ExplicitContextTag8::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![GeneralStringAsn1::from(
+                    IA5String::from_string("myuser".to_owned()).unwrap(),
+                )])),
+            }))),
+            realm: ExplicitContextTag9::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )),
+            sname: ExplicitContextTag10::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                    KerberosStringAsn1::from(IA5String::from_string("somename".to_owned()).unwrap()),
+                    KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                ])),
+            }),
+            e_text: Optional::from(Some(ExplicitContextTag11::from(GeneralStringAsn1::from(
+                IA5String::from_string("PROCESS_TGS".to_owned()).unwrap(),
+            )))),
+            e_data: Optional::from(None),
+        });
+
+        let krb_error: KrbError = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let krb_error_raw = picky_asn1_der::to_vec(&krb_error).unwrap();
+
+        assert_eq!(expected, krb_error);
+        assert_eq!(expected_raw, krb_error_raw);
+    }
+
+    #[test]
+    fn test_krb_client_not_found_error() {
         let expected_raw = vec![
             126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
             50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
@@ -618,5 +665,106 @@ mod tests {
 
         assert_eq!(expected, krb_error);
         assert_eq!(expected_raw, krb_error_raw);
+    }
+
+    #[test]
+    fn test_tgs_req() {
+        let expected_raw = vec![
+            108, 130, 2, 135, 48, 130, 2, 131, 161, 3, 2, 1, 5, 162, 3, 2, 1, 12, 163, 130, 1, 250, 48, 130, 1, 246,
+            48, 130, 1, 242, 161, 3, 2, 1, 1, 162, 130, 1, 233, 4, 130, 1, 229, 110, 130, 1, 225, 48, 130, 1, 221, 160,
+            3, 2, 1, 5, 161, 3, 2, 1, 14, 162, 7, 3, 5, 0, 0, 0, 0, 0, 163, 130, 1, 86, 97, 130, 1, 82, 48, 130, 1, 78,
+            160, 3, 2, 1, 5, 161, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 162, 32, 48, 30, 160, 3, 2,
+            1, 1, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79,
+            77, 163, 130, 1, 20, 48, 130, 1, 16, 160, 3, 2, 1, 18, 161, 3, 2, 1, 1, 162, 130, 1, 2, 4, 129, 255, 208,
+            37, 251, 184, 33, 173, 54, 72, 142, 105, 213, 119, 99, 50, 12, 51, 85, 130, 118, 156, 163, 115, 233, 59,
+            195, 44, 190, 17, 224, 214, 18, 196, 225, 140, 185, 117, 127, 179, 187, 178, 215, 23, 99, 158, 37, 55, 203,
+            145, 101, 117, 161, 119, 132, 192, 3, 62, 2, 193, 16, 20, 81, 57, 55, 92, 222, 222, 67, 178, 43, 208, 213,
+            126, 246, 84, 110, 105, 43, 225, 82, 89, 197, 129, 46, 145, 185, 12, 10, 53, 77, 142, 155, 59, 149, 88, 5,
+            189, 96, 20, 240, 67, 208, 118, 74, 242, 53, 160, 167, 14, 184, 170, 76, 1, 143, 174, 120, 137, 24, 182,
+            72, 34, 218, 56, 94, 215, 241, 221, 0, 105, 55, 217, 195, 230, 122, 222, 73, 232, 90, 115, 217, 19, 107,
+            33, 181, 111, 217, 150, 142, 86, 183, 108, 2, 197, 131, 57, 170, 221, 162, 206, 147, 93, 6, 226, 156, 179,
+            46, 177, 233, 184, 167, 104, 183, 137, 74, 99, 132, 174, 19, 146, 200, 59, 140, 241, 251, 108, 51, 3, 207,
+            76, 19, 220, 149, 29, 12, 62, 241, 184, 112, 188, 77, 216, 208, 73, 104, 223, 153, 139, 247, 6, 46, 244,
+            75, 106, 181, 233, 188, 184, 81, 247, 123, 231, 46, 139, 176, 204, 31, 18, 0, 222, 43, 113, 4, 64, 92, 63,
+            1, 72, 99, 108, 226, 222, 175, 87, 85, 60, 156, 73, 75, 79, 159, 250, 232, 10, 241, 214, 191, 164, 110, 48,
+            108, 160, 3, 2, 1, 18, 162, 101, 4, 99, 106, 94, 37, 142, 223, 93, 36, 146, 1, 124, 172, 242, 9, 76, 186,
+            171, 5, 77, 225, 43, 160, 252, 253, 38, 235, 37, 210, 141, 117, 149, 90, 1, 37, 130, 188, 5, 244, 120, 135,
+            207, 78, 51, 29, 145, 172, 119, 85, 62, 115, 181, 150, 53, 5, 85, 199, 195, 125, 106, 46, 244, 102, 110,
+            195, 8, 11, 158, 4, 44, 51, 208, 88, 2, 171, 238, 108, 125, 139, 32, 25, 5, 25, 183, 43, 184, 250, 77, 164,
+            24, 65, 247, 150, 138, 86, 57, 81, 74, 201, 60, 151, 164, 121, 48, 119, 160, 7, 3, 5, 0, 64, 129, 0, 16,
+            162, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 163, 34, 48, 32, 160, 3, 2, 1, 2, 161, 25, 48,
+            23, 27, 8, 115, 111, 109, 101, 110, 97, 109, 101, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 165,
+            17, 24, 15, 50, 48, 52, 49, 49, 50, 48, 53, 49, 55, 52, 53, 50, 48, 90, 166, 17, 24, 15, 50, 48, 52, 49,
+            49, 50, 48, 53, 49, 55, 52, 53, 50, 48, 90, 167, 6, 2, 4, 74, 26, 112, 174, 168, 11, 48, 9, 2, 1, 18, 2, 1,
+            17, 2, 1, 23,
+        ];
+
+        let expected = TgsReq::from(KdcReq {
+            pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![12])),
+            padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf::from(vec![PaData {
+                padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![1])),
+                padata_data: ExplicitContextTag2::from(OctetStringAsn1::from(vec![
+                    110, 130, 1, 225, 48, 130, 1, 221, 160, 3, 2, 1, 5, 161, 3, 2, 1, 14, 162, 7, 3, 5, 0, 0, 0, 0, 0,
+                    163, 130, 1, 86, 97, 130, 1, 82, 48, 130, 1, 78, 160, 3, 2, 1, 5, 161, 13, 27, 11, 69, 88, 65, 77,
+                    80, 76, 69, 46, 67, 79, 77, 162, 32, 48, 30, 160, 3, 2, 1, 1, 161, 23, 48, 21, 27, 6, 107, 114, 98,
+                    116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 163, 130, 1, 20, 48, 130, 1, 16,
+                    160, 3, 2, 1, 18, 161, 3, 2, 1, 1, 162, 130, 1, 2, 4, 129, 255, 208, 37, 251, 184, 33, 173, 54, 72,
+                    142, 105, 213, 119, 99, 50, 12, 51, 85, 130, 118, 156, 163, 115, 233, 59, 195, 44, 190, 17, 224,
+                    214, 18, 196, 225, 140, 185, 117, 127, 179, 187, 178, 215, 23, 99, 158, 37, 55, 203, 145, 101, 117,
+                    161, 119, 132, 192, 3, 62, 2, 193, 16, 20, 81, 57, 55, 92, 222, 222, 67, 178, 43, 208, 213, 126,
+                    246, 84, 110, 105, 43, 225, 82, 89, 197, 129, 46, 145, 185, 12, 10, 53, 77, 142, 155, 59, 149, 88,
+                    5, 189, 96, 20, 240, 67, 208, 118, 74, 242, 53, 160, 167, 14, 184, 170, 76, 1, 143, 174, 120, 137,
+                    24, 182, 72, 34, 218, 56, 94, 215, 241, 221, 0, 105, 55, 217, 195, 230, 122, 222, 73, 232, 90, 115,
+                    217, 19, 107, 33, 181, 111, 217, 150, 142, 86, 183, 108, 2, 197, 131, 57, 170, 221, 162, 206, 147,
+                    93, 6, 226, 156, 179, 46, 177, 233, 184, 167, 104, 183, 137, 74, 99, 132, 174, 19, 146, 200, 59,
+                    140, 241, 251, 108, 51, 3, 207, 76, 19, 220, 149, 29, 12, 62, 241, 184, 112, 188, 77, 216, 208, 73,
+                    104, 223, 153, 139, 247, 6, 46, 244, 75, 106, 181, 233, 188, 184, 81, 247, 123, 231, 46, 139, 176,
+                    204, 31, 18, 0, 222, 43, 113, 4, 64, 92, 63, 1, 72, 99, 108, 226, 222, 175, 87, 85, 60, 156, 73,
+                    75, 79, 159, 250, 232, 10, 241, 214, 191, 164, 110, 48, 108, 160, 3, 2, 1, 18, 162, 101, 4, 99,
+                    106, 94, 37, 142, 223, 93, 36, 146, 1, 124, 172, 242, 9, 76, 186, 171, 5, 77, 225, 43, 160, 252,
+                    253, 38, 235, 37, 210, 141, 117, 149, 90, 1, 37, 130, 188, 5, 244, 120, 135, 207, 78, 51, 29, 145,
+                    172, 119, 85, 62, 115, 181, 150, 53, 5, 85, 199, 195, 125, 106, 46, 244, 102, 110, 195, 8, 11, 158,
+                    4, 44, 51, 208, 88, 2, 171, 238, 108, 125, 139, 32, 25, 5, 25, 183, 43, 184, 250, 77, 164, 24, 65,
+                    247, 150, 138, 86, 57, 81, 74, 201, 60, 151,
+                ])),
+            }])))),
+            req_body: ExplicitContextTag4::from(KdcReqBody {
+                kdc_options: ExplicitContextTag0::from(KerberosFlags::from(BitString::with_bytes([
+                    0x40, 0x81, 0x00, 0x10,
+                ]))),
+                cname: Optional::from(None),
+                realm: ExplicitContextTag2::from(Realm::from(
+                    IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+                )),
+                sname: Optional::from(Some(ExplicitContextTag3::from(PrincipalName {
+                    name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                    name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                        KerberosStringAsn1::from(IA5String::from_string("somename".to_owned()).unwrap()),
+                        KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                    ])),
+                }))),
+                from: Optional::from(None),
+                till: ExplicitContextTag5::from(KerberosTime::from(Date::new(2041, 12, 05, 17, 45, 20).unwrap())),
+                rtime: Optional::from(Some(ExplicitContextTag6::from(KerberosTime::from(
+                    Date::new(2041, 12, 05, 17, 45, 20).unwrap(),
+                )))),
+                nonce: ExplicitContextTag7::from(IntegerAsn1(vec![0x4a, 0x1a, 0x70, 0xae])),
+                etype: ExplicitContextTag8::from(Asn1SequenceOf::from(vec![
+                    IntegerAsn1(vec![18]),
+                    IntegerAsn1(vec![17]),
+                    IntegerAsn1(vec![23]),
+                ])),
+                addresses: Optional::from(None),
+                enc_authorization_data: Optional::from(None),
+                additional_tickets: Optional::from(None),
+            }),
+        });
+
+        let tgs_req: TgsReq = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let tgs_req_raw = picky_asn1_der::to_vec(&tgs_req).unwrap();
+
+        assert_eq!(expected, tgs_req);
+        assert_eq!(expected_raw, tgs_req_raw);
     }
 }
