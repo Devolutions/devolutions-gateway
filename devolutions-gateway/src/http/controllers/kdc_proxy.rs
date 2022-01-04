@@ -12,6 +12,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
 const ERROR_BAD_FORMAT: &str = "\x0b";
+const DEFAULT_KDC_PORT: u16 = 88;
 
 pub struct KdcProxyController {
     config: Arc<Config>,
@@ -48,14 +49,14 @@ impl KdcProxyController {
             .ok_or_else(|| HttpErrorStatus::internal("KDC proxy is not configured"))?;
 
         if kdc_proxy_config.reaml != realm {
-            return Err(HttpErrorStatus::bad_request("Requested realm is not supported"));
+            return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
         }
 
         let scheme = kdc_proxy_config.kdc.scheme();
         let address_to_resolve = format!(
             "{}:{}",
             kdc_proxy_config.kdc.host().unwrap().to_string(),
-            kdc_proxy_config.kdc.port().unwrap_or(88)
+            kdc_proxy_config.kdc.port().unwrap_or(DEFAULT_KDC_PORT)
         );
 
         let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
@@ -81,10 +82,7 @@ impl KdcProxyController {
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
 
-            connection.read_to_end(&mut kdc_reply_message).await.map_err(|e| {
-                slog_scope::error!("{:?}", e);
-                HttpErrorStatus::internal("Unable to read reply from the KDC server")
-            })?;
+            read_kdc_reply_message(&mut connection, &mut kdc_reply_message).await?;
         } else if scheme == "udp" {
             let mut buff = vec![0; 1024];
 
@@ -112,8 +110,6 @@ impl KdcProxyController {
             kdc_reply_message.extend_from_slice(&buff[0..n]);
         }
 
-        println!("{:?}", kdc_reply_message);
-
         let kdc_proxy_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message).map_err(|e| {
             slog_scope::error!("{:?}", e);
             HttpErrorStatus::internal("Cannot create kdc proxy massage")
@@ -123,6 +119,40 @@ impl KdcProxyController {
             .body(kdc_proxy_reply_message.to_vec().unwrap())
             .status(200))
     }
+}
+
+async fn read_kdc_reply_message(
+    connection: &mut TcpStream,
+    kdc_reply_message: &mut Vec<u8>,
+) -> Result<(), HttpErrorStatus> {
+    let mut buff = Vec::new();
+    let mut len = 0;
+    
+    loop {
+        match connection.read_buf(&mut buff).await {
+            Ok(_) => {
+                if len == 0 {
+                    len = u32::from_be_bytes(buff[0..4].to_vec().try_into().unwrap()) as usize;
+                }
+                kdc_reply_message.extend_from_slice(&buff);
+                if kdc_reply_message.len() - 4 >= len {
+                    break;
+                }
+            }
+            Err(e) => {
+                slog_scope::error!("{:?}", e);
+                break;
+            }
+        };
+
+        buff.clear();
+
+        if kdc_reply_message.len() - 4 >= len {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 fn lookup_kdc(url: &str) -> Option<SocketAddr> {

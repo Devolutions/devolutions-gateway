@@ -881,11 +881,12 @@ impl Config {
 
         // validate KDC Proxy configuration
 
-        if config.kdc_proxy_config.is_some() {
-            let scheme = config.kdc_proxy_config.as_ref().unwrap().kdc.scheme();
+        if let Some(kdc_proxy_config) = config.kdc_proxy_config.as_ref() {
+            let scheme = kdc_proxy_config.kdc.scheme();
             if scheme != "tcp" && scheme != "udp" {
                 panic!("Unsupported protocol for kdc proxy: {}", scheme);
             }
+            kdc_proxy_config.kdc.host().expect("KDC address must contain host");
         }
 
         config
