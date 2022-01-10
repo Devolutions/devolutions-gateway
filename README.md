@@ -79,23 +79,6 @@ OPTIONS:
 
 ## Sample Usage
 
-### Routing to a specific URL
-
-1. Run Wayk Now on 2 hosts to be able to open a Wayk session between those 2 hosts.
-    * Download Wayk Now [here](https://wayk.devolutions.net/home/download)
-
-1. Start devolutions-gateway and specify the routing URL where x.x.x.x is the IP of your Wayk server host.
-    ```
-    $ cargo run -- -l 'tcp://0.0.0.0:10000,tcp://*:10000' -l 'ws://0.0.0.0:7171,wss://*:443' -r tls://x.x.x.x:4489
-    ```
-    * If you want to save the network traffic in a PCAP file, you can add the pcap-files-path parameter. The command will look to something like this:
-        ```
-        $ cargo run -- -l 'tcp://0.0.0.0:10000,tcp://*:10000' -l 'ws://0.0.0.0:7171,wss://*:443' -r tls://x.x.x.x:4489 --capture-path c:\waykTraffic\ -p wayk
-        ```
-
-1. On the same host where devolutions-gateway is running, open wayk and connect to 127.0.0.1:10000
-    * The connection should start. A dummy certificate will be shown. You can accept it and the Wayk connection should start.
-
 ### RDP routing
 
 The Jet can redirect RDP traffic authorized by a JWT (Json Web Token) both signed (JWS) and encrypted (JWE).
@@ -159,13 +142,13 @@ The binary is produced inside a `target/release` folder.
 RDP-TCP example:
 
 ```
-$ ./tokengen --dst-hst 192.168.122.70 --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tcp
+$ ./tokengen --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tcp --dst-hst 192.168.122.70 
 ```
 
 RDP-TLS example:
 
 ```
-$ ./tokengen --dst-hst 192.168.122.70 --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tls --jet-public-key /path/to/public/delegation/public/key.pem --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
+$ ./tokengen --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tls --dst-hst 192.168.122.70 --jet-public-key /path/to/public/delegation/public/key.pem --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
 ```
 
 ##### rdp_token.sh
@@ -176,13 +159,13 @@ Check out the [installation](https://github.com/smallstep/cli#installation) sect
 RDP-TCP example:
 
 ```
-$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem 192.168.122.70
+$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem target_address
 ```
 
 RDP-TLS example:
 
 ```
-$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem 192.168.122.70 proxy_username proxy_password host_username host_password
+$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem target_address proxy_username proxy_password host_username host_password
 ```
 
 #### Inject token in RDP connection using MSTSC
