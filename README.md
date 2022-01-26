@@ -4,7 +4,7 @@
 
 A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.
 
-Use `cargo run` to build and run devolutions-gateway locally with default options.
+Use `cargo build --release` to build a release version of `devolutions-gateway` locally.
 
 ## Command-line Interface
 
@@ -81,20 +81,20 @@ OPTIONS:
 
 ### RDP routing
 
-The Jet can redirect RDP traffic authorized by a JWT (Json Web Token) both signed (JWS) and encrypted (JWE).
+Devolutions Gateway can redirect RDP traffic authorized by a JWT (Json Web Token) both signed (JWS) and encrypted (JWE).
 
-The key used to sign must be known by the Jet. You can provide the Jet with the public
+The key used to sign must be known by the Gateway. You can provide the public
 key to use using `--provisioner-public-key-file` with a path to a PEM file; or `--provisioner-public-key-data`
 with a base64-encoded pkcs10 value.
-The provisioner can then use its private key to sign a JWT and authorize Jet RDP routing.
+The provisioner can then use its private key to sign a JWT and authorize RDP routing.
 
-The key used for token encryption is provided to Jet using `--delegation-private-key-data` or `--delegation-private-key-file`
+The key used for token encryption is provided using `--delegation-private-key-data` or `--delegation-private-key-file`
 similarly to the provisioner key.
 The public counter part of the delegation key must then be used for token encryption.
 
 #### JWT structure and claims
 
-The Jet is expecting a nested JWT.
+Devolutions Gateway is expecting a nested JWT.
 
 1. A set of claims are signed using JWS (Json Web Signature) into a compact JWT. Use of RSASSA-PKCS-v1_5 using SHA-256 (`RS256`) is recommended.
 2. This signed token is then wrapped inside another token using JWE (Json Web Encryption) in compact form as well.
