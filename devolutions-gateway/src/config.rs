@@ -881,17 +881,12 @@ impl Config {
             }
         }
 
-        // early fail if we start without any listeners
-        if self.listeners.is_empty() {
-            anyhow::bail!("At least one listener has to be specified.");
-        }
-
         if !self
             .listeners
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "http" | "https" | "ws" | "wss"))
         {
-            anyhow::bail!("At least one HTTP listener is required");
+            anyhow::bail!("At least one HTTP-capable listener is required");
         }
 
         if self.provisioner_public_key.is_none() {
