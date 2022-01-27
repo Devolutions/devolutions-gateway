@@ -12,6 +12,7 @@ pub struct DiagnosticsController {
 #[derive(Serialize)]
 struct GatewayConfigurationResponse {
     hostname: String,
+    version: &'static str,
     listeners: Vec<ListenerConfig>,
 }
 
@@ -19,6 +20,7 @@ impl From<Arc<Config>> for GatewayConfigurationResponse {
     fn from(config: Arc<Config>) -> Self {
         GatewayConfigurationResponse {
             listeners: config.listeners.clone(),
+            version: env!("CARGO_PKG_VERSION"),
             hostname: config.hostname.clone(),
         }
     }
