@@ -2,6 +2,10 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
+## Unpublished
+
+  * `diagnostics/configuration` endpoint now also returns Gateway's version
+
 ## 2021.1.7 (2021-12-07)
   * JMUX multiplexing protocol implementation for `jetsocat` and gateway server
   * Improve various startup validations and diagnostics
