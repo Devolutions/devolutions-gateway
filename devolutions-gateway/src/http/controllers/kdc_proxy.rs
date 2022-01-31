@@ -127,7 +127,7 @@ async fn read_kdc_reply_message(
 ) -> Result<(), HttpErrorStatus> {
     let mut buff = Vec::new();
     let mut len = 0;
-    
+
     loop {
         match connection.read_buf(&mut buff).await {
             Ok(_) => {
