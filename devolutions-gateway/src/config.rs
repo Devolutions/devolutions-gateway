@@ -154,11 +154,10 @@ pub struct SogarRegistryConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct KdcProxyConfig {
-    #[serde(rename = "Realm")]
-    pub reaml: String,
-    #[serde(rename = "KdcUrl")]
-    pub kdc: Url,
+    pub realm: String,
+    pub kdc_url: Url,
 }
 
 #[derive(Debug, Clone)]
@@ -882,11 +881,11 @@ impl Config {
         // validate KDC Proxy configuration
 
         if let Some(kdc_proxy_config) = config.kdc_proxy_config.as_ref() {
-            let scheme = kdc_proxy_config.kdc.scheme();
+            let scheme = kdc_proxy_config.kdc_url.scheme();
             if scheme != "tcp" && scheme != "udp" {
                 panic!("Unsupported protocol for kdc proxy: {}", scheme);
             }
-            kdc_proxy_config.kdc.host().expect("KDC address must contain host");
+            kdc_proxy_config.kdc_url.host().expect("KDC address must contain host");
         }
 
         config

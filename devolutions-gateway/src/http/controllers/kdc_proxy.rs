@@ -48,15 +48,15 @@ impl KdcProxyController {
             .as_ref()
             .ok_or_else(|| HttpErrorStatus::internal("KDC proxy is not configured"))?;
 
-        if kdc_proxy_config.reaml != realm {
+        if kdc_proxy_config.realm != realm {
             return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
         }
 
-        let scheme = kdc_proxy_config.kdc.scheme();
+        let scheme = kdc_proxy_config.kdc_url.scheme();
         let address_to_resolve = format!(
             "{}:{}",
-            kdc_proxy_config.kdc.host().unwrap().to_string(),
-            kdc_proxy_config.kdc.port().unwrap_or(DEFAULT_KDC_PORT)
+            kdc_proxy_config.kdc_url.host().unwrap().to_string(),
+            kdc_proxy_config.kdc_url.port().unwrap_or(DEFAULT_KDC_PORT)
         );
 
         let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
@@ -84,10 +84,11 @@ impl KdcProxyController {
 
             read_kdc_reply_message(&mut connection, &mut kdc_reply_message).await?;
         } else if scheme == "udp" {
-            let mut buff = vec![0; 1024];
+            // we assume that ticket length is not greater than 2048
+            let mut buff = [0; 2048];
 
             let port = portpicker::pick_unused_port().ok_or_else(|| HttpErrorStatus::internal("No free ports"))?;
-            let udp_socket = UdpSocket::bind(format!("127.0.0.1:{}", port)).await.map_err(|e| {
+            let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await.map_err(|e| {
                 slog_scope::error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to send the message to the KDC server")
             })?;
@@ -131,11 +132,11 @@ async fn read_kdc_reply_message(
     loop {
         match connection.read_buf(&mut buff).await {
             Ok(_) => {
-                if len == 0 {
+                if len == 0 && buff.len() >= 4 {
                     len = u32::from_be_bytes(buff[0..4].to_vec().try_into().unwrap()) as usize;
                 }
                 kdc_reply_message.extend_from_slice(&buff);
-                if kdc_reply_message.len() - 4 >= len {
+                if kdc_reply_message.len() >= len + 4 {
                     break;
                 }
             }
@@ -147,7 +148,7 @@ async fn read_kdc_reply_message(
 
         buff.clear();
 
-        if kdc_reply_message.len() - 4 >= len {
+        if kdc_reply_message.len() >= len + 4 {
             break;
         }
     }
