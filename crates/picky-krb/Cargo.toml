@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-picky-asn1-der = {git = "https://github.com/Devolutions/picky-rs.git", branch = "improvements"}
-picky-asn1 = {git = "https://github.com/Devolutions/picky-rs.git", branch = "improvements"}
+picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs.git", branch = "improvements" }
+picky-asn1 = { git = "https://github.com/Devolutions/picky-rs.git", branch = "improvements" }
 serde = { version = "1.0.130", features = ["derive"] }
