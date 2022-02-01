@@ -66,9 +66,7 @@ impl KdcProxyController {
             return Err(HttpErrorStatus::internal("Unable to locate KDC server"));
         };
 
-        let mut kdc_reply_message = Vec::new();
-
-        if scheme == "tcp" {
+        let kdc_reply_message = if scheme == "tcp" {
             let mut connection = TcpStream::connect(kdc_address).await.map_err(|e| {
                 slog_scope::error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to connect to KDC server")
@@ -82,7 +80,10 @@ impl KdcProxyController {
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
 
-            read_kdc_reply_message(&mut connection, &mut kdc_reply_message).await?;
+            read_kdc_reply_message(&mut connection).await.map_err(|e| {
+                slog_scope::error!("{:?}", e);
+                HttpErrorStatus::internal("Unable to read KDC reply message")
+            })?
         } else if scheme == "udp" {
             // we assume that ticket length is not greater than 2048
             let mut buff = [0; 2048];
@@ -107,9 +108,13 @@ impl KdcProxyController {
                 HttpErrorStatus::internal("Unable to read reply from the KDC server")
             })?;
 
-            kdc_reply_message.extend_from_slice(&(n as u32).to_be_bytes());
-            kdc_reply_message.extend_from_slice(&buff[0..n]);
-        }
+            let mut reply_buf = Vec::new();
+            reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
+            reply_buf.extend_from_slice(&buff[0..n]);
+            reply_buf
+        } else {
+            todo!("return an error at this point");
+        };
 
         let kdc_proxy_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message).map_err(|e| {
             slog_scope::error!("{:?}", e);
@@ -122,38 +127,12 @@ impl KdcProxyController {
     }
 }
 
-async fn read_kdc_reply_message(
-    connection: &mut TcpStream,
-    kdc_reply_message: &mut Vec<u8>,
-) -> Result<(), HttpErrorStatus> {
-    let mut buff = Vec::new();
-    let mut len = 0;
-
-    loop {
-        match connection.read_buf(&mut buff).await {
-            Ok(_) => {
-                if len == 0 && buff.len() >= 4 {
-                    len = u32::from_be_bytes(buff[0..4].to_vec().try_into().unwrap()) as usize;
-                }
-                kdc_reply_message.extend_from_slice(&buff);
-                if kdc_reply_message.len() >= len + 4 {
-                    break;
-                }
-            }
-            Err(e) => {
-                slog_scope::error!("{:?}", e);
-                break;
-            }
-        };
-
-        buff.clear();
-
-        if kdc_reply_message.len() >= len + 4 {
-            break;
-        }
-    }
-
-    Ok(())
+async fn read_kdc_reply_message(connection: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+    let len = connection.read_u32().await?;
+    let mut buf = vec![0; (len + 4).try_into().unwrap()];
+    buf[0..4].copy_from_slice(&(len.to_be_bytes()));
+    connection.read_exact(&mut buf[4..]).await?;
+    Ok(buf)
 }
 
 fn lookup_kdc(url: &str) -> Option<SocketAddr> {
