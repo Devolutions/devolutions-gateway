@@ -3,6 +3,7 @@ use crate::http::controllers::association::AssociationController;
 use crate::http::controllers::diagnostics::DiagnosticsController;
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
+use crate::http::controllers::kdc_proxy::KdcProxyController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
 use crate::http::controllers::sogar_token::TokenController;
 use crate::http::middlewares::auth::AuthMiddleware;
@@ -26,7 +27,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 .apply(
                     AuthMiddleware::new(config.clone()),
                     vec!["/"],
-                    vec!["/registry", "/health", "/jet/health"],
+                    vec!["/registry", "/health", "/jet/health", "/KdcProxy"],
                 )
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
@@ -42,6 +43,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let (health, legacy_health) = HealthController::new(config.clone());
             let http_bridge = HttpBridgeController::new();
             let jet = AssociationController::new(config.clone(), jet_associations.clone());
+            let kdc_proxy = KdcProxyController::new(config.clone());
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());
@@ -70,6 +72,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
                 .controller(LegacySessionsController)
+                .controller(kdc_proxy)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
         .build_stack_only()?;

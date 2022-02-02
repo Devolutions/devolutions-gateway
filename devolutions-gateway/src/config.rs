@@ -153,6 +153,13 @@ pub struct SogarRegistryConfig {
     pub sogar_push_registry_info: SogarPushRegistryInfo,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct KdcProxyConfig {
+    pub realm: String,
+    pub kdc_url: Url,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub service_mode: bool,
@@ -175,6 +182,7 @@ pub struct Config {
     pub recording_path: Option<Utf8PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
+    pub kdc_proxy_config: Option<KdcProxyConfig>,
 }
 
 impl Default for Config {
@@ -215,6 +223,7 @@ impl Default for Config {
                 },
             },
             sogar_user: Vec::new(),
+            kdc_proxy_config: None,
         }
     }
 }
@@ -300,6 +309,8 @@ pub struct ConfigFile {
     pub keep_time: Option<usize>,
     #[serde(rename = "PushFiles")]
     pub push_files: Option<bool>,
+    #[serde(rename = "KdcProxy")]
+    pub kdc_proxy: Option<KdcProxyConfig>,
 
     // unstable options (subject to change)
     #[serde(rename = "LogFile")]
@@ -867,6 +878,16 @@ impl Config {
             url_map_scheme_http_to_ws(&mut listener.external_url);
         }
 
+        // validate KDC Proxy configuration
+
+        if let Some(kdc_proxy_config) = config.kdc_proxy_config.as_ref() {
+            let scheme = kdc_proxy_config.kdc_url.scheme();
+            if scheme != "tcp" && scheme != "udp" {
+                panic!("Unsupported protocol for kdc proxy: {}", scheme);
+            }
+            kdc_proxy_config.kdc_url.host().expect("KDC address must contain host");
+        }
+
         config
     }
 
@@ -1016,6 +1037,7 @@ impl Config {
                 },
             },
             sogar_user,
+            kdc_proxy_config: config_file.kdc_proxy,
             ..Default::default()
         })
     }
