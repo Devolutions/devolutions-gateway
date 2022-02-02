@@ -84,7 +84,7 @@ impl KdcProxyController {
                 slog_scope::error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to read KDC reply message")
             })?
-        } else if scheme == "udp" {
+        } else {
             // we assume that ticket length is not greater than 2048
             let mut buff = [0; 2048];
 
@@ -112,8 +112,6 @@ impl KdcProxyController {
             reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
             reply_buf.extend_from_slice(&buff[0..n]);
             reply_buf
-        } else {
-            todo!("return an error at this point");
         };
 
         let kdc_proxy_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message).map_err(|e| {

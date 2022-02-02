@@ -13,7 +13,6 @@ members = [
 default-members = [
     "devolutions-gateway",
     "jetsocat",
-    "crates/picky-krb",
 ]
 
 [profile.production]
