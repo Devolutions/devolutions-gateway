@@ -2057,7 +2057,7 @@ dependencies = [
 [[package]]
 name = "picky-asn1"
 version = "0.4.0"
-source = "git+https://github.com/Devolutions/picky-rs.git?branch=improvements#8a9c136cdfeef31a23493e2d19af6b1e4b0c2b6e"
+source = "git+https://github.com/Devolutions/picky-rs.git#de87ad90954684e6bde8055bf02842d4d5c1d174"
 dependencies = [
  "oid",
  "serde",
@@ -2078,7 +2078,7 @@ dependencies = [
 [[package]]
 name = "picky-asn1-der"
 version = "0.2.5"
-source = "git+https://github.com/Devolutions/picky-rs.git?branch=improvements#8a9c136cdfeef31a23493e2d19af6b1e4b0c2b6e"
+source = "git+https://github.com/Devolutions/picky-rs.git#de87ad90954684e6bde8055bf02842d4d5c1d174"
 dependencies = [
  "picky-asn1 0.4.0",
  "serde",
@@ -2104,7 +2104,7 @@ name = "picky-krb"
 version = "0.1.0"
 dependencies = [
  "picky-asn1 0.4.0",
- "picky-asn1-der 0.2.5 (git+https://github.com/Devolutions/picky-rs.git?branch=improvements)",
+ "picky-asn1-der 0.2.5 (git+https://github.com/Devolutions/picky-rs.git)",
  "serde",
 ]
 
