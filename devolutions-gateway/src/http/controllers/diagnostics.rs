@@ -26,7 +26,6 @@ impl From<Arc<Config>> for GatewayConfigurationResponse {
 struct GatewayClockResponse {
     timestamp_secs: i64,
     timestamp_millis: i64,
-    timestamp_nanos: i64,
 }
 
 impl GatewayClockResponse {
@@ -36,7 +35,6 @@ impl GatewayClockResponse {
         Self {
             timestamp_secs: utc.timestamp(),
             timestamp_millis: utc.timestamp_millis(),
-            timestamp_nanos: utc.timestamp_nanos(),
         }
     }
 }
