@@ -65,11 +65,11 @@ impl DiagnosticsController {
         get_logs_stub(self).await
     }
 
+    // NOTE: this route is not secured by access token.
+    // Indeed, this route is used to retrieve server's clock when diagnosing clock drifting.
+    // If there is clock drift, token validation will fail because claims such as `nbf` will then
+    // be invalid, and thus prevent the clock drift diagnosis.
     #[get("/clock")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
-    )]
     async fn get_clock(&self) -> Json<GatewayClockResponse> {
         Json(GatewayClockResponse::now())
     }
