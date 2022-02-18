@@ -79,6 +79,8 @@ where
 
                         // end reading on Close message
                         TungsteniteMessage::Close(_) => return Poll::Ready(Ok(())),
+
+                        TungsteniteMessage::Frame(_) => unreachable!("raw frames are never returned when reading"),
                     },
                     Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                     None => return Poll::Ready(Ok(())),

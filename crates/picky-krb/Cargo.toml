@@ -6,6 +6,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-picky-asn1 = "0.5"
-picky-asn1-der = "0.3"
-serde = { version = "1.0.130", features = ["derive"] }
+picky-asn1 = "0.5.0"
+picky-asn1-der = "0.3.0"
+serde = { version = "1.0.136", features = ["derive"] }

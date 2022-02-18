@@ -15,19 +15,19 @@ jmux-proxy = { path = "../crates/jmux-proxy" }
 picky-krb = { path = "../crates/picky-krb" }
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
-ceviche = "0.5.0"
+ceviche = "0.5.1"
 
 # cli
 clap = "2.33"
 hostname = "0.3.1"
 
 # serialization
-serde = "1.0.131"
-serde_derive = "1.0.131"
-serde_json = "1.0.72"
+serde = "1.0.136"
+serde_derive = "1.0.136"
+serde_json = "1.0.79"
 
 # utils, misc
-camino = { version = "1.0.5", features = ["serde1"] }
+camino = { version = "1.0.7", features = ["serde1"] }
 smol_str = "0.1.21"
 tap = "1.0.1"
 byteorder = "1.4.3"
@@ -35,25 +35,25 @@ lazy_static = "1.4.0"
 bytes = "1.1.0"
 cfg-if = "1.0.0"
 url = { version = "2.2.2", features = ["serde"] }
-tempfile = "3.2.0"
-indexmap = "1.7.0"
+tempfile = "3.3.0"
+indexmap = "1.8.0"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
-parking_lot = "0.11.2"
-anyhow = "1.0.51"
+parking_lot = "0.12.0"
+anyhow = "1.0.53"
 # TODO: compare performance with `ringbuf` and `sluice`
 # NOTE: check if we actually still need a bip buffer for proxying though (see jetsocat)
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
 
 # security, crypto…
 native-tls = "0.2.8"
-zeroize = "1.4.3"
-rust-argon2 = "0.8.3"
+zeroize = "1.5.2"
+rust-argon2 = "1.0.0"
 picky = { version = "6.3.0", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
 ring = "0.16.20"
-# FIXME: we should use `sha-1` by RustCrypto (but we don't need this dependency if using `axum`)
-sha1 = "0.6.0"
+# (unrequired if using `axum`)
+sha1 = "0.10.1"
 # (unrequired if using `axum`)
 base64 = "0.13.0"
 
@@ -61,28 +61,28 @@ base64 = "0.13.0"
 # TODO: consider `tracing`
 slog-stdlog = "4.1.0"
 slog = { version = "2.7.0", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.8.0"
+slog-term = "2.8.1"
 slog-async = "2.7.0"
 slog-scope = "4.4.0"
 slog-envlogger = "2.2.0"
 slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
 
 # async, futures…
-tokio = { version = "1.14.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
-tokio-util = { version = "0.6.9", features = ["codec"] }
-# TODO: switch to `async-tungstenite`? See jetsocat
-tokio-tungstenite = "0.16.1"
-tokio-rustls = { version = "0.23.1", features = ["dangerous_configuration"] }
-futures = "0.3.17"
+tokio = { version = "1.17.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
+tokio-util = { version = "0.7.0", features = ["codec"] }
+tokio-tungstenite = "0.17.0"
+tokio-rustls = { version = "0.23.2", features = ["dangerous_configuration"] }
+futures = "0.3.21"
 
 # http
-hyper = "0.14.16"
+hyper = "0.14.17"
 # NOTE: maybe directly use hyper (we already use hyper)
-reqwest = "0.11.7"
-http = "0.2.5"
+reqwest = "0.11.9"
+http = "0.2.6"
 # FIXME: update once next saphir version is published or use `axum`/`warp`
 saphir = { version = "2.8", default-features = false, features = ["https", "json", "macro", "form", "operation", "file"], git = "https://github.com/CBenoit/saphir", branch = "hyper-update" }
-portpicker = "0.1.1" # for KDC proxy
+# for KDC proxy
+portpicker = "0.1.1"
 
 # plugins
 dlopen = "0.1.8"

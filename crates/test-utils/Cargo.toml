@@ -6,4 +6,4 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tokio = "1.14.0"
+tokio = "1.17.0"
