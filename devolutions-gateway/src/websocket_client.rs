@@ -11,6 +11,7 @@ use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use jmux_proxy::JmuxProxy;
 use saphir::error;
+use sha1::Digest as _;
 use slog_scope::{error, info};
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
@@ -320,10 +321,10 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 
     fn convert_key(input: &[u8]) -> String {
         const WS_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-        let mut digest = sha1::Sha1::new();
-        digest.update(input);
-        digest.update(WS_GUID);
-        base64::encode(&digest.digest().bytes())
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(input);
+        hasher.update(WS_GUID);
+        base64::encode(&hasher.finalize())
     }
     fn connection_has(value: &header::HeaderValue, needle: &str) -> bool {
         if let Ok(v) = value.to_str() {

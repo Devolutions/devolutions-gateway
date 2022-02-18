@@ -386,5 +386,6 @@ fn tungstenite_message_type_to_string(msg: &tungstenite::Message) -> &str {
         tungstenite::Message::Ping(_) => "Ping",
         tungstenite::Message::Pong(_) => "Pong",
         tungstenite::Message::Close(_) => "Close",
+        tungstenite::Message::Frame(_) => "Raw Frame",
     }
 }

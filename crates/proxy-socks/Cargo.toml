@@ -8,8 +8,8 @@ publish = false
 
 [dependencies]
 proxy-types = { path = "../proxy-types" }
-tokio = { version = "1.14.0", features = ["io-util"] }
+tokio = { version = "1.17.0", features = ["io-util"] }
 
 [dev-dependencies]
 test-utils = { path = "../test-utils" }
-tokio = { version = "1.14.0", features = ["rt", "macros"] }
+tokio = { version = "1.17.0", features = ["rt", "macros"] }
