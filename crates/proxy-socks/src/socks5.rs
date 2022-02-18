@@ -1,4 +1,5 @@
-use crate::{BoundAddr, DestAddr, ReadWriteStream, ToDestAddr};
+use crate::ReadWriteStream;
+use proxy_types::{BoundAddr, DestAddr, ToDestAddr};
 use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -7,6 +8,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const SOCKS_VERSION: u8 = 0x05;
 const PASSWORD_NEGOTIATION_VERSION: u8 = 0x01;
+const ADDR_MAX_LEN: usize = 260;
 
 /// SOCKS5 CONNECT client.
 #[derive(Debug)]
@@ -513,7 +515,7 @@ impl SocksRequest {
     const FIXED_PART_LEN: usize = 3;
 
     async fn write(&self, stream: &mut dyn ReadWriteStream) -> io::Result<()> {
-        let mut packet = [0x00; DestAddr::MAX_LEN + Self::FIXED_PART_LEN];
+        let mut packet = [0x00; ADDR_MAX_LEN + Self::FIXED_PART_LEN];
 
         // fixed part
         packet[0] = 0x05; // protocol version
@@ -521,7 +523,7 @@ impl SocksRequest {
         packet[2] = 0x00; // reserved
 
         // variable part
-        let variable_part_len = self.dst.write(&mut packet[Self::FIXED_PART_LEN..])?;
+        let variable_part_len = write_addr(&self.dst, &mut packet[Self::FIXED_PART_LEN..])?;
 
         // send packet
         let packet_len = Self::FIXED_PART_LEN + variable_part_len;
@@ -547,7 +549,7 @@ impl SocksRequest {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid reserved byte"));
         }
 
-        let dest_addr = DestAddr::read(stream).await?;
+        let dest_addr = read_addr(stream).await?;
 
         Ok(Self { cmd, dst: dest_addr })
     }
@@ -582,7 +584,7 @@ impl SocksResponse {
     }
 
     async fn write(&self, stream: &mut dyn ReadWriteStream) -> io::Result<()> {
-        let mut packet = [0x00; DestAddr::MAX_LEN + Self::FIXED_PART_LEN];
+        let mut packet = [0x00; ADDR_MAX_LEN + Self::FIXED_PART_LEN];
 
         // fixed part
         packet[0] = 0x05; // protocol version
@@ -590,7 +592,7 @@ impl SocksResponse {
         packet[2] = 0x00; // reserved
 
         // variable part
-        let variable_part_len = self.bnd.write(&mut packet[Self::FIXED_PART_LEN..])?;
+        let variable_part_len = write_addr(&self.bnd, &mut packet[Self::FIXED_PART_LEN..])?;
 
         // send packet
         let packet_len = Self::FIXED_PART_LEN + variable_part_len;
@@ -653,77 +655,74 @@ impl SocksResponse {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid reserved byte"));
         }
 
-        let bound_addr = BoundAddr::read(stream).await?;
+        let bound_addr = read_addr(stream).await?;
 
         Ok(Self { rep, bnd: bound_addr })
     }
 }
 
-/// https://www.ietf.org/rfc/rfc1928.txt
-/// o  ATYP (1 byte)  address type of following addresses:
-///     o  IP V4 address: X'01'
-///     o  DOMAINNAME: X'03'
-///     o  IP V6 address: X'04'
-/// o  DST.ADDR (variable)
-///      desired destination address
-/// o  DST.PORT (2 bytes)
-///      desired destination port
-impl DestAddr {
-    const MAX_LEN: usize = 260;
+// https://www.ietf.org/rfc/rfc1928.txt
+// o  ATYP (1 byte)  address type of following addresses:
+//     o  IP V4 address: X'01'
+//     o  DOMAINNAME: X'03'
+//     o  IP V6 address: X'04'
+// o  DST.ADDR (variable)
+//      desired destination address
+// o  DST.PORT (2 bytes)
+//      desired destination port
 
-    async fn read(stream: &mut dyn ReadWriteStream) -> io::Result<Self> {
-        match stream.read_u8().await? {
-            1 => {
-                let ip = Ipv4Addr::from(stream.read_u32().await?);
-                let port = stream.read_u16().await?;
-                Ok(Self::Ip(SocketAddr::V4(SocketAddrV4::new(ip, port))))
+async fn read_addr(stream: &mut dyn ReadWriteStream) -> io::Result<DestAddr> {
+    match stream.read_u8().await? {
+        1 => {
+            let ip = Ipv4Addr::from(stream.read_u32().await?);
+            let port = stream.read_u16().await?;
+            Ok(DestAddr::Ip(SocketAddr::V4(SocketAddrV4::new(ip, port))))
+        }
+        3 => {
+            let len = stream.read_u8().await?;
+            let mut domain = vec![0; len as usize];
+            stream.read_exact(&mut domain).await?;
+            let domain = String::from_utf8(domain).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let port = stream.read_u16().await?;
+            Ok(DestAddr::Domain(domain, port))
+        }
+        4 => {
+            let mut ip = [0; 16];
+            stream.read_exact(&mut ip).await?;
+            let ip = Ipv6Addr::from(ip);
+            let port = stream.read_u16().await?;
+            Ok(DestAddr::Ip(SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))))
+        }
+        _ => Err(io::Error::new(io::ErrorKind::Other, "unsupported address type")),
+    }
+}
+
+fn write_addr(addr: &DestAddr, mut addr_buf: &mut [u8]) -> io::Result<usize> {
+    let initial_len = addr_buf.len();
+
+    match addr {
+        DestAddr::Ip(SocketAddr::V4(addr)) => {
+            addr_buf.write_all(&[1])?;
+            addr_buf.write_all(&u32::from(*addr.ip()).to_be_bytes())?;
+            addr_buf.write_all(&addr.port().to_be_bytes())?;
+        }
+        DestAddr::Ip(SocketAddr::V6(addr)) => {
+            addr_buf.write_all(&[4])?;
+            addr_buf.write_all(&addr.ip().octets())?;
+            addr_buf.write_all(&addr.port().to_be_bytes())?;
+        }
+        DestAddr::Domain(domain, port) => {
+            if let Ok(len) = u8::try_from(domain.len()) {
+                addr_buf.write_all(&[3, len])?;
+            } else {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "domain name too long"));
             }
-            3 => {
-                let len = stream.read_u8().await?;
-                let mut domain = vec![0; len as usize];
-                stream.read_exact(&mut domain).await?;
-                let domain = String::from_utf8(domain).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                let port = stream.read_u16().await?;
-                Ok(Self::Domain(domain, port))
-            }
-            4 => {
-                let mut ip = [0; 16];
-                stream.read_exact(&mut ip).await?;
-                let ip = Ipv6Addr::from(ip);
-                let port = stream.read_u16().await?;
-                Ok(Self::Ip(SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))))
-            }
-            _ => Err(io::Error::new(io::ErrorKind::Other, "unsupported address type")),
+            addr_buf.write_all(domain.as_bytes())?;
+            addr_buf.write_all(&port.to_be_bytes())?;
         }
     }
 
-    fn write(&self, mut addr_buf: &mut [u8]) -> io::Result<usize> {
-        let initial_len = addr_buf.len();
-
-        match self {
-            DestAddr::Ip(SocketAddr::V4(addr)) => {
-                addr_buf.write_all(&[1])?;
-                addr_buf.write_all(&u32::from(*addr.ip()).to_be_bytes())?;
-                addr_buf.write_all(&addr.port().to_be_bytes())?;
-            }
-            DestAddr::Ip(SocketAddr::V6(addr)) => {
-                addr_buf.write_all(&[4])?;
-                addr_buf.write_all(&addr.ip().octets())?;
-                addr_buf.write_all(&addr.port().to_be_bytes())?;
-            }
-            DestAddr::Domain(domain, port) => {
-                if let Ok(len) = u8::try_from(domain.len()) {
-                    addr_buf.write_all(&[3, len])?;
-                } else {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "domain name too long"));
-                }
-                addr_buf.write_all(domain.as_bytes())?;
-                addr_buf.write_all(&port.to_be_bytes())?;
-            }
-        }
-
-        Ok(initial_len - addr_buf.len())
-    }
+    Ok(initial_len - addr_buf.len())
 }
 
 // https://datatracker.ietf.org/doc/html/rfc1929
@@ -873,9 +872,9 @@ async fn server_password_authentication(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{AsyncStdIo, DummyStream};
+    use test_utils::{AsyncStdIo, DummyStream};
 
-    // NOTE: for more comprehensive tests, see the `tester` binary.
+    // NOTE: for more comprehensive tests, see `proxy-tester`.
 
     // Greeting messages tests using dummy stream to validate errors
 
@@ -919,13 +918,13 @@ mod tests {
 
     async fn assert_encoding(addr: DestAddr, encoded: &[u8]) {
         // encode
-        let mut buf = [0; DestAddr::MAX_LEN];
-        let len = addr.write(&mut buf).unwrap();
+        let mut buf = [0; ADDR_MAX_LEN];
+        let len = write_addr(&addr, &mut buf).unwrap();
         assert_eq!(&buf[..len], encoded);
 
         // decode
         let mut reader = AsyncStdIo(io::Cursor::new(encoded.to_vec()));
-        let decoded = DestAddr::read(&mut reader).await.unwrap();
+        let decoded = read_addr(&mut reader).await.unwrap();
         assert_eq!(decoded, addr);
     }
 

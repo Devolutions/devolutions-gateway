@@ -1,6 +1,6 @@
 use anyhow::Context;
-use jetsocat_proxy::Socks5AcceptorConfig;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
+use proxy_socks::Socks5AcceptorConfig;
 use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -133,18 +133,18 @@ async fn socks5_process_socket(
     conf: Arc<Socks5AcceptorConfig>,
     log: Logger,
 ) -> anyhow::Result<()> {
-    use jetsocat_proxy::{Socks5Acceptor, Socks5FailureCode};
+    use proxy_socks::{Socks5Acceptor, Socks5FailureCode};
 
     let acceptor = Socks5Acceptor::accept_with_config(incoming, &conf).await?;
 
     if acceptor.is_connect_command() {
         let destination_url = match acceptor.dest_addr() {
-            jetsocat_proxy::DestAddr::Ip(addr) => {
+            proxy_types::DestAddr::Ip(addr) => {
                 let host = addr.ip().to_string();
                 let port = addr.port();
                 DestinationUrl::new("tcp", &host, port)
             }
-            jetsocat_proxy::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
+            proxy_types::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
         };
 
         debug!(log, "Request {}", destination_url);

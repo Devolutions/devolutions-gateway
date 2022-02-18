@@ -1,4 +1,4 @@
-use jetsocat_proxy::Socks5Stream;
+use proxy_socks::Socks5Stream;
 use std::{env, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -188,7 +188,7 @@ mod socks5_no_password {
 
 mod socks4 {
     use super::*;
-    use jetsocat_proxy::Socks4Stream;
+    use proxy_socks::Socks4Stream;
 
     pub fn test(addr: &str) {
         test! {
@@ -236,7 +236,7 @@ mod socks5_password {
 
 mod http {
     use super::*;
-    use jetsocat_proxy::HttpProxyStream;
+    use proxy_http::HttpProxyStream;
 
     pub fn test(addr: &str) {
         test! {

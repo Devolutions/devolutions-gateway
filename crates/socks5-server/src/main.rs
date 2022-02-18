@@ -1,4 +1,4 @@
-use jetsocat_proxy::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
+use proxy_socks::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
 use std::sync::Arc;
 use std::{env, io};
 use tokio::net::{TcpListener, TcpStream};
@@ -109,8 +109,8 @@ async fn process_socket(incoming: TcpStream, conf: Arc<Socks5AcceptorConfig>) ->
 
         let socket_addr = {
             match dest_addr.clone() {
-                jetsocat_proxy::DestAddr::Ip(addr) => addr,
-                jetsocat_proxy::DestAddr::Domain(domain, port) => {
+                proxy_types::DestAddr::Ip(addr) => addr,
+                proxy_types::DestAddr::Domain(domain, port) => {
                     let mut addrs = match tokio::net::lookup_host((domain, port)).await {
                         Ok(addrs) => addrs,
                         Err(e) => {

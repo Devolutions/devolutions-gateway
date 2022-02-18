@@ -1,8 +1,9 @@
 [package]
 name = "jet-proto"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
 authors = ["Devolutions Inc."]
+publish = false
 
 [dependencies]
 log = "0.4.14"

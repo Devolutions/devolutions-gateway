@@ -1,0 +1,15 @@
+[package]
+name = "proxy-socks"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+edition = "2021"
+description = "SOCKS proxy clients and acceptors"
+publish = false
+
+[dependencies]
+proxy-types = { path = "../proxy-types" }
+tokio = { version = "1.14.0", features = ["io-util"] }
+
+[dev-dependencies]
+test-utils = { path = "../test-utils" }
+tokio = { version = "1.14.0", features = ["rt", "macros"] }

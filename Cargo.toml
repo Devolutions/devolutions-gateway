@@ -2,12 +2,7 @@
 resolver = "2"
 members = [
     "devolutions-gateway",
-    "jet-proto",
     "jetsocat",
-    "jetsocat/proxy",
-    "jmux-proto",
-    "jmux-proxy",
-    "tools/*",
     "crates/*",
 ]
 default-members = [

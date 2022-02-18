@@ -1,4 +1,5 @@
-use crate::{DestAddr, ReadWriteStream, ToDestAddr};
+use crate::ReadWriteStream;
+use proxy_types::{DestAddr, ToDestAddr};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::pin::Pin;
@@ -168,7 +169,7 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::AsyncStdIo;
+    use test_utils::AsyncStdIo;
 
     async fn assert_encoding(addr: DestAddr, userid: &str, encoded: &[u8]) {
         let mut writer = AsyncStdIo(io::Cursor::new(Vec::new()));

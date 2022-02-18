@@ -1,9 +1,9 @@
 [package]
 name = "picky-krb"
-version = "0.1.0"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+publish = false
 
 [dependencies]
 picky-asn1 = "0.5"
