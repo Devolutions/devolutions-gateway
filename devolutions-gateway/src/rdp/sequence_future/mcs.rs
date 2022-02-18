@@ -1,18 +1,15 @@
-use std::collections::HashMap;
-use std::{io, iter};
-
-use bytes::BytesMut;
-use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
-use slog_scope::{debug, trace};
-use tokio::net::TcpStream;
-use tokio_rustls::TlsStream;
-use tokio_util::codec::Framed;
-
-use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::rdp::filter::{Filter, FilterConfig};
+use crate::rdp::sequence_future::{FutureState, NextStream, SequenceFutureProperties};
 use crate::rdp::{GLOBAL_CHANNEL_NAME, USER_CHANNEL_NAME};
 use crate::transport::mcs::McsTransport;
 use crate::transport::x224::DataTransport;
+use bytes::BytesMut;
+use ironrdp::{gcc, ConnectInitial, ConnectResponse, McsPdu, PduParsing};
+use std::collections::HashMap;
+use std::{io, iter};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsStream;
+use tokio_util::codec::Framed;
 
 pub type StaticChannels = HashMap<u16, String>;
 pub type McsFutureTransport = Framed<TlsStream<TcpStream>, McsTransport>;

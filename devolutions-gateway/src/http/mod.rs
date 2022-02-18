@@ -66,7 +66,7 @@ impl HttpErrorStatus {
 
 impl Responder for HttpErrorStatus {
     fn respond_with_builder(self, builder: Builder, _: &HttpContext) -> Builder {
-        slog_scope::error!("{} at {} [{}]", self.code, self.loc, self.source);
+        error!("{} at {} [{}]", self.code, self.loc, self.source);
         builder.status(self.code)
     }
 }

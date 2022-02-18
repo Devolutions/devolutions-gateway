@@ -1,7 +1,6 @@
 use super::{FutureState, NextStream, SequenceFutureProperties};
 use crate::transport::x224::{NegotiationWithClientTransport, NegotiationWithServerTransport};
 use ironrdp::nego::{FailureCode, NegoData, Request, Response, ResponseData, ResponseFlags, SecurityProtocol};
-use slog_scope::debug;
 use std::io;
 
 use tokio::net::TcpStream;

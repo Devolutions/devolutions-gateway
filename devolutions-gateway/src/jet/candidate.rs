@@ -1,13 +1,10 @@
+use crate::jet::TransportType;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-use slog_scope::error;
+use transport::Transport;
 use url::Url;
 use uuid::Uuid;
-
-use crate::jet::TransportType;
-use crate::transport::JetTransport;
 
 #[derive(Serialize, Deserialize)]
 pub struct CandidateResponse {
@@ -45,7 +42,7 @@ pub struct Candidate {
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
-    transport: Option<JetTransport>,
+    transport: Option<Transport>,
     client_nb_bytes_read: Option<Arc<AtomicU64>>,
     client_nb_bytes_written: Option<Arc<AtomicU64>>,
 }
@@ -109,11 +106,11 @@ impl Candidate {
         self.association_id = association_id;
     }
 
-    pub fn set_transport(&mut self, transport: JetTransport) {
+    pub fn set_transport(&mut self, transport: Transport) {
         self.transport = Some(transport);
     }
 
-    pub fn take_transport(&mut self) -> Option<JetTransport> {
+    pub fn take_transport(&mut self) -> Option<Transport> {
         self.transport.take()
     }
 

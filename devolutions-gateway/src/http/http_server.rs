@@ -11,7 +11,6 @@ use crate::http::middlewares::log::LogMiddleware;
 use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use saphir::server::Server as SaphirServer;
-use slog_scope::info;
 use sogar_core::registry::SogarController;
 use std::sync::Arc;
 

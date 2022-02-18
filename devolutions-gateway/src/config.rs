@@ -894,7 +894,7 @@ impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
         // early fail if specified plugins can't be loaded
         if let Some(plugins) = &self.plugins {
-            let mut manager = PLUGIN_MANAGER.lock().unwrap();
+            let mut manager = PLUGIN_MANAGER.lock();
             for plugin in plugins {
                 manager
                     .load_plugin(plugin)
@@ -945,8 +945,7 @@ impl Config {
             } else {
                 eprintln!(
                     "Invalid Listener: InternalUrl: {} ExternalUrl: {}",
-                    listener.internal_url.to_string(),
-                    listener.external_url.to_string()
+                    listener.internal_url, listener.external_url,
                 );
             }
         }

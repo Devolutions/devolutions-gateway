@@ -4,14 +4,13 @@ use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
 use crate::logger;
 use anyhow::Context;
+use parking_lot::Mutex;
 use slog::Logger;
-use slog_scope::{error, info};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::runtime::{self, Runtime};
-use tokio::sync::Mutex;
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum GatewayState {

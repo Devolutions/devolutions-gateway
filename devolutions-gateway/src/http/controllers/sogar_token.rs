@@ -7,7 +7,6 @@ use saphir::http::{Method, StatusCode};
 use saphir::macros::controller;
 use saphir::prelude::Request;
 use serde::{Deserialize, Serialize};
-use slog_scope::error;
 use sogar_core::AccessToken;
 use std::sync::Arc;
 

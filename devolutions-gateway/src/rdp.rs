@@ -8,19 +8,14 @@ pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 use self::connection_sequence_future::ConnectionSequenceFuture;
 use self::sequence_future::create_downgrade_dvc_capabilities_future;
 use crate::config::Config;
-use crate::interceptor::rdp::RdpMessageReader;
 use crate::jet_client::JetAssociationsMap;
-use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::token::{ApplicationProtocol, ConnectionMode, JetAssociationTokenClaims};
-use crate::transport::tcp::TcpTransport;
 use crate::transport::x224::NegotiationWithClientTransport;
-use crate::transport::JetTransport;
 use crate::utils::{self, TargetAddr};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
 use bytes::BytesMut;
-use slog_scope::info;
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
 use std::io;
@@ -77,10 +72,11 @@ impl RdpClient {
 
     pub async fn serve_with_association_claims_and_leftover_bytes(
         self,
-        mut client_stream: TcpStream,
+        client_stream: TcpStream,
         association_claims: JetAssociationTokenClaims,
         mut leftover_bytes: BytesMut,
     ) -> anyhow::Result<()> {
+        #[allow(unused)]
         let Self {
             config,
             jet_associations,
@@ -96,12 +92,10 @@ impl RdpClient {
             RdpRoutingMode::Tcp(targets) => {
                 info!("Starting RDP-TCP redirection");
 
-                let (mut server_conn, destination_host) =
+                let ((server_addr, mut server_stream), destination_host) =
                     utils::successive_try(&targets, utils::tcp_transport_connect).await?;
 
-                let client_transport = TcpTransport::new(client_stream);
-
-                server_conn
+                server_stream
                     .write_buf(&mut leftover_bytes)
                     .await
                     .context("Failed to write leftover bytes")?;
@@ -116,13 +110,15 @@ impl RdpClient {
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
-                Proxy::new(config, info)
-                    .build(server_conn, client_transport)
+                Proxy::new(config, info, client_stream.peer_addr()?, server_addr)
+                    .select_dissector_and_forward(client_stream, server_stream)
                     .await
                     .context("plain tcp traffic proxying failed")
             }
+            #[allow(unused)]
             RdpRoutingMode::Tls(identity) => {
                 info!("Starting RDP-TLS redirection");
+                anyhow::bail!("RDP-TLS is temporary disabled");
 
                 let tls_conf = config.tls.clone().context("TLS configuration is missing")?;
 
@@ -207,20 +203,25 @@ impl RdpClient {
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
-                Proxy::new(config, info)
-                    .build_with_message_reader(
-                        TcpTransport::new_tls(server_tls),
-                        TcpTransport::new_tls(client_tls),
-                        Some(Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager))),
-                    )
-                    .await
-                    .context("Proxy failed")
+                // use crate::interceptor::rdp::RdpMessageReader;
+
+                // Proxy::new(config, info)
+                //     .build_with_message_reader(
+                //         TcpTransport::new_tls(server_tls),
+                //         TcpTransport::new_tls(client_tls),
+                //         Some(Box::new(RdpMessageReader::new(joined_static_channels, dvc_manager))),
+                //     )
+                //     .await
+                //     .context("Proxy failed")
             }
+            #[allow(unused)]
             RdpRoutingMode::TcpRendezvous(association_id) => {
                 info!("Starting RdpTcpRendezvous redirection");
-                JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client_stream), association_id)
-                    .proxy(config, &*leftover_bytes)
-                    .await
+                anyhow::bail!("Jet TCP rendezvous is temporary disabled");
+                // use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
+                // JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client_stream), association_id)
+                //     .proxy(config, &*leftover_bytes)
+                //     .await
             }
         }
     }

@@ -10,7 +10,6 @@ use saphir::controller::Controller;
 use saphir::http::{Method, StatusCode};
 use saphir::macros::controller;
 use saphir::request::Request;
-use slog_scope::info;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use uuid::Uuid;
@@ -38,10 +37,9 @@ impl AssociationController {
     )]
     async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
-        let associations_response: Vec<AssociationResponse>;
-        let associations = self.jet_associations.lock().await;
+        let associations = self.jet_associations.lock();
 
-        associations_response = associations
+        let associations_response: Vec<AssociationResponse> = associations
             .values()
             .map(|association| AssociationResponse::from(association, with_detail))
             .collect();
@@ -73,7 +71,7 @@ impl AssociationController {
             match association_claims.jet_cm {
                 ConnectionMode::Rdv if association_claims.jet_aid == association_id => {}
                 _ => {
-                    slog_scope::error!(
+                    error!(
                         "Invalid session token: expected rendezvous token for {}",
                         association_id
                     );
@@ -81,7 +79,7 @@ impl AssociationController {
                 }
             }
 
-            let mut jet_associations = self.jet_associations.lock().await;
+            let mut jet_associations = self.jet_associations.lock();
 
             jet_associations.insert(
                 association_id,
@@ -113,7 +111,7 @@ impl AssociationController {
             match association_claims.jet_cm {
                 ConnectionMode::Rdv if association_claims.jet_aid == association_id => {}
                 _ => {
-                    slog_scope::error!(
+                    error!(
                         "Invalid session token: expected rendezvous token for {}",
                         association_id
                     );
@@ -123,12 +121,12 @@ impl AssociationController {
 
             // create association if needed
 
-            let mut jet_associations = self.jet_associations.lock().await;
+            let mut jet_associations = self.jet_associations.lock();
 
             let association = if let Some(association) = jet_associations.get_mut(&association_id) {
                 association
             } else {
-                slog_scope::error!("Association {} not found", association_id);
+                error!("Association {} not found", association_id);
                 return (StatusCode::INTERNAL_SERVER_ERROR, None);
             };
 
@@ -151,7 +149,7 @@ pub fn start_remove_association_future(jet_associations: JetAssociationsMap, uui
     if let Ok(runtime_handle) = Handle::try_current() {
         runtime_handle.spawn(async move {
             tokio::time::sleep(ACCEPT_REQUEST_TIMEOUT).await;
-            if remove_jet_association(jet_associations, uuid, None).await {
+            if remove_jet_association(jet_associations, uuid, None) {
                 info!(
                     "No connect request received with association {}. Association removed!",
                     uuid

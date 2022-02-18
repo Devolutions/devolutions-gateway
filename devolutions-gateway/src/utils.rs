@@ -1,6 +1,5 @@
 pub mod association;
 
-use crate::transport::tcp::TcpTransport;
 use anyhow::Context;
 use core::fmt;
 use serde::{de, ser};
@@ -67,11 +66,40 @@ pub async fn tcp_stream_connect(dest: &TargetAddr) -> anyhow::Result<TcpStream> 
     Ok(stream)
 }
 
-pub async fn tcp_transport_connect(target: &TargetAddr) -> anyhow::Result<TcpTransport> {
-    use crate::transport::Transport as _;
+pub async fn tcp_transport_connect(target: &TargetAddr) -> anyhow::Result<(SocketAddr, transport::Transport)> {
     let url = target.to_url().context("bad target")?;
-    let transport = tokio::time::timeout(CONNECTION_TIMEOUT, TcpTransport::connect(&url)).await??;
-    Ok(transport)
+    tcp_transport_connect_with_url(&url).await
+}
+
+pub async fn tcp_transport_connect_with_url(url: &Url) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+    use tokio_rustls::TlsStream;
+    use transport::Transport;
+
+    async fn connect_impl(url: &Url) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+        let socket_addr = resolve_url_to_socket_addr(url).await?;
+
+        match url.scheme() {
+            "tcp" => {
+                let stream = TcpStream::connect(&socket_addr).await?;
+                Ok((socket_addr, Transport::new(stream).into_erased()))
+            }
+            "tls" => {
+                let stream = TcpStream::connect(&socket_addr).await?;
+                let tls_handshake = create_tls_connector(stream).await?;
+                Ok((
+                    socket_addr,
+                    Transport::new(TlsStream::Client(tls_handshake)).into_erased(),
+                ))
+            }
+            scheme => {
+                anyhow::bail!("Unsupported scheme: {}", scheme);
+            }
+        }
+    }
+
+    let (addr, transport) = tokio::time::timeout(CONNECTION_TIMEOUT, connect_impl(url)).await??;
+
+    Ok((addr, transport))
 }
 
 pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> anyhow::Result<(Out, &'a In)>

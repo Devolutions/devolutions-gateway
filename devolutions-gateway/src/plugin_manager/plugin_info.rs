@@ -1,7 +1,6 @@
 use anyhow::Context;
 use dlopen::symbor::{Library, SymBorApi, Symbol};
 use dlopen_derive::SymBorApi;
-use slog_scope::{debug, error};
 use std::convert::TryFrom;
 use std::ffi::CStr;
 use std::mem::transmute;

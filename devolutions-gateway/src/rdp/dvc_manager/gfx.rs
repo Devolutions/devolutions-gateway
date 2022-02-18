@@ -1,11 +1,8 @@
-use std::io;
-
+use super::{CompleteDataResult, DynamicChannelDataHandler};
+use crate::interceptor::PeerSide;
 use ironrdp::dvc::gfx::{zgfx, ServerPdu};
 use ironrdp::PduParsing;
-use slog_scope::debug;
-
-use super::{CompleteDataResult, DynamicChannelDataHandler};
-use crate::interceptor::PduSource;
+use std::io;
 
 pub struct Handler {
     decompressor: zgfx::Decompressor,
@@ -25,9 +22,9 @@ impl DynamicChannelDataHandler for Handler {
     fn process_complete_data(
         &mut self,
         complete_data: CompleteDataResult,
-        pdu_source: PduSource,
+        pdu_source: PeerSide,
     ) -> Result<Vec<u8>, io::Error> {
-        if let PduSource::Server = pdu_source {
+        if let PeerSide::Server = pdu_source {
             let compressed_data = match &complete_data {
                 CompleteDataResult::Complete(v) => v,
                 CompleteDataResult::Parted(v) => v.as_slice(),

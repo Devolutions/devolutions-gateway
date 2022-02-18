@@ -1,4 +1,3 @@
-use slog_scope::{debug, error};
 use sogar_core::config::{get_mime_type_from_file_extension, CommandData, CommandType, Settings};
 use sogar_core::export_sogar_file_artifact;
 use std::fs;

@@ -8,9 +8,9 @@ pub use recording::Recorder;
 use camino::Utf8Path;
 use dlopen::symbor::Library;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
-use slog_scope::debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Clone)]
 struct Plugin {
@@ -57,7 +57,7 @@ impl PluginManager {
     pub fn load_plugin(&mut self, path: &Utf8Path) -> anyhow::Result<()> {
         let lib = Arc::new(Library::open(path)?);
         let info = PluginInformation::new(Arc::clone(&lib))?;
-        slog_scope::info!("Plugin {} loaded", info.get_name());
+        info!("Plugin {} loaded", info.get_name());
 
         self.libs.push(Plugin {
             lib,

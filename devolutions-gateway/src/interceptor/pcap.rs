@@ -1,71 +1,96 @@
+use crate::interceptor::{Dissector, Inspector, PeerSide};
+use anyhow::Context as _;
+use bytes::BytesMut;
 use packet::builder::Builder;
 use packet::ether::{Builder as BuildEthernet, Protocol};
 use packet::ip::v6::Builder as BuildV6;
 use packet::tcp::flag::Flags;
 use pcap_file::PcapWriter;
-use slog_scope::{debug, error};
 use std::fs::File;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-
-use crate::interceptor::{MessageReader, PacketInterceptor, PduSource, PeerInfo, UnknownMessageReader};
+use std::path::Path;
+use tokio::sync::mpsc;
 
 const TCP_IP_PACKET_MAX_SIZE: usize = 16384;
 
-#[derive(Clone)]
-pub struct PcapInterceptor {
-    pcap_writer: Arc<Mutex<PcapWriter<File>>>,
-    server_info: Arc<Mutex<PeerInfo>>,
-    client_info: Arc<Mutex<PeerInfo>>,
-    message_reader: Arc<Mutex<Box<dyn MessageReader>>>,
+pub struct PcapInspector {
+    side: PeerSide,
+    sender: mpsc::UnboundedSender<(PeerSide, Vec<u8>)>,
 }
 
-impl PcapInterceptor {
-    pub fn new(server_addr: SocketAddr, client_addr: SocketAddr, pcap_filename: &str) -> Self {
-        let file = File::create(pcap_filename).expect("Error creating file");
-        let pcap_writer: PcapWriter<File> = PcapWriter::new(file).expect("Error creating pcap writer");
-
-        PcapInterceptor {
-            server_info: Arc::new(Mutex::new(PeerInfo::new(server_addr))),
-            client_info: Arc::new(Mutex::new(PeerInfo::new(client_addr))),
-            pcap_writer: Arc::new(Mutex::new(pcap_writer)),
-            message_reader: Arc::new(Mutex::new(Box::new(UnknownMessageReader))),
-        }
-    }
-
-    pub fn set_message_reader(&mut self, message_reader: Box<dyn MessageReader>) {
-        self.message_reader = Arc::new(Mutex::new(message_reader));
+impl Inspector for PcapInspector {
+    fn inspect_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.sender
+            .send((self.side, bytes.to_vec()))
+            .context("PCAP inspector task is terminated")?;
+        Ok(())
     }
 }
 
-impl PacketInterceptor for PcapInterceptor {
-    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]) {
-        debug!("New packet intercepted. Packet size = {}", data.len());
+impl PcapInspector {
+    /// Returns client side and server side inspector
+    pub fn init(
+        client_addr: SocketAddr,
+        server_addr: SocketAddr,
+        pcap_filename: impl AsRef<Path>,
+        dissector: impl Dissector + Send + 'static,
+    ) -> anyhow::Result<(Self, Self)> {
+        let file = File::create(pcap_filename).context("Error creating file")?;
+        let pcap_writer = PcapWriter::new(file).context("Error creating pcap writer")?;
 
-        let mut server_info = self.server_info.lock().unwrap();
-        let mut client_info = self.client_info.lock().unwrap();
-        let mut message_reader = self.message_reader.lock().unwrap();
-        let is_from_server = source_addr.unwrap() == server_info.addr;
+        let (sender, receiver) = mpsc::unbounded_channel();
 
-        let (messages, source_addr, dest_addr, seq_number, ack_number) = if is_from_server {
-            server_info.data.extend_from_slice(data);
-            (
-                message_reader.get_messages(&mut server_info.data, PduSource::Server),
-                server_info.addr,
-                client_info.addr,
-                &mut client_info.sequence_number,
-                server_info.sequence_number,
-            )
-        } else {
-            client_info.data.extend_from_slice(data);
-            (
-                message_reader.get_messages(&mut client_info.data, PduSource::Client),
-                client_info.addr,
-                server_info.addr,
-                &mut server_info.sequence_number,
-                client_info.sequence_number,
-            )
+        tokio::spawn(writer_task(receiver, pcap_writer, client_addr, server_addr, dissector));
+
+        Ok((
+            Self {
+                side: PeerSide::Client,
+                sender: sender.clone(),
+            },
+            Self {
+                side: PeerSide::Server,
+                sender,
+            },
+        ))
+    }
+}
+
+async fn writer_task(
+    mut receiver: mpsc::UnboundedReceiver<(PeerSide, Vec<u8>)>,
+    mut pcap_writer: PcapWriter<File>,
+    server_addr: SocketAddr,
+    client_addr: SocketAddr,
+    mut dissector: impl Dissector,
+) {
+    let mut server_seq_number = 0;
+    let mut server_acc = BytesMut::new();
+
+    let mut client_seq_number = 0;
+    let mut client_acc = BytesMut::new();
+
+    while let Some((side, bytes)) = receiver.recv().await {
+        debug!("New packet intercepted. Packet size = {}", bytes.len());
+
+        let (acc, source_addr, dest_addr, seq_number, ack_number) = match side {
+            PeerSide::Client => (
+                &mut client_acc,
+                client_addr,
+                server_addr,
+                &mut client_seq_number,
+                server_seq_number,
+            ),
+            PeerSide::Server => (
+                &mut server_acc,
+                server_addr,
+                client_addr,
+                &mut server_seq_number,
+                client_seq_number,
+            ),
         };
+
+        acc.extend_from_slice(&bytes);
+
+        let messages = dissector.dissect_all(side, acc);
 
         for data in messages {
             for data_chunk in data.chunks(TCP_IP_PACKET_MAX_SIZE) {
@@ -116,7 +141,7 @@ impl PacketInterceptor for PcapInterceptor {
                 let since_epoch = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("Time went backwards");
-                let mut pcap_writer = self.pcap_writer.lock().unwrap();
+
                 if let Err(e) = pcap_writer.write(
                     since_epoch.as_secs() as u32,
                     since_epoch.subsec_micros(),
@@ -130,8 +155,5 @@ impl PacketInterceptor for PcapInterceptor {
                 *seq_number += data_chunk.len() as u32;
             }
         }
-    }
-    fn boxed_clone(&self) -> Box<dyn PacketInterceptor> {
-        Box::new(self.clone())
     }
 }
