@@ -6,7 +6,6 @@ use saphir::http::{self, StatusCode};
 use saphir::http_context::{HttpContext, State};
 use saphir::middleware::{Middleware, MiddlewareChain};
 use saphir::response::Builder as ResponseBuilder;
-use slog_scope::{error, warn};
 use std::io;
 use std::sync::Arc;
 

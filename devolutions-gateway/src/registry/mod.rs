@@ -3,7 +3,6 @@ mod push_files;
 use crate::config::Config;
 use crate::http::http_server::{NAMESPACE, REGISTRY_NAME};
 use crate::registry::push_files::{get_file_list_from_path, SogarData};
-use slog_scope::{debug, error};
 use sogar_core::{create_annotation_for_filename, parse_digest, read_file_data, registry, FileInfo, Layer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

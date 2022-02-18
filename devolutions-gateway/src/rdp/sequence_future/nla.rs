@@ -7,7 +7,6 @@ use crate::utils;
 use bytes::{Buf, BytesMut};
 use futures::{ready, SinkExt, StreamExt};
 use ironrdp::nego;
-use slog_scope::{debug, error, trace};
 use sspi::internal::credssp::{
     self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest, EARLY_USER_AUTH_RESULT_PDU_SIZE,
 };

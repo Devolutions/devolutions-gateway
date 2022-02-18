@@ -41,6 +41,7 @@ impl HttpBridgeController {
         // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
         // Use https://docs.rs/reqwest/0.11.4/reqwest/struct.Body.html#impl-From%3CBody%3E
         // to get a streaming reqwest Request instead of loading the whole body in memory.
+        // FIXME: consider using hyper directly
         let req = req.load_body().await.map_err(HttpErrorStatus::internal)?;
         let req: saphir::request::Request<reqwest::Body> = req.map(reqwest::Body::from);
         let mut req: http::Request<reqwest::Body> = http::Request::from(req);
@@ -73,7 +74,7 @@ impl HttpBridgeController {
         *req.uri_mut() = uri;
 
         // Forward
-        slog_scope::debug!("Forward HTTP request to {}", req.uri());
+        debug!("Forward HTTP request to {}", req.uri());
         let req = reqwest::Request::try_from(req).map_err(HttpErrorStatus::internal)?;
         let mut rsp = self.client.execute(req).await.map_err(HttpErrorStatus::bad_gateway)?;
 
@@ -96,7 +97,7 @@ impl HttpBridgeController {
             // Body
             match rsp.bytes().await {
                 Ok(body) => rsp_builder = rsp_builder.body(body),
-                Err(e) => slog_scope::warn!("Couldn’t get bytes from response body: {}", e),
+                Err(e) => warn!("Couldn’t get bytes from response body: {}", e),
             }
         }
 

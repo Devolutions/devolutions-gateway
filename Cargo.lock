@@ -395,12 +395,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4872d67bab6358e59559027aa3b9157c53d9358c51423c17554809a8858e0f8"
 
 [[package]]
-name = "cache_line_size"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ccbba4460cca3070e466e87ed2b1a50206d6a09dd2e2249da23c434a3e6535"
-
-[[package]]
 name = "camino"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -684,6 +678,7 @@ dependencies = [
  "pcap-file",
  "picky",
  "picky-krb",
+ "pin-project-lite",
  "portpicker",
  "proptest",
  "reqwest",
@@ -703,7 +698,6 @@ dependencies = [
  "slog-term",
  "smol_str",
  "sogar-core",
- "spsc-bip-buffer",
  "sspi",
  "tap",
  "tempfile",
@@ -712,6 +706,7 @@ dependencies = [
  "tokio-test",
  "tokio-tungstenite",
  "tokio-util 0.7.0",
+ "transport",
  "url 2.2.2",
  "uuid",
  "zeroize",
@@ -3076,14 +3071,6 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
-
-[[package]]
-name = "spsc-bip-buffer"
-version = "0.2.2-pre"
-source = "git+https://github.com/Devolutions/spsc-bip-buffer.git?branch=master#32342b38984d28abb2f61125900ca2b3e94e777f"
-dependencies = [
- "cache_line_size",
-]
 
 [[package]]
 name = "sspi"

@@ -1,11 +1,8 @@
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
-use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::rdp::RdpClient;
 use crate::token::{ApplicationProtocol, ConnectionMode};
-use crate::transport::tcp::TcpTransport;
-use crate::transport::JetTransport;
 use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
 use std::sync::Arc;
@@ -48,17 +45,19 @@ impl GenericClient {
 
                 match connection_mode {
                     ConnectionMode::Rdv => {
-                        info!(
-                            "Starting TCP rendezvous redirection for application protocol {:?}",
-                            application_protocol
-                        );
-                        JetRendezvousTcpProxy::new(
-                            jet_associations,
-                            JetTransport::new_tcp(client_stream),
-                            association_id,
-                        )
-                        .proxy(config, &*leftover_bytes)
-                        .await
+                        anyhow::bail!("Jet TCP rendezvous is temporary disabled");
+                        // use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
+                        // info!(
+                        //     "Starting TCP rendezvous redirection for application protocol {:?}",
+                        //     application_protocol
+                        // );
+                        // JetRendezvousTcpProxy::new(
+                        //     jet_associations,
+                        //     JetTransport::new_tcp(client_stream),
+                        //     association_id,
+                        // )
+                        // .proxy(config, &*leftover_bytes)
+                        // .await
                     }
                     ConnectionMode::Fwd { targets, creds: None } => {
                         info!(
@@ -70,12 +69,10 @@ impl GenericClient {
                             anyhow::bail!("can't meet recording policy");
                         }
 
-                        let (mut server_conn, selected_target) =
+                        let ((server_addr, mut server_transport), selected_target) =
                             utils::successive_try(&targets, utils::tcp_transport_connect).await?;
 
-                        let client_transport = TcpTransport::new(client_stream);
-
-                        server_conn
+                        server_transport
                             .write_buf(&mut leftover_bytes)
                             .await
                             .context("Failed to write leftover bytes")?;
@@ -90,8 +87,8 @@ impl GenericClient {
                         .with_recording_policy(recording_policy)
                         .with_filtering_policy(filtering_policy);
 
-                        Proxy::new(config, info)
-                            .build(server_conn, client_transport)
+                        Proxy::new(config, info, client_stream.peer_addr()?, server_addr)
+                            .select_dissector_and_forward(client_stream, server_transport)
                             .await
                             .context("Encountered a failure during plain tcp traffic proxying")
                     }

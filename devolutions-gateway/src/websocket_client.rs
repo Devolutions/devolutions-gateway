@@ -1,21 +1,17 @@
 use crate::config::Config;
-use crate::jet::candidate::CandidateState;
-use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
 use crate::token::ApplicationProtocol;
-use crate::transport::ws::WsTransport;
-use crate::transport::{JetTransport, Transport};
-use crate::utils::association::remove_jet_association;
 use crate::utils::TargetAddr;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
+use anyhow::Context as _;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use jmux_proxy::JmuxProxy;
 use saphir::error;
 use sha1::Digest as _;
-use slog_scope::{error, info};
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 use uuid::Uuid;
 
@@ -27,22 +23,22 @@ pub struct WebsocketService {
 
 impl WebsocketService {
     pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> Result<Response<Body>, io::Error> {
-        if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
-            info!("{} {}", req.method(), req.uri().path());
-            handle_jet_accept(req, client_addr, self.jet_associations.clone())
-                .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
-            info!("{} {}", req.method(), req.uri().path());
-            handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone())
-                .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
-            info!("{} {}", req.method(), req.uri().path());
-            handle_jet_test(req, self.jet_associations.clone())
-                .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jmux") {
+        // if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
+        //     info!("{} {}", req.method(), req.uri().path());
+        //     handle_jet_accept(req, client_addr, self.jet_associations.clone())
+        //         .await
+        //         .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
+        // } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
+        //     info!("{} {}", req.method(), req.uri().path());
+        //     handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone())
+        //         .await
+        //         .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
+        // } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
+        //     info!("{} {}", req.method(), req.uri().path());
+        //     handle_jet_test(req, self.jet_associations.clone())
+        //         .await
+        //         .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
+        if req.method() == Method::GET && req.uri().path().starts_with("/jmux") {
             info!("{} {}", req.method(), req.uri().path());
             handle_jmux(req, client_addr, self.config.clone())
                 .await
@@ -58,260 +54,273 @@ impl WebsocketService {
     }
 }
 
-async fn handle_jet_test(
-    req: Request<Body>,
-    jet_associations: JetAssociationsMap,
-) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_test_impl(req, jet_associations).await {
-        Ok(res) => Ok(res),
-        Err(status) => {
-            let mut res = Response::new(Body::empty());
-            *res.status_mut() = status;
-            Ok(res)
-        }
-    }
-}
+// use crate::jet::candidate::CandidateState;
+// use crate::jet::TransportType;
+// use crate::transport::{JetTransport, Transport};
+// use crate::utils::association::remove_jet_association;
 
-async fn handle_jet_test_impl(
-    req: Request<Body>,
-    jet_associations: JetAssociationsMap,
-) -> Result<Response<Body>, StatusCode> {
-    let header = req.headers().get("upgrade").ok_or(StatusCode::BAD_REQUEST)?;
-    let header_str = header.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
-    if header_str != "websocket" {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+// async fn handle_jet_test(
+//     req: Request<Body>,
+//     jet_associations: JetAssociationsMap,
+// ) -> Result<Response<Body>, saphir::error::InternalError> {
+//     match handle_jet_test_impl(req, jet_associations).await {
+//         Ok(res) => Ok(res),
+//         Err(status) => {
+//             let mut res = Response::new(Body::empty());
+//             *res.status_mut() = status;
+//             Ok(res)
+//         }
+//     }
+// }
 
-    let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(StatusCode::BAD_REQUEST)?;
-    let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(StatusCode::BAD_REQUEST)?;
+// async fn handle_jet_test_impl(
+//     req: Request<Body>,
+//     jet_associations: JetAssociationsMap,
+// ) -> Result<Response<Body>, StatusCode> {
+//     let header = req.headers().get("upgrade").ok_or(StatusCode::BAD_REQUEST)?;
+//     let header_str = header.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
+//     if header_str != "websocket" {
+//         return Err(StatusCode::BAD_REQUEST);
+//     }
 
-    let jet_assc = jet_associations.lock().await;
-    let assc = jet_assc.get(&association_id).ok_or(StatusCode::NOT_FOUND)?;
-    if assc.get_candidate(candidate_id).is_none() {
-        return Err(StatusCode::NOT_FOUND);
-    }
+//     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(StatusCode::BAD_REQUEST)?;
+//     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(StatusCode::BAD_REQUEST)?;
 
-    Ok(process_req(&req))
-}
+//     let jet_assc = jet_associations.lock().await;
+//     let assc = jet_assc.get(&association_id).ok_or(StatusCode::NOT_FOUND)?;
+//     if assc.get_candidate(candidate_id).is_none() {
+//         return Err(StatusCode::NOT_FOUND);
+//     }
 
-async fn handle_jet_accept(
-    req: Request<Body>,
-    client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
-) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_accept_impl(req, client_addr, jet_associations).await {
-        Ok(res) => Ok(res),
-        Err(()) => {
-            let mut res = Response::new(Body::empty());
-            *res.status_mut() = StatusCode::FORBIDDEN;
-            Ok(res)
-        }
-    }
-}
+//     Ok(process_req(&req))
+// }
 
-async fn handle_jet_accept_impl(
-    mut req: Request<Body>,
-    client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
-) -> Result<Response<Body>, ()> {
-    let header = req.headers().get("upgrade").ok_or(())?;
-    let header_str = header.to_str().map_err(|_| ())?;
-    if header_str != "websocket" {
-        return Err(());
-    }
+// async fn handle_jet_accept(
+//     req: Request<Body>,
+//     client_addr: SocketAddr,
+//     jet_associations: JetAssociationsMap,
+// ) -> Result<Response<Body>, saphir::error::InternalError> {
+//     match handle_jet_accept_impl(req, client_addr, jet_associations).await {
+//         Ok(res) => Ok(res),
+//         Err(()) => {
+//             let mut res = Response::new(Body::empty());
+//             *res.status_mut() = StatusCode::FORBIDDEN;
+//             Ok(res)
+//         }
+//     }
+// }
 
-    let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
-    let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
+// async fn handle_jet_accept_impl(
+//     mut req: Request<Body>,
+//     client_addr: SocketAddr,
+//     jet_associations: JetAssociationsMap,
+// ) -> Result<Response<Body>, ()> {
+//     let header = req.headers().get("upgrade").ok_or(())?;
+//     let header_str = header.to_str().map_err(|_| ())?;
+//     if header_str != "websocket" {
+//         return Err(());
+//     }
 
-    let version = {
-        let associations = jet_associations.lock().await;
-        let association = associations.get(&association_id).ok_or(())?;
-        association.version()
-    };
+//     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
+//     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
-    let res = process_req(&req);
+//     let version = {
+//         let associations = jet_associations.lock().await;
+//         let association = associations.get(&association_id).ok_or(())?;
+//         association.version()
+//     };
 
-    match version {
-        2 | 3 => {
-            tokio::spawn(async move {
-                let upgraded = hyper::upgrade::on(&mut req)
-                    .await
-                    .map_err(|e| error!("upgrade error: {}", e))?;
+//     let res = process_req(&req);
 
-                let mut jet_assc = jet_associations.lock().await;
-                if let Some(assc) = jet_assc.get_mut(&association_id) {
-                    if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
-                        candidate.set_state(CandidateState::Accepted);
-                        let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
-                        candidate.set_transport(JetTransport::Ws(ws_transport));
-                    }
-                }
-                Ok::<(), ()>(())
-            });
-            Ok(res)
-        }
-        _ => Err(()),
-    }
-}
+//     match version {
+//         2 | 3 => {
+//             tokio::spawn(async move {
+//                 let upgraded = hyper::upgrade::on(&mut req)
+//                     .await
+//                     .map_err(|e| error!("upgrade error: {}", e))?;
 
-async fn handle_jet_connect(
-    req: Request<Body>,
-    client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
-    config: Arc<Config>,
-) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_connect_impl(req, client_addr, jet_associations, config).await {
-        Ok(res) => Ok(res),
-        Err(()) => {
-            let mut res = Response::new(Body::empty());
-            *res.status_mut() = StatusCode::BAD_REQUEST;
-            Ok(res)
-        }
-    }
-}
+//                 let mut jet_assc = jet_associations.lock().await;
+//                 if let Some(assc) = jet_assc.get_mut(&association_id) {
+//                     if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
+//                         candidate.set_state(CandidateState::Accepted);
+//                         let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
+//                         candidate.set_transport(JetTransport::Ws(ws_transport));
+//                     }
+//                 }
+//                 Ok::<(), ()>(())
+//             });
+//             Ok(res)
+//         }
+//         _ => Err(()),
+//     }
+// }
 
-async fn handle_jet_connect_impl(
-    mut req: Request<Body>,
-    client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
-    config: Arc<Config>,
-) -> Result<Response<Body>, ()> {
-    use crate::interceptor::pcap_recording::PcapRecordingInterceptor;
-    use crate::interceptor::PacketInterceptor;
+// async fn handle_jet_connect(
+//     req: Request<Body>,
+//     client_addr: SocketAddr,
+//     jet_associations: JetAssociationsMap,
+//     config: Arc<Config>,
+// ) -> Result<Response<Body>, saphir::error::InternalError> {
+//     match handle_jet_connect_impl(req, client_addr, jet_associations, config).await {
+//         Ok(res) => Ok(res),
+//         Err(()) => {
+//             let mut res = Response::new(Body::empty());
+//             *res.status_mut() = StatusCode::BAD_REQUEST;
+//             Ok(res)
+//         }
+//     }
+// }
 
-    let header = req.headers().get("upgrade").ok_or(())?;
-    let header_str = header.to_str().map_err(|_| ())?;
-    if header_str != "websocket" {
-        return Err(());
-    }
+// async fn handle_jet_connect_impl(
+//     mut req: Request<Body>,
+//     client_addr: SocketAddr,
+//     jet_associations: JetAssociationsMap,
+//     config: Arc<Config>,
+// ) -> Result<Response<Body>, ()> {
+//     use crate::interceptor::plugin_recording::PluginRecordingInspector;
+//     use crate::interceptor::PacketInterceptor;
 
-    let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
+//     let header = req.headers().get("upgrade").ok_or(())?;
+//     let header_str = header.to_str().map_err(|_| ())?;
+//     if header_str != "websocket" {
+//         return Err(());
+//     }
 
-    let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
-    let (version, association_claims) = {
-        let associations = jet_associations.lock().await;
-        let association = associations.get(&association_id).ok_or(())?;
-        (association.version(), association.get_token_claims().clone())
-    };
+//     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(())?;
 
-    let association_id = association_claims.jet_aid;
+//     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
+//     let (version, association_claims) = {
+//         let associations = jet_associations.lock().await;
+//         let association = associations.get(&association_id).ok_or(())?;
+//         (association.version(), association.get_token_claims().clone())
+//     };
 
-    let res = process_req(&req);
+//     let association_id = association_claims.jet_aid;
 
-    match version {
-        2 | 3 => {
-            tokio::spawn(async move {
-                let upgraded = hyper::upgrade::on(&mut req)
-                    .await
-                    .map_err(|e| error!("upgrade error: {}", e))?;
+//     let res = process_req(&req);
 
-                let mut associations = jet_associations.lock().await;
-                let association = if let Some(assoc) = associations.get_mut(&association_id) {
-                    assoc
-                } else {
-                    error!("Failed to get association");
-                    return Err(());
-                };
+//     match version {
+//         2 | 3 => {
+//             tokio::spawn(async move {
+//                 let upgraded = hyper::upgrade::on(&mut req)
+//                     .await
+//                     .map_err(|e| error!("upgrade error: {}", e))?;
 
-                let candidate = if let Some(candidate) = association.get_candidate_mut(candidate_id) {
-                    candidate
-                } else {
-                    error!("Failed to get candidate");
-                    return Err(());
-                };
+//                 let mut associations = jet_associations.lock().await;
+//                 let association = if let Some(assoc) = associations.get_mut(&association_id) {
+//                     assoc
+//                 } else {
+//                     error!("Failed to get association");
+//                     return Err(());
+//                 };
 
-                // Sanity checks
-                let is_websocket =
-                    candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss;
-                let is_accepted = candidate.state() != CandidateState::Accepted;
-                if !is_websocket || !is_accepted {
-                    error!(
-                        "Unexpected candidate properties [is websocket? {}] [is accepted? {}]",
-                        is_websocket, is_accepted
-                    );
-                    return Err(());
-                }
+//                 let candidate = if let Some(candidate) = association.get_candidate_mut(candidate_id) {
+//                     candidate
+//                 } else {
+//                     error!("Failed to get candidate");
+//                     return Err(());
+//                 };
 
-                let server_transport = candidate
-                    .take_transport()
-                    .expect("Candidate cannot be created without a transport");
-                let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
-                let client_transport = JetTransport::Ws(ws_transport);
-                candidate.set_state(CandidateState::Connected);
-                candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
-                candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
+//                 // Sanity checks
+//                 let is_websocket =
+//                     candidate.transport_type() == TransportType::Ws || candidate.transport_type() == TransportType::Wss;
+//                 let is_accepted = candidate.state() != CandidateState::Accepted;
+//                 if !is_websocket || !is_accepted {
+//                     error!(
+//                         "Unexpected candidate properties [is websocket? {}] [is accepted? {}]",
+//                         is_websocket, is_accepted
+//                     );
+//                     return Err(());
+//                 }
 
-                let association_id = candidate.association_id();
-                let candidate_id = candidate.id();
+//                 let server_transport = candidate
+//                     .take_transport()
+//                     .expect("Candidate cannot be created without a transport");
+//                 let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
+//                 let client_transport = JetTransport::Ws(ws_transport);
+//                 candidate.set_state(CandidateState::Connected);
+//                 candidate.set_client_nb_bytes_read(client_transport.clone_nb_bytes_read());
+//                 candidate.set_client_nb_bytes_written(client_transport.clone_nb_bytes_written());
 
-                let mut file_pattern = None;
-                let mut recording_dir = None;
-                let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
-                let mut has_interceptor = false;
+//                 let association_id = candidate.association_id();
+//                 let candidate_id = candidate.id();
 
-                match (association.record_session(), config.plugins.is_some()) {
-                    (true, true) => {
-                        let mut interceptor = PcapRecordingInterceptor::new(
-                            server_transport.peer_addr().unwrap(),
-                            association_id.to_string(),
-                            candidate_id.to_string(),
-                        );
+//                 let mut file_pattern = None;
+//                 let mut recording_dir = None;
+//                 let mut recording_interceptor: Option<Box<dyn PacketInterceptor>> = None;
+//                 let mut has_interceptor = false;
 
-                        recording_dir = match &config.recording_path {
-                            Some(path) => {
-                                interceptor.set_recording_directory(path.as_str());
-                                Some(std::path::PathBuf::from(path))
-                            }
-                            _ => interceptor.get_recording_directory(),
-                        };
+//                 match (association.record_session(), config.plugins.is_some()) {
+//                     (true, true) => {
+//                         let mut interceptor = PluginRecordingInspector::new(
+//                             server_transport.peer_addr().unwrap(),
+//                             association_id.to_string(),
+//                             candidate_id.to_string(),
+//                         );
 
-                        file_pattern = Some(interceptor.get_filename_pattern());
+//                         recording_dir = match &config.recording_path {
+//                             Some(path) => {
+//                                 interceptor.set_recording_directory(path.as_str());
+//                                 Some(std::path::PathBuf::from(path))
+//                             }
+//                             _ => interceptor.get_recording_directory(),
+//                         };
 
-                        recording_interceptor = Some(Box::new(interceptor));
-                        has_interceptor = true;
-                    }
-                    (true, false) => {
-                        error!("Can't meet recording policy");
-                        return Err(());
-                    }
-                    (false, _) => {}
-                }
+//                         file_pattern = Some(interceptor.get_filename_pattern());
 
-                // We need to manually drop mutex lock to avoid deadlock below
-                std::mem::drop(associations);
+//                         recording_interceptor = Some(Box::new(interceptor));
+//                         has_interceptor = true;
+//                     }
+//                     (true, false) => {
+//                         error!("Can't meet recording policy");
+//                         return Err(());
+//                     }
+//                     (false, _) => {}
+//                 }
 
-                let info =
-                    GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
-                        .with_recording_policy(association_claims.jet_rec)
-                        .with_filtering_policy(association_claims.jet_flt);
+//                 // We need to manually drop mutex lock to avoid deadlock below
+//                 std::mem::drop(associations);
 
-                let proxy_result = Proxy::new(config.clone(), info)
-                    .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
-                    .await;
+//                 let info =
+//                     GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
+//                         .with_recording_policy(association_claims.jet_rec)
+//                         .with_filtering_policy(association_claims.jet_flt);
 
-                if has_interceptor {
-                    if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
-                        let registry = crate::registry::Registry::new(config);
-                        registry
-                            .manage_files(association_id.to_string(), pattern, dir.as_path())
-                            .await;
-                    };
-                }
+//                 let proxy_result = Proxy::new(config.clone(), info)
+//                     .build_with_packet_interceptor(server_transport, client_transport, recording_interceptor)
+//                     .await;
 
-                if let Err(e) = proxy_result {
-                    error!("failed to build Proxy for WebSocket connection: {}", e)
-                }
+//                 if has_interceptor {
+//                     if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
+//                         let registry = crate::registry::Registry::new(config);
+//                         registry
+//                             .manage_files(association_id.to_string(), pattern, dir.as_path())
+//                             .await;
+//                     };
+//                 }
 
-                remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
+//                 if let Err(e) = proxy_result {
+//                     error!("failed to build Proxy for WebSocket connection: {}", e)
+//                 }
 
-                Ok::<(), ()>(())
-            });
+//                 remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id)).await;
 
-            Ok(res)
-        }
-        _ => Err(()),
-    }
-}
+//                 Ok::<(), ()>(())
+//             });
+
+//             Ok(res)
+//         }
+//         _ => Err(()),
+//     }
+// }
+//
+// fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
+//     if let Some(raw_uuid) = path.split('/').nth(index + 1) {
+//         Uuid::parse_str(raw_uuid).ok()
+//     } else {
+//         None
+//     }
+// }
 
 fn process_req(req: &Request<Body>) -> Response<Body> {
     /*
@@ -382,14 +391,6 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
     builder.body(Body::empty()).unwrap()
 }
 
-fn get_uuid_in_path(path: &str, index: usize) -> Option<Uuid> {
-    if let Some(raw_uuid) = path.split('/').nth(index + 1) {
-        Uuid::parse_str(raw_uuid).ok()
-    } else {
-        None
-    }
-}
-
 async fn handle_jmux(
     mut req: Request<Body>,
     client_addr: SocketAddr,
@@ -450,18 +451,20 @@ async fn handle_jmux(
     tokio::spawn(async move {
         use jmux_proxy::JmuxConfig;
         use slog::o;
+        use tokio_tungstenite::tungstenite::protocol::Role;
 
         let upgraded = hyper::upgrade::on(&mut req)
             .await
             .map_err(|e| error!("upgrade error: {}", e))?;
 
-        let ws_transport = WsTransport::new_http(upgraded, Some(client_addr)).await;
-
-        let (read, write) = tokio::io::split(ws_transport);
+        let ws = tokio_tungstenite::WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+        let ws = transport::WebSocketStream::new(ws);
+        let transport = transport::Transport::new(ws);
+        let (reader, writer) = transport.split_erased();
 
         let jmux_proxy_log = slog_scope::logger().new(o!("client_addr" => client_addr));
 
-        JmuxProxy::new(Box::new(read), Box::new(write))
+        JmuxProxy::new(reader.into_inner(), writer.into_inner())
             .with_config(JmuxConfig::permissive())
             .with_logger(jmux_proxy_log)
             .run()
@@ -484,11 +487,11 @@ impl WsClient {
         WsClient { routing_url, config }
     }
 
-    pub async fn serve<T>(self, client_transport: T) -> anyhow::Result<()>
+    pub async fn serve<T>(self, client_addr: SocketAddr, client_transport: T) -> anyhow::Result<()>
     where
-        T: 'static + Transport + Send,
+        T: AsyncRead + AsyncWrite + Unpin,
     {
-        let server_transport = WsTransport::connect(&self.routing_url).await?;
+        let (server_addr, server_transport) = connect_server(&self.routing_url).await?;
 
         let destination_host = TargetAddr::try_from(&self.routing_url)?;
 
@@ -499,8 +502,59 @@ impl WsClient {
                 ApplicationProtocol::Unknown,
                 ConnectionModeDetails::Fwd { destination_host },
             ),
+            client_addr,
+            server_addr,
         )
-        .build(server_transport, client_transport)
+        .select_dissector_and_forward(client_transport, server_transport)
         .await
+    }
+}
+
+async fn connect_server(url: &Url) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+    use crate::utils;
+    use tokio::net::TcpStream;
+    use tokio_rustls::{rustls, TlsConnector, TlsStream};
+
+    let socket_addr = utils::resolve_url_to_socket_addr(url)
+        .await
+        .with_context(|| format!("couldn't resolve {}", url))?;
+
+    let request = Request::builder()
+        .uri(url.as_str())
+        .body(())
+        .context("request build failure")?;
+
+    match url.scheme() {
+        "ws" => {
+            let stream = TcpStream::connect(&socket_addr).await?;
+            let (stream, _) = tokio_tungstenite::client_async(request, stream)
+                .await
+                .context("WebSocket handshake failed")?;
+            let ws = transport::WebSocketStream::new(stream);
+            Ok((socket_addr, transport::Transport::new(ws).into_erased()))
+        }
+        "wss" => {
+            let tcp_stream = TcpStream::connect(&socket_addr).await?;
+
+            let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
+
+            let rustls_client_conf = rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_custom_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification))
+                .with_no_client_auth();
+            let rustls_client_conf = Arc::new(rustls_client_conf);
+            let cx = TlsConnector::from(rustls_client_conf);
+            let tls_stream = cx.connect(dns_name, tcp_stream).await?;
+
+            let (stream, _) = tokio_tungstenite::client_async(request, TlsStream::Client(tls_stream))
+                .await
+                .context("WebSocket handshake failed")?;
+            let ws = transport::WebSocketStream::new(stream);
+
+            Ok((socket_addr, transport::Transport::new(ws).into_erased()))
+        }
+        scheme => {
+            anyhow::bail!("Unsupported scheme: {}", scheme);
+        }
     }
 }

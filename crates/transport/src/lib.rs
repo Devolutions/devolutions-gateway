@@ -5,9 +5,8 @@ pub use self::forward::*;
 pub use self::ws::*;
 
 use pin_project_lite::pin_project;
-use std::io;
 use std::pin::Pin;
-use std::task;
+use std::{io, task};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 
 pin_project! {

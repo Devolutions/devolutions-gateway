@@ -1,17 +1,16 @@
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
-use slog_scope::debug;
 use tokio::time::Duration;
 use uuid::Uuid;
 
 pub const ACCEPT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-pub async fn remove_jet_association(
+pub fn remove_jet_association(
     jet_associations: JetAssociationsMap,
     association_id: Uuid,
     candidate_id: Option<Uuid>,
 ) -> bool {
-    let mut jet_associations = jet_associations.lock().await;
+    let mut jet_associations = jet_associations.lock();
 
     if let Some(association) = jet_associations.get_mut(&association_id) {
         if let Some(candidate_id) = candidate_id {

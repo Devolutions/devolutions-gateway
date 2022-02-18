@@ -1,5 +1,4 @@
-use std::io;
-
+use crate::rdp::sequence_future::post_mcs::{IndicationData, SequenceState};
 use ironrdp::rdp::server_license::{
     ClientNewLicenseRequest, ClientPlatformChallengeResponse, InitialMessageType, InitialServerLicenseMessage,
     LicenseEncryptionData, ServerLicenseError, ServerPlatformChallenge, ServerUpgradeLicense, PREMASTER_SECRET_SIZE,
@@ -8,9 +7,7 @@ use ironrdp::rdp::server_license::{
 use ironrdp::rdp::RdpError;
 use ironrdp::PduParsing;
 use ring::rand::SecureRandom;
-use slog_scope::{debug, info, trace, warn};
-
-use super::{IndicationData, SequenceState};
+use std::io;
 
 pub struct LicenseCredentials {
     pub username: String,

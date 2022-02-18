@@ -1,11 +1,8 @@
 use crate::config::Config;
 use crate::generic_client::GenericClient;
-use crate::jet_client::{JetAssociationsMap, JetClient};
+use crate::jet_client::JetAssociationsMap;
 use crate::rdp::RdpClient;
 use crate::routing_client;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::ws::WsTransport;
-use crate::transport::JetTransport;
 use crate::utils::url_to_socket_addr;
 use crate::websocket_client::{WebsocketService, WsClient};
 use anyhow::Context;
@@ -19,11 +16,19 @@ use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio_rustls::TlsStream;
 use url::Url;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListenerKind {
+    Tcp,
+    Ws,
+    Wss,
+}
+
 pub struct GatewayListener {
-    url: Url,
+    addr: SocketAddr,
+    kind: ListenerKind,
     listener: TcpListener,
-    config: Arc<Config>,
     jet_associations: JetAssociationsMap,
+    config: Arc<Config>,
     logger: Logger,
 }
 
@@ -45,17 +50,33 @@ impl GatewayListener {
             .listen(64)
             .context("failed to listen with the binded TCP socket")?;
 
+        let kind = match url.scheme() {
+            "tcp" => ListenerKind::Tcp,
+            "ws" => ListenerKind::Ws,
+            "wss" => ListenerKind::Wss,
+            unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
+        };
+
         info!("TCP listener on {} started successfully", socket_addr);
 
         let logger = logger.new(slog::o!("listener" => url.to_string()));
 
         Ok(Self {
-            url,
+            addr: socket_addr,
+            kind,
             listener,
             config,
             jet_associations,
             logger,
         })
+    }
+
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    pub fn kind(&self) -> ListenerKind {
+        self.kind
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
@@ -78,17 +99,16 @@ impl GatewayListener {
             }}
         }
 
-        match self.url.scheme() {
-            "tcp" => loop {
+        match self.kind() {
+            ListenerKind::Tcp => loop {
                 handle!(handle_tcp_client)
             },
-            "ws" => loop {
+            ListenerKind::Ws => loop {
                 handle!(handle_ws_client)
             },
-            "wss" => loop {
+            ListenerKind::Wss => loop {
                 handle!(handle_wss_client)
             },
-            unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
         }
     }
 
@@ -99,11 +119,10 @@ impl GatewayListener {
         let jet_associations = self.jet_associations.clone();
         let logger = self.logger.new(slog::o!("client" => peer_addr.to_string()));
 
-        match self.url.scheme() {
-            "tcp" => handle_tcp_client(config, jet_associations, conn, peer_addr, logger).await?,
-            "ws" => handle_ws_client(config, jet_associations, conn, peer_addr, logger).await?,
-            "wss" => handle_wss_client(config, jet_associations, conn, peer_addr, logger).await?,
-            unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
+        match self.kind() {
+            ListenerKind::Tcp => handle_tcp_client(config, jet_associations, conn, peer_addr, logger).await?,
+            ListenerKind::Ws => handle_ws_client(config, jet_associations, conn, peer_addr, logger).await?,
+            ListenerKind::Wss => handle_wss_client(config, jet_associations, conn, peer_addr, logger).await?,
         }
 
         Ok(())
@@ -124,10 +143,8 @@ async fn handle_tcp_client(
         // real world usecases)
         match routing_url.scheme() {
             "tcp" => {
-                let transport = TcpTransport::new(stream);
-
                 routing_client::Client::new(routing_url.clone(), config)
-                    .serve(transport)
+                    .serve(peer_addr, stream)
                     .with_logger(logger)
                     .await?;
             }
@@ -140,10 +157,9 @@ async fn handle_tcp_client(
                     .accept(stream)
                     .await
                     .context("TlsAcceptor handshake failed")?;
-                let transport = TcpTransport::new_tls(TlsStream::Server(tls_stream));
 
                 routing_client::Client::new(routing_url.clone(), config)
-                    .serve(transport)
+                    .serve(peer_addr, tls_stream)
                     .with_logger(logger)
                     .await?;
             }
@@ -151,10 +167,9 @@ async fn handle_tcp_client(
                 let stream = tokio_tungstenite::accept_async(stream)
                     .await
                     .context("WebSocket handshake failed")?;
-                let transport = WsTransport::new_tcp(stream, Some(peer_addr));
-
+                let ws = transport::WebSocketStream::new(stream);
                 WsClient::new(routing_url.clone(), config)
-                    .serve(transport)
+                    .serve(peer_addr, ws)
                     .with_logger(logger)
                     .await?;
             }
@@ -170,10 +185,9 @@ async fn handle_tcp_client(
                 let stream = tokio_tungstenite::accept_async(TlsStream::Server(tls_stream))
                     .await
                     .context("WebSocket handshake failed")?;
-                let transport = WsTransport::new_tls(stream, Some(peer_addr));
-
+                let ws = transport::WebSocketStream::new(stream);
                 WsClient::new(routing_url.clone(), config)
-                    .serve(transport)
+                    .serve(peer_addr, ws)
                     .with_logger(logger)
                     .await?;
             }
@@ -198,13 +212,14 @@ async fn handle_tcp_client(
         // Check if first four bytes contains some protocol magic bytes
         match &peeked[..n_read] {
             [b'J', b'E', b'T', b'\0'] => {
-                JetClient {
-                    config,
-                    jet_associations,
-                }
-                .serve(JetTransport::new_tcp(stream))
-                .with_logger(logger)
-                .await?;
+                anyhow::bail!("Jet TCP listener currently disabled")
+                // JetClient {
+                //     config,
+                //     jet_associations,
+                // }
+                // .serve(JetTransport::new_tcp(stream))
+                // .with_logger(logger)
+                // .await?;
             }
             [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
             _ => {
@@ -290,7 +305,7 @@ fn set_socket_options(socket: &TcpSocket, logger: &Logger) {
     const SOCKET_SEND_BUFFER_SIZE: u32 = 0x7FFFF;
     const SOCKET_RECV_BUFFER_SIZE: u32 = 0x7FFFF;
 
-    // FIXME: temporarily not available in tokio 1.5 (https://github.com/tokio-rs/tokio/issues/3082)
+    // FIXME: temporarily not available in tokio 1.x (https://github.com/tokio-rs/tokio/issues/3082)
     // if let Err(e) = socket.set_keepalive(Some(Duration::from_secs(2))) {
     //     slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
     // }

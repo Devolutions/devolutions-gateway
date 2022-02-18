@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 
 # in-house
+transport = { path = "../crates/transport" }
 jet-proto = { path = "../crates/jet-proto" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
 picky-krb = { path = "../crates/picky-krb" }
@@ -41,9 +42,6 @@ uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.0"
 anyhow = "1.0.55"
-# TODO: compare performance with `ringbuf` and `sluice`
-# NOTE: check if we actually still need a bip buffer for proxying though (see jetsocat)
-spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
 
 # security, crypto…
 native-tls = "0.2.8"
@@ -73,6 +71,9 @@ tokio-util = { version = "0.7.0", features = ["codec"] }
 tokio-tungstenite = "0.17.1"
 tokio-rustls = { version = "0.23.2", features = ["dangerous_configuration"] }
 futures = "0.3.21"
+
+# Safe pin projection
+pin-project-lite = "0.2.8"
 
 # http
 hyper = "0.14.17"

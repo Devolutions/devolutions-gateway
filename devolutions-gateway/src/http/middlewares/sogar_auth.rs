@@ -5,7 +5,6 @@ use saphir::http;
 use saphir::http_context::State;
 use saphir::prelude::*;
 use saphir::response::Builder as ResponseBuilder;
-use slog_scope::error;
 use sogar_core::registry::{
     BLOB_DOWNLOAD_ENDPOINT, BLOB_EXIST_ENDPOINT, BLOB_GET_LOCATION_ENDPOINT, BLOB_UPLOAD_ENDPOINT,
     MANIFEST_DOWNLOAD_ENDPOINT, MANIFEST_EXIST_ENDPOINT, MANIFEST_UPLOAD_ENDPOINT,

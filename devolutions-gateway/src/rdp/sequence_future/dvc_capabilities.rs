@@ -1,20 +1,17 @@
-use std::io;
-use std::marker::PhantomData;
-
+use crate::interceptor::PeerSide;
+use crate::rdp::sequence_future::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
+use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
+use crate::transport::rdp::{RdpPdu, RdpTransport};
 use bytes::{Buf, BytesMut};
 use ironrdp::mcs::SendDataContext;
 use ironrdp::rdp::vc;
 use ironrdp::rdp::vc::dvc::{self, gfx};
 use ironrdp::{McsPdu, PduParsing};
-use slog_scope::debug;
+use std::io;
+use std::marker::PhantomData;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsStream;
 use tokio_util::codec::Framed;
-
-use super::{FutureState, GetStateArgs, NextStream, SequenceFuture, SequenceFutureProperties};
-use crate::interceptor::PduSource;
-use crate::rdp::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
-use crate::transport::rdp::{RdpPdu, RdpTransport};
 
 type DvcCapabilitiesTransport = Framed<TlsStream<TcpStream>, RdpTransport>;
 
@@ -240,7 +237,7 @@ fn handle_send_data_request(
                 let channel_id_type = data_pdu.channel_id_type;
                 let channel_id = data_pdu.channel_id;
                 let complete_dvc_data = dvc_manager
-                    .handle_data_pdu(PduSource::Client, data_pdu, dvc_data.as_ref())
+                    .handle_data_pdu(PeerSide::Client, data_pdu, dvc_data.as_ref())
                     .expect("First GFX PDU must be complete data");
 
                 let gfx_capabilities = if let gfx::ClientPdu::CapabilitiesAdvertise(gfx_capabilities) =

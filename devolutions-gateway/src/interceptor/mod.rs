@@ -1,81 +1,142 @@
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::net::SocketAddr;
+use bytes::BytesMut;
+use pin_project_lite::pin_project;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::{io, task};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod pcap;
-pub mod pcap_recording;
-pub mod rdp;
+pub mod plugin_recording;
+// pub mod rdp;
 
-pub trait PacketInterceptor: Send + Sync {
-    fn on_new_packet(&mut self, source_addr: Option<SocketAddr>, data: &[u8]);
-    fn boxed_clone(&self) -> Box<dyn PacketInterceptor>;
+pin_project! {
+    pub struct Interceptor<S> {
+        #[pin]
+        pub inner: S,
+        pub nb_bytes_read: Arc<AtomicU64>,
+        pub inspectors: Vec<Box<dyn Inspector + Send>>,
+    }
 }
 
-pub trait MessageReader: Send + Sync {
-    fn get_messages(&mut self, data: &mut Vec<u8>, source: PduSource) -> Vec<Vec<u8>>;
+impl<S> Interceptor<S> {
+    pub fn new(stream: S) -> Self {
+        Self {
+            inner: stream,
+            nb_bytes_read: Arc::new(AtomicU64::new(0)),
+            inspectors: Vec::new(),
+        }
+    }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum PduSource {
+impl<S> AsyncRead for Interceptor<S>
+where
+    S: AsyncRead,
+{
+    #[inline]
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> task::Poll<io::Result<()>> {
+        let this = self.project();
+
+        match futures::ready!(this.inner.poll_read(cx, buf)) {
+            Ok(()) => {}
+            Err(e) => return task::Poll::Ready(Err(e)),
+        }
+
+        let filled = buf.filled();
+
+        this.nb_bytes_read.fetch_add(filled.len() as u64, Ordering::SeqCst);
+
+        for inspector in this.inspectors {
+            if let Err(e) = inspector.inspect_bytes(filled) {
+                debug!("inspector error: {}", e);
+            }
+        }
+
+        task::Poll::Ready(Ok(()))
+    }
+}
+
+impl<S> AsyncWrite for Interceptor<S>
+where
+    S: AsyncWrite,
+{
+    #[inline]
+    fn poll_write(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> task::Poll<io::Result<usize>> {
+        self.project().inner.poll_write(cx, buf)
+    }
+
+    #[inline]
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_flush(cx)
+    }
+
+    #[inline]
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_shutdown(cx)
+    }
+}
+
+pub trait Inspector {
+    /// Inspect traffic intercepted by `Interceptor`.
+    ///
+    /// This should execute as fast as possible (consider using a separate task for the heavy lifting).
+    fn inspect_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PeerSide {
     Client,
     Server,
 }
 
-pub struct PeerInfo {
-    pub addr: SocketAddr,
-    pub sequence_number: u32,
-    pub data: Vec<u8>,
-}
+pub trait Dissector {
+    /// Returns bytes containing a whole message leaving remaining bytes messages in the input
+    /// buffer.
+    fn dissect_one(&mut self, side: PeerSide, bytes: &mut BytesMut) -> Option<BytesMut>;
 
-impl PeerInfo {
-    pub fn new(addr: SocketAddr) -> Self {
-        PeerInfo {
-            addr,
-            sequence_number: 0,
-            data: Vec::new(),
+    fn dissect_all(&mut self, side: PeerSide, bytes: &mut BytesMut) -> Vec<BytesMut> {
+        let mut all = Vec::new();
+        while let Some(one) = self.dissect_one(side, bytes) {
+            all.push(one);
         }
+        all
     }
 }
 
-pub struct UnknownMessageReader;
-impl MessageReader for UnknownMessageReader {
-    fn get_messages(&mut self, data: &mut Vec<u8>, _source: PduSource) -> Vec<Vec<u8>> {
-        let mut destination = Vec::new();
-        std::mem::swap(data, &mut destination);
-        vec![destination]
+pub struct DummyDissector;
+
+impl Dissector for DummyDissector {
+    fn dissect_one(&mut self, _: PeerSide, bytes: &mut BytesMut) -> Option<BytesMut> {
+        Some(bytes.split_to(bytes.len()))
     }
 }
 
-pub struct WaykMessageReader;
-impl MessageReader for WaykMessageReader {
-    fn get_messages(&mut self, data: &mut Vec<u8>, _source: PduSource) -> Vec<Vec<u8>> {
-        let mut messages = Vec::new();
+pub struct WaykDissector;
 
-        loop {
-            let msg_size = {
-                let mut cursor = std::io::Cursor::new(&data);
-                if let Ok(header) = cursor.read_u32::<LittleEndian>() {
-                    if header & 0x8000_0000 != 0 {
-                        (header & 0x0000_FFFF) as usize + 4
-                    } else {
-                        (header & 0x07FF_FFFF) as usize + 6
-                    }
+impl Dissector for WaykDissector {
+    fn dissect_one(&mut self, _: PeerSide, bytes: &mut BytesMut) -> Option<BytesMut> {
+        let msg_size = {
+            let mut cursor = std::io::Cursor::new(&bytes);
+            if let Ok(header) = cursor.read_u32::<LittleEndian>() {
+                if header & 0x8000_0000 != 0 {
+                    (header & 0x0000_FFFF) as usize + 4
                 } else {
-                    break;
+                    (header & 0x07FF_FFFF) as usize + 6
                 }
-            };
-
-            if data.len() >= msg_size {
-                let drain = data.drain(..msg_size);
-                let mut new_message = Vec::new();
-                for x in drain {
-                    new_message.push(x);
-                }
-                messages.push(new_message);
             } else {
-                break;
+                return None;
             }
-        }
+        };
 
-        messages
+        if bytes.len() >= msg_size {
+            Some(bytes.split_to(msg_size))
+        } else {
+            None
+        }
     }
 }

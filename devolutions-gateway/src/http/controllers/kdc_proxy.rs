@@ -55,20 +55,20 @@ impl KdcProxyController {
         let scheme = kdc_proxy_config.kdc_url.scheme();
         let address_to_resolve = format!(
             "{}:{}",
-            kdc_proxy_config.kdc_url.host().unwrap().to_string(),
+            kdc_proxy_config.kdc_url.host().unwrap(),
             kdc_proxy_config.kdc_url.port().unwrap_or(DEFAULT_KDC_PORT)
         );
 
         let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
             address
         } else {
-            slog_scope::error!("Unable to locate KDC server");
+            error!("Unable to locate KDC server");
             return Err(HttpErrorStatus::internal("Unable to locate KDC server"));
         };
 
         let kdc_reply_message = if scheme == "tcp" {
             let mut connection = TcpStream::connect(kdc_address).await.map_err(|e| {
-                slog_scope::error!("{:?}", e);
+                error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to connect to KDC server")
             })?;
 
@@ -76,12 +76,12 @@ impl KdcProxyController {
                 .write_all(&kdc_proxy_message.kerb_message.0 .0)
                 .await
                 .map_err(|e| {
-                    slog_scope::error!("{:?}", e);
+                    error!("{:?}", e);
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
 
             read_kdc_reply_message(&mut connection).await.map_err(|e| {
-                slog_scope::error!("{:?}", e);
+                error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to read KDC reply message")
             })?
         } else {
@@ -90,7 +90,7 @@ impl KdcProxyController {
 
             let port = portpicker::pick_unused_port().ok_or_else(|| HttpErrorStatus::internal("No free ports"))?;
             let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await.map_err(|e| {
-                slog_scope::error!("{:?}", e);
+                error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to send the message to the KDC server")
             })?;
 
@@ -99,12 +99,12 @@ impl KdcProxyController {
                 .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_address)
                 .await
                 .map_err(|e| {
-                    slog_scope::error!("{:?}", e);
+                    error!("{:?}", e);
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
 
             let n = udp_socket.recv(&mut buff).await.map_err(|e| {
-                slog_scope::error!("{:?}", e);
+                error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to read reply from the KDC server")
             })?;
 
@@ -115,7 +115,7 @@ impl KdcProxyController {
         };
 
         let kdc_proxy_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message).map_err(|e| {
-            slog_scope::error!("{:?}", e);
+            error!("{:?}", e);
             HttpErrorStatus::internal("Cannot create kdc proxy massage")
         })?;
 
