@@ -1,12 +1,17 @@
 [package]
 name = "tokengen"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Devolutions Inc."]
 edition = "2021"
+publish = false
+
+[workspace]
+resolver = "2"
+members = ["."]
 
 [dependencies]
 picky = { version = "6.3.0", default-features = false, features = ["jose"] }
-clap = "3.0.0-beta.5"
+clap = { version = "3.0.5", features = ["derive"] }
 humantime = "2.1.0"
 serde = "1.0.131"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }

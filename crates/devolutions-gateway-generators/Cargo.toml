@@ -1,6 +1,7 @@
 [package]
 name = "devolutions-gateway-generators"
-version = "0.1.0"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
 edition = "2021"
 publish = false
 

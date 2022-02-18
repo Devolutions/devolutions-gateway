@@ -1,17 +1,5 @@
-mod http;
-mod socks4;
-mod socks5;
-
-#[cfg(test)]
-mod test_utils;
-
-pub use http::HttpProxyStream;
-pub use socks4::Socks4Stream;
-pub use socks5::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode, Socks5Listener, Socks5Stream};
-
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DestAddr {
@@ -127,15 +115,3 @@ impl<T: ToDestAddr + ?Sized> ToDestAddr for &T {
         (**self).to_dest_addr()
     }
 }
-
-/// We need a super-trait in order to have additional non-auto-trait traits in trait objects.
-///
-/// The reason for using trait objects is monomorphization prevention in generic code.
-/// This is for reducing code size by avoiding function duplication.
-///
-/// See:
-/// - https://doc.rust-lang.org/std/keyword.dyn.html
-/// - https://doc.rust-lang.org/reference/types/trait-object.html
-trait ReadWriteStream: AsyncRead + AsyncWrite + Unpin + Send {}
-
-impl<S> ReadWriteStream for S where S: AsyncRead + AsyncWrite + Unpin + Send {}

@@ -1,0 +1,6 @@
+[package]
+name = "proxy-types"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+edition = "2021"
+publish = false

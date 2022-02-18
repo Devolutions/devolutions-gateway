@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context as _, Result};
 use async_tungstenite::tungstenite::client::IntoClientRequest;
 use async_tungstenite::tungstenite::handshake::client::Response;
 use futures_util::future;
-use jetsocat_proxy::{DestAddr, ToDestAddr};
+use proxy_types::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -22,7 +22,8 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
 
 macro_rules! impl_tcp_connect {
     ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, $operation:expr) => {{
-        use jetsocat_proxy::{HttpProxyStream, Socks4Stream, Socks5Stream};
+        use proxy_http::HttpProxyStream;
+        use proxy_socks::{Socks4Stream, Socks5Stream};
 
         let out: $output_ty = match $proxy_cfg {
             Some(ProxyConfig {

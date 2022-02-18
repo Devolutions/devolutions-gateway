@@ -1,0 +1,11 @@
+[package]
+name = "socks5-server"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+edition = "2021"
+publish = false
+
+[dependencies]
+proxy-socks = { path = "../proxy-socks" }
+proxy-types = { path = "../proxy-types" }
+tokio = { version = "1.14.0", features = ["rt", "net", "rt-multi-thread", "macros"] }

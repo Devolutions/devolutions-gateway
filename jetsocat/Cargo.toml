@@ -4,6 +4,7 @@ version = "2021.1.7"
 authors = ["Devolutions Inc."]
 edition = "2021"
 description = "WebSocket toolkit for jet protocol related operations"
+publish = false
 
 [features]
 default = ["rustls", "detect-proxy"]
@@ -15,14 +16,16 @@ native-tls = ["async-tungstenite/tokio-native-tls"]
 [dependencies]
 
 # jet protocol support
-jet-proto = { path = "../jet-proto" }
+jet-proto = { path = "../crates/jet-proto" }
 uuid = "0.8.2"
 
 # jmux protocol support
-jmux-proxy = { path = "../jmux-proxy" }
+jmux-proxy = { path = "../crates/jmux-proxy" }
 
 # proxy support
-jetsocat-proxy = { path = "./proxy" }
+proxy-http = { path = "../crates/proxy-http" }
+proxy-socks = { path = "../crates/proxy-socks" }
+proxy-types = { path = "../crates/proxy-types" }
 proxy_cfg = { version = "0.4.0", optional = true }
 
 # cli

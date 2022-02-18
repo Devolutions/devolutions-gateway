@@ -5,12 +5,14 @@ edition = "2021"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc."]
+publish = false
 
 [dependencies]
 
 # in-house
-jet-proto = { path = "../jet-proto" }
-jmux-proxy = { path = "../jmux-proxy" }
+jet-proto = { path = "../crates/jet-proto" }
+jmux-proxy = { path = "../crates/jmux-proxy" }
+picky-krb = { path = "../crates/picky-krb" }
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
 ceviche = "0.5.0"
@@ -23,7 +25,6 @@ hostname = "0.3.1"
 serde = "1.0.131"
 serde_derive = "1.0.131"
 serde_json = "1.0.72"
-picky-krb = { path = "../crates/picky-krb", version = "0.1.0" }
 
 # utils, misc
 camino = { version = "1.0.5", features = ["serde1"] }

@@ -1,8 +1,9 @@
 [package]
 name = "jmux-proto"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Devolutions Inc."]
 edition = "2021"
+publish = false
 
 [dependencies]
 bytes = "1.1.0"
@@ -10,4 +11,4 @@ smol_str = "0.1.21"
 
 [dev-dependencies]
 proptest = "1.0.0"
-jmux-generators = { path = "../crates/jmux-generators" }
+jmux-generators = { path = "../jmux-generators" }
