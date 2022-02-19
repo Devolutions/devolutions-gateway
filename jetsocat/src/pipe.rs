@@ -1,8 +1,8 @@
 use crate::proxy::ProxyConfig;
 use anyhow::Result;
-use slog::{debug, info, o, Logger};
+use slog::{debug, info, Logger};
 use std::any::Any;
-use tokio::io::{AsyncRead, AsyncWrite};
+use transport::{ReadableHalf, WriteableHalf};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -37,8 +37,8 @@ pub enum PipeMode {
 
 pub struct Pipe {
     pub name: &'static str,
-    pub read: Box<dyn AsyncRead + Unpin + Send>,
-    pub write: Box<dyn AsyncWrite + Unpin + Send>,
+    pub read: ReadableHalf,
+    pub write: WriteableHalf,
 
     // Useful when we don't want to drop something before the Pipe
     pub _handle: Option<Box<dyn Any>>,
@@ -52,8 +52,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
     match mode {
         PipeMode::Stdio => Ok(Pipe {
             name: "stdio",
-            read: Box::new(tokio::io::stdin()),
-            write: Box::new(tokio::io::stdout()),
+            read: ReadableHalf::new(tokio::io::stdin()).into_erased(),
+            write: WriteableHalf::new(tokio::io::stdout()).into_erased(),
             _handle: None,
         }),
         PipeMode::ProcessCmd { command } => {
@@ -82,8 +82,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
 
             Ok(Pipe {
                 name: "process",
-                read: Box::new(stdout),
-                write: Box::new(stdin),
+                read: ReadableHalf::new(stdout).into_erased(),
+                write: WriteableHalf::new(stdin).into_erased(),
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
@@ -106,8 +106,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
 
             Ok(Pipe {
                 name: "tcp-listener",
-                read: Box::new(read),
-                write: Box::new(write),
+                read: ReadableHalf::new(read).into_erased(),
+                write: WriteableHalf::new(write).into_erased(),
                 _handle: None,
             })
         }
@@ -221,10 +221,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
             })
         }
         PipeMode::WebSocketListen { bind_addr } => {
-            use crate::io::{ReadableWebSocketHalf, WritableWebSocketHalf};
-            use async_tungstenite::tokio::accept_async;
             use futures_util::StreamExt as _;
             use tokio::net::TcpListener;
+            use tokio_tungstenite::accept_async;
+            use transport::WebSocketStream;
 
             info!(log, "Listening for WebSocket on {}", bind_addr);
 
@@ -242,10 +242,11 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
                 .await
                 .with_context(|| "WebSocket handshake failed")?;
 
+            // By splitting that way, critical section (protected by lock) is smaller
             let (sink, stream) = ws.split();
 
-            let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin + Send>;
-            let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin + Send>;
+            let read = ReadableHalf::new(WebSocketStream::new(stream)).into_erased();
+            let write = WriteableHalf::new(WebSocketStream::new(sink)).into_erased();
 
             Ok(Pipe {
                 name: "websocket-listener",
@@ -257,22 +258,25 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
     }
 }
 
-pub async fn pipe(a: Pipe, b: Pipe, log: slog::Logger) -> Result<()> {
-    use crate::io::forward;
-    use futures_util::future::Either;
-    use futures_util::{future, pin_mut};
+pub async fn pipe(mut a: Pipe, mut b: Pipe, log: slog::Logger) -> Result<()> {
+    use tokio::io::AsyncWriteExt;
+    use transport::forward;
 
-    let a_to_b = forward(a.read, b.write, log.new(o!(b.name => format!("← {}", a.name))));
-    let b_to_a = forward(b.read, a.write, log.new(o!(b.name => format!("→ {}", a.name))));
+    let a_to_b = forward(&mut a.read, &mut b.write);
+    let b_to_a = forward(&mut b.read, &mut a.write);
 
     info!(log, "Piping {} with {}", a.name, b.name);
 
-    pin_mut!(b_to_a, a_to_b);
-    let result = match future::select(b_to_a, a_to_b).await {
-        Either::Left((result, _)) | Either::Right((result, _)) => result,
-    };
+    let result = tokio::select! {
+        result = a_to_b => result,
+        result = b_to_a => result,
+    }
+    .map(|_| ());
 
     info!(log, "Ended");
+
+    a.write.shutdown().await?;
+    b.write.shutdown().await?;
 
     result
 }

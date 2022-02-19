@@ -10,8 +10,8 @@ publish = false
 default = ["rustls", "detect-proxy"]
 verbose = ["slog/max_level_trace"]
 detect-proxy = ["proxy_cfg"]
-rustls = ["async-tungstenite/tokio-rustls-webpki-roots"]
-native-tls = ["async-tungstenite/tokio-native-tls"]
+rustls = ["tokio-tungstenite/rustls-tls-webpki-roots"]
+native-tls = ["tokio-tungstenite/native-tls"]
 
 [dependencies]
 
@@ -33,10 +33,9 @@ seahorse = "2.0.0"
 
 # async
 tokio = { version = "1.17.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio-tungstenite = "0.17.0"
 futures-util = "0.3.21"
-async-tungstenite = "0.17.0"
-# TODO: compare with https://lib.rs/crates/tokio-tungstenite (smaller size? compile time?)
-# Also have a look at https://lib.rs/crates/ws_stream_tungstenite (should we use it? is there something to learn from it?)
+transport = { path = "../crates/transport" }
 
 # logging
 slog = "2.7.0"

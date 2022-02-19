@@ -1,47 +1,18 @@
 use anyhow::Result;
-use async_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
 use futures_util::{pin_mut, ready, Sink, Stream};
-use slog::{trace, Logger};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
 
-pub async fn forward<R, W>(mut reader: R, mut writer: W, logger: Logger) -> Result<()>
-where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-
-    let mut buf = [0u8; 5120];
-
-    loop {
-        let bytes_read = reader.read(&mut buf).await?;
-
-        if bytes_read == 0 {
-            break;
-        }
-
-        trace!(logger, r#""{}""#, String::from_utf8_lossy(&buf[..bytes_read]));
-
-        writer.write_all(&buf[..bytes_read]).await?;
-        writer.flush().await?;
-    }
-
-    Ok(())
-}
-
-/// Wraps a WebSocket stream and implements `AsyncRead`
-pub struct ReadableWebSocketHalf<S> {
+/// Wraps a WebSocket stream and implements `AsyncRead` and `AsyncWrite`
+pub struct WebSocketStream<S> {
     inner: S,
     read_buf: Option<Vec<u8>>,
 }
 
-impl<S> ReadableWebSocketHalf<S>
-where
-    S: Stream<Item = Result<TungsteniteMessage, TungsteniteError>> + Unpin,
-{
+impl<S> WebSocketStream<S> {
     pub fn new(stream: S) -> Self {
         Self {
             inner: stream,
@@ -50,7 +21,7 @@ where
     }
 }
 
-impl<S> AsyncRead for ReadableWebSocketHalf<S>
+impl<S> AsyncRead for WebSocketStream<S>
 where
     S: Stream<Item = Result<TungsteniteMessage, TungsteniteError>> + Unpin,
 {
@@ -103,21 +74,7 @@ where
     }
 }
 
-/// Wraps a WebSocket stream and implements `AsyncWrite`
-pub struct WritableWebSocketHalf<S> {
-    inner: S,
-}
-
-impl<S> WritableWebSocketHalf<S>
-where
-    S: Sink<TungsteniteMessage, Error = TungsteniteError> + Unpin,
-{
-    pub fn new(stream: S) -> Self {
-        Self { inner: stream }
-    }
-}
-
-impl<S> AsyncWrite for WritableWebSocketHalf<S>
+impl<S> AsyncWrite for WebSocketStream<S>
 where
     S: Sink<TungsteniteMessage, Error = TungsteniteError> + Unpin,
 {
@@ -126,6 +83,9 @@ where
             ($expr:expr) => {{
                 match $expr {
                     Ok(o) => o,
+                    // When using `AsyncWriteExt::write_all`, `io::ErrorKind::WriteZero` will be raised.
+                    // In this case it means "attempted to write on a closed socket".
+                    Err(TungsteniteError::ConnectionClosed) => return Poll::Ready(Ok(0)),
                     Err(e) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                 }
             }};
@@ -145,6 +105,8 @@ where
         let inner = &mut self.inner;
         pin_mut!(inner);
         try_in_poll!(inner.start_send(TungsteniteMessage::Binary(buf.to_vec())));
+        // ^ if no error occurred, message is accepted and queued when calling `start_send`
+        // (that is: `to_vec` is called only once)
 
         Poll::Ready(Ok(buf.len()))
     }
@@ -152,16 +114,20 @@ where
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let inner = &mut self.inner;
         pin_mut!(inner);
-        inner
-            .poll_flush(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        match ready!(inner.poll_flush(cx)) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
+            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+        }
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let inner = &mut self.inner;
         pin_mut!(inner);
-        inner
-            .poll_close(cx)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        match ready!(inner.poll_close(cx)) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
+            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+        }
     }
 }

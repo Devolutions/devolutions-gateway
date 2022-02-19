@@ -1,0 +1,20 @@
+[package]
+name = "transport"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+edition = "2021"
+publish = false
+
+[dependencies]
+
+# async
+tokio = "1.17.0"
+tokio-tungstenite = "0.17.0"
+futures-util = "0.3.21"
+
+# error handling
+anyhow = "1.0.53"
+
+# logging
+slog = "2.7.0"
+

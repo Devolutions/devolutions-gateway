@@ -146,24 +146,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-tungstenite"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3fe458e5f0c283bd6315a884d30f90b654c612b2c16d676730ba71f23cf160a"
-dependencies = [
- "futures-io",
- "futures-util",
- "log",
- "native-tls",
- "pin-project-lite",
- "tokio",
- "tokio-native-tls",
- "tokio-rustls 0.23.2",
- "tungstenite",
- "webpki-roots",
-]
-
-[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1337,7 +1319,6 @@ name = "jetsocat"
 version = "2021.1.7"
 dependencies = [
  "anyhow",
- "async-tungstenite",
  "dirs-next",
  "futures-util",
  "jet-proto",
@@ -1351,6 +1332,8 @@ dependencies = [
  "slog-async",
  "slog-term",
  "tokio",
+ "tokio-tungstenite",
+ "transport",
  "uuid",
 ]
 
@@ -3403,8 +3386,14 @@ checksum = "545bc3ea3a139f54a5338bcfcfe75105a45b952b477def251a957c96de5be43d"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
+ "rustls 0.20.3",
  "tokio",
+ "tokio-native-tls",
+ "tokio-rustls 0.23.2",
  "tungstenite",
+ "webpki 0.22.0",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -3459,6 +3448,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03cfcb51380632a72d3111cb8d3447a8d908e577d31beeac006f836383d29a23"
 dependencies = [
  "lazy_static",
+]
+
+[[package]]
+name = "transport"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "slog",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
