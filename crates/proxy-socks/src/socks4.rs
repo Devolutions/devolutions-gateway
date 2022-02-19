@@ -169,12 +169,10 @@ async fn read_socks_reply(stream: &mut dyn ReadWriteStream) -> io::Result<Socket
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_utils::AsyncStdIo;
 
     async fn assert_encoding(addr: DestAddr, userid: &str, encoded: &[u8]) {
-        let mut writer = AsyncStdIo(io::Cursor::new(Vec::new()));
+        let mut writer = tokio_test::io::Builder::new().write(encoded).build();
         write_socks_request(&mut writer, &addr, userid).await.unwrap();
-        assert_eq!(writer.0.into_inner().as_slice(), encoded);
     }
 
     #[tokio::test]

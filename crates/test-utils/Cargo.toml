@@ -1,9 +1,0 @@
-[package]
-name = "test-utils"
-version = "0.0.0"
-authors = ["Devolutions Inc."]
-edition = "2021"
-publish = false
-
-[dependencies]
-tokio = "1.17.0"
