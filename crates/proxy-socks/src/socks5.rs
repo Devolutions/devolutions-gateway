@@ -872,7 +872,6 @@ async fn server_password_authentication(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_utils::{AsyncStdIo, DummyStream};
 
     // NOTE: for more comprehensive tests, see `proxy-tester`.
 
@@ -880,8 +879,11 @@ mod tests {
 
     const GOOGLE_ADDR: &str = "google.com:80";
 
-    fn socks5_dummy() -> DummyStream {
-        DummyStream(vec![5, AuthMethod::USERNAME_PASSWORD])
+    fn socks5_dummy() -> tokio_test::io::Mock {
+        tokio_test::io::Builder::new()
+            .write(&[5, 2, AuthMethod::NO_AUTH_REQUIRED, AuthMethod::USERNAME_PASSWORD])
+            .read(&[5, AuthMethod::USERNAME_PASSWORD])
+            .build()
     }
 
     #[tokio::test]
@@ -923,7 +925,7 @@ mod tests {
         assert_eq!(&buf[..len], encoded);
 
         // decode
-        let mut reader = AsyncStdIo(io::Cursor::new(encoded.to_vec()));
+        let mut reader = tokio_test::io::Builder::new().read(encoded).build();
         let decoded = read_addr(&mut reader).await.unwrap();
         assert_eq!(decoded, addr);
     }
