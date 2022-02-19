@@ -1,9 +1,8 @@
-pub mod jet;
 pub mod listener;
 pub mod pipe;
 pub mod proxy;
 
-mod io;
+mod jet;
 mod utils;
 
 use jmux_proxy::JmuxConfig;
@@ -89,7 +88,7 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
     let pipe = open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log).await?;
 
     // Start JMUX proxy over the pipe
-    JmuxProxy::new(pipe.read, pipe.write)
+    JmuxProxy::new(pipe.read.into_inner(), pipe.write.into_inner())
         .with_config(cfg.jmux_cfg)
         .with_requester_api(api_request_rx)
         .with_logger(log)

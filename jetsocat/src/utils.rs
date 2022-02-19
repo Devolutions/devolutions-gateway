@@ -1,13 +1,12 @@
-use crate::io::{ReadableWebSocketHalf, WritableWebSocketHalf};
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{anyhow, Context as _, Result};
-use async_tungstenite::tungstenite::client::IntoClientRequest;
-use async_tungstenite::tungstenite::handshake::client::Response;
 use futures_util::future;
 use proxy_types::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Response;
+use transport::{ReadableHalf, WebSocketStream, WriteableHalf};
 
 async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
     match dest_addr {
@@ -46,7 +45,7 @@ macro_rules! impl_tcp_connect {
                 addr: proxy_addr,
             }) => {
                 // unknown SOCKS version, try SOCKS5 first and then SOCKS4
-                match Socks5Stream::connect(TcpStream::connect(proxy_addr.clone()).await?, &$req_addr).await {
+                match Socks5Stream::connect(TcpStream::connect(&proxy_addr).await?, &$req_addr).await {
                     Ok(socks5) => $operation(socks5).await,
                     Err(_) => {
                         let socks4 =
@@ -77,27 +76,23 @@ macro_rules! impl_tcp_connect {
     }};
 }
 
-type TcpConnectOutput = (Box<dyn AsyncRead + Unpin + Send>, Box<dyn AsyncWrite + Unpin + Send>);
+type TcpConnectOutput = (ReadableHalf, WriteableHalf);
 
 pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<TcpConnectOutput> {
     impl_tcp_connect!(req_addr, proxy_cfg, Result<TcpConnectOutput>, |stream| {
         let (read, write) = tokio::io::split(stream);
         future::ready(Ok((
-            Box::new(read) as Box<dyn AsyncRead + Unpin + Send>,
-            Box::new(write) as Box<dyn AsyncWrite + Unpin + Send>,
+            ReadableHalf::new(read).into_erased(),
+            WriteableHalf::new(write).into_erased(),
         )))
     })
 }
 
-type WebSocketConnectOutput = (
-    Box<dyn AsyncRead + Unpin + Send>,
-    Box<dyn AsyncWrite + Unpin + Send>,
-    Response,
-);
+type WebSocketConnectOutput = (ReadableHalf, WriteableHalf, Response);
 
 pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<WebSocketConnectOutput> {
-    use async_tungstenite::tokio::client_async_tls;
     use futures_util::StreamExt as _;
+    use tokio_tungstenite::client_async_tls;
 
     let req = addr.into_client_request()?;
     let domain = req.uri().host().context("no host name in the url")?;
@@ -110,8 +105,8 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
                 .await
                 .context("WebSocket handshake failed")?;
             let (sink, stream) = ws.split();
-            let read = Box::new(ReadableWebSocketHalf::new(stream)) as Box<dyn AsyncRead + Unpin + Send>;
-            let write = Box::new(WritableWebSocketHalf::new(sink)) as Box<dyn AsyncWrite + Unpin + Send>;
+            let read = ReadableHalf::new(WebSocketStream::new(stream)).into_erased();
+            let write = WriteableHalf::new(WebSocketStream::new(sink)).into_erased();
             Ok((read, write, rsp))
         }
     })
