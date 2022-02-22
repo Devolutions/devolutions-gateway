@@ -3203,6 +3203,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-utils"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "proptest",
+ "tokio",
+ "tokio-tungstenite",
+ "transport",
+]
+
+[[package]]
 name = "textwrap"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3449,10 +3461,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "futures-util",
+ "portpicker",
  "proptest",
- "slog",
+ "test-utils",
  "tokio",
- "tokio-test",
  "tokio-tungstenite",
 ]
 
