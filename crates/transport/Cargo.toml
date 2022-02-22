@@ -15,6 +15,8 @@ futures-util = "0.3.21"
 # error handling
 anyhow = "1.0.53"
 
-# logging
-slog = "2.7.0"
-
+[dev-dependencies]
+test-utils = { path = "../test-utils" }
+tokio = { version = "1.17.0", features = ["rt", "macros"] }
+proptest = "1.0.0"
+portpicker = "0.1.1"
