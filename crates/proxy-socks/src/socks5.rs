@@ -72,6 +72,7 @@ impl<S> AsyncRead for Socks5Stream<S>
 where
     S: AsyncRead + Unpin,
 {
+    #[inline]
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -85,6 +86,7 @@ impl<S> AsyncWrite for Socks5Stream<S>
 where
     S: AsyncWrite + Unpin,
 {
+    #[inline]
     fn poll_write(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -93,6 +95,7 @@ where
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 
+    #[inline]
     fn poll_flush(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -100,6 +103,7 @@ where
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
+    #[inline]
     fn poll_shutdown(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
