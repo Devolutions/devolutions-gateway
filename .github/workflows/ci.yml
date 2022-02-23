@@ -159,11 +159,15 @@ jobs:
         if: matrix.os == 'windows'
         run: pip install markupsafe==2.0.1
 
-      - name: Configure macOS runner
+      - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
+
+      - name: Configure macOS runner
+        if: matrix.os == 'macos'
+        run: pip3 install markupsafe==2.0.1
 
       - name: Configure conan
         run: |
