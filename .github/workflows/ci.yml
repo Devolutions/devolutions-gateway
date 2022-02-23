@@ -147,9 +147,13 @@ jobs:
           sudo apt update
           sudo apt install python3-wget python3-setuptools
 
-      - name: Configure Windows runner
+      - name: Configure Windows (x86) runner
         if: matrix.os == 'windows' && matrix.arch == 'x86'
         run: rustup target add i686-pc-windows-msvc
+
+      - name: Configure Windows runner
+        if: matrix.os == 'windows'
+        run: pip install markupsafe==2.0.1
 
       - name: Configure macOS runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
