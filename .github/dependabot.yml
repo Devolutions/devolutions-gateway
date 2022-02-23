@@ -5,4 +5,7 @@ updates:
     schedule:
       interval: "weekly"
     assignees:
-      - "CBenoit"  
+      - "CBenoit"
+    # Disable version updates, we only want security updates.
+    open-pull-requests-limit: 0
+    
