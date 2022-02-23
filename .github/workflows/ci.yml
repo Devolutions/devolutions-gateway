@@ -8,6 +8,9 @@ on:
     types: [ opened, synchronize, reopened ]
   workflow_dispatch:
 
+env:
+  conan-version: 1.43.4
+
 jobs:
 
   preflight:
@@ -96,7 +99,7 @@ jobs:
 
         - name: Configure conan
           run: |
-            pip3 install conan==1.40.0 --upgrade
+            pip3 install conan==${{ env.conan-version }} --upgrade
             conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
             conan remote clean
             conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
@@ -151,7 +154,7 @@ jobs:
         if: matrix.os == 'windows' && matrix.arch == 'x86'
         run: rustup target add i686-pc-windows-msvc
 
-      - name: Configure macOS runner
+      - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
@@ -159,7 +162,7 @@ jobs:
 
       - name: Configure conan
         run: |
-          pip3 install conan==1.40.0 --upgrade
+          pip3 install conan==${{ env.conan-version }} --upgrade
           conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
           conan remote clean
           conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
@@ -255,7 +258,7 @@ jobs:
 
       - name: Configure conan
         run: |
-          pip3 install conan==1.40.0 --upgrade
+          pip3 install conan==${{ env.conan-version }} --upgrade
           conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
           conan remote clean
           conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
