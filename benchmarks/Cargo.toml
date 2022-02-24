@@ -1,0 +1,25 @@
+[package]
+name = "benchmarks"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+publish = false
+edition = "2021"
+
+# Prevent this from interfering with workspaces
+[workspace]
+resolver = "2"
+members = ["."]
+
+[dev-dependencies]
+criterion = "0.3"
+transport = { path = "../crates/transport" }
+test-utils = { path = "../crates/test-utils" }
+tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread", "macros"] }
+portpicker = "0.1.1"
+futures-util = "0.3.21"
+rand = "0.8.5"
+bytes = "1.1.0"
+
+[[bench]]
+name = "forwarding"
+harness = false
