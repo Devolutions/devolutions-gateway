@@ -17,7 +17,7 @@ tokio-util = { version = "0.7.0", features = ["codec"] }
 futures-util = { version = "0.3.21", features = ["sink"] }
 
 # error handling
-anyhow = "1.0.53"
+anyhow = "1.0.55"
 
 # logging
 slog = "2.7.0"
