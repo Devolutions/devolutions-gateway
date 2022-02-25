@@ -15,6 +15,9 @@ futures-util = "0.3.21"
 # error handling
 anyhow = "1.0.53"
 
+# Safe pin projection
+pin-project-lite = "0.2.8"
+
 [dev-dependencies]
 test-utils = { path = "../test-utils" }
 tokio = { version = "1.17.0", features = ["rt", "macros"] }

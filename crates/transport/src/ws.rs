@@ -1,15 +1,19 @@
 use anyhow::Result;
-use futures_util::{pin_mut, ready, Sink, Stream};
+use futures_util::{ready, Sink, Stream};
+use pin_project_lite::pin_project;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
 
-/// Wraps a WebSocket stream and implements `AsyncRead` and `AsyncWrite`
-pub struct WebSocketStream<S> {
-    inner: S,
-    read_buf: Option<Vec<u8>>,
+pin_project! {
+    /// Wraps a stream of WebSocket messages and provides `AsyncRead` and `AsyncWrite`.
+    pub struct WebSocketStream<S> {
+        #[pin]
+        inner: S,
+        read_buf: Option<Vec<u8>>,
+    }
 }
 
 impl<S> WebSocketStream<S> {
@@ -23,20 +27,16 @@ impl<S> WebSocketStream<S> {
 
 impl<S> AsyncRead for WebSocketStream<S>
 where
-    S: Stream<Item = Result<TungsteniteMessage, TungsteniteError>> + Unpin,
+    S: Stream<Item = Result<TungsteniteMessage, TungsteniteError>>,
 {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let mut data = if let Some(data) = self.read_buf.take() {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let mut this = self.project();
+
+        let mut data = if let Some(data) = this.read_buf.take() {
             data
         } else {
             loop {
-                let inner = &mut self.inner;
-                pin_mut!(inner);
-                match ready!(inner.poll_next(cx)) {
+                match ready!(this.inner.as_mut().poll_next(cx)) {
                     Some(Ok(m)) => match m {
                         TungsteniteMessage::Text(s) => {
                             break s.into_bytes();
@@ -67,7 +67,7 @@ where
 
         if data.len() > bytes_to_copy {
             data.drain(..bytes_to_copy);
-            self.read_buf = Some(data);
+            *this.read_buf = Some(data);
         }
 
         Poll::Ready(Ok(()))
@@ -76,9 +76,9 @@ where
 
 impl<S> AsyncWrite for WebSocketStream<S>
 where
-    S: Sink<TungsteniteMessage, Error = TungsteniteError> + Unpin,
+    S: Sink<TungsteniteMessage, Error = TungsteniteError>,
 {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
         macro_rules! try_in_poll {
             ($expr:expr) => {{
                 match $expr {
@@ -91,40 +91,34 @@ where
             }};
         }
 
+        let mut this = self.project();
+
         // try flushing preemptively
-        let inner = &mut self.inner;
-        pin_mut!(inner);
-        let _ = inner.poll_flush(cx);
+        let _ = this.inner.as_mut().poll_flush(cx);
 
         // make sure sink is ready to send
-        let inner = &mut self.inner;
-        pin_mut!(inner);
-        try_in_poll!(ready!(inner.poll_ready(cx)));
+        try_in_poll!(ready!(this.inner.as_mut().poll_ready(cx)));
 
         // actually submit new item
-        let inner = &mut self.inner;
-        pin_mut!(inner);
-        try_in_poll!(inner.start_send(TungsteniteMessage::Binary(buf.to_vec())));
+        try_in_poll!(this.inner.start_send(TungsteniteMessage::Binary(buf.to_vec())));
         // ^ if no error occurred, message is accepted and queued when calling `start_send`
         // (that is: `to_vec` is called only once)
 
         Poll::Ready(Ok(buf.len()))
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        let inner = &mut self.inner;
-        pin_mut!(inner);
-        match ready!(inner.poll_flush(cx)) {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let this = self.project();
+        match ready!(this.inner.poll_flush(cx)) {
             Ok(()) => Poll::Ready(Ok(())),
             Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
             Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
         }
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        let inner = &mut self.inner;
-        pin_mut!(inner);
-        match ready!(inner.poll_close(cx)) {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let this = self.project();
+        match ready!(this.inner.poll_close(cx)) {
             Ok(()) => Poll::Ready(Ok(())),
             Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
             Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),

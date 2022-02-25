@@ -4,31 +4,38 @@ mod ws;
 pub use self::forward::*;
 pub use self::ws::*;
 
-use anyhow::Result;
+use pin_project_lite::pin_project;
+use std::io;
 use std::pin::Pin;
+use std::task;
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 
-pub struct ReadableHalf<R = Box<dyn AsyncRead + Unpin + Send>>(pub R);
+pin_project! {
+    pub struct ReadableHalf<R = Box<dyn AsyncRead + Send + Unpin>> {
+        #[pin]
+        pub inner: R,
+    }
+}
 
 impl<R> ReadableHalf<R> {
     #[inline]
     pub fn new(reader: R) -> Self {
-        Self(reader)
+        Self { inner: reader }
     }
 
     #[inline]
     pub fn into_inner(self) -> R {
-        self.0
+        self.inner
     }
 
     #[inline]
     pub fn as_inner(&self) -> &R {
-        &self.0
+        &self.inner
     }
 
     #[inline]
     pub fn as_inner_mut(&mut self) -> &mut R {
-        &mut self.0
+        &mut self.inner
     }
 }
 
@@ -57,95 +64,90 @@ impl ReadableHalf<tokio::net::tcp::OwnedReadHalf> {
 
 impl<R> ReadableHalf<R>
 where
-    R: AsyncRead + Unpin + Send,
+    R: AsyncRead + Send + Unpin,
 {
     #[inline]
-    pub fn into_erased(self) -> ReadableHalf<Box<dyn AsyncRead + Unpin + Send>>
+    pub fn into_erased(self) -> ReadableHalf<Box<dyn AsyncRead + Send + Unpin>>
     where
         R: 'static,
     {
-        ReadableHalf(Box::new(self.0))
+        ReadableHalf::new(Box::new(self.inner))
     }
 }
 
 impl<R> AsyncRead for ReadableHalf<R>
 where
-    R: AsyncRead + Unpin + Send,
+    R: AsyncRead,
 {
     #[inline]
     fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        Pin::new(&mut self.0).poll_read(cx, buf)
+    ) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_read(cx, buf)
     }
 }
 
-pub struct WriteableHalf<W = Box<dyn AsyncWrite + Unpin + Send>>(pub W);
+pin_project! {
+    pub struct WriteableHalf<W = Box<dyn AsyncWrite + Send + Unpin>> {
+        #[pin]
+        pub inner: W
+    }
+}
 
 impl<W> WriteableHalf<W> {
     #[inline]
     pub fn new(reader: W) -> Self {
-        Self(reader)
+        Self { inner: reader }
     }
 
     #[inline]
     pub fn into_inner(self) -> W {
-        self.0
+        self.inner
     }
 
     #[inline]
     pub fn as_inner(&self) -> &W {
-        &self.0
+        &self.inner
     }
 
     #[inline]
     pub fn as_inner_mut(&mut self) -> &mut W {
-        &mut self.0
+        &mut self.inner
     }
 }
 
 impl<W> WriteableHalf<W>
 where
-    W: AsyncWrite + Unpin + Send,
+    W: AsyncWrite + Send + Unpin,
 {
     #[inline]
-    pub fn into_erased(self) -> WriteableHalf<Box<dyn AsyncWrite + Unpin + Send>>
+    pub fn into_erased(self) -> WriteableHalf<Box<dyn AsyncWrite + Send + Unpin>>
     where
         W: 'static,
     {
-        WriteableHalf(Box::new(self.0))
+        WriteableHalf::new(Box::new(self.inner))
     }
 }
 
 impl<W> AsyncWrite for WriteableHalf<W>
 where
-    W: AsyncWrite + Unpin + Send,
+    W: AsyncWrite,
 {
     #[inline]
-    fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        Pin::new(&mut self.0).poll_write(cx, buf)
+    fn poll_write(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> task::Poll<io::Result<usize>> {
+        self.project().inner.poll_write(cx, buf)
     }
 
     #[inline]
-    fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.0).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_flush(cx)
     }
 
     #[inline]
-    fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_shutdown(cx)
     }
 }
 
@@ -153,46 +155,51 @@ pub trait AsyncReadWrite: AsyncRead + AsyncWrite {}
 
 impl<T> AsyncReadWrite for T where T: AsyncRead + AsyncWrite {}
 
-pub struct Transport<S = Box<dyn AsyncReadWrite + Unpin + Send>>(pub S);
+pin_project! {
+    pub struct Transport<S = Box<dyn AsyncReadWrite + Send + Unpin>> {
+        #[pin]
+        pub inner: S,
+    }
+}
 
 impl<S> Transport<S> {
     #[inline]
     pub fn new(stream: S) -> Self {
-        Self(stream)
+        Self { inner: stream }
     }
 
     #[inline]
     pub fn into_inner(self) -> S {
-        self.0
+        self.inner
     }
 
     #[inline]
     pub fn as_inner(&self) -> &S {
-        &self.0
+        &self.inner
     }
 
     #[inline]
     pub fn as_inner_mut(&mut self) -> &mut S {
-        &mut self.0
+        &mut self.inner
     }
 }
 
 impl<S> Transport<S>
 where
-    S: AsyncRead + AsyncWrite + Unpin + Send,
+    S: AsyncRead + AsyncWrite,
 {
     #[inline]
     pub fn split(self) -> (ReadableHalf<ReadHalf<S>>, WriteableHalf<WriteHalf<S>>) {
-        let (reader, writer) = tokio::io::split(self.0);
+        let (reader, writer) = tokio::io::split(self.inner);
         (ReadableHalf::new(reader), WriteableHalf::new(writer))
     }
 
     #[inline]
     pub fn split_erased(self) -> (ReadableHalf, WriteableHalf)
     where
-        S: 'static,
+        S: Send + 'static,
     {
-        let (reader, writer) = tokio::io::split(self.0);
+        let (reader, writer) = tokio::io::split(self.inner);
         (
             ReadableHalf::new(reader).into_erased(),
             WriteableHalf::new(writer).into_erased(),
@@ -200,54 +207,44 @@ where
     }
 
     #[inline]
-    pub fn into_erased(self) -> Transport<Box<dyn AsyncReadWrite + Unpin + Send>>
+    pub fn into_erased(self) -> Transport<Box<dyn AsyncReadWrite + Send + Unpin>>
     where
-        S: 'static,
+        S: Send + Unpin + 'static,
     {
-        Transport(Box::new(self.0))
+        Transport::new(Box::new(self.inner))
     }
 }
 
 impl<S> AsyncRead for Transport<S>
 where
-    S: AsyncRead + Unpin + Send,
+    S: AsyncRead,
 {
     #[inline]
     fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        self: Pin<&mut Self>,
+        cx: &mut task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        Pin::new(&mut self.0).poll_read(cx, buf)
+    ) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_read(cx, buf)
     }
 }
 
 impl<S> AsyncWrite for Transport<S>
 where
-    S: AsyncWrite + Unpin + Send,
+    S: AsyncWrite,
 {
     #[inline]
-    fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        Pin::new(&mut self.0).poll_write(cx, buf)
+    fn poll_write(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> task::Poll<io::Result<usize>> {
+        self.project().inner.poll_write(cx, buf)
     }
 
     #[inline]
-    fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.0).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_flush(cx)
     }
 
     #[inline]
-    fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<io::Result<()>> {
+        self.project().inner.poll_shutdown(cx)
     }
 }
