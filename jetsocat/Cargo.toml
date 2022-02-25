@@ -33,17 +33,17 @@ seahorse = "2.0.0"
 
 # async
 tokio = { version = "1.17.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-tokio-tungstenite = "0.17.0"
+tokio-tungstenite = "0.17.1"
 futures-util = "0.3.21"
 transport = { path = "../crates/transport" }
 
 # logging
 slog = "2.7.0"
 slog-async = "2.7.0"
-slog-term = "2.8.1"
+slog-term = "2.9.0"
 
 # error handling
-anyhow = "1.0.53"
+anyhow = "1.0.55"
 
 # location of special directories
 dirs-next = "2.0.0"

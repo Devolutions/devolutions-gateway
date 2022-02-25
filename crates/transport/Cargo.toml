@@ -9,11 +9,11 @@ publish = false
 
 # async
 tokio = "1.17.0"
-tokio-tungstenite = "0.17.0"
+tokio-tungstenite = "0.17.1"
 futures-util = "0.3.21"
 
 # error handling
-anyhow = "1.0.53"
+anyhow = "1.0.55"
 
 # Safe pin projection
 pin-project-lite = "0.2.8"

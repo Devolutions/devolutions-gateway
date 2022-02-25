@@ -40,14 +40,14 @@ indexmap = "1.8.0"
 uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.0"
-anyhow = "1.0.53"
+anyhow = "1.0.55"
 # TODO: compare performance with `ringbuf` and `sluice`
 # NOTE: check if we actually still need a bip buffer for proxying though (see jetsocat)
 spsc-bip-buffer = { git = "https://github.com/Devolutions/spsc-bip-buffer.git", branch = "master" }
 
 # security, crypto…
 native-tls = "0.2.8"
-zeroize = "1.5.2"
+zeroize = "1.5.3"
 rust-argon2 = "1.0.0"
 picky = { version = "6.3.0", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
@@ -61,7 +61,7 @@ base64 = "0.13.0"
 # TODO: consider `tracing`
 slog-stdlog = "4.1.0"
 slog = { version = "2.7.0", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.8.1"
+slog-term = "2.9.0"
 slog-async = "2.7.0"
 slog-scope = "4.4.0"
 slog-envlogger = "2.2.0"
@@ -70,7 +70,7 @@ slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.
 # async, futures…
 tokio = { version = "1.17.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
-tokio-tungstenite = "0.17.0"
+tokio-tungstenite = "0.17.1"
 tokio-rustls = { version = "0.23.2", features = ["dangerous_configuration"] }
 futures = "0.3.21"
 
