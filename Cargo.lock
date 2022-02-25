@@ -3461,6 +3461,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "futures-util",
+ "pin-project-lite",
  "portpicker",
  "proptest",
  "test-utils",
