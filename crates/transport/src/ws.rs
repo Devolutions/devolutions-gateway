@@ -53,6 +53,7 @@ where
 
                         TungsteniteMessage::Frame(_) => unreachable!("raw frames are never returned when reading"),
                     },
+                    Some(Err(TungsteniteError::Io(e))) => return Poll::Ready(Err(e)),
                     Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                     None => return Poll::Ready(Ok(())),
                 }
@@ -61,6 +62,7 @@ where
 
         let bytes_to_copy = std::cmp::min(buf.remaining(), data.len());
 
+        // TODO: can we can better performance with `unfilled_mut` and a bit of unsafe code?
         let dest = buf.initialize_unfilled_to(bytes_to_copy);
         dest.copy_from_slice(&data[..bytes_to_copy]);
         buf.advance(bytes_to_copy);
@@ -78,7 +80,7 @@ impl<S> AsyncWrite for WebSocketStream<S>
 where
     S: Sink<TungsteniteMessage, Error = TungsteniteError>,
 {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         macro_rules! try_in_poll {
             ($expr:expr) => {{
                 match $expr {
@@ -86,6 +88,7 @@ where
                     // When using `AsyncWriteExt::write_all`, `io::ErrorKind::WriteZero` will be raised.
                     // In this case it means "attempted to write on a closed socket".
                     Err(TungsteniteError::ConnectionClosed) => return Poll::Ready(Ok(0)),
+                    Err(TungsteniteError::Io(e)) => return Poll::Ready(Err(e)),
                     Err(e) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                 }
             }};
@@ -107,21 +110,22 @@ where
         Poll::Ready(Ok(buf.len()))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        let this = self.project();
-        match ready!(this.inner.poll_flush(cx)) {
-            Ok(()) => Poll::Ready(Ok(())),
-            Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
-            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
-        }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let res = ready!(self.project().inner.poll_flush(cx));
+        Poll::Ready(tungstenite_to_io_result(res))
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        let this = self.project();
-        match ready!(this.inner.poll_close(cx)) {
-            Ok(()) => Poll::Ready(Ok(())),
-            Err(TungsteniteError::ConnectionClosed) => Poll::Ready(Ok(())),
-            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
-        }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let res = ready!(self.project().inner.poll_close(cx));
+        Poll::Ready(tungstenite_to_io_result(res))
+    }
+}
+
+fn tungstenite_to_io_result(res: Result<(), TungsteniteError>) -> io::Result<()> {
+    match res {
+        Ok(()) => Ok(()),
+        Err(TungsteniteError::ConnectionClosed) => Ok(()),
+        Err(TungsteniteError::Io(e)) => Err(e),
+        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
     }
 }
