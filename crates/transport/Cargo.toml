@@ -23,4 +23,3 @@ pin-project-lite = "0.2.8"
 test-utils = { path = "../test-utils" }
 tokio = { version = "1.17.0", features = ["rt", "macros"] }
 proptest = "1.0.0"
-portpicker = "0.1.1"

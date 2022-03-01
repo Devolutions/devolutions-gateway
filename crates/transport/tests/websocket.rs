@@ -1,7 +1,9 @@
 use anyhow::Context as _;
 use futures_util::FutureExt;
 use proptest::prelude::*;
-use test_utils::{large_payload, payload, read_assert_payload, write_payload, ws_accept, ws_connect};
+use test_utils::{
+    find_unused_ports, large_payload, payload, read_assert_payload, write_payload, ws_accept, ws_connect,
+};
 use tokio::io::AsyncWriteExt;
 
 async fn round_trip_client(payload: &[u8], port: u16) -> anyhow::Result<()> {
@@ -24,7 +26,7 @@ async fn round_trip_server(payload: &[u8], port: u16) -> anyhow::Result<()> {
 
 #[test]
 fn round_trip() {
-    let port = portpicker::pick_unused_port().expect("No available port");
+    let port = find_unused_ports(1)[0];
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -45,7 +47,7 @@ fn round_trip() {
 #[test]
 #[cfg_attr(debug_assertions, ignore)]
 fn round_trip_large_payload() {
-    let port = portpicker::pick_unused_port().expect("No available port");
+    let port = find_unused_ports(1)[0];
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

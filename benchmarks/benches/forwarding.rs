@@ -3,7 +3,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use futures_util::TryFutureExt;
 use rand::{thread_rng, Rng};
 use std::mem::transmute;
-use test_utils::{read_assert_payload, write_payload, TransportKind};
+use test_utils::{find_unused_ports, read_assert_payload, write_payload, TransportKind};
 use transport::{ErasedReadWrite, Transport};
 
 struct Context {
@@ -14,8 +14,9 @@ struct Context {
 }
 
 async fn setup(kind: TransportKind) -> Context {
-    let port_node = portpicker::pick_unused_port().expect("No available port");
-    let port_server = portpicker::pick_unused_port().expect("No available port");
+    let ports = find_unused_ports(2);
+    let port_node = ports[0];
+    let port_server = ports[1];
 
     let client_fut = kind.connect(port_node).map_ok(Transport::into_erased);
     let node_to_client_fut = kind.accept(port_node).map_ok(Transport::into_erased);

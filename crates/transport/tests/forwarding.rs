@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use futures_util::FutureExt;
 use proptest::prelude::*;
-use test_utils::{payload, read_assert_payload, transport_kind, write_payload, TransportKind};
+use test_utils::{find_unused_ports, payload, read_assert_payload, transport_kind, write_payload, TransportKind};
 use tokio::io::AsyncWriteExt;
 
 async fn client(payload: &[u8], kind: TransportKind, port: u16) -> anyhow::Result<()> {
@@ -61,8 +61,9 @@ async fn server(payload: &[u8], kind: TransportKind, port: u16) -> anyhow::Resul
 
 #[test]
 fn three_points() {
-    let port_node = portpicker::pick_unused_port().expect("No available port");
-    let port_server = portpicker::pick_unused_port().expect("No available port");
+    let ports = find_unused_ports(2);
+    let port_node = ports[0];
+    let port_server = ports[1];
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

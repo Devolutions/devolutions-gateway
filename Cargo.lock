@@ -3603,7 +3603,6 @@ dependencies = [
  "anyhow",
  "futures-util",
  "pin-project-lite",
- "portpicker",
  "proptest",
  "test-utils",
  "tokio",
