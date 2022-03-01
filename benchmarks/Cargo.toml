@@ -15,7 +15,6 @@ criterion = "0.3"
 transport = { path = "../crates/transport" }
 test-utils = { path = "../crates/test-utils" }
 tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread", "macros"] }
-portpicker = "0.1.1"
 futures-util = "0.3.21"
 rand = "0.8.5"
 bytes = "1.1.0"
