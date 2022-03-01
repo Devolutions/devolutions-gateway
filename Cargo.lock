@@ -1432,6 +1432,7 @@ dependencies = [
  "futures-util",
  "jet-proto",
  "jmux-proxy",
+ "proptest",
  "proxy-http",
  "proxy-socks",
  "proxy-types",
@@ -1440,6 +1441,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
+ "test-utils",
  "tokio",
  "tokio-tungstenite",
  "transport",
@@ -3340,6 +3342,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "futures-util",
+ "portpicker",
  "proptest",
  "tokio",
  "tokio-tungstenite",

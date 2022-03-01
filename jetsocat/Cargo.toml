@@ -47,3 +47,8 @@ anyhow = "1.0.55"
 
 # location of special directories
 dirs-next = "2.0.0"
+
+[dev-dependencies]
+test-utils = { path = "../crates/test-utils" }
+tokio = { version = "1.17.0", features = ["time"] }
+proptest = "1.0.0"

@@ -41,7 +41,7 @@ pub struct Pipe {
     pub write: ErasedWrite,
 
     // Useful when we don't want to drop something before the Pipe
-    pub _handle: Option<Box<dyn Any>>,
+    pub _handle: Option<Box<dyn Any + Send>>,
 }
 
 pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logger) -> Result<Pipe> {

@@ -4,7 +4,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
 pub async fn write_jet_accept_request(
-    writer: &mut (dyn AsyncWrite + Unpin),
+    writer: &mut (dyn AsyncWrite + Send + Unpin),
     association_id: Uuid,
     candidate_id: Uuid,
 ) -> Result<()> {
@@ -26,7 +26,7 @@ pub async fn write_jet_accept_request(
     Ok(())
 }
 
-pub async fn read_jet_accept_response(reader: &mut (dyn AsyncRead + Unpin)) -> Result<()> {
+pub async fn read_jet_accept_response(reader: &mut (dyn AsyncRead + Send + Unpin)) -> Result<()> {
     use jet_proto::JetMessage;
     use tokio::io::AsyncReadExt;
 
@@ -56,7 +56,7 @@ pub async fn read_jet_accept_response(reader: &mut (dyn AsyncRead + Unpin)) -> R
 }
 
 pub async fn write_jet_connect_request(
-    writer: &mut (dyn AsyncWrite + Unpin),
+    writer: &mut (dyn AsyncWrite + Send + Unpin),
     association_id: Uuid,
     candidate_id: Uuid,
 ) -> Result<()> {
@@ -78,7 +78,7 @@ pub async fn write_jet_connect_request(
     Ok(())
 }
 
-pub async fn read_jet_connect_response(reader: &mut (dyn AsyncRead + Unpin)) -> Result<()> {
+pub async fn read_jet_connect_response(reader: &mut (dyn AsyncRead + Send + Unpin)) -> Result<()> {
     use jet_proto::JetMessage;
     use tokio::io::AsyncReadExt;
 

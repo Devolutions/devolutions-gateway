@@ -1,12 +1,13 @@
 use anyhow::Context as _;
 use proptest::collection::size_range;
 use proptest::prelude::*;
+use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use transport::{Transport, WebSocketStream};
 
 /// For sane Debug display
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Payload(pub Vec<u8>);
 
 impl core::fmt::Debug for Payload {
@@ -19,11 +20,20 @@ impl core::fmt::Debug for Payload {
     }
 }
 
-const PAYLOAD_MINIMUM_SIZE: usize = 256;
-const PAYLOAD_MAXIMUM_SIZE: usize = 24 * 256 * 144; // approximately the size of a 144p 24bpp BMP image
+const SMALL_MINIMUM_SIZE: usize = 32;
+const SMALL_MAXIMUM_SIZE: usize = 256;
 
 prop_compose! {
-    pub fn payload()(data in any_with::<Vec<u8>>(size_range(PAYLOAD_MINIMUM_SIZE..PAYLOAD_MAXIMUM_SIZE).lift())) -> Payload {
+    pub fn small_payload()(data in any_with::<Vec<u8>>(size_range(SMALL_MINIMUM_SIZE..SMALL_MAXIMUM_SIZE).lift())) -> Payload {
+        Payload(data)
+    }
+}
+
+const INTERMEDIATE_MINIMUM_SIZE: usize = 256;
+const INTERMEDIATE_MAXIMUM_SIZE: usize = 24 * 256 * 144; // approximately the size of a 144p 24bpp BMP image
+
+prop_compose! {
+    pub fn payload()(data in any_with::<Vec<u8>>(size_range(INTERMEDIATE_MINIMUM_SIZE..INTERMEDIATE_MAXIMUM_SIZE).lift())) -> Payload {
         Payload(data)
     }
 }
@@ -155,4 +165,22 @@ pub async fn read_assert_payload<R: AsyncRead + Unpin>(reader: &mut R, expected_
     }
 
     Ok(())
+}
+
+pub fn find_unused_ports(number: usize) -> Vec<u16> {
+    let mut ports = HashSet::with_capacity(number);
+
+    'outer: for _ in 0..number {
+        for _ in 0..5 {
+            let port = portpicker::pick_unused_port().expect("No available port");
+            if !ports.contains(&port) {
+                ports.insert(port);
+                continue 'outer;
+            }
+        }
+
+        panic!("not enough ports available");
+    }
+
+    ports.into_iter().collect()
 }
