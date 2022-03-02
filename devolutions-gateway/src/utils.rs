@@ -66,30 +66,27 @@ pub async fn tcp_stream_connect(dest: &TargetAddr) -> anyhow::Result<TcpStream> 
     Ok(stream)
 }
 
-pub async fn tcp_transport_connect(target: &TargetAddr) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+pub async fn tcp_transport_connect(target: &TargetAddr) -> anyhow::Result<transport::Transport> {
     let url = target.to_url().context("bad target")?;
     tcp_transport_connect_with_url(&url).await
 }
 
-pub async fn tcp_transport_connect_with_url(url: &Url) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+pub async fn tcp_transport_connect_with_url(url: &Url) -> anyhow::Result<transport::Transport> {
     use tokio_rustls::TlsStream;
     use transport::Transport;
 
-    async fn connect_impl(url: &Url) -> anyhow::Result<(SocketAddr, transport::Transport)> {
+    async fn connect_impl(url: &Url) -> anyhow::Result<transport::Transport> {
         let socket_addr = resolve_url_to_socket_addr(url).await?;
 
         match url.scheme() {
             "tcp" => {
                 let stream = TcpStream::connect(&socket_addr).await?;
-                Ok((socket_addr, Transport::new(stream).into_erased()))
+                Ok(Transport::new(stream, socket_addr))
             }
             "tls" => {
                 let stream = TcpStream::connect(&socket_addr).await?;
                 let tls_handshake = create_tls_connector(stream).await?;
-                Ok((
-                    socket_addr,
-                    Transport::new(TlsStream::Client(tls_handshake)).into_erased(),
-                ))
+                Ok(Transport::new(TlsStream::Client(tls_handshake), socket_addr))
             }
             scheme => {
                 anyhow::bail!("Unsupported scheme: {}", scheme);
@@ -97,9 +94,9 @@ pub async fn tcp_transport_connect_with_url(url: &Url) -> anyhow::Result<(Socket
         }
     }
 
-    let (addr, transport) = tokio::time::timeout(CONNECTION_TIMEOUT, connect_impl(url)).await??;
+    let transport = tokio::time::timeout(CONNECTION_TIMEOUT, connect_impl(url)).await??;
 
-    Ok((addr, transport))
+    Ok(transport)
 }
 
 pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> anyhow::Result<(Out, &'a In)>

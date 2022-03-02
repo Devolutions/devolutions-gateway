@@ -2,8 +2,6 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::BytesMut;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::{io, task};
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -15,7 +13,6 @@ pin_project! {
     pub struct Interceptor<S> {
         #[pin]
         pub inner: S,
-        pub nb_bytes_read: Arc<AtomicU64>,
         pub inspectors: Vec<Box<dyn Inspector + Send>>,
     }
 }
@@ -24,7 +21,6 @@ impl<S> Interceptor<S> {
     pub fn new(stream: S) -> Self {
         Self {
             inner: stream,
-            nb_bytes_read: Arc::new(AtomicU64::new(0)),
             inspectors: Vec::new(),
         }
     }
@@ -48,8 +44,6 @@ where
         }
 
         let filled = buf.filled();
-
-        this.nb_bytes_read.fetch_add(filled.len() as u64, Ordering::SeqCst);
 
         for inspector in this.inspectors {
             if let Err(e) = inspector.inspect_bytes(filled) {

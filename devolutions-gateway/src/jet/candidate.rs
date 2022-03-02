@@ -1,7 +1,6 @@
 use crate::jet::TransportType;
+use bytes::Bytes;
 use std::convert::TryInto;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use transport::Transport;
 use url::Url;
 use uuid::Uuid;
@@ -13,25 +12,22 @@ pub struct CandidateResponse {
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
+
+    // legacy: always set to 0 (re-evaluate if we need that later)
     bytes_sent: u64,
     bytes_recv: u64,
 }
 
 impl From<&Candidate> for CandidateResponse {
     fn from(c: &Candidate) -> Self {
-        let (bytes_sent, bytes_recv) = match (c.client_nb_bytes_read(), c.client_nb_bytes_written()) {
-            (Some(client_bytes_sent), Some(client_bytes_recv)) => (client_bytes_sent, client_bytes_recv),
-            _ => (0, 0),
-        };
-
         CandidateResponse {
             id: c.id,
             url: c.url.clone(),
             state: c.state.clone(),
             association_id: c.association_id,
             transport_type: c.transport_type.clone(),
-            bytes_sent,
-            bytes_recv,
+            bytes_sent: 0,
+            bytes_recv: 0,
         }
     }
 }
@@ -42,9 +38,7 @@ pub struct Candidate {
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
-    transport: Option<Transport>,
-    client_nb_bytes_read: Option<Arc<AtomicU64>>,
-    client_nb_bytes_written: Option<Arc<AtomicU64>>,
+    transport: Option<(Transport, Bytes)>,
 }
 
 impl Candidate {
@@ -56,8 +50,6 @@ impl Candidate {
             association_id: Uuid::nil(),
             transport_type: TransportType::Tcp,
             transport: None,
-            client_nb_bytes_read: None,
-            client_nb_bytes_written: None,
         }
     }
 
@@ -71,8 +63,6 @@ impl Candidate {
                     association_id: Uuid::nil(),
                     transport_type,
                     transport: None,
-                    client_nb_bytes_read: None,
-                    client_nb_bytes_written: None,
                 });
             }
         } else {
@@ -106,32 +96,16 @@ impl Candidate {
         self.association_id = association_id;
     }
 
-    pub fn set_transport(&mut self, transport: Transport) {
-        self.transport = Some(transport);
+    pub fn set_transport(&mut self, transport: Transport, leftover: Bytes) {
+        self.transport = Some((transport, leftover));
     }
 
-    pub fn take_transport(&mut self) -> Option<Transport> {
+    pub fn take_transport(&mut self) -> Option<(Transport, Bytes)> {
         self.transport.take()
     }
 
     pub fn has_transport(&self) -> bool {
         self.transport.is_some()
-    }
-
-    pub fn set_client_nb_bytes_read(&mut self, client_nb_bytes_read: Arc<AtomicU64>) {
-        self.client_nb_bytes_read = Some(client_nb_bytes_read);
-    }
-
-    pub fn client_nb_bytes_read(&self) -> Option<u64> {
-        self.client_nb_bytes_read.clone().map(|v| v.load(Ordering::Relaxed))
-    }
-
-    pub fn set_client_nb_bytes_written(&mut self, client_nb_bytes_written: Arc<AtomicU64>) {
-        self.client_nb_bytes_written = Some(client_nb_bytes_written);
-    }
-
-    pub fn client_nb_bytes_written(&self) -> Option<u64> {
-        self.client_nb_bytes_written.clone().map(|v| v.load(Ordering::Relaxed))
     }
 
     pub fn set_state(&mut self, state: CandidateState) {

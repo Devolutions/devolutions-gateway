@@ -7,37 +7,94 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub struct Proxy {
-    config: Arc<Config>,
-    gateway_session_info: GatewaySessionInfo,
-    client_addr: SocketAddr,
-    server_addr: SocketAddr,
+pub struct IsMissing;
+
+pub struct HasConfig(Arc<Config>);
+
+pub struct HasSessionInfo(GatewaySessionInfo);
+
+pub struct HasTransports<A, B> {
+    a: A,
+    b: B,
 }
 
-impl Proxy {
-    pub fn new(
-        config: Arc<Config>,
-        gateway_session_info: GatewaySessionInfo,
-        client_addr: SocketAddr,
-        server_addr: SocketAddr,
-    ) -> Self {
-        Proxy {
-            config,
-            gateway_session_info,
-            client_addr,
-            server_addr,
+pub struct HasAddresses {
+    a: SocketAddr,
+    b: SocketAddr,
+}
+
+pub struct Proxy<CONF, INFO, TRANSPORT, ADDR> {
+    pub config: CONF,
+    pub session_info: INFO,
+    pub transports: TRANSPORT,
+    pub addrs: ADDR,
+}
+
+impl Proxy<IsMissing, IsMissing, IsMissing, IsMissing> {
+    pub fn init() -> Self {
+        Self {
+            config: IsMissing,
+            session_info: IsMissing,
+            transports: IsMissing,
+            addrs: IsMissing,
         }
     }
+}
 
-    pub async fn select_dissector_and_forward<A, B>(self, a: A, b: B) -> anyhow::Result<()>
-    where
-        A: AsyncWrite + AsyncRead + Unpin,
-        B: AsyncWrite + AsyncRead + Unpin,
-    {
-        match self.config.protocol {
+impl<INFO, TRANSPORT, ADDR> Proxy<IsMissing, INFO, TRANSPORT, ADDR> {
+    pub fn config(self, config: Arc<Config>) -> Proxy<HasConfig, INFO, TRANSPORT, ADDR> {
+        Proxy {
+            config: HasConfig(config),
+            session_info: self.session_info,
+            transports: self.transports,
+            addrs: self.addrs,
+        }
+    }
+}
+
+impl<CONF, TRANSPORT, ADDR> Proxy<CONF, IsMissing, TRANSPORT, ADDR> {
+    pub fn session_info(self, info: GatewaySessionInfo) -> Proxy<CONF, HasSessionInfo, TRANSPORT, ADDR> {
+        Proxy {
+            config: self.config,
+            session_info: HasSessionInfo(info),
+            transports: self.transports,
+            addrs: self.addrs,
+        }
+    }
+}
+
+impl<CONF, INFO, ADDR> Proxy<CONF, INFO, IsMissing, ADDR> {
+    pub fn transports<A, B>(self, a: A, b: B) -> Proxy<CONF, INFO, HasTransports<A, B>, ADDR> {
+        Proxy {
+            config: self.config,
+            session_info: self.session_info,
+            transports: HasTransports { a, b },
+            addrs: self.addrs,
+        }
+    }
+}
+
+impl<CONF, INFO, TRANSPORT> Proxy<CONF, INFO, TRANSPORT, IsMissing> {
+    pub fn addrs(self, a: SocketAddr, b: SocketAddr) -> Proxy<CONF, INFO, TRANSPORT, HasAddresses> {
+        Proxy {
+            config: self.config,
+            session_info: self.session_info,
+            transports: self.transports,
+            addrs: HasAddresses { a, b },
+        }
+    }
+}
+
+impl<A, B> Proxy<HasConfig, HasSessionInfo, HasTransports<A, B>, HasAddresses>
+where
+    A: AsyncWrite + AsyncRead + Unpin,
+    B: AsyncWrite + AsyncRead + Unpin,
+{
+    pub async fn select_dissector_and_forward(self) -> anyhow::Result<()> {
+        match self.config.0.protocol {
             Protocol::Wayk => {
                 debug!("WaykMessageReader will be used to interpret application protocol.");
-                self.forward_using_dissector(a, b, WaykDissector).await
+                self.forward_using_dissector(WaykDissector).await
             }
             // Protocol::Rdp => {
             //     debug!("RdpMessageReader will be used to interpret application protocol");
@@ -55,52 +112,62 @@ impl Proxy {
             // }
             Protocol::Unknown | Protocol::Rdp => {
                 debug!("Protocol is unknown. Data received will not be split to get application message.");
-                self.forward_using_dissector(a, b, DummyDissector).await
+                self.forward_using_dissector(DummyDissector).await
             }
         }
     }
 
-    pub async fn forward_using_dissector<A, B, D>(self, a: A, b: B, dissector: D) -> anyhow::Result<()>
+    pub async fn forward_using_dissector<D>(self, dissector: D) -> anyhow::Result<()>
     where
-        A: AsyncWrite + AsyncRead + Unpin,
-        B: AsyncWrite + AsyncRead + Unpin,
         D: Dissector + Send + 'static,
     {
-        if let Some(capture_path) = self.config.capture_path.as_ref() {
+        if let Some(capture_path) = self.config.0.capture_path.as_ref() {
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
-                self.client_addr.ip(),
-                self.client_addr.port(),
-                self.server_addr.ip(),
-                self.server_addr.port(),
+                self.addrs.a.ip(),
+                self.addrs.a.port(),
+                self.addrs.b.ip(),
+                self.addrs.b.port(),
                 chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
             );
             let mut path = Utf8PathBuf::from(capture_path);
             path.push(filename);
 
             let (client_inspector, server_inspector) =
-                PcapInspector::init(self.client_addr, self.server_addr, path, dissector)?;
+                PcapInspector::init(self.addrs.a, self.addrs.b, path, dissector)?;
 
-            let mut client = Interceptor::new(a);
-            client.inspectors.push(Box::new(client_inspector));
+            let mut a = Interceptor::new(self.transports.a);
+            a.inspectors.push(Box::new(client_inspector));
 
-            let mut server = Interceptor::new(b);
-            server.inspectors.push(Box::new(server_inspector));
+            let mut b = Interceptor::new(self.transports.b);
+            b.inspectors.push(Box::new(server_inspector));
 
-            self.forward(client, server).await
+            Proxy {
+                config: self.config,
+                session_info: self.session_info,
+                transports: HasTransports { a, b },
+                addrs: self.addrs,
+            }
+            .forward()
+            .await
         } else {
-            self.forward(a, b).await
+            self.forward().await
         }
     }
+}
 
-    pub async fn forward<A, B>(self, a: A, b: B) -> anyhow::Result<()>
-    where
-        A: AsyncWrite + AsyncRead + Unpin,
-        B: AsyncWrite + AsyncRead + Unpin,
-    {
-        add_session_in_progress(self.gateway_session_info.clone()).await;
-        let res = transport::forward_bidirectional(a, b).await;
-        remove_session_in_progress(self.gateway_session_info.id()).await;
+impl<A, B, CONF, ADDR> Proxy<CONF, HasSessionInfo, HasTransports<A, B>, ADDR>
+where
+    A: AsyncWrite + AsyncRead + Unpin,
+    B: AsyncWrite + AsyncRead + Unpin,
+{
+    pub async fn forward(self) -> anyhow::Result<()> {
+        let session_id = self.session_info.0.id();
+
+        add_session_in_progress(self.session_info.0).await;
+        let res = transport::forward_bidirectional(self.transports.a, self.transports.b).await;
+        remove_session_in_progress(session_id).await;
+
         res.map(|_| ())
     }
 }

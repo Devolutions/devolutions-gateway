@@ -708,6 +708,7 @@ dependencies = [
  "tokio-tungstenite",
  "tokio-util 0.7.0",
  "transport",
+ "typed-builder",
  "url 2.2.2",
  "uuid",
  "zeroize",
@@ -2977,7 +2978,7 @@ dependencies = [
 [[package]]
 name = "slog-scope-futures"
 version = "0.1.1"
-source = "git+https://github.com/Devolutions/slog-scope-futures.git#dadfa8d3b537c0322852fd5c893ccb20d249035d"
+source = "git+https://github.com/Devolutions/slog-scope-futures.git#4647d3c1216bf8d4b443b45950e08c265714dd0c"
 dependencies = [
  "futures 0.1.31",
  "slog",
@@ -3556,6 +3557,17 @@ dependencies = [
  "url 2.2.2",
  "utf-8",
  "webpki 0.22.0",
+]
+
+[[package]]
+name = "typed-builder"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89851716b67b937e393b3daa8423e67ddfc4bbbf1654bcf05488e95e0828db0c"
+dependencies = [
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "syn 1.0.86",
 ]
 
 [[package]]
