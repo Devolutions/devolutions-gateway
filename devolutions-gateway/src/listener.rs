@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::generic_client::GenericClient;
-use crate::jet_client::JetAssociationsMap;
+use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::rdp::RdpClient;
 use crate::routing_client;
 use crate::utils::url_to_socket_addr;
@@ -11,6 +11,7 @@ use slog::Logger;
 use slog_scope_futures::future03::FutureExt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio_rustls::TlsStream;
@@ -212,24 +213,27 @@ async fn handle_tcp_client(
         // Check if first four bytes contains some protocol magic bytes
         match &peeked[..n_read] {
             [b'J', b'E', b'T', b'\0'] => {
-                anyhow::bail!("Jet TCP listener currently disabled")
-                // JetClient {
-                //     config,
-                //     jet_associations,
-                // }
-                // .serve(JetTransport::new_tcp(stream))
-                // .with_logger(logger)
-                // .await?;
+                JetClient::builder()
+                    .config(config)
+                    .associations(jet_associations)
+                    .addr(peer_addr)
+                    .transport(stream)
+                    .build()
+                    .serve()
+                    .with_logger(logger)
+                    .await?;
             }
             [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
             _ => {
-                GenericClient {
-                    config,
-                    jet_associations,
-                }
-                .serve(stream)
-                .with_logger(logger)
-                .await?;
+                GenericClient::builder()
+                    .config(config)
+                    .associations(jet_associations)
+                    .client_addr(peer_addr)
+                    .client_stream(stream)
+                    .build()
+                    .serve()
+                    .with_logger(logger)
+                    .await?;
             }
         }
     };
@@ -245,7 +249,12 @@ async fn handle_ws_client(
     logger: Logger,
 ) -> anyhow::Result<()> {
     set_stream_option(&conn, &logger);
+
+    // Annonate using the type alias from `transport` just for sanity
+    let conn: transport::TcpStream = conn;
+
     process_ws_stream(conn, peer_addr, config, jet_associations, logger).await?;
+
     Ok(())
 }
 
@@ -259,7 +268,14 @@ async fn handle_wss_client(
     set_stream_option(&stream, &logger);
 
     let tls_conf = config.tls.as_ref().context("TLS configuration is missing")?;
-    let tls_stream = tls_conf.acceptor.accept(stream).await.context("TLS handshake failed")?;
+
+    // Annotate using the type alias from `transport` just for sanity
+    let tls_stream: transport::TlsStream = tls_conf
+        .acceptor
+        .accept(stream)
+        .await
+        .context("TLS handshake failed")?
+        .pipe(tokio_rustls::TlsStream::Server);
 
     process_ws_stream(tls_stream, peer_addr, config, jet_associations, logger).await?;
 

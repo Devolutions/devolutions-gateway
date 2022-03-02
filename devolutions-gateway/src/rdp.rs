@@ -19,10 +19,12 @@ use bytes::BytesMut;
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::Decoder;
+use transport::AnyStream;
 use uuid::Uuid;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
@@ -64,19 +66,25 @@ pub struct RdpClient {
 impl RdpClient {
     pub async fn serve(self, mut client_stream: TcpStream) -> anyhow::Result<()> {
         let (pdu, leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
-        let source_ip = client_stream.peer_addr()?.ip();
+        let client_addr = client_stream.peer_addr()?;
+        let source_ip = client_addr.ip();
         let association_claims = extract_association_claims(&pdu, source_ip, &self.config)?;
-        self.serve_with_association_claims_and_leftover_bytes(client_stream, association_claims, leftover_bytes)
-            .await
+        self.serve_with_association_claims_and_leftover_bytes(
+            client_addr,
+            client_stream,
+            association_claims,
+            leftover_bytes,
+        )
+        .await
     }
 
     pub async fn serve_with_association_claims_and_leftover_bytes(
         self,
+        client_addr: SocketAddr,
         client_stream: TcpStream,
         association_claims: JetAssociationTokenClaims,
         mut leftover_bytes: BytesMut,
     ) -> anyhow::Result<()> {
-        #[allow(unused)]
         let Self {
             config,
             jet_associations,
@@ -92,10 +100,10 @@ impl RdpClient {
             RdpRoutingMode::Tcp(targets) => {
                 info!("Starting RDP-TCP redirection");
 
-                let ((server_addr, mut server_stream), destination_host) =
+                let (mut server_transport, destination_host) =
                     utils::successive_try(&targets, utils::tcp_transport_connect).await?;
 
-                server_stream
+                server_transport
                     .write_buf(&mut leftover_bytes)
                     .await
                     .context("Failed to write leftover bytes")?;
@@ -110,8 +118,12 @@ impl RdpClient {
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
-                Proxy::new(config, info, client_stream.peer_addr()?, server_addr)
-                    .select_dissector_and_forward(client_stream, server_stream)
+                Proxy::init()
+                    .config(config)
+                    .session_info(info)
+                    .addrs(client_addr, server_transport.addr)
+                    .transports(client_stream, server_transport)
+                    .select_dissector_and_forward()
                     .await
                     .context("plain tcp traffic proxying failed")
             }
@@ -214,14 +226,15 @@ impl RdpClient {
                 //     .await
                 //     .context("Proxy failed")
             }
-            #[allow(unused)]
             RdpRoutingMode::TcpRendezvous(association_id) => {
                 info!("Starting RdpTcpRendezvous redirection");
-                anyhow::bail!("Jet TCP rendezvous is temporary disabled");
-                // use crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy;
-                // JetRendezvousTcpProxy::new(jet_associations, JetTransport::new_tcp(client_stream), association_id)
-                //     .proxy(config, &*leftover_bytes)
-                //     .await
+                crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy::builder()
+                    .associations(jet_associations)
+                    .client_transport(AnyStream::from(client_stream))
+                    .association_id(association_id)
+                    .build()
+                    .start(&leftover_bytes)
+                    .await
             }
         }
     }

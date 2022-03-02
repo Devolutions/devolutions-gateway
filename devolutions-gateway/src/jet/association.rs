@@ -105,31 +105,18 @@ impl Association {
 pub struct AssociationResponse {
     id: Uuid,
     version: u8,
-    bytes_sent: u64,
-    bytes_recv: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     candidates: Option<Vec<CandidateResponse>>,
     #[serde(with = "ts_seconds")]
     creation_timestamp: DateTime<Utc>,
+
+    // legacy: always set to 0 (re-evaluate if we need that later)
+    bytes_sent: u64,
+    bytes_recv: u64,
 }
 
 impl AssociationResponse {
     pub fn from(association: &Association, with_detail: bool) -> Self {
-        let (client_bytes_sent, client_bytes_recv) = association
-            .candidates
-            .iter()
-            .find_map(
-                |(_, candidate)| match (candidate.client_nb_bytes_read(), candidate.client_nb_bytes_written()) {
-                    (Some(client_bytes_sent), Some(client_bytes_recv))
-                        if client_bytes_sent != 0 || client_bytes_recv != 0 =>
-                    {
-                        Some((client_bytes_sent, client_bytes_recv))
-                    }
-                    _ => None,
-                },
-            )
-            .unwrap_or((0, 0));
-
         let candidates: Option<Vec<CandidateResponse>> = if with_detail {
             Some(
                 association
@@ -145,10 +132,10 @@ impl AssociationResponse {
         AssociationResponse {
             id: association.id,
             version: association.version,
-            bytes_sent: client_bytes_sent,
-            bytes_recv: client_bytes_recv,
             candidates,
             creation_timestamp: association.creation_timestamp,
+            bytes_sent: 0,
+            bytes_recv: 0,
         }
     }
 }

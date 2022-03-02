@@ -42,6 +42,7 @@ uuid = { version = "0.8.2", features = ["v4", "serde"] }
 chrono = { version = "0.4.19", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.0"
 anyhow = "1.0.55"
+typed-builder = "0.10.0"
 # Unicode case folding comparisons
 focaccia = "1.1.2"
 

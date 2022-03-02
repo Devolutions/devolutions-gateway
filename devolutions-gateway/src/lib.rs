@@ -36,6 +36,7 @@ use tokio::sync::RwLock;
 use utils::TargetAddr;
 use uuid::Uuid;
 
+// TODO: investigate if parking_lot::RwLock should be used instead
 lazy_static! {
     pub static ref SESSIONS_IN_PROGRESS: RwLock<HashMap<Uuid, GatewaySessionInfo>> = RwLock::new(HashMap::new());
 }

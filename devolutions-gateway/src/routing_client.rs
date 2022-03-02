@@ -22,21 +22,20 @@ impl Client {
     where
         T: AsyncRead + AsyncWrite + Unpin,
     {
-        let (server_addr, server_transport) = crate::utils::tcp_transport_connect_with_url(&self.routing_url).await?;
+        let server_transport = crate::utils::tcp_transport_connect_with_url(&self.routing_url).await?;
 
         let destination_host = TargetAddr::try_from(&self.routing_url)?;
 
-        Proxy::new(
-            self.config.clone(),
-            GatewaySessionInfo::new(
+        Proxy::init()
+            .config(self.config)
+            .session_info(GatewaySessionInfo::new(
                 uuid::Uuid::new_v4(),
                 ApplicationProtocol::Unknown,
                 ConnectionModeDetails::Fwd { destination_host },
-            ),
-            client_addr,
-            server_addr,
-        )
-        .select_dissector_and_forward(client_transport, server_transport)
-        .await
+            ))
+            .addrs(client_addr, server_transport.addr)
+            .transports(client_transport, server_transport)
+            .select_dissector_and_forward()
+            .await
     }
 }
