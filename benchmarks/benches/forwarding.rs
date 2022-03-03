@@ -1,25 +1,26 @@
 use bytes::Bytes;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use futures_util::TryFutureExt;
 use rand::{thread_rng, Rng};
 use std::mem::transmute;
 use test_utils::{read_assert_payload, write_payload, TransportKind};
-use transport::Transport;
+use transport::{ErasedReadWrite, Transport};
 
 struct Context {
-    client_to_node: Transport,
-    node_to_client: Transport,
-    node_to_server: Transport,
-    server_to_node: Transport,
+    client_to_node: ErasedReadWrite,
+    node_to_client: ErasedReadWrite,
+    node_to_server: ErasedReadWrite,
+    server_to_node: ErasedReadWrite,
 }
 
 async fn setup(kind: TransportKind) -> Context {
     let port_node = portpicker::pick_unused_port().expect("No available port");
     let port_server = portpicker::pick_unused_port().expect("No available port");
 
-    let client_fut = kind.connect(port_node);
-    let node_to_client_fut = kind.accept(port_node);
-    let node_to_server_fut = kind.connect(port_server);
-    let server_fut = kind.accept(port_server);
+    let client_fut = kind.connect(port_node).map_ok(Transport::into_erased);
+    let node_to_client_fut = kind.accept(port_node).map_ok(Transport::into_erased);
+    let node_to_server_fut = kind.connect(port_server).map_ok(Transport::into_erased);
+    let server_fut = kind.accept(port_server).map_ok(Transport::into_erased);
 
     let (node_to_client, server_to_node, client_to_node, node_to_server) =
         tokio::try_join!(node_to_client_fut, server_fut, client_fut, node_to_server_fut).unwrap();
@@ -32,7 +33,7 @@ async fn setup(kind: TransportKind) -> Context {
     }
 }
 
-async fn endpoint(transport: &'static mut Transport, payload: Bytes) {
+async fn endpoint(transport: &'static mut ErasedReadWrite, payload: Bytes) {
     let (reader, writer) = tokio::io::split(transport);
 
     let writer_payload = payload.clone();
@@ -49,12 +50,12 @@ async fn endpoint(transport: &'static mut Transport, payload: Bytes) {
     tokio::try_join!(write_fut, read_fut).unwrap();
 }
 
-async fn transfer(client_to_node: &mut Transport, server_to_node: &mut Transport, payload: Bytes) {
+async fn transfer(client_to_node: &mut ErasedReadWrite, server_to_node: &mut ErasedReadWrite, payload: Bytes) {
     unsafe {
         // SAFETY: it's kind of fine because we are joining or cancelling all the tasks before exiting (poor man's scoped tasks)
         // (I would definitely not do that for production code though)
-        let client_to_node: &'static mut Transport = transmute(client_to_node);
-        let server_to_node: &'static mut Transport = transmute(server_to_node);
+        let client_to_node: &'static mut _ = transmute(client_to_node);
+        let server_to_node: &'static mut _ = transmute(server_to_node);
 
         let server_fut = endpoint(server_to_node, payload.clone());
         let client_fut = endpoint(client_to_node, payload);
@@ -128,10 +129,10 @@ harness!(duplex_benchmark, "Duplex", {
     let (client_to_node, node_to_client) = tokio::io::duplex(5012);
     let (node_to_server, server_to_node) = tokio::io::duplex(5012);
     Context {
-        client_to_node: Transport::new(client_to_node).into_erased(),
-        node_to_client: Transport::new(node_to_client).into_erased(),
-        node_to_server: Transport::new(node_to_server).into_erased(),
-        server_to_node: Transport::new(server_to_node).into_erased(),
+        client_to_node: Box::new(client_to_node) as ErasedReadWrite,
+        node_to_client: Box::new(node_to_client) as ErasedReadWrite,
+        node_to_server: Box::new(node_to_server) as ErasedReadWrite,
+        server_to_node: Box::new(server_to_node) as ErasedReadWrite,
     }
 });
 harness!(tcp_benchmark, "TCP", { setup(TransportKind::Tcp).await });

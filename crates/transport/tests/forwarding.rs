@@ -5,7 +5,7 @@ use test_utils::{payload, read_assert_payload, transport_kind, write_payload, Tr
 use tokio::io::AsyncWriteExt;
 
 async fn client(payload: &[u8], kind: TransportKind, port: u16) -> anyhow::Result<()> {
-    let (mut reader, mut writer) = kind.connect(port).await.context("Connect")?.split();
+    let (mut reader, mut writer) = kind.connect(port).await.context("Connect")?.into_erased_split();
     let write_fut = write_payload(&mut writer, payload).map(|res| res.context("Write payload"));
     let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("Assert payload"));
     tokio::try_join!(write_fut, read_fut)?;
@@ -19,8 +19,17 @@ async fn node(
     port_server: u16,
     server_kind: TransportKind,
 ) -> anyhow::Result<()> {
-    let (mut client_reader, mut client_writer) = client_kind.accept(port_node).await.context("Accept")?.split();
-    let (mut server_reader, mut server_writer) = server_kind.connect(port_server).await.context("Connect")?.split();
+    let (mut client_reader, mut client_writer) = client_kind
+        .accept(port_node)
+        .await
+        .context("Accept")?
+        .into_erased_split();
+
+    let (mut server_reader, mut server_writer) = server_kind
+        .connect(port_server)
+        .await
+        .context("Connect")?
+        .into_erased_split();
 
     let client_to_server_fut =
         transport::forward(&mut client_reader, &mut server_writer).map(|res| res.context("Forward to server"));
@@ -42,7 +51,7 @@ async fn node(
 }
 
 async fn server(payload: &[u8], kind: TransportKind, port: u16) -> anyhow::Result<()> {
-    let (mut reader, mut writer) = kind.accept(port).await.context("Accept")?.split();
+    let (mut reader, mut writer) = kind.accept(port).await.context("Accept")?.into_erased_split();
     let write_fut = write_payload(&mut writer, payload).map(|res| res.context("Write payload"));
     let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("Assert payload"));
     tokio::try_join!(write_fut, read_fut)?;

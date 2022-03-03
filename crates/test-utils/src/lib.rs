@@ -67,13 +67,13 @@ pub async fn ws_accept(port: u16) -> anyhow::Result<Transport> {
     use tokio_tungstenite::accept_async;
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    let (stream, ..) = listener.accept().await?;
+    let (stream, addr) = listener.accept().await?;
     let ws = accept_async(stream)
         .await
         .context("WebSocket handshake failed (accept)")?;
     let ws = WebSocketStream::new(ws);
 
-    Ok(Transport::new(ws).into_erased())
+    Ok(Transport::new(ws, addr))
 }
 
 pub async fn ws_connect(port: u16) -> anyhow::Result<Transport> {
@@ -81,6 +81,7 @@ pub async fn ws_connect(port: u16) -> anyhow::Result<Transport> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
     let stream = TcpStream::connect(("127.0.0.1", port)).await?;
+    let addr = stream.peer_addr()?;
 
     let req = format!("ws://127.0.0.1:{}", port).into_client_request()?;
     let (ws, ..) = client_async(req, stream)
@@ -88,18 +89,19 @@ pub async fn ws_connect(port: u16) -> anyhow::Result<Transport> {
         .context("WebSocket handshake failed (connect)")?;
     let ws = WebSocketStream::new(ws);
 
-    Ok(Transport::new(ws).into_erased())
+    Ok(Transport::new(ws, addr))
 }
 
 pub async fn tcp_accept(port: u16) -> anyhow::Result<Transport> {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    let (stream, ..) = listener.accept().await?;
-    Ok(Transport::new(stream).into_erased())
+    let (stream, addr) = listener.accept().await?;
+    Ok(Transport::new(stream, addr))
 }
 
 pub async fn tcp_connect(port: u16) -> anyhow::Result<Transport> {
     let stream = TcpStream::connect(("127.0.0.1", port)).await?;
-    Ok(Transport::new(stream).into_erased())
+    let addr = stream.peer_addr()?;
+    Ok(Transport::new(stream, addr))
 }
 
 pub async fn write_payload<W: AsyncWrite + Unpin>(writer: &mut W, payload: &[u8]) -> anyhow::Result<()> {

@@ -2,7 +2,7 @@ use crate::proxy::ProxyConfig;
 use anyhow::Result;
 use slog::{debug, info, Logger};
 use std::any::Any;
-use transport::{ReadableHalf, WriteableHalf};
+use transport::{ErasedRead, ErasedWrite};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -37,8 +37,8 @@ pub enum PipeMode {
 
 pub struct Pipe {
     pub name: &'static str,
-    pub read: ReadableHalf,
-    pub write: WriteableHalf,
+    pub read: ErasedRead,
+    pub write: ErasedWrite,
 
     // Useful when we don't want to drop something before the Pipe
     pub _handle: Option<Box<dyn Any>>,
@@ -52,8 +52,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
     match mode {
         PipeMode::Stdio => Ok(Pipe {
             name: "stdio",
-            read: ReadableHalf::new(tokio::io::stdin()).into_erased(),
-            write: WriteableHalf::new(tokio::io::stdout()).into_erased(),
+            read: Box::new(tokio::io::stdin()),
+            write: Box::new(tokio::io::stdout()),
             _handle: None,
         }),
         PipeMode::ProcessCmd { command } => {
@@ -82,8 +82,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
 
             Ok(Pipe {
                 name: "process",
-                read: ReadableHalf::new(stdout).into_erased(),
-                write: WriteableHalf::new(stdin).into_erased(),
+                read: Box::new(stdout),
+                write: Box::new(stdin),
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
@@ -106,8 +106,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
 
             Ok(Pipe {
                 name: "tcp-listener",
-                read: ReadableHalf::new(read).into_erased(),
-                write: WriteableHalf::new(write).into_erased(),
+                read: Box::new(read),
+                write: Box::new(write),
                 _handle: None,
             })
         }
@@ -245,8 +245,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>, log: Logg
             // By splitting that way, critical section (protected by lock) is smaller
             let (sink, stream) = ws.split();
 
-            let read = ReadableHalf::new(WebSocketStream::new(stream)).into_erased();
-            let write = WriteableHalf::new(WebSocketStream::new(sink)).into_erased();
+            let read = Box::new(WebSocketStream::new(stream));
+            let write = Box::new(WebSocketStream::new(sink));
 
             Ok(Pipe {
                 name: "websocket-listener",

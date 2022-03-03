@@ -10,6 +10,7 @@ publish = false
 # async
 tokio = "1.17.0"
 tokio-tungstenite = "0.17.1"
+tokio-rustls = "0.23.2"
 futures-util = "0.3.21"
 
 # error handling
