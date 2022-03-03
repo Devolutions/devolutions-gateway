@@ -38,11 +38,19 @@ impl KdcProxyController {
         )
         .map_err(|_| HttpErrorStatus::bad_request(ERROR_BAD_FORMAT))?;
 
+        trace!(
+            "Received KDC message. target_domain = {:?}, dclocator_hint = {:?}",
+            kdc_proxy_message.target_domain,
+            kdc_proxy_message.dclocator_hint
+        );
+
         let realm = if let Some(realm) = &kdc_proxy_message.target_domain.0 {
             realm.0.to_string()
         } else {
             return Err(HttpErrorStatus::bad_request(ERROR_BAD_FORMAT));
         };
+
+        trace!("Request is for realm (target_domain): {realm}");
 
         let kdc_proxy_config = self
             .config
@@ -68,11 +76,15 @@ impl KdcProxyController {
             return Err(HttpErrorStatus::internal("Unable to locate KDC server"));
         };
 
+        trace!("Connecting to KDC server located at {kdc_address} using protocol {scheme}...");
+
         let kdc_reply_message = if scheme == "tcp" {
             let mut connection = TcpStream::connect(kdc_address).await.map_err(|e| {
                 error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to connect to KDC server")
             })?;
+
+            trace!("Connected! Forwarding KDC message...");
 
             connection
                 .write_all(&kdc_proxy_message.kerb_message.0 .0)
@@ -81,6 +93,8 @@ impl KdcProxyController {
                     error!("{:?}", e);
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
+
+            trace!("Reading KDC reply...");
 
             read_kdc_reply_message(&mut connection).await.map_err(|e| {
                 error!("{:?}", e);
@@ -91,10 +105,15 @@ impl KdcProxyController {
             let mut buff = [0; 2048];
 
             let port = portpicker::pick_unused_port().ok_or_else(|| HttpErrorStatus::internal("No free ports"))?;
+
+            trace!("Binding UDP listener to 127.0.0.1:{port}...");
+
             let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await.map_err(|e| {
                 error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to send the message to the KDC server")
             })?;
+
+            trace!("Binded! Forwarding KDC message...");
 
             // first 4 bytes contains message length. we don't need it for UDP
             udp_socket
@@ -104,6 +123,8 @@ impl KdcProxyController {
                     error!("{:?}", e);
                     HttpErrorStatus::internal("Unable to send the message to the KDC server")
                 })?;
+
+            trace!("Reading KDC reply...");
 
             let n = udp_socket.recv(&mut buff).await.map_err(|e| {
                 error!("{:?}", e);
