@@ -663,6 +663,7 @@ dependencies = [
  "dlopen",
  "dlopen_derive",
  "embed-resource",
+ "focaccia",
  "futures 0.3.21",
  "hostname",
  "http",
@@ -909,6 +910,12 @@ name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
+name = "focaccia"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81a5987956b8394019bd75c05158075f9c14ffed5bb7f0d100569d224094947e"
 
 [[package]]
 name = "foreign-types"

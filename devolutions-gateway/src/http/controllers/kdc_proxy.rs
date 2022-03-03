@@ -28,6 +28,8 @@ impl KdcProxyController {
 impl KdcProxyController {
     #[post("/")]
     async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
+        use focaccia::unicode_full_case_eq;
+
         let kdc_proxy_message = KdcProxyMessage::from_raw(
             req.load_body()
                 .await
@@ -48,7 +50,7 @@ impl KdcProxyController {
             .as_ref()
             .ok_or_else(|| HttpErrorStatus::internal("KDC proxy is not configured"))?;
 
-        if kdc_proxy_config.realm != realm {
+        if !unicode_full_case_eq(&kdc_proxy_config.realm, &realm) {
             return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
         }
 
