@@ -11,7 +11,7 @@ pin_project! {
     /// Wraps a stream of WebSocket messages and provides `AsyncRead` and `AsyncWrite`.
     pub struct WebSocketStream<S> {
         #[pin]
-        inner: S,
+        pub inner: S,
         read_buf: Option<Vec<u8>>,
     }
 }
@@ -22,6 +22,14 @@ impl<S> WebSocketStream<S> {
             inner: stream,
             read_buf: None,
         }
+    }
+
+    pub fn get_ref(&self) -> &S {
+        &self.inner
+    }
+
+    pub fn get_mut(&mut self) -> &mut S {
+        &mut self.inner
     }
 }
 

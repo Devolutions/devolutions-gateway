@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
-use transport::{ReadableHalf, WebSocketStream, WriteableHalf};
+use transport::{ErasedRead, ErasedWrite, WebSocketStream};
 
 async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
     match dest_addr {
@@ -76,19 +76,16 @@ macro_rules! impl_tcp_connect {
     }};
 }
 
-type TcpConnectOutput = (ReadableHalf, WriteableHalf);
+type TcpConnectOutput = (ErasedRead, ErasedWrite);
 
 pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<TcpConnectOutput> {
     impl_tcp_connect!(req_addr, proxy_cfg, Result<TcpConnectOutput>, |stream| {
         let (read, write) = tokio::io::split(stream);
-        future::ready(Ok((
-            ReadableHalf::new(read).into_erased(),
-            WriteableHalf::new(write).into_erased(),
-        )))
+        future::ready(Ok((Box::new(read) as ErasedRead, Box::new(write) as ErasedWrite)))
     })
 }
 
-type WebSocketConnectOutput = (ReadableHalf, WriteableHalf, Response);
+type WebSocketConnectOutput = (ErasedRead, ErasedWrite, Response);
 
 pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<WebSocketConnectOutput> {
     use futures_util::StreamExt as _;
@@ -105,8 +102,8 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
                 .await
                 .context("WebSocket handshake failed")?;
             let (sink, stream) = ws.split();
-            let read = ReadableHalf::new(WebSocketStream::new(stream)).into_erased();
-            let write = WriteableHalf::new(WebSocketStream::new(sink)).into_erased();
+            let read = Box::new(WebSocketStream::new(stream)) as ErasedRead;
+            let write = Box::new(WebSocketStream::new(sink)) as ErasedWrite;
             Ok((read, write, rsp))
         }
     })
