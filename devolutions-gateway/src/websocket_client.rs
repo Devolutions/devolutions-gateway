@@ -465,7 +465,7 @@ async fn handle_jmux(
     config: Arc<Config>,
 ) -> io::Result<Response<Body>> {
     use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
-    use crate::token::{validate_token, JetAccessTokenClaims};
+    use crate::token::{validate_token, AccessTokenClaims};
 
     let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
         let authorization_value = authorization_value
@@ -493,7 +493,7 @@ async fn handle_jmux(
     let delegation_key = config.delegation_private_key.as_ref();
 
     match validate_token(token, client_addr.ip(), provisioner_key, delegation_key) {
-        Ok(JetAccessTokenClaims::Jmux(_)) => {}
+        Ok(AccessTokenClaims::Jmux(_)) => {}
         Ok(_) => {
             return Err(io::Error::new(io::ErrorKind::Other, "wrong access token"));
         }

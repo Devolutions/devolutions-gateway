@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::token::{validate_token, JetAccessTokenClaims, JetAssociationTokenClaims};
+use crate::token::{validate_token, AccessTokenClaims, JetAssociationTokenClaims};
 use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use std::io;
@@ -25,7 +25,7 @@ pub fn extract_association_claims(
     let delegation_key = config.delegation_private_key.as_ref();
 
     match validate_token(payload, source_ip, provisioner_key, delegation_key)? {
-        JetAccessTokenClaims::Association(claims) => Ok(claims),
+        AccessTokenClaims::Association(claims) => Ok(claims),
         _ => Err(io::Error::new(io::ErrorKind::Other, "unexpected token type")),
     }
 }

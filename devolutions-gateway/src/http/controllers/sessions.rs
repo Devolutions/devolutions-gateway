@@ -1,4 +1,4 @@
-use crate::http::guards::access::{AccessGuard, JetTokenType};
+use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::JetAccessScope;
 use crate::{GatewaySessionInfo, SESSIONS_IN_PROGRESS};
@@ -12,19 +12,13 @@ pub struct SessionsController;
 #[controller(name = "jet/sessions")]
 impl SessionsController {
     #[get("/count")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
     async fn get_count(&self) -> (StatusCode, String) {
         get_count_stub().await
     }
 
     #[get("/")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
     async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
         get_sessions_stub().await
     }
@@ -50,19 +44,13 @@ pub struct LegacySessionsController;
 #[controller(name = "sessions")]
 impl LegacySessionsController {
     #[get("/count")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
     async fn get_count(&self) -> (StatusCode, String) {
         get_count_stub().await
     }
 
     #[get("/")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewaySessionsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
     async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
         get_sessions_stub().await
     }
