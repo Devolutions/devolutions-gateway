@@ -26,6 +26,7 @@ pub enum AccessTokenClaims {
     Scope(ScopeTokenClaims),
     Bridge(BridgeTokenClaims),
     Jmux(JmuxTokenClaims),
+    Kdc(KdcTokenClaims),
 }
 
 impl AccessTokenClaims {
@@ -35,6 +36,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Scope(_) => false,
             AccessTokenClaims::Bridge(_) => false,
             AccessTokenClaims::Jmux(_) => false,
+            AccessTokenClaims::Kdc(_) => false,
         }
     }
 }
@@ -190,7 +192,7 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
             }
         };
 
-        Ok(JetAssociationTokenClaims {
+        Ok(Self {
             jet_aid: claims.jet_aid,
             jet_ap: claims.jet_ap,
             jet_cm,
@@ -256,6 +258,75 @@ pub struct JmuxTokenClaims {
 
     // Unique ID for this token
     jti: Uuid,
+}
+
+// ----- KDC claims ----- //
+
+#[derive(Clone)]
+pub struct KdcTokenClaims {
+    /// Kerberos realm.
+    /// e.g.: ad.it-help.ninja
+    /// Should be lowercased (actual validation is case-insensitive though).
+    pub krb_realm: SmolStr,
+
+    /// Kerberos KDC address.
+    /// e.g.: tcp://IT-HELP-DC.ad.it-help.ninja:88
+    /// Default scheme is `tcp`.
+    /// Default port is `88`.
+    pub krb_kdc: TargetAddr,
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    exp: i64,
+
+    // Unique ID for this token
+    jti: Uuid,
+}
+
+impl<'de> de::Deserialize<'de> for KdcTokenClaims {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const DEFAULT_KDC_PORT: u16 = 88;
+
+        #[derive(Deserialize)]
+        struct ClaimsHelper {
+            krb_realm: SmolStr,
+            krb_kdc: SmolStr,
+            exp: i64,
+            jti: Uuid,
+        }
+
+        let claims = ClaimsHelper::deserialize(deserializer)?;
+
+        // Validate krb_realm value
+
+        if !claims.krb_realm.chars().all(char::is_lowercase) {
+            return Err(de::Error::custom("krb_realm field contains uppercases"));
+        }
+
+        // Validate krb_kdc field
+
+        let krb_kdc = TargetAddr::parse(&claims.krb_kdc, DEFAULT_KDC_PORT).map_err(de::Error::custom)?;
+        match krb_kdc.scheme() {
+            "tcp" | "udp" => { /* supported! */ }
+            unsupported_scheme => {
+                return Err(de::Error::custom(format!(
+                    "unsupported protocol for KDC proxy: {}",
+                    unsupported_scheme
+                )));
+            }
+        }
+
+        Ok(Self {
+            krb_realm: claims.krb_realm,
+            krb_kdc,
+            exp: claims.exp,
+            jti: claims.jti,
+        })
+    }
 }
 
 // ----- validation ----- //
@@ -381,7 +452,8 @@ pub fn validate_token(
         )
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match TOKEN_CACHE.lock().entry(id) {
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match TOKEN_CACHE.lock().entry(id) {
             Entry::Occupied(_) => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,

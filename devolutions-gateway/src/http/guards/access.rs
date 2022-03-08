@@ -7,6 +7,7 @@ pub enum TokenType {
     Scope(JetAccessScope),
     Bridge,
     Association,
+    Kdc,
 }
 
 pub struct AccessGuard {
@@ -33,6 +34,7 @@ impl AccessGuard {
                 true
             }
             (TokenType::Bridge, AccessTokenClaims::Bridge(_)) => true,
+            (TokenType::Kdc, AccessTokenClaims::Kdc(_)) => true,
             _ => false,
         };
 
