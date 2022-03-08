@@ -1,38 +1,38 @@
 use crate::http::HttpErrorStatus;
-use crate::token::{JetAccessScope, JetAccessTokenClaims};
+use crate::token::{AccessTokenClaims, JetAccessScope};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
-pub enum JetTokenType {
+pub enum TokenType {
     Scope(JetAccessScope),
     Bridge,
     Association,
 }
 
 pub struct AccessGuard {
-    token_type: JetTokenType,
+    token_type: TokenType,
 }
 
 #[guard]
 impl AccessGuard {
-    pub fn new(token_type: JetTokenType) -> Self {
+    pub fn new(token_type: TokenType) -> Self {
         AccessGuard { token_type }
     }
 
     async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
         let claims = req
             .extensions()
-            .get::<JetAccessTokenClaims>()
+            .get::<AccessTokenClaims>()
             .ok_or_else(|| HttpErrorStatus::unauthorized("identity missing (no token provided)"))?;
 
         let allowed = match (&self.token_type, claims) {
-            (JetTokenType::Association, JetAccessTokenClaims::Association(_)) => true,
-            (JetTokenType::Scope(scope_needed), JetAccessTokenClaims::Scope(scope_from_request))
+            (TokenType::Association, AccessTokenClaims::Association(_)) => true,
+            (TokenType::Scope(scope_needed), AccessTokenClaims::Scope(scope_from_request))
                 if scope_from_request.scope == *scope_needed =>
             {
                 true
             }
-            (JetTokenType::Bridge, JetAccessTokenClaims::Bridge(_)) => true,
+            (TokenType::Bridge, AccessTokenClaims::Bridge(_)) => true,
             _ => false,
         };
 

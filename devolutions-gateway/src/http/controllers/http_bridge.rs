@@ -1,6 +1,6 @@
-use crate::http::guards::access::{AccessGuard, JetTokenType};
+use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
-use crate::token::JetAccessTokenClaims;
+use crate::token::AccessTokenClaims;
 use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
@@ -29,13 +29,13 @@ impl HttpBridgeController {
     #[put("/message")]
     #[patch("/message")]
     #[delete("/message")]
-    #[guard(AccessGuard, init_expr = r#"JetTokenType::Bridge"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Bridge"#)]
     async fn message(&self, mut req: Request) -> Result<Builder, HttpErrorStatus> {
         use core::convert::TryFrom;
 
         let claims = req
             .extensions_mut()
-            .remove::<JetAccessTokenClaims>()
+            .remove::<AccessTokenClaims>()
             .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
 
         // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
@@ -47,7 +47,7 @@ impl HttpBridgeController {
         let mut req: http::Request<reqwest::Body> = http::Request::from(req);
 
         // Update request destination based on the token claims
-        let uri: http::Uri = if let JetAccessTokenClaims::Bridge(claims) = claims {
+        let uri: http::Uri = if let AccessTokenClaims::Bridge(claims) = claims {
             // <METHOD> <TARGET>
             let request_target = req
                 .headers()

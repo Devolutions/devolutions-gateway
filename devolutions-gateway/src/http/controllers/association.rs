@@ -1,9 +1,9 @@
 use crate::config::Config;
-use crate::http::guards::access::{AccessGuard, JetTokenType};
+use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
-use crate::token::{ConnectionMode, JetAccessScope, JetAccessTokenClaims};
+use crate::token::{AccessTokenClaims, ConnectionMode, JetAccessScope};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use jet_proto::JET_VERSION_V2;
 use saphir::controller::Controller;
@@ -33,7 +33,7 @@ impl AssociationController {
     #[get("/")]
     #[guard(
         AccessGuard,
-        init_expr = r#"JetTokenType::Scope(JetAccessScope::GatewayAssociationsRead)"#
+        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayAssociationsRead)"#
     )]
     async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
@@ -52,10 +52,10 @@ impl AssociationController {
     }
 
     #[post("/<association_id>")]
-    #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Association"#)]
     async fn create_association(&self, mut req: Request) -> StatusCode {
-        if let Some(JetAccessTokenClaims::Association(association_claims)) =
-            req.extensions_mut().remove::<JetAccessTokenClaims>()
+        if let Some(AccessTokenClaims::Association(association_claims)) =
+            req.extensions_mut().remove::<AccessTokenClaims>()
         {
             let association_id = match req
                 .captures()
@@ -94,10 +94,10 @@ impl AssociationController {
     }
 
     #[post("/<association_id>/candidates")]
-    #[guard(AccessGuard, init_expr = r#"JetTokenType::Association"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Association"#)]
     async fn gather_association_candidates(&self, mut req: Request) -> (StatusCode, Option<String>) {
-        if let Some(JetAccessTokenClaims::Association(association_claims)) =
-            req.extensions_mut().remove::<JetAccessTokenClaims>()
+        if let Some(AccessTokenClaims::Association(association_claims)) =
+            req.extensions_mut().remove::<AccessTokenClaims>()
         {
             let association_id = match req
                 .captures()

@@ -21,20 +21,20 @@ const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
 #[derive(Deserialize, Clone)]
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
-pub enum JetAccessTokenClaims {
+pub enum AccessTokenClaims {
     Association(JetAssociationTokenClaims),
-    Scope(JetScopeTokenClaims),
-    Bridge(JetBridgeTokenClaims),
-    Jmux(JetJmuxTokenClaims),
+    Scope(ScopeTokenClaims),
+    Bridge(BridgeTokenClaims),
+    Jmux(JmuxTokenClaims),
 }
 
-impl JetAccessTokenClaims {
+impl AccessTokenClaims {
     fn contains_secret(&self) -> bool {
         match &self {
-            JetAccessTokenClaims::Association(claims) => claims.contains_secret(),
-            JetAccessTokenClaims::Scope(_) => false,
-            JetAccessTokenClaims::Bridge(_) => false,
-            JetAccessTokenClaims::Jmux(_) => false,
+            AccessTokenClaims::Association(claims) => claims.contains_secret(),
+            AccessTokenClaims::Scope(_) => false,
+            AccessTokenClaims::Bridge(_) => false,
+            AccessTokenClaims::Jmux(_) => false,
         }
     }
 }
@@ -149,7 +149,7 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
 
         #[derive(Deserialize)]
         struct ClaimsHelper {
-            #[serde(default = "Uuid::new_v4")] // legacy: DVLS up to 2021.2.10 do not generate this claim.
+            #[serde(default = "Uuid::new_v4")] // DVLS up to 2021.2.10 do not generate this claim.
             jet_aid: Uuid,
             jet_ap: ApplicationProtocol,
             #[serde(flatten)]
@@ -209,21 +209,21 @@ pub enum JetAccessScope {
 }
 
 #[derive(Clone, Deserialize)]
-pub struct JetScopeTokenClaims {
+pub struct ScopeTokenClaims {
     pub scope: JetAccessScope,
 }
 
 // ----- bridge claims ----- //
 
 #[derive(Clone, Deserialize)]
-pub struct JetBridgeTokenClaims {
+pub struct BridgeTokenClaims {
     pub target_host: TargetAddr,
 }
 
 // ----- jmux claims ----- //
 
 #[derive(Clone, Deserialize)]
-pub struct JetJmuxTokenClaims {
+pub struct JmuxTokenClaims {
     _filtering: Option<()>, // TODO
 }
 
@@ -245,10 +245,11 @@ pub fn validate_token(
     source_ip: IpAddr,
     provisioner_key: &PublicKey,
     delegation_key: Option<&PrivateKey>,
-) -> Result<JetAccessTokenClaims, io::Error> {
+) -> Result<AccessTokenClaims, io::Error> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
     use serde_json::Value;
+    use std::collections::hash_map::Entry;
 
     let is_encrypted = is_encrypted(token);
 
@@ -288,7 +289,7 @@ pub fn validate_token(
         )
     })?;
 
-    let claims = match serde_json::from_value::<JetAccessTokenClaims>(jwt_token.claims.clone()) {
+    let claims = match serde_json::from_value::<AccessTokenClaims>(jwt_token.claims.clone()) {
         Ok(claims) => claims,
         Err(primary_error) => {
             let association_claims =
@@ -298,7 +299,7 @@ pub fn validate_token(
                         format!("couldn't decode token claims: {} & {}", primary_error, secondary_error),
                     )
                 })?;
-            JetAccessTokenClaims::Association(association_claims)
+            AccessTokenClaims::Association(association_claims)
         }
     };
 
@@ -311,8 +312,7 @@ pub fn validate_token(
 
     // Mitigate replay attacks using the token cache
     match &claims {
-        JetAccessTokenClaims::Association(association_claims) => {
-            use std::collections::hash_map::Entry;
+        AccessTokenClaims::Association(association_claims) => {
             match TOKEN_CACHE.lock().entry(association_claims.jet_aid) {
                 Entry::Occupied(bucket) => {
                     if bucket.get().ip != source_ip {
@@ -330,9 +330,9 @@ pub fn validate_token(
                 }
             }
         }
-        JetAccessTokenClaims::Scope(_) => (),
-        JetAccessTokenClaims::Bridge(_) => (),
-        JetAccessTokenClaims::Jmux(_) => (),
+        AccessTokenClaims::Scope(_) => (),
+        AccessTokenClaims::Bridge(_) => (),
+        AccessTokenClaims::Jmux(_) => (),
     }
 
     Ok(claims)
