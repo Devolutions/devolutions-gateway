@@ -19,7 +19,7 @@
 
   <!-- SDDL string representing desired %programdata%\devolutions\gateway ACL -->
   <!-- SYSTEM/LocalService/BuiltInAdministrators = Full Control, BuiltInUsers - Read/Execute -->
-  <?define ProgramDataSddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)"" ?>
+  <?define ProgramDataSddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" ?>
 
   <!-- 32-bit / 64-bit variables -->
   <?if $(var.Platform) = x64 ?>
