@@ -117,6 +117,10 @@ pub struct JetAssociationTokenClaims {
     // We need this to build our token invalidation cache.
     // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
     exp: i64,
+
+    // Unique ID for this token
+    // DVLS up to 2022.1.9 do not generate this claim.
+    jti: Option<Uuid>,
 }
 
 impl JetAssociationTokenClaims {
@@ -159,6 +163,7 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
             #[serde(default)]
             jet_flt: bool,
             exp: i64,
+            jti: Option<Uuid>, // DVLS up to 2022.1.9 do not generate this claim.
         }
 
         let claims = ClaimsHelper::deserialize(deserializer)?;
@@ -192,6 +197,7 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
             jet_rec: claims.jet_rec,
             jet_flt: claims.jet_flt,
             exp: claims.exp,
+            jti: claims.jti,
         })
     }
 }
@@ -211,6 +217,15 @@ pub enum JetAccessScope {
 #[derive(Clone, Deserialize)]
 pub struct ScopeTokenClaims {
     pub scope: JetAccessScope,
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    exp: i64,
+
+    // Unique ID for this token
+    // DVLS up to 2022.1.9 do not generate this claim.
+    jti: Option<Uuid>,
 }
 
 // ----- bridge claims ----- //
@@ -218,6 +233,14 @@ pub struct ScopeTokenClaims {
 #[derive(Clone, Deserialize)]
 pub struct BridgeTokenClaims {
     pub target_host: TargetAddr,
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    exp: i64,
+
+    // Unique ID for this token
+    jti: Uuid,
 }
 
 // ----- jmux claims ----- //
@@ -225,6 +248,14 @@ pub struct BridgeTokenClaims {
 #[derive(Clone, Deserialize)]
 pub struct JmuxTokenClaims {
     _filtering: Option<()>, // TODO
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    exp: i64,
+
+    // Unique ID for this token
+    jti: Uuid,
 }
 
 // ----- validation ----- //
@@ -310,29 +341,63 @@ pub fn validate_token(
         ));
     }
 
-    // Mitigate replay attacks using the token cache
-    match &claims {
-        AccessTokenClaims::Association(association_claims) => {
-            match TOKEN_CACHE.lock().entry(association_claims.jet_aid) {
-                Entry::Occupied(bucket) => {
-                    if bucket.get().ip != source_ip {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            "received identical token twice from another IP. A replay attack may have been attempted.",
-                        ));
-                    }
-                }
-                Entry::Vacant(bucket) => {
-                    bucket.insert(TokenSource {
-                        ip: source_ip,
-                        expiration_timestamp: association_claims.exp,
-                    });
+    // Token cache to prevent replay attacks
+    match claims {
+        // Mitigate replay attacks for RDP associations by rejecting token re-use from a different
+        // source address IP (RDP requires multiple connections, so we can't just reject everything)
+        AccessTokenClaims::Association(
+            JetAssociationTokenClaims {
+                jti: Some(id),
+                exp,
+                jet_ap: ApplicationProtocol::Rdp,
+                ..
+            }
+            | JetAssociationTokenClaims {
+                jet_aid: id,
+                exp,
+                jet_ap: ApplicationProtocol::Rdp,
+                ..
+            },
+        ) => match TOKEN_CACHE.lock().entry(id) {
+            Entry::Occupied(bucket) => {
+                if bucket.get().ip != source_ip {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "received identical token twice from another IP. A replay attack may have been attempted.",
+                    ));
                 }
             }
-        }
-        AccessTokenClaims::Scope(_) => (),
-        AccessTokenClaims::Bridge(_) => (),
-        AccessTokenClaims::Jmux(_) => (),
+            Entry::Vacant(bucket) => {
+                bucket.insert(TokenSource {
+                    ip: source_ip,
+                    expiration_timestamp: exp,
+                });
+            }
+        },
+
+        // All other tokens can't be re-used even if source IP is identical
+        AccessTokenClaims::Association(
+            JetAssociationTokenClaims { jti: Some(id), exp, .. } | JetAssociationTokenClaims { jet_aid: id, exp, .. },
+        )
+        | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
+        | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match TOKEN_CACHE.lock().entry(id) {
+            Entry::Occupied(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "received identical token twice. A replay attack may have been attempted.",
+                ));
+            }
+            Entry::Vacant(bucket) => {
+                bucket.insert(TokenSource {
+                    ip: source_ip,
+                    expiration_timestamp: exp,
+                });
+            }
+        },
+
+        // No mitigation if token has no ID (might be disallowed in the future)
+        AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
     }
 
     Ok(claims)
