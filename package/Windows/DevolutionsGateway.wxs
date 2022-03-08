@@ -200,7 +200,7 @@
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionTcp" Name="Devolutions Gateway Service TCP" Description="Devolutions Gateway Service TCP" Protocol="tcp" Profile="all" Scope="any" IgnoreFailure="yes"/>
         <fw:FirewallException Id="DGatewayServiceFirewallExceptionUdp" Name="Devolutions Gateway Service UDP" Description="Devolutions Gateway Service UDP" Protocol="udp" Profile="all" Scope="any" IgnoreFailure="yes"/>
       </File>
-      <ServiceInstall Id="DGatewayServiceControl" Type="ownProcess" Interactive="no" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
+      <ServiceInstall Id="DGatewayServiceControl" Type="ownProcess" Account="NT AUTHORITY\LocalService" Interactive="no" Vital="yes" Name="$(var.ServiceName)" Arguments="--service" 
         DisplayName="$(var.ServiceDisplayName)" Description="$(var.ServiceDescription)" Start="demand" ErrorControl="ignore">
         <util:ServiceConfig FirstFailureActionType='restart' SecondFailureActionType='restart' ThirdFailureActionType='restart' RestartServiceDelayInSeconds='900' ResetPeriodInDays='1'/>
       </ServiceInstall>
