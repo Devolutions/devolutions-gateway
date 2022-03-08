@@ -3,11 +3,11 @@ use proptest::collection::vec;
 use proptest::prelude::*;
 
 pub fn local_channel_id() -> impl Strategy<Value = LocalChannelId> {
-    any::<u32>().prop_map(|id| LocalChannelId::from(id))
+    any::<u32>().prop_map(LocalChannelId::from)
 }
 
 pub fn distant_channel_id() -> impl Strategy<Value = DistantChannelId> {
-    any::<u32>().prop_map(|id| DistantChannelId::from(id))
+    any::<u32>().prop_map(DistantChannelId::from)
 }
 
 pub fn destination_url_parts() -> impl Strategy<Value = (String, String, u16)> {
@@ -19,7 +19,7 @@ pub fn destination_url() -> impl Strategy<Value = DestinationUrl> {
 }
 
 pub fn reason_code() -> impl Strategy<Value = ReasonCode> {
-    any::<u32>().prop_map(|code| ReasonCode(code))
+    any::<u32>().prop_map(ReasonCode)
 }
 
 pub fn message_open() -> impl Strategy<Value = Message> {
@@ -50,11 +50,11 @@ pub fn message_data() -> impl Strategy<Value = Message> {
 }
 
 pub fn message_eof() -> impl Strategy<Value = Message> {
-    distant_channel_id().prop_map(|distant_id| Message::eof(distant_id))
+    distant_channel_id().prop_map(Message::eof)
 }
 
 pub fn message_close() -> impl Strategy<Value = Message> {
-    distant_channel_id().prop_map(|distant_id| Message::close(distant_id))
+    distant_channel_id().prop_map(Message::close)
 }
 
 pub fn any_message() -> impl Strategy<Value = Message> {
