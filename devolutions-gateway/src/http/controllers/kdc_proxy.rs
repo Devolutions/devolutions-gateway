@@ -1,5 +1,6 @@
-use crate::config::Config;
+use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
+use crate::token::AccessTokenClaims;
 use picky_krb::messages::KdcProxyMessage;
 use saphir::controller::Controller;
 use saphir::http::Method;
@@ -7,28 +8,24 @@ use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
 const ERROR_BAD_FORMAT: &str = "\x0b";
-const DEFAULT_KDC_PORT: u16 = 88;
 
-pub struct KdcProxyController {
-    config: Arc<Config>,
-}
-
-impl KdcProxyController {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
-    }
-}
+pub struct KdcProxyController;
 
 #[controller(name = "KdcProxy")]
 impl KdcProxyController {
     #[post("/")]
-    async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
+    #[guard(AccessGuard, init_expr = r#"TokenType::Kdc"#)]
+    async fn proxy_kdc_message(&self, mut req: Request) -> Result<Builder, HttpErrorStatus> {
         use focaccia::unicode_full_case_eq;
+
+        let claims = req
+            .extensions_mut()
+            .remove::<AccessTokenClaims>()
+            .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
 
         let kdc_proxy_message = KdcProxyMessage::from_raw(
             req.load_body()
@@ -52,22 +49,18 @@ impl KdcProxyController {
 
         trace!("Request is for realm (target_domain): {realm}");
 
-        let kdc_proxy_config = self
-            .config
-            .kdc_proxy_config
-            .as_ref()
-            .ok_or_else(|| HttpErrorStatus::internal("KDC proxy is not configured"))?;
+        let claims = if let AccessTokenClaims::Kdc(claims) = claims {
+            claims
+        } else {
+            return Err(HttpErrorStatus::forbidden("token not allowed"));
+        };
 
-        if !unicode_full_case_eq(&kdc_proxy_config.realm, &realm) {
+        if !unicode_full_case_eq(&claims.krb_realm, &realm) {
             return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
         }
 
-        let scheme = kdc_proxy_config.kdc_url.scheme();
-        let address_to_resolve = format!(
-            "{}:{}",
-            kdc_proxy_config.kdc_url.host().unwrap(),
-            kdc_proxy_config.kdc_url.port().unwrap_or(DEFAULT_KDC_PORT)
-        );
+        let protocol = claims.krb_kdc.scheme();
+        let address_to_resolve = claims.krb_kdc.host_repr().to_string();
 
         let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
             address
@@ -76,9 +69,9 @@ impl KdcProxyController {
             return Err(HttpErrorStatus::internal("Unable to locate KDC server"));
         };
 
-        trace!("Connecting to KDC server located at {kdc_address} using protocol {scheme}...");
+        trace!("Connecting to KDC server located at {kdc_address} using protocol {protocol}...");
 
-        let kdc_reply_message = if scheme == "tcp" {
+        let kdc_reply_message = if protocol == "tcp" {
             let mut connection = TcpStream::connect(kdc_address).await.map_err(|e| {
                 error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to connect to KDC server")

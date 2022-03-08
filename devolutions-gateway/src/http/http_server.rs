@@ -48,7 +48,6 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
             let (health, legacy_health) = HealthController::new(config.clone());
             let http_bridge = HttpBridgeController::new();
             let jet = AssociationController::new(config.clone(), jet_associations.clone());
-            let kdc_proxy = KdcProxyController::new(config.clone());
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());
@@ -77,7 +76,7 @@ pub fn configure_http_server(config: Arc<Config>, jet_associations: JetAssociati
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
                 .controller(LegacySessionsController)
-                .controller(kdc_proxy)
+                .controller(KdcProxyController)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
         .build_stack_only()?;

@@ -270,7 +270,7 @@ impl TargetAddr {
         &self.scheme
     }
 
-    pub fn host(&self) -> &HostRepr {
+    pub fn host_repr(&self) -> &HostRepr {
         &self.host
     }
 
