@@ -4,11 +4,11 @@ use devolutions_gateway::config::Config;
 use devolutions_gateway::jet_client::JetAssociationsMap;
 use devolutions_gateway::listener::GatewayListener;
 use libfuzzer_sys::fuzz_target;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use url::Url;
 
 fuzz_target!(|data: &[u8]| {
