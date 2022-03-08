@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::token::{validate_token, AccessTokenClaims, JetAssociationTokenClaims};
+use anyhow::Context as _;
 use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use std::io;
@@ -11,22 +12,19 @@ pub fn extract_association_claims(
     pdu: &PreconnectionPdu,
     source_ip: IpAddr,
     config: &Config,
-) -> Result<JetAssociationTokenClaims, io::Error> {
-    let payload = pdu
-        .payload
-        .as_deref()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Empty preconnection PDU"))?;
+) -> anyhow::Result<JetAssociationTokenClaims> {
+    let payload = pdu.payload.as_deref().context("Empty preconnection PDU")?;
 
     let provisioner_key = config
         .provisioner_public_key
         .as_ref()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
+        .context("Provisioner key is missing")?;
 
     let delegation_key = config.delegation_private_key.as_ref();
 
     match validate_token(payload, source_ip, provisioner_key, delegation_key)? {
         AccessTokenClaims::Association(claims) => Ok(claims),
-        _ => Err(io::Error::new(io::ErrorKind::Other, "unexpected token type")),
+        _ => anyhow::bail!("unexpected token type"),
     }
 }
 

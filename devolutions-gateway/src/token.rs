@@ -1,4 +1,6 @@
 use crate::utils::TargetAddr;
+use anyhow::Context as _;
+use core::fmt;
 use parking_lot::Mutex;
 use picky::key::{PrivateKey, PublicKey};
 use serde::de;
@@ -6,6 +8,7 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
+use std::str::FromStr;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -15,6 +18,47 @@ lazy_static::lazy_static! {
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
+
+// ----- token types -----
+
+#[derive(Deserialize)]
+enum ContentType {
+    Association,
+    Scope,
+    Bridge,
+    Jmux,
+    Kdc,
+}
+
+impl FromStr for ContentType {
+    type Err = BadContentType;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ASSOCIATION" => Ok(ContentType::Association),
+            "SCOPE" => Ok(ContentType::Scope),
+            "BRIDGE" => Ok(ContentType::Bridge),
+            "JMUX" => Ok(ContentType::Jmux),
+            "KDC" => Ok(ContentType::Kdc),
+            unexpected => Err(BadContentType {
+                value: SmolStr::new(unexpected),
+            }),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BadContentType {
+    value: SmolStr,
+}
+
+impl fmt::Display for BadContentType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unexpected content type: {}", self.value)
+    }
+}
+
+impl std::error::Error for BadContentType {}
 
 // ----- generic struct -----
 
@@ -347,7 +391,7 @@ pub fn validate_token(
     source_ip: IpAddr,
     provisioner_key: &PublicKey,
     delegation_key: Option<&PrivateKey>,
-) -> Result<AccessTokenClaims, io::Error> {
+) -> anyhow::Result<AccessTokenClaims> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
     use serde_json::Value;
@@ -359,23 +403,10 @@ pub fn validate_token(
 
     let signed_jwt = if is_encrypted {
         let encrypted_jwt = token;
-
-        let delegation_key =
-            delegation_key.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Delegation key is missing"))?;
-
-        jwe_token = Jwe::decode(encrypted_jwt, delegation_key).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to decode encrypted JWT routing token: {}", e),
-            )
-        })?;
-
-        std::str::from_utf8(&jwe_token.payload).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("Failed to decode encrypted JWT routing token payload: {}", e),
-            )
-        })?
+        let delegation_key = delegation_key.context("Delegation key is missing")?;
+        jwe_token =
+            Jwe::decode(encrypted_jwt, delegation_key).context("Failed to decode encrypted JWT routing token")?;
+        std::str::from_utf8(&jwe_token.payload).context("Failed to decode encrypted JWT routing token payload")?
     } else {
         token
     };
@@ -384,32 +415,28 @@ pub fn validate_token(
     let now = JwtDate::new_with_leeway(timestamp_now, LEEWAY_SECS);
     let validator = JwtValidator::strict(&now);
 
-    let jwt_token = JwtSig::<Value>::decode(signed_jwt, provisioner_key, &validator).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("failed to decode signed payload of JWT routing token: {}", e),
-        )
-    })?;
+    let jwt = JwtSig::<Value>::decode(signed_jwt, provisioner_key, &validator)
+        .context("failed to decode signed payload of JWT routing token")?;
 
-    let claims = match serde_json::from_value::<AccessTokenClaims>(jwt_token.claims.clone()) {
-        Ok(claims) => claims,
-        Err(primary_error) => {
-            let association_claims =
-                serde_json::from_value::<JetAssociationTokenClaims>(jwt_token.claims).map_err(|secondary_error| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("couldn't decode token claims: {} & {}", primary_error, secondary_error),
-                    )
-                })?;
-            AccessTokenClaims::Association(association_claims)
+    let claims = if let Some(content_type) = jwt.header.cty {
+        let content_type: ContentType = content_type
+            .parse()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        match content_type {
+            ContentType::Association => AccessTokenClaims::Association(serde_json::from_value(jwt.claims)?),
+            ContentType::Scope => AccessTokenClaims::Scope(serde_json::from_value(jwt.claims)?),
+            ContentType::Bridge => AccessTokenClaims::Bridge(serde_json::from_value(jwt.claims)?),
+            ContentType::Jmux => AccessTokenClaims::Jmux(serde_json::from_value(jwt.claims)?),
+            ContentType::Kdc => AccessTokenClaims::Kdc(serde_json::from_value(jwt.claims)?),
         }
+    } else if jwt.claims.get("type").is_some() {
+        serde_json::from_value::<AccessTokenClaims>(jwt.claims)?
+    } else {
+        AccessTokenClaims::Association(serde_json::from_value::<JetAssociationTokenClaims>(jwt.claims)?)
     };
 
     if claims.contains_secret() && !is_encrypted {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "received a non encrypted JWT containing secrets. This is unacceptable, do it right!",
-        ));
+        anyhow::bail!("received a non encrypted JWT containing secrets. This is unacceptable, do it right!");
     }
 
     // Token cache to prevent replay attacks
@@ -432,10 +459,9 @@ pub fn validate_token(
         ) => match TOKEN_CACHE.lock().entry(id) {
             Entry::Occupied(bucket) => {
                 if bucket.get().ip != source_ip {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "received identical token twice from another IP. A replay attack may have been attempted.",
-                    ));
+                    anyhow::bail!(
+                        "received identical token twice from another IP for RDP protocol. A replay attack may have been attempted."
+                    );
                 }
             }
             Entry::Vacant(bucket) => {
@@ -455,10 +481,7 @@ pub fn validate_token(
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match TOKEN_CACHE.lock().entry(id) {
             Entry::Occupied(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "received identical token twice. A replay attack may have been attempted.",
-                ));
+                anyhow::bail!("received identical token twice. A replay attack may have been attempted.");
             }
             Entry::Vacant(bucket) => {
                 bucket.insert(TokenSource {
