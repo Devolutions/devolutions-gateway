@@ -4,7 +4,11 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## Unpublished
 
+## 2022.1.1 (2022-03-09)
   * `diagnostics/configuration` endpoint now also returns Gateway's version
+  * New `diagnostics/clock` endpoint to troubleshoot clock drift
+  * Initial KDC proxy implementation
+  * Windows installer (MSI) now installs Gateway service as "Local Service" (fewer permissions)
 
 ## 2021.1.7 (2021-12-07)
   * JMUX multiplexing protocol implementation for `jetsocat` and gateway server
