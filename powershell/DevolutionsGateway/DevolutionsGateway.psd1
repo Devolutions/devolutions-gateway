@@ -5,9 +5,9 @@
 @{
     # Script module or binary module file associated with this manifest.
     RootModule = 'DevolutionsGateway.psm1'
-    
+
     # Version number of this module.
-    ModuleVersion = '2021.1.7'
+    ModuleVersion = '2022.1.1'
 
     # Supported PSEditions
     CompatiblePSEditions = 'Desktop', 'Core'
