@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::rdp::RdpClient;
-use crate::token::{ApplicationProtocol, ConnectionMode};
+use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, TokenCache};
 use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
 use std::net::SocketAddr;
@@ -15,7 +15,9 @@ use typed_builder::TypedBuilder;
 #[derive(TypedBuilder)]
 pub struct GenericClient {
     config: Arc<Config>,
-    associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     client_addr: SocketAddr,
     client_stream: TcpStream,
 }
@@ -25,20 +27,24 @@ impl GenericClient {
         let Self {
             config,
             associations,
+            token_cache,
+            jrl,
             client_addr,
             mut client_stream,
         } = self;
 
         let (pdu, mut leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
         let source_ip = client_addr.ip();
-        let association_claims = extract_association_claims(&pdu, source_ip, &config)?;
+        let association_claims = extract_association_claims(&pdu, source_ip, &config, &token_cache, &jrl)?;
 
         match association_claims.jet_ap {
             // We currently special case this because it may be the "RDP-TLS" protocol
             ApplicationProtocol::Rdp => {
                 RdpClient {
                     config,
-                    jet_associations: associations,
+                    associations,
+                    token_cache,
+                    jrl,
                 }
                 .serve_with_association_claims_and_leftover_bytes(
                     client_addr,

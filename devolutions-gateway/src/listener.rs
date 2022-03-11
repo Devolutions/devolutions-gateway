@@ -3,6 +3,7 @@ use crate::generic_client::GenericClient;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::rdp::RdpClient;
 use crate::routing_client;
+use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::url_to_socket_addr;
 use crate::websocket_client::{WebsocketService, WsClient};
 use anyhow::Context;
@@ -28,7 +29,9 @@ pub struct GatewayListener {
     addr: SocketAddr,
     kind: ListenerKind,
     listener: TcpListener,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     config: Arc<Config>,
     logger: Logger,
 }
@@ -37,7 +40,9 @@ impl GatewayListener {
     pub fn init_and_bind(
         url: Url,
         config: Arc<Config>,
-        jet_associations: JetAssociationsMap,
+        associations: Arc<JetAssociationsMap>,
+        token_cache: Arc<TokenCache>,
+        jrl: Arc<CurrentJrl>,
         logger: Logger,
     ) -> anyhow::Result<Self> {
         info!("Initiating listener {}…", url);
@@ -67,7 +72,9 @@ impl GatewayListener {
             kind,
             listener,
             config,
-            jet_associations,
+            associations,
+            token_cache,
+            jrl,
             logger,
         })
     }
@@ -86,11 +93,13 @@ impl GatewayListener {
                 match self.listener.accept().await.context("failed to accept connection") {
                     Ok((stream, peer_addr)) => {
                         let config = self.config.clone();
-                        let jet_associations = self.jet_associations.clone();
+                        let associations = self.associations.clone();
+                        let token_cache = self.token_cache.clone();
+                        let jrl = self.jrl.clone();
                         let logger = self.logger.new(slog::o!("client" => peer_addr.to_string()));
 
                         tokio::spawn(async move {
-                            if let Err(e) = $handler(config, jet_associations, stream, peer_addr, logger.clone()).await {
+                            if let Err(e) = $handler(config, associations, token_cache, jrl, stream, peer_addr, logger.clone()).await {
                                 slog_error!(logger, concat!(stringify!($handler), " failure: {:#}"), e);
                             }
                         });
@@ -117,13 +126,21 @@ impl GatewayListener {
         let (conn, peer_addr) = self.listener.accept().await.context("failed to accept connection")?;
 
         let config = self.config.clone();
-        let jet_associations = self.jet_associations.clone();
+        let associations = self.associations.clone();
+        let token_cache = self.token_cache.clone();
+        let jrl = self.jrl.clone();
         let logger = self.logger.new(slog::o!("client" => peer_addr.to_string()));
 
         match self.kind() {
-            ListenerKind::Tcp => handle_tcp_client(config, jet_associations, conn, peer_addr, logger).await?,
-            ListenerKind::Ws => handle_ws_client(config, jet_associations, conn, peer_addr, logger).await?,
-            ListenerKind::Wss => handle_wss_client(config, jet_associations, conn, peer_addr, logger).await?,
+            ListenerKind::Tcp => {
+                handle_tcp_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+            }
+            ListenerKind::Ws => {
+                handle_ws_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+            }
+            ListenerKind::Wss => {
+                handle_wss_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+            }
         }
 
         Ok(())
@@ -132,7 +149,9 @@ impl GatewayListener {
 
 async fn handle_tcp_client(
     config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     stream: TcpStream,
     peer_addr: SocketAddr,
     logger: Logger,
@@ -195,7 +214,9 @@ async fn handle_tcp_client(
             "rdp" => {
                 RdpClient {
                     config,
-                    jet_associations,
+                    associations,
+                    token_cache,
+                    jrl,
                 }
                 .serve(stream)
                 .with_logger(logger)
@@ -215,7 +236,7 @@ async fn handle_tcp_client(
             [b'J', b'E', b'T', b'\0'] => {
                 JetClient::builder()
                     .config(config)
-                    .associations(jet_associations)
+                    .associations(associations)
                     .addr(peer_addr)
                     .transport(stream)
                     .build()
@@ -227,9 +248,11 @@ async fn handle_tcp_client(
             _ => {
                 GenericClient::builder()
                     .config(config)
-                    .associations(jet_associations)
+                    .associations(associations)
                     .client_addr(peer_addr)
                     .client_stream(stream)
+                    .token_cache(token_cache)
+                    .jrl(jrl)
                     .build()
                     .serve()
                     .with_logger(logger)
@@ -243,7 +266,9 @@ async fn handle_tcp_client(
 
 async fn handle_ws_client(
     config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     conn: TcpStream,
     peer_addr: SocketAddr,
     logger: Logger,
@@ -253,14 +278,16 @@ async fn handle_ws_client(
     // Annonate using the type alias from `transport` just for sanity
     let conn: transport::TcpStream = conn;
 
-    process_ws_stream(conn, peer_addr, config, jet_associations, logger).await?;
+    process_ws_stream(conn, peer_addr, config, associations, token_cache, jrl, logger).await?;
 
     Ok(())
 }
 
 async fn handle_wss_client(
     config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     stream: TcpStream,
     peer_addr: SocketAddr,
     logger: Logger,
@@ -277,7 +304,7 @@ async fn handle_wss_client(
         .context("TLS handshake failed")?
         .pipe(tokio_rustls::TlsStream::Server);
 
-    process_ws_stream(tls_stream, peer_addr, config, jet_associations, logger).await?;
+    process_ws_stream(tls_stream, peer_addr, config, associations, token_cache, jrl, logger).await?;
 
     Ok(())
 }
@@ -286,15 +313,19 @@ async fn process_ws_stream<I>(
     io: I,
     remote_addr: SocketAddr,
     config: Arc<Config>,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     logger: Logger,
 ) -> anyhow::Result<()>
 where
     I: AsyncWrite + AsyncRead + Unpin + Send + Sync + 'static,
 {
     let websocket_service = WebsocketService {
-        jet_associations,
+        associations,
         config,
+        token_cache,
+        jrl,
     };
 
     let service = service_fn(move |req| {

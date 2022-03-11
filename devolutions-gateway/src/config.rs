@@ -164,7 +164,7 @@ pub struct Config {
     pub farm_name: String,
     pub hostname: String,
     pub routing_url: Option<Url>,
-    pub capture_path: Option<String>,
+    pub capture_path: Option<Utf8PathBuf>,
     pub protocol: Protocol,
     pub log_file: Option<Utf8PathBuf>,
     pub application_protocols: Vec<String>,
@@ -175,6 +175,7 @@ pub struct Config {
     pub recording_path: Option<Utf8PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
+    pub jrl_file: Option<Utf8PathBuf>,
 }
 
 impl Default for Config {
@@ -215,6 +216,7 @@ impl Default for Config {
                 },
             },
             sogar_user: Vec::new(),
+            jrl_file: None,
         }
     }
 }
@@ -277,7 +279,7 @@ pub struct ConfigFile {
     #[serde(rename = "Plugins")]
     pub plugins: Option<Vec<Utf8PathBuf>>,
     #[serde(rename = "RecordingPath")]
-    pub recording_path: Option<String>,
+    pub recording_path: Option<Utf8PathBuf>,
     #[serde(rename = "SogarRegistryUrl")]
     pub registry_url: Option<String>,
     #[serde(rename = "SogarUsername")]
@@ -303,9 +305,11 @@ pub struct ConfigFile {
 
     // unstable options (subject to change)
     #[serde(rename = "LogFile")]
-    pub log_file: Option<String>,
+    pub log_file: Option<Utf8PathBuf>,
+    #[serde(rename = "JrlFile")]
+    pub jrl_file: Option<Utf8PathBuf>,
     #[serde(rename = "CapturePath")]
-    pub capture_path: Option<String>,
+    pub capture_path: Option<Utf8PathBuf>,
 }
 
 fn get_config_path() -> Utf8PathBuf {
@@ -665,7 +669,7 @@ impl Config {
         }
 
         if let Some(capture_path) = matches.value_of(ARG_CAPTURE_PATH) {
-            config.capture_path = Some(capture_path.to_owned());
+            config.capture_path = Some(capture_path.into());
         }
 
         if let Some(protocol) = matches.value_of(ARG_PROTOCOL) {
@@ -858,6 +862,10 @@ impl Config {
             });
         }
 
+        if config.jrl_file.is_none() {
+            config.jrl_file = Some(Utf8PathBuf::from("./jrl.json"));
+        }
+
         // NOTE: we allow configs to specify "http" or "https" scheme if it's clearer,
         // but this is ultimately identical to "ws" and "wss" respectively.
 
@@ -931,8 +939,11 @@ impl Config {
 
         let application_protocols = config_file.application_protocols.unwrap_or_default();
 
-        let gateway_log_file = config_file.log_file.unwrap_or_else(|| "gateway.log".to_owned());
-        let log_file = get_program_data_file_path(&gateway_log_file);
+        let log_file = config_file.log_file.unwrap_or_else(|| Utf8PathBuf::from("gateway.log"));
+        let log_file = get_program_data_file_path(&log_file);
+
+        let jrl_file = config_file.jrl_file.unwrap_or_else(|| Utf8PathBuf::from("jrl.json"));
+        let jrl_file = get_program_data_file_path(&jrl_file);
 
         let tls_certificate = config_file.certificate_file.map(|file| {
             let file = get_program_data_file_path(&file);
@@ -1015,12 +1026,8 @@ impl Config {
                 },
             },
             sogar_user,
+            jrl_file: Some(jrl_file),
             ..Default::default()
         })
-    }
-
-    #[allow(dead_code)]
-    pub fn is_rdp_supported(&self) -> bool {
-        self.application_protocols.contains(&"rdp".to_string())
     }
 }

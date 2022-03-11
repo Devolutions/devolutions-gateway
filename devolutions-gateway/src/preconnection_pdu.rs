@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::token::{validate_token, AccessTokenClaims, JetAssociationTokenClaims};
+use crate::token::{validate_token, AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache};
 use anyhow::Context as _;
 use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
@@ -12,6 +12,8 @@ pub fn extract_association_claims(
     pdu: &PreconnectionPdu,
     source_ip: IpAddr,
     config: &Config,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
 ) -> anyhow::Result<JetAssociationTokenClaims> {
     let payload = pdu.payload.as_deref().context("Empty preconnection PDU")?;
 
@@ -22,7 +24,7 @@ pub fn extract_association_claims(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    match validate_token(payload, source_ip, provisioner_key, delegation_key)? {
+    match validate_token(payload, source_ip, provisioner_key, delegation_key, token_cache, jrl)? {
         AccessTokenClaims::Association(claims) => Ok(claims),
         _ => anyhow::bail!("unexpected token type"),
     }

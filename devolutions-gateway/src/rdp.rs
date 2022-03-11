@@ -10,7 +10,7 @@ use self::sequence_future::create_downgrade_dvc_capabilities_future;
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
-use crate::token::{ApplicationProtocol, ConnectionMode, JetAssociationTokenClaims};
+use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, TokenCache};
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -60,7 +60,9 @@ impl credssp::CredentialsProxy for RdpIdentity {
 
 pub struct RdpClient {
     pub config: Arc<Config>,
-    pub jet_associations: JetAssociationsMap,
+    pub associations: Arc<JetAssociationsMap>,
+    pub token_cache: Arc<TokenCache>,
+    pub jrl: Arc<CurrentJrl>,
 }
 
 impl RdpClient {
@@ -68,7 +70,8 @@ impl RdpClient {
         let (pdu, leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
         let client_addr = client_stream.peer_addr()?;
         let source_ip = client_addr.ip();
-        let association_claims = extract_association_claims(&pdu, source_ip, &self.config)?;
+        let association_claims =
+            extract_association_claims(&pdu, source_ip, &self.config, &self.token_cache, &self.jrl)?;
         self.serve_with_association_claims_and_leftover_bytes(
             client_addr,
             client_stream,
@@ -86,8 +89,7 @@ impl RdpClient {
         mut leftover_bytes: BytesMut,
     ) -> anyhow::Result<()> {
         let Self {
-            config,
-            jet_associations,
+            config, associations, ..
         } = self;
 
         if association_claims.jet_rec {
@@ -229,7 +231,7 @@ impl RdpClient {
             RdpRoutingMode::TcpRendezvous(association_id) => {
                 info!("Starting RdpTcpRendezvous redirection");
                 crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy::builder()
-                    .associations(jet_associations)
+                    .associations(associations)
                     .client_transport(AnyStream::from(client_stream))
                     .association_id(association_id)
                     .build()

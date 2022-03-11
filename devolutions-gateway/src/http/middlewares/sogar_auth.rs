@@ -1,6 +1,6 @@
 use crate::config::{Config, SogarPermission, SogarUser};
 use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
-use picky::jose::jwt::{JwtSig, JwtValidator};
+use picky::jose::jwt::{JwtSig, NO_CHECK_VALIDATOR};
 use saphir::http;
 use saphir::http_context::State;
 use saphir::prelude::*;
@@ -64,9 +64,9 @@ async fn auth_middleware(
         let private_key = config.delegation_private_key.clone();
         if let (Some((AuthHeaderType::Bearer, token)), Some(private_key)) = (parse_auth_header(auth_str), private_key) {
             let public_key = private_key.to_public_key();
-            match JwtSig::<SogarUser>::decode(token, &public_key, &JwtValidator::no_check()) {
-                Ok(user) => {
-                    if let Some(permission) = user.claims.permission {
+            match JwtSig::decode(token, &public_key).and_then(|jwt| jwt.validate::<SogarUser>(&NO_CHECK_VALIDATOR)) {
+                Ok(jwt) => {
+                    if let Some(permission) = jwt.state.claims.permission {
                         if metadata == BLOB_EXIST_ENDPOINT || metadata == MANIFEST_EXIST_ENDPOINT {
                             return chain.next(ctx).await;
                         }

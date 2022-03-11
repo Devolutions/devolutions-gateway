@@ -4,6 +4,7 @@ use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
 use crate::{ConnectionModeDetails, GatewaySessionInfo};
 use anyhow::Context;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use transport::AnyStream;
 use typed_builder::TypedBuilder;
@@ -11,7 +12,7 @@ use uuid::Uuid;
 
 #[derive(TypedBuilder)]
 pub struct JetRendezvousTcpProxy {
-    associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
     client_transport: AnyStream,
     association_id: Uuid,
 }
@@ -59,10 +60,12 @@ impl JetRendezvousTcpProxy {
             .await
             .context("Failed to write client leftover request")?;
 
-        client_transport
-            .write_all(&server_leftover)
-            .await
-            .context("Failed to write server leftover")?;
+        if let Some(bytes) = server_leftover {
+            client_transport
+                .write_all(&bytes)
+                .await
+                .context("Failed to write server leftover")?;
+        }
 
         let proxy_result = Proxy::init()
             .session_info(info)

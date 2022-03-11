@@ -11,7 +11,6 @@ use crate::utils::create_tls_connector;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context as _;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use bytes::Bytes;
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
 use jet_proto::connect::{JetConnectReq, JetConnectRsp};
 use jet_proto::test::{JetTestReq, JetTestRsp};
@@ -29,14 +28,14 @@ use transport::Transport;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
-pub type JetAssociationsMap = Arc<Mutex<HashMap<Uuid, Association>>>;
+pub type JetAssociationsMap = Mutex<HashMap<Uuid, Association>>;
 
 // FIXME? why "client"? Wouldn't `JetServer` or `JetProxy` be more appropriate naming?
 
 #[derive(TypedBuilder)]
 pub struct JetClient {
     config: Arc<Config>,
-    associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
     addr: SocketAddr,
     transport: TcpStream,
 }
@@ -65,9 +64,9 @@ impl JetClient {
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
 
-                let proxy_result = handle_build_proxy(associations.clone(), config, response).await;
+                let proxy_result = handle_build_proxy(&associations, config, response).await;
 
-                remove_jet_association(associations.clone(), association_id, Some(candidate_id));
+                remove_jet_association(&associations, association_id, Some(candidate_id));
 
                 proxy_result
             }
@@ -108,7 +107,7 @@ async fn handle_build_tls_proxy(
 }
 
 async fn handle_build_proxy(
-    jet_associations: JetAssociationsMap,
+    associations: &JetAssociationsMap,
     config: Arc<Config>,
     response: HandleConnectJetMsgResponse,
 ) -> anyhow::Result<()> {
@@ -117,7 +116,7 @@ async fn handle_build_proxy(
     let mut recording_dir = None;
     let mut file_pattern = None;
 
-    if let Some(association) = jet_associations.lock().get(&association_id) {
+    if let Some(association) = associations.lock().get(&association_id) {
         match (association.record_session(), config.plugins.is_some()) {
             (true, true) => {
                 let init_result = PluginRecordingInspector::init(
@@ -218,7 +217,7 @@ struct HandleAcceptJetMsg {
     config: Arc<Config>,
     transport: Option<(SocketAddr, TcpStream)>,
     request_msg: JetAcceptReq,
-    associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
     remove_association_future: Option<Pin<Box<dyn Future<Output = ()> + Send>>>,
 }
 
@@ -228,7 +227,7 @@ impl HandleAcceptJetMsg {
         addr: SocketAddr,
         transport: TcpStream,
         msg: JetAcceptReq,
-        associations: JetAssociationsMap,
+        associations: Arc<JetAssociationsMap>,
     ) -> Self {
         HandleAcceptJetMsg {
             config,
@@ -287,7 +286,7 @@ impl HandleAcceptJetMsg {
             if association.version() == JET_VERSION_V2 {
                 if let Some(candidate) = association.get_candidate_mut(self.request_msg.candidate) {
                     let (addr, stream) = self.transport.take().expect("Must be set in the constructor");
-                    candidate.set_transport(Transport::new(stream, addr), Bytes::new());
+                    candidate.set_transport(Transport::new(stream, addr), None);
                 }
             }
         }
@@ -313,7 +312,7 @@ impl HandleAcceptJetMsg {
 async fn handle_connect_jet_msg(
     mut client_transport: TcpStream,
     request_msg: JetConnectReq,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
 ) -> anyhow::Result<HandleConnectJetMsgResponse> {
     let mut response_msg = Vec::with_capacity(512);
     let mut server_transport = None;
@@ -324,7 +323,7 @@ async fn handle_connect_jet_msg(
     // Find the server transport
     let mut status_code = StatusCode::BAD_REQUEST;
 
-    if let Some(association) = jet_associations.lock().get_mut(&request_msg.association) {
+    if let Some(association) = associations.lock().get_mut(&request_msg.association) {
         association_token = Some(association.get_token_claims().clone());
 
         let candidate = match (association.version(), request_msg.version) {
@@ -383,7 +382,7 @@ async fn handle_connect_jet_msg(
         candidate_id.take(),
         association_token.take(),
     ) {
-        (Some((server_transport, _)), Some(association_id), Some(candidate_id), Some(token)) => {
+        (Some((server_transport, None)), Some(association_id), Some(candidate_id), Some(token)) => {
             Ok(HandleConnectJetMsgResponse {
                 client_transport,
                 server_transport: server_transport
