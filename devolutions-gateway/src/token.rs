@@ -6,18 +6,17 @@ use picky::key::{PrivateKey, PublicKey};
 use serde::de;
 use smol_str::SmolStr;
 use std::collections::HashMap;
-use std::io;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-lazy_static::lazy_static! {
-    static ref TOKEN_CACHE: Mutex<HashMap<Uuid, TokenSource>> = Mutex::new(HashMap::new());
-}
-
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
+
+pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>;
+pub type CurrentJrl = Mutex<JrlTokenClaims>;
 
 // ----- token types -----
 
@@ -28,6 +27,7 @@ enum ContentType {
     Bridge,
     Jmux,
     Kdc,
+    Jrl,
 }
 
 impl FromStr for ContentType {
@@ -40,6 +40,7 @@ impl FromStr for ContentType {
             "BRIDGE" => Ok(ContentType::Bridge),
             "JMUX" => Ok(ContentType::Jmux),
             "KDC" => Ok(ContentType::Kdc),
+            "JRL" => Ok(ContentType::Jrl),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -71,16 +72,18 @@ pub enum AccessTokenClaims {
     Bridge(BridgeTokenClaims),
     Jmux(JmuxTokenClaims),
     Kdc(KdcTokenClaims),
+    Jrl(JrlTokenClaims),
 }
 
 impl AccessTokenClaims {
     fn contains_secret(&self) -> bool {
-        match &self {
+        match self {
             AccessTokenClaims::Association(claims) => claims.contains_secret(),
             AccessTokenClaims::Scope(_) => false,
             AccessTokenClaims::Bridge(_) => false,
             AccessTokenClaims::Jmux(_) => false,
             AccessTokenClaims::Kdc(_) => false,
+            AccessTokenClaims::Jrl(_) => false,
         }
     }
 }
@@ -258,6 +261,8 @@ pub enum JetAccessScope {
     GatewayAssociationsRead,
     #[serde(rename = "gateway.diagnostics.read")]
     GatewayDiagnosticsRead,
+    #[serde(rename = "gateway.jrl.read")]
+    GatewayJrlRead,
 }
 
 #[derive(Clone, Deserialize)]
@@ -373,10 +378,35 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
     }
 }
 
+// ----- jrl claims ----- //
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct JrlTokenClaims {
+    /// Unique ID for this token
+    pub jti: Uuid,
+
+    /// JWT "Issued At" claim.
+    /// Revocation list is saved only for the more recent token.
+    pub iat: i64,
+
+    /// The JWT revocation list as a claim-values map
+    pub jrl: HashMap<String, Vec<serde_json::Value>>,
+}
+
+impl Default for JrlTokenClaims {
+    fn default() -> Self {
+        Self {
+            jti: Uuid::nil(),
+            iat: 0,
+            jrl: HashMap::default(),
+        }
+    }
+}
+
 // ----- validation ----- //
 
 #[derive(Debug, Clone)]
-struct TokenSource {
+pub struct TokenSource {
     ip: IpAddr,
     expiration_timestamp: i64,
 }
@@ -391,11 +421,15 @@ pub fn validate_token(
     source_ip: IpAddr,
     provisioner_key: &PublicKey,
     delegation_key: Option<&PrivateKey>,
+    token_cache: &TokenCache,
+    revocation_list: &CurrentJrl,
 ) -> anyhow::Result<AccessTokenClaims> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
     use serde_json::Value;
     use std::collections::hash_map::Entry;
+
+    // === Decoding JWT === //
 
     let is_encrypted = is_encrypted(token);
 
@@ -411,35 +445,74 @@ pub fn validate_token(
         token
     };
 
+    let jwt =
+        JwtSig::decode(signed_jwt, provisioner_key).context("failed to decode signed payload of JWT routing token")?;
+
+    // === Extracting content type and validating JWT claims === //
+
     let timestamp_now = chrono::Utc::now().timestamp();
     let now = JwtDate::new_with_leeway(timestamp_now, LEEWAY_SECS);
-    let validator = JwtValidator::strict(&now);
+    let strict_validator = JwtValidator::strict(&now);
 
-    let jwt = JwtSig::<Value>::decode(signed_jwt, provisioner_key, &validator)
-        .context("failed to decode signed payload of JWT routing token")?;
+    let (claims, content_type) = if let Some(content_type) = jwt.header.cty.as_deref() {
+        let content_type = content_type.parse::<ContentType>()?;
 
-    let claims = if let Some(content_type) = jwt.header.cty {
-        let content_type: ContentType = content_type
-            .parse()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        match content_type {
-            ContentType::Association => AccessTokenClaims::Association(serde_json::from_value(jwt.claims)?),
-            ContentType::Scope => AccessTokenClaims::Scope(serde_json::from_value(jwt.claims)?),
-            ContentType::Bridge => AccessTokenClaims::Bridge(serde_json::from_value(jwt.claims)?),
-            ContentType::Jmux => AccessTokenClaims::Jmux(serde_json::from_value(jwt.claims)?),
-            ContentType::Kdc => AccessTokenClaims::Kdc(serde_json::from_value(jwt.claims)?),
-        }
-    } else if jwt.claims.get("type").is_some() {
-        serde_json::from_value::<AccessTokenClaims>(jwt.claims)?
+        let claims = match content_type {
+            ContentType::Association
+            | ContentType::Scope
+            | ContentType::Bridge
+            | ContentType::Jmux
+            | ContentType::Kdc => jwt.validate::<Value>(&strict_validator)?.state.claims,
+            ContentType::Jrl => {
+                // NOTE: JRL tokens are not expected to have any expiration.
+                // However, `iat` (Issued At) claim will be used, and only more recent tokens will
+                // be accepted when updating the revocation list.
+                let lenient_validator = strict_validator.not_before_check_optional().expiration_check_optional();
+                jwt.validate::<Value>(&lenient_validator)?.state.claims
+            }
+        };
+
+        (claims, content_type)
     } else {
-        AccessTokenClaims::Association(serde_json::from_value::<JetAssociationTokenClaims>(jwt.claims)?)
+        let mut claims = jwt.validate::<Value>(&strict_validator)?.state.claims;
+
+        let content_type = if let Some(Value::String(content_type)) = claims.get_mut("type") {
+            content_type.make_ascii_uppercase();
+            content_type.parse::<ContentType>()?
+        } else {
+            ContentType::Association
+        };
+
+        (claims, content_type)
     };
+
+    // === Check for revoked values in JWT Revocation List === //
+
+    for (key, revoked_values) in &revocation_list.lock().jrl {
+        if let Some(token_value) = claims.get(key) {
+            if revoked_values.contains(token_value) {
+                anyhow::bail!("received a token containing a revoked value.");
+            }
+        }
+    }
+
+    // === Convert json value into an instance of the correct claims type === //
+
+    let claims = match content_type {
+        ContentType::Association => AccessTokenClaims::Association(serde_json::from_value(claims)?),
+        ContentType::Scope => AccessTokenClaims::Scope(serde_json::from_value(claims)?),
+        ContentType::Bridge => AccessTokenClaims::Bridge(serde_json::from_value(claims)?),
+        ContentType::Jmux => AccessTokenClaims::Jmux(serde_json::from_value(claims)?),
+        ContentType::Kdc => AccessTokenClaims::Kdc(serde_json::from_value(claims)?),
+        ContentType::Jrl => AccessTokenClaims::Jrl(serde_json::from_value(claims)?),
+    };
+
+    // === Applying additional validations as appropriate === //
 
     if claims.contains_secret() && !is_encrypted {
         anyhow::bail!("received a non encrypted JWT containing secrets. This is unacceptable, do it right!");
     }
 
-    // Token cache to prevent replay attacks
     match claims {
         // Mitigate replay attacks for RDP associations by rejecting token re-use from a different
         // source address IP (RDP requires multiple connections, so we can't just reject everything)
@@ -456,7 +529,7 @@ pub fn validate_token(
                 jet_ap: ApplicationProtocol::Rdp,
                 ..
             },
-        ) => match TOKEN_CACHE.lock().entry(id) {
+        ) => match token_cache.lock().entry(id) {
             Entry::Occupied(bucket) => {
                 if bucket.get().ip != source_ip {
                     anyhow::bail!(
@@ -473,13 +546,12 @@ pub fn validate_token(
         },
 
         // All other tokens can't be re-used even if source IP is identical
-        AccessTokenClaims::Association(
-            JetAssociationTokenClaims { jti: Some(id), exp, .. } | JetAssociationTokenClaims { jet_aid: id, exp, .. },
-        )
+        AccessTokenClaims::Association(JetAssociationTokenClaims { jti: Some(id), exp, .. })
+        | AccessTokenClaims::Association(JetAssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match TOKEN_CACHE.lock().entry(id) {
+        | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 anyhow::bail!("received identical token twice. A replay attack may have been attempted.");
             }
@@ -493,19 +565,30 @@ pub fn validate_token(
 
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
+
+        // JRL token must be more recent than the current revocation list
+        AccessTokenClaims::Jrl(JrlTokenClaims { iat, .. }) => {
+            if iat < revocation_list.lock().iat {
+                anyhow::bail!("received an older JWT Revocation List token.");
+            }
+        }
     }
 
     Ok(claims)
 }
 
-pub async fn cleanup_task() {
+pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
     use tokio::time::{sleep, Duration};
 
     loop {
         sleep(Duration::from_secs(CLEANUP_TASK_INTERVAL_SECS)).await;
         let clean_threshold = chrono::Utc::now().timestamp() - i64::from(LEEWAY_SECS);
-        TOKEN_CACHE
+        token_cache
             .lock()
             .retain(|_, src| src.expiration_timestamp > clean_threshold);
     }
+}
+
+pub fn new_token_cache() -> TokenCache {
+    Mutex::new(HashMap::new())
 }

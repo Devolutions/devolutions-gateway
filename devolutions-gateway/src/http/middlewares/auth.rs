@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::token::validate_token;
+use crate::token::{validate_token, CurrentJrl, TokenCache};
 use futures::future::{BoxFuture, FutureExt};
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};
@@ -13,11 +13,17 @@ const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
 
 pub struct AuthMiddleware {
     config: Arc<Config>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
 }
 
 impl AuthMiddleware {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub fn new(config: Arc<Config>, token_cache: Arc<TokenCache>, jrl: Arc<CurrentJrl>) -> Self {
+        Self {
+            config,
+            token_cache,
+            jrl,
+        }
     }
 }
 
@@ -27,12 +33,21 @@ impl Middleware for AuthMiddleware {
         ctx: HttpContext,
         chain: &'static dyn MiddlewareChain,
     ) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
-        auth_middleware(self.config.clone(), ctx, chain).boxed()
+        auth_middleware(
+            self.config.clone(),
+            self.token_cache.clone(),
+            self.jrl.clone(),
+            ctx,
+            chain,
+        )
+        .boxed()
     }
 }
 
 async fn auth_middleware(
     config: Arc<Config>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
     mut ctx: HttpContext,
     chain: &'static dyn MiddlewareChain,
 ) -> Result<HttpContext, SaphirError> {
@@ -81,7 +96,14 @@ async fn auth_middleware(
 
         let delegation_key = config.delegation_private_key.as_ref();
 
-        match validate_token(token, source_addr.ip(), provisioner_key, delegation_key) {
+        match validate_token(
+            token,
+            source_addr.ip(),
+            provisioner_key,
+            delegation_key,
+            &token_cache,
+            &jrl,
+        ) {
             Ok(jet_token) => {
                 request.extensions_mut().insert(jet_token);
                 return chain.next(ctx).await;

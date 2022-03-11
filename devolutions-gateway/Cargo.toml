@@ -48,9 +48,9 @@ focaccia = "1.1.2"
 
 # security, crypto…
 native-tls = "0.2.8"
-zeroize = "1.5.3"
+zeroize = { version = "1.5.3", features = ["derive"] }
 rust-argon2 = "1.0.0"
-picky = { version = "6.3.0", default-features = false, features = ["jose", "x509"] }
+picky = { version = "7.0.0-rc.2", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
 ring = "0.16.20"
 # (unrequired if using `axum`)

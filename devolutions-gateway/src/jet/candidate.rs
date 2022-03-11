@@ -38,7 +38,7 @@ pub struct Candidate {
     state: CandidateState,
     association_id: Uuid,
     transport_type: TransportType,
-    transport: Option<(Transport, Bytes)>,
+    transport: Option<(Transport, Option<Bytes>)>,
 }
 
 impl Candidate {
@@ -96,11 +96,11 @@ impl Candidate {
         self.association_id = association_id;
     }
 
-    pub fn set_transport(&mut self, transport: Transport, leftover: Bytes) {
+    pub fn set_transport(&mut self, transport: Transport, leftover: Option<Bytes>) {
         self.transport = Some((transport, leftover));
     }
 
-    pub fn take_transport(&mut self) -> Option<(Transport, Bytes)> {
+    pub fn take_transport(&mut self) -> Option<(Transport, Option<Bytes>)> {
         self.transport.take()
     }
 

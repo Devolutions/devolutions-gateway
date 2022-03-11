@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
-use crate::token::ApplicationProtocol;
+use crate::token::{ApplicationProtocol, CurrentJrl, TokenCache};
 use crate::utils::association::remove_jet_association;
 use crate::utils::TargetAddr;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -21,7 +21,9 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct WebsocketService {
-    pub jet_associations: JetAssociationsMap,
+    pub associations: Arc<JetAssociationsMap>,
+    pub token_cache: Arc<TokenCache>,
+    pub jrl: Arc<CurrentJrl>,
     pub config: Arc<Config>,
 }
 
@@ -29,21 +31,21 @@ impl WebsocketService {
     pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> Result<Response<Body>, io::Error> {
         if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_accept(req, client_addr, self.jet_associations.clone())
+            handle_jet_accept(req, client_addr, self.associations.clone())
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_connect(req, client_addr, self.jet_associations.clone(), self.config.clone())
+            handle_jet_connect(req, client_addr, self.associations.clone(), self.config.clone())
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jet_test(req, self.jet_associations.clone())
+            handle_jet_test(req, &self.associations)
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else if req.method() == Method::GET && req.uri().path().starts_with("/jmux") {
             info!("{} {}", req.method(), req.uri().path());
-            handle_jmux(req, client_addr, self.config.clone())
+            handle_jmux(req, client_addr, &self.config, &self.token_cache, &self.jrl)
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:?}", err)))
         } else {
@@ -59,9 +61,9 @@ impl WebsocketService {
 
 fn handle_jet_test(
     req: Request<Body>,
-    jet_associations: JetAssociationsMap,
+    associations: &JetAssociationsMap,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_test_impl(req, jet_associations) {
+    match handle_jet_test_impl(req, associations) {
         Ok(res) => Ok(res),
         Err(status) => {
             let mut res = Response::new(Body::empty());
@@ -71,10 +73,7 @@ fn handle_jet_test(
     }
 }
 
-fn handle_jet_test_impl(
-    req: Request<Body>,
-    jet_associations: JetAssociationsMap,
-) -> Result<Response<Body>, StatusCode> {
+fn handle_jet_test_impl(req: Request<Body>, associations: &JetAssociationsMap) -> Result<Response<Body>, StatusCode> {
     let header = req.headers().get("upgrade").ok_or(StatusCode::BAD_REQUEST)?;
     let header_str = header.to_str().map_err(|_| StatusCode::BAD_REQUEST)?;
     if header_str != "websocket" {
@@ -84,7 +83,7 @@ fn handle_jet_test_impl(
     let association_id = get_uuid_in_path(req.uri().path(), 2).ok_or(StatusCode::BAD_REQUEST)?;
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(StatusCode::BAD_REQUEST)?;
 
-    let jet_assc = jet_associations.lock();
+    let jet_assc = associations.lock();
     let assc = jet_assc.get(&association_id).ok_or(StatusCode::NOT_FOUND)?;
     if assc.get_candidate(candidate_id).is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -96,9 +95,9 @@ fn handle_jet_test_impl(
 async fn handle_jet_accept(
     req: Request<Body>,
     client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_accept_impl(req, client_addr, jet_associations).await {
+    match handle_jet_accept_impl(req, client_addr, associations).await {
         Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
@@ -111,7 +110,7 @@ async fn handle_jet_accept(
 async fn handle_jet_accept_impl(
     mut req: Request<Body>,
     client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
 ) -> Result<Response<Body>, ()> {
     use tokio_tungstenite::tungstenite::protocol::Role;
 
@@ -125,7 +124,7 @@ async fn handle_jet_accept_impl(
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
     let version = {
-        let associations = jet_associations.lock();
+        let associations = associations.lock();
         let association = associations.get(&association_id).ok_or(())?;
         association.version()
     };
@@ -160,11 +159,11 @@ async fn handle_jet_accept_impl(
                     },
                 };
 
-                let mut jet_assc = jet_associations.lock();
+                let mut jet_assc = associations.lock();
                 if let Some(assc) = jet_assc.get_mut(&association_id) {
                     if let Some(candidate) = assc.get_candidate_mut(candidate_id) {
                         candidate.set_state(CandidateState::Accepted);
-                        candidate.set_transport(transport, leftover_bytes);
+                        candidate.set_transport(transport, Some(leftover_bytes));
                     }
                 }
                 Ok::<(), ()>(())
@@ -178,10 +177,10 @@ async fn handle_jet_accept_impl(
 async fn handle_jet_connect(
     req: Request<Body>,
     client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
     config: Arc<Config>,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_connect_impl(req, client_addr, jet_associations, config).await {
+    match handle_jet_connect_impl(req, client_addr, associations, config).await {
         Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
@@ -194,7 +193,7 @@ async fn handle_jet_connect(
 async fn handle_jet_connect_impl(
     mut req: Request<Body>,
     client_addr: SocketAddr,
-    jet_associations: JetAssociationsMap,
+    associations: Arc<JetAssociationsMap>,
     config: Arc<Config>,
 ) -> Result<Response<Body>, ()> {
     use crate::interceptor::plugin_recording::PluginRecordingInspector;
@@ -211,7 +210,7 @@ async fn handle_jet_connect_impl(
     let candidate_id = get_uuid_in_path(req.uri().path(), 3).ok_or(())?;
 
     let (version, association_claims) = {
-        let associations = jet_associations.lock();
+        let associations = associations.lock();
         let association = associations.get(&association_id).ok_or(())?;
         (association.version(), association.get_token_claims().clone())
     };
@@ -255,7 +254,7 @@ async fn handle_jet_connect_impl(
                 let mut recording_inspector: Option<(PluginRecordingInspector, PluginRecordingInspector)> = None;
 
                 {
-                    let mut associations = jet_associations.lock();
+                    let mut associations = associations.lock();
 
                     let association = if let Some(assoc) = associations.get_mut(&association_id) {
                         assoc
@@ -330,10 +329,12 @@ async fn handle_jet_connect_impl(
                         .await
                         .map_err(|e| error!("Failed to write client leftover request: {}", e))?;
 
-                    client_transport
-                        .write_all(&server_leftover)
-                        .await
-                        .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
+                    if let Some(bytes) = server_leftover {
+                        client_transport
+                            .write_all(&bytes)
+                            .await
+                            .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
+                    }
 
                     let proxy_result = Proxy::init()
                         .session_info(info)
@@ -355,10 +356,12 @@ async fn handle_jet_connect_impl(
                         .await
                         .map_err(|e| error!("Failed to write client leftover request: {}", e))?;
 
-                    client_transport
-                        .write_all(&server_leftover)
-                        .await
-                        .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
+                    if let Some(bytes) = server_leftover {
+                        client_transport
+                            .write_all(&bytes)
+                            .await
+                            .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
+                    }
 
                     Proxy::init()
                         .session_info(info)
@@ -371,7 +374,7 @@ async fn handle_jet_connect_impl(
                     error!("failed to build Proxy for WebSocket connection: {}", e)
                 }
 
-                remove_jet_association(jet_associations.clone(), association_id, Some(candidate_id));
+                remove_jet_association(&associations, association_id, Some(candidate_id));
 
                 Ok::<(), ()>(())
             });
@@ -462,7 +465,9 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 async fn handle_jmux(
     mut req: Request<Body>,
     client_addr: SocketAddr,
-    config: Arc<Config>,
+    config: &Config,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
 ) -> io::Result<Response<Body>> {
     use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
     use crate::token::{validate_token, AccessTokenClaims};
@@ -492,7 +497,14 @@ async fn handle_jmux(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    match validate_token(token, client_addr.ip(), provisioner_key, delegation_key) {
+    match validate_token(
+        token,
+        client_addr.ip(),
+        provisioner_key,
+        delegation_key,
+        token_cache,
+        jrl,
+    ) {
         Ok(AccessTokenClaims::Jmux(_)) => {}
         Ok(_) => {
             return Err(io::Error::new(io::ErrorKind::Other, "wrong access token"));

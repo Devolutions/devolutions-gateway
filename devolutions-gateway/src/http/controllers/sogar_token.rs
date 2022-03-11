@@ -1,6 +1,6 @@
 use crate::config::{Config, SogarUser};
 use picky::jose::jws::JwsAlg;
-use picky::jose::jwt::JwtSig;
+use picky::jose::jwt::CheckedJwtSig;
 use picky::key::PrivateKey;
 use saphir::controller::Controller;
 use saphir::http::{Method, StatusCode};
@@ -59,27 +59,23 @@ fn create_token(private_key: &Option<PrivateKey>, user: &SogarUser) -> (StatusCo
     }
 
     match private_key {
-        Some(private_key) => {
-            let signed_result = JwtSig::new(JwsAlg::RS256, user).encode(private_key);
+        Some(private_key) => match CheckedJwtSig::new(JwsAlg::RS256, user).encode(private_key) {
+            Ok(access_token) => {
+                let response = ResponseAccessToken { access_token };
 
-            match signed_result {
-                Ok(access_token) => {
-                    let response = ResponseAccessToken { access_token };
-
-                    match serde_json::to_string(&response) {
-                        Ok(token) => (StatusCode::OK, Some(token)),
-                        Err(e) => {
-                            error!("Failed serialize token! Error is {}", e);
-                            (StatusCode::BAD_REQUEST, None)
-                        }
+                match serde_json::to_string(&response) {
+                    Ok(token) => (StatusCode::OK, Some(token)),
+                    Err(e) => {
+                        error!("Failed serialize token! Error is {}", e);
+                        (StatusCode::BAD_REQUEST, None)
                     }
                 }
-                Err(e) => {
-                    error!("Failed to create token! Error is {}", e);
-                    (StatusCode::BAD_REQUEST, None)
-                }
             }
-        }
+            Err(e) => {
+                error!("Failed to create token! Error is {}", e);
+                (StatusCode::BAD_REQUEST, None)
+            }
+        },
         None => {
             error!("Private key is missing. Not able to create the jwt token.");
             (StatusCode::BAD_REQUEST, None)

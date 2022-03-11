@@ -3,13 +3,17 @@ use crate::http::http_server::configure_http_server;
 use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
 use crate::logger;
+use crate::token::{CurrentJrl, JrlTokenClaims};
 use anyhow::Context;
 use parking_lot::Mutex;
 use slog::Logger;
 use std::collections::HashMap;
+use std::fs::File;
 use std::future::Future;
+use std::io::BufReader;
 use std::pin::Pin;
 use std::sync::Arc;
+use tap::Pipe as _;
 use tokio::runtime::{self, Runtime};
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
@@ -102,10 +106,29 @@ impl GatewayService {
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
 
 fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<VecOfFuturesType> {
-    let jet_associations: JetAssociationsMap = Arc::new(Mutex::new(HashMap::new()));
+    let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
+    let token_cache = crate::token::new_token_cache().pipe(Arc::new);
+    let jrl: Arc<CurrentJrl> = {
+        let jrl_file = config.jrl_file.as_deref().context("JRL file path is missing")?;
+
+        let claims: JrlTokenClaims = if jrl_file.exists() {
+            info!("Reading JRL file from disk (path: {jrl_file})");
+            File::open(jrl_file)
+                .context("Couldn't open JRL file")?
+                .pipe(BufReader::new)
+                .pipe(serde_json::from_reader)
+                .context("Couldn't read JRL file")?
+        } else {
+            info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL.");
+            JrlTokenClaims::default()
+        };
+
+        Arc::new(Mutex::new(claims))
+    };
 
     // Configure http server
-    configure_http_server(config.clone(), jet_associations.clone()).context("failed to configure http server")?;
+    configure_http_server(config.clone(), associations.clone(), token_cache.clone(), jrl.clone())
+        .context("failed to configure http server")?;
 
     let mut futures: VecOfFuturesType = Vec::with_capacity(config.listeners.len());
 
@@ -116,7 +139,9 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<V
             GatewayListener::init_and_bind(
                 listener.internal_url.clone(),
                 config.clone(),
-                jet_associations.clone(),
+                associations.clone(),
+                token_cache.clone(),
+                jrl.clone(),
                 logger.clone(),
             )
             .with_context(|| format!("Failed to initialize {}", listener.internal_url))
@@ -129,7 +154,7 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<V
     }
 
     futures.push(Box::pin(async {
-        crate::token::cleanup_task().await;
+        crate::token::cleanup_task(token_cache).await;
         Ok(())
     }));
 

@@ -1,6 +1,8 @@
+use devolutions_gateway::token::{new_token_cache, CurrentJrl, JrlTokenClaims, TokenCache};
 use devolutions_gateway_generators::*;
+use parking_lot::Mutex;
 use picky::jose::jws::JwsAlg;
-use picky::jose::jwt::JwtSig;
+use picky::jose::jwt::CheckedJwtSig;
 use picky::key::{PrivateKey, PublicKey};
 use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,16 +37,22 @@ Z/fDKMxHxeXla54kfV+HiGkH
 -----END PRIVATE KEY-----"#;
 
 /// This emulate a token validation on Gateway side using the provided claims
-fn encode_decode_round_trip<C>(pub_key: &PublicKey, priv_key: &PrivateKey, claims: C) -> anyhow::Result<()>
+fn encode_decode_round_trip<C>(
+    pub_key: &PublicKey,
+    priv_key: &PrivateKey,
+    claims: C,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
+) -> anyhow::Result<()>
 where
     C: serde::ser::Serialize,
 {
     // DVLS side
-    let token = JwtSig::new(JwsAlg::RS256, claims).encode(priv_key)?;
+    let token = CheckedJwtSig::new(JwsAlg::RS256, claims).encode(priv_key)?;
 
     // Gateway side
     let source_ip = std::net::IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None)?;
+    devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None, token_cache, jrl)?;
 
     Ok(())
 }
@@ -114,11 +122,13 @@ mod as_of_v2021_2_13_0 {
     /// Make sure current Gateway is able to validate association tokens provided by DVLS
     #[test]
     fn association_token_validation() {
+        let token_cache = new_token_cache();
+        let jrl = Mutex::new(JrlTokenClaims::default());
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
@@ -185,11 +195,13 @@ mod as_of_v2021_2_4 {
     /// Make sure current Gateway is able to validate scope tokens provided by DVLS
     #[test]
     fn scope_token_validation() {
+        let token_cache = new_token_cache();
+        let jrl = Mutex::new(JrlTokenClaims::default());
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }
@@ -234,11 +246,13 @@ mod as_of_v2021_1_7_0 {
     /// Make sure current Gateway is able to validate association tokens provided by DVLS
     #[test]
     fn association_token_validation() {
+        let token_cache = new_token_cache();
+        let jrl = Mutex::new(JrlTokenClaims::default());
         let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }
