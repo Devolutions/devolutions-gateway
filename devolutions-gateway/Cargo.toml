@@ -72,7 +72,7 @@ slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.
 tokio = { version = "1.17.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 tokio-tungstenite = "0.17.1"
-tokio-rustls = { version = "0.23.2", features = ["dangerous_configuration"] }
+tokio-rustls = { version = "0.23.2", features = ["dangerous_configuration", "tls12"] }
 futures = "0.3.21"
 
 # Safe pin projection
