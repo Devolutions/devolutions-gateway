@@ -31,6 +31,7 @@ enum SubCommand {
     RdpTcpRendezvous,
     Scope(ScopeParams),
     Jmux,
+    Kdc(KdcParams),
 }
 
 #[derive(Parser)]
@@ -64,6 +65,14 @@ struct ScopeParams {
     scope: String,
 }
 
+#[derive(Parser)]
+struct KdcParams {
+    #[clap(long)]
+    krb_realm: String,
+    #[clap(long)]
+    krb_kdc: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
@@ -71,6 +80,7 @@ enum GatewayAccessClaims<'a> {
     Association(AssociationClaims<'a>),
     Scope(ScopeClaims),
     Jmux(JmuxClaims),
+    Kdc(KdcClaims),
 }
 
 #[derive(Clone, Serialize)]
@@ -93,9 +103,18 @@ struct ScopeClaims {
 }
 
 #[derive(Clone, Serialize)]
-pub struct JmuxClaims {
+struct JmuxClaims {
     exp: i64,
     nbf: i64,
+}
+
+#[derive(Clone, Serialize)]
+struct KdcClaims {
+    krb_realm: String,
+    krb_kdc: String,
+    exp: i64,
+    nbf: i64,
+    jti: Uuid,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -140,14 +159,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
         }),
-        _ => GatewayAccessClaims::Association(AssociationClaims {
+        SubCommand::RdpTcp(_) | SubCommand::RdpTls(_) | SubCommand::RdpTcpRendezvous => {
+            GatewayAccessClaims::Association(AssociationClaims {
+                exp: exp as i64,
+                nbf: now.as_secs() as i64,
+                dst_hst,
+                jet_cm,
+                jet_ap,
+                jet_aid,
+                identity,
+            })
+        }
+        SubCommand::Kdc(params) => GatewayAccessClaims::Kdc(KdcClaims {
             exp: exp as i64,
             nbf: now.as_secs() as i64,
-            dst_hst,
-            jet_cm,
-            jet_ap,
-            jet_aid,
-            identity,
+            krb_realm: params.krb_realm.clone(),
+            krb_kdc: params.krb_kdc.clone(),
+            jti: Uuid::new_v4(),
         }),
     };
 
