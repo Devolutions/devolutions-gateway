@@ -20,8 +20,8 @@ pub type CurrentJrl = Mutex<JrlTokenClaims>;
 
 // ----- token types -----
 
-#[derive(Deserialize)]
-enum ContentType {
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub enum ContentType {
     Association,
     Scope,
     Bridge,
@@ -48,9 +48,22 @@ impl FromStr for ContentType {
     }
 }
 
+impl fmt::Display for ContentType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ContentType::Association => write!(f, "ASSOCIATION"),
+            ContentType::Scope => write!(f, "SCOPE"),
+            ContentType::Bridge => write!(f, "BRIDGE"),
+            ContentType::Jmux => write!(f, "JMUX"),
+            ContentType::Kdc => write!(f, "KDC"),
+            ContentType::Jrl => write!(f, "JRL"),
+        }
+    }
+}
+
 #[derive(Debug)]
-struct BadContentType {
-    value: SmolStr,
+pub struct BadContentType {
+    pub value: SmolStr,
 }
 
 impl fmt::Display for BadContentType {
@@ -380,7 +393,7 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
 
 // ----- jrl claims ----- //
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JrlTokenClaims {
     /// Unique ID for this token
     pub jti: Uuid,
@@ -446,7 +459,7 @@ pub fn validate_token(
     };
 
     let jwt =
-        JwtSig::decode(signed_jwt, provisioner_key).context("failed to decode signed payload of JWT routing token")?;
+        JwtSig::decode(signed_jwt, provisioner_key).context("Failed to decode signed payload of JWT routing token")?;
 
     // === Extracting content type and validating JWT claims === //
 
@@ -491,7 +504,7 @@ pub fn validate_token(
     for (key, revoked_values) in &revocation_list.lock().jrl {
         if let Some(token_value) = claims.get(key) {
             if revoked_values.contains(token_value) {
-                anyhow::bail!("received a token containing a revoked value.");
+                anyhow::bail!("Received a token containing a revoked value.");
             }
         }
     }
@@ -499,18 +512,19 @@ pub fn validate_token(
     // === Convert json value into an instance of the correct claims type === //
 
     let claims = match content_type {
-        ContentType::Association => AccessTokenClaims::Association(serde_json::from_value(claims)?),
-        ContentType::Scope => AccessTokenClaims::Scope(serde_json::from_value(claims)?),
-        ContentType::Bridge => AccessTokenClaims::Bridge(serde_json::from_value(claims)?),
-        ContentType::Jmux => AccessTokenClaims::Jmux(serde_json::from_value(claims)?),
-        ContentType::Kdc => AccessTokenClaims::Kdc(serde_json::from_value(claims)?),
-        ContentType::Jrl => AccessTokenClaims::Jrl(serde_json::from_value(claims)?),
-    };
+        ContentType::Association => serde_json::from_value(claims).map(AccessTokenClaims::Association),
+        ContentType::Scope => serde_json::from_value(claims).map(AccessTokenClaims::Scope),
+        ContentType::Bridge => serde_json::from_value(claims).map(AccessTokenClaims::Bridge),
+        ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
+        ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
+        ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+    }
+    .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
 
     // === Applying additional validations as appropriate === //
 
     if claims.contains_secret() && !is_encrypted {
-        anyhow::bail!("received a non encrypted JWT containing secrets. This is unacceptable, do it right!");
+        anyhow::bail!("Received a non encrypted JWT containing secrets. This is unacceptable, do it right!");
     }
 
     match claims {
@@ -533,7 +547,7 @@ pub fn validate_token(
             Entry::Occupied(bucket) => {
                 if bucket.get().ip != source_ip {
                     anyhow::bail!(
-                        "received identical token twice from another IP for RDP protocol. A replay attack may have been attempted."
+                        "Received identical token twice from another IP for RDP protocol. A replay attack may have been attempted."
                     );
                 }
             }
@@ -553,7 +567,7 @@ pub fn validate_token(
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
-                anyhow::bail!("received identical token twice. A replay attack may have been attempted.");
+                anyhow::bail!("Received identical token twice. A replay attack may have been attempted.");
             }
             Entry::Vacant(bucket) => {
                 bucket.insert(TokenSource {
@@ -569,7 +583,7 @@ pub fn validate_token(
         // JRL token must be more recent than the current revocation list
         AccessTokenClaims::Jrl(JrlTokenClaims { iat, .. }) => {
             if iat < revocation_list.lock().iat {
-                anyhow::bail!("received an older JWT Revocation List token.");
+                anyhow::bail!("Received an older JWT Revocation List token.");
             }
         }
     }
