@@ -365,7 +365,7 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
 
         // Validate krb_realm value
 
-        if !claims.krb_realm.chars().all(char::is_lowercase) {
+        if claims.krb_realm.chars().any(char::is_uppercase) {
             return Err(de::Error::custom("krb_realm field contains uppercases"));
         }
 
