@@ -60,68 +60,78 @@ async fn auth_middleware(
         .remove(GATEWAY_AUTHORIZATION_HDR_NAME)
         .or_else(|| headers.remove(http::header::AUTHORIZATION));
 
-    // TODO: we could probably use an Error implementing the right saphir trait and `?` on error
-    // (IRCC we did something similar in Bastion).
-    let auth_value = match auth_value {
-        Some(value) => value,
+    let token = match &auth_value {
+        // Extract token from header
+        Some(auth_value) => match auth_value.to_str() {
+            Ok(auth_value) => {
+                if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
+                    token
+                } else {
+                    error!("Invalid authorization type");
+                    let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+                    let mut ctx = ctx.clone_with_empty_state();
+                    ctx.state = State::After(Box::new(response));
+                    return Ok(ctx);
+                }
+            }
+            Err(_) => {
+                error!("non-ASCII value in Authorization header");
+                let response = ResponseBuilder::new().status(StatusCode::BAD_REQUEST).build()?;
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
+            }
+        },
+
+        // Try to extract token from query params
         None => {
-            error!("Authorization header missing");
-            let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
-            let mut ctx = ctx.clone_with_empty_state();
-            ctx.state = State::After(Box::new(response));
-            return Ok(ctx);
+            if let Some(token) = request.uri().query().and_then(|q| {
+                q.split('&')
+                    .filter_map(|segment| segment.split_once('='))
+                    .find_map(|(key, val)| key.eq("token").then(|| val))
+            }) {
+                token
+            } else {
+                error!("Authorization header missing");
+                let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+                let mut ctx = ctx.clone_with_empty_state();
+                ctx.state = State::After(Box::new(response));
+                return Ok(ctx);
+            }
         }
     };
 
-    let auth_value = match auth_value.to_str() {
-        Ok(v) => v,
-        Err(_) => {
-            error!("non-ASCII value in Authorization header");
+    let source_addr = request
+        .peer_addr()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
+
+    let provisioner_key = config
+        .provisioner_public_key
+        .as_ref()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
+
+    let delegation_key = config.delegation_private_key.as_ref();
+
+    match validate_token(
+        token,
+        source_addr.ip(),
+        provisioner_key,
+        delegation_key,
+        &token_cache,
+        &jrl,
+    ) {
+        Ok(jet_token) => {
+            request.extensions_mut().insert(jet_token);
+            chain.next(ctx).await
+        }
+        Err(e) => {
+            error!("Invalid authorization token: {:#}", e);
             let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
             let mut ctx = ctx.clone_with_empty_state();
             ctx.state = State::After(Box::new(response));
-            return Ok(ctx);
+            Ok(ctx)
         }
-    };
-
-    if let Some((AuthHeaderType::Bearer, token)) = parse_auth_header(auth_value) {
-        let source_addr = request
-            .peer_addr()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
-
-        let provisioner_key = config
-            .provisioner_public_key
-            .as_ref()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
-
-        let delegation_key = config.delegation_private_key.as_ref();
-
-        match validate_token(
-            token,
-            source_addr.ip(),
-            provisioner_key,
-            delegation_key,
-            &token_cache,
-            &jrl,
-        ) {
-            Ok(jet_token) => {
-                request.extensions_mut().insert(jet_token);
-                return chain.next(ctx).await;
-            }
-            Err(e) => {
-                error!("Invalid authorization token: {}", e);
-            }
-        }
-    } else {
-        error!("Invalid authorization type");
     }
-
-    // At this point, authentication failed…
-
-    let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
-    let mut ctx = ctx.clone_with_empty_state();
-    ctx.state = State::After(Box::new(response));
-    Ok(ctx)
 }
 
 #[derive(PartialEq)]

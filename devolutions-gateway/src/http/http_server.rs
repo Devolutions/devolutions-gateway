@@ -33,13 +33,7 @@ pub fn configure_http_server(
                 .apply(
                     AuthMiddleware::new(config.clone(), token_cache, jrl.clone()),
                     vec!["/"],
-                    vec![
-                        "/registry",
-                        "/health",
-                        "/jet/health",
-                        "/KdcProxy",
-                        "/jet/diagnostics/clock",
-                    ],
+                    vec!["/registry", "/health", "/jet/health", "/jet/diagnostics/clock"],
                 )
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
