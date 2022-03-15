@@ -774,6 +774,7 @@ version = "0.0.0"
 dependencies = [
  "devolutions-gateway",
  "proptest",
+ "serde",
  "uuid",
 ]
 
