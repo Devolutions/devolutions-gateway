@@ -336,14 +336,6 @@ pub struct KdcTokenClaims {
     /// Default scheme is `tcp`.
     /// Default port is `88`.
     pub krb_kdc: TargetAddr,
-
-    // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
-    exp: i64,
-
-    // Unique ID for this token
-    jti: Uuid,
 }
 
 impl<'de> de::Deserialize<'de> for KdcTokenClaims {
@@ -357,8 +349,6 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
         struct ClaimsHelper {
             krb_realm: SmolStr,
             krb_kdc: SmolStr,
-            exp: i64,
-            jti: Uuid,
         }
 
         let claims = ClaimsHelper::deserialize(deserializer)?;
@@ -385,8 +375,6 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
         Ok(Self {
             krb_realm: claims.krb_realm,
             krb_kdc,
-            exp: claims.exp,
-            jti: claims.jti,
         })
     }
 }
@@ -564,8 +552,7 @@ pub fn validate_token(
         | AccessTokenClaims::Association(JetAssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Kdc(KdcTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 anyhow::bail!("Received identical token twice. A replay attack may have been attempted.");
             }
@@ -579,6 +566,9 @@ pub fn validate_token(
 
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
+
+        // KDC tokens are long-lived and expected to be re-used
+        AccessTokenClaims::Kdc(_) => {}
 
         // JRL token must be more recent than the current revocation list
         AccessTokenClaims::Jrl(JrlTokenClaims { iat, .. }) => {
