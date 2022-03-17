@@ -35,10 +35,11 @@ impl KdcProxyController {
         )
         .map_err(|_| HttpErrorStatus::bad_request(ERROR_BAD_FORMAT))?;
 
-        trace!(
-            "Received KDC message. target_domain = {:?}, dclocator_hint = {:?}",
-            kdc_proxy_message.target_domain,
-            kdc_proxy_message.dclocator_hint
+        trace!("Received KDC message: {:?}", kdc_proxy_message);
+
+        debug!(
+            "KDC message: target_domain = {:?}, dclocator_hint = {:?}",
+            kdc_proxy_message.target_domain, kdc_proxy_message.dclocator_hint
         );
 
         let realm = if let Some(realm) = &kdc_proxy_message.target_domain.0 {
@@ -47,7 +48,7 @@ impl KdcProxyController {
             return Err(HttpErrorStatus::bad_request(ERROR_BAD_FORMAT));
         };
 
-        trace!("Request is for realm (target_domain): {realm}");
+        debug!("Request is for realm (target_domain): {realm}");
 
         let claims = if let AccessTokenClaims::Kdc(claims) = claims {
             claims
@@ -134,6 +135,8 @@ impl KdcProxyController {
             error!("{:?}", e);
             HttpErrorStatus::internal("Cannot create kdc proxy massage")
         })?;
+
+        trace!("Sending back KDC reply: {:?}", kdc_proxy_reply_message);
 
         Ok(Builder::new()
             .body(kdc_proxy_reply_message.to_vec().unwrap())
