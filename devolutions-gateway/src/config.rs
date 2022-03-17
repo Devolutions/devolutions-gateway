@@ -122,7 +122,7 @@ impl TlsConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct SogarPushRegistryInfo {
     pub registry_url: Option<String>,
     pub username: Option<String>,
@@ -143,7 +143,7 @@ pub struct SogarUser {
     pub permission: Option<SogarPermission>,
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct SogarRegistryConfig {
     pub serve_as_registry: Option<bool>,
     pub local_registry_name: Option<String>,
@@ -224,7 +224,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct GatewayListener {
     #[serde(rename = "InternalUrl")]
     pub internal_url: String,
@@ -261,7 +261,7 @@ fn url_map_scheme_http_to_ws(url: &mut Url) {
     url.set_scheme(scheme).expect("couldn't update scheme");
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConfigFile {
     #[serde(rename = "FarmName")]
     pub farm_name: Option<String>,
@@ -324,7 +324,7 @@ pub struct ConfigFile {
 ///
 /// Note to developers: all options should be safe by default, never add an option
 /// that needs to be overridden manually in order to be safe.
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Deserialize)]
 pub struct DebugOptions {
     /// Dump received tokens using a `debug` statement
     #[serde(rename = "DumpTokens")]
