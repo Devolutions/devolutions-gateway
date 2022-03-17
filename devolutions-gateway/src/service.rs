@@ -38,6 +38,10 @@ impl GatewayService {
 
         config.validate().context("Invalid configuration")?;
 
+        if config.debug != crate::config::DebugOptions::default() {
+            warn!("**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**");
+        }
+
         let config = Arc::new(config);
 
         Ok(GatewayService {

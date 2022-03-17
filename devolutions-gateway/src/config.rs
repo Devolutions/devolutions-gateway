@@ -1,4 +1,5 @@
 use crate::plugin_manager::PLUGIN_MANAGER;
+use crate::utils::TargetAddr;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
@@ -176,6 +177,7 @@ pub struct Config {
     pub sogar_registry_config: SogarRegistryConfig,
     pub sogar_user: Vec<SogarUser>,
     pub jrl_file: Option<Utf8PathBuf>,
+    pub debug: DebugOptions,
 }
 
 impl Default for Config {
@@ -217,6 +219,7 @@ impl Default for Config {
             },
             sogar_user: Vec::new(),
             jrl_file: None,
+            debug: DebugOptions::default(),
         }
     }
 }
@@ -310,6 +313,45 @@ pub struct ConfigFile {
     pub jrl_file: Option<Utf8PathBuf>,
     #[serde(rename = "CapturePath")]
     pub capture_path: Option<Utf8PathBuf>,
+
+    // unsafe debug options for developers
+    pub debug: DebugOptions,
+}
+
+/// Unsafe debug options that should only ever be used at development stage
+///
+/// These options might change or get removed without further notice.
+///
+/// Note to developers: all options should be safe by default, never add an option
+/// that needs to be overridden manually in order to be safe.
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+pub struct DebugOptions {
+    /// Dump received tokens using a `debug` statement
+    #[serde(rename = "DumpTokens")]
+    #[serde(default)]
+    pub dump_tokens: bool,
+
+    /// Ignore token signature and accept as-is (any signer is accepted), expired tokens and token
+    /// reuse is allowed, etc. Only restriction is to provide claims in the right format.
+    #[serde(rename = "DisableTokenValidation")]
+    #[serde(default)]
+    pub disable_token_validation: bool,
+
+    /// Ignore KDC address provided by KDC token, and use this one instead
+    #[serde(rename = "OverrideKdc")]
+    pub override_kdc: Option<TargetAddr>,
+}
+
+/// Manual Default trait implementation just to make sure default values are deliberates
+#[allow(clippy::derivable_impls)]
+impl Default for DebugOptions {
+    fn default() -> Self {
+        Self {
+            dump_tokens: false,
+            disable_token_validation: false,
+            override_kdc: None,
+        }
+    }
 }
 
 fn get_config_path() -> Utf8PathBuf {

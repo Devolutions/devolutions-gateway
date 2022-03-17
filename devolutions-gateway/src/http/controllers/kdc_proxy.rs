@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::AccessTokenClaims;
@@ -8,12 +9,15 @@ use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
 const ERROR_BAD_FORMAT: &str = "\x0b";
 
-pub struct KdcProxyController;
+pub struct KdcProxyController {
+    pub config: Arc<Config>,
+}
 
 #[controller(name = "KdcProxy")]
 impl KdcProxyController {
@@ -57,11 +61,22 @@ impl KdcProxyController {
         };
 
         if !unicode_full_case_eq(&claims.krb_realm, &realm) {
-            return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
+            if self.config.debug.disable_token_validation {
+                warn!("**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token");
+            } else {
+                return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
+            }
         }
 
-        let protocol = claims.krb_kdc.scheme();
-        let address_to_resolve = claims.krb_kdc.host_repr().to_string();
+        let kdc_addr = if let Some(kdc_addr) = &self.config.debug.override_kdc {
+            warn!("**DEBUG OPTION** KDC address has been overridden with {kdc_addr}");
+            kdc_addr
+        } else {
+            &claims.krb_kdc
+        };
+
+        let protocol = kdc_addr.scheme();
+        let address_to_resolve = kdc_addr.host_repr().to_string();
 
         let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
             address

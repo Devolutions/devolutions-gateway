@@ -101,6 +101,10 @@ async fn auth_middleware(
         }
     };
 
+    if config.debug.dump_tokens {
+        debug!("**DEBUG OPTION** Received token: {token}");
+    }
+
     let source_addr = request
         .peer_addr()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
@@ -112,14 +116,21 @@ async fn auth_middleware(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    match validate_token(
-        token,
-        source_addr.ip(),
-        provisioner_key,
-        delegation_key,
-        &token_cache,
-        &jrl,
-    ) {
+    let validation_result = if config.debug.disable_token_validation {
+        #[allow(deprecated)]
+        crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
+    } else {
+        validate_token(
+            token,
+            source_addr.ip(),
+            provisioner_key,
+            delegation_key,
+            &token_cache,
+            &jrl,
+        )
+    };
+
+    match validation_result {
         Ok(jet_token) => {
             request.extensions_mut().insert(jet_token);
             chain.next(ctx).await

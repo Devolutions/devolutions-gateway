@@ -15,7 +15,11 @@ pub fn extract_association_claims(
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> anyhow::Result<JetAssociationTokenClaims> {
-    let payload = pdu.payload.as_deref().context("Empty preconnection PDU")?;
+    let token = pdu.payload.as_deref().context("Empty preconnection PDU")?;
+
+    if config.debug.dump_tokens {
+        debug!("**DEBUG OPTION** Received token: {token}");
+    }
 
     let provisioner_key = config
         .provisioner_public_key
@@ -24,7 +28,15 @@ pub fn extract_association_claims(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    match validate_token(payload, source_ip, provisioner_key, delegation_key, token_cache, jrl)? {
+    let claims = if config.debug.disable_token_validation {
+        #[allow(deprecated)]
+        crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
+    } else {
+        validate_token(token, source_ip, provisioner_key, delegation_key, token_cache, jrl)
+    }
+    .context("token validation")?;
+
+    match claims {
         AccessTokenClaims::Association(claims) => Ok(claims),
         _ => anyhow::bail!("unexpected token type"),
     }

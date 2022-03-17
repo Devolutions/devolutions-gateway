@@ -233,14 +233,14 @@ impl std::error::Error for BadTargetAddr {}
 ///
 /// Similar to `url::Url`, but doesn't contain any route.
 /// Also, when parsing, default scheme is `tcp`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetAddr {
     serialization: SmolStr,
     scheme: SmolStr,
     host: HostRepr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostRepr {
     Domain(SmolStr, u16),
     Ip(SocketAddr),
