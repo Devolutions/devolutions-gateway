@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::token::{validate_token, CurrentJrl, TokenCache};
+use crate::token::{validate_token, CurrentJrl, RawToken, TokenCache};
 use futures::future::{BoxFuture, FutureExt};
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};
@@ -132,7 +132,10 @@ async fn auth_middleware(
 
     match validation_result {
         Ok(jet_token) => {
-            request.extensions_mut().insert(jet_token);
+            let raw_token = RawToken(token.to_owned());
+            let extensions = request.extensions_mut();
+            extensions.insert(jet_token);
+            extensions.insert(raw_token);
             chain.next(ctx).await
         }
         Err(e) => {

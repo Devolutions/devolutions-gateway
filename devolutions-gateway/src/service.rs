@@ -8,9 +8,7 @@ use anyhow::Context;
 use parking_lot::Mutex;
 use slog::Logger;
 use std::collections::HashMap;
-use std::fs::File;
 use std::future::Future;
-use std::io::BufReader;
 use std::pin::Pin;
 use std::sync::Arc;
 use tap::Pipe as _;
@@ -112,23 +110,7 @@ type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Se
 fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<VecOfFuturesType> {
     let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
     let token_cache = crate::token::new_token_cache().pipe(Arc::new);
-    let jrl: Arc<CurrentJrl> = {
-        let jrl_file = config.jrl_file.as_deref().context("JRL file path is missing")?;
-
-        let claims: JrlTokenClaims = if jrl_file.exists() {
-            info!("Reading JRL file from disk (path: {jrl_file})");
-            File::open(jrl_file)
-                .context("Couldn't open JRL file")?
-                .pipe(BufReader::new)
-                .pipe(serde_json::from_reader)
-                .context("Couldn't read JRL file")?
-        } else {
-            info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL.");
-            JrlTokenClaims::default()
-        };
-
-        Arc::new(Mutex::new(claims))
-    };
+    let jrl = load_jrl_from_disk(&config)?;
 
     // Configure http server
     configure_http_server(config.clone(), associations.clone(), token_cache.clone(), jrl.clone())
@@ -163,4 +145,39 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<V
     }));
 
     Ok(futures)
+}
+
+fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
+    use picky::jose::jwt;
+
+    let jrl_file = config.jrl_file.as_deref().context("JRL file path is missing")?;
+
+    let provisioner_key = config
+        .provisioner_public_key
+        .as_ref()
+        .context("Provisioner key is missing")?;
+
+    let claims: JrlTokenClaims = if jrl_file.exists() {
+        info!("Reading JRL file from disk (path: {jrl_file})");
+        let token = std::fs::read_to_string(jrl_file).context("Couldn't read JRL file")?;
+
+        let jwt = if config.debug.disable_token_validation {
+            warn!("**DEBUG OPTION** ignoring JRL token signature");
+            jwt::JwtSig::decode_dangerous(&token)
+        } else {
+            jwt::JwtSig::decode(&token, provisioner_key)
+        }
+        .context("Failed to decode JRL token")?;
+
+        let jwt = jwt
+            .validate::<JrlTokenClaims>(&jwt::NO_CHECK_VALIDATOR) // we don't expect any expiration for JRL tokens
+            .context("JRL token validation failed")?;
+
+        jwt.state.claims
+    } else {
+        info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL.");
+        JrlTokenClaims::default()
+    };
+
+    Ok(Arc::new(Mutex::new(claims)))
 }
