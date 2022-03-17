@@ -596,3 +596,77 @@ pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
 pub fn new_token_cache() -> TokenCache {
     Mutex::new(HashMap::new())
 }
+
+#[deprecated = "make sure this is never used without a deliberate action"]
+pub mod unsafe_debug {
+    // Any function in this module should only be used at development stage when deliberately
+    // enabling debugging options.
+
+    use super::*;
+    use picky::jose::jwt;
+
+    pub fn dangerous_validate_token(
+        token: &str,
+        delegation_key: Option<&PrivateKey>,
+    ) -> anyhow::Result<AccessTokenClaims> {
+        use picky::jose::jwe::Jwe;
+        use picky::jose::jwt::JwtSig;
+        use serde_json::Value;
+
+        warn!("**DEBUG OPTION** using dangerous token validation for testing purposes. Make sure this is not happening in production!");
+
+        // === Decoding JWT === //
+
+        let is_encrypted = is_encrypted(token);
+
+        let jwe_token; // pre-declaration for extended lifetime
+
+        let signed_jwt = if is_encrypted {
+            let encrypted_jwt = token;
+            let delegation_key = delegation_key.context("Delegation key is missing")?;
+            jwe_token =
+                Jwe::decode(encrypted_jwt, delegation_key).context("Failed to decode encrypted JWT routing token")?;
+            std::str::from_utf8(&jwe_token.payload).context("Failed to decode encrypted JWT routing token payload")?
+        } else {
+            token
+        };
+
+        let jwt =
+            JwtSig::decode_dangerous(signed_jwt).context("Failed to decode signed payload of JWT routing token")?;
+
+        // === Extracting content type BUT without validating JWT claims === //
+
+        let (claims, content_type) = if let Some(content_type) = jwt.header.cty.as_deref() {
+            let content_type = content_type.parse::<ContentType>()?;
+            let claims = jwt.validate::<Value>(&jwt::NO_CHECK_VALIDATOR)?.state.claims;
+            (claims, content_type)
+        } else {
+            let mut claims = jwt.validate::<Value>(&jwt::NO_CHECK_VALIDATOR)?.state.claims;
+
+            let content_type = if let Some(Value::String(content_type)) = claims.get_mut("type") {
+                content_type.make_ascii_uppercase();
+                content_type.parse::<ContentType>()?
+            } else {
+                ContentType::Association
+            };
+
+            (claims, content_type)
+        };
+
+        // === Convert json value into an instance of the correct claims type === //
+
+        let claims = match content_type {
+            ContentType::Association => serde_json::from_value(claims).map(AccessTokenClaims::Association),
+            ContentType::Scope => serde_json::from_value(claims).map(AccessTokenClaims::Scope),
+            ContentType::Bridge => serde_json::from_value(claims).map(AccessTokenClaims::Bridge),
+            ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
+            ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
+            ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+        }
+        .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
+
+        // Other checks are removed as well
+
+        Ok(claims)
+    }
+}

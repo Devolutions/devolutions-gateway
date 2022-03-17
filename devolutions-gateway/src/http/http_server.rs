@@ -50,6 +50,7 @@ pub fn configure_http_server(
             let http_bridge = HttpBridgeController::new();
             let jet = AssociationController::new(config.clone(), associations.clone());
             let jrl = JrlController::new(config.clone(), jrl);
+            let kdc_proxy = KdcProxyController { config: config.clone() };
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());
@@ -78,7 +79,7 @@ pub fn configure_http_server(
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
                 .controller(LegacySessionsController)
-                .controller(KdcProxyController)
+                .controller(kdc_proxy)
                 .controller(jrl)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
