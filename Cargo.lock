@@ -757,7 +757,7 @@ dependencies = [
  "tap",
  "tempfile",
  "tokio",
- "tokio-rustls 0.23.2",
+ "tokio-rustls",
  "tokio-test",
  "tokio-tungstenite",
  "tokio-util 0.7.0",
@@ -1415,7 +1415,7 @@ dependencies = [
  "serde_json",
  "sspi",
  "tempfile",
- "tokio-rustls 0.23.2",
+ "tokio-rustls",
  "ureq",
  "url 2.2.2",
  "uuid",
@@ -2676,27 +2676,14 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.19.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35edb675feee39aec9c99fa5ff985081995a06d594114ae14cbe797ad7b7a6d7"
-dependencies = [
- "base64 0.13.0",
- "log",
- "ring",
- "sct 0.6.1",
- "webpki 0.21.4",
-]
-
-[[package]]
-name = "rustls"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b323592e3164322f5b193dc4302e4e36cd8d37158a712d664efae1a5c2791700"
 dependencies = [
  "log",
  "ring",
- "sct 0.7.0",
- "webpki 0.22.0",
+ "sct",
+ "webpki",
 ]
 
 [[package]]
@@ -2728,7 +2715,6 @@ name = "saphir"
 version = "2.8.2"
 source = "git+https://github.com/CBenoit/saphir?branch=hyper-update#dff5d11a57b7ae93e3004fccef6dc85a31753d12"
 dependencies = [
- "base64 0.13.0",
  "brotli",
  "chrono",
  "flate2",
@@ -2744,14 +2730,12 @@ dependencies = [
  "parking_lot 0.11.2",
  "percent-encoding 2.1.0",
  "regex 1.4.6",
- "rustls 0.19.1",
  "saphir-cookie",
  "saphir_macro",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "tokio",
- "tokio-rustls 0.22.0",
  "tokio-stream",
  "tower-service",
  "uuid",
@@ -2793,16 +2777,6 @@ name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
-
-[[package]]
-name = "sct"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b362b83898e0e69f38515b82ee15aa80636befe47c3b6d3d89a911e78fc228ce"
-dependencies = [
- "ring",
- "untrusted",
-]
 
 [[package]]
 name = "sct"
@@ -3121,7 +3095,7 @@ dependencies = [
 [[package]]
 name = "sogar-core"
 version = "0.3.0"
-source = "git+https://github.com/Devolutions/sogar?branch=hyper-update#ab60392fce8a7acbfd66b8e836a203ca7eb095f8"
+source = "git+https://github.com/Devolutions/sogar?branch=hyper-update#9fa6944c71eb86b9f5ad6e93b03cbbc423e88b1d"
 dependencies = [
  "clap",
  "config",
@@ -3486,24 +3460,13 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc6844de72e57df1980054b38be3a9f4702aba4858be64dd700181a8a6d0e1b6"
-dependencies = [
- "rustls 0.19.1",
- "tokio",
- "webpki 0.21.4",
-]
-
-[[package]]
-name = "tokio-rustls"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a27d5f2b839802bd8267fa19b0530f5a08b9c08cd417976be2a65d130fe1c11b"
 dependencies = [
- "rustls 0.20.3",
+ "rustls",
  "tokio",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -3538,12 +3501,12 @@ dependencies = [
  "futures-util",
  "log",
  "native-tls",
- "rustls 0.20.3",
+ "rustls",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls 0.23.2",
+ "tokio-rustls",
  "tungstenite",
- "webpki 0.22.0",
+ "webpki",
  "webpki-roots",
 ]
 
@@ -3612,7 +3575,7 @@ dependencies = [
  "proptest",
  "test-utils",
  "tokio",
- "tokio-rustls 0.23.2",
+ "tokio-rustls",
  "tokio-tungstenite",
 ]
 
@@ -3636,12 +3599,12 @@ dependencies = [
  "log",
  "native-tls",
  "rand 0.8.5",
- "rustls 0.20.3",
+ "rustls",
  "sha-1",
  "thiserror",
  "url 2.2.2",
  "utf-8",
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]
@@ -3742,11 +3705,11 @@ dependencies = [
  "flate2",
  "log",
  "once_cell",
- "rustls 0.20.3",
+ "rustls",
  "serde",
  "serde_json",
  "url 2.2.2",
- "webpki 0.22.0",
+ "webpki",
  "webpki-roots",
 ]
 
@@ -3943,16 +3906,6 @@ dependencies = [
 
 [[package]]
 name = "webpki"
-version = "0.21.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e38c0608262c46d4a56202ebabdeb094cef7e560ca7a226c6bf055188aa4ea"
-dependencies = [
- "ring",
- "untrusted",
-]
-
-[[package]]
-name = "webpki"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f095d78192e208183081cc07bc5515ef55216397af48b873e5edcd72637fa1bd"
@@ -3967,7 +3920,7 @@ version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "552ceb903e957524388c4d3475725ff2c8b7960922063af6ce53c9a43da07449"
 dependencies = [
- "webpki 0.22.0",
+ "webpki",
 ]
 
 [[package]]

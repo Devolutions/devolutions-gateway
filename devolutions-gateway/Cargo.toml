@@ -84,7 +84,7 @@ hyper = "0.14.17"
 reqwest = "0.11.9"
 http = "0.2.6"
 # FIXME: update once next saphir version is published or use `axum`/`warp`
-saphir = { version = "2.8", default-features = false, features = ["https", "json", "macro", "form", "operation", "file"], git = "https://github.com/CBenoit/saphir", branch = "hyper-update" }
+saphir = { version = "2.8", default-features = false, features = ["json", "macro", "form", "operation", "file"], git = "https://github.com/CBenoit/saphir", branch = "hyper-update" }
 # for KDC proxy
 portpicker = "0.1.1"
 
