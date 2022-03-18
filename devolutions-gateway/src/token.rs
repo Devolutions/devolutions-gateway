@@ -18,6 +18,13 @@ const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>;
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
 
+pub fn new_token_cache() -> TokenCache {
+    Mutex::new(HashMap::new())
+}
+
+#[derive(Clone, Debug)]
+pub struct RawToken(pub String);
+
 // ----- token types -----
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -404,6 +411,20 @@ impl Default for JrlTokenClaims {
     }
 }
 
+// ----- cache clean up ----- //
+
+pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
+    use tokio::time::{sleep, Duration};
+
+    loop {
+        sleep(Duration::from_secs(CLEANUP_TASK_INTERVAL_SECS)).await;
+        let clean_threshold = chrono::Utc::now().timestamp() - i64::from(LEEWAY_SECS);
+        token_cache
+            .lock()
+            .retain(|_, src| src.expiration_timestamp > clean_threshold);
+    }
+}
+
 // ----- validation ----- //
 
 #[derive(Debug, Clone)]
@@ -579,22 +600,6 @@ pub fn validate_token(
     }
 
     Ok(claims)
-}
-
-pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
-    use tokio::time::{sleep, Duration};
-
-    loop {
-        sleep(Duration::from_secs(CLEANUP_TASK_INTERVAL_SECS)).await;
-        let clean_threshold = chrono::Utc::now().timestamp() - i64::from(LEEWAY_SECS);
-        token_cache
-            .lock()
-            .retain(|_, src| src.expiration_timestamp > clean_threshold);
-    }
-}
-
-pub fn new_token_cache() -> TokenCache {
-    Mutex::new(HashMap::new())
 }
 
 #[deprecated = "make sure this is never used without a deliberate action"]

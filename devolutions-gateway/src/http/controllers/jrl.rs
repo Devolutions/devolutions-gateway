@@ -1,11 +1,11 @@
 use crate::config::Config;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
-use crate::token::{AccessTokenClaims, CurrentJrl, JetAccessScope};
+use crate::token::{AccessTokenClaims, CurrentJrl, JetAccessScope, RawToken};
 use saphir::prelude::*;
-use std::io::BufWriter;
 use std::sync::Arc;
 use tap::Pipe as _;
+use tokio::io::{AsyncWriteExt, BufWriter};
 use uuid::Uuid;
 
 pub struct JrlController {
@@ -32,31 +32,33 @@ impl JrlController {
             .remove::<AccessTokenClaims>()
             .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
 
+        let token = req
+            .extensions_mut()
+            .remove::<RawToken>()
+            .ok_or_else(|| HttpErrorStatus::internal("raw token is missing"))?;
+
         if let AccessTokenClaims::Jrl(claims) = claims {
             let config = self.config.clone();
 
-            let claims = tokio::task::spawn_blocking(move || {
-                let jrl_file = config
-                    .jrl_file
-                    .as_deref()
-                    .ok_or_else(|| HttpErrorStatus::internal("JRL file path is missing"))?;
+            let jrl_file = config
+                .jrl_file
+                .as_deref()
+                .ok_or_else(|| HttpErrorStatus::internal("JRL file path is missing"))?;
 
-                info!("Writing JRL file to disk (path: {jrl_file})");
+            info!("Writing JRL file to disk (path: {jrl_file})");
 
-                std::fs::File::options()
-                    .write(true)
-                    .truncate(true)
-                    .create(true)
-                    .open(jrl_file)
-                    .map_err(HttpErrorStatus::internal)?
-                    .pipe(BufWriter::new)
-                    .pipe(|w| serde_json::to_writer_pretty(w, &claims))
-                    .map_err(HttpErrorStatus::internal)?;
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .create(true)
+                .open(jrl_file)
+                .await
+                .map_err(HttpErrorStatus::internal)?
+                .pipe(BufWriter::new);
 
-                Ok::<_, HttpErrorStatus>(claims)
-            })
-            .await
-            .map_err(HttpErrorStatus::internal)??;
+            file.write_all(token.0.as_bytes())
+                .await
+                .map_err(HttpErrorStatus::internal)?;
 
             *self.revocation_list.lock() = claims;
 
