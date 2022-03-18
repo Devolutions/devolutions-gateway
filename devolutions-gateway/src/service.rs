@@ -42,6 +42,10 @@ impl GatewayService {
 
         let config = Arc::new(config);
 
+        if let Err(e) = crate::tls_sanity::check_default_configuration() {
+            warn!("Anomality detected with TLS configuration: {e:#}");
+        }
+
         Ok(GatewayService {
             config,
             logger,

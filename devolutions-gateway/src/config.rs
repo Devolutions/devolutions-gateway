@@ -98,18 +98,14 @@ impl fmt::Debug for TlsConfig {
 }
 
 impl TlsConfig {
-    fn init(certificate: rustls::Certificate, private_key: rustls::PrivateKey) -> Result<Self, String> {
+    fn init(certificate: rustls::Certificate, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
         let public_key = {
-            let cert = picky::x509::Cert::from_der(&certificate.0)
-                .map_err(|e| format!("couldn't parse TLS certificate: {}", e))?;
+            let cert = picky::x509::Cert::from_der(&certificate.0).context("couldn't parse TLS certificate")?;
             TlsPublicKey(cert.public_key().to_der().unwrap())
         };
 
-        let rustls_config = rustls::ServerConfig::builder()
-            .with_safe_defaults()
-            .with_no_client_auth()
-            .with_single_cert(vec![certificate.clone()], private_key.clone())
-            .map_err(|e| format!("couldn't set server config cert: {}", e))?;
+        let rustls_config = crate::tls_sanity::build_rustls_config(certificate.clone(), private_key.clone())
+            .context("Couldn't build TLS config")?;
 
         let acceptor = TlsAcceptor::from(Arc::new(rustls_config));
 
