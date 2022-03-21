@@ -2196,9 +2196,11 @@ dependencies = [
 name = "picky-krb"
 version = "0.0.0"
 dependencies = [
+ "byteorder",
  "picky-asn1",
  "picky-asn1-der",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
