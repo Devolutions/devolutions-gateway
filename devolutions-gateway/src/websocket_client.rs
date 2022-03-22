@@ -497,14 +497,25 @@ async fn handle_jmux(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    let claims = match validate_token(
-        token,
-        client_addr.ip(),
-        provisioner_key,
-        delegation_key,
-        token_cache,
-        jrl,
-    ) {
+    if config.debug.dump_tokens {
+        debug!("**DEBUG OPTION** Received token: {token}");
+    }
+
+    let validation_result = if config.debug.disable_token_validation {
+        #[allow(deprecated)]
+        crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
+    } else {
+        validate_token(
+            token,
+            client_addr.ip(),
+            provisioner_key,
+            delegation_key,
+            token_cache,
+            jrl,
+        )
+    };
+
+    let claims = match validation_result {
         Ok(AccessTokenClaims::Jmux(claims)) => claims,
         Ok(_) => {
             return Err(io::Error::new(io::ErrorKind::Other, "wrong access token"));

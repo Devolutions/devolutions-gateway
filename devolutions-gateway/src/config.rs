@@ -311,6 +311,7 @@ pub struct ConfigFile {
     pub capture_path: Option<Utf8PathBuf>,
 
     // unsafe debug options for developers
+    #[serde(rename = "__debug__")]
     pub debug: DebugOptions,
 }
 
@@ -323,18 +324,15 @@ pub struct ConfigFile {
 #[derive(PartialEq, Debug, Clone, Deserialize)]
 pub struct DebugOptions {
     /// Dump received tokens using a `debug` statement
-    #[serde(rename = "DumpTokens")]
     #[serde(default)]
     pub dump_tokens: bool,
 
     /// Ignore token signature and accept as-is (any signer is accepted), expired tokens and token
     /// reuse is allowed, etc. Only restriction is to provide claims in the right format.
-    #[serde(rename = "DisableTokenValidation")]
     #[serde(default)]
     pub disable_token_validation: bool,
 
     /// Ignore KDC address provided by KDC token, and use this one instead
-    #[serde(rename = "OverrideKdc")]
     pub override_kdc: Option<TargetAddr>,
 }
 
@@ -1065,6 +1063,7 @@ impl Config {
             },
             sogar_user,
             jrl_file: Some(jrl_file),
+            debug: config_file.debug,
             ..Default::default()
         })
     }
