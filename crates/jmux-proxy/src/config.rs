@@ -6,7 +6,6 @@ use jmux_proto::DestinationUrl;
 /// All parameters are designed to be opt-in rather than opt-out: default values are conservatives
 /// and always safe (whitelist approach).
 #[derive(Debug, Default, Clone)]
-#[non_exhaustive]
 pub struct JmuxConfig {
     /// Rule to use when filtering requests.
     pub filtering: FilteringRule,
@@ -32,7 +31,6 @@ impl JmuxConfig {
     pub fn client() -> Self {
         Self {
             filtering: FilteringRule::Deny,
-            ..Self::default()
         }
     }
 }
@@ -59,32 +57,35 @@ impl JmuxConfig {
 /// let elaborated_rule = FilteringRule::port(80)
 ///     .and(
 ///         FilteringRule::host("doc.rust-lang.org")
-///             .or(FilteringRule::specific_domain_segment("devolutions", 2))
+///             .or(FilteringRule::wildcard_host("devolutions.*"))
+///             .or(FilteringRule::wildcard_host("*.devolutions.net"))
 ///     )
-///     .or(FilteringRule::port(22).and(FilteringRule::any_domain_segment("vps")))
+///     .or(FilteringRule::port(22).and(FilteringRule::wildcard_host("vps.*.*")))
 ///     .or(FilteringRule::port(1080).invert().and(FilteringRule::host("sekai.net")))
 ///     .or(FilteringRule::host_and_port("127.0.0.1", 8080).and(FilteringRule::scheme("wss")));
 ///
-/// elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:80")?;
-/// elaborated_rule.validate_destination_str("ws://devolutions.net:80")?;
-/// elaborated_rule.validate_destination_str("wss://dvls.devolutions.net:80")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:80").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("ws://devolutions.net:80").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("wss://dvls.devolutions.net:80").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tcp://dvls.devolutions.ninja:80").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://devolutions.bad.ninja:80").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://duckduckgo.com:80").is_err());
 ///
-/// elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:22")?;
-/// elaborated_rule.validate_destination_str("tcp://vps.rust-lang.org:22")?;
-/// elaborated_rule.validate_destination_str("tcp://super.vps.ninja:22")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:22").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tcp://vps.rust-lang.org:22").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tcp://super.vps.ninja:22").is_err());
+/// assert!(elaborated_rule.validate_destination_str("tcp://vps.super.devolutions.ninja:22").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:2222").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://myvps.ovh.com:22").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:22").is_err());
 /// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:22").is_err());
 ///
-/// elaborated_rule.validate_destination_str("tcp://sekai.net:80")?;
-/// elaborated_rule.validate_destination_str("tcp://sekai.net:8080")?;
-/// elaborated_rule.validate_destination_str("tcp://sekai.net:22")?;
+/// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:80").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:8080").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:22").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:1080").is_err());
 ///
-/// elaborated_rule.validate_destination_str("wss://127.0.0.1:8080")?;
+/// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:8080").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("wss://doc.rust-lang.org:8080").is_err());
 /// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:80").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://127.0.0.1:8080").is_err());
@@ -111,10 +112,9 @@ pub enum FilteringRule {
     Scheme(String),
     /// Host and port must match exactly.
     HostAndPort { host: String, port: u16 },
-    /// Name must match exactly
-    SpecificDomainSegment { name: String, level: usize },
-    /// Name must match exactly.
-    AnyDomainSegment { name: String },
+    /// Rule matching multiple sub-domains, as in wildcard certificates.
+    /// e.g.: `*.example.com`, `*.*.devolutions.net`
+    WildcardHost(String),
 }
 
 impl Default for FilteringRule {
@@ -156,15 +156,8 @@ impl FilteringRule {
         }
     }
 
-    pub fn specific_domain_segment(name: impl Into<String>, level: usize) -> Self {
-        Self::SpecificDomainSegment {
-            name: name.into(),
-            level,
-        }
-    }
-
-    pub fn any_domain_segment(name: impl Into<String>) -> Self {
-        Self::AnyDomainSegment { name: name.into() }
+    pub fn wildcard_host(host: impl Into<String>) -> Self {
+        Self::WildcardHost(host.into())
     }
 
     /// Combine current rule using an "AND" operator
@@ -248,17 +241,17 @@ fn is_valid(rule: &FilteringRule, target_scheme: &str, target_host: &str, target
         FilteringRule::Port(port) => target_port == *port,
         FilteringRule::Scheme(scheme) => target_scheme == scheme,
         FilteringRule::HostAndPort { host, port } => target_host == host && target_port == *port,
-        FilteringRule::SpecificDomainSegment { name, level } => {
-            if *level == 0 {
-                false
-            } else {
-                target_host
-                    .rsplit('.')
-                    .nth(level - 1)
-                    .into_iter()
-                    .all(|segment| segment == name)
+        FilteringRule::WildcardHost(host) => {
+            let mut expected_it = host.rsplit('.');
+            let mut actual_it = target_host.rsplit('.');
+            loop {
+                match (expected_it.next(), actual_it.next()) {
+                    (Some(expected), Some(actual)) if expected == actual => {}
+                    (Some("*"), Some(_)) => {}
+                    (None, None) => return true,
+                    _ => return false,
+                }
             }
         }
-        FilteringRule::AnyDomainSegment { name } => target_host.rsplit('.').any(|segment| segment == name),
     }
 }

@@ -290,8 +290,6 @@ pub struct ScopeTokenClaims {
     pub scope: JetAccessScope,
 
     // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
     exp: i64,
 
     // Unique ID for this token
@@ -306,8 +304,6 @@ pub struct BridgeTokenClaims {
     pub target_host: TargetAddr,
 
     // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
     exp: i64,
 
     // Unique ID for this token
@@ -316,17 +312,69 @@ pub struct BridgeTokenClaims {
 
 // ----- jmux claims ----- //
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone)]
 pub struct JmuxTokenClaims {
-    _filtering: Option<()>, // TODO
+    /// Authorized hosts
+    pub hosts: Vec<TargetAddr>,
 
     // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
     exp: i64,
 
     // Unique ID for this token
     jti: Uuid,
+}
+
+impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use crate::utils::BadTargetAddr;
+
+        #[derive(Deserialize)]
+        struct ClaimsHelper {
+            // Main target host
+            dst_hst: SmolStr,
+            // Additional target hosts
+            dst_addl: Vec<SmolStr>,
+            exp: i64,
+            jti: Uuid,
+        }
+
+        fn parse_target_address(s: &str) -> Result<TargetAddr, BadTargetAddr> {
+            const PORT_HTTP: u16 = 80;
+            const PORT_HTTPS: u16 = 443;
+            const PORT_FTP: u16 = 21;
+            const DEFAULT_SCHEME: &str = "http";
+
+            let default_port = match s.split("://").next() {
+                Some("http" | "ws") => PORT_HTTP,
+                Some("https" | "wss") => PORT_HTTPS,
+                Some("ftp") => PORT_FTP,
+                Some(_) | None => PORT_HTTP,
+            };
+
+            TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
+        }
+
+        let claims = ClaimsHelper::deserialize(deserializer)?;
+
+        let primary = parse_target_address(&claims.dst_hst).map_err(de::Error::custom)?;
+
+        let mut hosts = Vec::with_capacity(claims.dst_addl.len() + 1);
+        hosts.push(primary);
+
+        for additional in claims.dst_addl {
+            let additional = parse_target_address(&additional).map_err(de::Error::custom)?;
+            hosts.push(additional);
+        }
+
+        Ok(Self {
+            hosts,
+            exp: claims.exp,
+            jti: claims.jti,
+        })
+    }
 }
 
 // ----- KDC claims ----- //

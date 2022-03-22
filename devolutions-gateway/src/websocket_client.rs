@@ -47,7 +47,7 @@ impl WebsocketService {
             info!("{} {}", req.method(), req.uri().path());
             handle_jmux(req, client_addr, &self.config, &self.token_cache, &self.jrl)
                 .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:?}", err)))
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
@@ -497,7 +497,7 @@ async fn handle_jmux(
 
     let delegation_key = config.delegation_private_key.as_ref();
 
-    match validate_token(
+    let claims = match validate_token(
         token,
         client_addr.ip(),
         provisioner_key,
@@ -505,17 +505,17 @@ async fn handle_jmux(
         token_cache,
         jrl,
     ) {
-        Ok(AccessTokenClaims::Jmux(_)) => {}
+        Ok(AccessTokenClaims::Jmux(claims)) => claims,
         Ok(_) => {
             return Err(io::Error::new(io::ErrorKind::Other, "wrong access token"));
         }
         Err(e) => {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("couldn't validate token: {}", e),
+                format!("couldn't validate token: {:#}", e),
             ));
         }
-    }
+    };
 
     if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
         if upgrade_val != "websocket" {
@@ -529,7 +529,7 @@ async fn handle_jmux(
     let rsp = process_req(&req);
 
     tokio::spawn(async move {
-        use jmux_proxy::JmuxConfig;
+        use jmux_proxy::{FilteringRule, JmuxConfig};
         use slog::o;
         use tokio_tungstenite::tungstenite::protocol::Role;
 
@@ -543,10 +543,22 @@ async fn handle_jmux(
         let reader = Box::new(reader) as ErasedRead;
         let writer = Box::new(writer) as ErasedWrite;
 
+        let config = JmuxConfig {
+            filtering: FilteringRule::Any(
+                claims
+                    .hosts
+                    .into_iter()
+                    .map(|addr| {
+                        FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
+                    })
+                    .collect(),
+            ),
+        };
+
         let jmux_proxy_log = slog_scope::logger().new(o!("client_addr" => client_addr));
 
         JmuxProxy::new(reader, writer)
-            .with_config(JmuxConfig::permissive())
+            .with_config(config)
             .with_logger(jmux_proxy_log)
             .run()
             .await
