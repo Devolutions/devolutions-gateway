@@ -2,13 +2,13 @@ use crate::config::Config;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::AccessTokenClaims;
+use crate::utils::resolve_target_to_socket_addr;
 use picky_krb::messages::KdcProxyMessage;
 use saphir::controller::Controller;
 use saphir::http::Method;
 use saphir::macros::controller;
 use saphir::request::Request;
 use saphir::response::Builder;
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
@@ -76,19 +76,16 @@ impl KdcProxyController {
         };
 
         let protocol = kdc_addr.scheme();
-        let address_to_resolve = kdc_addr.host_repr().to_string();
 
-        let kdc_address = if let Some(address) = lookup_kdc(&address_to_resolve) {
-            address
-        } else {
-            error!("Unable to locate KDC server");
-            return Err(HttpErrorStatus::internal("Unable to locate KDC server"));
-        };
+        let kdc_addr = resolve_target_to_socket_addr(kdc_addr).await.map_err(|e| {
+            error!("Unable to locate KDC server: {:#}", e);
+            HttpErrorStatus::internal("Unable to locate KDC server")
+        })?;
 
-        trace!("Connecting to KDC server located at {kdc_address} using protocol {protocol}...");
+        trace!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
 
         let kdc_reply_message = if protocol == "tcp" {
-            let mut connection = TcpStream::connect(kdc_address).await.map_err(|e| {
+            let mut connection = TcpStream::connect(kdc_addr).await.map_err(|e| {
                 error!("{:?}", e);
                 HttpErrorStatus::internal("Unable to connect to KDC server")
             })?;
@@ -126,7 +123,7 @@ impl KdcProxyController {
 
             // first 4 bytes contains message length. we don't need it for UDP
             udp_socket
-                .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_address)
+                .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr)
                 .await
                 .map_err(|e| {
                     error!("{:?}", e);
@@ -165,8 +162,4 @@ async fn read_kdc_reply_message(connection: &mut TcpStream) -> std::io::Result<V
     buf[0..4].copy_from_slice(&(len.to_be_bytes()));
     connection.read_exact(&mut buf[4..]).await?;
     Ok(buf)
-}
-
-fn lookup_kdc(url: &str) -> Option<SocketAddr> {
-    url.to_socket_addrs().ok()?.next()
 }

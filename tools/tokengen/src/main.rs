@@ -30,7 +30,7 @@ enum SubCommand {
     RdpTls(TlsParams),
     RdpTcpRendezvous,
     Scope(ScopeParams),
-    Jmux,
+    Jmux(JmuxParams),
     Kdc(KdcParams),
 }
 
@@ -66,6 +66,12 @@ struct ScopeParams {
 }
 
 #[derive(Parser)]
+struct JmuxParams {
+    dst_hst: String,
+    dst_addl: Vec<String>,
+}
+
+#[derive(Parser)]
 struct KdcParams {
     #[clap(long)]
     krb_realm: String,
@@ -79,7 +85,7 @@ struct KdcParams {
 enum GatewayAccessClaims<'a> {
     Association(AssociationClaims<'a>),
     Scope(ScopeClaims),
-    Jmux(JmuxClaims),
+    Jmux(JmuxClaims<'a>),
     Kdc(KdcClaims),
 }
 
@@ -103,9 +109,12 @@ struct ScopeClaims {
 }
 
 #[derive(Clone, Serialize)]
-struct JmuxClaims {
+struct JmuxClaims<'a> {
+    dst_hst: &'a str,
+    dst_addl: Vec<&'a str>,
     exp: i64,
     nbf: i64,
+    jti: Uuid,
 }
 
 #[derive(Clone, Serialize)]
@@ -155,9 +164,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             nbf: now.as_secs() as i64,
             scope: params.scope.clone(),
         }),
-        SubCommand::Jmux => GatewayAccessClaims::Jmux(JmuxClaims {
+        SubCommand::Jmux(params) => GatewayAccessClaims::Jmux(JmuxClaims {
+            dst_hst: &params.dst_hst,
+            dst_addl: params.dst_addl.iter().map(|o| o.as_str()).collect(),
             exp: exp as i64,
             nbf: now.as_secs() as i64,
+            jti: Uuid::new_v4(),
         }),
         SubCommand::RdpTcp(_) | SubCommand::RdpTls(_) | SubCommand::RdpTcpRendezvous => {
             GatewayAccessClaims::Association(AssociationClaims {
