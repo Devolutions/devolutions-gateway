@@ -15,7 +15,7 @@ use zeroize::Zeroize;
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
 
-pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>;
+pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
 
 pub fn new_token_cache() -> TokenCache {
