@@ -1,6 +1,6 @@
 use crate::data_types::{
     EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, LastReq, Microseconds,
-    PaData, PrincipalName, Realm, Ticket,
+    PaData, PrincipalName, Realm, Ticket, ApOptions, Authenticator,
 };
 use picky_asn1::wrapper::{
     Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10, ExplicitContextTag11,
@@ -258,6 +258,26 @@ pub type EncAsRepPart = ApplicationTag<EncKdcRepPart, 25>;
 /// EncTGSRepPart   ::= [APPLICATION 26] EncKDCRepPart
 /// ```
 pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct ApReqInner {
+    pvno: ExplicitContextTag0<IntegerAsn1>,
+    msg_type: ExplicitContextTag1<IntegerAsn1>,
+    ap_options: ExplicitContextTag2<ApOptions>,
+    ticket: ExplicitContextTag3<Ticket>,
+    authenticator: ExplicitContextTag4<Authenticator>,
+}
+
+pub type ApReq = ApplicationTag<ApReqInner, 14>;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct ApRepInner {
+    pvno: ExplicitContextTag0<IntegerAsn1>,
+    msg_type: ExplicitContextTag1<IntegerAsn1>,
+    enc_part: ExplicitContextTag2<EncryptedData>,
+}
+
+pub type ApRep = ApplicationTag<ApRepInner, 15>;
 
 #[cfg(test)]
 mod tests {

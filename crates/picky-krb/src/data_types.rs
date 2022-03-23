@@ -1,6 +1,6 @@
 use picky_asn1::wrapper::{
     Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
-    GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
+    GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional, ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8
 };
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,8 @@ pub type Realm = KerberosStringAsn1;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PrincipalName {
-    pub(crate) name_type: ExplicitContextTag0<IntegerAsn1>,
-    pub(crate) name_string: ExplicitContextTag1<Asn1SequenceOf<KerberosStringAsn1>>,
+    pub name_type: ExplicitContextTag0<IntegerAsn1>,
+    pub name_string: ExplicitContextTag1<Asn1SequenceOf<KerberosStringAsn1>>,
 }
 
 /// [RFC 4120 5.2.3](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -83,8 +83,8 @@ pub type AuthorizationData = Asn1SequenceOf<AuthorizationDataInner>;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaData {
-    pub(crate) padata_type: ExplicitContextTag1<IntegerAsn1>,
-    pub(crate) padata_data: ExplicitContextTag2<OctetStringAsn1>,
+    pub padata_type: ExplicitContextTag1<IntegerAsn1>,
+    pub padata_data: ExplicitContextTag2<OctetStringAsn1>,
 }
 
 /// [RFC 4120 5.2.8](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -105,9 +105,9 @@ pub type KerberosFlags = BitStringAsn1;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncryptedData {
-    pub(crate) etype: ExplicitContextTag0<IntegerAsn1>,
-    pub(crate) kvno: Optional<Option<ExplicitContextTag1<IntegerAsn1>>>,
-    pub(crate) cipher: ExplicitContextTag2<OctetStringAsn1>,
+    pub etype: ExplicitContextTag0<IntegerAsn1>,
+    pub kvno: Optional<Option<ExplicitContextTag1<IntegerAsn1>>>,
+    pub cipher: ExplicitContextTag2<OctetStringAsn1>,
 }
 
 /// [RFC 4120 5.2.9](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -136,10 +136,10 @@ pub struct EncryptionKey {
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TicketInner {
-    pub(crate) tkt_vno: ExplicitContextTag0<IntegerAsn1>,
-    pub(crate) realm: ExplicitContextTag1<Realm>,
-    pub(crate) sname: ExplicitContextTag2<PrincipalName>,
-    pub(crate) enc_part: ExplicitContextTag3<EncryptedData>,
+    pub tkt_vno: ExplicitContextTag0<IntegerAsn1>,
+    pub realm: ExplicitContextTag1<Realm>,
+    pub sname: ExplicitContextTag2<PrincipalName>,
+    pub enc_part: ExplicitContextTag3<EncryptedData>,
 }
 
 pub type Ticket = ApplicationTag<TicketInner, 1>;
@@ -158,6 +158,59 @@ pub struct LastReqInner {
     lr_value: ExplicitContextTag1<KerberosTime>,
 }
 pub type LastReq = Asn1SequenceOf<LastReqInner>;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct KerbErrorData {
+    data_type: ExplicitContextTag1<IntegerAsn1>,
+    data_value: Optional<Option<ExplicitContextTag2<BitStringAsn1>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct PaEncTsEnc {
+    patimestamp: ExplicitContextTag0<KerberosTime>,
+    pausec: Optional<Option<ExplicitContextTag1<Microseconds>>>,
+}
+
+pub type PaEncTimestamp = EncryptedData;
+
+// pub struct KerbPaPacRequest {
+//     include_pac: ExplicitContextTag0<Bool>,
+// }
+
+pub type PaPacOptions = KerberosFlags;
+
+pub type ApOptions = KerberosFlags;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct Checksum {
+    cksumtype: ExplicitContextTag0<IntegerAsn1>,
+    checksum: ExplicitContextTag1<OctetStringAsn1>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct AuthenticatorInner {
+    authenticator_bno: ExplicitContextTag0<IntegerAsn1>,
+    crealm: ExplicitContextTag1<Realm>,
+    cname: ExplicitContextTag2<PrincipalName>,
+    cksum: Optional<Option<ExplicitContextTag3<Checksum>>>,
+    cusec: ExplicitContextTag4<Microseconds>,
+    ctime: ExplicitContextTag5<KerberosTime>,
+    subkey: Optional<Option<ExplicitContextTag6<EncryptionKey>>>,
+    seq_number: Optional<Option<ExplicitContextTag7<IntegerAsn1>>>,
+    authorization_data: Optional<Option<ExplicitContextTag8<AuthorizationData>>>,
+}
+
+pub type Authenticator = ApplicationTag<AuthenticatorInner, 2>;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct EncApRepPartInner {
+    ctime: ExplicitContextTag0<KerberosTime>,
+    cusec: ExplicitContextTag1<Microseconds>,
+    subkey: Optional<Option<ExplicitContextTag2<EncryptionKey>>>,
+    seq_number: Optional<Option<ExplicitContextTag3<IntegerAsn1>>>,
+}
+
+pub type EncApRepPart = ApplicationTag<EncApRepPartInner, 27>;
 
 #[cfg(test)]
 mod tests {
