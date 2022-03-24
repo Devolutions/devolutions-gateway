@@ -53,8 +53,8 @@ pub type Microseconds = IntegerAsn1;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct HostAddress {
-    addr_type: ExplicitContextTag0<IntegerAsn1>,
-    address: ExplicitContextTag1<OctetStringAsn1>,
+    pub addr_type: ExplicitContextTag0<IntegerAsn1>,
+    pub address: ExplicitContextTag1<OctetStringAsn1>,
 }
 
 /// [RFC 4120 5.2.6](https://www.rfc-editor.org/rfc/rfc4120.txt)
