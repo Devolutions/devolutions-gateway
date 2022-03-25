@@ -1,6 +1,6 @@
 use crate::data_types::{
-    EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, LastReq, Microseconds,
-    PaData, PrincipalName, Realm, Ticket, ApOptions, Authenticator,
+    ApOptions, Authenticator, EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1,
+    KerberosTime, LastReq, Microseconds, PaData, PrincipalName, Realm, Ticket,
 };
 use picky_asn1::wrapper::{
     Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10, ExplicitContextTag11,
@@ -227,22 +227,22 @@ pub type KrbError = ApplicationTag<KrbErrorInner, 30>;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncKdcRepPart {
-    key: ExplicitContextTag0<EncryptionKey>,
-    last_req: ExplicitContextTag1<LastReq>,
-    nonce: ExplicitContextTag2<IntegerAsn1>,
-    key_expiration: Optional<Option<ExplicitContextTag3<KerberosTime>>>,
-    flags: ExplicitContextTag4<KerberosFlags>,
-    auth_time: ExplicitContextTag5<KerberosTime>,
-    start_time: Optional<Option<ExplicitContextTag6<KerberosTime>>>,
-    end_time: ExplicitContextTag7<KerberosTime>,
-    renew_till: Optional<Option<ExplicitContextTag8<KerberosTime>>>,
-    srealm: ExplicitContextTag9<Realm>,
-    sname: ExplicitContextTag10<PrincipalName>,
+    pub key: ExplicitContextTag0<EncryptionKey>,
+    pub last_req: ExplicitContextTag1<LastReq>,
+    pub nonce: ExplicitContextTag2<IntegerAsn1>,
+    pub key_expiration: Optional<Option<ExplicitContextTag3<KerberosTime>>>,
+    pub flags: ExplicitContextTag4<KerberosFlags>,
+    pub auth_time: ExplicitContextTag5<KerberosTime>,
+    pub start_time: Optional<Option<ExplicitContextTag6<KerberosTime>>>,
+    pub end_time: ExplicitContextTag7<KerberosTime>,
+    pub renew_till: Optional<Option<ExplicitContextTag8<KerberosTime>>>,
+    pub srealm: ExplicitContextTag9<Realm>,
+    pub sname: ExplicitContextTag10<PrincipalName>,
     #[serde(default)]
-    caadr: Optional<Option<ExplicitContextTag11<HostAddress>>>,
+    pub caadr: Optional<Option<ExplicitContextTag11<HostAddress>>>,
     // this field is not specified in RFC but present in real tickets
     #[serde(default)]
-    encrypted_pa_data: Optional<Option<ExplicitContextTag12<Asn1SequenceOf<PaData>>>>,
+    pub encrypted_pa_data: Optional<Option<ExplicitContextTag12<Asn1SequenceOf<PaData>>>>,
 }
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -261,22 +261,21 @@ pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApReqInner {
-    pvno: ExplicitContextTag0<IntegerAsn1>,
-    msg_type: ExplicitContextTag1<IntegerAsn1>,
-    ap_options: ExplicitContextTag2<ApOptions>,
-    ticket: ExplicitContextTag3<Ticket>,
-    authenticator: ExplicitContextTag4<Authenticator>,
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub ap_options: ExplicitContextTag2<ApOptions>,
+    pub ticket: ExplicitContextTag3<Ticket>,
+    pub authenticator: ExplicitContextTag4<EncryptedData>,
 }
 
 pub type ApReq = ApplicationTag<ApReqInner, 14>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApRepInner {
-    pvno: ExplicitContextTag0<IntegerAsn1>,
-    msg_type: ExplicitContextTag1<IntegerAsn1>,
-    enc_part: ExplicitContextTag2<EncryptedData>,
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub enc_part: ExplicitContextTag2<EncryptedData>,
 }
-
 pub type ApRep = ApplicationTag<ApRepInner, 15>;
 
 #[cfg(test)]
