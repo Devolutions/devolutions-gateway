@@ -1,6 +1,6 @@
 use crate::data_types::{
-    ApOptions, Authenticator, EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1,
-    KerberosTime, LastReq, Microseconds, PaData, PrincipalName, Realm, Ticket,
+    ApOptions, EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, LastReq,
+    Microseconds, PaData, PrincipalName, Realm, Ticket,
 };
 use picky_asn1::wrapper::{
     Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10, ExplicitContextTag11,
