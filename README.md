@@ -142,13 +142,13 @@ The binary is produced inside a `target/release` folder.
 RDP-TCP example:
 
 ```
-$ ./tokengen --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tcp --dst-hst 192.168.122.70 
+$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem rdp-tcp --dst-hst 192.168.122.70 
 ```
 
 RDP-TLS example:
 
 ```
-$ ./tokengen --provider-private-key /path/to/private/provisioner/private/key.pem rdp-tls --dst-hst 192.168.122.70 --jet-public-key /path/to/public/delegation/public/key.pem --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
+$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem --delegation-public-key /path/to/delegation/public/key.pem rdp-tls --dst-hst 192.168.122.70 --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
 ```
 
 ##### rdp_token.sh
