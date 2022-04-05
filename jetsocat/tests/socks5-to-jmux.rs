@@ -224,7 +224,7 @@ fn socks5_to_jmux() {
         targets[i] = ports[i + 2];
     }
 
-    proptest!(ProptestConfig::with_cases(64), |(
+    proptest!(ProptestConfig::with_cases(32), |(
         cfgs in prop::collection::vec(client_cfg(), 1..5),
         pipe_kind in transport_kind(),
     )| {
