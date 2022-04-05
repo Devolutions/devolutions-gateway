@@ -1,0 +1,14 @@
+[package]
+name = "mock-net"
+version = "0.0.0"
+edition = "2021"
+authors = ["Devolutions Inc."]
+publish = false
+
+[dependencies]
+tokio = { version = "1.17.0", features = ["io-util", "sync"] }
+loom = { version = "0.5.4", features = ["futures", "checkpoint"] }
+lazy_static = "1.4.0"
+
+[dev-dependencies]
+tokio = { version = "1.17.0", features = ["rt"] }
