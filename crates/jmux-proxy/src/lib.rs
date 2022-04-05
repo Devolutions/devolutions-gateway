@@ -6,6 +6,8 @@ extern crate slog;
 mod codec;
 mod config;
 mod id_allocator;
+mod net;
+mod sync;
 
 pub use self::config::{FilteringRule, JmuxConfig};
 pub use jmux_proto::DestinationUrl;
@@ -13,17 +15,14 @@ pub use jmux_proto::DestinationUrl;
 use self::codec::JmuxCodec;
 use self::id_allocator::IdAllocator;
 use crate::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
+use crate::net::{OwnedReadHalf, OwnedWriteHalf, TcpStream};
+use crate::sync::{Arc, AtomicUsize, Ordering};
 use anyhow::Context as _;
 use futures_util::{SinkExt, StreamExt};
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use slog::Logger;
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
@@ -265,6 +264,9 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
 
 // ---------------------- //
 
+type DataSenders = HashMap<LocalChannelId, DataSender>;
+type PendingChannels = HashMap<LocalChannelId, (DestinationUrl, ApiResponseSender)>;
+
 struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     cfg: JmuxConfig,
     jmux_stream: FramedRead<T, JmuxCodec>,
@@ -290,8 +292,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
     } = task;
 
     let mut jmux_ctx = JmuxCtx::new();
-    let mut data_senders: HashMap<LocalChannelId, DataSender> = HashMap::new();
-    let mut pending_channels: HashMap<LocalChannelId, (DestinationUrl, ApiResponseSender)> = HashMap::new();
+    let mut data_senders: DataSenders = HashMap::new();
+    let mut pending_channels: PendingChannels = HashMap::new();
     let (internal_msg_tx, mut internal_msg_rx) = mpsc::unbounded_channel::<InternalMessage>();
 
     // Safety net against poor AsyncRead trait implementations.
@@ -307,131 +309,22 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         // unrecoverable failures.
 
         tokio::select! {
-            Some(request) = api_request_rx.recv() => {
-                match request {
-                    JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
-                        match jmux_ctx.allocate_id() {
-                            Some(id) => {
-                                debug!(log, "Allocated local ID {}", id);
-                                debug!(log, "{} request {}", id, destination_url);
-                                pending_channels.insert(id, (destination_url.clone(), api_response_tx));
-                                msg_to_send_tx
-                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES as u16, destination_url))
-                                    .context("Couldn’t send CHANNEL OPEN message through mpsc channel")?;
-                            }
-                            None => warn!(log, "Couldn’t allocate ID for API request: {}", destination_url),
-                        }
-                    }
-                    JmuxApiRequest::Start { id, stream } => {
-                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
-
-                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-
-                        if data_senders.insert(id, data_tx).is_some() {
-                            anyhow::bail!("Detected two streams with the same ID {}", id);
-                        }
-
-                        let (reader, writer) = stream.into_split();
-
-                        DataWriterTask {
-                            writer,
-                            data_rx,
-                            log: channel.log.clone(),
-                        }.spawn();
-
-                        DataReaderTask {
-                            reader,
-                            local_id: channel.local_id,
-                            distant_id: channel.distant_id,
-                            window_size_updated: Arc::clone(&channel.window_size_updated),
-                            window_size: Arc::clone(&channel.window_size),
-                            maximum_packet_size: channel.maximum_packet_size,
-                            msg_to_send_tx: msg_to_send_tx.clone(),
-                            internal_msg_tx: internal_msg_tx.clone(),
-                            log: channel.log.clone()
-                        }.spawn();
-                    }
-                }
-            }
-            Some(internal_msg) = internal_msg_rx.recv() => {
-                match internal_msg {
-                    InternalMessage::Eof { id } => {
-                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
-                        let channel_log = channel.log.clone();
-                        let local_id = channel.local_id;
-                        let distant_id = channel.distant_id;
-
-                        match channel.distant_state {
-                            JmuxChannelState::Streaming => {
-                                channel.local_state = JmuxChannelState::Eof;
-                                msg_to_send_tx
-                                    .send(Message::eof(distant_id))
-                                    .context("Couldn’t send EOF message")?;
-                                },
-                            JmuxChannelState::Eof => {
-                                channel.local_state = JmuxChannelState::Closed;
-                                msg_to_send_tx
-                                    .send(Message::close(distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
-                                },
-                            JmuxChannelState::Closed => {
-                                jmux_ctx.unregister(local_id);
-                                msg_to_send_tx
-                                    .send(Message::close(distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
-                                debug!(channel_log, "Channel closed");
-                            },
-                        }
-                    }
-                    InternalMessage::StreamResolved {
-                        channel, stream
-                    } => {
-                        let local_id = channel.local_id;
-                        let distant_id = channel.distant_id;
-                        let initial_window_size = channel.initial_window_size;
-                        let maximum_packet_size = channel.maximum_packet_size;
-                        let window_size_updated = Arc::clone(&channel.window_size_updated);
-                        let window_size = Arc::clone(&channel.window_size);
-                        let channel_log = channel.log.clone();
-
-                        let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-
-                        if data_senders.insert(channel.local_id, data_tx).is_some() {
-                            anyhow::bail!("Detected two streams with the same local ID {}", channel.local_id);
-                        };
-
-                        jmux_ctx.register_channel(channel)?;
-
-                        msg_to_send_tx
-                            .send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size))
-                            .context("Couldn’t send OPEN SUCCESS message through mpsc channel")?;
-
-                        debug!(channel_log, "Channel accepted");
-
-                        let (reader, writer) = stream.into_split();
-
-                        DataWriterTask {
-                            writer,
-                            data_rx,
-                            log: channel_log.clone(),
-                        }.spawn();
-
-                        let reader_task = DataReaderTask {
-                            reader,
-                            local_id,
-                            distant_id,
-                            window_size_updated,
-                            window_size,
-                            maximum_packet_size,
-                            msg_to_send_tx: msg_to_send_tx.clone(),
-                            internal_msg_tx: internal_msg_tx.clone(),
-                            log: channel_log,
-                        };
-
-                        reader_task.spawn();
-                    }
-                }
-            }
+            Some(request) = api_request_rx.recv() => handle_api_request(
+                request,
+                &log,
+                &mut jmux_ctx,
+                &mut data_senders,
+                &mut pending_channels,
+                &msg_to_send_tx,
+                &internal_msg_tx
+            )?,
+            Some(internal_msg) = internal_msg_rx.recv() => handle_internal_message(
+                internal_msg,
+                &mut jmux_ctx,
+                &mut data_senders,
+                &msg_to_send_tx,
+                &internal_msg_tx
+            )?,
             msg = jmux_stream.next() => {
                 let msg = match msg {
                     Some(msg) => msg,
@@ -464,214 +357,417 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                 trace!(log, "Received channel message: {:?}", msg);
 
-                match msg {
-                    Message::Open(msg) => {
-                        let peer_id = DistantChannelId::from(msg.sender_channel_id);
-
-                        if let Err(e) = cfg.filtering.validate_destination(&msg.destination_url) {
-                            debug!(log, "Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
-                            msg_to_send_tx
-                                .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, e.to_string()))
-                                .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                            continue;
-                        }
-
-                        let local_id = match jmux_ctx.allocate_id() {
-                            Some(id) => id,
-                            None => {
-                                warn!(log, "Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id);
-                                msg_to_send_tx
-                                    .send(Message::open_failure(peer_id, ReasonCode::GENERAL_FAILURE, "no more ID available"))
-                                    .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                                continue;
-                            }
-                        };
-
-                        debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
-                        info!(log, "({} {}) request {}", local_id, peer_id, msg.destination_url);
-
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.to_string()));
-
-                        let window_size_updated = Arc::new(Notify::new());
-                        let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
-
-                        let channel = JmuxChannelCtx {
-                            distant_id: peer_id,
-                            distant_state: JmuxChannelState::Streaming,
-
-                            local_id,
-                            local_state: JmuxChannelState::Streaming,
-
-                            initial_window_size: msg.initial_window_size,
-                            window_size_updated: window_size_updated.clone(),
-                            window_size: window_size.clone(),
-
-                            maximum_packet_size: msg.maximum_packet_size,
-
-                            log: channel_log,
-                        };
-
-                        StreamResolverTask {
-                            channel,
-                            destination_url: msg.destination_url,
-                            internal_msg_tx: internal_msg_tx.clone(),
-                            msg_to_send_tx: msg_to_send_tx.clone(),
-                        }
-                        .spawn();
-                    }
-                    Message::OpenSuccess(msg) => {
-                        let local_id = LocalChannelId::from(msg.recipient_channel_id);
-                        let peer_id = DistantChannelId::from(msg.sender_channel_id);
-
-                        let (destination_url, api_response_tx) = match pending_channels.remove(&local_id) {
-                            Some(pending) => pending,
-                            None => {
-                                warn!(log, "Couldn’t find pending channel for {}", local_id);
-                                continue;
-                            },
-                        };
-
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url.to_string()));
-
-                        debug!(channel_log, "Successfully opened channel");
-
-                        if api_response_tx.send(JmuxApiResponse::Success { id: local_id }).is_err() {
-                            warn!(channel_log, "Couldn’t send success API response through mpsc channel");
-                            continue;
-                        }
-
-                        jmux_ctx.register_channel(JmuxChannelCtx {
-                            distant_id: peer_id,
-                            distant_state: JmuxChannelState::Streaming,
-
-                            local_id,
-                            local_state: JmuxChannelState::Streaming,
-
-                            initial_window_size: msg.initial_window_size,
-                            window_size_updated: Arc::new(Notify::new()),
-                            window_size: Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap())),
-
-                            maximum_packet_size: msg.maximum_packet_size,
-
-                            log: channel_log,
-                        })?;
-                    }
-                    Message::WindowAdjust(msg) => {
-                        if let Some(ctx) = jmux_ctx.get_channel_mut(LocalChannelId::from(msg.recipient_channel_id)) {
-                            ctx.window_size.fetch_add(usize::try_from(msg.window_adjustment).unwrap(), Ordering::SeqCst);
-                            ctx.window_size_updated.notify_one();
-                        }
-                    }
-                    Message::Data(msg) => {
-                        let id = LocalChannelId::from(msg.recipient_channel_id);
-                        let data_length = u32::try_from(msg.transfer_data.len()).unwrap();
-                        let distant_id = match jmux_ctx.get_channel(id) {
-                            Some(channel) => channel.distant_id,
-                            None => {
-                                warn!(log, "Couldn’t find channel with id {}", id);
-                                continue;
-                            },
-                        };
-
-                        let data_tx = match data_senders.get_mut(&id) {
-                            Some(sender) => sender,
-                            None => {
-                                warn!(log, "received data but associated data sender is missing");
-                                continue;
-                            }
-                        };
-
-                        let _ = data_tx.send(msg.transfer_data);
-
-                        // Simplest flow control logic for now: just send back a WINDOW ADJUST message to
-                        // increase back peer’s window size.
-                        msg_to_send_tx.send(Message::window_adjust(distant_id, data_length))
-                            .context("Couldn’t send WINDOW ADJUST message")?;
-                    }
-                    Message::Eof(msg) => {
-                        // Per the spec:
-                        // > No explicit response is sent to this message.
-                        // > However, the application may send EOF to whatever is at the other end of the channel.
-                        // > Note that the channel remains open after this message, and more data may still be sent in the other direction.
-                        // > This message does not consume window space and can be sent even if no window space is available.
-
-                        let id = LocalChannelId::from(msg.recipient_channel_id);
-                        let channel = match jmux_ctx.get_channel_mut(id) {
-                            Some(channel) => channel,
-                            None => {
-                                warn!(log, "Couldn’t find channel with id {}", id);
-                                continue;
-                            },
-                        };
-
-                        channel.distant_state = JmuxChannelState::Eof;
-                        debug!(channel.log, "Distant peer EOFed");
-
-                        // Remove associated data sender
-                        data_senders.remove(&id);
-
-                        match channel.local_state {
-                            JmuxChannelState::Streaming => {},
-                            JmuxChannelState::Eof => {
-                                channel.local_state = JmuxChannelState::Closed;
-                                msg_to_send_tx
-                                    .send(Message::close(channel.distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
-                            },
-                            JmuxChannelState::Closed => {},
-                        }
-                    }
-                    Message::OpenFailure(msg) => {
-                        let id = LocalChannelId::from(msg.recipient_channel_id);
-
-                        let (destination_url, api_response_tx) = match pending_channels.remove(&id) {
-                            Some(pending) => pending,
-                            None => {
-                                warn!(log, "Couldn’t find pending channel {}", id);
-                                continue;
-                            },
-                        };
-
-                        warn!(log, "{} -> {} channel opening failed [{}]: {}", id, destination_url, msg.reason_code, msg.description);
-
-                        let _ = api_response_tx.send(JmuxApiResponse::Failure { id, reason_code: msg.reason_code });
-                    }
-                    Message::Close(msg) => {
-                        let local_id = LocalChannelId::from(msg.recipient_channel_id);
-                        let channel = match jmux_ctx.get_channel_mut(local_id) {
-                            Some(channel) => channel,
-                            None => {
-                                warn!(log, "Couldn’t find channel with id {}", local_id);
-                                continue;
-                            },
-                        };
-                        let distant_id = channel.distant_id;
-                        let channel_log = channel.log.clone();
-
-                        channel.distant_state = JmuxChannelState::Closed;
-                        debug!(channel_log, "Distant peer closed");
-
-                        // This will also shutdown the associated TCP stream.
-                        data_senders.remove(&local_id);
-
-                        if channel.local_state == JmuxChannelState::Eof {
-                            channel.local_state = JmuxChannelState::Closed;
-                            msg_to_send_tx
-                                .send(Message::close(distant_id))
-                                .context("Couldn’t send CLOSE message")?;
-                        }
-
-                        if channel.local_state == JmuxChannelState::Closed {
-                            jmux_ctx.unregister(local_id);
-                            debug!(channel_log, "Channel closed");
-                        }
-                    }
-                }
+                handle_jmux_message(
+                    msg,
+                    &log,
+                    &cfg,
+                    &mut jmux_ctx,
+                    &mut data_senders,
+                    &mut pending_channels,
+                    &msg_to_send_tx,
+                    &internal_msg_tx
+                )?;
             }
         }
     }
 
     info!(log, "Closing JMUX scheduler task...");
+
+    Ok(())
+}
+
+fn handle_api_request(
+    request: JmuxApiRequest,
+    log: &Logger,
+    jmux_ctx: &mut JmuxCtx,
+    data_senders: &mut DataSenders,
+    pending_channels: &mut PendingChannels,
+    msg_to_send_tx: &MessageSender,
+    internal_msg_tx: &mpsc::UnboundedSender<InternalMessage>,
+) -> anyhow::Result<()> {
+    match request {
+        JmuxApiRequest::OpenChannel {
+            destination_url,
+            api_response_tx,
+        } => match jmux_ctx.allocate_id() {
+            Some(id) => {
+                debug!(log, "Allocated local ID {}", id);
+                debug!(log, "{} request {}", id, destination_url);
+                pending_channels.insert(id, (destination_url.clone(), api_response_tx));
+                msg_to_send_tx
+                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES as u16, destination_url))
+                    .context("Couldn’t send CHANNEL OPEN message through mpsc channel")?;
+            }
+            None => warn!(log, "Couldn’t allocate ID for API request: {}", destination_url),
+        },
+        JmuxApiRequest::Start { id, stream } => {
+            let channel = jmux_ctx
+                .get_channel(id)
+                .with_context(|| format!("Couldn’t find channel with id {}", id))?;
+
+            let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+            if data_senders.insert(id, data_tx).is_some() {
+                anyhow::bail!("Detected two streams with the same ID {}", id);
+            }
+
+            let (reader, writer) = stream.into_split();
+
+            DataWriterTask {
+                writer,
+                data_rx,
+                log: channel.log.clone(),
+            }
+            .spawn();
+
+            DataReaderTask {
+                reader,
+                local_id: channel.local_id,
+                distant_id: channel.distant_id,
+                window_size_updated: Arc::clone(&channel.window_size_updated),
+                window_size: Arc::clone(&channel.window_size),
+                maximum_packet_size: channel.maximum_packet_size,
+                msg_to_send_tx: msg_to_send_tx.clone(),
+                internal_msg_tx: internal_msg_tx.clone(),
+                log: channel.log.clone(),
+            }
+            .spawn();
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_internal_message(
+    internal_msg: InternalMessage,
+    jmux_ctx: &mut JmuxCtx,
+    data_senders: &mut DataSenders,
+    msg_to_send_tx: &MessageSender,
+    internal_msg_tx: &mpsc::UnboundedSender<InternalMessage>,
+) -> anyhow::Result<()> {
+    match internal_msg {
+        InternalMessage::Eof { id } => {
+            let channel = jmux_ctx
+                .get_channel_mut(id)
+                .with_context(|| format!("Couldn’t find channel with id {}", id))?;
+            let channel_log = channel.log.clone();
+            let local_id = channel.local_id;
+            let distant_id = channel.distant_id;
+
+            match channel.distant_state {
+                JmuxChannelState::Streaming => {
+                    channel.local_state = JmuxChannelState::Eof;
+                    msg_to_send_tx
+                        .send(Message::eof(distant_id))
+                        .context("Couldn’t send EOF message")?;
+                }
+                JmuxChannelState::Eof => {
+                    channel.local_state = JmuxChannelState::Closed;
+                    msg_to_send_tx
+                        .send(Message::close(distant_id))
+                        .context("Couldn’t send CLOSE message")?;
+                }
+                JmuxChannelState::Closed => {
+                    jmux_ctx.unregister(local_id);
+                    msg_to_send_tx
+                        .send(Message::close(distant_id))
+                        .context("Couldn’t send CLOSE message")?;
+                    debug!(channel_log, "Channel closed");
+                }
+            }
+        }
+        InternalMessage::StreamResolved { channel, stream } => {
+            let local_id = channel.local_id;
+            let distant_id = channel.distant_id;
+            let initial_window_size = channel.initial_window_size;
+            let maximum_packet_size = channel.maximum_packet_size;
+            let window_size_updated = Arc::clone(&channel.window_size_updated);
+            let window_size = Arc::clone(&channel.window_size);
+            let channel_log = channel.log.clone();
+
+            let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+            if data_senders.insert(channel.local_id, data_tx).is_some() {
+                anyhow::bail!("Detected two streams with the same local ID {}", channel.local_id);
+            };
+
+            jmux_ctx.register_channel(channel)?;
+
+            msg_to_send_tx
+                .send(Message::open_success(
+                    distant_id,
+                    local_id,
+                    initial_window_size,
+                    maximum_packet_size,
+                ))
+                .context("Couldn’t send OPEN SUCCESS message through mpsc channel")?;
+
+            debug!(channel_log, "Channel accepted");
+
+            let (reader, writer) = stream.into_split();
+
+            DataWriterTask {
+                writer,
+                data_rx,
+                log: channel_log.clone(),
+            }
+            .spawn();
+
+            DataReaderTask {
+                reader,
+                local_id,
+                distant_id,
+                window_size_updated,
+                window_size,
+                maximum_packet_size,
+                msg_to_send_tx: msg_to_send_tx.clone(),
+                internal_msg_tx: internal_msg_tx.clone(),
+                log: channel_log,
+            }
+            .spawn();
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_jmux_message(
+    msg: Message,
+    log: &Logger,
+    cfg: &JmuxConfig,
+    jmux_ctx: &mut JmuxCtx,
+    data_senders: &mut DataSenders,
+    pending_channels: &mut PendingChannels,
+    msg_to_send_tx: &MessageSender,
+    internal_msg_tx: &mpsc::UnboundedSender<InternalMessage>,
+) -> anyhow::Result<()> {
+    match msg {
+        Message::Open(msg) => {
+            let peer_id = DistantChannelId::from(msg.sender_channel_id);
+
+            if let Err(e) = cfg.filtering.validate_destination(&msg.destination_url) {
+                debug!(
+                    log,
+                    "Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e
+                );
+                msg_to_send_tx
+                    .send(Message::open_failure(
+                        peer_id,
+                        ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET,
+                        e.to_string(),
+                    ))
+                    .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                return Ok(());
+            }
+
+            let local_id = match jmux_ctx.allocate_id() {
+                Some(id) => id,
+                None => {
+                    warn!(
+                        log,
+                        "Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id
+                    );
+                    msg_to_send_tx
+                        .send(Message::open_failure(
+                            peer_id,
+                            ReasonCode::GENERAL_FAILURE,
+                            "no more ID available",
+                        ))
+                        .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                    return Ok(());
+                }
+            };
+
+            debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
+            info!(log, "({} {}) request {}", local_id, peer_id, msg.destination_url);
+
+            let channel_log = log
+                .new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.to_string()));
+
+            let window_size_updated = Arc::new(Notify::new());
+            let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
+
+            let channel = JmuxChannelCtx {
+                distant_id: peer_id,
+                distant_state: JmuxChannelState::Streaming,
+
+                local_id,
+                local_state: JmuxChannelState::Streaming,
+
+                initial_window_size: msg.initial_window_size,
+                window_size_updated: window_size_updated.clone(),
+                window_size: window_size.clone(),
+
+                maximum_packet_size: msg.maximum_packet_size,
+
+                log: channel_log,
+            };
+
+            StreamResolverTask {
+                channel,
+                destination_url: msg.destination_url,
+                internal_msg_tx: internal_msg_tx.clone(),
+                msg_to_send_tx: msg_to_send_tx.clone(),
+            }
+            .spawn();
+        }
+        Message::OpenSuccess(msg) => {
+            let local_id = LocalChannelId::from(msg.recipient_channel_id);
+            let peer_id = DistantChannelId::from(msg.sender_channel_id);
+
+            let (destination_url, api_response_tx) = match pending_channels.remove(&local_id) {
+                Some(pending) => pending,
+                None => {
+                    warn!(log, "Couldn’t find pending channel for {}", local_id);
+                    return Ok(());
+                }
+            };
+
+            let channel_log =
+                log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url.to_string()));
+
+            debug!(channel_log, "Successfully opened channel");
+
+            if api_response_tx.send(JmuxApiResponse::Success { id: local_id }).is_err() {
+                warn!(channel_log, "Couldn’t send success API response through mpsc channel");
+                return Ok(());
+            }
+
+            jmux_ctx.register_channel(JmuxChannelCtx {
+                distant_id: peer_id,
+                distant_state: JmuxChannelState::Streaming,
+
+                local_id,
+                local_state: JmuxChannelState::Streaming,
+
+                initial_window_size: msg.initial_window_size,
+                window_size_updated: Arc::new(Notify::new()),
+                window_size: Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap())),
+
+                maximum_packet_size: msg.maximum_packet_size,
+
+                log: channel_log,
+            })?;
+        }
+        Message::WindowAdjust(msg) => {
+            if let Some(ctx) = jmux_ctx.get_channel_mut(LocalChannelId::from(msg.recipient_channel_id)) {
+                ctx.window_size
+                    .fetch_add(usize::try_from(msg.window_adjustment).unwrap(), Ordering::AcqRel);
+                ctx.window_size_updated.notify_one();
+            }
+        }
+        Message::Data(msg) => {
+            let id = LocalChannelId::from(msg.recipient_channel_id);
+            let data_length = u32::try_from(msg.transfer_data.len()).unwrap();
+            let distant_id = match jmux_ctx.get_channel(id) {
+                Some(channel) => channel.distant_id,
+                None => {
+                    warn!(log, "Couldn’t find channel with id {}", id);
+                    return Ok(());
+                }
+            };
+
+            let data_tx = match data_senders.get_mut(&id) {
+                Some(sender) => sender,
+                None => {
+                    warn!(log, "received data but associated data sender is missing");
+                    return Ok(());
+                }
+            };
+
+            let _ = data_tx.send(msg.transfer_data);
+
+            // Simplest flow control logic for now: just send back a WINDOW ADJUST message to
+            // increase back peer’s window size.
+            msg_to_send_tx
+                .send(Message::window_adjust(distant_id, data_length))
+                .context("Couldn’t send WINDOW ADJUST message")?;
+        }
+        Message::Eof(msg) => {
+            // Per the spec:
+            // > No explicit response is sent to this message.
+            // > However, the application may send EOF to whatever is at the other end of the channel.
+            // > Note that the channel remains open after this message, and more data may still be sent in the other direction.
+            // > This message does not consume window space and can be sent even if no window space is available.
+
+            let id = LocalChannelId::from(msg.recipient_channel_id);
+            let channel = match jmux_ctx.get_channel_mut(id) {
+                Some(channel) => channel,
+                None => {
+                    warn!(log, "Couldn’t find channel with id {}", id);
+                    return Ok(());
+                }
+            };
+
+            channel.distant_state = JmuxChannelState::Eof;
+            debug!(channel.log, "Distant peer EOFed");
+
+            // Remove associated data sender
+            data_senders.remove(&id);
+
+            match channel.local_state {
+                JmuxChannelState::Streaming => {}
+                JmuxChannelState::Eof => {
+                    channel.local_state = JmuxChannelState::Closed;
+                    msg_to_send_tx
+                        .send(Message::close(channel.distant_id))
+                        .context("Couldn’t send CLOSE message")?;
+                }
+                JmuxChannelState::Closed => {}
+            }
+        }
+        Message::OpenFailure(msg) => {
+            let id = LocalChannelId::from(msg.recipient_channel_id);
+
+            let (destination_url, api_response_tx) = match pending_channels.remove(&id) {
+                Some(pending) => pending,
+                None => {
+                    warn!(log, "Couldn’t find pending channel {}", id);
+                    return Ok(());
+                }
+            };
+
+            warn!(
+                log,
+                "{} -> {} channel opening failed [{}]: {}", id, destination_url, msg.reason_code, msg.description
+            );
+
+            let _ = api_response_tx.send(JmuxApiResponse::Failure {
+                id,
+                reason_code: msg.reason_code,
+            });
+        }
+        Message::Close(msg) => {
+            let local_id = LocalChannelId::from(msg.recipient_channel_id);
+            let channel = match jmux_ctx.get_channel_mut(local_id) {
+                Some(channel) => channel,
+                None => {
+                    warn!(log, "Couldn’t find channel with id {}", local_id);
+                    return Ok(());
+                }
+            };
+            let distant_id = channel.distant_id;
+            let channel_log = channel.log.clone();
+
+            channel.distant_state = JmuxChannelState::Closed;
+            debug!(channel_log, "Distant peer closed");
+
+            // This will also shutdown the associated TCP stream.
+            data_senders.remove(&local_id);
+
+            if channel.local_state == JmuxChannelState::Eof {
+                channel.local_state = JmuxChannelState::Closed;
+                msg_to_send_tx
+                    .send(Message::close(distant_id))
+                    .context("Couldn’t send CLOSE message")?;
+            }
+
+            if channel.local_state == JmuxChannelState::Closed {
+                jmux_ctx.unregister(local_id);
+                debug!(channel_log, "Channel closed");
+            }
+        }
+    }
 
     Ok(())
 }
@@ -720,6 +816,8 @@ impl DataReaderTask {
         debug!(log, "Started forwarding");
 
         while let Some(bytes) = bytes_stream.next().await {
+            debug!(log, "Received some bytes");
+
             let bytes = bytes.context("Couldn’t read next bytes from stream")?;
 
             let chunk_size = maximum_packet_size - Header::SIZE - ChannelData::FIXED_PART_SIZE;
@@ -728,7 +826,7 @@ impl DataReaderTask {
 
             for mut bytes in queue {
                 loop {
-                    let window_size_now = window_size.load(Ordering::SeqCst);
+                    let window_size_now = window_size.load(Ordering::Acquire);
                     if window_size_now < bytes.len() {
                         debug!(
                             log,
@@ -739,7 +837,7 @@ impl DataReaderTask {
 
                         if window_size_now > 0 {
                             let bytes_to_send_now: Vec<u8> = bytes.drain(..window_size_now).collect();
-                            window_size.fetch_sub(bytes_to_send_now.len(), Ordering::SeqCst);
+                            window_size.fetch_sub(bytes_to_send_now.len(), Ordering::AcqRel);
                             msg_to_send_tx
                                 .send(Message::data(distant_id, bytes_to_send_now))
                                 .context("Couldn’t send DATA message")?;
@@ -747,7 +845,7 @@ impl DataReaderTask {
 
                         window_size_updated.notified().await;
                     } else {
-                        window_size.fetch_sub(bytes.len(), Ordering::SeqCst);
+                        window_size.fetch_sub(bytes.len(), Ordering::AcqRel);
                         msg_to_send_tx
                             .send(Message::data(distant_id, bytes))
                             .context("Couldn’t send DATA message")?;
@@ -824,7 +922,7 @@ impl StreamResolverTask {
         let host = destination_url.host();
         let port = destination_url.port();
 
-        let mut addrs = match tokio::net::lookup_host((host, port)).await {
+        let mut addrs = match crate::net::lookup_host((host, port)).await {
             Ok(addrs) => addrs,
             Err(e) => {
                 msg_to_send_tx
@@ -861,5 +959,128 @@ impl StreamResolverTask {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use super::*;
+
+    use jmux_proto::ChannelClose;
+    use loom::future::block_on;
+    use loom::thread::spawn;
+    use slog::Drain as _;
+
+    #[test]
+    fn reader_task_window_size() {
+        loom::model(|| {
+            let decorator = slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
+            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+            let async_drain = slog_async::Async::new(drain).build().fuse();
+            let log = slog::Logger::root(async_drain, slog::o!());
+
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            let handle = rt.handle();
+
+            info!(log, "Executing…");
+
+            let (client, server) = tokio::io::duplex(128);
+            let client = TcpStream(client);
+            let (reader, mut writer) = client.into_split();
+
+            let cfg = JmuxConfig::default();
+            let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
+
+            let initial_window_size = 10;
+            let maximum_packet_size = 100;
+
+            let mut jmux_ctx = JmuxCtx::new();
+            let mut data_senders: DataSenders = HashMap::new();
+            let mut pending_channels: PendingChannels = HashMap::new();
+            let (internal_msg_tx, internal_msg_rx) = mpsc::unbounded_channel::<InternalMessage>();
+
+            let window_size_updated = Arc::new(Notify::new());
+            let window_size = Arc::new(AtomicUsize::new(usize::try_from(initial_window_size).unwrap()));
+
+            debug!(log, "Spawn reader task");
+
+            let handle = spawn({
+                let local_id = LocalChannelId::from(0);
+                let distant_id = DistantChannelId::from(1);
+                let window_size_updated = window_size_updated.clone();
+                let window_size = window_size.clone();
+                let channel_log = log.new(o!("channel" => format!("({} {})", local_id, distant_id)));
+
+                let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+                data_senders.insert(local_id, data_tx);
+
+                jmux_ctx
+                    .register_channel(JmuxChannelCtx {
+                        distant_id,
+                        distant_state: JmuxChannelState::Streaming,
+                        local_id,
+                        local_state: JmuxChannelState::Streaming,
+                        initial_window_size,
+                        window_size_updated: window_size_updated.clone(),
+                        window_size: window_size.clone(),
+                        maximum_packet_size,
+                        log: channel_log.clone(),
+                    })
+                    .unwrap();
+
+                let msg_to_send_tx = msg_to_send_tx.clone();
+                let internal_msg_tx = internal_msg_tx.clone();
+
+                let handle = handle.clone();
+
+                move || {
+                    handle.block_on(
+                        DataReaderTask {
+                            reader,
+                            local_id,
+                            distant_id,
+                            window_size_updated,
+                            window_size,
+                            maximum_packet_size,
+                            msg_to_send_tx,
+                            internal_msg_tx,
+                            log: channel_log,
+                        }
+                        .run(),
+                    )
+                }
+            });
+
+            debug!(log, "Emulate JMUX messages");
+
+            rt.block_on(writer.write_all(&[
+                0, 1, 2, 3, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+                25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25,
+                25, 25,
+            ]))
+            .unwrap();
+
+            handle_jmux_message(
+                Message::Close(ChannelClose::new(DistantChannelId::from(0))),
+                &log,
+                &cfg,
+                &mut jmux_ctx,
+                &mut data_senders,
+                &mut pending_channels,
+                &msg_to_send_tx,
+                &internal_msg_tx,
+            )
+            .unwrap();
+
+            debug!(log, "Waiting for thread to finish");
+
+            rt.block_on(writer.shutdown()).unwrap();
+            drop(writer);
+
+            drop(internal_msg_rx);
+
+            handle.join().unwrap().unwrap();
+        })
     }
 }
