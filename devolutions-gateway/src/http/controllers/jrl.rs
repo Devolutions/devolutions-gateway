@@ -60,6 +60,8 @@ impl JrlController {
                 .await
                 .map_err(HttpErrorStatus::internal)?;
 
+            file.flush().await.map_err(HttpErrorStatus::internal)?;
+
             *self.revocation_list.lock() = claims;
 
             info!("Current JRL updated!");
