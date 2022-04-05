@@ -160,6 +160,14 @@ pub struct LastReqInner {
 }
 pub type LastReq = Asn1SequenceOf<LastReqInner>;
 
+/// [MS-KILE 2.2.2](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
+/// 
+/// ```not_rust
+/// KERB-ERROR-DATA ::= SEQUENCE {
+///     data-type [1] INTEGER,
+///     data-value [2] OCTET STRING OPTIONAL
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct KerbErrorData {
     data_type: ExplicitContextTag1<IntegerAsn1>,
@@ -167,6 +175,14 @@ pub struct KerbErrorData {
     data_value: Optional<Option<ExplicitContextTag2<BitStringAsn1>>>,
 }
 
+/// [RFC 4120 ](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.2)
+///
+/// ```not_rust
+/// PA-ENC-TS-ENC           ::= SEQUENCE {
+///         patimestamp     [0] KerberosTime -- client's time --,
+///         pausec          [1] Microseconds OPTIONAL
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaEncTsEnc {
     pub patimestamp: ExplicitContextTag0<KerberosTime>,
@@ -174,25 +190,65 @@ pub struct PaEncTsEnc {
     pub pausec: Optional<Option<ExplicitContextTag1<Microseconds>>>,
 }
 
+/// [RFC 4120 ](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.2)
+///
+/// ```not_rust
+/// PA-ENC-TIMESTAMP        ::= EncryptedData -- PA-ENC-TS-ENC
+/// ```
 pub type PaEncTimestamp = EncryptedData;
 
 // pub struct KerbPaPacRequest {
 //     include_pac: ExplicitContextTag0<Bool>,
 // }
 
+/// [MS-KILE 2.2.10](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
+/// 
+/// ```not_rust
+/// PA-PAC-OPTIONS ::= SEQUENCE {
+///     flags                ::= KerberosFlags
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct PaPacOptions {
     pub flags: ExplicitContextTag0<KerberosFlags>,
 }
 
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.1)
+/// 
+/// ```not_rust
+/// APOptions       ::= KerberosFlags
+/// ```
 pub type ApOptions = KerberosFlags;
 
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.9)
+/// 
+/// ```not_rust
+/// Checksum        ::= SEQUENCE {
+///         cksumtype       [0] Int32,
+///         checksum        [1] OCTET STRING
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Checksum {
     pub cksumtype: ExplicitContextTag0<IntegerAsn1>,
     pub checksum: ExplicitContextTag1<OctetStringAsn1>,
 }
 
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.1)
+/// 
+/// ```not_rust
+/// Authenticator   ::= [APPLICATION 2] SEQUENCE  {
+///         authenticator-vno       [0] INTEGER (5),
+///         crealm                  [1] Realm,
+///         cname                   [2] PrincipalName,
+///         cksum                   [3] Checksum OPTIONAL,
+///         cusec                   [4] Microseconds,
+///         ctime                   [5] KerberosTime,
+///         subkey                  [6] EncryptionKey OPTIONAL,
+///         seq-number              [7] UInt32 OPTIONAL,
+///         authorization-data      [8] AuthorizationData OPTIONAL
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct AuthenticatorInner {
     pub authenticator_bno: ExplicitContextTag0<IntegerAsn1>,
@@ -208,9 +264,19 @@ pub struct AuthenticatorInner {
     #[serde(default)]
     pub authorization_data: Optional<Option<ExplicitContextTag8<AuthorizationData>>>,
 }
-
 pub type Authenticator = ApplicationTag<AuthenticatorInner, 2>;
 
+
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.2)
+/// 
+/// ```not_rust
+/// EncAPRepPart    ::= [APPLICATION 27] SEQUENCE {
+///         ctime           [0] KerberosTime,
+///         cusec           [1] Microseconds,
+///         subkey          [2] EncryptionKey OPTIONAL,
+///         seq-number      [3] UInt32 OPTIONAL
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EncApRepPartInner {
     pub ctime: ExplicitContextTag0<KerberosTime>,
@@ -220,9 +286,17 @@ pub struct EncApRepPartInner {
     #[serde(default)]
     pub seq_number: Optional<Option<ExplicitContextTag3<IntegerAsn1>>>,
 }
-
 pub type EncApRepPart = ApplicationTag<EncApRepPartInner, 27>;
 
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.5)
+/// 
+/// ```not_rust
+/// ETYPE-INFO2-ENTRY       ::= SEQUENCE {
+///         etype           [0] Int32,
+///         salt            [1] KerberosString OPTIONAL,
+///         s2kparams       [2] OCTET STRING OPTIONAL
+/// }
+/// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct EtypeInfo2Entry {
     pub etype: ExplicitContextTag0<IntegerAsn1>,
@@ -232,6 +306,11 @@ pub struct EtypeInfo2Entry {
     pub s2kparams: Optional<Option<ExplicitContextTag2<OctetStringAsn1>>>,
 }
 
+/// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.5)
+/// 
+/// ```not_rust
+/// ETYPE-INFO2              ::= SEQUENCE SIZE (1..MAX) OF ETYPE-INFO2-ENTRY
+/// ```
 pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 
 #[cfg(test)]
