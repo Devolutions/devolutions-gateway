@@ -161,7 +161,7 @@ pub struct LastReqInner {
 pub type LastReq = Asn1SequenceOf<LastReqInner>;
 
 /// [MS-KILE 2.2.2](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
-/// 
+///
 /// ```not_rust
 /// KERB-ERROR-DATA ::= SEQUENCE {
 ///     data-type [1] INTEGER,
@@ -197,12 +197,20 @@ pub struct PaEncTsEnc {
 /// ```
 pub type PaEncTimestamp = EncryptedData;
 
-// pub struct KerbPaPacRequest {
-//     include_pac: ExplicitContextTag0<Bool>,
-// }
+/// [MS-KILE 2.2.3](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
+///
+/// ```not_rust
+/// KERB-PA-PAC-REQUEST ::= SEQUENCE {
+///     include-pac[0] BOOLEAN
+/// }
+/// ```
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct KerbPaPacRequest {
+    pub include_pac: ExplicitContextTag0<bool>,
+}
 
 /// [MS-KILE 2.2.10](https://winprotocoldoc.blob.core.windows.net/productionwindowsarchives/MS-KILE/%5bMS-KILE%5d.pdf)
-/// 
+///
 /// ```not_rust
 /// PA-PAC-OPTIONS ::= SEQUENCE {
 ///     flags                ::= KerberosFlags
@@ -214,14 +222,14 @@ pub struct PaPacOptions {
 }
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.1)
-/// 
+///
 /// ```not_rust
 /// APOptions       ::= KerberosFlags
 /// ```
 pub type ApOptions = KerberosFlags;
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.9)
-/// 
+///
 /// ```not_rust
 /// Checksum        ::= SEQUENCE {
 ///         cksumtype       [0] Int32,
@@ -235,7 +243,7 @@ pub struct Checksum {
 }
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.1)
-/// 
+///
 /// ```not_rust
 /// Authenticator   ::= [APPLICATION 2] SEQUENCE  {
 ///         authenticator-vno       [0] INTEGER (5),
@@ -266,9 +274,8 @@ pub struct AuthenticatorInner {
 }
 pub type Authenticator = ApplicationTag<AuthenticatorInner, 2>;
 
-
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.2)
-/// 
+///
 /// ```not_rust
 /// EncAPRepPart    ::= [APPLICATION 27] SEQUENCE {
 ///         ctime           [0] KerberosTime,
@@ -289,7 +296,7 @@ pub struct EncApRepPartInner {
 pub type EncApRepPart = ApplicationTag<EncApRepPartInner, 27>;
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.5)
-/// 
+///
 /// ```not_rust
 /// ETYPE-INFO2-ENTRY       ::= SEQUENCE {
 ///         etype           [0] Int32,
@@ -307,7 +314,7 @@ pub struct EtypeInfo2Entry {
 }
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.5)
-/// 
+///
 /// ```not_rust
 /// ETYPE-INFO2              ::= SEQUENCE SIZE (1..MAX) OF ETYPE-INFO2-ENTRY
 /// ```
@@ -316,15 +323,20 @@ pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
-        EncryptedData, EncryptionKey, HostAddress, KerberosStringAsn1, KerberosTime, LastReqInner, PaData,
+        AuthenticatorInner, AuthorizationData, AuthorizationDataInner, Checksum, EncryptedData, EncryptionKey,
+        EtypeInfo2Entry, HostAddress, KerbPaPacRequest, KerberosStringAsn1, KerberosTime, LastReqInner, PaData,
         PrincipalName,
     };
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
     use picky_asn1::wrapper::{
-        Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, GeneralStringAsn1, IntegerAsn1,
-        OctetStringAsn1, Optional,
+        Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
+        ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8,
+        GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional,
     };
+    use picky_asn1_der::application_tag::ApplicationTag;
+
+    use super::{Microseconds, PaEncTsEnc};
 
     #[test]
     fn test_kerberos_string() {
@@ -539,5 +551,118 @@ mod tests {
     }
 
     #[test]
-    fn test_authorization_data() {}
+    fn test_authenticator() {
+        let expected_raw = [
+            98, 130, 1, 14, 48, 130, 1, 10, 160, 3, 2, 1, 5, 161, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79,
+            77, 162, 15, 48, 13, 160, 3, 2, 1, 1, 161, 6, 48, 4, 27, 2, 112, 51, 163, 37, 48, 35, 160, 5, 2, 3, 0, 128,
+            3, 161, 26, 4, 24, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 62, 0, 0, 0, 164, 3, 2, 1,
+            8, 165, 17, 24, 15, 50, 48, 50, 50, 48, 52, 48, 53, 48, 56, 49, 57, 52, 54, 90, 166, 43, 48, 41, 160, 3, 2,
+            1, 18, 161, 34, 4, 32, 137, 180, 229, 144, 148, 18, 158, 111, 110, 0, 13, 63, 21, 116, 77, 186, 198, 9,
+            166, 152, 141, 83, 211, 88, 142, 95, 34, 169, 63, 91, 71, 97, 167, 6, 2, 4, 104, 244, 223, 174, 168, 111,
+            48, 109, 48, 107, 160, 3, 2, 1, 1, 161, 100, 4, 98, 48, 96, 48, 14, 160, 4, 2, 2, 0, 143, 161, 6, 4, 4, 0,
+            64, 0, 0, 48, 78, 160, 4, 2, 2, 0, 144, 161, 70, 4, 68, 84, 0, 69, 0, 82, 0, 77, 0, 83, 0, 82, 0, 86, 0,
+            47, 0, 112, 0, 51, 0, 46, 0, 113, 0, 107, 0, 97, 0, 116, 0, 105, 0, 111, 0, 110, 0, 46, 0, 99, 0, 111, 0,
+            109, 0, 64, 0, 81, 0, 75, 0, 65, 0, 84, 0, 73, 0, 79, 0, 78, 0, 46, 0, 67, 0, 79, 0, 77, 0,
+        ];
+
+        let expected: ApplicationTag<_, 2> = ApplicationTag(AuthenticatorInner {
+            authenticator_bno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
+            crealm: ExplicitContextTag1::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )),
+            cname: ExplicitContextTag2::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![KerberosStringAsn1::from(
+                    IA5String::from_string("p3".to_owned()).unwrap(),
+                )])),
+            }),
+            cksum: Optional::from(Some(ExplicitContextTag3::from(Checksum {
+                cksumtype: ExplicitContextTag0::from(IntegerAsn1(vec![0x00, 0x80, 0x03])),
+                checksum: ExplicitContextTag1::from(OctetStringAsn1::from(vec![
+                    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x3E, 0x00, 0x00, 0x00,
+                ])),
+            }))),
+            cusec: ExplicitContextTag4::from(IntegerAsn1::from(vec![0x08])),
+            ctime: ExplicitContextTag5::from(KerberosTime::from(Date::new(2022, 4, 5, 8, 19, 46).unwrap())),
+            subkey: Optional::from(Some(ExplicitContextTag6::from(EncryptionKey {
+                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![0x12])),
+                key_value: ExplicitContextTag1::from(OctetStringAsn1::from(vec![
+                    0x89, 0xB4, 0xE5, 0x90, 0x94, 0x12, 0x9E, 0x6F, 0x6E, 0x00, 0x0D, 0x3F, 0x15, 0x74, 0x4D, 0xBA,
+                    0xC6, 0x09, 0xA6, 0x98, 0x8D, 0x53, 0xD3, 0x58, 0x8E, 0x5F, 0x22, 0xA9, 0x3F, 0x5B, 0x47, 0x61,
+                ])),
+            }))),
+            seq_number: Optional::from(Some(ExplicitContextTag7::from(IntegerAsn1::from(vec![
+                0x68, 0xf4, 0xdf, 0xae,
+            ])))),
+            authorization_data: Optional::from(Some(ExplicitContextTag8::from(AuthorizationData::from(vec![
+                AuthorizationDataInner {
+                    ad_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![0x01])),
+                    ad_data: ExplicitContextTag1::from(OctetStringAsn1::from(vec![
+                        48, 96, 48, 14, 160, 4, 2, 2, 0, 143, 161, 6, 4, 4, 0, 64, 0, 0, 48, 78, 160, 4, 2, 2, 0, 144,
+                        161, 70, 4, 68, 84, 0, 69, 0, 82, 0, 77, 0, 83, 0, 82, 0, 86, 0, 47, 0, 112, 0, 51, 0, 46, 0,
+                        113, 0, 107, 0, 97, 0, 116, 0, 105, 0, 111, 0, 110, 0, 46, 0, 99, 0, 111, 0, 109, 0, 64, 0, 81,
+                        0, 75, 0, 65, 0, 84, 0, 73, 0, 79, 0, 78, 0, 46, 0, 67, 0, 79, 0, 77, 0,
+                    ])),
+                },
+            ])))),
+        });
+
+        let authenticator: ApplicationTag<AuthenticatorInner, 2> = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let authenticator_raw = picky_asn1_der::to_vec(&authenticator).unwrap();
+
+        assert_eq!(authenticator, expected);
+        assert_eq!(authenticator_raw, expected_raw);
+    }
+
+    #[test]
+    fn test_kerb_pa_pac_request() {
+        let expected_raw = [48, 5, 160, 3, 1, 1, 255];
+        let expected = KerbPaPacRequest {
+            include_pac: ExplicitContextTag0::from(true),
+        };
+
+        let kerb_pa_pac_request: KerbPaPacRequest = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let kerb_pa_pac_request_raw = picky_asn1_der::to_vec(&kerb_pa_pac_request).unwrap();
+
+        assert_eq!(kerb_pa_pac_request, expected);
+        assert_eq!(kerb_pa_pac_request_raw, expected_raw);
+    }
+
+    #[test]
+    fn test_etype_info2_entry() {
+        let expected_raw = [
+            48, 22, 160, 3, 2, 1, 18, 161, 15, 27, 13, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 112, 51,
+        ];
+        let expected = EtypeInfo2Entry {
+            etype: ExplicitContextTag0::from(IntegerAsn1::from(vec![0x12])),
+            salt: Optional::from(Some(ExplicitContextTag1::from(KerberosStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COMp3".to_owned()).unwrap(),
+            )))),
+            s2kparams: Optional::from(None),
+        };
+
+        let etype_info2_entry: EtypeInfo2Entry = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let etype_info2_entry_raw = picky_asn1_der::to_vec(&etype_info2_entry).unwrap();
+
+        assert_eq!(etype_info2_entry, expected);
+        assert_eq!(etype_info2_entry_raw, expected_raw);
+    }
+
+    #[test]
+    fn test_pa_enc_ts_enc() {
+        let expected_raw = vec![
+            48, 24, 160, 17, 24, 15, 50, 48, 50, 50, 48, 52, 48, 53, 48, 56, 49, 57, 52, 54, 90, 161, 3, 2, 1, 32,
+        ];
+        let expected = PaEncTsEnc {
+            patimestamp: ExplicitContextTag0::from(KerberosTime::from(Date::new(2022, 4, 5, 8, 19, 46).unwrap())),
+            pausec: Optional::from(Some(ExplicitContextTag1::from(Microseconds::from(vec![32])))),
+        };
+
+        let pa_enc_ts_enc: PaEncTsEnc = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let pa_enc_ts_enc_raw = picky_asn1_der::to_vec(&expected).unwrap();
+
+        assert_eq!(pa_enc_ts_enc, expected);
+        assert_eq!(pa_enc_ts_enc_raw, expected_raw);
+    }
 }
