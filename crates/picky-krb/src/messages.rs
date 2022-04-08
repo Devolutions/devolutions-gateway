@@ -1,7 +1,3 @@
-use crate::data_types::{
-    ApOptions, EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, LastReq,
-    Microseconds, PaData, PrincipalName, Realm, Ticket,
-};
 use picky_asn1::wrapper::{
     Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10, ExplicitContextTag11,
     ExplicitContextTag12, ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5,
@@ -11,6 +7,17 @@ use picky_asn1::wrapper::{
 use picky_asn1_der::application_tag::ApplicationTag;
 use picky_asn1_der::Asn1DerError;
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    constants::types::{
+        AP_REP_MSG_TYPE, AP_REQ_MSG_TYPE, AS_REP_MSG_TYPE, AS_REQ_MSG_TYPE, ENC_AS_REP_PART_TYPE,
+        ENC_TGS_REP_PART_TYPE, KRB_ERROR_MSG_TYPE, TGS_REP_MSG_TYPE, TGS_REQ_MSG_TYPE,
+    },
+    data_types::{
+        ApOptions, EncryptedData, EncryptionKey, HostAddress, KerberosFlags, KerberosStringAsn1, KerberosTime, LastReq,
+        Microseconds, PaData, PrincipalName, Realm, Ticket,
+    },
+};
 
 /// [2.2.2 KDC_PROXY_MESSAGE](https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-kkdcp/5778aff5-b182-4b97-a970-29c7f911eef2)
 ///
@@ -119,14 +126,14 @@ pub struct KdcReq {
 /// ```not_rust
 /// AS-REQ          ::= [APPLICATION 10] KDC-REQ
 /// ```
-pub type AsReq = ApplicationTag<KdcReq, 10>;
+pub type AsReq = ApplicationTag<KdcReq, AS_REQ_MSG_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// TGS-REQ         ::= [APPLICATION 12] KDC-REQ
 /// ```
-pub type TgsReq = ApplicationTag<KdcReq, 12>;
+pub type TgsReq = ApplicationTag<KdcReq, TGS_REQ_MSG_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -158,14 +165,14 @@ pub struct KdcRep {
 /// ```not_rust
 /// AS-REP          ::= [APPLICATION 11] KDC-REP
 /// ```
-pub type AsRep = ApplicationTag<KdcRep, 11>;
+pub type AsRep = ApplicationTag<KdcRep, AS_REP_MSG_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// TGS-REP         ::= [APPLICATION 13] KDC-REP
 /// ```
-pub type TgsRep = ApplicationTag<KdcRep, 13>;
+pub type TgsRep = ApplicationTag<KdcRep, TGS_REP_MSG_TYPE>;
 
 /// [RFC 4120 5.9.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -205,7 +212,7 @@ pub struct KrbErrorInner {
     e_data: Optional<Option<ExplicitContextTag12<OctetStringAsn1>>>,
 }
 
-pub type KrbError = ApplicationTag<KrbErrorInner, 30>;
+pub type KrbError = ApplicationTag<KrbErrorInner, KRB_ERROR_MSG_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -250,14 +257,14 @@ pub struct EncKdcRepPart {
 /// ```not_rust
 /// EncASRepPart    ::= [APPLICATION 25] EncKDCRepPart
 /// ```
-pub type EncAsRepPart = ApplicationTag<EncKdcRepPart, 25>;
+pub type EncAsRepPart = ApplicationTag<EncKdcRepPart, ENC_AS_REP_PART_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not_rust
 /// EncTGSRepPart   ::= [APPLICATION 26] EncKDCRepPart
 /// ```
-pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, 26>;
+pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, ENC_TGS_REP_PART_TYPE>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApReqInner {
@@ -268,7 +275,7 @@ pub struct ApReqInner {
     pub authenticator: ExplicitContextTag4<EncryptedData>,
 }
 
-pub type ApReq = ApplicationTag<ApReqInner, 14>;
+pub type ApReq = ApplicationTag<ApReqInner, AP_REQ_MSG_TYPE>;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApRepInner {
@@ -276,7 +283,7 @@ pub struct ApRepInner {
     pub msg_type: ExplicitContextTag1<IntegerAsn1>,
     pub enc_part: ExplicitContextTag2<EncryptedData>,
 }
-pub type ApRep = ApplicationTag<ApRepInner, 15>;
+pub type ApRep = ApplicationTag<ApRepInner, AP_REP_MSG_TYPE>;
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,8 @@ use picky_asn1::wrapper::{
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::{Deserialize, Serialize};
 
+use crate::constants::types::{TICKET_TYPE, AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE};
+
 /// [RFC 4120 5.2.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
 /// ```not-rust
@@ -143,7 +145,7 @@ pub struct TicketInner {
     pub enc_part: ExplicitContextTag3<EncryptedData>,
 }
 
-pub type Ticket = ApplicationTag<TicketInner, 1>;
+pub type Ticket = ApplicationTag<TicketInner, TICKET_TYPE>;
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -272,7 +274,7 @@ pub struct AuthenticatorInner {
     #[serde(default)]
     pub authorization_data: Optional<Option<ExplicitContextTag8<AuthorizationData>>>,
 }
-pub type Authenticator = ApplicationTag<AuthenticatorInner, 2>;
+pub type Authenticator = ApplicationTag<AuthenticatorInner, AUTHENTICATOR_TYPE_TYPE>;
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.2)
 ///
@@ -293,7 +295,7 @@ pub struct EncApRepPartInner {
     #[serde(default)]
     pub seq_number: Optional<Option<ExplicitContextTag3<IntegerAsn1>>>,
 }
-pub type EncApRepPart = ApplicationTag<EncApRepPartInner, 27>;
+pub type EncApRepPart = ApplicationTag<EncApRepPartInner, ENC_AP_REP_PART_TYPE>;
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.5)
 ///

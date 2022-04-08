@@ -8,6 +8,8 @@ pub mod types {
     pub const TGT_REQ_MSG_TYPE: u8 = 0x10;
     pub const TGT_REP_MSG_TYPE: u8 = 0x11;
 
+    pub const KRB_ERROR_MSG_TYPE: u8 = 0x1e;
+
     pub const NT_PRINCIPAL: u8 = 0x01;
     pub const NT_SRV_INST: u8 = 0x02;
 
@@ -17,6 +19,12 @@ pub mod types {
     pub const PA_ETYPE_INFO2_TYPE: [u8; 1] = [0x13];
     pub const PA_TGS_REQ_TYPE: [u8; 1] = [0x01];
     pub const PA_PAC_OPTIONS_TYPE: [u8; 2] = [0x00, 0xa7];
+
+    pub const TICKET_TYPE: u8 = 1;
+    pub const AUTHENTICATOR_TYPE_TYPE: u8 = 2;
+    pub const ENC_AS_REP_PART_TYPE: u8 = 25;
+    pub const ENC_TGS_REP_PART_TYPE: u8 = 26;
+    pub const ENC_AP_REP_PART_TYPE: u8 = 27;
 }
 
 pub mod oids {
