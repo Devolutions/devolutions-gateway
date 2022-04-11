@@ -195,24 +195,40 @@ pub type TgsRep = ApplicationTag<KdcRep, TGS_REP_MSG_TYPE>;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct KrbErrorInner {
-    pvno: ExplicitContextTag0<IntegerAsn1>,
-    msg_type: ExplicitContextTag1<IntegerAsn1>,
-    ctime: Optional<Option<ExplicitContextTag2<KerberosTime>>>,
-    cusec: Optional<Option<ExplicitContextTag3<KerberosTime>>>,
-    stime: ExplicitContextTag4<KerberosTime>,
-    susec: ExplicitContextTag5<Microseconds>,
-    error_code: ExplicitContextTag6<IntegerAsn1>,
-    crealm: Optional<Option<ExplicitContextTag7<Realm>>>,
-    cname: Optional<Option<ExplicitContextTag8<PrincipalName>>>,
-    realm: ExplicitContextTag9<Realm>,
-    sname: ExplicitContextTag10<PrincipalName>,
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub ctime: Optional<Option<ExplicitContextTag2<KerberosTime>>>,
+    pub cusec: Optional<Option<ExplicitContextTag3<KerberosTime>>>,
+    pub stime: ExplicitContextTag4<KerberosTime>,
+    pub susec: ExplicitContextTag5<Microseconds>,
+    pub error_code: ExplicitContextTag6<IntegerAsn1>,
+    pub crealm: Optional<Option<ExplicitContextTag7<Realm>>>,
+    pub cname: Optional<Option<ExplicitContextTag8<PrincipalName>>>,
+    pub realm: ExplicitContextTag9<Realm>,
+    pub sname: ExplicitContextTag10<PrincipalName>,
     #[serde(default)]
-    e_text: Optional<Option<ExplicitContextTag11<KerberosStringAsn1>>>,
+    pub e_text: Optional<Option<ExplicitContextTag11<KerberosStringAsn1>>>,
     #[serde(default)]
-    e_data: Optional<Option<ExplicitContextTag12<OctetStringAsn1>>>,
+    pub e_data: Optional<Option<ExplicitContextTag12<OctetStringAsn1>>>,
 }
 
 pub type KrbError = ApplicationTag<KrbErrorInner, KRB_ERROR_MSG_TYPE>;
+
+impl ToString for KrbErrorInner {
+    fn to_string(&self) -> String {
+        let mut be_byes = [0, 0, 0, 0];
+        let error_code_bytes = self.error_code.0.as_signed_bytes_be();
+        let len = error_code_bytes.len();
+
+        if len < 4 {
+            be_byes[0..len].copy_from_slice(error_code_bytes);
+        } else {
+            be_byes.copy_from_slice(&error_code_bytes[0..4]);
+        }
+
+        format!("error code: {}", i32::from_be_bytes(be_byes))
+    }
+}
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///

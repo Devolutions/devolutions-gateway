@@ -3,10 +3,13 @@ use picky_asn1::wrapper::{
     ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8,
     GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
 };
-use picky_asn1_der::application_tag::ApplicationTag;
+use picky_asn1_der::{application_tag::ApplicationTag, Asn1DerError};
 use serde::{Deserialize, Serialize};
 
-use crate::constants::types::{AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE, TICKET_TYPE};
+use crate::{
+    constants::types::{AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE, TICKET_TYPE},
+    messages::KrbError,
+};
 
 /// [RFC 4120 5.2.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -322,6 +325,24 @@ pub struct EtypeInfo2Entry {
 /// ```
 pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 
+#[derive(Debug, PartialEq)]
+pub enum KrbResult<T> {
+    Ok(T),
+    Err(KrbError),
+}
+
+impl<'a, T: Deserialize<'a>> KrbResult<T> {
+    pub fn from_bytes(data: &'a [u8]) -> Result<KrbResult<T>, Asn1DerError> {
+        match picky_asn1_der::from_bytes(data) {
+            Ok(item) => Ok(KrbResult::Ok(item)),
+            Err(_) => match picky_asn1_der::from_bytes(data) {
+                Ok(krb_error) => Ok(KrbResult::Err(krb_error)),
+                Err(err) => Err(err),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
@@ -329,16 +350,18 @@ mod tests {
         EncryptedData, EncryptionKey, EtypeInfo2Entry, HostAddress, KerbPaPacRequest, KerberosStringAsn1, KerberosTime,
         LastReqInner, PaData, PrincipalName,
     };
+    use crate::messages::{AsReq, KdcReqBody, KdcReq, KrbError, KrbErrorInner};
+    use picky_asn1::bit_string::BitString;
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
     use picky_asn1::wrapper::{
         Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
         ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8,
-        GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional,
+        GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional, BitStringAsn1, GeneralizedTimeAsn1, ExplicitContextTag9, ExplicitContextTag10, ExplicitContextTag11,
     };
     use picky_asn1_der::application_tag::ApplicationTag;
 
-    use super::{Microseconds, PaEncTsEnc};
+    use super::{Microseconds, PaEncTsEnc, KrbResult};
 
     #[test]
     fn test_kerberos_string() {
@@ -696,5 +719,111 @@ mod tests {
 
         assert_eq!(enc_ap_rep_part, expected);
         assert_eq!(enc_ap_rep_part_raw, expected_raw);
+    }
+
+    #[test]
+    fn test_krb_result() {
+        let raw_as_req = vec![
+            106, 129, 181, 48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10, 161, 4, 2, 2, 0,
+            150, 162, 2, 4, 0, 48, 10, 161, 4, 2, 2, 0, 149, 162, 2, 4, 0, 164, 129, 137, 48, 129, 134, 160, 7, 3, 5,
+            0, 0, 0, 0, 16, 161, 19, 48, 17, 160, 3, 2, 1, 1, 161, 10, 48, 8, 27, 6, 109, 121, 117, 115, 101, 114, 162,
+            13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 163, 32, 48, 30, 160, 3, 2, 1, 2, 161, 23, 48, 21,
+            27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 165, 17, 24, 15,
+            50, 48, 50, 49, 49, 50, 50, 57, 49, 48, 51, 54, 48, 54, 90, 167, 6, 2, 4, 29, 32, 235, 11, 168, 26, 48, 24,
+            2, 1, 18, 2, 1, 17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
+        ];
+        let raw_error = vec![126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
+            50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
+            65, 77, 80, 76, 69, 46, 67, 79, 77, 168, 21, 48, 19, 160, 3, 2, 1, 1, 161, 12, 48, 10, 27, 8, 98, 97, 100,
+            95, 117, 115, 101, 114, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 32, 48, 30, 160,
+            3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
+            67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,];
+
+        let krb_result = KrbResult::<AsReq>::from_bytes(&raw_as_req).unwrap();
+
+        assert_eq!(KrbResult::Ok(AsReq::from(KdcReq {
+            pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
+            padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf::from(vec![
+                PaData {
+                    padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 150])),
+                    padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
+                },
+                PaData {
+                    padata_type: ExplicitContextTag1::from(IntegerAsn1(vec![0, 149])),
+                    padata_data: ExplicitContextTag2::from(OctetStringAsn1(Vec::new())),
+                },
+            ])))),
+            req_body: ExplicitContextTag4::from(KdcReqBody {
+                kdc_options: ExplicitContextTag0::from(BitStringAsn1::from(BitString::with_bytes(vec![0, 0, 0, 16]))),
+                cname: Optional::from(Some(ExplicitContextTag1::from(PrincipalName {
+                    name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                    name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![GeneralStringAsn1::from(
+                        IA5String::from_string("myuser".to_owned()).unwrap(),
+                    )])),
+                }))),
+                realm: ExplicitContextTag2::from(GeneralStringAsn1::from(
+                    IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+                )),
+                sname: Optional::from(Some(ExplicitContextTag3::from(PrincipalName {
+                    name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                    name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                        KerberosStringAsn1::from(IA5String::from_string("krbtgt".to_owned()).unwrap()),
+                        KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                    ])),
+                }))),
+                from: Optional::from(None),
+                till: ExplicitContextTag5::from(KerberosTime::from(Date::new(2021, 12, 29, 10, 36, 6).unwrap())),
+                rtime: Optional::from(None),
+                nonce: ExplicitContextTag7::from(IntegerAsn1(vec![29, 32, 235, 11])),
+                etype: ExplicitContextTag8::from(Asn1SequenceOf::from(vec![
+                    IntegerAsn1(vec![18]),
+                    IntegerAsn1(vec![17]),
+                    IntegerAsn1(vec![20]),
+                    IntegerAsn1(vec![19]),
+                    IntegerAsn1(vec![16]),
+                    IntegerAsn1(vec![23]),
+                    IntegerAsn1(vec![25]),
+                    IntegerAsn1(vec![26]),
+                ])),
+                addresses: Optional::from(None),
+                enc_authorization_data: Optional::from(None),
+                additional_tickets: Optional::from(None),
+            }),
+        })), krb_result);
+
+        let krb_result = KrbResult::<AsReq>::from_bytes(&raw_error).unwrap();
+        assert_eq!(KrbResult::Err(KrbError::from(KrbErrorInner {
+            pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
+            msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
+            ctime: Optional::from(None),
+            cusec: Optional::from(None),
+            stime: ExplicitContextTag4::from(GeneralizedTimeAsn1::from(Date::new(2021, 12, 28, 13, 40, 11).unwrap())),
+            susec: ExplicitContextTag5::from(IntegerAsn1(vec![12, 139, 242])),
+            error_code: ExplicitContextTag6::from(IntegerAsn1(vec![6])),
+            crealm: Optional::from(Some(ExplicitContextTag7::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )))),
+            cname: Optional::from(Some(ExplicitContextTag8::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![1])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![GeneralStringAsn1::from(
+                    IA5String::from_string("bad_user".to_owned()).unwrap(),
+                )])),
+            }))),
+            realm: ExplicitContextTag9::from(GeneralStringAsn1::from(
+                IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap(),
+            )),
+            sname: ExplicitContextTag10::from(PrincipalName {
+                name_type: ExplicitContextTag0::from(IntegerAsn1(vec![2])),
+                name_string: ExplicitContextTag1::from(Asn1SequenceOf::from(vec![
+                    KerberosStringAsn1::from(IA5String::from_string("krbtgt".to_owned()).unwrap()),
+                    KerberosStringAsn1::from(IA5String::from_string("EXAMPLE.COM".to_owned()).unwrap()),
+                ])),
+            }),
+            e_text: Optional::from(Some(ExplicitContextTag11::from(GeneralStringAsn1::from(
+                IA5String::from_string("CLIENT_NOT_FOUND".to_owned()).unwrap(),
+            )))),
+            e_data: Optional::from(None),
+        })), krb_result);
     }
 }
