@@ -6,7 +6,7 @@ use picky_asn1::wrapper::{
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::{Deserialize, Serialize};
 
-use crate::constants::types::{TICKET_TYPE, AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE};
+use crate::constants::types::{AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE, TICKET_TYPE};
 
 /// [RFC 4120 5.2.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
 ///
@@ -70,8 +70,8 @@ pub struct HostAddress {
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct AuthorizationDataInner {
-    ad_type: ExplicitContextTag0<IntegerAsn1>,
-    ad_data: ExplicitContextTag1<OctetStringAsn1>,
+    pub ad_type: ExplicitContextTag0<IntegerAsn1>,
+    pub ad_data: ExplicitContextTag1<OctetStringAsn1>,
 }
 
 pub type AuthorizationData = Asn1SequenceOf<AuthorizationDataInner>;
@@ -325,9 +325,9 @@ pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
-        AuthenticatorInner, AuthorizationData, AuthorizationDataInner, Checksum, EncryptedData, EncryptionKey,
-        EtypeInfo2Entry, HostAddress, KerbPaPacRequest, KerberosStringAsn1, KerberosTime, LastReqInner, PaData,
-        PrincipalName,
+        AuthenticatorInner, AuthorizationData, AuthorizationDataInner, Checksum, EncApRepPart, EncApRepPartInner,
+        EncryptedData, EncryptionKey, EtypeInfo2Entry, HostAddress, KerbPaPacRequest, KerberosStringAsn1, KerberosTime,
+        LastReqInner, PaData, PrincipalName,
     };
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
@@ -666,5 +666,35 @@ mod tests {
 
         assert_eq!(pa_enc_ts_enc, expected);
         assert_eq!(pa_enc_ts_enc_raw, expected_raw);
+    }
+
+    #[test]
+    fn test_enc_ap_rep_part() {
+        let expected_raw = vec![
+            123, 79, 48, 77, 160, 17, 24, 15, 50, 48, 50, 50, 48, 52, 48, 57, 49, 49, 49, 54, 52, 52, 90, 161, 3, 2, 1,
+            43, 162, 43, 48, 41, 160, 3, 2, 1, 18, 161, 34, 4, 32, 225, 45, 62, 116, 165, 142, 214, 44, 102, 216, 202,
+            158, 12, 78, 40, 121, 161, 178, 118, 68, 81, 178, 188, 246, 235, 201, 45, 41, 17, 64, 189, 185, 163, 6, 2,
+            4, 74, 244, 122, 62,
+        ];
+        let expected = EncApRepPart::from(EncApRepPartInner {
+            ctime: ExplicitContextTag0::from(KerberosTime::from(Date::new(2022, 4, 9, 11, 16, 44).unwrap())),
+            cusec: ExplicitContextTag1::from(Microseconds::from(vec![0x2b])),
+            subkey: Optional::from(Some(ExplicitContextTag2::from(EncryptionKey {
+                key_type: ExplicitContextTag0::from(IntegerAsn1::from(vec![0x12])),
+                key_value: ExplicitContextTag1::from(OctetStringAsn1::from(vec![
+                    0xe1, 0x2d, 0x3e, 0x74, 0xa5, 0x8e, 0xd6, 0x2c, 0x66, 0xd8, 0xca, 0x9e, 0x0c, 0x4e, 0x28, 0x79,
+                    0xa1, 0xb2, 0x76, 0x44, 0x51, 0xb2, 0xbc, 0xf6, 0xeb, 0xc9, 0x2d, 0x29, 0x11, 0x40, 0xbd, 0xb9,
+                ])),
+            }))),
+            seq_number: Optional::from(Some(ExplicitContextTag3::from(IntegerAsn1::from(vec![
+                0x4a, 0xf4, 0x7a, 0x3e,
+            ])))),
+        });
+
+        let enc_ap_rep_part: EncApRepPart = picky_asn1_der::from_bytes(&expected_raw).unwrap();
+        let enc_ap_rep_part_raw = picky_asn1_der::to_vec(&expected).unwrap();
+
+        assert_eq!(enc_ap_rep_part, expected);
+        assert_eq!(enc_ap_rep_part_raw, expected_raw);
     }
 }

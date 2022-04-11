@@ -29,7 +29,15 @@ pub mod types {
 
 pub mod oids {
     pub const SPNEGO: &str = "1.3.6.1.5.5.2";
-    pub const MSKRB5: &str = "1.2.840.48018.1.2.2";
+    pub const MS_KRB5: &str = "1.2.840.48018.1.2.2";
     pub const KRB5: &str = "1.2.840.113554.1.2.2";
+    pub const KRB5_USER_TO_USER: &str = "1.2.840.113554.1.2.2.3";
     pub const NTLM_SSP: &str = "1.3.6.1.4.1.311.2.2.10";
+}
+
+pub mod key_usages {
+    pub const ACCEPTOR_SEAL: i32 = 22;
+    pub const ACCEPTOR_SIGN: i32 = 23;
+    pub const INITIATOR_SEAL: i32 = 24;
+    pub const INITIATOR_SIGN: i32 = 25;
 }
