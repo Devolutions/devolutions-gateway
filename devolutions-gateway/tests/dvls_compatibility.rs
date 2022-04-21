@@ -41,6 +41,7 @@ fn encode_decode_round_trip<C>(
     pub_key: &PublicKey,
     priv_key: &PrivateKey,
     claims: C,
+    cty: Option<String>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> anyhow::Result<()>
@@ -48,13 +49,109 @@ where
     C: serde::ser::Serialize,
 {
     // DVLS side
-    let token = CheckedJwtSig::new(JwsAlg::RS256, claims).encode(priv_key)?;
+    let mut token = CheckedJwtSig::new(JwsAlg::RS256, claims);
+    if let Some(cty) = cty {
+        token.header.cty = Some(cty);
+    }
+    let token = token.encode(priv_key)?;
 
     // Gateway side
     let source_ip = std::net::IpAddr::from([13u8, 12u8, 11u8, 10u8]);
     devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None, token_cache, jrl)?;
 
     Ok(())
+}
+
+mod as_of_v2022_2_0_0 {
+    use super::*;
+    use proptest::collection::vec;
+
+    const CTY_ASSOCIATION: &str = "ASSOCIATION";
+    const TYPE_ASSOCIATION: &str = "association";
+    const JET_CM: &str = "fwd";
+
+    #[derive(Serialize, Debug)]
+    struct DvlsAssociationClaims {
+        #[serde(rename = "type")]
+        ty: &'static str,
+        jet_aid: String,
+        jet_ap: String,
+        jet_cm: &'static str,
+        dst_hst: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dst_alt: Vec<String>,
+        nbf: i64,
+        exp: i64,
+        jti: String,
+    }
+
+    prop_compose! {
+        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?") -> String {
+            host
+        }
+    }
+
+    prop_compose! {
+        fn dvls_application_protocol()(protocol in "(rdp|ssh)") -> String {
+            protocol
+        }
+    }
+
+    prop_compose! {
+        fn dvls_alternate_hosts()(alternates in vec(dvls_host(), 0..4)) -> Vec<String> {
+            alternates
+        }
+    }
+
+    prop_compose! {
+        fn dvls_association_claims(
+            now: i64
+        )(
+            jet_aid in uuid_str(),
+            jet_ap in dvls_application_protocol(),
+            dst_hst in dvls_host(),
+            dst_alt in dvls_alternate_hosts(),
+            jti in uuid_str(),
+        ) -> DvlsAssociationClaims {
+            DvlsAssociationClaims {
+                ty: TYPE_ASSOCIATION,
+                jet_aid,
+                jet_ap,
+                jet_cm: JET_CM,
+                dst_hst,
+                dst_alt,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            }
+        }
+    }
+
+    /// Make sure current Gateway is able to validate association tokens provided by DVLS
+    #[test]
+    fn association_token_validation() {
+        let token_cache = new_token_cache();
+        let jrl = Mutex::new(JrlTokenClaims::default());
+        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
+        let pub_key = priv_key.to_public_key();
+        let now = chrono::Utc::now().timestamp();
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
+            encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_ASSOCIATION.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    const ASSOCIATION_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NTA0MDM2NzIsImV4cCI6MTY1MDQwMzk3MiwiaWF0IjoxNjUwNDAzNjcyLCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJzc2giLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTI4LjEyOC4xMjguMTgyOjIyIiwiamV0X2FpZCI6ImQwMWMwOWQ0LTc2NjItNDdlZS1hNzBkLWJmNDlkMDVlZDI2ZSIsImp0aSI6IjQzZWEyN2Y3LTk3NGEtNDVjZC1iMjdiLWI4OGQ3N2QzMzc4NCJ9.QLW4cjLj8hAz3iX5mNKXZtUXA0MaEfbrCbt8to2Ptqqv2iJSArTtCqvXCTnqpwKPKsHx25-2E8xHHfrXVrqLOZcwag-jECLNDggpwtHgm6YM4wZ44Rzh15hWjHUPi1ZwGmuiDuZbVLfCXt6SGeHpGmHr9YkIBd4ay2hs_pJ02faPYT5rJBA8LT1z-rRK76VhOlsrf4mrD43xH_2v3ANchIukp-kZOMouJNb6iU6ZBCzREaEY7gtGZCtTb4qleEHSlJ6r-Tu-w_lqCyuxKo5uO3mAGyHk5QRS83xfx1NV8VaWO4X4UzcL66TnkR5LOoIbf_x2Tw5teBF5QkxUZ7Q_8Q";
+    const SCOPE_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlNDT1BFIn0.eyJuYmYiOjE2NTA0MDM0ODEsImV4cCI6MTY1MDQwMzc4MSwiaWF0IjoxNjUwNDAzNDgxLCJzY29wZSI6ImdhdGV3YXkuZGlhZ25vc3RpY3MucmVhZCIsImp0aSI6Ijc4MTk2ODRkLTQ5ZjktNDExYy05ZGFiLTE2M2MwMjJiOTlhMCIsInR5cGUiOiJzY29wZSJ9.qxiHVjlvrbUdxyBApV1asWdYGE0VzF2FPiJtWYr0EjN7TJv3mWIZbpXGkQQoWoPs9qOBKOp6atrXXbhrfbxwIH32s07RI7W6_mOxRwIag1G7SRHXHLXZWH8Jw-t_my7BYS90-lr_hcLoirb6pDVhTFe70RoEL9rjl8jitWel8vC8rmbXIdzQGbcbA6Ed41mksCwEfvMCHIt8xnkmu7krFTbmN9kWwGgGnEryzX-tbq6H6DzQ26n9diliy6O24Zk5oKf8zZ6K5ACFEuL_xPnqr37Ttl7wmvt7bS3ugz6Lop5weXD9yB9GOxpai7yit0Ri-0qVNCt9rzQ-9od3_4Kj7Q";
+    const SAMPLES: &[&str] = &[ASSOCIATION_TOKEN_SAMPLE, SCOPE_TOKEN_SAMPLE];
+
+    #[test]
+    fn samples() {
+        for (idx, sample) in SAMPLES.into_iter().enumerate() {
+            let idx = idx.to_string();
+            #[allow(deprecated)]
+            devolutions_gateway::token::unsafe_debug::dangerous_validate_token(sample, None).expect(&idx);
+        }
+    }
 }
 
 mod as_of_v2021_2_13_0 {
@@ -128,7 +225,7 @@ mod as_of_v2021_2_13_0 {
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
@@ -201,7 +298,7 @@ mod as_of_v2021_2_4 {
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }
@@ -252,7 +349,7 @@ mod as_of_v2021_1_7_0 {
         let pub_key = priv_key.to_public_key();
         let now = chrono::Utc::now().timestamp();
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }

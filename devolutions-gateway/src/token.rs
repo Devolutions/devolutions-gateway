@@ -658,6 +658,10 @@ pub mod unsafe_debug {
     use super::*;
     use picky::jose::jwt;
 
+    /// Dangerous token validation procedure.
+    ///
+    /// Most security checks are removed.
+    /// This will basically only checks for content type and attempt to deserialize into the appropriate struct. No more.
     pub fn dangerous_validate_token(
         token: &str,
         delegation_key: Option<&PrivateKey>,
