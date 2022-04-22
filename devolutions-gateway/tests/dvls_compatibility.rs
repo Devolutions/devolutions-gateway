@@ -92,7 +92,7 @@ mod as_of_v2022_2_0_0 {
     }
 
     prop_compose! {
-        fn dvls_application_protocol()(protocol in "(rdp|ssh)") -> String {
+        fn dvls_application_protocol()(protocol in "(rdp|ssh|sftp|scp|ard|pwsh)") -> String {
             protocol
         }
     }

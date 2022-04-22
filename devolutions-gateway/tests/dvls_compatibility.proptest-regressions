@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 229c3ee33947347fe40f4d061636904b5e59f7aa7f58323d502cda6a5f6841f9 # shrinks to claims = AssociationClaims { ty: "association", jet_aid: "83803365-5577-5603-6789-789499930409", jet_ap: "rdp", jet_cm: "fwd", dst_hst: "qjncsynq.p", dst_alt: [], nbf: 1639427462, exp: 1639428462 }
+cc d746c87bbb900d057b55d11eef0acc1cdbf724a172f79cb9c5b7c24229d9e0ce # shrinks to claims = DvlsAssociationClaims { ty: "association", jet_aid: "94245289-1677-2060-2471-822240899998", jet_ap: "pwsh", jet_cm: "fwd", dst_hst: "selszilee.mifwq", dst_alt: ["hvtu.vau", "pxajd.gm"], nbf: 1650893420, exp: 1650894420, jti: "19219043-5943-7253-3784-534349478719" }

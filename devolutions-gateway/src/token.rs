@@ -119,6 +119,7 @@ pub enum ApplicationProtocol {
     Ard,
     Ssh,
     Sftp,
+    Scp,
     #[serde(other)]
     Unknown,
 }
@@ -127,11 +128,12 @@ impl ApplicationProtocol {
     pub fn known_default_port(self) -> Option<u16> {
         match self {
             ApplicationProtocol::Wayk => None,
-            ApplicationProtocol::Pwsh => None,
+            ApplicationProtocol::Pwsh => Some(22),
             ApplicationProtocol::Rdp => Some(3389),
             ApplicationProtocol::Ard => Some(3283),
             ApplicationProtocol::Ssh => Some(22),
             ApplicationProtocol::Sftp => Some(22),
+            ApplicationProtocol::Scp => Some(22),
             ApplicationProtocol::Unknown => None,
         }
     }
