@@ -102,5 +102,5 @@ async fn auth_middleware(
         return Ok(ctx);
     }
 
-    Ok(chain.next(ctx).await?)
+    chain.next(ctx).await
 }
