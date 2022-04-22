@@ -304,7 +304,7 @@ impl HandleAcceptJetMsg {
             .transport
             .as_mut()
             .expect("Must not be taken upon successful call to handle_set_transport");
-        transport.write(&response_msg).await?;
+        transport.write_all(&response_msg).await?;
         self.handle_set_transport().await
     }
 }
@@ -373,7 +373,7 @@ async fn handle_connect_jet_msg(
     });
     connect_response_msg.write_to(&mut response_msg)?;
 
-    client_transport.write(&response_msg).await?;
+    client_transport.write_all(&response_msg).await?;
 
     // If server stream found, start the proxy
     match (
