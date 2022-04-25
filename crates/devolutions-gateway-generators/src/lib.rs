@@ -29,10 +29,10 @@ pub fn token_content_type() -> impl Strategy<Value = token::ContentType> {
 pub fn application_protocol() -> impl Strategy<Value = ApplicationProtocol> {
     prop_oneof![
         Just(ApplicationProtocol::Wayk),
-        Just(ApplicationProtocol::Pwsh),
         Just(ApplicationProtocol::Rdp),
         Just(ApplicationProtocol::Ard),
         Just(ApplicationProtocol::Ssh),
+        Just(ApplicationProtocol::SshPwsh),
         Just(ApplicationProtocol::Sftp),
         Just(ApplicationProtocol::Unknown),
     ]
