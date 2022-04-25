@@ -1,6 +1,7 @@
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{anyhow, Context as _, Result};
-use futures_util::future;
+use core::time::Duration;
+use futures_util::{future, Future};
 use proxy_types::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -107,4 +108,16 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
             Ok((read, write, rsp))
         }
     })
+}
+
+#[track_caller]
+pub async fn timeout<T, Fut>(duration: Option<Duration>, future: Fut) -> Result<T>
+where
+    Fut: Future<Output = Result<T>>,
+{
+    if let Some(duration) = duration {
+        tokio::time::timeout(duration, future).await?
+    } else {
+        future.await
+    }
 }

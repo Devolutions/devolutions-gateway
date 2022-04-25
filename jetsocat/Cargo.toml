@@ -30,9 +30,10 @@ proxy_cfg = { version = "0.4.1", optional = true }
 
 # cli
 seahorse = "2.0.0"
+humantime = "2.1.0"
 
 # async
-tokio = { version = "1.17.0", features = ["io-std", "io-util", "net", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio = { version = "1.17.0", features = ["io-std", "io-util", "net", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
 tokio-tungstenite = "0.17.1"
 futures-util = "0.3.21"
 transport = { path = "../crates/transport" }

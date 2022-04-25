@@ -5,6 +5,8 @@ pub mod proxy;
 mod jet;
 mod utils;
 
+use anyhow::Context as _;
+use core::time::Duration;
 use jmux_proxy::JmuxConfig;
 use slog::*;
 
@@ -13,6 +15,7 @@ pub struct ForwardCfg {
     pub pipe_a_mode: pipe::PipeMode,
     pub pipe_b_mode: pipe::PipeMode,
     pub repeat_count: usize,
+    pub timeout: Option<Duration>,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
 }
 
@@ -26,10 +29,20 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
         debug!(log, "Repeat count {}/{}", count, cfg.repeat_count);
 
         let pipe_a_log = log.new(o!("open pipe" => "A"));
-        let pipe_a = open_pipe(cfg.pipe_a_mode.clone(), cfg.proxy_cfg.clone(), pipe_a_log).await?;
+        let pipe_a = utils::timeout(
+            cfg.timeout,
+            open_pipe(cfg.pipe_a_mode.clone(), cfg.proxy_cfg.clone(), pipe_a_log),
+        )
+        .await
+        .context("Couldn't open pipe A")?;
 
         let pipe_b_log = log.new(o!("open pipe" => "B"));
-        let pipe_b = open_pipe(cfg.pipe_b_mode.clone(), cfg.proxy_cfg.clone(), pipe_b_log).await?;
+        let pipe_b = utils::timeout(
+            cfg.timeout,
+            open_pipe(cfg.pipe_b_mode.clone(), cfg.proxy_cfg.clone(), pipe_b_log),
+        )
+        .await
+        .context("Couldn't open pipe B")?;
 
         pipe(pipe_a, pipe_b, log.clone()).await.context("Failed to pipe")?;
     }
@@ -42,6 +55,7 @@ pub struct JmuxProxyCfg {
     pub pipe_mode: pipe::PipeMode,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
     pub listener_modes: Vec<self::listener::ListenerMode>,
+    pub timeout: Option<Duration>,
     pub jmux_cfg: JmuxConfig,
 }
 
@@ -85,7 +99,9 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
 
     // Open generic pipe to exchange JMUX channel messages on
     let pipe_log = log.new(o!("open pipe" => "JMUX pipe"));
-    let pipe = open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log).await?;
+    let pipe = utils::timeout(cfg.timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log))
+        .await
+        .context("Couldn't open pipe")?;
 
     // Start JMUX proxy over the pipe
     JmuxProxy::new(pipe.read, pipe.write)
