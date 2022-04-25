@@ -114,10 +114,11 @@ impl AccessTokenClaims {
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationProtocol {
     Wayk,
-    Pwsh,
     Rdp,
     Ard,
     Ssh,
+    /// PowerShell over SSH
+    SshPwsh,
     Sftp,
     Scp,
     #[serde(other)]
@@ -128,10 +129,10 @@ impl ApplicationProtocol {
     pub fn known_default_port(self) -> Option<u16> {
         match self {
             ApplicationProtocol::Wayk => None,
-            ApplicationProtocol::Pwsh => Some(22),
             ApplicationProtocol::Rdp => Some(3389),
             ApplicationProtocol::Ard => Some(3283),
             ApplicationProtocol::Ssh => Some(22),
+            ApplicationProtocol::SshPwsh => Some(22),
             ApplicationProtocol::Sftp => Some(22),
             ApplicationProtocol::Scp => Some(22),
             ApplicationProtocol::Unknown => None,
