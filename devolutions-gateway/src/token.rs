@@ -116,6 +116,7 @@ pub enum ApplicationProtocol {
     Wayk,
     Rdp,
     Ard,
+    Vnc,
     Ssh,
     /// PowerShell over SSH
     SshPwsh,
@@ -130,7 +131,8 @@ impl ApplicationProtocol {
         match self {
             ApplicationProtocol::Wayk => None,
             ApplicationProtocol::Rdp => Some(3389),
-            ApplicationProtocol::Ard => Some(3283),
+            ApplicationProtocol::Ard => Some(5900),
+            ApplicationProtocol::Vnc => Some(5900),
             ApplicationProtocol::Ssh => Some(22),
             ApplicationProtocol::SshPwsh => Some(22),
             ApplicationProtocol::Sftp => Some(22),
