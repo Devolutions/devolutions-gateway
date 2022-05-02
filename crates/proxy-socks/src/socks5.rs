@@ -431,7 +431,7 @@ impl AuthMethod {
     const NO_ACCEPTABLE_METHODS: u8 = 0xFF;
 }
 
-// Negotation request (client greeting)
+// Negotiation request (client greeting)
 // +----+----------+----------+
 // |VER | NMETHODS | METHODS  |
 // +----+----------+----------+

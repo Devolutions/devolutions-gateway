@@ -27,7 +27,7 @@ pub fn process_license_request(
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "An error occured during reading Initial Server License Message: {:?}",
+                "An error occurred during reading Initial Server License Message: {:?}",
                 err
             ),
         )
@@ -138,7 +138,7 @@ pub fn process_challenge(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "An error occured during reading Initial Server License Message: {:?}",
+                    "An error occurred during reading Initial Server License Message: {:?}",
                     error
                 ),
             ));
@@ -225,7 +225,7 @@ pub fn process_upgrade_license(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "An error occured during reading Initial Server License Message: {:?}",
+                    "An error occurred during reading Initial Server License Message: {:?}",
                     error
                 ),
             ));

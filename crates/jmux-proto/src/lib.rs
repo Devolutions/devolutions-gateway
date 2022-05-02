@@ -629,7 +629,7 @@ pub struct ChannelWindowAdjust {
 
 impl ChannelWindowAdjust {
     pub const NAME: &'static str = "CHANNEL WINDOW ADJUST";
-    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*windowAdjustement*/;
+    pub const SIZE: usize = 4 /*recipientChannelId*/ + 4 /*windowAdjustment*/;
 
     pub fn new(distant_id: DistantChannelId, window_adjustment: u32) -> Self {
         ChannelWindowAdjust {

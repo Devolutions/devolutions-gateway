@@ -254,9 +254,9 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
         .flag(Flag::new("timeout", FlagType::String).description("Timeout when opening pipes"))
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
-        .flag(Flag::new("socks4", FlagType::String).description("Use specificed address:port as SOCKS4 proxy"))
-        .flag(Flag::new("socks5", FlagType::String).description("Use specificed address:port as SOCKS5 proxy"))
-        .flag(Flag::new("http-proxy", FlagType::String).description("Use specificed address:port as HTTP proxy"))
+        .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
+        .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
+        .flag(Flag::new("http-proxy", FlagType::String).description("Use specified address:port as HTTP proxy"))
 }
 
 enum Logging {

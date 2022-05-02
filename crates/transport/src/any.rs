@@ -16,7 +16,7 @@ macro_rules! map_any_stream {
     }};
 }
 
-#[allow(clippy::large_enum_variant)] // TODO: mesure impact of boxing WssStream and TlsStream on performance
+#[allow(clippy::large_enum_variant)] // TODO: measure impact of boxing WssStream and TlsStream on performance
 pub enum AnyStream {
     Tcp(TcpStream),
     Tls(TlsStream),

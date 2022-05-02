@@ -25,7 +25,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   * Update SOGAR and replace sogar-cli with sogar-core
   * Authorization improvements (PR#174, PR#175)
   * Add an endpoint to retrieve logs (GET /diagnostics/logs)
-  * Add an endpoint to retrive configuration (GET /diagnostics/configuration)
+  * Add an endpoint to retrieve configuration (GET /diagnostics/configuration)
   * Add an endpoint to list sessions (GET /sessions)
 
 ## 2021.1.5 (2021-06-22)

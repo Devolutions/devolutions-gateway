@@ -189,7 +189,7 @@ pub struct JetAssociationTokenClaims {
 
     // JWT expiration time claim.
     // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitely written in the structure to be checked by the JwtValidator.
+    // This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
     exp: i64,
 
     // Unique ID for this token

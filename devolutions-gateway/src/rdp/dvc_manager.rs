@@ -208,25 +208,25 @@ impl DynamicChannel {
 
     fn process_data_first_pdu(
         &mut self,
-        pdu_souce: PeerSide,
+        pdu_source: PeerSide,
         total_length: usize,
         data_first: &[u8],
     ) -> Option<Vec<u8>> {
-        let complete_data = match pdu_souce {
+        let complete_data = match pdu_source {
             PeerSide::Client => self.client_data.process_data_first_pdu(total_length, data_first),
             PeerSide::Server => self.server_data.process_data_first_pdu(total_length, data_first),
         };
 
-        self.process_complete_data(pdu_souce, complete_data)
+        self.process_complete_data(pdu_source, complete_data)
     }
 
-    fn process_data_pdu(&mut self, pdu_souce: PeerSide, data: &[u8]) -> Option<Vec<u8>> {
-        let complete_data = match pdu_souce {
+    fn process_data_pdu(&mut self, pdu_source: PeerSide, data: &[u8]) -> Option<Vec<u8>> {
+        let complete_data = match pdu_source {
             PeerSide::Client => self.client_data.process_data_pdu(data),
             PeerSide::Server => self.server_data.process_data_pdu(data),
         };
 
-        self.process_complete_data(pdu_souce, complete_data)
+        self.process_complete_data(pdu_source, complete_data)
     }
 
     fn process_complete_data(
