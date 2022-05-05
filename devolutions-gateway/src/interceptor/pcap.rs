@@ -148,7 +148,7 @@ async fn writer_task(
                     &tcpip_packet,
                     tcpip_packet.len() as u32,
                 ) {
-                    error!("Error writting pcap file: {}", e);
+                    error!("Error writing pcap file: {}", e);
                 }
 
                 // Update the seq_number

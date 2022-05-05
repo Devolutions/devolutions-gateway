@@ -20,9 +20,9 @@ impl Decoder for JmuxCodec {
         }
 
         // Read length marker
-        let mut lenght_bytes = [0u8; 2];
-        lenght_bytes.copy_from_slice(&src[1..3]);
-        let length = u16::from_be_bytes(lenght_bytes) as usize;
+        let mut length_bytes = [0u8; 2];
+        length_bytes.copy_from_slice(&src[1..3]);
+        let length = u16::from_be_bytes(length_bytes) as usize;
 
         if length > MAXIMUM_PACKET_SIZE_IN_BYTES {
             anyhow::bail!(
