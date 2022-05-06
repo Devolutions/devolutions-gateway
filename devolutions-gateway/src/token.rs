@@ -341,6 +341,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             // Main target host
             dst_hst: SmolStr,
             // Additional target hosts
+            #[serde(default)]
             dst_addl: Vec<SmolStr>,
             exp: i64,
             jti: Uuid,
