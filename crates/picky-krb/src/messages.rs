@@ -28,7 +28,7 @@ use crate::{
 ///     dclocator-hint         [2] INTEGER OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KdcProxyMessage {
     pub kerb_message: ExplicitContextTag0<OctetStringAsn1>,
     #[serde(default)]
@@ -83,23 +83,23 @@ impl KdcProxyMessage {
 ///                                        -- NOTE: not empty
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KdcReqBody {
-    kdc_options: ExplicitContextTag0<KerberosFlags>,
-    cname: Optional<Option<ExplicitContextTag1<PrincipalName>>>,
-    realm: ExplicitContextTag2<Realm>,
-    sname: Optional<Option<ExplicitContextTag3<PrincipalName>>>,
-    from: Optional<Option<ExplicitContextTag4<KerberosTime>>>,
-    till: ExplicitContextTag5<KerberosTime>,
-    rtime: Optional<Option<ExplicitContextTag6<KerberosTime>>>,
-    nonce: ExplicitContextTag7<IntegerAsn1>,
-    etype: ExplicitContextTag8<Asn1SequenceOf<IntegerAsn1>>,
+    pub kdc_options: ExplicitContextTag0<KerberosFlags>,
+    pub cname: Optional<Option<ExplicitContextTag1<PrincipalName>>>,
+    pub realm: ExplicitContextTag2<Realm>,
+    pub sname: Optional<Option<ExplicitContextTag3<PrincipalName>>>,
+    pub from: Optional<Option<ExplicitContextTag4<KerberosTime>>>,
+    pub till: ExplicitContextTag5<KerberosTime>,
+    pub rtime: Optional<Option<ExplicitContextTag6<KerberosTime>>>,
+    pub nonce: ExplicitContextTag7<IntegerAsn1>,
+    pub etype: ExplicitContextTag8<Asn1SequenceOf<IntegerAsn1>>,
     #[serde(default)]
-    addresses: Optional<Option<ExplicitContextTag9<Asn1SequenceOf<HostAddress>>>>,
+    pub addresses: Optional<Option<ExplicitContextTag9<Asn1SequenceOf<HostAddress>>>>,
     #[serde(default)]
-    enc_authorization_data: Optional<Option<ExplicitContextTag10<EncryptedData>>>,
+    pub enc_authorization_data: Optional<Option<ExplicitContextTag10<EncryptedData>>>,
     #[serde(default)]
-    additional_tickets: Optional<Option<ExplicitContextTag11<Asn1SequenceOf<Ticket>>>>,
+    pub additional_tickets: Optional<Option<ExplicitContextTag11<Asn1SequenceOf<Ticket>>>>,
 }
 
 /// [RFC 4120 5.4.1](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -113,12 +113,12 @@ pub struct KdcReqBody {
 ///         req-body        [4] KDC-REQ-BODY,
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KdcReq {
-    pvno: ExplicitContextTag1<IntegerAsn1>,
-    msg_type: ExplicitContextTag2<IntegerAsn1>,
-    padata: Optional<Option<ExplicitContextTag3<Asn1SequenceOf<PaData>>>>,
-    req_body: ExplicitContextTag4<KdcReqBody>,
+    pub pvno: ExplicitContextTag1<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag2<IntegerAsn1>,
+    pub padata: Optional<Option<ExplicitContextTag3<Asn1SequenceOf<PaData>>>>,
+    pub req_body: ExplicitContextTag4<KdcReqBody>,
 }
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -149,15 +149,15 @@ pub type TgsReq = ApplicationTag<KdcReq, TGS_REQ_MSG_TYPE>;
 ///         enc-part        [6] EncryptedData
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KdcRep {
-    pvno: ExplicitContextTag0<IntegerAsn1>,
-    msg_type: ExplicitContextTag1<IntegerAsn1>,
-    padata: Optional<Option<ExplicitContextTag2<Asn1SequenceOf<PaData>>>>,
-    crealm: ExplicitContextTag3<Realm>,
-    cname: ExplicitContextTag4<PrincipalName>,
-    ticket: ExplicitContextTag5<Ticket>,
-    enc_part: ExplicitContextTag6<EncryptedData>,
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub padata: Optional<Option<ExplicitContextTag2<Asn1SequenceOf<PaData>>>>,
+    pub crealm: ExplicitContextTag3<Realm>,
+    pub cname: ExplicitContextTag4<PrincipalName>,
+    pub ticket: ExplicitContextTag5<Ticket>,
+    pub enc_part: ExplicitContextTag6<EncryptedData>,
 }
 
 /// [RFC 4120 5.4.2](https://www.rfc-editor.org/rfc/rfc4120.txt)
@@ -193,7 +193,7 @@ pub type TgsRep = ApplicationTag<KdcRep, TGS_REP_MSG_TYPE>;
 ///         e-data          [12] OCTET STRING OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KrbErrorInner {
     pub pvno: ExplicitContextTag0<IntegerAsn1>,
     pub msg_type: ExplicitContextTag1<IntegerAsn1>,
@@ -220,11 +220,8 @@ impl ToString for KrbErrorInner {
         let error_code_bytes = self.error_code.0.as_signed_bytes_be();
         let len = error_code_bytes.len();
 
-        if len < 4 {
-            be_byes[0..len].copy_from_slice(error_code_bytes);
-        } else {
-            be_byes.copy_from_slice(&error_code_bytes[0..4]);
-        }
+        let len = std::cmp::min(4, len);
+        be_byes[0..len].copy_from_slice(&error_code_bytes[..len]);
 
         format!("error code: {}", i32::from_be_bytes(be_byes))
     }
@@ -248,7 +245,7 @@ impl ToString for KrbErrorInner {
 ///         caddr           [11] HostAddresses OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EncKdcRepPart {
     pub key: ExplicitContextTag0<EncryptionKey>,
     pub last_req: ExplicitContextTag1<LastReq>,
@@ -282,7 +279,7 @@ pub type EncAsRepPart = ApplicationTag<EncKdcRepPart, ENC_AS_REP_PART_TYPE>;
 /// ```
 pub type EncTgsRepPart = ApplicationTag<EncKdcRepPart, ENC_TGS_REP_PART_TYPE>;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ApReqInner {
     pub pvno: ExplicitContextTag0<IntegerAsn1>,
     pub msg_type: ExplicitContextTag1<IntegerAsn1>,
@@ -293,13 +290,27 @@ pub struct ApReqInner {
 
 pub type ApReq = ApplicationTag<ApReqInner, AP_REQ_MSG_TYPE>;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct ApRepInner {
     pub pvno: ExplicitContextTag0<IntegerAsn1>,
     pub msg_type: ExplicitContextTag1<IntegerAsn1>,
     pub enc_part: ExplicitContextTag2<EncryptedData>,
 }
 pub type ApRep = ApplicationTag<ApRepInner, AP_REP_MSG_TYPE>;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct TgtReq {
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub server_name: ExplicitContextTag2<PrincipalName>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct TgtRep {
+    pub pvno: ExplicitContextTag0<IntegerAsn1>,
+    pub msg_type: ExplicitContextTag1<IntegerAsn1>,
+    pub ticket: ExplicitContextTag2<Ticket>,
+}
 
 #[cfg(test)]
 mod tests {

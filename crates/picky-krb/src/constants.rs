@@ -21,18 +21,20 @@ pub mod types {
     pub const PA_PAC_OPTIONS_TYPE: [u8; 2] = [0x00, 0xa7];
 
     pub const TICKET_TYPE: u8 = 1;
-    pub const AUTHENTICATOR_TYPE_TYPE: u8 = 2;
+    pub const AUTHENTICATOR_TYPE: u8 = 2;
     pub const ENC_AS_REP_PART_TYPE: u8 = 25;
     pub const ENC_TGS_REP_PART_TYPE: u8 = 26;
     pub const ENC_AP_REP_PART_TYPE: u8 = 27;
-}
 
-pub mod oids {
-    pub const SPNEGO: &str = "1.3.6.1.5.5.2";
-    pub const MS_KRB5: &str = "1.2.840.48018.1.2.2";
-    pub const KRB5: &str = "1.2.840.113554.1.2.2";
-    pub const KRB5_USER_TO_USER: &str = "1.2.840.113554.1.2.2.3";
-    pub const NTLM_SSP: &str = "1.3.6.1.4.1.311.2.2.10";
+    pub const IP_V4_ADDR_TYPE: u8 = 2;
+    pub const DIRECTIONAL_ADDR_TYPE: u8 = 2;
+    pub const CHAOS_NET_ADDR_TYPE: u8 = 2;
+    pub const XNS_ADDR_TYPE: u8 = 2;
+    pub const ISO_ADDR_TYPE: u8 = 2;
+    pub const DECNET_PHASE_IV_ADDR_TYPE: u8 = 2;
+    pub const APPLETALK_DDP_ADDR_TYPE: u8 = 2;
+    pub const NET_BIOS_ADDR_TYPE: u8 = 2;
+    pub const IP_V6_ADDR_TYPE: u8 = 2;
 }
 
 pub mod key_usages {
@@ -40,4 +42,17 @@ pub mod key_usages {
     pub const ACCEPTOR_SIGN: i32 = 23;
     pub const INITIATOR_SEAL: i32 = 24;
     pub const INITIATOR_SIGN: i32 = 25;
+}
+
+pub mod gss_api {
+    pub const AP_REQ_TOKEN_ID: [u8; 2] = [0x01, 0x00];
+    pub const TGT_REQ_TOKEN_ID: [u8; 2] = [0x04, 0x00];
+    pub const ACCEPT_COMPLETE: [u8; 3] = [0x0a, 0x01, 0x00];
+    pub const ACCEPT_INCOMPLETE: [u8; 3] = [0x0a, 0x01, 0x01];
+
+    pub const MIC_TOKEN_ID: [u8; 2] = [0x04, 0x04];
+    pub const MIC_FILLER: [u8; 5] = [0xff, 0xff, 0xff, 0xff, 0xff];
+
+    pub const WRAP_TOKEN_ID: [u8; 2] = [0x05, 0x04];
+    pub const WRAP_FILLER: u8 = 0xff;
 }

@@ -3,11 +3,15 @@ use picky_asn1::wrapper::{
     ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8,
     GeneralStringAsn1, GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
 };
-use picky_asn1_der::{application_tag::ApplicationTag, Asn1DerError};
-use serde::{Deserialize, Serialize};
+use picky_asn1_der::application_tag::ApplicationTag;
+use serde::de::Error;
+use serde::{de, ser, Deserialize, Serialize};
+use std::fmt;
+use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use crate::{
-    constants::types::{AUTHENTICATOR_TYPE_TYPE, ENC_AP_REP_PART_TYPE, TICKET_TYPE},
+    constants::types::{AUTHENTICATOR_TYPE, ENC_AP_REP_PART_TYPE, TICKET_TYPE},
     messages::KrbError,
 };
 
@@ -57,7 +61,7 @@ pub type Microseconds = IntegerAsn1;
 ///         address         [1] OCTET STRING
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct HostAddress {
     pub addr_type: ExplicitContextTag0<IntegerAsn1>,
     pub address: ExplicitContextTag1<OctetStringAsn1>,
@@ -71,7 +75,7 @@ pub struct HostAddress {
 ///         ad-data         [1] OCTET STRING
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct AuthorizationDataInner {
     pub ad_type: ExplicitContextTag0<IntegerAsn1>,
     pub ad_data: ExplicitContextTag1<OctetStringAsn1>,
@@ -87,7 +91,7 @@ pub type AuthorizationData = Asn1SequenceOf<AuthorizationDataInner>;
 ///         padata-value    [2] OCTET STRING
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PaData {
     pub padata_type: ExplicitContextTag1<IntegerAsn1>,
     pub padata_data: ExplicitContextTag2<OctetStringAsn1>,
@@ -109,7 +113,7 @@ pub type KerberosFlags = BitStringAsn1;
 ///         cipher  [2] OCTET STRING -- ciphertext
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EncryptedData {
     pub etype: ExplicitContextTag0<IntegerAsn1>,
     pub kvno: Optional<Option<ExplicitContextTag1<IntegerAsn1>>>,
@@ -124,7 +128,7 @@ pub struct EncryptedData {
 ///         keyvalue        [1] OCTET STRING
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EncryptionKey {
     pub key_type: ExplicitContextTag0<IntegerAsn1>,
     pub key_value: ExplicitContextTag1<OctetStringAsn1>,
@@ -140,7 +144,7 @@ pub struct EncryptionKey {
 ///         enc-part        [3] EncryptedData
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct TicketInner {
     pub tkt_vno: ExplicitContextTag0<IntegerAsn1>,
     pub realm: ExplicitContextTag1<Realm>,
@@ -158,7 +162,7 @@ pub type Ticket = ApplicationTag<TicketInner, TICKET_TYPE>;
 ///         lr-value        [1] KerberosTime
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct LastReqInner {
     lr_type: ExplicitContextTag0<IntegerAsn1>,
     lr_value: ExplicitContextTag1<KerberosTime>,
@@ -173,7 +177,7 @@ pub type LastReq = Asn1SequenceOf<LastReqInner>;
 ///     data-value [2] OCTET STRING OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KerbErrorData {
     data_type: ExplicitContextTag1<IntegerAsn1>,
     #[serde(default)]
@@ -188,7 +192,7 @@ pub struct KerbErrorData {
 ///         pausec          [1] Microseconds OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PaEncTsEnc {
     pub patimestamp: ExplicitContextTag0<KerberosTime>,
     #[serde(default)]
@@ -209,7 +213,7 @@ pub type PaEncTimestamp = EncryptedData;
 ///     include-pac[0] BOOLEAN
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KerbPaPacRequest {
     pub include_pac: ExplicitContextTag0<bool>,
 }
@@ -221,7 +225,7 @@ pub struct KerbPaPacRequest {
 ///     flags                ::= KerberosFlags
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct PaPacOptions {
     pub flags: ExplicitContextTag0<KerberosFlags>,
 }
@@ -241,7 +245,7 @@ pub type ApOptions = KerberosFlags;
 ///         checksum        [1] OCTET STRING
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Checksum {
     pub cksumtype: ExplicitContextTag0<IntegerAsn1>,
     pub checksum: ExplicitContextTag1<OctetStringAsn1>,
@@ -262,7 +266,7 @@ pub struct Checksum {
 ///         authorization-data      [8] AuthorizationData OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct AuthenticatorInner {
     pub authenticator_bno: ExplicitContextTag0<IntegerAsn1>,
     pub crealm: ExplicitContextTag1<Realm>,
@@ -277,7 +281,7 @@ pub struct AuthenticatorInner {
     #[serde(default)]
     pub authorization_data: Optional<Option<ExplicitContextTag8<AuthorizationData>>>,
 }
-pub type Authenticator = ApplicationTag<AuthenticatorInner, AUTHENTICATOR_TYPE_TYPE>;
+pub type Authenticator = ApplicationTag<AuthenticatorInner, AUTHENTICATOR_TYPE>;
 
 /// [RFC 4120](https://datatracker.ietf.org/doc/html/rfc4120#section-5.5.2)
 ///
@@ -289,7 +293,7 @@ pub type Authenticator = ApplicationTag<AuthenticatorInner, AUTHENTICATOR_TYPE_T
 ///         seq-number      [3] UInt32 OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EncApRepPartInner {
     pub ctime: ExplicitContextTag0<KerberosTime>,
     pub cusec: ExplicitContextTag1<Microseconds>,
@@ -309,7 +313,7 @@ pub type EncApRepPart = ApplicationTag<EncApRepPartInner, ENC_AP_REP_PART_TYPE>;
 ///         s2kparams       [2] OCTET STRING OPTIONAL
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct EtypeInfo2Entry {
     pub etype: ExplicitContextTag0<IntegerAsn1>,
     #[serde(default)]
@@ -325,20 +329,53 @@ pub struct EtypeInfo2Entry {
 /// ```
 pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 
-#[derive(Debug, PartialEq)]
-pub enum KrbResult<T> {
-    Ok(T),
-    Err(KrbError),
+#[derive(Debug, PartialEq, Clone)]
+pub struct KrbResult<T>(pub Result<T, KrbError>);
+
+impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for KrbResult<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, <D as de::Deserializer<'de>>::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        struct Visitor<V>(PhantomData<V>);
+
+        impl<'de, V: de::Deserialize<'de>> de::Visitor<'de> for Visitor<V> {
+            type Value = KrbResult<V>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a valid DER-encoded KbResult")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                match seq.next_element() {
+                    Ok(value) => value
+                        .ok_or_else(|| A::Error::missing_field("Missing KrbResult value"))
+                        .map(|value| KrbResult(Ok(value))),
+                    Err(_) => match seq.next_element() {
+                        Ok(error_value) => error_value
+                            .ok_or_else(|| A::Error::missing_field("Missing KrbResult value"))
+                            .map(|error_value| KrbResult(Err(error_value))),
+                        Err(err) => Err(err),
+                    },
+                }
+            }
+        }
+
+        deserializer.deserialize_enum("KrbResult", &["Ok", "Err"], Visitor::<T>(PhantomData))
+    }
 }
 
-impl<'a, T: Deserialize<'a>> KrbResult<T> {
-    pub fn from_bytes(data: &'a [u8]) -> Result<KrbResult<T>, Asn1DerError> {
-        match picky_asn1_der::from_bytes(data) {
-            Ok(item) => Ok(KrbResult::Ok(item)),
-            Err(_) => match picky_asn1_der::from_bytes(data) {
-                Ok(krb_error) => Ok(KrbResult::Err(krb_error)),
-                Err(err) => Err(err),
-            },
+impl<T: ser::Serialize> ser::Serialize for KrbResult<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<<S as ser::Serializer>::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        match self.0.as_ref() {
+            Ok(value) => value.serialize(serializer),
+            Err(error) => error.serialize(serializer),
         }
     }
 }
@@ -350,21 +387,22 @@ mod tests {
         EncryptedData, EncryptionKey, EtypeInfo2Entry, HostAddress, KerbPaPacRequest, KerberosStringAsn1, KerberosTime,
         LastReqInner, PaData, PrincipalName,
     };
-    use crate::messages::{AsReq, KdcReqBody, KdcReq, KrbError, KrbErrorInner};
+    use crate::messages::{AsReq, KdcReq, KdcReqBody, KrbError, KrbErrorInner};
     use picky_asn1::bit_string::BitString;
     use picky_asn1::date::Date;
     use picky_asn1::restricted_string::IA5String;
     use picky_asn1::wrapper::{
-        Asn1SequenceOf, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag2, ExplicitContextTag3,
-        ExplicitContextTag4, ExplicitContextTag5, ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8,
-        GeneralStringAsn1, IntegerAsn1, OctetStringAsn1, Optional, BitStringAsn1, GeneralizedTimeAsn1, ExplicitContextTag9, ExplicitContextTag10, ExplicitContextTag11,
+        Asn1SequenceOf, BitStringAsn1, ExplicitContextTag0, ExplicitContextTag1, ExplicitContextTag10,
+        ExplicitContextTag11, ExplicitContextTag2, ExplicitContextTag3, ExplicitContextTag4, ExplicitContextTag5,
+        ExplicitContextTag6, ExplicitContextTag7, ExplicitContextTag8, ExplicitContextTag9, GeneralStringAsn1,
+        GeneralizedTimeAsn1, IntegerAsn1, OctetStringAsn1, Optional,
     };
     use picky_asn1_der::application_tag::ApplicationTag;
 
-    use super::{Microseconds, PaEncTsEnc, KrbResult};
+    use super::{KrbResult, Microseconds, PaEncTsEnc};
 
     #[test]
-    fn test_kerberos_string() {
+    fn test_kerberos_string_decode() {
         // EXAMPLE.COM
         let expected = [27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77];
 
@@ -722,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn test_krb_result() {
+    fn test_krb_result_decode() {
         let raw_as_req = vec![
             106, 129, 181, 48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10, 161, 4, 2, 2, 0,
             150, 162, 2, 4, 0, 48, 10, 161, 4, 2, 2, 0, 149, 162, 2, 4, 0, 164, 129, 137, 48, 129, 134, 160, 7, 3, 5,
@@ -732,16 +770,7 @@ mod tests {
             50, 48, 50, 49, 49, 50, 50, 57, 49, 48, 51, 54, 48, 54, 90, 167, 6, 2, 4, 29, 32, 235, 11, 168, 26, 48, 24,
             2, 1, 18, 2, 1, 17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
         ];
-        let raw_error = vec![126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
-            50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
-            65, 77, 80, 76, 69, 46, 67, 79, 77, 168, 21, 48, 19, 160, 3, 2, 1, 1, 161, 12, 48, 10, 27, 8, 98, 97, 100,
-            95, 117, 115, 101, 114, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 32, 48, 30, 160,
-            3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
-            67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,];
-
-        let krb_result = KrbResult::<AsReq>::from_bytes(&raw_as_req).unwrap();
-
-        assert_eq!(KrbResult::Ok(AsReq::from(KdcReq {
+        let expected_ap_req = KrbResult(Ok(AsReq::from(KdcReq {
             pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
             padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf::from(vec![
@@ -790,10 +819,16 @@ mod tests {
                 enc_authorization_data: Optional::from(None),
                 additional_tickets: Optional::from(None),
             }),
-        })), krb_result);
-
-        let krb_result = KrbResult::<AsReq>::from_bytes(&raw_error).unwrap();
-        assert_eq!(KrbResult::Err(KrbError::from(KrbErrorInner {
+        })));
+        let raw_error = vec![
+            126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
+            50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
+            65, 77, 80, 76, 69, 46, 67, 79, 77, 168, 21, 48, 19, 160, 3, 2, 1, 1, 161, 12, 48, 10, 27, 8, 98, 97, 100,
+            95, 117, 115, 101, 114, 169, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 170, 32, 48, 30, 160,
+            3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
+            67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,
+        ];
+        let expected_error = KrbResult(Err(KrbError::from(KrbErrorInner {
             pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
             ctime: Optional::from(None),
@@ -824,6 +859,12 @@ mod tests {
                 IA5String::from_string("CLIENT_NOT_FOUND".to_owned()).unwrap(),
             )))),
             e_data: Optional::from(None),
-        })), krb_result);
+        })));
+
+        let krb_result: KrbResult<AsReq> = picky_asn1_der::from_bytes(&raw_as_req).unwrap();
+        assert_eq!(expected_ap_req, krb_result);
+
+        let krb_result: KrbResult<AsReq> = picky_asn1_der::from_bytes(&raw_error).unwrap();
+        assert_eq!(expected_error, krb_result);
     }
 }
