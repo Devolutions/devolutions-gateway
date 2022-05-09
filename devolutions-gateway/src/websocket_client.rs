@@ -560,7 +560,12 @@ async fn handle_jmux(
                     .hosts
                     .into_iter()
                     .map(|addr| {
-                        FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
+                        if addr.host() == "*" {
+                            // Basically allow all
+                            FilteringRule::Allow
+                        } else {
+                            FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
+                        }
                     })
                     .collect(),
             ),
