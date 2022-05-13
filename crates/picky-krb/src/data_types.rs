@@ -5,7 +5,7 @@ use picky_asn1::wrapper::{
 };
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::de::Error;
-use serde::{de, Deserialize, Serialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -329,12 +329,22 @@ pub struct EtypeInfo2Entry {
 /// ```
 pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 
-pub trait ResultExt<'a, T> where T: Deserialize<'a> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'a>, Self: Sized;
+pub trait ResultExt<'a, T>
+where
+    T: Deserialize<'a>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'a>,
+        Self: Sized;
 }
 
 impl<'de, T: Deserialize<'de>> ResultExt<'de, T> for Result<T, KrbError> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, <D as de::Deserializer<'de>>::Error> where D: Deserializer<'de>, Self: Sized {
+    fn deserialize<D>(deserializer: D) -> Result<Self, <D as de::Deserializer<'de>>::Error>
+    where
+        D: Deserializer<'de>,
+        Self: Sized,
+    {
         struct Visitor<V>(PhantomData<V>);
 
         impl<'de, V: de::Deserialize<'de>> de::Visitor<'de> for Visitor<V> {
@@ -345,8 +355,8 @@ impl<'de, T: Deserialize<'de>> ResultExt<'de, T> for Result<T, KrbError> {
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-                where
-                    A: de::SeqAccess<'de>,
+            where
+                A: de::SeqAccess<'de>,
             {
                 match seq.next_element() {
                     Ok(value) => value
