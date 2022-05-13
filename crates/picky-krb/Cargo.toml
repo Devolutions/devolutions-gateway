@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 picky-asn1 = "0.5.0"
-picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs.git", branch = "application-tag-improvements-and-nla-oids" }
+picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs.git", rev = "9f292f56e7ece37106585ab24abf8b0cb876c4db" }
 serde = { version = "1.0.136", features = ["derive"] }
 byteorder = "1.1.0"
 thiserror = "1.0.30"
