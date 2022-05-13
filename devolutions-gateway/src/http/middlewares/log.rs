@@ -18,7 +18,8 @@ impl LogMiddleware {
         let uri = request.uri().path().to_owned();
         let method = request.method().to_owned();
 
-        let logger = slog_scope::logger().new(o!("request_id" => operation_id));
+        let logger = slog_scope::logger().new(o!("request_id" => operation_id, "uri" => uri.clone()));
+
         slog_debug!(logger, "Request received: {} {}", method, uri);
 
         ctx = chain.next(ctx).with_logger(logger.clone()).await?;
@@ -26,7 +27,11 @@ impl LogMiddleware {
         let status = ctx.state.response_unchecked().status();
         let duration = format!("Duration_ms={}", start_time.elapsed().as_millis());
 
-        slog_info!(logger, "{} {} {} ({})", method, uri, status, duration);
+        if uri.ends_with("health") {
+            slog_debug!(logger, "{} {} {} ({})", method, uri, status, duration);
+        } else {
+            slog_info!(logger, "{} {} {} ({})", method, uri, status, duration);
+        }
 
         Ok(ctx)
     }
