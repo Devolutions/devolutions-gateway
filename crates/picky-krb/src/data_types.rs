@@ -376,6 +376,8 @@ impl<'de, T: Deserialize<'de>> ResultExt<'de, T> for Result<T, KrbError> {
     }
 }
 
+pub type KrbResult<T> = Result<T, KrbError>;
+
 #[cfg(test)]
 mod tests {
     use crate::data_types::{
