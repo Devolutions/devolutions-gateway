@@ -2159,15 +2159,6 @@ dependencies = [
 [[package]]
 name = "picky-asn1"
 version = "0.5.0"
-dependencies = [
- "oid",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "picky-asn1"
-version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1088a7f82ee21e534da0f62b074b559d2a0717b0d5104ba7a47c1f5bc6c83f69"
 dependencies = [
@@ -2177,10 +2168,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "picky-asn1-der"
-version = "0.3.0"
+name = "picky-asn1"
+version = "0.5.0"
+source = "git+https://github.com/Devolutions/picky-rs.git?branch=application-tag-improvements-and-nla-oids#0f520906f32ed5d3a4d17860a5491813491fe89d"
 dependencies = [
- "picky-asn1 0.5.0",
+ "oid",
  "serde",
  "serde_bytes",
 ]
@@ -2192,6 +2184,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac9e1454c26d52ef1951149e611ca2851673fea960269060887acc6793e3e683"
 dependencies = [
  "picky-asn1 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "picky-asn1-der"
+version = "0.3.0"
+source = "git+https://github.com/Devolutions/picky-rs.git?branch=application-tag-improvements-and-nla-oids#0f520906f32ed5d3a4d17860a5491813491fe89d"
+dependencies = [
+ "picky-asn1 0.5.0 (git+https://github.com/Devolutions/picky-rs.git?branch=application-tag-improvements-and-nla-oids)",
  "serde",
  "serde_bytes",
 ]
@@ -2216,7 +2218,7 @@ version = "0.0.0"
 dependencies = [
  "byteorder",
  "picky-asn1 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "picky-asn1-der 0.3.0",
+ "picky-asn1-der 0.3.0 (git+https://github.com/Devolutions/picky-rs.git?branch=application-tag-improvements-and-nla-oids)",
  "serde",
  "thiserror",
 ]

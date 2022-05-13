@@ -201,7 +201,7 @@ mod tests {
     use super::{Pac, PacBuffer, PacBufferType, PacInfoBuffer};
 
     #[test]
-    fn test_pac_serialize() {
+    fn pac() {
         let expected_pac = Pac {
             c_buffers: 4,
             buffers: vec![

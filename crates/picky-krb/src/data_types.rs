@@ -5,7 +5,7 @@ use picky_asn1::wrapper::{
 };
 use picky_asn1_der::application_tag::ApplicationTag;
 use serde::de::Error;
-use serde::{de, ser, Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize, Deserializer};
 use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -179,9 +179,9 @@ pub type LastReq = Asn1SequenceOf<LastReqInner>;
 /// ```
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct KerbErrorData {
-    data_type: ExplicitContextTag1<IntegerAsn1>,
+    pub data_type: ExplicitContextTag1<IntegerAsn1>,
     #[serde(default)]
-    data_value: Optional<Option<ExplicitContextTag2<BitStringAsn1>>>,
+    pub data_value: Optional<Option<ExplicitContextTag2<BitStringAsn1>>>,
 }
 
 /// [RFC 4120 ](https://datatracker.ietf.org/doc/html/rfc4120#section-5.2.7.2)
@@ -329,35 +329,33 @@ pub struct EtypeInfo2Entry {
 /// ```
 pub type EtypeInfo2 = Asn1SequenceOf<EtypeInfo2Entry>;
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct KrbResult<T>(pub Result<T, KrbError>);
+pub trait ResultExt<'a, T> where T: Deserialize<'a> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'a>, Self: Sized;
+}
 
-impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for KrbResult<T> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, <D as de::Deserializer<'de>>::Error>
-    where
-        D: de::Deserializer<'de>,
-    {
+impl<'de, T: Deserialize<'de>> ResultExt<'de, T> for Result<T, KrbError> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, <D as de::Deserializer<'de>>::Error> where D: Deserializer<'de>, Self: Sized {
         struct Visitor<V>(PhantomData<V>);
 
         impl<'de, V: de::Deserialize<'de>> de::Visitor<'de> for Visitor<V> {
-            type Value = KrbResult<V>;
+            type Value = Result<V, KrbError>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("a valid DER-encoded KbResult")
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: de::SeqAccess<'de>,
+                where
+                    A: de::SeqAccess<'de>,
             {
                 match seq.next_element() {
                     Ok(value) => value
                         .ok_or_else(|| A::Error::missing_field("Missing KrbResult value"))
-                        .map(|value| KrbResult(Ok(value))),
+                        .map(|value| Ok(value)),
                     Err(_) => match seq.next_element() {
                         Ok(error_value) => error_value
                             .ok_or_else(|| A::Error::missing_field("Missing KrbResult value"))
-                            .map(|error_value| KrbResult(Err(error_value))),
+                            .map(|error_value| Err(error_value)),
                         Err(err) => Err(err),
                     },
                 }
@@ -365,18 +363,6 @@ impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for KrbResult<T> {
         }
 
         deserializer.deserialize_enum("KrbResult", &["Ok", "Err"], Visitor::<T>(PhantomData))
-    }
-}
-
-impl<T: ser::Serialize> ser::Serialize for KrbResult<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<<S as ser::Serializer>::Ok, S::Error>
-    where
-        S: ser::Serializer,
-    {
-        match self.0.as_ref() {
-            Ok(value) => value.serialize(serializer),
-            Err(error) => error.serialize(serializer),
-        }
     }
 }
 
@@ -399,10 +385,10 @@ mod tests {
     };
     use picky_asn1_der::application_tag::ApplicationTag;
 
-    use super::{KrbResult, Microseconds, PaEncTsEnc};
+    use super::{Microseconds, PaEncTsEnc};
 
     #[test]
-    fn test_kerberos_string_decode() {
+    fn kerberos_string_decode() {
         // EXAMPLE.COM
         let expected = [27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77];
 
@@ -413,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pa_data() {
+    fn pa_data() {
         let expected_raw = [
             48, 39, 161, 3, 2, 1, 19, 162, 32, 4, 30, 48, 28, 48, 26, 160, 3, 2, 1, 18, 161, 19, 27, 17, 69, 88, 65,
             77, 80, 76, 69, 46, 67, 79, 77, 109, 121, 117, 115, 101, 114,
@@ -434,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_principal_name() {
+    fn simple_principal_name() {
         let expected_raw = [
             48, 17, 160, 3, 2, 1, 1, 161, 10, 48, 8, 27, 6, 109, 121, 117, 115, 101, 114,
         ];
@@ -453,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn test_principal_name_with_two_names() {
+    fn principal_name_with_two_names() {
         let expected_raw = [
             48, 30, 160, 3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80,
             76, 69, 46, 67, 79, 77,
@@ -474,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypted_data() {
+    fn encrypted_data() {
         let expected_raw = [
             48, 129, 252, 160, 3, 2, 1, 18, 161, 3, 2, 1, 1, 162, 129, 239, 4, 129, 236, 166, 11, 233, 202, 198, 160,
             29, 10, 87, 131, 189, 15, 170, 61, 216, 210, 116, 104, 91, 174, 27, 255, 246, 126, 9, 92, 141, 206, 172,
@@ -514,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypted_data_without_kvno() {
+    fn encrypted_data_without_kvno() {
         let expected_raw = [
             48, 130, 1, 21, 160, 3, 2, 1, 18, 162, 130, 1, 12, 4, 130, 1, 8, 198, 68, 255, 54, 137, 75, 224, 202, 101,
             33, 67, 17, 110, 98, 71, 39, 211, 155, 248, 29, 67, 235, 64, 135, 38, 247, 252, 121, 38, 244, 112, 7, 92,
@@ -556,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn test_host_address() {
+    fn host_address() {
         let expected_raw = [
             0x30, 0x19, 0xa0, 0x03, 0x02, 0x01, 0x14, 0xa1, 0x12, 0x04, 0x10, 0x48, 0x4f, 0x4c, 0x4c, 0x4f, 0x57, 0x42,
             0x41, 0x53, 0x54, 0x49, 0x4f, 0x4e, 0x20, 0x20, 0x20,
@@ -576,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn test_encryption_key() {
+    fn encryption_key() {
         let expected_raw = [
             48, 41, 160, 3, 2, 1, 18, 161, 34, 4, 32, 23, 138, 210, 243, 7, 121, 117, 180, 99, 86, 230, 62, 222, 63,
             251, 46, 242, 161, 37, 67, 254, 103, 199, 93, 74, 174, 166, 64, 17, 198, 242, 144,
@@ -597,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn test_last_req_inner() {
+    fn last_req_inner() {
         let expected_raw = [
             48, 24, 160, 3, 2, 1, 0, 161, 17, 24, 15, 49, 57, 55, 48, 48, 49, 48, 49, 48, 48, 48, 48, 48, 48, 90,
         ];
@@ -614,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn test_authenticator() {
+    fn authenticator() {
         let expected_raw = [
             98, 130, 1, 14, 48, 130, 1, 10, 160, 3, 2, 1, 5, 161, 13, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79,
             77, 162, 15, 48, 13, 160, 3, 2, 1, 1, 161, 6, 48, 4, 27, 2, 112, 51, 163, 37, 48, 35, 160, 5, 2, 3, 0, 128,
@@ -679,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kerb_pa_pac_request() {
+    fn kerb_pa_pac_request() {
         let expected_raw = [48, 5, 160, 3, 1, 1, 255];
         let expected = KerbPaPacRequest {
             include_pac: ExplicitContextTag0::from(true),
@@ -693,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn test_etype_info2_entry() {
+    fn etype_info2_entry() {
         let expected_raw = [
             48, 22, 160, 3, 2, 1, 18, 161, 15, 27, 13, 69, 88, 65, 77, 80, 76, 69, 46, 67, 79, 77, 112, 51,
         ];
@@ -713,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pa_enc_ts_enc() {
+    fn pa_enc_ts_enc() {
         let expected_raw = vec![
             48, 24, 160, 17, 24, 15, 50, 48, 50, 50, 48, 52, 48, 53, 48, 56, 49, 57, 52, 54, 90, 161, 3, 2, 1, 32,
         ];
@@ -730,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enc_ap_rep_part() {
+    fn enc_ap_rep_part() {
         let expected_raw = vec![
             123, 79, 48, 77, 160, 17, 24, 15, 50, 48, 50, 50, 48, 52, 48, 57, 49, 49, 49, 54, 52, 52, 90, 161, 3, 2, 1,
             43, 162, 43, 48, 41, 160, 3, 2, 1, 18, 161, 34, 4, 32, 225, 45, 62, 116, 165, 142, 214, 44, 102, 216, 202,
@@ -760,7 +746,8 @@ mod tests {
     }
 
     #[test]
-    fn test_krb_result_decode() {
+    fn krb_result_decode() {
+        use super::ResultExt;
         let raw_as_req = vec![
             106, 129, 181, 48, 129, 178, 161, 3, 2, 1, 5, 162, 3, 2, 1, 10, 163, 26, 48, 24, 48, 10, 161, 4, 2, 2, 0,
             150, 162, 2, 4, 0, 48, 10, 161, 4, 2, 2, 0, 149, 162, 2, 4, 0, 164, 129, 137, 48, 129, 134, 160, 7, 3, 5,
@@ -770,7 +757,7 @@ mod tests {
             50, 48, 50, 49, 49, 50, 50, 57, 49, 48, 51, 54, 48, 54, 90, 167, 6, 2, 4, 29, 32, 235, 11, 168, 26, 48, 24,
             2, 1, 18, 2, 1, 17, 2, 1, 20, 2, 1, 19, 2, 1, 16, 2, 1, 23, 2, 1, 25, 2, 1, 26,
         ];
-        let expected_ap_req = KrbResult(Ok(AsReq::from(KdcReq {
+        let expected_ap_req = Ok(AsReq::from(KdcReq {
             pvno: ExplicitContextTag1::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag2::from(IntegerAsn1(vec![10])),
             padata: Optional::from(Some(ExplicitContextTag3::from(Asn1SequenceOf::from(vec![
@@ -819,7 +806,7 @@ mod tests {
                 enc_authorization_data: Optional::from(None),
                 additional_tickets: Optional::from(None),
             }),
-        })));
+        }));
         let raw_error = vec![
             126, 129, 151, 48, 129, 148, 160, 3, 2, 1, 5, 161, 3, 2, 1, 30, 164, 17, 24, 15, 50, 48, 50, 49, 49, 50,
             50, 56, 49, 51, 52, 48, 49, 49, 90, 165, 5, 2, 3, 12, 139, 242, 166, 3, 2, 1, 6, 167, 13, 27, 11, 69, 88,
@@ -828,7 +815,7 @@ mod tests {
             3, 2, 1, 2, 161, 23, 48, 21, 27, 6, 107, 114, 98, 116, 103, 116, 27, 11, 69, 88, 65, 77, 80, 76, 69, 46,
             67, 79, 77, 171, 18, 27, 16, 67, 76, 73, 69, 78, 84, 95, 78, 79, 84, 95, 70, 79, 85, 78, 68,
         ];
-        let expected_error = KrbResult(Err(KrbError::from(KrbErrorInner {
+        let expected_error = Err(KrbError::from(KrbErrorInner {
             pvno: ExplicitContextTag0::from(IntegerAsn1(vec![5])),
             msg_type: ExplicitContextTag1::from(IntegerAsn1(vec![30])),
             ctime: Optional::from(None),
@@ -859,12 +846,14 @@ mod tests {
                 IA5String::from_string("CLIENT_NOT_FOUND".to_owned()).unwrap(),
             )))),
             e_data: Optional::from(None),
-        })));
+        }));
 
-        let krb_result: KrbResult<AsReq> = picky_asn1_der::from_bytes(&raw_as_req).unwrap();
+        let mut d = picky_asn1_der::Deserializer::new_from_bytes(&raw_as_req);
+        let krb_result: Result<AsReq, KrbError> = Result::deserialize(&mut d).unwrap();
         assert_eq!(expected_ap_req, krb_result);
 
-        let krb_result: KrbResult<AsReq> = picky_asn1_der::from_bytes(&raw_error).unwrap();
+        let mut d = picky_asn1_der::Deserializer::new_from_bytes(&raw_error);
+        let krb_result: Result<AsReq, KrbError> = Result::deserialize(&mut d).unwrap();
         assert_eq!(expected_error, krb_result);
     }
 }
