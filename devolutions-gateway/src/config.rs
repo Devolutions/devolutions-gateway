@@ -311,7 +311,7 @@ pub struct ConfigFile {
     pub capture_path: Option<Utf8PathBuf>,
 
     // unsafe debug options for developers
-    #[serde(rename = "__debug__")]
+    #[serde(default, rename = "__debug__")]
     pub debug: DebugOptions,
 }
 
