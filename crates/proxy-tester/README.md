@@ -16,10 +16,10 @@ SOCKS tests are run by running
 $ cargo run -p proxy-tester -- --mode socks --addr 192.168.122.70:1080
 ```
 
-HTTP proxy tests are run by using
+HTTPS proxy tests are run by using
 
 ```
-$ cargo run -p proxy-tester -- --mode http --addr 192.168.122.70:808
+$ cargo run -p proxy-tester -- --mode https --addr 192.168.122.70:808
 ```
 
 ## Username/Password authentication method testing

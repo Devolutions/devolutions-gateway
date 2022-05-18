@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
-use tokio::sync::Notify;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 
 lazy_static::lazy_static! {
     static ref LISTENERS: Mutex<HashMap<SocketAddr, mpsc::Sender<DuplexStream>>> = Mutex::new(HashMap::new());

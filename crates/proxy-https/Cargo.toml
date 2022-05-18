@@ -1,14 +1,17 @@
 [package]
-name = "proxy-http"
+name = "proxy-https"
 version = "0.0.0"
 authors = ["Devolutions Inc."]
 edition = "2021"
-description = "HTTP(S) proxy client and acceptor"
+description = "Client and acceptor for HTTPS tunneling (CONNECT method)"
 publish = false
 
 [dependencies]
 proxy-types = { path = "../proxy-types" }
 tokio = { version = "1.17.0", features = ["io-util"] }
+pin-project-lite = "0.2.9"
+bytes = "1.1.0"
 
 [dev-dependencies]
-tokio = { version = "1.17.0", features = ["rt", "macros"] }
+proptest = "1.0.0"
+proxy-generators = { path = "../proxy-generators" }

@@ -960,4 +960,25 @@ mod tests {
         )
         .await;
     }
+
+    #[test]
+    fn address_encode_decode_roundtrip() {
+        use proptest::prelude::*;
+        use proxy_generators as generators;
+
+        proptest!(|(
+            dest_addr in generators::dest_addr()
+        )| {
+            // encode
+            let mut encoded = [0; ADDR_MAX_LEN];
+            let len = write_addr(&dest_addr, &mut encoded).unwrap();
+
+            // decode
+            let mut reader = tokio_test::io::Builder::new().read(&encoded[..len]).build();
+            let decoded_addr = tokio_test::block_on(read_addr(&mut reader)).unwrap();
+
+            // assert result is identical
+            assert_eq!(decoded_addr, dest_addr);
+        })
+    }
 }
