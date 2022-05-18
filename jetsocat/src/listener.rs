@@ -1,5 +1,6 @@
 use anyhow::Context;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
+use proxy_https::HttpsProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
 use slog::{debug, error, info, o, warn, Logger};
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use tokio::sync::oneshot;
 #[derive(Debug, Clone)]
 pub enum ListenerMode {
     Tcp { bind_addr: String, destination_url: String },
+    Https { bind_addr: String },
     Socks5 { bind_addr: String },
 }
 
@@ -65,7 +67,13 @@ pub async fn tcp_listener_task(
 
                     match receiver.await {
                         Ok(JmuxApiResponse::Success { id }) => {
-                            let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream }).await;
+                            let _ = api_request_tx
+                                .send(JmuxApiRequest::Start {
+                                    id,
+                                    stream,
+                                    leftover: None,
+                                })
+                                .await;
                         }
                         Ok(JmuxApiResponse::Failure { id, reason_code }) => {
                             debug!(log, "Channel {} failure: {}", id, reason_code);
@@ -138,14 +146,7 @@ async fn socks5_process_socket(
     let acceptor = Socks5Acceptor::accept_with_config(incoming, &conf).await?;
 
     if acceptor.is_connect_command() {
-        let destination_url = match acceptor.dest_addr() {
-            proxy_types::DestAddr::Ip(addr) => {
-                let host = addr.ip().to_string();
-                let port = addr.port();
-                DestinationUrl::new("tcp", &host, port)
-            }
-            proxy_types::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
-        };
+        let destination_url = dest_addr_to_url(acceptor.dest_addr());
 
         debug!(log, "Request {}", destination_url);
 
@@ -180,10 +181,114 @@ async fn socks5_process_socket(
         let dummy_local_addr = "0.0.0.0:0";
         let stream = acceptor.connected(dummy_local_addr).await?;
 
-        let _ = api_request_tx.send(JmuxApiRequest::Start { id, stream }).await;
+        let _ = api_request_tx
+            .send(JmuxApiRequest::Start {
+                id,
+                stream,
+                leftover: None,
+            })
+            .await;
     } else {
         acceptor.failed(Socks5FailureCode::CommandNotSupported).await?;
     }
 
     Ok(())
+}
+
+pub async fn https_listener_task(
+    api_request_tx: ApiRequestSender,
+    bind_addr: String,
+    log: Logger,
+) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind(&bind_addr)
+        .await
+        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
+
+    info!(log, "Started listening on {}", bind_addr);
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let api_request_sender = api_request_tx.clone();
+                let log = log.new(o!("addr" => addr));
+                tokio::spawn(async move {
+                    if let Err(e) = https_process_socket(api_request_sender, stream, log.clone()).await {
+                        debug!(log, "HTTPS proxy packet processing failed: {:?}", e);
+                    }
+                });
+            }
+            Err(e) => {
+                error!(log, "Couldn’t accept next TCP stream: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn https_process_socket(
+    api_request_tx: ApiRequestSender,
+    incoming: TcpStream,
+    log: Logger,
+) -> anyhow::Result<()> {
+    let acceptor = HttpsProxyAcceptor::accept(incoming).await?;
+
+    let destination_url = dest_addr_to_url(acceptor.dest_addr());
+
+    debug!(log, "Request {}", destination_url);
+
+    let (sender, receiver) = oneshot::channel();
+
+    match api_request_tx
+        .send(JmuxApiRequest::OpenChannel {
+            destination_url,
+            api_response_tx: sender,
+        })
+        .await
+    {
+        Ok(()) => {}
+        Err(e) => {
+            warn!(log, "Couldn’t send JMUX API request: {}", e);
+            let _ = acceptor.respond(500).await;
+            anyhow::bail!("Couldn't send JMUX request");
+        }
+    }
+
+    let id = match receiver.await.context("negotiation interrupted")? {
+        JmuxApiResponse::Success { id } => id,
+        JmuxApiResponse::Failure { id, reason_code } => {
+            let _ = acceptor.respond(500).await;
+            anyhow::bail!("Channel {} failure: {}", id, reason_code);
+        }
+    };
+
+    // send success response
+    let incoming_stream = acceptor.respond(200).await?;
+
+    let (stream, leftover) = incoming_stream.into_parts();
+
+    let _ = api_request_tx
+        .send(JmuxApiRequest::Start {
+            id,
+            stream,
+            leftover: Some(leftover),
+        })
+        .await;
+
+    Ok(())
+}
+
+fn dest_addr_to_url(dest_addr: &proxy_types::DestAddr) -> DestinationUrl {
+    match dest_addr {
+        proxy_types::DestAddr::Ip(addr) => {
+            let host = addr.ip().to_string();
+            let port = addr.port();
+            DestinationUrl::new("tcp", &host, port)
+        }
+        proxy_types::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
+    }
 }

@@ -43,8 +43,8 @@ fn main() {
                 socks4::test(args.addr);
             }
         }
-        "http" => {
-            http::test(args.addr);
+        "https" => {
+            https::test(args.addr);
         }
         invalid_mode => {
             eprintln!(
@@ -234,9 +234,9 @@ mod socks5_password {
     }
 }
 
-mod http {
+mod https {
     use super::*;
-    use proxy_http::HttpProxyStream;
+    use proxy_https::HttpsProxyStream;
 
     pub fn test(addr: &str) {
         test! {
@@ -246,7 +246,7 @@ mod http {
 
     async fn basic(addr: &str) {
         let socket = TcpStream::connect(addr).await.unwrap();
-        let stream = HttpProxyStream::connect(socket, GOOGLE_ADDR).await.unwrap();
+        let stream = HttpsProxyStream::connect(socket, GOOGLE_ADDR).await.unwrap();
         crate::ping_google(stream).await;
     }
 }

@@ -14,6 +14,7 @@ use self::codec::JmuxCodec;
 use self::id_allocator::IdAllocator;
 use crate::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
 use anyhow::Context as _;
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
 use slog::Logger;
@@ -42,6 +43,8 @@ pub enum JmuxApiRequest {
     Start {
         id: LocalChannelId,
         stream: TcpStream,
+        /// Leftover bytes to be sent to target
+        leftover: Option<Bytes>,
     },
 }
 
@@ -322,7 +325,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             None => warn!(log, "Couldn’t allocate ID for API request: {}", destination_url),
                         }
                     }
-                    JmuxApiRequest::Start { id, stream } => {
+                    JmuxApiRequest::Start { id, stream, leftover } => {
                         let channel = jmux_ctx.get_channel(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
 
                         let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -336,6 +339,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
+                            leftover,
                             log: channel.log.clone(),
                         }.spawn();
 
@@ -413,6 +417,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
+                            leftover: None,
                             log: channel_log.clone(),
                         }.spawn();
 
@@ -771,6 +776,7 @@ impl DataReaderTask {
 struct DataWriterTask {
     writer: OwnedWriteHalf,
     data_rx: DataReceiver,
+    leftover: Option<Bytes>,
     log: Logger,
 }
 
@@ -779,10 +785,17 @@ impl DataWriterTask {
         let Self {
             mut writer,
             mut data_rx,
+            leftover,
             log,
         } = self;
 
         tokio::spawn(async move {
+            if let Some(leftover) = leftover {
+                if let Err(e) = writer.write_all(&leftover).await {
+                    warn!(log, "writer task failed to send leftover bytes: {}", e);
+                }
+            }
+
             while let Some(data) = data_rx.recv().await {
                 if let Err(e) = writer.write_all(&data).await {
                     warn!(log, "writer task failed: {}", e);

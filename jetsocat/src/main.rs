@@ -165,10 +165,11 @@ fn jmux_proxy() -> Command {
 Listener format:
     - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
     - socks5-listen://<BINDING ADDRESS>
+    - https-listen://<BINDING ADDRESS>
 
 Example: JMUX proxy
 
-    {command} {subcommand} tcp-listen://0.0.0.0:7772
+    {command} {subcommand} tcp-listen://0.0.0.0:7772 --allow-all
 
 Example: TCP to JMUX proxy
 
@@ -256,7 +257,7 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
-        .flag(Flag::new("http-proxy", FlagType::String).description("Use specified address:port as HTTP proxy"))
+        .flag(Flag::new("https-proxy", FlagType::String).description("Use specified address:port as HTTPS proxy"))
 }
 
 enum Logging {
@@ -302,9 +303,9 @@ impl CommonArgs {
                 ty: ProxyType::Socks4,
                 addr,
             })
-        } else if let Ok(addr) = c.string_flag("http-proxy") {
+        } else if let Ok(addr) = c.string_flag("https-proxy") {
             Some(ProxyConfig {
-                ty: ProxyType::Http,
+                ty: ProxyType::Https,
                 addr,
             })
         } else if c.bool_flag("no-proxy") {
@@ -482,6 +483,9 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
             })
         }
         "socks5-listen" => Ok(ListenerMode::Socks5 {
+            bind_addr: value.to_owned(),
+        }),
+        "https-listen" => Ok(ListenerMode::Https {
             bind_addr: value.to_owned(),
         }),
         _ => anyhow::bail!("Unknown listener scheme: {}", scheme),

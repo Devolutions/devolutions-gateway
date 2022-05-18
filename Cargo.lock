@@ -1453,7 +1453,7 @@ dependencies = [
  "jet-proto",
  "jmux-proxy",
  "proptest",
- "proxy-http",
+ "proxy-https",
  "proxy-socks",
  "proxy-types",
  "proxy_cfg",
@@ -2207,9 +2207,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e280fbe77cc62c91527259e9442153f4688736748d24660126286329742b4c6c"
+checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 
 [[package]]
 name = "pin-utils"
@@ -2317,9 +2317,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "proxy-http"
+name = "proxy-generators"
 version = "0.0.0"
 dependencies = [
+ "proptest",
+ "proxy-types",
+]
+
+[[package]]
+name = "proxy-https"
+version = "0.0.0"
+dependencies = [
+ "bytes 1.1.0",
+ "pin-project-lite",
+ "proptest",
+ "proxy-generators",
+ "proxy-types",
+ "tokio",
+]
+
+[[package]]
+name = "proxy-server"
+version = "0.0.0"
+dependencies = [
+ "proxy-https",
+ "proxy-socks",
  "proxy-types",
  "tokio",
 ]
@@ -2328,6 +2350,8 @@ dependencies = [
 name = "proxy-socks"
 version = "0.0.0"
 dependencies = [
+ "proptest",
+ "proxy-generators",
  "proxy-types",
  "tokio",
  "tokio-test",
@@ -2337,7 +2361,7 @@ dependencies = [
 name = "proxy-tester"
 version = "0.0.0"
 dependencies = [
- "proxy-http",
+ "proxy-https",
  "proxy-socks",
  "tokio",
 ]
@@ -3194,15 +3218,6 @@ checksum = "66d72b759436ae32898a2af0a14218dbf55efde3feeb170eb623637db85ee1e0"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "socks5-server"
-version = "0.0.0"
-dependencies = [
- "proxy-socks",
- "proxy-types",
- "tokio",
 ]
 
 [[package]]

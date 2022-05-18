@@ -60,7 +60,7 @@ pub struct JmuxProxyCfg {
 }
 
 pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
-    use self::listener::{socks5_listener_task, tcp_listener_task, ListenerMode};
+    use self::listener::{https_listener_task, socks5_listener_task, tcp_listener_task, ListenerMode};
     use jmux_proxy::JmuxProxy;
     use pipe::open_pipe;
     use tokio::sync::mpsc;
@@ -81,6 +81,15 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
                     if let Err(e) =
                         tcp_listener_task(api_request_tx, bind_addr, destination_url, listener_log.clone()).await
                     {
+                        error!(listener_log, "Task failed: {:?}", e);
+                    }
+                });
+            }
+            ListenerMode::Https { bind_addr } => {
+                let listener_log = log.new(o!("HTTPS proxy listener" => bind_addr.clone()));
+                let api_request_tx = api_request_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = https_listener_task(api_request_tx, bind_addr, listener_log.clone()).await {
                         error!(listener_log, "Task failed: {:?}", e);
                     }
                 });

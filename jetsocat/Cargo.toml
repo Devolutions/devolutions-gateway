@@ -23,7 +23,7 @@ uuid = "0.8.2"
 jmux-proxy = { path = "../crates/jmux-proxy" }
 
 # proxy support
-proxy-http = { path = "../crates/proxy-http" }
+proxy-https = { path = "../crates/proxy-https" }
 proxy-socks = { path = "../crates/proxy-socks" }
 proxy-types = { path = "../crates/proxy-types" }
 proxy_cfg = { version = "0.4.1", optional = true }

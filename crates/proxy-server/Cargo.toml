@@ -1,5 +1,5 @@
 [package]
-name = "socks5-server"
+name = "proxy-server"
 version = "0.0.0"
 authors = ["Devolutions Inc."]
 edition = "2021"
@@ -7,5 +7,6 @@ publish = false
 
 [dependencies]
 proxy-socks = { path = "../proxy-socks" }
+proxy-https = { path = "../proxy-https" }
 proxy-types = { path = "../proxy-types" }
 tokio = { version = "1.17.0", features = ["rt", "net", "rt-multi-thread", "macros"] }
