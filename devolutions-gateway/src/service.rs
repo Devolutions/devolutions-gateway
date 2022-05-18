@@ -29,8 +29,11 @@ pub struct GatewayService {
 
 impl GatewayService {
     pub fn load(config: Config) -> anyhow::Result<Self> {
-        let logger =
-            logger::init(config.log_file.as_ref().map(|o| o.as_std_path())).context("failed to setup logger")?;
+        let logger = logger::init(
+            config.log_file.as_ref().map(|o| o.as_std_path()),
+            config.log_level.as_deref(),
+        )
+        .context("failed to setup logger")?;
         let logger_guard = slog_scope::set_global_logger(logger.clone());
         slog_stdlog::init().context("Failed to init logger")?;
 
