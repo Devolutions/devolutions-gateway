@@ -43,12 +43,12 @@ impl<D1: Drain<Ok = (), Err = Never>, D2: Drain<Ok = (), Err = Never>> Drain for
     }
 }
 
-pub fn init(file_path: Option<&Path>) -> io::Result<Logger> {
+pub fn init(filepath: Option<&Path>, log_level: Option<&str>) -> io::Result<Logger> {
     let term_decorator = TermDecorator::new().build();
     let term_fmt = format_decorator(term_decorator);
 
-    let drain_decorator = if let Some(file_path) = file_path {
-        let outfile = OpenOptions::new().create(true).append(true).open(file_path)?;
+    let drain_decorator = if let Some(filepath) = filepath {
+        let outfile = OpenOptions::new().create(true).append(true).open(filepath)?;
         let file_decorator = PlainDecorator::new(outfile);
         let file_fmt = format_decorator(file_decorator);
 
@@ -59,7 +59,7 @@ pub fn init(file_path: Option<&Path>) -> io::Result<Logger> {
 
     let env_drain = slog_envlogger::LogBuilder::new(drain_decorator)
         .filter(None, FilterLevel::Info)
-        .parse(env::var("RUST_LOG").unwrap_or_default().as_str())
+        .parse(log_level.unwrap_or(env::var("RUST_LOG").unwrap_or_default().as_str()))
         .build();
 
     let drain = Async::new(env_drain.fuse())
