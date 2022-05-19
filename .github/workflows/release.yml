@@ -18,7 +18,7 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-18.04
-    outputs: 
+    outputs:
       version: ${{ steps.get-version.outputs.version }}
 
     steps:
@@ -70,13 +70,13 @@ jobs:
         run: |
           $PkgDir = Join-Path docker $Env:RUNNER_OS # RUNNER_OS is camelcase
           echo "::set-output name=package-path::$PkgDir"
-          
+
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
 
           if ($Env:RUNNER_OS -eq "Windows") {
             $SourceFileName = "$($SourceFileName).exe"
             $TargetFileName = "DevolutionsGateway.exe"
-          } else { 
+          } else {
             $TargetFileName = "devolutions-gateway"
           }
 
@@ -106,7 +106,7 @@ jobs:
         shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
-          echo ${{ secrets.DOCKER_HUB_BOT_PASSWORD }} | docker login -u devolutionsbot --password-stdin
+          echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
           if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
