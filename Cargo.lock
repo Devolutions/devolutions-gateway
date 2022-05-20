@@ -2169,9 +2169,9 @@ dependencies = [
 
 [[package]]
 name = "picky-asn1-der"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9e1454c26d52ef1951149e611ca2851673fea960269060887acc6793e3e683"
+checksum = "de76bf631e2f2064f78d7f1ea8a57cb0445d83138cd5fac67274d50b0f6053c2"
 dependencies = [
  "picky-asn1",
  "serde",
@@ -2194,11 +2194,15 @@ dependencies = [
 
 [[package]]
 name = "picky-krb"
-version = "0.0.0"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b0957a0e10bcba34dbf5f0170ed58aa79f741b11d388499128dbb532ccb2bab"
 dependencies = [
+ "byteorder",
  "picky-asn1",
  "picky-asn1-der",
  "serde",
+ "thiserror",
 ]
 
 [[package]]
