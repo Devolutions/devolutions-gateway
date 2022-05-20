@@ -13,10 +13,10 @@ publish = false
 transport = { path = "../crates/transport" }
 jet-proto = { path = "../crates/jet-proto" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
-picky-krb = { path = "../crates/picky-krb" }
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
 ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
 ceviche = "0.5.1"
+picky-krb = "0.1.0"
 
 # cli
 clap = "2.33"
