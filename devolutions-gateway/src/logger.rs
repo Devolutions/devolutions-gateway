@@ -59,7 +59,12 @@ pub fn init(filepath: Option<&Path>, log_level: Option<&str>) -> io::Result<Logg
 
     let env_drain = slog_envlogger::LogBuilder::new(drain_decorator)
         .filter(None, FilterLevel::Info)
-        .parse(log_level.unwrap_or(env::var("RUST_LOG").unwrap_or_default().as_str()))
+        .parse(
+            log_level
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| env::var("RUST_LOG").unwrap_or_default())
+                .as_str(),
+        )
         .build();
 
     let drain = Async::new(env_drain.fuse())
