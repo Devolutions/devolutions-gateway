@@ -141,7 +141,7 @@ pub fn forward_action(c: &Context) {
             pipe_a_mode: args.pipe_a_mode,
             pipe_b_mode: args.pipe_b_mode,
             repeat_count: args.repeat_count,
-            timeout: args.common.timeout,
+            pipe_timeout: args.common.pipe_timeout,
             proxy_cfg: args.common.proxy_cfg,
         };
 
@@ -200,7 +200,7 @@ pub fn jmux_proxy_action(c: &Context) {
             pipe_mode: args.pipe_mode,
             proxy_cfg: args.common.proxy_cfg,
             listener_modes: args.listener_modes,
-            timeout: args.common.timeout,
+            pipe_timeout: args.common.pipe_timeout,
             jmux_cfg: args.jmux_cfg,
         };
 
@@ -253,7 +253,7 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
         .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
-        .flag(Flag::new("timeout", FlagType::String).description("Timeout when opening pipes"))
+        .flag(Flag::new("pipe-timeout", FlagType::String).description("Timeout when opening pipes"))
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
@@ -268,7 +268,7 @@ enum Logging {
 struct CommonArgs {
     logging: Logging,
     proxy_cfg: Option<ProxyConfig>,
-    timeout: Option<core::time::Duration>,
+    pipe_timeout: Option<core::time::Duration>,
 }
 
 impl CommonArgs {
@@ -314,7 +314,7 @@ impl CommonArgs {
             detect_proxy()
         };
 
-        let timeout = if let Ok(timeout) = c.string_flag("timeout") {
+        let pipe_timeout = if let Ok(timeout) = c.string_flag("pipe-timeout") {
             let timeout = humantime::parse_duration(&timeout).context("Invalid value for timeout")?;
             Some(timeout)
         } else {
@@ -324,7 +324,7 @@ impl CommonArgs {
         Ok(Self {
             logging,
             proxy_cfg,
-            timeout,
+            pipe_timeout,
         })
     }
 }
