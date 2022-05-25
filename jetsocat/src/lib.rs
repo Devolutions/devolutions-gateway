@@ -15,7 +15,7 @@ pub struct ForwardCfg {
     pub pipe_a_mode: pipe::PipeMode,
     pub pipe_b_mode: pipe::PipeMode,
     pub repeat_count: usize,
-    pub timeout: Option<Duration>,
+    pub pipe_timeout: Option<Duration>,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
 }
 
@@ -30,7 +30,7 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
 
         let pipe_a_log = log.new(o!("open pipe" => "A"));
         let pipe_a = utils::timeout(
-            cfg.timeout,
+            cfg.pipe_timeout,
             open_pipe(cfg.pipe_a_mode.clone(), cfg.proxy_cfg.clone(), pipe_a_log),
         )
         .await
@@ -38,7 +38,7 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
 
         let pipe_b_log = log.new(o!("open pipe" => "B"));
         let pipe_b = utils::timeout(
-            cfg.timeout,
+            cfg.pipe_timeout,
             open_pipe(cfg.pipe_b_mode.clone(), cfg.proxy_cfg.clone(), pipe_b_log),
         )
         .await
@@ -55,7 +55,7 @@ pub struct JmuxProxyCfg {
     pub pipe_mode: pipe::PipeMode,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
     pub listener_modes: Vec<self::listener::ListenerMode>,
-    pub timeout: Option<Duration>,
+    pub pipe_timeout: Option<Duration>,
     pub jmux_cfg: JmuxConfig,
 }
 
@@ -108,7 +108,7 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
 
     // Open generic pipe to exchange JMUX channel messages on
     let pipe_log = log.new(o!("open pipe" => "JMUX pipe"));
-    let pipe = utils::timeout(cfg.timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log))
+    let pipe = utils::timeout(cfg.pipe_timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg, pipe_log))
         .await
         .context("Couldn't open pipe")?;
 
