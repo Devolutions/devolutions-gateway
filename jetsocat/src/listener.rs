@@ -20,78 +20,60 @@ pub async fn tcp_listener_task(
     destination_url: String,
     log: Logger,
 ) -> anyhow::Result<()> {
-    use anyhow::Context as _;
-    use tokio::net::TcpListener;
-
     let destination_url = format!("tcp://{}", destination_url);
 
-    let listener = TcpListener::bind(&bind_addr)
-        .await
-        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
+    let processor = |stream, log: Logger| {
+        let api_request_tx = api_request_tx.clone();
+        let destination_url = destination_url.clone();
 
-    info!(log, "Started listening on {}", bind_addr);
+        tokio::spawn(async move {
+            debug!(log, "Request {}", destination_url);
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let log = log.new(o!("addr" => addr));
-                let api_request_tx = api_request_tx.clone();
-                let destination_url = destination_url.clone();
+            let destination_url = match DestinationUrl::parse_str(&destination_url) {
+                Ok(url) => url,
+                Err(e) => {
+                    debug!(log, "Bad request: {}", e);
+                    return;
+                }
+            };
 
-                tokio::spawn(async move {
-                    debug!(log, "Request {}", destination_url);
+            let (sender, receiver) = oneshot::channel();
 
-                    let destination_url = match DestinationUrl::parse_str(&destination_url) {
-                        Ok(url) => url,
-                        Err(e) => {
-                            debug!(log, "Bad request: {}", e);
-                            return;
-                        }
-                    };
+            match api_request_tx
+                .send(JmuxApiRequest::OpenChannel {
+                    destination_url,
+                    api_response_tx: sender,
+                })
+                .await
+            {
+                Ok(()) => {}
+                Err(e) => {
+                    warn!(log, "Couldn’t send JMUX API request: {}", e);
+                    return;
+                }
+            }
 
-                    let (sender, receiver) = oneshot::channel();
-
-                    match api_request_tx
-                        .send(JmuxApiRequest::OpenChannel {
-                            destination_url,
-                            api_response_tx: sender,
+            match receiver.await {
+                Ok(JmuxApiResponse::Success { id }) => {
+                    let _ = api_request_tx
+                        .send(JmuxApiRequest::Start {
+                            id,
+                            stream,
+                            leftover: None,
                         })
-                        .await
-                    {
-                        Ok(()) => {}
-                        Err(e) => {
-                            warn!(log, "Couldn’t send JMUX API request: {}", e);
-                            return;
-                        }
-                    }
-
-                    match receiver.await {
-                        Ok(JmuxApiResponse::Success { id }) => {
-                            let _ = api_request_tx
-                                .send(JmuxApiRequest::Start {
-                                    id,
-                                    stream,
-                                    leftover: None,
-                                })
-                                .await;
-                        }
-                        Ok(JmuxApiResponse::Failure { id, reason_code }) => {
-                            debug!(log, "Channel {} failure: {}", id, reason_code);
-                        }
-                        Err(e) => {
-                            debug!(log, "Couldn't receive API response: {}", e);
-                        }
-                    }
-                });
+                        .await;
+                }
+                Ok(JmuxApiResponse::Failure { id, reason_code }) => {
+                    debug!(log, "Channel {} failure: {}", id, reason_code);
+                }
+                Err(e) => {
+                    debug!(log, "Couldn't receive API response: {}", e);
+                }
             }
-            Err(e) => {
-                error!(log, "Couldn’t accept next TCP stream: {}", e);
-                break;
-            }
-        }
-    }
+        });
+    };
 
-    Ok(())
+    listener_task_impl(processor, bind_addr, log).await
 }
 
 pub async fn socks5_listener_task(
@@ -99,40 +81,22 @@ pub async fn socks5_listener_task(
     bind_addr: String,
     log: Logger,
 ) -> anyhow::Result<()> {
-    use anyhow::Context as _;
-    use tokio::net::TcpListener;
-
-    let listener = TcpListener::bind(&bind_addr)
-        .await
-        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
-
-    info!(log, "Started listening on {}", bind_addr);
-
     let conf = Arc::new(Socks5AcceptorConfig {
         no_auth_required: true,
         users: None,
     });
 
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let api_request_sender = api_request_tx.clone();
-                let log = log.new(o!("addr" => addr));
-                let conf = Arc::clone(&conf);
-                tokio::spawn(async move {
-                    if let Err(e) = socks5_process_socket(api_request_sender, stream, conf, log.clone()).await {
-                        debug!(log, "SOCKS5 packet processing failed: {:?}", e);
-                    }
-                });
+    let processor = |stream, log: Logger| {
+        let api_request_tx = api_request_tx.clone();
+        let conf = Arc::clone(&conf);
+        tokio::spawn(async move {
+            if let Err(e) = socks5_process_socket(api_request_tx, stream, conf, log.clone()).await {
+                debug!(log, "SOCKS5 packet processing failed: {:#}", e);
             }
-            Err(e) => {
-                error!(log, "Couldn’t accept next TCP stream: {}", e);
-                break;
-            }
-        }
-    }
+        });
+    };
 
-    Ok(())
+    listener_task_impl(processor, bind_addr, log).await
 }
 
 async fn socks5_process_socket(
@@ -200,34 +164,16 @@ pub async fn https_listener_task(
     bind_addr: String,
     log: Logger,
 ) -> anyhow::Result<()> {
-    use anyhow::Context as _;
-    use tokio::net::TcpListener;
-
-    let listener = TcpListener::bind(&bind_addr)
-        .await
-        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
-
-    info!(log, "Started listening on {}", bind_addr);
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let api_request_sender = api_request_tx.clone();
-                let log = log.new(o!("addr" => addr));
-                tokio::spawn(async move {
-                    if let Err(e) = https_process_socket(api_request_sender, stream, log.clone()).await {
-                        debug!(log, "HTTPS proxy packet processing failed: {:?}", e);
-                    }
-                });
+    let processor = |stream, log: Logger| {
+        let api_request_tx = api_request_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = https_process_socket(api_request_tx, stream, log.clone()).await {
+                debug!(log, "HTTPS proxy packet processing failed: {:?}", e);
             }
-            Err(e) => {
-                error!(log, "Couldn’t accept next TCP stream: {}", e);
-                break;
-            }
-        }
-    }
+        });
+    };
 
-    Ok(())
+    listener_task_impl(processor, bind_addr, log).await
 }
 
 async fn https_process_socket(
@@ -291,4 +237,33 @@ fn dest_addr_to_url(dest_addr: &proxy_types::DestAddr) -> DestinationUrl {
         }
         proxy_types::DestAddr::Domain(domain, port) => DestinationUrl::new("tcp", domain, *port),
     }
+}
+
+async fn listener_task_impl<F>(mut processor: F, bind_addr: String, log: Logger) -> anyhow::Result<()>
+where
+    F: FnMut(TcpStream, Logger),
+{
+    use anyhow::Context as _;
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind(&bind_addr)
+        .await
+        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
+
+    info!(log, "Started listening on {}", bind_addr);
+
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let log = log.new(o!("addr" => addr));
+                processor(stream, log.clone());
+            }
+            Err(e) => {
+                error!(log, "Couldn’t accept next TCP stream: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }

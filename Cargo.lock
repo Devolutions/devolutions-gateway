@@ -1461,6 +1461,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
+ "sysinfo",
  "test-utils",
  "tokio",
  "tokio-tungstenite",
@@ -3361,6 +3362,20 @@ dependencies = [
  "quote 1.0.15",
  "syn 1.0.86",
  "unicode-xid 0.2.2",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.23.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3977ec2e0520829be45c8a2df70db2bf364714d8a748316a10c3c35d4d2b01c9"
+dependencies = [
+ "cfg-if 1.0.0",
+ "core-foundation-sys",
+ "libc",
+ "ntapi",
+ "once_cell",
+ "winapi",
 ]
 
 [[package]]

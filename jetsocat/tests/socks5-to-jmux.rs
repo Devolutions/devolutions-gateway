@@ -169,6 +169,7 @@ async fn client_side_jmux(
         proxy_cfg: None,
         listener_modes: vec![listener_mode],
         pipe_timeout: None,
+        watch_process: None,
         jmux_cfg: jmux_proxy::JmuxConfig::client(),
     };
 
@@ -199,6 +200,7 @@ async fn server_side_jmux(port: u16, kind: TransportKind, logger: slog::Logger) 
         proxy_cfg: None,
         listener_modes: Vec::new(),
         pipe_timeout: None,
+        watch_process: None,
         jmux_cfg: JmuxConfig {
             filtering: filtering_rule,
         },
