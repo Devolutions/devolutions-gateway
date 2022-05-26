@@ -142,6 +142,7 @@ pub fn forward_action(c: &Context) {
             pipe_b_mode: args.pipe_b_mode,
             repeat_count: args.repeat_count,
             pipe_timeout: args.common.pipe_timeout,
+            watch_process: args.common.watch_process,
             proxy_cfg: args.common.proxy_cfg,
         };
 
@@ -201,6 +202,7 @@ pub fn jmux_proxy_action(c: &Context) {
             proxy_cfg: args.common.proxy_cfg,
             listener_modes: args.listener_modes,
             pipe_timeout: args.common.pipe_timeout,
+            watch_process: args.common.watch_process,
             jmux_cfg: args.jmux_cfg,
         };
 
@@ -258,6 +260,10 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
         .flag(Flag::new("https-proxy", FlagType::String).description("Use specified address:port as HTTPS proxy"))
+        .flag(
+            Flag::new("watch-parent", FlagType::Bool).description("Watch parent process and stop piping when it dies"),
+        )
+        .flag(Flag::new("watch-process", FlagType::Int).description("Watch given process and stop piping when it dies"))
 }
 
 enum Logging {
@@ -269,6 +275,7 @@ struct CommonArgs {
     logging: Logging,
     proxy_cfg: Option<ProxyConfig>,
     pipe_timeout: Option<core::time::Duration>,
+    watch_process: Option<sysinfo::Pid>,
 }
 
 impl CommonArgs {
@@ -315,8 +322,25 @@ impl CommonArgs {
         };
 
         let pipe_timeout = if let Ok(timeout) = c.string_flag("pipe-timeout") {
-            let timeout = humantime::parse_duration(&timeout).context("Invalid value for timeout")?;
+            let timeout = humantime::parse_duration(&timeout).context("Invalid value for pipe timeout")?;
             Some(timeout)
+        } else {
+            None
+        };
+
+        let watch_process = if let Ok(process_id) = c.int_flag("watch-process") {
+            let pid = u32::try_from(process_id).context("Invalid value for process ID")?;
+            Some(sysinfo::PidExt::from_u32(pid))
+        } else if c.bool_flag("watch-parent") {
+            use sysinfo::{ProcessExt as _, ProcessRefreshKind, RefreshKind, System, SystemExt};
+
+            // Find current process' parent process ID
+            let current_pid =
+                sysinfo::get_current_pid().map_err(|e| anyhow::anyhow!("Couldn't find current process ID: {e}"))?;
+            let refresh_kind = RefreshKind::new().with_processes(ProcessRefreshKind::new());
+            let system = System::new_with_specifics(refresh_kind);
+            let current_process = system.process(current_pid).unwrap(); // current process should exist
+            Some(current_process.parent().context("Couldn't find parent process")?)
         } else {
             None
         };
@@ -325,6 +349,7 @@ impl CommonArgs {
             logging,
             proxy_cfg,
             pipe_timeout,
+            watch_process,
         })
     }
 }

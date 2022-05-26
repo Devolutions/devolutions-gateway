@@ -1,5 +1,5 @@
 use crate::proxy::{ProxyConfig, ProxyType};
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, Context as _};
 use core::time::Duration;
 use futures_util::{future, Future};
 use proxy_types::{DestAddr, ToDestAddr};
@@ -9,7 +9,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
 use transport::{ErasedRead, ErasedWrite, WebSocketStream};
 
-async fn resolve_dest_addr(dest_addr: DestAddr) -> Result<SocketAddr> {
+async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
     match dest_addr {
         DestAddr::Ip(socket_addr) => Ok(socket_addr),
         DestAddr::Domain(host, port) => tokio::net::lookup_host((host.as_str(), port))
@@ -79,8 +79,8 @@ macro_rules! impl_tcp_connect {
 
 type TcpConnectOutput = (ErasedRead, ErasedWrite);
 
-pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<TcpConnectOutput> {
-    impl_tcp_connect!(req_addr, proxy_cfg, Result<TcpConnectOutput>, |stream| {
+pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<TcpConnectOutput> {
+    impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<TcpConnectOutput>, |stream| {
         let (read, write) = tokio::io::split(stream);
         future::ready(Ok((Box::new(read) as ErasedRead, Box::new(write) as ErasedWrite)))
     })
@@ -88,7 +88,7 @@ pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> Re
 
 type WebSocketConnectOutput = (ErasedRead, ErasedWrite, Response);
 
-pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<WebSocketConnectOutput> {
+pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<WebSocketConnectOutput> {
     use futures_util::StreamExt as _;
     use tokio_tungstenite::client_async_tls;
 
@@ -97,7 +97,7 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
     let port = req.uri().port_u16().context("no port in the url")?;
     let req_addr = (domain, port);
 
-    impl_tcp_connect!(req_addr, proxy_cfg, Result<WebSocketConnectOutput>, |stream| {
+    impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<WebSocketConnectOutput>, |stream| {
         async {
             let (ws, rsp) = client_async_tls(req, stream)
                 .await
@@ -111,9 +111,10 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> Result<
 }
 
 #[track_caller]
-pub async fn timeout<T, Fut>(duration: Option<Duration>, future: Fut) -> Result<T>
+pub async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
 where
-    Fut: Future<Output = Result<T>>,
+    Fut: Future<Output = Result<T, E>>,
+    E: From<tokio::time::error::Elapsed>,
 {
     if let Some(duration) = duration {
         tokio::time::timeout(duration, future).await?

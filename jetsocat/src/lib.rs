@@ -3,6 +3,7 @@ pub mod pipe;
 pub mod proxy;
 
 mod jet;
+mod process_watcher;
 mod utils;
 
 use anyhow::Context as _;
@@ -16,6 +17,7 @@ pub struct ForwardCfg {
     pub pipe_b_mode: pipe::PipeMode,
     pub repeat_count: usize,
     pub pipe_timeout: Option<Duration>,
+    pub watch_process: Option<sysinfo::Pid>,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
 }
 
@@ -44,7 +46,20 @@ pub async fn forward(cfg: ForwardCfg, log: Logger) -> anyhow::Result<()> {
         .await
         .context("Couldn't open pipe B")?;
 
-        pipe(pipe_a, pipe_b, log.clone()).await.context("Failed to pipe")?;
+        let pipe_fut = pipe(pipe_a, pipe_b, log.clone());
+
+        if let Some(pid) = cfg.watch_process {
+            tokio::select! {
+                res = pipe_fut => res,
+                _ = process_watcher::watch_process(pid) => {
+                    info!(log, "Process {pid} is not running anymore");
+                    return Ok(());
+                },
+            }
+        } else {
+            pipe_fut.await
+        }
+        .context("Failed to pipe")?;
     }
 
     Ok(())
@@ -56,6 +71,7 @@ pub struct JmuxProxyCfg {
     pub proxy_cfg: Option<proxy::ProxyConfig>,
     pub listener_modes: Vec<self::listener::ListenerMode>,
     pub pipe_timeout: Option<Duration>,
+    pub watch_process: Option<sysinfo::Pid>,
     pub jmux_cfg: JmuxConfig,
 }
 
@@ -113,10 +129,21 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg, log: Logger) -> anyhow::Result<()> {
         .context("Couldn't open pipe")?;
 
     // Start JMUX proxy over the pipe
-    JmuxProxy::new(pipe.read, pipe.write)
+    let proxy_fut = JmuxProxy::new(pipe.read, pipe.write)
         .with_config(cfg.jmux_cfg)
         .with_requester_api(api_request_rx)
-        .with_logger(log)
-        .run()
-        .await
+        .with_logger(log.clone())
+        .run();
+
+    if let Some(pid) = cfg.watch_process {
+        tokio::select! {
+            res = proxy_fut => res,
+            _ = process_watcher::watch_process(pid) => {
+                info!(log, "Process {pid} is not running anymore");
+                Ok(())
+            },
+        }
+    } else {
+        proxy_fut.await
+    }
 }
