@@ -102,7 +102,7 @@ async fn auth_middleware(
     };
 
     if config.debug.dump_tokens {
-        debug!("**DEBUG OPTION** Received token: {token}");
+        debug!(token, "**DEBUG OPTION**");
     }
 
     let source_addr = request

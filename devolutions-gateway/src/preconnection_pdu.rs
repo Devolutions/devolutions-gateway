@@ -18,7 +18,7 @@ pub fn extract_association_claims(
     let token = pdu.payload.as_deref().context("Empty preconnection PDU")?;
 
     if config.debug.dump_tokens {
-        debug!("**DEBUG OPTION** Received token: {token}");
+        debug!(token, "**DEBUG OPTION**");
     }
 
     let provisioner_key = config

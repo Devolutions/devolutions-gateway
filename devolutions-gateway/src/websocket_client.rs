@@ -15,6 +15,7 @@ use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::Instrument as _;
 use transport::{ErasedRead, ErasedWrite};
 use url::Url;
 use uuid::Uuid;
@@ -498,7 +499,7 @@ async fn handle_jmux(
     let delegation_key = config.delegation_private_key.as_ref();
 
     if config.debug.dump_tokens {
-        debug!("**DEBUG OPTION** Received token: {token}");
+        debug!(token, "**DEBUG OPTION**");
     }
 
     let validation_result = if config.debug.disable_token_validation {
@@ -541,7 +542,6 @@ async fn handle_jmux(
 
     tokio::spawn(async move {
         use jmux_proxy::{FilteringRule, JmuxConfig};
-        use slog::o;
         use tokio_tungstenite::tungstenite::protocol::Role;
 
         let upgraded = hyper::upgrade::on(&mut req)
@@ -571,12 +571,10 @@ async fn handle_jmux(
             ),
         };
 
-        let jmux_proxy_log = slog_scope::logger().new(o!("client_addr" => client_addr));
-
         JmuxProxy::new(reader, writer)
             .with_config(config)
-            .with_logger(jmux_proxy_log)
             .run()
+            .instrument(info_span!("jmux", client=%client_addr))
             .await
             .map_err(|e| error!("JMUX proxy error: {}", e))?;
 

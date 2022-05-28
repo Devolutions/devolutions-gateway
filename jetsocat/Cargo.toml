@@ -8,7 +8,6 @@ publish = false
 
 [features]
 default = ["rustls", "detect-proxy"]
-verbose = ["slog/max_level_trace"]
 detect-proxy = ["proxy_cfg"]
 rustls = ["tokio-tungstenite/rustls-tls-webpki-roots"]
 native-tls = ["tokio-tungstenite/native-tls"]
@@ -39,9 +38,9 @@ futures-util = "0.3.21"
 transport = { path = "../crates/transport" }
 
 # logging
-slog = "2.7.0"
-slog-async = "2.7.0"
-slog-term = "2.9.0"
+tracing = "0.1.34"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+tracing-appender = "0.2.2"
 
 # error handling
 anyhow = "1.0.55"

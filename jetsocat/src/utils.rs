@@ -117,7 +117,26 @@ where
     E: From<tokio::time::error::Elapsed>,
 {
     if let Some(duration) = duration {
+        debug!(?duration, "With timeout");
         tokio::time::timeout(duration, future).await?
+    } else {
+        future.await
+    }
+}
+#[track_caller]
+pub async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
+where
+    Fut: Future<Output = Result<(), E>>,
+{
+    if let Some(pid) = process {
+        info!(%pid, "Watch for process");
+        tokio::select! {
+            res = future => res,
+            _ = crate::process_watcher::watch_process(pid) => {
+                info!(%pid, "Watched process is not running anymore");
+                Ok(())
+            },
+        }
     } else {
         future.await
     }

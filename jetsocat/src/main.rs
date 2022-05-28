@@ -4,11 +4,11 @@ use jetsocat::pipe::PipeMode;
 use jetsocat::proxy::{detect_proxy, ProxyConfig, ProxyType};
 use jmux_proxy::JmuxConfig;
 use seahorse::{App, Command, Context, Flag, FlagType};
-use slog::{crit, info, o, Logger};
 use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use tokio::runtime;
+use tracing::*;
 
 fn main() {
     let args: Vec<String> = if let Ok(args_str) = std::env::var("JETSOCAT_ARGS") {
@@ -36,38 +36,34 @@ fn generate_usage() -> String {
     const IS_DEBUG: bool = true;
     #[cfg(not(debug_assertions))]
     const IS_DEBUG: bool = false;
-    #[cfg(feature = "verbose")]
-    const IS_VERBOSE: bool = true;
-    #[cfg(not(feature = "verbose"))]
-    const IS_VERBOSE: bool = false;
 
     format!(
-        "{command} [action]\n\
+        "{command} [subcommand]\n\
         \n\
         \tExample: unauthenticated PowerShell\n\
         \n\
         \t  {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'\n\
         \n\
-        For detailed logs use debug binary or any binary built with 'verbose' feature enabled.\n\
-        This binary was built as:\n\
-        \tDebug? {is_debug}\n\
-        \tVerbose? {is_verbose}",
+        \tFor detailed logs, use the `RUST_LOG` environment variable:\n\
+        \n\
+        \t  RUST_LOG=target[span{{field=value}}]=level\n\
+        \n\
+        Build type: {build}",
         command = env!("CARGO_PKG_NAME"),
-        is_debug = IS_DEBUG,
-        is_verbose = IS_VERBOSE,
+        build = if IS_DEBUG { "debug" } else { "release" },
     )
 }
 
-pub fn run<F: Future<Output = anyhow::Result<()>>>(log: Logger, f: F) -> anyhow::Result<()> {
+pub fn run<F: Future<Output = anyhow::Result<()>>>(f: F) -> anyhow::Result<()> {
     let rt = runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("runtime build failed")?;
 
     match rt.block_on(f) {
-        Ok(()) => info!(log, "Terminated successfully"),
+        Ok(()) => info!("Terminated successfully"),
         Err(e) => {
-            crit!(log, "{:#}", e);
+            error!("{:#}", e);
             return Err(e);
         }
     }
@@ -135,7 +131,7 @@ Example: unauthenticated sftp client
 
 pub fn forward_action(c: &Context) {
     let res = ForwardArgs::parse(c).and_then(|args| {
-        let log = setup_logger(args.common.logging);
+        let _log_guard = setup_logger(args.common.logging);
 
         let cfg = jetsocat::ForwardCfg {
             pipe_a_mode: args.pipe_a_mode,
@@ -146,9 +142,7 @@ pub fn forward_action(c: &Context) {
             proxy_cfg: args.common.proxy_cfg,
         };
 
-        let forward_log = log.new(o!("action" => "forward"));
-
-        run(forward_log.clone(), jetsocat::forward(cfg, forward_log))
+        run(jetsocat::forward(cfg))
     });
     exit(res);
 }
@@ -195,7 +189,7 @@ Example: SOCKS5 to JMUX proxy
 
 pub fn jmux_proxy_action(c: &Context) {
     let res = JmuxProxyArgs::parse(c).and_then(|args| {
-        let log = setup_logger(args.common.logging);
+        let _log_guard = setup_logger(args.common.logging);
 
         let cfg = jetsocat::JmuxProxyCfg {
             pipe_mode: args.pipe_mode,
@@ -206,9 +200,7 @@ pub fn jmux_proxy_action(c: &Context) {
             jmux_cfg: args.jmux_cfg,
         };
 
-        let jmux_proxy_log = log.new(o!("action" => JMUX_PROXY_SUBCOMMAND));
-
-        run(jmux_proxy_log.clone(), jetsocat::jmux_proxy(cfg, jmux_proxy_log))
+        run(jetsocat::jmux_proxy(cfg))
     });
     exit(res);
 }
@@ -255,7 +247,10 @@ fn parse_env_variable_as_args(env_var_str: &str) -> Vec<String> {
 fn apply_common_flags(cmd: Command) -> Command {
     cmd.flag(Flag::new("log-file", FlagType::String).description("Specify filepath for log file"))
         .flag(Flag::new("log-term", FlagType::Bool).description("Print logs to stdout instead of log file"))
-        .flag(Flag::new("pipe-timeout", FlagType::String).description("Timeout when opening pipes"))
+        .flag(
+            Flag::new("pipe-timeout", FlagType::String)
+                .description("Timeout when opening pipes (mostly useful for listeners)"),
+        )
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
@@ -519,16 +514,22 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
 
 // logging
 
-fn setup_logger(logging: Logging) -> slog::Logger {
-    use slog::Drain;
+struct LoggerGuard {
+    _worker_guard: tracing_appender::non_blocking::WorkerGuard,
+}
+
+fn setup_logger(logging: Logging) -> LoggerGuard {
     use std::fs::OpenOptions;
     use std::panic;
+    use tracing::metadata::LevelFilter;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{fmt, EnvFilter};
 
-    let drain = match logging {
+    let (layer, guard) = match logging {
         Logging::Term => {
-            let decorator = slog_term::TermDecorator::new().build();
-            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-            slog_async::Async::new(drain).build().fuse()
+            let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout());
+            let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
+            (stdio_layer, guard)
         }
         Logging::File { filepath } => {
             let file = OpenOptions::new()
@@ -537,19 +538,27 @@ fn setup_logger(logging: Logging) -> slog::Logger {
                 .truncate(false)
                 .open(filepath)
                 .expect("couldn't create log file");
-            let decorator = slog_term::PlainDecorator::new(file);
-            let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-            slog_async::Async::new(drain).build().fuse()
+
+            let (non_blocking, guard) = tracing_appender::non_blocking(file);
+            let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+
+            (file_layer, guard)
         }
     };
 
-    let logger = slog::Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")));
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env()
+        .expect("invalid filtering directive from env");
 
-    let logger_cloned = logger.clone();
+    tracing_subscriber::registry().with(layer).with(env_filter).init();
+
+    info!(version = env!("CARGO_PKG_VERSION"));
+
     panic::set_hook(Box::new(move |panic_info| {
-        slog::crit!(logger_cloned, "{}", panic_info);
+        error!(%panic_info);
         eprintln!("{}", panic_info);
     }));
 
-    logger
+    LoggerGuard { _worker_guard: guard }
 }

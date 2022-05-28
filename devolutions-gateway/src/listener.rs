@@ -8,14 +8,13 @@ use crate::utils::url_to_socket_addr;
 use crate::websocket_client::{WebsocketService, WsClient};
 use anyhow::Context;
 use hyper::service::service_fn;
-use slog::Logger;
-use slog_scope_futures::future03::FutureExt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio_rustls::TlsStream;
+use tracing::Instrument as _;
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,13 +26,13 @@ pub enum ListenerKind {
 
 pub struct GatewayListener {
     addr: SocketAddr,
+    listener_url: Url,
     kind: ListenerKind,
     listener: TcpListener,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     config: Arc<Config>,
-    logger: Logger,
 }
 
 impl GatewayListener {
@@ -43,7 +42,6 @@ impl GatewayListener {
         associations: Arc<JetAssociationsMap>,
         token_cache: Arc<TokenCache>,
         jrl: Arc<CurrentJrl>,
-        logger: Logger,
     ) -> anyhow::Result<Self> {
         info!("Initiating listener {}…", url);
 
@@ -51,7 +49,7 @@ impl GatewayListener {
 
         let socket = TcpSocket::new_v4().context("failed to create TCP socket")?;
         socket.bind(socket_addr).context("failed to bind TCP socket")?;
-        set_socket_options(&socket, &logger);
+        set_socket_options(&socket);
         let listener = socket
             .listen(64)
             .context("failed to listen with the binded TCP socket")?;
@@ -63,19 +61,17 @@ impl GatewayListener {
             unsupported => anyhow::bail!("unsupported listener scheme: {}", unsupported),
         };
 
-        info!("TCP listener on {} started successfully", socket_addr);
-
-        let logger = logger.new(slog::o!("listener" => url.to_string()));
+        info!("{kind:?} listener on {} started successfully", socket_addr);
 
         Ok(Self {
             addr: socket_addr,
+            listener_url: url,
             kind,
             listener,
             config,
             associations,
             token_cache,
             jrl,
-            logger,
         })
     }
 
@@ -87,41 +83,50 @@ impl GatewayListener {
         self.kind
     }
 
+    #[instrument("listener", skip(self), fields(url = %self.listener_url))]
     pub async fn run(self) -> anyhow::Result<()> {
         macro_rules! handle {
-            ($handler:ident) => {{
-                match self.listener.accept().await.context("failed to accept connection") {
+            ($protocol:literal, $handler:ident) => {{
+                match self
+                    .listener
+                    .accept()
+                    .await
+                    .context("failed to accept connection")
+                {
                     Ok((stream, peer_addr)) => {
                         let config = self.config.clone();
                         let associations = self.associations.clone();
                         let token_cache = self.token_cache.clone();
                         let jrl = self.jrl.clone();
-                        let logger = self.logger.new(slog::o!("client" => peer_addr.to_string()));
 
-                        tokio::spawn(async move {
-                            if let Err(e) = $handler(config, associations, token_cache, jrl, stream, peer_addr, logger.clone()).await {
-                                slog_error!(logger, concat!(stringify!($handler), " failure: {:#}"), e);
+                        let fut = async move {
+                            if let Err(e) = $handler(config, associations, token_cache, jrl, stream, peer_addr).await {
+                                error!(concat!(stringify!($handler), " failure: {:#}"), e);
                             }
-                        });
+                        }
+                        .instrument(info_span!($protocol, client = %peer_addr));
+
+                        tokio::spawn(fut);
                     }
-                    Err(e) => slog_warn!(self.logger, "listener failure: {:#}", e),
+                    Err(e) => warn!("listener failure: {:#}", e),
                 }
-            }}
+            }};
         }
 
         match self.kind() {
             ListenerKind::Tcp => loop {
-                handle!(handle_tcp_client)
+                handle!("tcp", handle_tcp_client)
             },
             ListenerKind::Ws => loop {
-                handle!(handle_ws_client)
+                handle!("ws", handle_ws_client)
             },
             ListenerKind::Wss => loop {
-                handle!(handle_wss_client)
+                handle!("wss", handle_wss_client)
             },
         }
     }
 
+    #[instrument(skip(self), fields(listener = %self.listener_url))]
     pub async fn handle_one(&self) -> anyhow::Result<()> {
         let (conn, peer_addr) = self.listener.accept().await.context("failed to accept connection")?;
 
@@ -129,17 +134,22 @@ impl GatewayListener {
         let associations = self.associations.clone();
         let token_cache = self.token_cache.clone();
         let jrl = self.jrl.clone();
-        let logger = self.logger.new(slog::o!("client" => peer_addr.to_string()));
 
         match self.kind() {
             ListenerKind::Tcp => {
-                handle_tcp_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+                handle_tcp_client(config, associations, token_cache, jrl, conn, peer_addr)
+                    .instrument(info_span!("tcp", client = %peer_addr))
+                    .await?
             }
             ListenerKind::Ws => {
-                handle_ws_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+                handle_ws_client(config, associations, token_cache, jrl, conn, peer_addr)
+                    .instrument(info_span!("ws", client = %peer_addr))
+                    .await?
             }
             ListenerKind::Wss => {
-                handle_wss_client(config, associations, token_cache, jrl, conn, peer_addr, logger).await?
+                handle_wss_client(config, associations, token_cache, jrl, conn, peer_addr)
+                    .instrument(info_span!("wss", client = %peer_addr))
+                    .await?
             }
         }
 
@@ -154,9 +164,8 @@ async fn handle_tcp_client(
     jrl: Arc<CurrentJrl>,
     stream: TcpStream,
     peer_addr: SocketAddr,
-    logger: Logger,
 ) -> anyhow::Result<()> {
-    set_stream_option(&stream, &logger);
+    set_stream_option(&stream);
 
     if let Some(routing_url) = &config.routing_url {
         // TODO: should we keep support for this "routing URL" option? (it's not really used in
@@ -165,7 +174,7 @@ async fn handle_tcp_client(
             "tcp" => {
                 routing_client::Client::new(routing_url.clone(), config)
                     .serve(peer_addr, stream)
-                    .with_logger(logger)
+                    .instrument(info_span!("tcp-client"))
                     .await?;
             }
             "tls" => {
@@ -180,7 +189,7 @@ async fn handle_tcp_client(
 
                 routing_client::Client::new(routing_url.clone(), config)
                     .serve(peer_addr, tls_stream)
-                    .with_logger(logger)
+                    .instrument(info_span!("tls-client"))
                     .await?;
             }
             "ws" => {
@@ -190,7 +199,7 @@ async fn handle_tcp_client(
                 let ws = transport::WebSocketStream::new(stream);
                 WsClient::new(routing_url.clone(), config)
                     .serve(peer_addr, ws)
-                    .with_logger(logger)
+                    .instrument(info_span!("ws-client"))
                     .await?;
             }
             "wss" => {
@@ -208,7 +217,7 @@ async fn handle_tcp_client(
                 let ws = transport::WebSocketStream::new(stream);
                 WsClient::new(routing_url.clone(), config)
                     .serve(peer_addr, ws)
-                    .with_logger(logger)
+                    .instrument(info_span!("wss-client"))
                     .await?;
             }
             "rdp" => {
@@ -219,7 +228,7 @@ async fn handle_tcp_client(
                     jrl,
                 }
                 .serve(stream)
-                .with_logger(logger)
+                .instrument(info_span!("rdp-client"))
                 .await?;
             }
             scheme => anyhow::bail!("Unsupported routing URL scheme {}", scheme),
@@ -241,7 +250,7 @@ async fn handle_tcp_client(
                     .transport(stream)
                     .build()
                     .serve()
-                    .with_logger(logger)
+                    .instrument(info_span!("jet-client"))
                     .await?;
             }
             [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
@@ -255,7 +264,7 @@ async fn handle_tcp_client(
                     .jrl(jrl)
                     .build()
                     .serve()
-                    .with_logger(logger)
+                    .instrument(info_span!("generic-client"))
                     .await?;
             }
         }
@@ -271,14 +280,13 @@ async fn handle_ws_client(
     jrl: Arc<CurrentJrl>,
     conn: TcpStream,
     peer_addr: SocketAddr,
-    logger: Logger,
 ) -> anyhow::Result<()> {
-    set_stream_option(&conn, &logger);
+    set_stream_option(&conn);
 
     // Annonate using the type alias from `transport` just for sanity
     let conn: transport::TcpStream = conn;
 
-    process_ws_stream(conn, peer_addr, config, associations, token_cache, jrl, logger).await?;
+    process_ws_stream(conn, peer_addr, config, associations, token_cache, jrl).await?;
 
     Ok(())
 }
@@ -290,9 +298,8 @@ async fn handle_wss_client(
     jrl: Arc<CurrentJrl>,
     stream: TcpStream,
     peer_addr: SocketAddr,
-    logger: Logger,
 ) -> anyhow::Result<()> {
-    set_stream_option(&stream, &logger);
+    set_stream_option(&stream);
 
     let tls_conf = config.tls.as_ref().context("TLS configuration is missing")?;
 
@@ -304,7 +311,7 @@ async fn handle_wss_client(
         .context("TLS handshake failed")?
         .pipe(tokio_rustls::TlsStream::Server);
 
-    process_ws_stream(tls_stream, peer_addr, config, associations, token_cache, jrl, logger).await?;
+    process_ws_stream(tls_stream, peer_addr, config, associations, token_cache, jrl).await?;
 
     Ok(())
 }
@@ -316,7 +323,6 @@ async fn process_ws_stream<I>(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
-    logger: Logger,
 ) -> anyhow::Result<()>
 where
     I: AsyncWrite + AsyncRead + Unpin + Send + Sync + 'static,
@@ -342,32 +348,32 @@ where
 
     http.serve_connection(io, service)
         .with_upgrades()
-        .with_logger(logger)
+        .instrument(info_span!("http"))
         .await?;
 
     Ok(())
 }
 
-fn set_socket_options(socket: &TcpSocket, logger: &Logger) {
+fn set_socket_options(socket: &TcpSocket) {
     const SOCKET_SEND_BUFFER_SIZE: u32 = 0x7FFFF;
     const SOCKET_RECV_BUFFER_SIZE: u32 = 0x7FFFF;
 
     // FIXME: temporarily not available in tokio 1.x (https://github.com/tokio-rs/tokio/issues/3082)
     // if let Err(e) = socket.set_keepalive(Some(Duration::from_secs(2))) {
-    //     slog_error!(logger, "set_keepalive on TcpStream failed: {}", e);
+    //     error!("set_keepalive on TcpStream failed: {}", e);
     // }
 
     if let Err(e) = socket.set_send_buffer_size(SOCKET_SEND_BUFFER_SIZE) {
-        slog_error!(logger, "set_send_buffer_size on TcpStream failed: {}", e);
+        error!("set_send_buffer_size on TcpStream failed: {}", e);
     }
 
     if let Err(e) = socket.set_recv_buffer_size(SOCKET_RECV_BUFFER_SIZE) {
-        slog_error!(logger, "set_recv_buffer_size on TcpStream failed: {}", e);
+        error!("set_recv_buffer_size on TcpStream failed: {}", e);
     }
 }
 
-fn set_stream_option(stream: &TcpStream, logger: &Logger) {
+fn set_stream_option(stream: &TcpStream) {
     if let Err(e) = stream.set_nodelay(true) {
-        slog_error!(logger, "set_nodelay on TcpStream failed: {}", e);
+        error!("set_nodelay on TcpStream failed: {}", e);
     }
 }
