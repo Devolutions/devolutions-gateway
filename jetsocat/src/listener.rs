@@ -2,10 +2,11 @@ use anyhow::Context;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
 use proxy_https::HttpsProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
-use slog::{debug, error, info, o, warn, Logger};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
+use tracing::Instrument as _;
 
 #[derive(Debug, Clone)]
 pub enum ListenerMode {
@@ -14,96 +15,98 @@ pub enum ListenerMode {
     Socks5 { bind_addr: String },
 }
 
-pub async fn tcp_listener_task(
-    api_request_tx: ApiRequestSender,
-    bind_addr: String,
-    destination_url: String,
-    log: Logger,
-) -> anyhow::Result<()> {
+#[instrument(skip(api_request_tx))]
+pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: String, destination_url: String) {
     let destination_url = format!("tcp://{}", destination_url);
 
-    let processor = |stream, log: Logger| {
+    let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
         let destination_url = destination_url.clone();
 
-        tokio::spawn(async move {
-            debug!(log, "Request {}", destination_url);
+        tokio::spawn(
+            async move {
+                debug!("Got request");
 
-            let destination_url = match DestinationUrl::parse_str(&destination_url) {
-                Ok(url) => url,
-                Err(e) => {
-                    debug!(log, "Bad request: {}", e);
-                    return;
+                let destination_url = match DestinationUrl::parse_str(&destination_url) {
+                    Ok(url) => url,
+                    Err(error) => {
+                        debug!(%error, "Bad request");
+                        return;
+                    }
+                };
+
+                let (sender, receiver) = oneshot::channel();
+
+                match api_request_tx
+                    .send(JmuxApiRequest::OpenChannel {
+                        destination_url,
+                        api_response_tx: sender,
+                    })
+                    .await
+                {
+                    Ok(()) => {}
+                    Err(error) => {
+                        warn!(%error, "Couldn’t send JMUX API request");
+                        return;
+                    }
                 }
-            };
 
-            let (sender, receiver) = oneshot::channel();
-
-            match api_request_tx
-                .send(JmuxApiRequest::OpenChannel {
-                    destination_url,
-                    api_response_tx: sender,
-                })
-                .await
-            {
-                Ok(()) => {}
-                Err(e) => {
-                    warn!(log, "Couldn’t send JMUX API request: {}", e);
-                    return;
+                match receiver.await {
+                    Ok(JmuxApiResponse::Success { id }) => {
+                        let _ = api_request_tx
+                            .send(JmuxApiRequest::Start {
+                                id,
+                                stream,
+                                leftover: None,
+                            })
+                            .await;
+                    }
+                    Ok(JmuxApiResponse::Failure { id, reason_code }) => {
+                        debug!(%id, %reason_code, "Channel failure");
+                    }
+                    Err(error) => {
+                        debug!(%error, "Couldn't receive API response");
+                    }
                 }
             }
-
-            match receiver.await {
-                Ok(JmuxApiResponse::Success { id }) => {
-                    let _ = api_request_tx
-                        .send(JmuxApiRequest::Start {
-                            id,
-                            stream,
-                            leftover: None,
-                        })
-                        .await;
-                }
-                Ok(JmuxApiResponse::Failure { id, reason_code }) => {
-                    debug!(log, "Channel {} failure: {}", id, reason_code);
-                }
-                Err(e) => {
-                    debug!(log, "Couldn't receive API response: {}", e);
-                }
-            }
-        });
+            .instrument(info_span!("process", %addr)),
+        );
     };
 
-    listener_task_impl(processor, bind_addr, log).await
+    if let Err(e) = listener_task_impl(processor, bind_addr).await {
+        error!("Task failed: {:#}", e);
+    }
 }
 
-pub async fn socks5_listener_task(
-    api_request_tx: ApiRequestSender,
-    bind_addr: String,
-    log: Logger,
-) -> anyhow::Result<()> {
+#[instrument(skip(api_request_tx))]
+pub async fn socks5_listener_task(api_request_tx: ApiRequestSender, bind_addr: String) {
     let conf = Arc::new(Socks5AcceptorConfig {
         no_auth_required: true,
         users: None,
     });
 
-    let processor = |stream, log: Logger| {
+    let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
         let conf = Arc::clone(&conf);
-        tokio::spawn(async move {
-            if let Err(e) = socks5_process_socket(api_request_tx, stream, conf, log.clone()).await {
-                debug!(log, "SOCKS5 packet processing failed: {:#}", e);
+        tokio::spawn(
+            async move {
+                if let Err(e) = socks5_process_socket(api_request_tx, stream, conf).await {
+                    debug!("SOCKS5 packet processing failed: {:#}", e);
+                }
             }
-        });
+            .instrument(info_span!("process", %addr)),
+        );
     };
 
-    listener_task_impl(processor, bind_addr, log).await
+    if let Err(e) = listener_task_impl(processor, bind_addr).await {
+        error!("Task failed: {:#}", e);
+    }
 }
 
 async fn socks5_process_socket(
     api_request_tx: ApiRequestSender,
     incoming: TcpStream,
     conf: Arc<Socks5AcceptorConfig>,
-    log: Logger,
 ) -> anyhow::Result<()> {
     use proxy_socks::{Socks5Acceptor, Socks5FailureCode};
 
@@ -112,7 +115,7 @@ async fn socks5_process_socket(
     if acceptor.is_connect_command() {
         let destination_url = dest_addr_to_url(acceptor.dest_addr());
 
-        debug!(log, "Request {}", destination_url);
+        debug!(%destination_url, "Got request");
 
         let (sender, receiver) = oneshot::channel();
 
@@ -124,8 +127,8 @@ async fn socks5_process_socket(
             .await
         {
             Ok(()) => {}
-            Err(e) => {
-                warn!(log, "Couldn’t send JMUX API request: {}", e);
+            Err(error) => {
+                warn!(%error, "Couldn’t send JMUX API request");
                 anyhow::bail!("Couldn't send JMUX request");
             }
         }
@@ -159,33 +162,31 @@ async fn socks5_process_socket(
     Ok(())
 }
 
-pub async fn https_listener_task(
-    api_request_tx: ApiRequestSender,
-    bind_addr: String,
-    log: Logger,
-) -> anyhow::Result<()> {
-    let processor = |stream, log: Logger| {
+#[instrument(skip(api_request_tx))]
+pub async fn https_listener_task(api_request_tx: ApiRequestSender, bind_addr: String) {
+    let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = https_process_socket(api_request_tx, stream, log.clone()).await {
-                debug!(log, "HTTPS proxy packet processing failed: {:?}", e);
+        tokio::spawn(
+            async move {
+                if let Err(error) = https_process_socket(api_request_tx, stream).await {
+                    debug!("HTTPS proxy packet processing failed: {:#}", error);
+                }
             }
-        });
+            .instrument(info_span!("process", %addr)),
+        );
     };
 
-    listener_task_impl(processor, bind_addr, log).await
+    if let Err(e) = listener_task_impl(processor, bind_addr).await {
+        error!("Task failed: {:#}", e);
+    }
 }
 
-async fn https_process_socket(
-    api_request_tx: ApiRequestSender,
-    incoming: TcpStream,
-    log: Logger,
-) -> anyhow::Result<()> {
+async fn https_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStream) -> anyhow::Result<()> {
     let acceptor = HttpsProxyAcceptor::accept(incoming).await?;
 
     let destination_url = dest_addr_to_url(acceptor.dest_addr());
 
-    debug!(log, "Request {}", destination_url);
+    debug!(%destination_url, "Got request");
 
     let (sender, receiver) = oneshot::channel();
 
@@ -197,8 +198,8 @@ async fn https_process_socket(
         .await
     {
         Ok(()) => {}
-        Err(e) => {
-            warn!(log, "Couldn’t send JMUX API request: {}", e);
+        Err(error) => {
+            warn!(%error, "Couldn’t send JMUX API request");
             let _ = acceptor.respond(500).await;
             anyhow::bail!("Couldn't send JMUX request");
         }
@@ -239,9 +240,9 @@ fn dest_addr_to_url(dest_addr: &proxy_types::DestAddr) -> DestinationUrl {
     }
 }
 
-async fn listener_task_impl<F>(mut processor: F, bind_addr: String, log: Logger) -> anyhow::Result<()>
+async fn listener_task_impl<F>(mut processor: F, bind_addr: String) -> anyhow::Result<()>
 where
-    F: FnMut(TcpStream, Logger),
+    F: FnMut(TcpStream, SocketAddr),
 {
     use anyhow::Context as _;
     use tokio::net::TcpListener;
@@ -250,16 +251,13 @@ where
         .await
         .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
 
-    info!(log, "Started listening on {}", bind_addr);
+    info!(%bind_addr, "Start listener");
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => {
-                let log = log.new(o!("addr" => addr));
-                processor(stream, log.clone());
-            }
-            Err(e) => {
-                error!(log, "Couldn’t accept next TCP stream: {}", e);
+            Ok((stream, addr)) => processor(stream, addr),
+            Err(error) => {
+                error!(%error, "Couldn’t accept next TCP stream");
                 break;
             }
         }

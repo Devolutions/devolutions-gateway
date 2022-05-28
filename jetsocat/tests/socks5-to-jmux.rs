@@ -7,6 +7,7 @@ use test_utils::{
     find_unused_ports, read_assert_payload, small_payload, transport_kind, write_payload, Payload, TransportKind,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::*;
 
 const NB_TARGETS: usize = 3;
 
@@ -49,22 +50,16 @@ where
     fut().await
 }
 
-async fn client(
-    cfg: ClientConfig,
-    socks5_port: u16,
-    targets: [u16; NB_TARGETS],
-    logger: slog::Logger,
-) -> anyhow::Result<()> {
+async fn client(cfg: ClientConfig, socks5_port: u16, targets: [u16; NB_TARGETS]) -> anyhow::Result<()> {
     use proxy_socks::Socks5Stream;
     use tokio::net::TcpStream;
 
     for (idx, op) in cfg.operations.into_iter().enumerate() {
-        let logger = logger.new(slog::o!("operation" => idx));
-
         let stream = retry(|| {
-            slog::info!(logger, "Connecting to SOCKS5 proxy");
+            info!("Connecting to SOCKS5 proxy");
             TcpStream::connect(("127.0.0.1", socks5_port))
         })
+        .instrument(info_span!("operation", %idx))
         .await
         .with_context(|| format!("TCP stream connect (port = {socks5_port})"))?;
 
@@ -75,7 +70,7 @@ async fn client(
                     .context("SOCKS5 connect")?;
                 let (mut reader, mut writer) = tokio::io::split(stream);
 
-                slog::info!(logger, "Echo test");
+                info!("Echo test");
 
                 let write_fut = write_payload(&mut writer, &payload.0).map(|res| res.context("Write payload"));
                 let read_fut = read_assert_payload(&mut reader, &payload.0).map(|res| res.context("Assert payload"));
@@ -88,7 +83,7 @@ async fn client(
                     .await
                     .context("SOCKS5 connect")?;
 
-                slog::info!(logger, "HTML test");
+                info!("HTML test");
 
                 stream
                     .write_all(b"GET / HTTP/1.0\r\n\r\n")
@@ -110,14 +105,12 @@ async fn client(
     Ok(())
 }
 
-async fn echo_server(port: u16, logger: slog::Logger) -> anyhow::Result<()> {
+async fn echo_server(port: u16) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    slog::info!(logger, "Echo server listening on 127.0.0.1:{}", port);
+    info!("Echo server listening on 127.0.0.1:{}", port);
 
     loop {
         let (mut socket, _) = listener.accept().await.context("Accept operation")?;
-
-        let logger = logger.clone();
 
         tokio::spawn(async move {
             let mut buf = [0; 256];
@@ -125,7 +118,7 @@ async fn echo_server(port: u16, logger: slog::Logger) -> anyhow::Result<()> {
             loop {
                 let n = socket.read(&mut buf).await.expect("failed to read data from socket");
 
-                slog::debug!(logger, "Read {n}");
+                debug!("Read {n}");
 
                 if n == 0 {
                     break;
@@ -137,18 +130,13 @@ async fn echo_server(port: u16, logger: slog::Logger) -> anyhow::Result<()> {
                     .expect("failed to write data to socket");
             }
 
-            slog::debug!(logger, "Closed");
+            debug!("Closed");
         });
     }
 }
 
 /// Client-side relay converting SOCKS5 to JMUX
-async fn client_side_jmux(
-    socks5_port: u16,
-    jmux_server_port: u16,
-    kind: TransportKind,
-    logger: slog::Logger,
-) -> anyhow::Result<()> {
+async fn client_side_jmux(socks5_port: u16, jmux_server_port: u16, kind: TransportKind) -> anyhow::Result<()> {
     use jetsocat::pipe::PipeMode;
 
     let pipe_mode = match kind {
@@ -173,13 +161,11 @@ async fn client_side_jmux(
         jmux_cfg: jmux_proxy::JmuxConfig::client(),
     };
 
-    jetsocat::jmux_proxy(cfg, logger.new(slog::o!("side" => "client")))
-        .await
-        .context("Client-side JMUX")
+    jetsocat::jmux_proxy(cfg).await.context("Client-side JMUX")
 }
 
 /// Server-side relay processing JMUX requests
-async fn server_side_jmux(port: u16, kind: TransportKind, logger: slog::Logger) -> anyhow::Result<()> {
+async fn server_side_jmux(port: u16, kind: TransportKind) -> anyhow::Result<()> {
     use jetsocat::pipe::PipeMode;
     use jmux_proxy::{FilteringRule, JmuxConfig};
 
@@ -206,19 +192,15 @@ async fn server_side_jmux(port: u16, kind: TransportKind, logger: slog::Logger) 
         },
     };
 
-    jetsocat::jmux_proxy(cfg, logger.new(slog::o!("side" => "server")))
-        .await
-        .context("Server-side JMUX")
+    jetsocat::jmux_proxy(cfg).await.context("Server-side JMUX")
 }
 
 #[test]
 fn socks5_to_jmux() {
-    use slog::Drain as _;
-
-    let decorator = slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-    let async_drain = slog_async::Async::new(drain).build().fuse();
-    let logger = slog::Logger::root(async_drain, slog::o!());
+    tracing_subscriber::fmt()
+        .with_test_writer()
+        .with_max_level(Level::DEBUG)
+        .init();
 
     let ports = find_unused_ports(NB_TARGETS + 2);
     let socks5_port = ports[0];
@@ -242,14 +224,14 @@ fn socks5_to_jmux() {
             let mut to_abort = Vec::new();
 
             for (index, target_port) in targets.into_iter().enumerate() {
-                to_abort.push(tokio::spawn(echo_server(target_port, logger.new(slog::o!("echo server" => index)))));
+                to_abort.push(tokio::spawn(echo_server(target_port).instrument(info_span!("echo_server", %index))));
             }
 
-            to_abort.push(tokio::spawn(server_side_jmux(jmux_server_port, pipe_kind, logger.clone())));
-            to_abort.push(tokio::spawn(client_side_jmux(socks5_port, jmux_server_port, pipe_kind, logger.clone())));
+            to_abort.push(tokio::spawn(server_side_jmux(jmux_server_port, pipe_kind)));
+            to_abort.push(tokio::spawn(client_side_jmux(socks5_port, jmux_server_port, pipe_kind)));
 
             for (index, cfg) in cfgs.into_iter().enumerate() {
-                to_await.push(tokio::spawn(client(cfg, socks5_port, targets, logger.new(slog::o!("client" => index)))));
+                to_await.push(tokio::spawn(client(cfg, socks5_port, targets).instrument(info_span!("client", %index))));
             }
 
             for handle in to_await {

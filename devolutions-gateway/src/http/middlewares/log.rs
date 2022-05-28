@@ -2,9 +2,8 @@ use saphir::error::SaphirError;
 use saphir::http_context::HttpContext;
 use saphir::middleware::MiddlewareChain;
 use saphir::prelude::*;
-use slog::{o, slog_debug, slog_info};
-use slog_scope_futures::future03::FutureExt as _;
 use std::time::Instant;
+use tracing::Instrument as _;
 
 pub struct LogMiddleware;
 
@@ -12,27 +11,29 @@ pub struct LogMiddleware;
 impl LogMiddleware {
     async fn next(&self, mut ctx: HttpContext, chain: &dyn MiddlewareChain) -> Result<HttpContext, SaphirError> {
         let request = ctx.state.request_unchecked();
-        let start_time = Instant::now();
-        let operation_id = ctx.operation_id.to_string();
-
+        let operation_id = ctx.operation_id;
         let uri = request.uri().path().to_owned();
         let method = request.method().to_owned();
+        let is_health_check = uri.ends_with("health");
 
-        let logger = slog_scope::logger().new(o!("request_id" => operation_id, "uri" => uri.clone()));
+        async move {
+            let start_time = Instant::now();
 
-        slog_debug!(logger, "Request received: {} {}", method, uri);
+            debug!("received request");
 
-        ctx = chain.next(ctx).with_logger(logger.clone()).await?;
+            ctx = chain.next(ctx).await?;
 
-        let status = ctx.state.response_unchecked().status();
-        let duration = format!("Duration_ms={}", start_time.elapsed().as_millis());
+            let status = ctx.state.response_unchecked().status();
 
-        if uri.ends_with("health") {
-            slog_debug!(logger, "{} {} {} ({})", method, uri, status, duration);
-        } else {
-            slog_info!(logger, "{} {} {} ({})", method, uri, status, duration);
+            if is_health_check {
+                debug!(duration = ?start_time.elapsed(), %status);
+            } else {
+                info!(duration = ?start_time.elapsed(), %status);
+            }
+
+            Ok(ctx)
         }
-
-        Ok(ctx)
+        .instrument(info_span!("request", request_id = %operation_id, %method, %uri))
+        .await
     }
 }

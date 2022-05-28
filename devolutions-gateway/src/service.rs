@@ -2,11 +2,10 @@ use crate::config::Config;
 use crate::http::http_server::configure_http_server;
 use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
-use crate::logger;
+use crate::log::{self, log_deleter_task, LoggerGuard};
 use crate::token::{CurrentJrl, JrlTokenClaims};
 use anyhow::Context;
 use parking_lot::Mutex;
-use slog::Logger;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -22,27 +21,21 @@ enum GatewayState {
 
 pub struct GatewayService {
     config: Arc<Config>,
-    logger: Logger,
     state: GatewayState,
-    _logger_guard: slog_scope::GlobalLoggerGuard,
+    _logger_guard: LoggerGuard,
 }
 
 impl GatewayService {
     pub fn load(config: Config) -> anyhow::Result<Self> {
-        let logger = logger::init(
-            config.log_file.as_ref().map(|o| o.as_std_path()),
-            config.log_level.as_deref(),
-        )
-        .context("failed to setup logger")?;
-        let logger_guard = slog_scope::set_global_logger(logger.clone());
-        slog_stdlog::init().context("Failed to init logger")?;
+        let logger_guard =
+            log::init(config.log_file.as_deref(), config.log_directive.as_deref()).context("failed to setup logger")?;
 
         config.validate().context("Invalid configuration")?;
 
         if config.debug != crate::config::DebugOptions::default() {
             warn!(
-                "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**\n{:#?}",
-                config.debug
+                ?config.debug,
+                "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
             );
         }
 
@@ -54,7 +47,6 @@ impl GatewayService {
 
         Ok(GatewayService {
             config,
-            logger,
             state: GatewayState::Stopped,
             _logger_guard: logger_guard,
         })
@@ -79,10 +71,9 @@ impl GatewayService {
             .expect("failed to create runtime");
 
         let config = self.config.clone();
-        let logger = self.logger.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
-        let futures = runtime.block_on(async { create_futures(config, logger).expect("failed to initiate gateway") });
+        let futures = runtime.block_on(async { create_futures(config).expect("failed to initiate gateway") });
 
         let join_all = futures::future::join_all(futures);
 
@@ -117,7 +108,7 @@ impl GatewayService {
 // TODO: when benchmarking facility is ready, use Handle instead of pinned futures
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
 
-fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<VecOfFuturesType> {
+fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
     let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
     let token_cache = crate::token::new_token_cache().pipe(Arc::new);
     let jrl = load_jrl_from_disk(&config)?;
@@ -138,7 +129,6 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<V
                 associations.clone(),
                 token_cache.clone(),
                 jrl.clone(),
-                logger.clone(),
             )
             .with_context(|| format!("Failed to initialize {}", listener.internal_url))
         })
@@ -153,6 +143,10 @@ fn create_futures(config: Arc<Config>, logger: slog::Logger) -> anyhow::Result<V
         crate::token::cleanup_task(token_cache).await;
         Ok(())
     }));
+
+    if let Some(log_path) = config.log_file.clone() {
+        futures.push(Box::pin(async move { log_deleter_task(&log_path).await }));
+    }
 
     Ok(futures)
 }

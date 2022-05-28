@@ -164,7 +164,7 @@ pub struct Config {
     pub capture_path: Option<Utf8PathBuf>,
     pub protocol: Protocol,
     pub log_file: Option<Utf8PathBuf>,
-    pub log_level: Option<String>,
+    pub log_directive: Option<String>,
     pub application_protocols: Vec<String>,
     pub tls: Option<TlsConfig>,
     pub provisioner_public_key: Option<PublicKey>,
@@ -194,7 +194,7 @@ impl Default for Config {
             capture_path: None,
             protocol: Protocol::Unknown,
             log_file: None,
-            log_level: None,
+            log_directive: None,
             application_protocols: Vec::new(),
             tls: None,
             provisioner_public_key: None,
@@ -312,8 +312,8 @@ pub struct ConfigFile {
     #[serde(rename = "CapturePath")]
     pub capture_path: Option<Utf8PathBuf>,
     /// Directive string in the same form as the RUST_LOG environment variable.
-    #[serde(rename = "LogLevel")]
-    pub log_level: Option<String>,
+    #[serde(rename = "LogDirective")]
+    pub log_directive: Option<String>,
 
     // unsafe debug options for developers
     #[serde(default, rename = "__debug__")]
@@ -1046,7 +1046,7 @@ impl Config {
             hostname,
             capture_path,
             log_file: Some(log_file),
-            log_level: config_file.log_level,
+            log_directive: config_file.log_directive,
             application_protocols,
             tls: tls_conf,
             provisioner_public_key,

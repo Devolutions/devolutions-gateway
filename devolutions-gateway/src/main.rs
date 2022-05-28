@@ -5,8 +5,8 @@ use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, SubCommand};
 use devolutions_gateway::config::Config;
 use devolutions_gateway::service::GatewayService;
-use slog_scope::info;
 use std::sync::mpsc;
+use tracing::info;
 
 enum GatewayServiceEvent {}
 

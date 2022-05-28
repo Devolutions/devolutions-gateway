@@ -1,9 +1,9 @@
 #[macro_use]
-extern crate slog_scope;
-#[macro_use]
 extern crate serde_json;
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate tracing;
 
 pub mod config;
 pub mod generic_client;
@@ -13,7 +13,7 @@ pub mod jet;
 pub mod jet_client;
 pub mod jet_rendezvous_tcp_proxy;
 pub mod listener;
-pub mod logger;
+pub mod log;
 pub mod plugin_manager;
 pub mod preconnection_pdu;
 pub mod proxy;

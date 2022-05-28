@@ -20,7 +20,7 @@ futures-util = { version = "0.3.21", features = ["sink"] }
 anyhow = "1.0.55"
 
 # logging
-slog = "2.7.0"
+tracing = "0.1.34"
 
 # codec implementation
 bytes = "1.1.0"

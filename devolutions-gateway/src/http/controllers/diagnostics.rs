@@ -89,8 +89,17 @@ async fn get_logs_stub(controller: &DiagnosticsController) -> Result<File, HttpE
         .config
         .log_file
         .as_ref()
-        .ok_or_else(|| HttpErrorStatus::not_found("Log file is not configured"))?;
-    File::open(log_file_path.as_str())
+        .ok_or_else(|| HttpErrorStatus::not_found("log file is not configured"))?;
+
+    let latest_log_file_path = crate::log::find_latest_log_file(log_file_path.as_path())
+        .await
+        .map_err(|e| HttpErrorStatus::not_found(format!("latest log file not found: {e:#}")))?;
+
+    let latest_log_file_path = latest_log_file_path
+        .to_str()
+        .ok_or_else(|| HttpErrorStatus::internal("invalid file path"))?;
+
+    File::open(latest_log_file_path)
         .await
         .map_err(HttpErrorStatus::internal)
 }

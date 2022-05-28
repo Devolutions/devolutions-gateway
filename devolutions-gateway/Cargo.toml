@@ -59,14 +59,10 @@ sha1 = "0.10.1"
 base64 = "0.13.0"
 
 # logging
-# TODO: consider `tracing`
-slog-stdlog = "4.1.0"
-slog = { version = "2.7.0", features = ["max_level_trace", "release_max_level_debug"] }
-slog-term = "2.9.0"
-slog-async = "2.7.0"
-slog-scope = "4.4.0"
-slog-envlogger = "2.2.0"
-slog-scope-futures = { git = "https://github.com/Devolutions/slog-scope-futures.git" }
+tracing = "0.1.34"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
+tracing-appender = "0.2.2"
+# TODO: consider `tracing-error` crate
 
 # async, futures…
 tokio = { version = "1.17.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot"] }

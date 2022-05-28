@@ -1,7 +1,7 @@
 //! [Specification document](https://github.com/awakecoding/qmux/blob/protocol-update/SPEC.md)
 
 #[macro_use]
-extern crate slog;
+extern crate tracing;
 
 mod codec;
 mod config;
@@ -17,7 +17,6 @@ use anyhow::Context as _;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
-use slog::Logger;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,6 +27,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite};
+use tracing::{Instrument as _, Span};
 
 pub type ApiResponseSender = oneshot::Sender<JmuxApiResponse>;
 pub type ApiResponseReceiver = oneshot::Receiver<JmuxApiResponse>;
@@ -64,7 +64,6 @@ pub struct JmuxProxy {
     api_request_rx: Option<ApiRequestReceiver>,
     jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
     jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
-    log: Logger,
 }
 
 impl JmuxProxy {
@@ -72,13 +71,11 @@ impl JmuxProxy {
         jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
         jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
     ) -> Self {
-        let log = slog::Logger::root(slog::Discard, o!());
         Self {
             cfg: JmuxConfig::default(),
             api_request_rx: None,
             jmux_reader,
             jmux_writer,
-            log,
         }
     }
 
@@ -89,11 +86,6 @@ impl JmuxProxy {
 
     pub fn with_requester_api(mut self, api_request_rx: ApiRequestReceiver) -> Self {
         self.api_request_rx = Some(api_request_rx);
-        self
-    }
-
-    pub fn with_logger(mut self, log: Logger) -> Self {
-        self.log = log;
         self
     }
 
@@ -108,48 +100,60 @@ impl JmuxProxy {
             api_request_rx,
             jmux_reader,
             jmux_writer,
-            log,
         } = self;
 
-        let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
+        let span = Span::current();
 
-        let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
-        let jmux_sink = FramedWrite::new(jmux_writer, JmuxCodec);
-
-        let sender_task_handle = JmuxSenderTask {
-            jmux_sink,
-            msg_to_send_rx,
-            log: log.new(o!("JMUX task" => "sender")),
-        }
-        .spawn();
-
-        let api_request_rx = if let Some(rx) = api_request_rx {
-            rx
-        } else {
-            mpsc::channel(1).1
-        };
-
-        let scheduler_task_handle = JmuxSchedulerTask {
-            cfg,
-            jmux_stream,
-            msg_to_send_tx,
-            api_request_rx,
-            log: log.new(o!("JMUX task" => "scheduler")),
-        }
-        .spawn();
-
-        match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
-            (Ok(_), Err(e)) => debug!(log, "Sender task failed: {}", e),
-            (Err(e), Ok(_)) => debug!(log, "Scheduler task failed: {}", e),
-            (Err(scheduler_e), Err(sender_e)) => {
-                // Usually, it's only of interest when both tasks are failed.
-                anyhow::bail!("Both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
-            }
-            (Ok(_), Ok(_)) => {}
-        }
-
-        Ok(())
+        run_proxy_impl(cfg, api_request_rx, jmux_reader, jmux_writer, span.clone())
+            .instrument(span)
+            .await
     }
+}
+
+async fn run_proxy_impl(
+    cfg: JmuxConfig,
+    api_request_rx: Option<ApiRequestReceiver>,
+    jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
+    jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
+    span: Span,
+) -> anyhow::Result<()> {
+    let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
+
+    let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
+    let jmux_sink = FramedWrite::new(jmux_writer, JmuxCodec);
+
+    let sender_task_handle = JmuxSenderTask {
+        jmux_sink,
+        msg_to_send_rx,
+    }
+    .spawn(span.clone());
+
+    let api_request_rx = if let Some(rx) = api_request_rx {
+        rx
+    } else {
+        mpsc::channel(1).1
+    };
+
+    let scheduler_task_handle = JmuxSchedulerTask {
+        cfg,
+        jmux_stream,
+        msg_to_send_tx,
+        api_request_rx,
+        parent_span: span,
+    }
+    .spawn();
+
+    match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
+        (Ok(_), Err(e)) => debug!("Sender task failed: {}", e),
+        (Err(e), Ok(_)) => debug!("Scheduler task failed: {}", e),
+        (Err(scheduler_e), Err(sender_e)) => {
+            // Usually, it's only of interest when both tasks are failed.
+            anyhow::bail!("Both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
+        }
+        (Ok(_), Ok(_)) => {}
+    }
+
+    Ok(())
 }
 
 // === implementation details === //
@@ -175,7 +179,7 @@ struct JmuxChannelCtx {
 
     maximum_packet_size: u16,
 
-    log: Logger,
+    span: Span,
 }
 
 struct JmuxCtx {
@@ -238,29 +242,28 @@ enum InternalMessage {
 struct JmuxSenderTask<T: AsyncWrite + Unpin + Send + 'static> {
     jmux_sink: FramedWrite<T, JmuxCodec>,
     msg_to_send_rx: MessageReceiver,
-    log: Logger,
 }
 
 impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
-    fn spawn(self) -> JoinHandle<anyhow::Result<()>> {
-        let fut = self.run();
+    fn spawn(self, span: Span) -> JoinHandle<anyhow::Result<()>> {
+        let fut = self.run().instrument(span);
         tokio::spawn(fut)
     }
 
+    #[instrument("sender", skip_all)]
     async fn run(self) -> anyhow::Result<()> {
         let Self {
             mut jmux_sink,
             mut msg_to_send_rx,
-            log,
         } = self;
 
         while let Some(msg) = msg_to_send_rx.recv().await {
-            trace!(log, "Send channel message: {:?}", msg);
+            trace!("Send channel message: {:?}", msg);
             jmux_sink.feed(msg).await?;
             jmux_sink.flush().await?;
         }
 
-        info!(log, "Closing JMUX sender task...");
+        info!("Closing JMUX sender task...");
 
         Ok(())
     }
@@ -273,23 +276,25 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
     jmux_stream: FramedRead<T, JmuxCodec>,
     msg_to_send_tx: MessageSender,
     api_request_rx: ApiRequestReceiver,
-    log: Logger,
+    parent_span: Span,
 }
 
 impl<T: AsyncRead + Unpin + Send + 'static> JmuxSchedulerTask<T> {
     fn spawn(self) -> tokio::task::JoinHandle<anyhow::Result<()>> {
-        let fut = scheduler_task_impl(self);
+        let parent_span = self.parent_span.clone();
+        let fut = scheduler_task_impl(self).instrument(parent_span);
         tokio::spawn(fut)
     }
 }
 
+#[instrument("scheduler", skip_all)]
 async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSchedulerTask<T>) -> anyhow::Result<()> {
     let JmuxSchedulerTask {
         cfg,
         mut jmux_stream,
         msg_to_send_tx,
         mut api_request_rx,
-        log,
+        parent_span,
     } = task;
 
     let mut jmux_ctx = JmuxCtx::new();
@@ -315,14 +320,14 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     JmuxApiRequest::OpenChannel { destination_url, api_response_tx } => {
                         match jmux_ctx.allocate_id() {
                             Some(id) => {
-                                debug!(log, "Allocated local ID {}", id);
-                                debug!(log, "{} request {}", id, destination_url);
+                                debug!("Allocated local ID {}", id);
+                                debug!("{} request {}", id, destination_url);
                                 pending_channels.insert(id, (destination_url.clone(), api_response_tx));
                                 msg_to_send_tx
                                     .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES as u16, destination_url))
                                     .context("Couldn’t send CHANNEL OPEN message through mpsc channel")?;
                             }
-                            None => warn!(log, "Couldn’t allocate ID for API request: {}", destination_url),
+                            None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
@@ -340,8 +345,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             writer,
                             data_rx,
                             leftover,
-                            log: channel.log.clone(),
-                        }.spawn();
+                        }.spawn(channel.span.clone());
 
                         DataReaderTask {
                             reader,
@@ -352,8 +356,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size: channel.maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
-                            log: channel.log.clone()
-                        }.spawn();
+                        }.spawn(channel.span.clone());
                     }
                 }
             }
@@ -361,7 +364,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                 match internal_msg {
                     InternalMessage::Eof { id } => {
                         let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
-                        let channel_log = channel.log.clone();
+                        let channel_span = channel.span.clone();
                         let local_id = channel.local_id;
                         let distant_id = channel.distant_id;
 
@@ -383,7 +386,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 msg_to_send_tx
                                     .send(Message::close(distant_id))
                                     .context("Couldn’t send CLOSE message")?;
-                                debug!(channel_log, "Channel closed");
+                                channel_span.in_scope(|| {
+                                    debug!("Channel closed");
+                                });
                             },
                         }
                     }
@@ -396,7 +401,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let maximum_packet_size = channel.maximum_packet_size;
                         let window_size_updated = Arc::clone(&channel.window_size_updated);
                         let window_size = Arc::clone(&channel.window_size);
-                        let channel_log = channel.log.clone();
+                        let channel_span = channel.span.clone();
 
                         let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -410,7 +415,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             .send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size))
                             .context("Couldn’t send OPEN SUCCESS message through mpsc channel")?;
 
-                        debug!(channel_log, "Channel accepted");
+                        channel_span.in_scope(|| {
+                            debug!("Channel accepted");
+                        });
 
                         let (reader, writer) = stream.into_split();
 
@@ -418,10 +425,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             writer,
                             data_rx,
                             leftover: None,
-                            log: channel_log.clone(),
-                        }.spawn();
+                        }.spawn(channel_span.clone());
 
-                        let reader_task = DataReaderTask {
+                        DataReaderTask {
                             reader,
                             local_id,
                             distant_id,
@@ -430,10 +436,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
-                            log: channel_log,
-                        };
-
-                        reader_task.spawn();
+                        }.spawn(channel_span);
                     }
                 }
             }
@@ -441,7 +444,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                 let msg = match msg {
                     Some(msg) => msg,
                     None => {
-                        info!(log, "JMUX pipe was closed by peer");
+                        info!("JMUX pipe was closed by peer");
                         break;
                     }
                 };
@@ -452,7 +455,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         msg
                     },
                     Err(e) => {
-                        error!(log, "JMUX pipe error: {:#}", e);
+                        error!("JMUX pipe error: {:#}", e);
 
                         nb_consecutive_pipe_failures += 1;
                         if nb_consecutive_pipe_failures > MAX_CONSECUTIVE_PIPE_FAILURES {
@@ -467,14 +470,14 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 };
 
-                trace!(log, "Received channel message: {:?}", msg);
+                trace!("Received channel message: {:?}", msg);
 
                 match msg {
                     Message::Open(msg) => {
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
                         if let Err(e) = cfg.filtering.validate_destination(&msg.destination_url) {
-                            debug!(log, "Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
+                            debug!("Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
                             msg_to_send_tx
                                 .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, e.to_string()))
                                 .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
@@ -484,7 +487,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let local_id = match jmux_ctx.allocate_id() {
                             Some(id) => id,
                             None => {
-                                warn!(log, "Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id);
+                                warn!("Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id);
                                 msg_to_send_tx
                                     .send(Message::open_failure(peer_id, ReasonCode::GENERAL_FAILURE, "no more ID available"))
                                     .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
@@ -492,10 +495,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             }
                         };
 
-                        debug!(log, "Allocated ID {} for peer {}", local_id, peer_id);
-                        info!(log, "({} {}) request {}", local_id, peer_id, msg.destination_url);
+                        debug!("Allocated ID {} for peer {}", local_id, peer_id);
+                        info!("({} {}) request {}", local_id, peer_id, msg.destination_url);
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => msg.destination_url.to_string()));
+                        let channel_span = info_span!(parent: parent_span.clone(), "channel", %local_id, %peer_id, url = %msg.destination_url);
 
                         let window_size_updated = Arc::new(Notify::new());
                         let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
@@ -513,7 +516,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             maximum_packet_size: msg.maximum_packet_size,
 
-                            log: channel_log,
+                            span: channel_span,
                         };
 
                         StreamResolverTask {
@@ -531,17 +534,17 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let (destination_url, api_response_tx) = match pending_channels.remove(&local_id) {
                             Some(pending) => pending,
                             None => {
-                                warn!(log, "Couldn’t find pending channel for {}", local_id);
+                                warn!("Couldn’t find pending channel for {}", local_id);
                                 continue;
                             },
                         };
 
-                        let channel_log = log.new(o!("channel" => format!("({} {})", local_id, peer_id), "url" => destination_url.to_string()));
+                        let channel_span = info_span!(parent: parent_span.clone(), "channel", %local_id, %peer_id, url = %destination_url).entered();
 
-                        debug!(channel_log, "Successfully opened channel");
+                        debug!("Successfully opened channel");
 
                         if api_response_tx.send(JmuxApiResponse::Success { id: local_id }).is_err() {
-                            warn!(channel_log, "Couldn’t send success API response through mpsc channel");
+                            warn!("Couldn’t send success API response through mpsc channel");
                             continue;
                         }
 
@@ -558,7 +561,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             maximum_packet_size: msg.maximum_packet_size,
 
-                            log: channel_log,
+                            span: channel_span.exit(),
                         })?;
                     }
                     Message::WindowAdjust(msg) => {
@@ -573,7 +576,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let distant_id = match jmux_ctx.get_channel(id) {
                             Some(channel) => channel.distant_id,
                             None => {
-                                warn!(log, "Couldn’t find channel with id {}", id);
+                                warn!("Couldn’t find channel with id {}", id);
                                 continue;
                             },
                         };
@@ -581,7 +584,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let data_tx = match data_senders.get_mut(&id) {
                             Some(sender) => sender,
                             None => {
-                                warn!(log, "received data but associated data sender is missing");
+                                warn!("received data but associated data sender is missing");
                                 continue;
                             }
                         };
@@ -604,13 +607,15 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let channel = match jmux_ctx.get_channel_mut(id) {
                             Some(channel) => channel,
                             None => {
-                                warn!(log, "Couldn’t find channel with id {}", id);
+                                warn!("Couldn’t find channel with id {}", id);
                                 continue;
                             },
                         };
 
                         channel.distant_state = JmuxChannelState::Eof;
-                        debug!(channel.log, "Distant peer EOFed");
+                        channel.span.in_scope(|| {
+                            debug!("Distant peer EOFed");
+                        });
 
                         // Remove associated data sender
                         data_senders.remove(&id);
@@ -632,12 +637,12 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let (destination_url, api_response_tx) = match pending_channels.remove(&id) {
                             Some(pending) => pending,
                             None => {
-                                warn!(log, "Couldn’t find pending channel {}", id);
+                                warn!("Couldn’t find pending channel {}", id);
                                 continue;
                             },
                         };
 
-                        warn!(log, "{} -> {} channel opening failed [{}]: {}", id, destination_url, msg.reason_code, msg.description);
+                        warn!(local_id = %id, %destination_url, %msg.reason_code, "channel opening failed: {}", msg.description);
 
                         let _ = api_response_tx.send(JmuxApiResponse::Failure { id, reason_code: msg.reason_code });
                     }
@@ -646,15 +651,16 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let channel = match jmux_ctx.get_channel_mut(local_id) {
                             Some(channel) => channel,
                             None => {
-                                warn!(log, "Couldn’t find channel with id {}", local_id);
+                                warn!("Couldn’t find channel with id {}", local_id);
                                 continue;
                             },
                         };
                         let distant_id = channel.distant_id;
-                        let channel_log = channel.log.clone();
+                        let channel_span = channel.span.clone();
+                        let _enter = channel_span.enter();
 
                         channel.distant_state = JmuxChannelState::Closed;
-                        debug!(channel_log, "Distant peer closed");
+                        debug!("Distant peer closed");
 
                         // This will also shutdown the associated TCP stream.
                         data_senders.remove(&local_id);
@@ -668,7 +674,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         if channel.local_state == JmuxChannelState::Closed {
                             jmux_ctx.unregister(local_id);
-                            debug!(channel_log, "Channel closed");
+                            debug!("Channel closed");
                         }
                     }
                 }
@@ -676,7 +682,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
         }
     }
 
-    info!(log, "Closing JMUX scheduler task...");
+    info!("Closing JMUX scheduler task...");
 
     Ok(())
 }
@@ -692,17 +698,18 @@ struct DataReaderTask {
     maximum_packet_size: u16,
     msg_to_send_tx: MessageSender,
     internal_msg_tx: InternalMessageSender,
-    log: Logger,
 }
 
 impl DataReaderTask {
-    fn spawn(self) {
-        tokio::spawn(async move {
-            let log = self.log.clone();
-            if let Err(e) = self.run().await {
-                warn!(log, "reader task failed: {}", e);
+    fn spawn(self, span: Span) {
+        tokio::spawn(
+            async move {
+                if let Err(e) = self.run().await {
+                    warn!("reader task failed: {}", e);
+                }
             }
-        });
+            .instrument(span),
+        );
     }
 
     async fn run(self) -> anyhow::Result<()> {
@@ -715,14 +722,13 @@ impl DataReaderTask {
             maximum_packet_size,
             msg_to_send_tx,
             internal_msg_tx,
-            log,
         } = self;
 
         let codec = tokio_util::codec::BytesCodec::new();
         let mut bytes_stream = FramedRead::new(reader, codec);
         let maximum_packet_size = usize::try_from(maximum_packet_size).unwrap();
 
-        debug!(log, "Started forwarding");
+        debug!("Started forwarding");
 
         while let Some(bytes) = bytes_stream.next().await {
             let bytes = bytes.context("Couldn’t read next bytes from stream")?;
@@ -736,7 +742,6 @@ impl DataReaderTask {
                     let window_size_now = window_size.load(Ordering::SeqCst);
                     if window_size_now < bytes.len() {
                         debug!(
-                            log,
                             "Window size ({} bytes) insufficient to send full packet ({} bytes). Truncate packet and wait.",
                             window_size_now,
                             bytes.len()
@@ -762,7 +767,7 @@ impl DataReaderTask {
             }
         }
 
-        debug!(log, "Finished forwarding (EOF)");
+        debug!("Finished forwarding (EOF)");
         internal_msg_tx
             .send(InternalMessage::Eof { id: local_id })
             .context("Couldn’t send EOF notification")?;
@@ -777,32 +782,33 @@ struct DataWriterTask {
     writer: OwnedWriteHalf,
     data_rx: DataReceiver,
     leftover: Option<Bytes>,
-    log: Logger,
 }
 
 impl DataWriterTask {
-    fn spawn(self) {
+    fn spawn(self, span: Span) {
         let Self {
             mut writer,
             mut data_rx,
             leftover,
-            log,
         } = self;
 
-        tokio::spawn(async move {
-            if let Some(leftover) = leftover {
-                if let Err(e) = writer.write_all(&leftover).await {
-                    warn!(log, "writer task failed to send leftover bytes: {}", e);
+        tokio::spawn(
+            async move {
+                if let Some(leftover) = leftover {
+                    if let Err(e) = writer.write_all(&leftover).await {
+                        warn!("writer task failed to send leftover bytes: {}", e);
+                    }
                 }
-            }
 
-            while let Some(data) = data_rx.recv().await {
-                if let Err(e) = writer.write_all(&data).await {
-                    warn!(log, "writer task failed: {}", e);
-                    break;
+                while let Some(data) = data_rx.recv().await {
+                    if let Err(e) = writer.write_all(&data).await {
+                        warn!("writer task failed: {}", e);
+                        break;
+                    }
                 }
             }
-        });
+            .instrument(span),
+        );
     }
 }
 
@@ -817,12 +823,15 @@ struct StreamResolverTask {
 
 impl StreamResolverTask {
     fn spawn(self) {
-        tokio::spawn(async move {
-            let log = self.channel.log.clone();
-            if let Err(e) = self.run().await {
-                warn!(log, "resolver task failed: {}", e);
+        let span = self.channel.span.clone();
+        tokio::spawn(
+            async move {
+                if let Err(e) = self.run().await {
+                    warn!("resolver task failed: {}", e);
+                }
             }
-        });
+            .instrument(span),
+        );
     }
 
     async fn run(self) -> anyhow::Result<()> {
