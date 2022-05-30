@@ -4,6 +4,21 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## Unpublished
 
+## 2022.2.1 (2022-05-30)
+  * Migrate logging infrastructure to `tracing`
+  * *dgw*: log files are now rotated on a daily basis (old log files are deleted automatically)
+  * *dgw*: new `LogDirective` config option
+  * *dgw*: downgrade health route logs to debug level
+  * *dgw*: `*` in JMUX token for "allow all" rule
+  * *dgw*: specify JMUX filtering through claims
+  * *dgw*: PowerShell via SSH application protocol has been renamed from `pwsh` to `ssh-pwsh`
+  * *dgw*: add PowerShell via WinRM (`pwsh-http-winrm`, `pwsh-https-winrm`) in known application protocols
+  * *dgw*: add VNC (`vnc`) in known application protocols
+  * *dgw*: add SCP (`scp`) in known application protocols
+  * *jetsocat*: process watcher option (`--watch-parent`, `--watch-process`)
+  * *jetsocat*: pipe timeout option (`--pipe-timeout`)
+  * *jetsocat*: HTTPS tunneling (proxy) listener for JMUX proxy (`https-listen://<BINDING_ADDRESS>`)
+
 ## 2022.1.1 (2022-03-09)
   * `diagnostics/configuration` endpoint now also returns Gateway's version
   * New `diagnostics/clock` endpoint to troubleshoot clock drift
