@@ -120,6 +120,10 @@ pub enum ApplicationProtocol {
     Ssh,
     /// PowerShell over SSH
     SshPwsh,
+    /// PowerShell over WinRM via HTTP transport
+    WinrmHttpPwsh,
+    /// PowerShell over WinRM via HTTPS transport
+    WinrmHttpsPwsh,
     Sftp,
     Scp,
     #[serde(other)]
@@ -135,6 +139,8 @@ impl ApplicationProtocol {
             ApplicationProtocol::Vnc => Some(5900),
             ApplicationProtocol::Ssh => Some(22),
             ApplicationProtocol::SshPwsh => Some(22),
+            ApplicationProtocol::WinrmHttpPwsh => Some(5985),
+            ApplicationProtocol::WinrmHttpsPwsh => Some(5986),
             ApplicationProtocol::Sftp => Some(22),
             ApplicationProtocol::Scp => Some(22),
             ApplicationProtocol::Unknown => None,
