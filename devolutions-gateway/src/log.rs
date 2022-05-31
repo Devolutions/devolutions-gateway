@@ -18,7 +18,7 @@ pub struct LoggerGuard {
 
 struct LogPathCfg<'a> {
     folder: &'a Utf8Path,
-    prefix: &'a Utf8Path,
+    prefix: &'a str,
 }
 
 impl<'a> LogPathCfg<'a> {
@@ -26,15 +26,12 @@ impl<'a> LogPathCfg<'a> {
         if path.is_dir() {
             Ok(Self {
                 folder: path,
-                prefix: Utf8Path::new("gateway.log"),
+                prefix: "gateway.log",
             })
         } else {
             Ok(Self {
                 folder: path.parent().context("invalid log path (parent)")?,
-                prefix: path
-                    .file_name()
-                    .map(Utf8Path::new)
-                    .context("invalid log path (file_name)")?,
+                prefix: path.file_name().context("invalid log path (file_name)")?,
             })
         }
     }
@@ -84,7 +81,7 @@ pub fn init(path: Option<&Utf8Path>, filtering_directive: Option<&str>) -> anyho
 
 /// File deletion task (by age)
 ///
-/// Given path is be used as prefix.
+/// Given path is used to filter out by file name prefix.
 #[instrument]
 pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24); // once per day
@@ -99,7 +96,7 @@ pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
             Ok(mut read_dir) => {
                 while let Ok(Some(entry)) = read_dir.next_entry().await {
                     match entry.file_name().to_str() {
-                        Some(file_name) if file_name.starts_with(cfg.prefix.as_str()) => {
+                        Some(file_name) if file_name.starts_with(cfg.prefix) => {
                             debug!(file_name, "Found a log file");
                             match entry
                                 .metadata()
@@ -136,7 +133,7 @@ pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
 
 /// Find latest log file (by age)
 ///
-/// Given path is be used as prefix.
+/// Given path is used to filter out by file name prefix.
 #[instrument]
 pub async fn find_latest_log_file(prefix: &Utf8Path) -> anyhow::Result<std::path::PathBuf> {
     let cfg = LogPathCfg::from_path(prefix)?;
@@ -148,7 +145,7 @@ pub async fn find_latest_log_file(prefix: &Utf8Path) -> anyhow::Result<std::path
 
     while let Ok(Some(entry)) = read_dir.next_entry().await {
         match entry.file_name().to_str() {
-            Some(file_name) if file_name.starts_with(cfg.prefix.as_str()) => {
+            Some(file_name) if file_name.starts_with(cfg.prefix) => {
                 debug!(file_name, "Found a log file");
                 match entry.metadata().await.and_then(|metadata| metadata.modified()) {
                     Ok(modified) if modified > most_recent_time => {
