@@ -12,7 +12,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   * *dgw*: `*` in JMUX token for "allow all" rule
   * *dgw*: specify JMUX filtering through claims
   * *dgw*: PowerShell via SSH application protocol has been renamed from `pwsh` to `ssh-pwsh`
-  * *dgw*: add PowerShell via WinRM (`pwsh-http-winrm`, `pwsh-https-winrm`) in known application protocols
+  * *dgw*: add PowerShell via WinRM (`winrm-http-pwsh`, `winrm-https-pwsh`) in known application protocols
   * *dgw*: add VNC (`vnc`) in known application protocols
   * *dgw*: add SCP (`scp`) in known application protocols
   * *jetsocat*: process watcher option (`--watch-parent`, `--watch-process`)
