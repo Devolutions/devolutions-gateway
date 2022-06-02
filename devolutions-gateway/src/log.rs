@@ -111,7 +111,7 @@ pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
                                     }
                                 }
                                 Ok(_) => {
-                                    debug!(file_name, "Keep this log file");
+                                    trace!(file_name, "Keep this log file");
                                 }
                                 Err(error) => {
                                     warn!(%error, file_name, "Couldn't retrieve metadata for file");
