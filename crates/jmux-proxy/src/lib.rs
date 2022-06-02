@@ -258,7 +258,7 @@ impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
         } = self;
 
         while let Some(msg) = msg_to_send_rx.recv().await {
-            trace!("Send channel message: {:?}", msg);
+            trace!(?msg, "Send channel message");
             jmux_sink.feed(msg).await?;
             jmux_sink.flush().await?;
         }
@@ -470,7 +470,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                 };
 
-                trace!("Received channel message: {:?}", msg);
+                trace!(?msg, "Received channel message");
 
                 match msg {
                     Message::Open(msg) => {
@@ -728,7 +728,7 @@ impl DataReaderTask {
         let mut bytes_stream = FramedRead::new(reader, codec);
         let maximum_packet_size = usize::try_from(maximum_packet_size).unwrap();
 
-        debug!("Started forwarding");
+        trace!("Started forwarding");
 
         while let Some(bytes) = bytes_stream.next().await {
             let bytes = bytes.context("Couldn’t read next bytes from stream")?;
@@ -741,10 +741,10 @@ impl DataReaderTask {
                 loop {
                     let window_size_now = window_size.load(Ordering::SeqCst);
                     if window_size_now < bytes.len() {
-                        debug!(
-                            "Window size ({} bytes) insufficient to send full packet ({} bytes). Truncate packet and wait.",
+                        trace!(
                             window_size_now,
-                            bytes.len()
+                            full_packet_size = bytes.len(),
+                            "Window size insufficient to send full packet. Truncate and wait."
                         );
 
                         if window_size_now > 0 {
@@ -767,7 +767,7 @@ impl DataReaderTask {
             }
         }
 
-        debug!("Finished forwarding (EOF)");
+        trace!("Finished forwarding (EOF)");
         internal_msg_tx
             .send(InternalMessage::Eof { id: local_id })
             .context("Couldn’t send EOF notification")?;

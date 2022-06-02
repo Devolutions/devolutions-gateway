@@ -71,7 +71,7 @@ pub struct JmuxProxyCfg {
     pub jmux_cfg: JmuxConfig,
 }
 
-#[instrument(skip_all)]
+#[instrument("jmux", skip_all)]
 pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
     use self::listener::{https_listener_task, socks5_listener_task, tcp_listener_task, ListenerMode};
     use jmux_proxy::JmuxProxy;
