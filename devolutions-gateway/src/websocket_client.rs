@@ -30,22 +30,24 @@ pub struct WebsocketService {
 
 impl WebsocketService {
     pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> Result<Response<Body>, io::Error> {
-        if req.method() == Method::GET && req.uri().path().starts_with("/jet/accept") {
-            info!("{} {}", req.method(), req.uri().path());
+        let req_uri = req.uri().path();
+
+        if req.method() == Method::GET && req_uri.starts_with("/jet/accept") {
+            info!("{} {}", req.method(), req_uri);
             handle_jet_accept(req, client_addr, self.associations.clone())
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/connect") {
-            info!("{} {}", req.method(), req.uri().path());
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/connect") {
+            info!("{} {}", req.method(), req_uri);
             handle_jet_connect(req, client_addr, self.associations.clone(), self.config.clone())
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jet/test") {
-            info!("{} {}", req.method(), req.uri().path());
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/test") {
+            info!("{} {}", req.method(), req_uri);
             handle_jet_test(req, &self.associations)
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/jmux") {
-            info!("{} {}", req.method(), req.uri().path());
+        } else if req.method() == Method::GET && (req_uri.starts_with("/jmux") || req_uri.starts_with("/jet/jmux")) {
+            info!("{} {}", req.method(), req_uri);
             handle_jmux(req, client_addr, &self.config, &self.token_cache, &self.jrl)
                 .await
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
