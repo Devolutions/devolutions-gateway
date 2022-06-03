@@ -1,13 +1,13 @@
-# HTTPS tunneling, SOCKS5 and SOCKS5H proxy demonstration server
+# HTTP(S), SOCKS5 and SOCKS5H proxy demonstration server
 
-This crate provides HTTPS tunneling and SOCKS5 server demonstrating server-side usage of `proxy-https` and `proxy-socks`.
+This crate provides HTTP(S) and SOCKS5 proxy server demonstrating server-side usage of `proxy-http` and `proxy-socks` crates.
 
 ## Testing
 
 This server may be run using
 
 ```
-$ cargo run -p proxy-server -- --socks-port 1080 --no-auth-required --https-port 8080
+$ cargo run -p proxy-server -- --socks-port 1080 --no-auth-required --http-port 8080
 ```
 
 or
@@ -24,4 +24,4 @@ $ cargo run -p proxy-tester -- --mode socks5 --addr localhost:1080 [--user usern
 
 Alternatively, you can configure your browser to use it ("Network Settings" menu in Firefox).
 
-Note that username/password authentication is not (yet) supported for HTTPS tunneling.
+Note that username/password authentication is not (yet) supported for HTTP(S) tunneling.

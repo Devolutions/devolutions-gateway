@@ -1441,9 +1441,10 @@ dependencies = [
  "futures-util",
  "humantime",
  "jet-proto",
+ "jmux-proto",
  "jmux-proxy",
  "proptest",
- "proxy-https",
+ "proxy-http",
  "proxy-socks",
  "proxy-types",
  "proxy_cfg",
@@ -2316,7 +2317,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "proxy-https"
+name = "proxy-http"
 version = "0.0.0"
 dependencies = [
  "bytes 1.1.0",
@@ -2331,7 +2332,7 @@ dependencies = [
 name = "proxy-server"
 version = "0.0.0"
 dependencies = [
- "proxy-https",
+ "proxy-http",
  "proxy-socks",
  "proxy-types",
  "tokio",
@@ -2352,7 +2353,7 @@ dependencies = [
 name = "proxy-tester"
 version = "0.0.0"
 dependencies = [
- "proxy-https",
+ "proxy-http",
  "proxy-socks",
  "tokio",
 ]

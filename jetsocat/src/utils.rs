@@ -22,7 +22,6 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
 
 macro_rules! impl_tcp_connect {
     ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, $operation:expr) => {{
-        use proxy_https::HttpsProxyStream;
         use proxy_socks::{Socks4Stream, Socks5Stream};
 
         let out: $output_ty = match $proxy_cfg {
@@ -63,7 +62,7 @@ macro_rules! impl_tcp_connect {
                 ty: ProxyType::Https,
                 addr: proxy_addr,
             }) => {
-                let stream = HttpsProxyStream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
+                let stream = proxy_http::ProxyStream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
                 $operation(stream).await
             }
             None => {

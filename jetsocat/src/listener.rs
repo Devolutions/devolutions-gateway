@@ -1,6 +1,6 @@
 use anyhow::Context;
 use jmux_proxy::{ApiRequestSender, DestinationUrl, JmuxApiRequest, JmuxApiResponse};
-use proxy_https::HttpsProxyAcceptor;
+use proxy_http::HttpProxyAcceptor;
 use proxy_socks::Socks5AcceptorConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use tracing::Instrument as _;
 #[derive(Debug, Clone)]
 pub enum ListenerMode {
     Tcp { bind_addr: String, destination_url: String },
-    Https { bind_addr: String },
+    Http { bind_addr: String },
     Socks5 { bind_addr: String },
 }
 
@@ -136,6 +136,7 @@ async fn socks5_process_socket(
         let id = match receiver.await.context("negotiation interrupted")? {
             JmuxApiResponse::Success { id } => id,
             JmuxApiResponse::Failure { id, reason_code } => {
+                let _ = acceptor.failed(jmux_to_socks_error(reason_code)).await;
                 anyhow::bail!("Channel {} failure: {}", id, reason_code);
             }
         };
@@ -162,14 +163,30 @@ async fn socks5_process_socket(
     Ok(())
 }
 
+fn jmux_to_socks_error(code: jmux_proto::ReasonCode) -> proxy_socks::Socks5FailureCode {
+    use jmux_proto::ReasonCode;
+    use proxy_socks::Socks5FailureCode;
+
+    match code {
+        ReasonCode::GENERAL_FAILURE => Socks5FailureCode::GeneralSocksServerFailure,
+        ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET => Socks5FailureCode::ConnectionNotAllowedByRuleset,
+        ReasonCode::NETWORK_UNREACHABLE => Socks5FailureCode::NetworkUnreachable,
+        ReasonCode::HOST_UNREACHABLE => Socks5FailureCode::HostUnreachable,
+        ReasonCode::CONNECTION_REFUSED => Socks5FailureCode::ConnectionRefused,
+        ReasonCode::TTL_EXPIRED => Socks5FailureCode::TtlExpired,
+        ReasonCode::ADDRESS_TYPE_NOT_SUPPORTED => Socks5FailureCode::AddressTypeNotSupported,
+        _ => Socks5FailureCode::GeneralSocksServerFailure,
+    }
+}
+
 #[instrument(skip(api_request_tx))]
-pub async fn https_listener_task(api_request_tx: ApiRequestSender, bind_addr: String) {
+pub async fn http_listener_task(api_request_tx: ApiRequestSender, bind_addr: String) {
     let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
         tokio::spawn(
             async move {
-                if let Err(error) = https_process_socket(api_request_tx, stream).await {
-                    debug!("HTTPS proxy packet processing failed: {:#}", error);
+                if let Err(error) = http_process_socket(api_request_tx, stream).await {
+                    debug!("HTTP(S) proxy packet processing failed: {:#}", error);
                 }
             }
             .instrument(info_span!("process", %addr)),
@@ -181,8 +198,8 @@ pub async fn https_listener_task(api_request_tx: ApiRequestSender, bind_addr: St
     }
 }
 
-async fn https_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStream) -> anyhow::Result<()> {
-    let acceptor = HttpsProxyAcceptor::accept(incoming).await?;
+async fn http_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStream) -> anyhow::Result<()> {
+    let acceptor = HttpProxyAcceptor::accept(incoming).await?;
 
     let destination_url = dest_addr_to_url(acceptor.dest_addr());
 
@@ -200,7 +217,7 @@ async fn https_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStr
         Ok(()) => {}
         Err(error) => {
             warn!(%error, "Couldn’t send JMUX API request");
-            let _ = acceptor.respond(500).await;
+            let _ = acceptor.failure(proxy_http::ErrorCode::InternalServerError).await;
             anyhow::bail!("Couldn't send JMUX request");
         }
     }
@@ -208,13 +225,15 @@ async fn https_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStr
     let id = match receiver.await.context("negotiation interrupted")? {
         JmuxApiResponse::Success { id } => id,
         JmuxApiResponse::Failure { id, reason_code } => {
-            let _ = acceptor.respond(500).await;
+            let _ = acceptor.failure(jmux_to_http_error_code(reason_code)).await;
             anyhow::bail!("Channel {} failure: {}", id, reason_code);
         }
     };
 
-    // send success response
-    let incoming_stream = acceptor.respond(200).await?;
+    let incoming_stream = match acceptor {
+        HttpProxyAcceptor::RegularRequest(regular_request) => regular_request.success_with_rewrite()?,
+        HttpProxyAcceptor::TunnelRequest(tunnel_request) => tunnel_request.success().await?,
+    };
 
     let (stream, leftover) = incoming_stream.into_parts();
 
@@ -227,6 +246,22 @@ async fn https_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStr
         .await;
 
     Ok(())
+}
+
+fn jmux_to_http_error_code(code: jmux_proto::ReasonCode) -> proxy_http::ErrorCode {
+    use jmux_proto::ReasonCode;
+    use proxy_http::ErrorCode;
+
+    match code {
+        ReasonCode::GENERAL_FAILURE => ErrorCode::InternalServerError,
+        ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET => ErrorCode::Forbidden,
+        ReasonCode::NETWORK_UNREACHABLE => ErrorCode::BadGateway,
+        ReasonCode::HOST_UNREACHABLE => ErrorCode::BadGateway,
+        ReasonCode::CONNECTION_REFUSED => ErrorCode::BadGateway,
+        ReasonCode::TTL_EXPIRED => ErrorCode::RequestTimeout,
+        ReasonCode::ADDRESS_TYPE_NOT_SUPPORTED => ErrorCode::BadRequest,
+        _ => ErrorCode::InternalServerError,
+    }
 }
 
 fn dest_addr_to_url(dest_addr: &proxy_types::DestAddr) -> DestinationUrl {
@@ -251,7 +286,7 @@ where
         .await
         .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
 
-    info!(%bind_addr, "Start listener");
+    info!("Start listener");
 
     loop {
         match listener.accept().await {

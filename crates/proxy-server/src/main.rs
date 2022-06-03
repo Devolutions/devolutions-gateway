@@ -1,4 +1,4 @@
-use proxy_https::HttpsProxyAcceptor;
+use proxy_http::HttpProxyAcceptor;
 use proxy_socks::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
 use std::sync::Arc;
 use std::{env, io};
@@ -190,7 +190,7 @@ async fn process_socks5(incoming: TcpStream, conf: Arc<Socks5AcceptorConfig>) ->
 }
 
 async fn process_https(incoming: TcpStream) -> io::Result<()> {
-    let acceptor = HttpsProxyAcceptor::accept(incoming).await?;
+    let acceptor = HttpProxyAcceptor::accept(incoming).await?;
 
     let dest_addr = acceptor.dest_addr();
 
@@ -203,7 +203,7 @@ async fn process_https(incoming: TcpStream) -> io::Result<()> {
                 let mut addrs = match tokio::net::lookup_host((domain, port)).await {
                     Ok(addrs) => addrs,
                     Err(e) => {
-                        acceptor.respond(502).await?;
+                        acceptor.failure(proxy_http::ErrorCode::BadGateway).await?;
                         return Err(e);
                     }
                 };
@@ -215,12 +215,15 @@ async fn process_https(incoming: TcpStream) -> io::Result<()> {
     let target_stream = match TcpStream::connect(socket_addr).await {
         Ok(stream) => stream,
         Err(e) => {
-            acceptor.respond(500).await?;
+            acceptor.failure(proxy_http::ErrorCode::InternalServerError).await?;
             return Err(e);
         }
     };
 
-    let incoming_stream = acceptor.respond(200).await?;
+    let incoming_stream = match acceptor {
+        HttpProxyAcceptor::RegularRequest(regular_request) => regular_request.success_with_rewrite()?,
+        HttpProxyAcceptor::TunnelRequest(tunnel_request) => tunnel_request.success().await?,
+    };
 
     let (incoming_stream, read_leftover) = incoming_stream.into_parts();
 

@@ -16,7 +16,8 @@ use crate::codec::MAXIMUM_PACKET_SIZE_IN_BYTES;
 use anyhow::Context as _;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
-use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message, ReasonCode};
+use jmux_proto::ReasonCode;
+use jmux_proto::{ChannelData, DistantChannelId, Header, LocalChannelId, Message};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -339,12 +340,18 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             anyhow::bail!("Detected two streams with the same ID {}", id);
                         }
 
+                        // Send leftover bytes if any
+                        if let Some(leftover) = leftover {
+                            if let Err(error) = msg_to_send_tx.send(Message::data(channel.distant_id, leftover.to_vec())) {
+                                error!(%error, "Couldn't send leftover bytes");
+                            }                               ;
+                        }
+
                         let (reader, writer) = stream.into_split();
 
                         DataWriterTask {
                             writer,
                             data_rx,
-                            leftover,
                         }.spawn(channel.span.clone());
 
                         DataReaderTask {
@@ -424,7 +431,6 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
-                            leftover: None,
                         }.spawn(channel_span.clone());
 
                         DataReaderTask {
@@ -476,10 +482,10 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     Message::Open(msg) => {
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
-                        if let Err(e) = cfg.filtering.validate_destination(&msg.destination_url) {
-                            debug!("Invalid destination {} requested by {}: {}", msg.destination_url, peer_id, e);
+                        if let Err(error) = cfg.filtering.validate_destination(&msg.destination_url) {
+                            debug!(%error, %msg.destination_url, %peer_id, "Invalid destination requested");
                             msg_to_send_tx
-                                .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, e.to_string()))
+                                .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, error.to_string()))
                                 .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
                             continue;
                         }
@@ -704,8 +710,8 @@ impl DataReaderTask {
     fn spawn(self, span: Span) {
         tokio::spawn(
             async move {
-                if let Err(e) = self.run().await {
-                    warn!("reader task failed: {}", e);
+                if let Err(error) = self.run().await {
+                    warn!(%error, "reader task failed");
                 }
             }
             .instrument(span),
@@ -781,7 +787,6 @@ impl DataReaderTask {
 struct DataWriterTask {
     writer: OwnedWriteHalf,
     data_rx: DataReceiver,
-    leftover: Option<Bytes>,
 }
 
 impl DataWriterTask {
@@ -789,20 +794,13 @@ impl DataWriterTask {
         let Self {
             mut writer,
             mut data_rx,
-            leftover,
         } = self;
 
         tokio::spawn(
             async move {
-                if let Some(leftover) = leftover {
-                    if let Err(e) = writer.write_all(&leftover).await {
-                        warn!("writer task failed to send leftover bytes: {}", e);
-                    }
-                }
-
                 while let Some(data) = data_rx.recv().await {
-                    if let Err(e) = writer.write_all(&data).await {
-                        warn!("writer task failed: {}", e);
+                    if let Err(error) = writer.write_all(&data).await {
+                        warn!(%error, "writer task failed");
                         break;
                     }
                 }
@@ -826,8 +824,8 @@ impl StreamResolverTask {
         let span = self.channel.span.clone();
         tokio::spawn(
             async move {
-                if let Err(e) = self.run().await {
-                    warn!("resolver task failed: {}", e);
+                if let Err(error) = self.run().await {
+                    warn!(%error, "resolver task failed");
                 }
             }
             .instrument(span),
@@ -848,15 +846,16 @@ impl StreamResolverTask {
 
         let mut addrs = match tokio::net::lookup_host((host, port)).await {
             Ok(addrs) => addrs,
-            Err(e) => {
+            Err(error) => {
+                debug!(?error, "tokio::net::lookup_host failed");
                 msg_to_send_tx
                     .send(Message::open_failure(
                         channel.distant_id,
-                        ReasonCode::from(e.kind()),
-                        e.to_string(),
+                        ReasonCode::from(error.kind()),
+                        error.to_string(),
                     ))
                     .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("Couldn't resolve {}:{}: {}", host, port, e);
+                anyhow::bail!("Couldn't resolve {}:{}: {}", host, port, error);
             }
         };
         let socket_addr = addrs.next().expect("at least one resolved address should be present");
@@ -868,15 +867,16 @@ impl StreamResolverTask {
                         .send(InternalMessage::StreamResolved { channel, stream })
                         .context("Could't send back resolved stream through internal mpsc channel")?;
                 }
-                Err(e) => {
+                Err(error) => {
+                    debug!(?error, "TcpStream::connect failed");
                     msg_to_send_tx
                         .send(Message::open_failure(
                             channel.distant_id,
-                            ReasonCode::from(e.kind()),
-                            e.to_string(),
+                            ReasonCode::from(error.kind()),
+                            error.to_string(),
                         ))
                         .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                    anyhow::bail!("Couldn’t connect TCP socket to {}:{}: {}", host, port, e);
+                    anyhow::bail!("Couldn’t connect TCP socket to {}:{}: {}", host, port, error);
                 }
             },
             _ => anyhow::bail!("unsupported scheme: {}", scheme),
