@@ -9,12 +9,15 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   * *dgw*: log files are now rotated on a daily basis (old log files are deleted automatically)
   * *dgw*: new `LogDirective` config option
   * *dgw*: downgrade health route logs to debug level
-  * *dgw*: `*` in JMUX token for "allow all" rule
-  * *dgw*: specify JMUX filtering through claims
+  * *dgw*: JMUX filtering through claims (`*` is used to generate an "allow all" rule)
+  * *dgw*: optional application protocol claim in JMUX tokens to find good default ports
   * *dgw*: PowerShell via SSH application protocol has been renamed from `pwsh` to `ssh-pwsh`
-  * *dgw*: add PowerShell via WinRM (`winrm-http-pwsh`, `winrm-https-pwsh`) in known application protocols
-  * *dgw*: add VNC (`vnc`) in known application protocols
-  * *dgw*: add SCP (`scp`) in known application protocols
+  * *dgw*: new known application protocols
+    * PowerShell via WinRM (`winrm-http-pwsh`, `winrm-https-pwsh`)
+    * VNC (`vnc`)
+    * SCP (`scp`)
+    * HTTP (`http`)
+    * HTTPS (`https`)
   * *jetsocat*: process watcher option (`--watch-parent`, `--watch-process`)
   * *jetsocat*: pipe timeout option (`--pipe-timeout`)
   * *jetsocat*: HTTP(S) tunneling (proxy) listener for JMUX proxy (`http-listen://<BINDING_ADDRESS>`)

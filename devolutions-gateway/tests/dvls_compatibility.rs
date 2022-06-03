@@ -70,6 +70,8 @@ mod as_of_v2022_2_0_0 {
     const TYPE_ASSOCIATION: &str = "association";
     const JET_CM: &str = "fwd";
 
+    // TODO: also test jmux tokens
+
     #[derive(Serialize, Debug)]
     struct DvlsAssociationClaims {
         #[serde(rename = "type")]
@@ -92,7 +94,7 @@ mod as_of_v2022_2_0_0 {
     }
 
     prop_compose! {
-        fn dvls_application_protocol()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc|winrm-http-pwsh|winrm-https-pwsh)") -> String {
+        fn dvls_application_protocol()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc|winrm-http-pwsh|winrm-https-pwsh|http|https)") -> String {
             protocol
         }
     }

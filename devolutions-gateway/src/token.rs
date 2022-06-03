@@ -108,15 +108,20 @@ impl AccessTokenClaims {
     }
 }
 
-// ----- association claims ----- //
+// ----- Known application protocols -----
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationProtocol {
+    /// Wayk Remote Desktop Protocol
     Wayk,
+    /// Remote Desktop Protocol
     Rdp,
+    /// Apple Remote Desktop
     Ard,
+    /// Virtual Network Computing
     Vnc,
+    /// Secure Shell Protocol
     Ssh,
     /// PowerShell over SSH
     SshPwsh,
@@ -124,8 +129,15 @@ pub enum ApplicationProtocol {
     WinrmHttpPwsh,
     /// PowerShell over WinRM via HTTPS transport
     WinrmHttpsPwsh,
+    /// SSH File Transfer Protocol
     Sftp,
+    /// Secure Copy Protocol
     Scp,
+    /// Hypertext Transfer Protocol
+    Http,
+    /// Hypertext Transfer Protocol Secure
+    Https,
+    /// Unknown Protocol
     #[serde(other)]
     Unknown,
 }
@@ -143,10 +155,20 @@ impl ApplicationProtocol {
             ApplicationProtocol::WinrmHttpsPwsh => Some(5986),
             ApplicationProtocol::Sftp => Some(22),
             ApplicationProtocol::Scp => Some(22),
+            ApplicationProtocol::Http => Some(80),
+            ApplicationProtocol::Https => Some(443),
             ApplicationProtocol::Unknown => None,
         }
     }
 }
+
+impl Default for ApplicationProtocol {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+// ----- association claims ----- //
 
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
@@ -328,6 +350,9 @@ pub struct JmuxTokenClaims {
     /// Authorized hosts
     pub hosts: Vec<TargetAddr>,
 
+    /// Application Protocol (mostly used to find a known default port)
+    pub app_protocol: ApplicationProtocol,
+
     // JWT expiration time claim.
     exp: i64,
 
@@ -349,21 +374,23 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             // Additional target hosts
             #[serde(default)]
             dst_addl: Vec<SmolStr>,
+            #[serde(default)]
+            ap: ApplicationProtocol,
             exp: i64,
             jti: Uuid,
         }
 
-        fn parse_target_address(s: &str) -> Result<TargetAddr, BadTargetAddr> {
+        fn parse_target_address(s: &str, app_protocol: ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
             const PORT_HTTP: u16 = 80;
             const PORT_HTTPS: u16 = 443;
             const PORT_FTP: u16 = 21;
-            const DEFAULT_SCHEME: &str = "http";
+            const DEFAULT_SCHEME: &str = "tcp";
 
             let default_port = match s.split("://").next() {
                 Some("http" | "ws") => PORT_HTTP,
                 Some("https" | "wss") => PORT_HTTPS,
                 Some("ftp") => PORT_FTP,
-                Some(_) | None => PORT_HTTP,
+                Some(_) | None => app_protocol.known_default_port().unwrap_or(PORT_HTTP),
             };
 
             TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
@@ -371,18 +398,21 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
 
         let claims = ClaimsHelper::deserialize(deserializer)?;
 
-        let primary = parse_target_address(&claims.dst_hst).map_err(de::Error::custom)?;
+        let app_protocol = claims.ap;
+
+        let primary = parse_target_address(&claims.dst_hst, app_protocol).map_err(de::Error::custom)?;
 
         let mut hosts = Vec::with_capacity(claims.dst_addl.len() + 1);
         hosts.push(primary);
 
         for additional in claims.dst_addl {
-            let additional = parse_target_address(&additional).map_err(de::Error::custom)?;
+            let additional = parse_target_address(&additional, app_protocol).map_err(de::Error::custom)?;
             hosts.push(additional);
         }
 
         Ok(Self {
             hosts,
+            app_protocol,
             exp: claims.exp,
             jti: claims.jti,
         })
