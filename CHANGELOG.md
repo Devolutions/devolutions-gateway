@@ -17,7 +17,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   * *dgw*: add SCP (`scp`) in known application protocols
   * *jetsocat*: process watcher option (`--watch-parent`, `--watch-process`)
   * *jetsocat*: pipe timeout option (`--pipe-timeout`)
-  * *jetsocat*: HTTPS tunneling (proxy) listener for JMUX proxy (`https-listen://<BINDING_ADDRESS>`)
+  * *jetsocat*: HTTP(S) tunneling (proxy) listener for JMUX proxy (`http-listen://<BINDING_ADDRESS>`)
 
 ## 2022.1.1 (2022-03-09)
   * `diagnostics/configuration` endpoint now also returns Gateway's version

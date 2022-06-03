@@ -7,5 +7,5 @@ publish = false
 
 [dependencies]
 tokio = { version = "1.17.0", features = ["rt", "net"] }
-proxy-https = { path = "../proxy-https" }
+proxy-http = { path = "../proxy-http" }
 proxy-socks = { path = "../proxy-socks" }

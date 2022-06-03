@@ -160,7 +160,7 @@ fn jmux_proxy() -> Command {
 Listener format:
     - tcp-listen://<BINDING ADDRESS>/<DESTINATION URL>
     - socks5-listen://<BINDING ADDRESS>
-    - https-listen://<BINDING ADDRESS>
+    - http-listen://<BINDING ADDRESS>
 
 Example: JMUX proxy
 
@@ -254,7 +254,10 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("no-proxy", FlagType::Bool).description("Disable any form of proxy auto-detection"))
         .flag(Flag::new("socks4", FlagType::String).description("Use specified address:port as SOCKS4 proxy"))
         .flag(Flag::new("socks5", FlagType::String).description("Use specified address:port as SOCKS5 proxy"))
-        .flag(Flag::new("https-proxy", FlagType::String).description("Use specified address:port as HTTPS proxy"))
+        .flag(
+            Flag::new("https-proxy", FlagType::String)
+                .description("Use specified address:port as HTTP tunneling proxy (also called HTTPS proxy)"),
+        )
         .flag(
             Flag::new("watch-parent", FlagType::Bool).description("Watch parent process and stop piping when it dies"),
         )
@@ -505,7 +508,7 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
         "socks5-listen" => Ok(ListenerMode::Socks5 {
             bind_addr: value.to_owned(),
         }),
-        "https-listen" => Ok(ListenerMode::Https {
+        "http-listen" => Ok(ListenerMode::Http {
             bind_addr: value.to_owned(),
         }),
         _ => anyhow::bail!("Unknown listener scheme: {}", scheme),
