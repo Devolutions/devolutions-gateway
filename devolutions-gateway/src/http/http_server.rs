@@ -51,6 +51,7 @@ pub fn configure_http_server(
             let jet = AssociationController::new(config.clone(), associations.clone());
             let jrl = JrlController::new(config.clone(), jrl);
             let kdc_proxy = KdcProxyController { config: config.clone() };
+            let duplicated_kdc_proxy = kdc_proxy.duplicated();
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());
@@ -80,6 +81,7 @@ pub fn configure_http_server(
                 .controller(legacy_diagnostics)
                 .controller(LegacySessionsController)
                 .controller(kdc_proxy)
+                .controller(duplicated_kdc_proxy)
                 .controller(jrl)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
