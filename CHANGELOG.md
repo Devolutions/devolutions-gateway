@@ -6,6 +6,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## 2022.2.1 (2022-05-30)
   * Migrate logging infrastructure to `tracing`
+  * *dgw*: duplicate `/jmux` and `/KdcProxy` endpoints under `/jet`
   * *dgw*: log files are now rotated on a daily basis (old log files are deleted automatically)
   * *dgw*: new `LogDirective` config option
   * *dgw*: downgrade health route logs to debug level
