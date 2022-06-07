@@ -66,6 +66,7 @@ mod as_of_v2022_2_0_0 {
     use super::*;
     use proptest::collection::vec;
 
+    const CTY_JMUX: &str = "JMUX";
     const CTY_ASSOCIATION: &str = "ASSOCIATION";
     const TYPE_ASSOCIATION: &str = "association";
     const JET_CM: &str = "fwd";
@@ -93,9 +94,8 @@ mod as_of_v2022_2_0_0 {
         }
     }
 
-    // FIXME(DGW-33): the last ones are only used for JMUX tokens
     prop_compose! {
-        fn dvls_application_protocol()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc|winrm-http-pwsh|winrm-https-pwsh|http|https)") -> String {
+        fn dvls_application_protocol_assoc()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc)") -> String {
             protocol
         }
     }
@@ -111,7 +111,7 @@ mod as_of_v2022_2_0_0 {
             now: i64
         )(
             jet_aid in uuid_str(),
-            jet_ap in dvls_application_protocol(),
+            jet_ap in dvls_application_protocol_assoc(),
             dst_hst in dvls_host(),
             dst_alt in dvls_alternate_hosts(),
             jti in uuid_str(),
@@ -143,9 +143,63 @@ mod as_of_v2022_2_0_0 {
         });
     }
 
+    #[derive(Serialize, Debug)]
+    struct DvlsJmuxClaims {
+        dst_hst: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dst_addl: Vec<String>,
+        jet_ap: String,
+        jet_aid: String,
+        nbf: i64,
+        exp: i64,
+        jti: String,
+    }
+
+    prop_compose! {
+        fn dvls_application_protocol_jmux()(protocol in "(winrm-http-pwsh|winrm-https-pwsh|http|https)") -> String {
+            protocol
+        }
+    }
+
+    prop_compose! {
+        fn dvls_jmux_claims(
+            now: i64
+        )(
+            jet_aid in uuid_str(),
+            jet_ap in dvls_application_protocol_assoc(),
+            dst_hst in dvls_host(),
+            dst_addl in dvls_alternate_hosts(),
+            jti in uuid_str(),
+        ) -> DvlsJmuxClaims {
+            DvlsJmuxClaims {
+                dst_hst,
+                dst_addl,
+                jet_ap,
+                jet_aid,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            }
+        }
+    }
+
+    /// Make sure current Gateway is able to validate JMUX tokens provided by DVLS
+    #[test]
+    fn jmux_token_validation() {
+        let token_cache = new_token_cache();
+        let jrl = Mutex::new(JrlTokenClaims::default());
+        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
+        let pub_key = priv_key.to_public_key();
+        let now = chrono::Utc::now().timestamp();
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jmux_claims(now).no_shrink())| {
+            encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_JMUX.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
     const ASSOCIATION_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NTA0MDM2NzIsImV4cCI6MTY1MDQwMzk3MiwiaWF0IjoxNjUwNDAzNjcyLCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJzc2giLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTI4LjEyOC4xMjguMTgyOjIyIiwiamV0X2FpZCI6ImQwMWMwOWQ0LTc2NjItNDdlZS1hNzBkLWJmNDlkMDVlZDI2ZSIsImp0aSI6IjQzZWEyN2Y3LTk3NGEtNDVjZC1iMjdiLWI4OGQ3N2QzMzc4NCJ9.QLW4cjLj8hAz3iX5mNKXZtUXA0MaEfbrCbt8to2Ptqqv2iJSArTtCqvXCTnqpwKPKsHx25-2E8xHHfrXVrqLOZcwag-jECLNDggpwtHgm6YM4wZ44Rzh15hWjHUPi1ZwGmuiDuZbVLfCXt6SGeHpGmHr9YkIBd4ay2hs_pJ02faPYT5rJBA8LT1z-rRK76VhOlsrf4mrD43xH_2v3ANchIukp-kZOMouJNb6iU6ZBCzREaEY7gtGZCtTb4qleEHSlJ6r-Tu-w_lqCyuxKo5uO3mAGyHk5QRS83xfx1NV8VaWO4X4UzcL66TnkR5LOoIbf_x2Tw5teBF5QkxUZ7Q_8Q";
     const SCOPE_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlNDT1BFIn0.eyJuYmYiOjE2NTA0MDM0ODEsImV4cCI6MTY1MDQwMzc4MSwiaWF0IjoxNjUwNDAzNDgxLCJzY29wZSI6ImdhdGV3YXkuZGlhZ25vc3RpY3MucmVhZCIsImp0aSI6Ijc4MTk2ODRkLTQ5ZjktNDExYy05ZGFiLTE2M2MwMjJiOTlhMCIsInR5cGUiOiJzY29wZSJ9.qxiHVjlvrbUdxyBApV1asWdYGE0VzF2FPiJtWYr0EjN7TJv3mWIZbpXGkQQoWoPs9qOBKOp6atrXXbhrfbxwIH32s07RI7W6_mOxRwIag1G7SRHXHLXZWH8Jw-t_my7BYS90-lr_hcLoirb6pDVhTFe70RoEL9rjl8jitWel8vC8rmbXIdzQGbcbA6Ed41mksCwEfvMCHIt8xnkmu7krFTbmN9kWwGgGnEryzX-tbq6H6DzQ26n9diliy6O24Zk5oKf8zZ6K5ACFEuL_xPnqr37Ttl7wmvt7bS3ugz6Lop5weXD9yB9GOxpai7yit0Ri-0qVNCt9rzQ-9od3_4Kj7Q";
-    const SAMPLES: &[&str] = &[ASSOCIATION_TOKEN_SAMPLE, SCOPE_TOKEN_SAMPLE];
+    const JMUX_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpNVVgifQ.eyJuYmYiOjE2NTQ2MzAyODQsImV4cCI6MTY1NDYzMDU4NCwiaWF0IjoxNjU0NjMwMjg0LCJkc3RfaHN0IjoiaHR0cDovLzE5Mi4xNjguOC4xMjg6MTExMTEiLCJqZXRfYXAiOiJodHRwIiwiamV0X2FpZCI6ImJmMmQ5MmJhLTQ4OTktNGEzMi04ZWFjLTJlNzM3ZDA2ODg2ZiIsImp0aSI6IjhhNTk0OTQyLWRmODAtNDk0Mi05ZTBlLTVkYmIyNDI5NjA1ZiJ9.IayaQwjsHTHUbirO7VVXqgKyJI3jdQX5fcb2u_mSgV-oyJ6zKwh8h-LEhLMmp5dgoxorC4-dWPgHwnOjXWPvQDSragghyp2be9qW45va_r20gjUFOUVCV3lT9_XXVu6l46GlM6W3ZP_I67aEPbLHgL6-5qIxb-6SW_HkjWOGnc88Lcicv74ujgcyq0U4L_Mh1jLPaopDsGNhqtg4SHzbgayHU7yL7icgWWVDWz-MEWCZkwC1bk2IAJJCRd6YjlCNQhZpO5MRiD6omLLmtS-6npivKb94ao9J8R8mxrDQ9idgVXAgqY9uPHvKXAE2eDjt8xbsVbSss4yI8LGhoC-Rgg";
+    const SAMPLES: &[&str] = &[ASSOCIATION_TOKEN_SAMPLE, SCOPE_TOKEN_SAMPLE, JMUX_TOKEN_SAMPLE];
 
     #[test]
     fn samples() {
