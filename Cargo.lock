@@ -728,6 +728,7 @@ dependencies = [
  "jmux-proxy",
  "lazy_static",
  "native-tls",
+ "nonempty",
  "packet",
  "parking_lot 0.12.0",
  "pcap-file",
@@ -1797,6 +1798,12 @@ dependencies = [
  "minimal-lexical",
  "version_check",
 ]
+
+[[package]]
+name = "nonempty"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
 
 [[package]]
 name = "ntapi"

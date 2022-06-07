@@ -1,6 +1,7 @@
 use crate::utils::TargetAddr;
 use anyhow::Context as _;
 use core::fmt;
+use nonempty::NonEmpty;
 use parking_lot::Mutex;
 use picky::key::{PrivateKey, PublicKey};
 use serde::de;
@@ -125,14 +126,14 @@ pub enum ApplicationProtocol {
     Ssh,
     /// PowerShell over SSH
     SshPwsh,
-    /// PowerShell over WinRM via HTTP transport
-    WinrmHttpPwsh,
-    /// PowerShell over WinRM via HTTPS transport
-    WinrmHttpsPwsh,
     /// SSH File Transfer Protocol
     Sftp,
     /// Secure Copy Protocol
     Scp,
+    /// PowerShell over WinRM via HTTP transport
+    WinrmHttpPwsh,
+    /// PowerShell over WinRM via HTTPS transport
+    WinrmHttpsPwsh,
     /// Hypertext Transfer Protocol
     Http,
     /// Hypertext Transfer Protocol Secure
@@ -347,11 +348,14 @@ pub struct BridgeTokenClaims {
 
 #[derive(Clone)]
 pub struct JmuxTokenClaims {
+    /// Jet Association ID (= Session ID)
+    pub jet_aid: Uuid,
+
     /// Authorized hosts
-    pub hosts: Vec<TargetAddr>,
+    pub hosts: NonEmpty<TargetAddr>,
 
     /// Application Protocol (mostly used to find a known default port)
-    pub app_protocol: ApplicationProtocol,
+    pub jet_ap: ApplicationProtocol,
 
     // JWT expiration time claim.
     exp: i64,
@@ -375,12 +379,13 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             #[serde(default)]
             dst_addl: Vec<SmolStr>,
             #[serde(default)]
-            ap: ApplicationProtocol,
+            jet_ap: ApplicationProtocol,
+            jet_aid: Uuid,
             exp: i64,
             jti: Uuid,
         }
 
-        fn parse_target_address(s: &str, app_protocol: ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
+        fn parse_target_address(s: &str, jet_ap: ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
             const PORT_HTTP: u16 = 80;
             const PORT_HTTPS: u16 = 443;
             const PORT_FTP: u16 = 21;
@@ -390,7 +395,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
                 Some("http" | "ws") => PORT_HTTP,
                 Some("https" | "wss") => PORT_HTTPS,
                 Some("ftp") => PORT_FTP,
-                Some(_) | None => app_protocol.known_default_port().unwrap_or(PORT_HTTP),
+                Some(_) | None => jet_ap.known_default_port().unwrap_or(PORT_HTTP),
             };
 
             TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
@@ -398,21 +403,24 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
 
         let claims = ClaimsHelper::deserialize(deserializer)?;
 
-        let app_protocol = claims.ap;
+        let jet_ap = claims.jet_ap;
 
-        let primary = parse_target_address(&claims.dst_hst, app_protocol).map_err(de::Error::custom)?;
+        let primary = parse_target_address(&claims.dst_hst, jet_ap).map_err(de::Error::custom)?;
 
-        let mut hosts = Vec::with_capacity(claims.dst_addl.len() + 1);
-        hosts.push(primary);
+        let mut hosts = NonEmpty {
+            head: primary,
+            tail: Vec::with_capacity(claims.dst_addl.len()),
+        };
 
         for additional in claims.dst_addl {
-            let additional = parse_target_address(&additional, app_protocol).map_err(de::Error::custom)?;
+            let additional = parse_target_address(&additional, jet_ap).map_err(de::Error::custom)?;
             hosts.push(additional);
         }
 
         Ok(Self {
+            jet_aid: claims.jet_aid,
             hosts,
-            app_protocol,
+            jet_ap,
             exp: claims.exp,
             jti: claims.jti,
         })

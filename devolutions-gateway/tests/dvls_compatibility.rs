@@ -93,6 +93,7 @@ mod as_of_v2022_2_0_0 {
         }
     }
 
+    // FIXME(DGW-33): the last ones are only used for JMUX tokens
     prop_compose! {
         fn dvls_application_protocol()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc|winrm-http-pwsh|winrm-https-pwsh|http|https)") -> String {
             protocol
