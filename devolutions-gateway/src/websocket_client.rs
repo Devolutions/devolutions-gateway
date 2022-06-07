@@ -556,6 +556,8 @@ async fn handle_jmux(
         let reader = Box::new(reader) as ErasedRead;
         let writer = Box::new(writer) as ErasedWrite;
 
+        let main_destination_host = claims.hosts.first().clone();
+
         let config = JmuxConfig {
             filtering: FilteringRule::Any(
                 claims
@@ -573,12 +575,26 @@ async fn handle_jmux(
             ),
         };
 
+        let session_id = claims.jet_aid;
+
+        let info = GatewaySessionInfo::new(
+            session_id,
+            claims.jet_ap,
+            ConnectionModeDetails::Fwd {
+                destination_host: main_destination_host,
+            },
+        );
+
+        crate::add_session_in_progress(info).await;
+
         JmuxProxy::new(reader, writer)
             .with_config(config)
             .run()
             .instrument(info_span!("jmux", client=%client_addr))
             .await
             .map_err(|e| error!("JMUX proxy error: {}", e))?;
+
+        crate::remove_session_in_progress(session_id).await;
 
         Ok::<(), ()>(())
     });
