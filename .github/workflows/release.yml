@@ -40,7 +40,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          $Output = (gh release list) | Out-String
+          $Output = (gh release list --repo $Env:GITHUB_REPOSITORY) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
           $Versions = ForEach($Release in $Releases) {
               $Version = ( $Release -Split '\s+' ).Trim()
