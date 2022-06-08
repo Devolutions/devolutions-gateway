@@ -4,7 +4,7 @@ use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
@@ -26,14 +26,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let jti = Uuid::new_v4();
 
     let (cty, claims) = match app.subcmd {
-        SubCommand::RdpTcp(params) => {
+        SubCommand::Forward(params) => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
                 jti,
                 dst_hst: Some(&params.dst_hst),
                 jet_cm: "fwd",
-                jet_ap: "rdp",
+                jet_ap: params.jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
                 creds: None,
             };
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jti,
                 dst_hst: Some(&params.dst_hst),
                 jet_cm: "fwd",
-                jet_ap: "rdp",
+                jet_ap: ApplicationProtocol::Rdp,
                 jet_aid: Uuid::new_v4(),
                 creds: Some(CredsClaims {
                     prx_usr: &params.prx_usr,
@@ -57,14 +57,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("ASSOCIATION", serde_json::to_value(&claims).unwrap())
         }
-        SubCommand::RdpTcpRendezvous => {
+        SubCommand::Rendezvous(params) => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
                 jti,
                 dst_hst: None,
                 jet_cm: "rdv",
-                jet_ap: "rdp",
+                jet_ap: params.jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
                 creds: None,
             };
@@ -83,6 +83,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             let claims = JmuxClaims {
                 dst_hst: &params.dst_hst,
                 dst_addl: params.dst_addl.iter().map(|o| o.as_str()).collect(),
+                jet_ap: params.jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_aid: Uuid::new_v4(),
                 exp,
                 nbf,
                 jti,
@@ -152,9 +154,9 @@ struct App {
 
 #[derive(Parser)]
 enum SubCommand {
-    RdpTcp(TcpParams),
+    Forward(ForwardParams),
+    Rendezvous(RendezvousParams),
     RdpTls(TlsParams),
-    RdpTcpRendezvous,
     Scope(ScopeParams),
     Jmux(JmuxParams),
     Kdc(KdcParams),
@@ -162,9 +164,17 @@ enum SubCommand {
 }
 
 #[derive(Parser)]
-struct TcpParams {
+struct ForwardParams {
     #[clap(long)]
     dst_hst: String,
+    #[clap(long)]
+    jet_ap: Option<ApplicationProtocol>,
+}
+
+#[derive(Parser)]
+struct RendezvousParams {
+    #[clap(long)]
+    jet_ap: Option<ApplicationProtocol>,
 }
 
 #[derive(Parser)]
@@ -189,6 +199,8 @@ struct ScopeParams {
 
 #[derive(Parser)]
 struct JmuxParams {
+    #[clap(long)]
+    jet_ap: Option<ApplicationProtocol>,
     dst_hst: String,
     dst_addl: Vec<String>,
 }
@@ -215,7 +227,7 @@ struct AssociationClaims<'a> {
     nbf: i64,
     jti: Uuid,
     jet_cm: &'a str,
-    jet_ap: &'a str,
+    jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
     dst_hst: Option<&'a str>,
     #[serde(flatten)]
@@ -242,6 +254,8 @@ struct ScopeClaims<'a> {
 struct JmuxClaims<'a> {
     dst_hst: &'a str,
     dst_addl: Vec<&'a str>,
+    jet_ap: ApplicationProtocol,
+    jet_aid: Uuid,
     exp: i64,
     nbf: i64,
     jti: Uuid,
@@ -261,4 +275,45 @@ struct JrlClaims<'a> {
     jti: Uuid,
     iat: i64,
     jrl: HashMap<&'a str, Vec<serde_json::Value>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApplicationProtocol {
+    /// Wayk Remote Desktop Protocol
+    Wayk,
+    /// Remote Desktop Protocol
+    Rdp,
+    /// Apple Remote Desktop
+    Ard,
+    /// Virtual Network Computing
+    Vnc,
+    /// Secure Shell Protocol
+    Ssh,
+    /// PowerShell over SSH
+    SshPwsh,
+    /// SSH File Transfer Protocol
+    Sftp,
+    /// Secure Copy Protocol
+    Scp,
+    /// PowerShell over WinRM via HTTP transport
+    WinrmHttpPwsh,
+    /// PowerShell over WinRM via HTTPS transport
+    WinrmHttpsPwsh,
+    /// Hypertext Transfer Protocol
+    Http,
+    /// Hypertext Transfer Protocol Secure
+    Https,
+    /// Unknown Protocol
+    Unknown,
+}
+
+impl std::str::FromStr for ApplicationProtocol {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Not the most elegant / performant solution, but it's DRY and good enough for a small tool like this one
+        let json_s = format!("\"{s}\"");
+        serde_json::from_str(&json_s)
+    }
 }

@@ -142,7 +142,7 @@ The binary is produced inside a `target/release` folder.
 RDP-TCP example:
 
 ```
-$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem rdp-tcp --dst-hst 192.168.122.70 
+$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem forward --dst-hst 192.168.122.70 --jet-ap rdp
 ```
 
 RDP-TLS example:
