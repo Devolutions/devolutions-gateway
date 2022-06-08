@@ -38,7 +38,7 @@ jobs:
         id: check-release
         shell: pwsh
         run:
-          $Output = & gh release list
+          $Output = (gh release list) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
           $Versions = ForEach($Release in $Releases) {
               $Version = ( $Release -Split '\s+' ).Trim()
