@@ -12,6 +12,12 @@ on:
         required: false
         default: true
   workflow_call:
+    inputs:
+      dispatch:
+        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        type: string
+        required: false
+        default: "workflow_call"
 
 jobs:
   preflight:
@@ -20,8 +26,19 @@ jobs:
     outputs: 
       run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
+      dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
 
     steps:
+      - name: Get download strategy
+        id: get-dl-strategy
+        shell: pwsh
+        run: |
+          if ('${{ inputs.dispatch }}') {
+            echo '::set-output name=dl-strategy::action'
+          } else {
+            echo '::set-output name=dl-strategy::cli'
+          }
+
       - name: Get run
         id: get-run
         shell: pwsh
@@ -110,16 +127,28 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: ${{ needs.preflight.outputs.dl-strategy }} = "action"
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ matrix.project }}
+          path: ${{ runner.temp }}/${{ matrix.project }}
+
+      - name: Download artifacts (cli)
+        if: ${{ needs.preflight.outputs.dl-strategy }} = "cli"
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
+
+      - name: Manage artifacts
+        shell: pwsh
+        run: |
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
             Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
-          }
+          }    
 
       - name: Configure certificates (Windows)
         if: matrix.os == 'windows'
