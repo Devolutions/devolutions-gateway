@@ -10,7 +10,7 @@ on:
 
 jobs:
   call-ci-workflow:
-    uses: .github/workflows/ci.yml
+    uses: ./.github/workflows/ci.yml
 
   job2:
     runs-on: ubuntu-latest
