@@ -12,25 +12,32 @@ on:
         required: false
         default: true
   workflow_call:
-    inputs:
-      run:
-        required: true
-        type: string
 
 jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-18.04
     outputs: 
+      run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
 
     steps:
+      - name: Get run
+        id: get-run
+        shell: pwsh
+        run: |
+          if ('${{ github.event.inputs.run }}') {
+            echo '::set-output name=run::${{ github.event.inputs.run }}'
+          } else {
+            echo '::set-output name=run::${{ github.sha }}'
+          }
+
       - name: Get commit
         id: get-commit
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          CI_RUN: ${{ github.event.inputs.run }}
+          CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
           $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
           if ($($Run.head_branch) -Ne "master") {
@@ -50,7 +57,7 @@ jobs:
           }
 
           echo "::set-output name=commit::$($Run.head_sha)"
-          echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ github.event.inputs.run }}"
+          echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ steps.get-run.outputs.run }}"
 
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
@@ -109,7 +116,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
-          gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D "$Destination"
+          gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
             Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
           }

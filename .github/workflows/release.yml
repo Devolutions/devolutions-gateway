@@ -12,10 +12,6 @@ on:
         type: boolean
         default: 'true'
   workflow_call:
-    inputs:
-      run:
-        required: true
-        type: string
 
 concurrency: gateway-release
 
@@ -24,20 +20,31 @@ jobs:
     name: Preflight
     runs-on: ubuntu-18.04
     outputs:
+      run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
       skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
 
     steps:
+      - name: Get run
+        id: get-run
+        shell: pwsh
+        run: |
+          if ('${{ github.event.inputs.run }}') {
+            echo '::set-output name=run::${{ github.event.inputs.run }}'
+          } else {
+            echo '::set-output name=run::${{ github.sha }}'
+          }
+
       - name: Get version
         id: get-version
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
+          gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
           $Version = Get-Content VERSION -TotalCount 1
           echo "::set-output name=version::$Version"
-          echo "::notice::Releasing artifacts for version $Version from run ${{ github.event.inputs.run }}"
+          echo "::notice::Releasing artifacts for version $Version from run ${{ steps.get-run.outputs.run }}"
 
       - name: Check GitHub releases
         id: check-release
@@ -90,7 +97,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
       - name: Prepare artifacts
         id: prepare-artifacts
@@ -156,7 +163,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Create GitHub release
         shell: pwsh
@@ -197,7 +204,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
       - name: Publish PowerShell module
         shell: pwsh
