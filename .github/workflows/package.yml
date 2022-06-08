@@ -6,11 +6,19 @@ on:
       run:
         description: 'The CI workflow run to package'
         required: true
+      validate-dependency:
+        description: 'Validate that the CI workflow ran to completion'
+        required: false
+        default: true
   workflow_call:
     inputs:
       run:
         required: true
         type: string
+      validate-dependency:
+        description: 'Validate that the CI workflow ran to completion'
+        required: false
+        default: false
 
 jobs:
   preflight:
@@ -31,9 +39,12 @@ jobs:
           if ($($Run.head_branch) -Ne "master") {
             echo "::notice::specified run is not on master"
           }
-          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-            echo "::error::specified run is either not complete or not successful"
-            exit 1
+
+          if ([System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')) {
+            if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+              echo "::error::specified run is either not complete or not successful"
+              exit 1
+            }
           }
 
           echo "::set-output name=commit::$($Run.head_sha)"
