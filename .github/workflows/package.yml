@@ -128,14 +128,14 @@ jobs:
           ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Download artifacts (action)
-        if: ${{ needs.preflight.outputs.dl-strategy }} == "action"
+        if: needs.preflight.outputs.dl-strateg == 'action'
         uses: actions/download-artifact@v3
         with:
           name: ${{ matrix.project }}
           path: ${{ runner.temp }}/${{ matrix.project }}
 
       - name: Download artifacts (cli)
-        if: ${{ needs.preflight.outputs.dl-strategy }} == "cli"
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
