@@ -14,15 +14,16 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets: inherit
 
-  job2:
-    runs-on: ubuntu-latest
-    needs: call-ci-workflow
-    steps:
-      - run: echo ${{ needs.call-ci-workflow.outputs.run-id }} 
+  call-package-workflow:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    needs: [ call-ci-workflow ]
+    with:
+      run: ${{ github.run_id }}
 
-  # call-workflow-passing-data:
-  #   uses: octo-org/example-repo/.github/workflows/workflow-B.yml@main
-  #   with:
-  #     username: mona
-  #   secrets:
-  #     token: ${{ secrets.TOKEN }}
+  call-release-workflow:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+    needs: [ call-package-workflow ]
+    with:
+      run: ${{ github.run_id }}
