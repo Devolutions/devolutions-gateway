@@ -37,7 +37,7 @@ jobs:
       - name: Check GitHub releases
         id: check-release
         shell: pwsh
-        run:
+        run: |
           $Output = (gh release list) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
           $Versions = ForEach($Release in $Releases) {
