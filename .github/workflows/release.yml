@@ -37,6 +37,8 @@ jobs:
       - name: Check GitHub releases
         id: check-release
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Output = (gh release list) | Out-String
           $Releases = ( $Output -split '\r?\n' ).Trim()
@@ -58,7 +60,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight]
-    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -139,7 +141,7 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight]
-    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
 
     steps:
       - name: Configure runner
@@ -183,7 +185,7 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: preflight
-    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
+    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
 
     steps:
       - name: Download artifacts
