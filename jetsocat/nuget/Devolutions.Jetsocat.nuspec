@@ -1,0 +1,14 @@
+<package>
+  <metadata>
+    <id>Devolutions.Jetsocat</id>
+    <version>1.0.0</version>
+    <authors>Richard Markiewicz</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Websocket toolkit for jet protocol related operations</description>
+    <dependencies />
+  </metadata>
+  <files>
+    <file src="bin/x64/jetsocat.exe" target="runtimes/win-x64/native" />
+    <file src="Devolutions.Jetsocat.targets" target="build" />
+  </files>
+</package>

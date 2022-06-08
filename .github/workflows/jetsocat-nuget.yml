@@ -1,0 +1,41 @@
+name: jetsocat nuget package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (optional)'
+        required: false
+
+jobs:
+  package:
+    runs-on: [self-hosted, Linux, X64, main]
+    environment: artifactory-publish
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v2
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      - name: create and publish
+        working-directory: ./jetsocat/nuget
+        shell: pwsh
+        run: |
+          $Version = '${{ github.event.inputs.version }}'
+          if ($Version) {
+            pwsh package.ps1 -AccessToken ${{ secrets.GITHUB_TOKEN }} -Version $Version
+          } else {
+            pwsh package.ps1 -AccessToken ${{ secrets.GITHUB_TOKEN }}
+          }
+
+      - name: Publish to Artifactory
+        uses: ./.github/workflows/nuget-publish-jfrog
+        with:
+          apikey: ${{ secrets.ARTIFACTORY_PASSWORD }}
+          username: ${{ secrets.ARTIFACTORY_USERNAME }}
+          directory: /jetsocat/nuget
