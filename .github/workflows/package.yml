@@ -8,6 +8,7 @@ on:
         required: true
       validate-dependency:
         description: 'Validate that the CI workflow ran to completion'
+        type: boolean
         required: false
         default: true
   workflow_call:
@@ -17,6 +18,7 @@ on:
         type: string
       validate-dependency:
         description: 'Validate that the CI workflow ran to completion'
+        type: boolean
         required: false
         default: false
 
