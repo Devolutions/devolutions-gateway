@@ -6,6 +6,10 @@ on:
       run:
         description: 'The CI workflow run to package'
         required: true
+  workflow_call:
+    inputs:
+      run:
+        required: true
 
 jobs:
   preflight:

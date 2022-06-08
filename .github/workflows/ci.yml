@@ -7,6 +7,11 @@ on:
   pull_request:
     types: [ opened, synchronize, reopened ]
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      run-id:
+        description: "The workflow run id"
+        value: ${{ github.run_id }}
 
 env:
   conan-version: 1.43.4
