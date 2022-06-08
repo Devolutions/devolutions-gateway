@@ -428,9 +428,9 @@ checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
 
 [[package]]
 name = "ceviche"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca4bb7e45c1c5c6e47c11dfa3768a52c0f8d42f6eacc36fc51e92367a1259603"
+checksum = "dd1a44085e79b3b02c2a5d18a54c8cb943bc7ae85207f76679b89f1e1c3c68c9"
 dependencies = [
  "cfg-if 1.0.0",
  "chrono",
@@ -1532,9 +1532,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.118"
+version = "0.2.126"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06e509672465a0504304aa87f9f176f2b2b716ed8fb105ebe5c02dc6dce96a94"
+checksum = "349d5a591cd28b49e1d1037471617a32ddcda5731b99419008085f72d5a53836"
 
 [[package]]
 name = "libm"
@@ -1743,25 +1743,24 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd0eaf8df8bab402257e0a5c17a254e4cc1f72a93588a1ddfb5d356c801aa7cb"
-dependencies = [
- "bitflags",
- "cc",
- "cfg-if 0.1.10",
- "libc",
- "void",
-]
-
-[[package]]
-name = "nix"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
 dependencies = [
  "bitflags",
  "cc",
+ "cfg-if 1.0.0",
+ "libc",
+ "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f17df307904acd05aa8e32e97bb20f2a0df1728bbc2d771ae8f9a90463441e9"
+dependencies = [
+ "bitflags",
  "cfg-if 1.0.0",
  "libc",
  "memoffset",
@@ -3378,14 +3377,14 @@ dependencies = [
 
 [[package]]
 name = "systemd-rs"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb0efd71f94fbb33be427352be56db567d59f399395da6459a07cc82acef0ee9"
+checksum = "ba28cdec1491faf8b9820305aa6cf9df1dff3378c1adfe41d5bd1261d4a17b59"
 dependencies = [
  "epoll",
  "libc",
  "log",
- "nix 0.16.1",
+ "nix 0.24.1",
  "systemd-sys",
 ]
 
@@ -3968,12 +3967,6 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
-
-[[package]]
-name = "void"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "vswhom"
