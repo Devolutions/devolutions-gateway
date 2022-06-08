@@ -146,6 +146,7 @@ jobs:
       - name: Manage artifacts
         shell: pwsh
         run: |
+          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
             Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
           }    
