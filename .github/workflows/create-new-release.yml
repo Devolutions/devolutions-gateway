@@ -2,11 +2,11 @@ name: Create new release
 
 on:
   workflow_dispatch:
-      dry-run:
-        description: 'If true, the workflow only indicates which artifacts would be uploaded'
-        required: true
-        type: boolean
-        default: 'true'
+    dry-run:
+      description: 'If true, the workflow only indicates which artifacts would be uploaded'
+      required: true
+      type: boolean
+      default: 'true'
 
 jobs:
   call-ci-workflow:
