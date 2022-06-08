@@ -16,11 +16,6 @@ on:
       run:
         required: true
         type: string
-      validate-dependency:
-        description: 'Validate that the CI workflow ran to completion'
-        type: boolean
-        required: false
-        default: false
 
 jobs:
   preflight:
@@ -42,7 +37,12 @@ jobs:
             echo "::notice::specified run is not on master"
           }
 
-          if ([System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')) {
+          $ValidateDependency = $false
+          if ('${{ github.event.inputs.validate-dependency }}') {
+            $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
+          }
+
+          if ($ValidateDependency) {
             if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
               echo "::error::specified run is either not complete or not successful"
               exit 1
