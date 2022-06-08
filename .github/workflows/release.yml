@@ -15,6 +15,7 @@ on:
     inputs:
       run:
         required: true
+        type: string
 
 concurrency: gateway-release
 

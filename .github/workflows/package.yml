@@ -10,6 +10,7 @@ on:
     inputs:
       run:
         required: true
+        type: string
 
 jobs:
   preflight:
