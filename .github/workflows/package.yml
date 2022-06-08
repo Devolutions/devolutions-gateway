@@ -29,7 +29,7 @@ jobs:
           if ('${{ github.event.inputs.run }}') {
             echo '::set-output name=run::${{ github.event.inputs.run }}'
           } else {
-            echo '::set-output name=run::${{ github.sha }}'
+            echo '::set-output name=run::${{ github.run_id }}'
           }
 
       - name: Get commit
