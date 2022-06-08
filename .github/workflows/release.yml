@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-18.04
     outputs:
       version: ${{ steps.get-version.outputs.version }}
+      skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
 
     steps:
       - name: Get version
@@ -31,13 +32,33 @@ jobs:
           gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
           $Version = Get-Content VERSION -TotalCount 1
           echo "::set-output name=version::$Version"
-          echo "::notice::Releasing artifacts for version ${{ steps.get-version.outputs.version }} from run ${{ github.event.inputs.run }}"
+          echo "::notice::Releasing artifacts for version $Version from run ${{ github.event.inputs.run }}"
+
+      - name: Check GitHub releases
+        id: check-release
+        shell: pwsh
+        run:
+          $Output = & gh release list
+          $Releases = ( $Output -split '\r?\n' ).Trim()
+          $Versions = ForEach($Release in $Releases) {
+              $Version = ( $Release -Split '\s+' ).Trim()
+              $Version = $Version.TrimStart("v")
+              $Version[0]
+          }
+
+          $SkipPublishing = 'false'
+          if ($Versions -Contains "${{ steps.get-version.outputs.version }}") {
+            echo "::warning::GitHub already has a release version ${{ steps.get-version.outputs.version }}; publishing will be skipped"
+            $SkipPublishing = 'true'
+          }
+          echo "::set-output name=skip-publishing::$SkipPublishing"
 
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight]
+    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -118,6 +139,7 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight]
+    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
 
     steps:
       - name: Configure runner
@@ -161,6 +183,7 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: preflight
+    if: ${{ always() && (needs.preflight.outputs.skip-publishing == 'false') }}
 
     steps:
       - name: Download artifacts
