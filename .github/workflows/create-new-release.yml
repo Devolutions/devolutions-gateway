@@ -1,6 +1,7 @@
 name: Create new release
 
 on:
+  push:
   workflow_dispatch:
     dry-run:
       description: 'If true, the workflow only indicates which artifacts would be uploaded'
