@@ -15,14 +15,14 @@ jobs:
     secrets: inherit
 
   call-package-workflow:
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/package.yml
     secrets: inherit
     needs: [ call-ci-workflow ]
     with:
       run: ${{ github.run_id }}
 
   call-release-workflow:
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/release.yml
     secrets: inherit
     needs: [ call-package-workflow ]
     with:
