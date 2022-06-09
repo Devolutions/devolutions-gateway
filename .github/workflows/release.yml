@@ -12,6 +12,12 @@ on:
         type: boolean
         default: 'true'
   workflow_call:
+    inputs:
+      dispatch:
+        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        type: string
+        required: false
+        default: "workflow_call"
 
 concurrency: gateway-release
 
@@ -23,8 +29,19 @@ jobs:
       run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
       skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
+      dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
 
     steps:
+      - name: Get download strategy
+        id: get-dl-strategy
+        shell: pwsh
+        run: |
+          if ('${{ inputs.dispatch }}') {
+            echo '::set-output name=dl-strategy::action'
+          } else {
+            echo '::set-output name=dl-strategy::cli'
+          }
+
       - name: Get run
         id: get-run
         shell: pwsh
@@ -32,16 +49,26 @@ jobs:
           if ('${{ github.event.inputs.run }}') {
             echo '::set-output name=run::${{ github.event.inputs.run }}'
           } else {
-            echo '::set-output name=run::${{ github.sha }}'
+            echo '::set-output name=run::${{ github.run_id }}'
           }
+
+      - name: Download version (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: version
+
+      - name: Download version (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}    
+        run: gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
 
       - name: Get version
         id: get-version
         shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
           $Version = Get-Content VERSION -TotalCount 1
           echo "::set-output name=version::$Version"
           echo "::notice::Releasing artifacts for version $Version from run ${{ steps.get-run.outputs.run }}"
@@ -72,7 +99,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight]
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -93,7 +120,20 @@ jobs:
             base-image: nanoserver-1809
 
     steps:
-      - name: Download artifacts
+     - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: docker
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
@@ -153,13 +193,32 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight]
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
       - name: Configure runner
         run: cargo install parse-changelog
 
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: changelog
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
@@ -197,10 +256,17 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: preflight
-    if: ${{ needs.preflight.outputs.skip-publishing == 'false' }}
+    if: eeds.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
