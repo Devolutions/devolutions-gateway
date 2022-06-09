@@ -53,13 +53,13 @@ jobs:
           }
 
       - name: Download version (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
+        if: steps.get-dl-strategy.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
           name: version
 
       - name: Download version (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
+        if: steps.get-dl-strategy.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}    
