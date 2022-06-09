@@ -165,6 +165,7 @@ pub struct Config {
     pub protocol: Protocol,
     pub log_file: Option<Utf8PathBuf>,
     pub log_directive: Option<String>,
+    // FIXME? this is used nowhere
     pub application_protocols: Vec<String>,
     pub tls: Option<TlsConfig>,
     pub provisioner_public_key: Option<PublicKey>,

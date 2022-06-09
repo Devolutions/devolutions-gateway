@@ -179,7 +179,7 @@ fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
 
         jwt.state.claims
     } else {
-        info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL.");
+        info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL (JWT Revocation List).");
         JrlTokenClaims::default()
     };
 
