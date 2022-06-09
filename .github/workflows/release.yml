@@ -256,7 +256,7 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: preflight
-    if: eeds.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
       - name: Download artifacts (action)
