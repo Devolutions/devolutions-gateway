@@ -88,10 +88,10 @@ jobs:
           }
 
           $SkipPublishing = 'false'
-          if ($Versions -Contains "${{ steps.get-version.outputs.version }}") {
-            echo "::warning::GitHub already has a release version ${{ steps.get-version.outputs.version }}; publishing will be skipped"
-            $SkipPublishing = 'true'
-          }
+          # if ($Versions -Contains "${{ steps.get-version.outputs.version }}") {
+          #   echo "::warning::GitHub already has a release version ${{ steps.get-version.outputs.version }}; publishing will be skipped"
+          #   $SkipPublishing = 'true'
+          # }
           echo "::set-output name=skip-publishing::$SkipPublishing"
 
   containers:
@@ -120,7 +120,7 @@ jobs:
             base-image: nanoserver-1809
 
     steps:
-     - name: Download artifacts (action)
+      - name: Download artifacts (action)
         if: needs.preflight.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
@@ -184,9 +184,9 @@ jobs:
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
-          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
-            Invoke-Expression $DockerPushCmd
-          }
+          # if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+          #   Invoke-Expression $DockerPushCmd
+          # }
 
   github-release:
     name: GitHub release
@@ -247,9 +247,9 @@ jobs:
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
-          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
-            Invoke-Expression $GhCmd
-          }
+          # if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+          #   Invoke-Expression $GhCmd
+          # }
 
   psgallery-release:
     name: PowerShell release
@@ -286,7 +286,7 @@ jobs:
           Write-Host $PublishCmd
 
           try {
-            Invoke-Expression $PublishCmd
+            # Invoke-Expression $PublishCmd
           }
           catch {
             if ($_.Exception.Message -ilike "*cannot be published as the current version*is already available in the repository*") {
