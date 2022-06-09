@@ -125,12 +125,14 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: docker
+          path: docker
 
       - name: Download artifacts (action)
         if: needs.preflight.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
           name: devolutions-gateway
+          path: devolutions-gateway
 
       - name: Download artifacts (cli)
         if: needs.preflight.outputs.dl-strategy == 'cli'
@@ -204,18 +206,21 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: jetsocat
+          path: jetsocat
 
       - name: Download artifacts (action)
         if: needs.preflight.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
           name: devolutions-gateway
+          path: devolutions-gateway
 
       - name: Download artifacts (action)
         if: needs.preflight.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
           name: changelog
+          path: changelog
 
       - name: Download artifacts (cli)
         if: needs.preflight.outputs.dl-strategy == 'cli'
