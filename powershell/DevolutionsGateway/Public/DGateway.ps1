@@ -434,7 +434,7 @@ function Set-DGatewayApplicationProtocols {
         [string] $ConfigPath,
         [Parameter(Mandatory = $true, Position = 0)]
         [AllowEmptyCollection()]
-        [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
+        [ValidateSet('unknown', 'wayk', 'rdp', 'ard', 'vnc', 'ssh', 'ssh-pwsh', 'sftp', 'scp', 'winrm-http-pwsh', 'winrm-https-pwsh', 'http', 'https')]
         [string[]] $ApplicationProtocols
     )
 
@@ -620,7 +620,7 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        [ValidateSet('association', 'scope', 'bridge')]
+        [ValidateSet('ASSOCIATION', 'SCOPE', 'BRIDGE', 'JMUX')]
         [Parameter(Mandatory = $true)]
         [string] $Type, #type
 
@@ -631,12 +631,12 @@ function New-DGatewayToken {
 
         # private association claims
         [string] $AssociationId, # jet_aid
-        [ValidateSet('none', 'rdp', 'wayk', 'pwsh')]
+        [ValidateSet('unknown', 'wayk', 'rdp', 'ard', 'vnc', 'ssh', 'ssh-pwsh', 'sftp', 'scp', 'winrm-http-pwsh', 'winrm-https-pwsh', 'http', 'https')]
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm
         [string] $DestinationHost, # dst_hst
-        
+
         #private scope claims
         [string] $Scope, # scope
 
@@ -651,7 +651,15 @@ function New-DGatewayToken {
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
 
     if (-Not $PrivateKeyFile) {
-        $PrivateKeyFile = Join-Path $ConfigPath $Config.ProvisionerPrivateKeyFile
+        if (-Not $Config.ProvisionerPrivateKeyFile) {
+            throw "Config file is missing ``ProvisionerPrivateKeyFile``. Alternatively, use -PrivateKeyFile argument."
+        }
+
+        if ([System.IO.Path]::IsPathRooted($Config.ProvisionerPrivateKeyFile)) {
+            $PrivateKeyFile = $Config.ProvisionerPrivateKeyFile
+        } else {
+            $PrivateKeyFile = Join-Path $ConfigPath $Config.ProvisionerPrivateKeyFile
+        }
     }
 
     if (-Not (Test-Path -Path $PrivateKeyFile -PathType 'Leaf')) {
@@ -677,20 +685,22 @@ function New-DGatewayToken {
     $iat = [System.DateTimeOffset]::new($IssuedAt).ToUnixTimeSeconds()
     $nbf = [System.DateTimeOffset]::new($NotBefore).ToUnixTimeSeconds()
     $exp = [System.DateTimeOffset]::new($ExpirationTime).ToUnixTimeSeconds()
-    
+    $jti = (New-Guid).ToString()
+
     $Header = [PSCustomObject]@{
         alg = 'RS256'
         typ = 'JWT'
+        cty = $Type
     }
-    
+
     $Payload = [PSCustomObject]@{
         iat    = $iat
         nbf    = $nbf
         exp    = $exp
-        type   = $Type
+        jti    = $jti
     }
 
-    if ($Type -eq 'association') {
+    if ($Type -eq 'ASSOCIATION') {
         if (-Not $ApplicationProtocol) {
             if ($ConnectionMode -eq 'fwd') {
                 $ApplicationProtocol = 'rdp'
@@ -711,21 +721,40 @@ function New-DGatewayToken {
             
         $Payload | Add-Member -MemberType NoteProperty -Name 'jet_cm' -Value $ConnectionMode
 
-        if ($AssociationId) {
-            $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
-        }    
+        if (-Not $AssociationId) {
+            $AssociationId = New-Guid
+        }
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
 
         if ($DestinationHost) {
             $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
         }
     }
 
+    if ($Type -eq 'JMUX') {
+        if (-Not $DestinationHost) {
+            throw "-DestinationHost is required"
+        }
 
-    if (($Type -eq 'scope') -and ($Scope)) {
+        if ($ApplicationProtocol) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
+        }
+        
+        if (-Not $AssociationId) {
+            $AssociationId = New-Guid
+        }
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+    }
+
+    if (($Type -eq 'SCOPE') -and ($Scope)) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'scope' -Value $Scope
     }
 
-    if (($Type -eq 'bridge') -and ($Target)) {
+    if (($Type -eq 'BRIDGE') -and ($Target)) {
         $Payload | Add-Member -MemberType NoteProperty -Name 'target' -Value $Target
     }
 
