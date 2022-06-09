@@ -141,6 +141,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+
       - name: Prepare artifacts
         id: prepare-artifacts
         shell: pwsh
@@ -229,6 +233,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
 
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+
       - name: Create GitHub release
         shell: pwsh
         env:
@@ -276,6 +284,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Publish PowerShell module
         shell: pwsh
