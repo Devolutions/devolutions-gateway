@@ -51,12 +51,11 @@ function ConvertTo-RsaPrivateKey
         [Parameter(Mandatory=$true,Position=0)]
         [string] $Pem
     )
+    
+    $rsa = [System.Security.Cryptography.RSA]::Create();
+    $rsa.ImportFromPem($Pem);
 
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Pem)
-    $stream = [System.IO.MemoryStream]::new($bytes)
-    $reader = [PemUtils.PemReader]::new($stream)
-    $params = $reader.ReadRsaKey();
-    [System.Security.Cryptography.RSA]::Create($params)
+    $rsa
 }
 
 function New-RsaKeyPair
