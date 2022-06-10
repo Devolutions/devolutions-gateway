@@ -41,7 +41,8 @@ jobs:
 
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-        ref: ${{ steps.get-commit.outputs.ref }}
+        with:
+          ref: ${{ steps.get-commit.outputs.ref }}
 
       - name: Get version
         id: get-version
@@ -105,7 +106,8 @@ jobs:
       steps:
         - name: Checkout ${{ github.repository }}
           uses: actions/checkout@v2
-          ref: ${{ needs.preflight.outputs.ref }}
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
 
         - name: Configure rust toolchain
           run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
@@ -159,7 +161,8 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-        ref: ${{ needs.preflight.outputs.ref }}
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Configure rust toolchain
         run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
@@ -235,7 +238,8 @@ jobs:
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2
-        ref: ${{ needs.preflight.outputs.ref }}
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Load dynamic variables
         id: load-variables
