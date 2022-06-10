@@ -1,18 +1,19 @@
-name: Create new release
+name: Create New Release
 
 on:
-  push:
   workflow_dispatch:
-    dry-run:
-      description: 'If true, the workflow only indicates which artifacts would be uploaded'
-      required: true
-      type: boolean
-      default: 'true'
+    inputs:
+      ref:
+        description: "The commit SHA to build"
+        required: false
+        type: string
 
 jobs:
   call-ci-workflow:
     uses: ./.github/workflows/ci.yml
     secrets: inherit
+    with:
+      ref: ${{ github.event.inputs.ref }}
 
   call-package-workflow:
     uses: ./.github/workflows/package.yml

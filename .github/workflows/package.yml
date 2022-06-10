@@ -18,12 +18,16 @@ on:
         type: string
         required: false
         default: "workflow_call"
+      ref:
+        description: "The commit SHA to build"
+        required: false
+        type: string
 
 jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-18.04
-    outputs: 
+    outputs:
       run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
       dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
@@ -56,25 +60,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
-          $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
-          if ($($Run.head_branch) -Ne "master") {
-            echo "::notice::specified run is not on master"
-          }
-
-          $ValidateDependency = $false
-          if ('${{ github.event.inputs.validate-dependency }}') {
-            $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
-          }
-
-          if ($ValidateDependency) {
-            if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-              echo "::error::specified run is either not complete or not successful"
-              exit 1
+          $Ref = '${{ inputs.ref }}'
+          if (-Not $Ref) {
+            $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
+            if ($($Run.head_branch) -Ne "master") {
+              echo "::notice::specified run is not on master"
             }
+
+            $ValidateDependency = $false
+            if ('${{ github.event.inputs.validate-dependency }}') {
+              $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
+            }
+
+            if ($ValidateDependency) {
+              if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+                echo "::error::specified run is either not complete or not successful"
+                exit 1
+              }
+            }
+
+            $Ref = $($Run.head_sha)
           }
 
-          echo "::set-output name=commit::$($Run.head_sha)"
-          echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ steps.get-run.outputs.run }}"
+          echo "::set-output name=commit::$Ref"
+          echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
 
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v2

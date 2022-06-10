@@ -190,7 +190,13 @@ jobs:
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
-          # if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          # if (-Not $DryRun) {
           #   Invoke-Expression $DockerPushCmd
           # }
 
@@ -260,7 +266,13 @@ jobs:
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
-          # if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          # if (-Not $DryRun) {
           #   Invoke-Expression $GhCmd
           # }
 
@@ -296,7 +308,13 @@ jobs:
           Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
 
           $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
-          if ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          if ($DryRun) {
             $PublishCmd += '-WhatIf'
           }
           $PublishCmd = $PublishCmd -Join ' '
