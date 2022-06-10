@@ -9,7 +9,7 @@ on:
 
 jobs:
   package:
-    runs-on: [self-hosted, Linux, X64, main]
+    runs-on: [ubuntu-latest]
     environment: artifactory-publish
     steps:
       - uses: actions/checkout@v3
