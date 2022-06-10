@@ -29,6 +29,7 @@ jobs:
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
 
     steps:
+      ## The SHA to build might be passed via workflow_call, otherwise the current commit is used
       - name: Get commit
         id: get-commit
         shell: pwsh

@@ -19,8 +19,12 @@ jobs:
     uses: ./.github/workflows/package.yml
     secrets: inherit
     needs: [ call-ci-workflow ]
+    with:
+      ref: ${{ github.event.inputs.ref }}
 
   call-release-workflow:
+    ## Only builds from master enable LTO
+    if: github.ref == 'refs/heads/master'
     uses: ./.github/workflows/release.yml
     secrets: inherit
     needs: [ call-package-workflow ]

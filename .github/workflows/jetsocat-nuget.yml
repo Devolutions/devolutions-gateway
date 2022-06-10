@@ -1,7 +1,6 @@
-name: jetsocat nuget package
+name: Release jetsocat nuget package
 
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       version:

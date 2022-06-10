@@ -13,6 +13,17 @@ There are three seperate workflows:
 ## Making a Release
 
 - Ensure that the [VERSION](../../VERSION) number and [CHANGELOG](../../CHANGELOG.md) are up-to-date.
+
+Use the [Create New Release](create-new-release.yml) to run a full build and test, package the artifacts and release to GitHub, PSGallery and Docker Hub.
+
+##### Parameters
+
+- `ref` Optional SHA value of the commit to release.
+
+## Making a Release (manual)
+
+It's possible to run the individual workflows and generate a release manually.
+
 - Execute the [CI](#ci) workflow (either manually via the GitHub web UI or `gh`, or by creating or merging a pull request)
 
 :warning: *For releases, the CI workflow should be run from a commit on `master`. This ensures the binaries are built with the proper opimizations*
@@ -60,12 +71,16 @@ The following actions are taken:
 - Push the Devolutions Gateway PowerShell module to PSGallery
 - Generate a GitHub release
 
-If you run the release multiple times for the same version, the results might be unexpected:
-
-- The PowerShell module will not be re-uploaded. PSGallery does not support replacing an existing version. If you wish to replace the PowerShell module, you must increment the version number.
+Re-releasing the same version multiple times is not supported. The "Release" workflow checks for an existing GitHub release with the specified version and will not proceed if found.
 
 ##### Parameters
 
 - `run` The run-id of the [Package](#package) workflow run containing the artifacts to package
 - `dry-run` If selected, the workflow will only indicate the actions to be taken. No deployment will occur.
 
+### JETSOCAT NUGET
+
+A seperate workflow (Release jetsocat nuget package) is provided to generate the nuget package for jetsocat. It will retrieve the jetsocat binaries from the latest GitHub release, wrap them in a nuget package and deploy to Artifactory.
+##### Parameters
+
+- `version` The version for the nuget package. Note that this is distinct from the jetsocat binary version.

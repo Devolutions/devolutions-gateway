@@ -33,6 +33,8 @@ jobs:
       dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
 
     steps:
+      ## workflow_dispatch: CI run artifacts are downloaded using `gh` (specifying the CI workflow run_id)
+      ## workflow_call:     CI run artifacts are downloaded using actions/download-artifact (using the current run_id)
       - name: Get download strategy
         id: get-dl-strategy
         shell: pwsh
@@ -43,6 +45,8 @@ jobs:
             echo '::set-output name=dl-strategy::cli'
           }
 
+      ## workflow_dispatch: The run_id is read from the inputs
+      ## workflow_call:     The run_id is the current run_id
       - name: Get run
         id: get-run
         shell: pwsh
@@ -53,6 +57,10 @@ jobs:
             echo '::set-output name=run::${{ github.run_id }}'
           }
 
+      ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
+      ##
+      ## workflow_dispatch: Lookup the SHA from the given run_id
+      ## workflow_call:     Use the input SHA; otherwise lookup the SHA from the current run_id
       - name: Get commit
         id: get-commit
         shell: pwsh
@@ -152,6 +160,8 @@ jobs:
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
 
+      ## Delete the files that we won't operate on to prevent them being re-uploaded
+      ## This ensures consistency of the artifact since we are operating in a matrix
       - name: Manage artifacts
         shell: pwsh
         run: |
