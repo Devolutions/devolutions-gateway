@@ -41,7 +41,7 @@ jobs:
           echo "::set-output name=ref::$Ref"
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ steps.get-commit.outputs.ref }}
 
@@ -106,7 +106,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v2
+          uses: actions/checkout@v3
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
@@ -161,7 +161,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -238,7 +238,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
