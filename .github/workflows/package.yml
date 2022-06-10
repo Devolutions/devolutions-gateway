@@ -6,36 +6,95 @@ on:
       run:
         description: 'The CI workflow run to package'
         required: true
+      validate-dependency:
+        description: 'Validate that the CI workflow ran to completion'
+        type: boolean
+        required: false
+        default: true
+  workflow_call:
+    inputs:
+      dispatch:
+        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        type: string
+        required: false
+        default: "workflow_call"
+      ref:
+        description: "The commit SHA to build"
+        required: false
+        type: string
 
 jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-18.04
-    outputs: 
+    outputs:
+      run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
+      dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
 
     steps:
+      ## workflow_dispatch: CI run artifacts are downloaded using `gh` (specifying the CI workflow run_id)
+      ## workflow_call:     CI run artifacts are downloaded using actions/download-artifact (using the current run_id)
+      - name: Get download strategy
+        id: get-dl-strategy
+        shell: pwsh
+        run: |
+          if ('${{ inputs.dispatch }}') {
+            echo '::set-output name=dl-strategy::action'
+          } else {
+            echo '::set-output name=dl-strategy::cli'
+          }
+
+      ## workflow_dispatch: The run_id is read from the inputs
+      ## workflow_call:     The run_id is the current run_id
+      - name: Get run
+        id: get-run
+        shell: pwsh
+        run: |
+          if ('${{ github.event.inputs.run }}') {
+            echo '::set-output name=run::${{ github.event.inputs.run }}'
+          } else {
+            echo '::set-output name=run::${{ github.run_id }}'
+          }
+
+      ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
+      ##
+      ## workflow_dispatch: Lookup the SHA from the given run_id
+      ## workflow_call:     Use the input SHA; otherwise lookup the SHA from the current run_id
       - name: Get commit
         id: get-commit
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          CI_RUN: ${{ github.event.inputs.run }}
+          CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
-          $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
-          if ($($Run.head_branch) -Ne "master") {
-            echo "::notice::specified run is not on master"
-          }
-          if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
-            echo "::error::specified run is either not complete or not successful"
-            exit 1
+          $Ref = '${{ inputs.ref }}'
+          if (-Not $Ref) {
+            $Run = gh api /repos/$Env:GITHUB_REPOSITORY/actions/runs/$Env:CI_RUN | ConvertFrom-Json
+            if ($($Run.head_branch) -Ne "master") {
+              echo "::notice::specified run is not on master"
+            }
+
+            $ValidateDependency = $false
+            if ('${{ github.event.inputs.validate-dependency }}') {
+              $ValidateDependency = [System.Convert]::ToBoolean('${{ github.event.inputs.validate-dependency }}')
+            }
+
+            if ($ValidateDependency) {
+              if (($($Run.status) -Ne "completed") -Or ($($Run.conclusion) -Ne "success")) {
+                echo "::error::specified run is either not complete or not successful"
+                exit 1
+              }
+            }
+
+            $Ref = $($Run.head_sha)
           }
 
-          echo "::set-output name=commit::$($Run.head_sha)"
-          echo "::notice::Packaging artifacts built from commit $($Run.head_sha) in run ${{ github.event.inputs.run }}"
+          echo "::set-output name=commit::$Ref"
+          echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ steps.get-commit.outputs.commit }}
 
@@ -51,7 +110,7 @@ jobs:
           name: docker
           path: package/**/Dockerfile
 
-      - name: Changelog artifacts
+      - name: Upload changelog artifacts
         uses: actions/upload-artifact@v2
         with:
           name: changelog
@@ -81,20 +140,35 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ matrix.project }}
+          path: ${{ runner.temp }}/${{ matrix.project }}
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
-          gh run download ${{ github.event.inputs.run }} -n ${{ matrix.project }} -D "$Destination"
+          gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
+
+      ## Delete the files that we won't operate on to prevent them being re-uploaded
+      ## This ensures consistency of the artifact since we are operating in a matrix
+      - name: Manage artifacts
+        shell: pwsh
+        run: |
+          $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
             Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
-          }
+          }    
 
       - name: Configure certificates (Windows)
         if: matrix.os == 'windows'

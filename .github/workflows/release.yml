@@ -11,6 +11,13 @@ on:
         required: true
         type: boolean
         default: 'true'
+  workflow_call:
+    inputs:
+      dispatch:
+        description: "Marker to indicate that the workflow was dispatched via workflow_call"
+        type: string
+        required: false
+        default: "workflow_call"
 
 concurrency: gateway-release
 
@@ -19,25 +26,85 @@ jobs:
     name: Preflight
     runs-on: ubuntu-18.04
     outputs:
+      run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
+      skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
+      dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
 
     steps:
+      ## workflow_dispatch: CI run artifacts are downloaded using `gh` (specifying the CI workflow run_id)
+      ## workflow_call:     CI run artifacts are downloaded using actions/download-artifact (using the current run_id)
+      - name: Get download strategy
+        id: get-dl-strategy
+        shell: pwsh
+        run: |
+          if ('${{ inputs.dispatch }}') {
+            echo '::set-output name=dl-strategy::action'
+          } else {
+            echo '::set-output name=dl-strategy::cli'
+          }
+
+      ## workflow_dispatch: The run_id is read from the inputs
+      ## workflow_call:     The run_id is the current run_id
+      - name: Get run
+        id: get-run
+        shell: pwsh
+        run: |
+          if ('${{ github.event.inputs.run }}') {
+            echo '::set-output name=run::${{ github.event.inputs.run }}'
+          } else {
+            echo '::set-output name=run::${{ github.run_id }}'
+          }
+
+      - name: Download version (action)
+        if: steps.get-dl-strategy.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: version
+
+      - name: Download version (cli)
+        if: steps.get-dl-strategy.outputs.dl-strategy == 'cli'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}    
+        run: gh run download ${{ steps.get-run.outputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
+
       - name: Get version
         id: get-version
+        shell: pwsh
+        run: |
+          $Version = Get-Content VERSION -TotalCount 1
+          echo "::set-output name=version::$Version"
+          echo "::notice::Releasing artifacts for version $Version from run ${{ steps.get-run.outputs.run }}"
+
+      ## If we already released this version to GitHub, publishing will be skipped
+      - name: Check GitHub releases
+        id: check-release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
         run: |
-          gh run download ${{ github.event.inputs.run }} -n version --repo $Env:GITHUB_REPOSITORY
-          $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
-          echo "::notice::Releasing artifacts for version ${{ steps.get-version.outputs.version }} from run ${{ github.event.inputs.run }}"
+          $Output = (gh release list --repo $Env:GITHUB_REPOSITORY) | Out-String
+          $Releases = ( $Output -split '\r?\n' ).Trim()
+          $Versions = ForEach($Release in $Releases) {
+              $Version = ( $Release -Split '\s+' ).Trim()
+              $Version = $Version.TrimStart("v")
+              $Version[0]
+          }
+
+          $SkipPublishing = 'false'
+          if ($Versions -Contains "${{ steps.get-version.outputs.version }}") {
+            echo "::warning::GitHub already has a release version ${{ steps.get-version.outputs.version }}; publishing will be skipped"
+            $SkipPublishing = 'true'
+          }
+          echo "::set-output name=skip-publishing::$SkipPublishing"
 
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
     needs: [preflight]
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -58,11 +125,31 @@ jobs:
             base-image: nanoserver-1809
 
     steps:
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: docker
+          path: docker
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+          path: devolutions-gateway
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
+      ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Prepare artifacts
         id: prepare-artifacts
@@ -109,7 +196,13 @@ jobs:
           echo ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }} | docker login -u devolutionsbot --password-stdin
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
-          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          if (-Not $DryRun) {
             Invoke-Expression $DockerPushCmd
           }
 
@@ -118,16 +211,44 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: [preflight]
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
       - name: Configure runner
         run: cargo install parse-changelog
 
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+          path: jetsocat
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+          path: devolutions-gateway
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: changelog
+          path: changelog
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
+
+      ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Create GitHub release
         shell: pwsh
@@ -152,7 +273,13 @@ jobs:
 
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
-          if (-Not ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}'))) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          if (-Not $DryRun) {
             Invoke-Expression $GhCmd
           }
 
@@ -161,13 +288,26 @@ jobs:
     runs-on: ubuntu-18.04
     environment: build-and-publish
     needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
-      - name: Download artifacts
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ github.event.inputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
+      ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
+      - name: Manage artifacts
+        shell: pwsh
+        run: Remove-Item (Join-Path PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
 
       - name: Publish PowerShell module
         shell: pwsh
@@ -176,7 +316,13 @@ jobs:
           Expand-Archive -Path $Archive -DestinationPath 'PowerShell'
 
           $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
-          if ([System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')) {
+
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+
+          if ($DryRun) {
             $PublishCmd += '-WhatIf'
           }
           $PublishCmd = $PublishCmd -Join ' '

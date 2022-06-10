@@ -214,3 +214,7 @@ Using FreeRDP, token can be provided using `/pcb` argument with `xfreerdp`.
 Unfortunately, Microsoft Windows 7/8/8.1/Server 2008/Server 2012 machines
 cannot accept connections from [rustls](https://crates.io/crates/rustls)
 client. Support for required cipher suits was not implemented until Windows 10.
+
+## Continuous Integration and Delivery
+
+See the dedicated [README](.github/workflows//README.md) in the workflows directory.

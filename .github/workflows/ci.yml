@@ -7,6 +7,12 @@ on:
   pull_request:
     types: [ opened, synchronize, reopened ]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "The commit SHA to build"
+        required: false
+        type: string
 
 env:
   conan-version: 1.43.4
@@ -17,13 +23,27 @@ jobs:
     name: preflight
     runs-on: ubuntu-18.04
     outputs:
+      ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
       rust-channel: ${{ steps.rust-toolchain.outputs.rust-channel }}
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
 
     steps:
+      ## The SHA to build might be passed via workflow_call, otherwise the current commit is used
+      - name: Get commit
+        id: get-commit
+        shell: pwsh
+        run: |
+          $Ref = '${{ inputs.ref }}'
+          if (-Not $Ref) {
+            $Ref = '${{ github.sha }}'
+          }
+          echo "::set-output name=ref::$Ref"
+
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ steps.get-commit.outputs.ref }}
 
       - name: Get version
         id: get-version
@@ -86,7 +106,9 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v2
+          uses: actions/checkout@v3
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
 
         - name: Configure rust toolchain
           run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
@@ -139,7 +161,9 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Configure rust toolchain
         run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
@@ -214,7 +238,9 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Load dynamic variables
         id: load-variables

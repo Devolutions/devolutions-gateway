@@ -1,0 +1,29 @@
+name: Release jetsocat nuget package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number'
+        required: true
+
+jobs:
+  package:
+    runs-on: [ubuntu-latest]
+    environment: artifactory-publish
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: create and publish
+        working-directory: ./jetsocat/nuget
+        shell: pwsh
+        run: |
+          $Version = '${{ github.event.inputs.version }}'
+          pwsh package.ps1 -AccessToken ${{ secrets.GITHUB_TOKEN }} -Version $Version
+
+      - name: Publish to Artifactory
+        uses: Devolutions/actions/nuget-publish-jfrog@master
+        with:
+          apikey: ${{ secrets.ARTIFACTORY_PASSWORD }}
+          username: ${{ secrets.ARTIFACTORY_USERNAME }}
+          directory: /jetsocat/nuget
