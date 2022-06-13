@@ -1,4 +1,4 @@
-use devolutions_gateway::token::{self, ApplicationProtocol};
+use devolutions_gateway::token::{self, ApplicationProtocol, Protocol};
 use devolutions_gateway::utils::TargetAddr;
 use devolutions_gateway::{ConnectionModeDetails, GatewaySessionInfo};
 use proptest::collection::vec;
@@ -28,13 +28,19 @@ pub fn token_content_type() -> impl Strategy<Value = token::ContentType> {
 
 pub fn application_protocol() -> impl Strategy<Value = ApplicationProtocol> {
     prop_oneof![
-        Just(ApplicationProtocol::Wayk),
-        Just(ApplicationProtocol::Rdp),
-        Just(ApplicationProtocol::Ard),
-        Just(ApplicationProtocol::Ssh),
-        Just(ApplicationProtocol::SshPwsh),
-        Just(ApplicationProtocol::Sftp),
-        Just(ApplicationProtocol::Unknown),
+        Just(ApplicationProtocol::Known(Protocol::Wayk)),
+        Just(ApplicationProtocol::Known(Protocol::Rdp)),
+        Just(ApplicationProtocol::Known(Protocol::Ard)),
+        Just(ApplicationProtocol::Known(Protocol::Vnc)),
+        Just(ApplicationProtocol::Known(Protocol::Ssh)),
+        Just(ApplicationProtocol::Known(Protocol::SshPwsh)),
+        Just(ApplicationProtocol::Known(Protocol::Sftp)),
+        Just(ApplicationProtocol::Known(Protocol::Scp)),
+        Just(ApplicationProtocol::Known(Protocol::WinrmHttpPwsh)),
+        Just(ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh)),
+        Just(ApplicationProtocol::Known(Protocol::Http)),
+        Just(ApplicationProtocol::Known(Protocol::Https)),
+        Just(ApplicationProtocol::unknown()),
     ]
     .no_shrink()
 }

@@ -63,6 +63,7 @@ cfg_if! {
     }
 }
 
+// FIXME: should probably be deleted
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
     Wayk,

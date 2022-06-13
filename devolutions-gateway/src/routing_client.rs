@@ -30,7 +30,7 @@ impl Client {
             .config(self.config)
             .session_info(GatewaySessionInfo::new(
                 uuid::Uuid::new_v4(),
-                ApplicationProtocol::Unknown,
+                ApplicationProtocol::unknown(),
                 ConnectionModeDetails::Fwd { destination_host },
             ))
             .addrs(client_addr, server_transport.addr)

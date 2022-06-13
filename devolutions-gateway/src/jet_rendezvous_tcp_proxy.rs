@@ -34,13 +34,13 @@ impl JetRendezvousTcpProxy {
 
             let claims = assc.get_token_claims();
 
-            let info = GatewaySessionInfo::new(association_id, claims.jet_ap, ConnectionModeDetails::Rdv)
-                .with_recording_policy(claims.jet_rec)
-                .with_filtering_policy(claims.jet_flt);
-
             if claims.jet_rec {
                 anyhow::bail!("can't meet recording policy");
             }
+
+            let info = GatewaySessionInfo::new(association_id, claims.jet_ap.clone(), ConnectionModeDetails::Rdv)
+                .with_recording_policy(claims.jet_rec)
+                .with_filtering_policy(claims.jet_flt);
 
             let candidate = assc
                 .get_first_accepted_tcp_candidate()

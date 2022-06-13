@@ -10,7 +10,7 @@ use self::sequence_future::create_downgrade_dvc_capabilities_future;
 use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
-use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, TokenCache};
+use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, Protocol, TokenCache};
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -249,7 +249,7 @@ enum RdpRoutingMode {
 }
 
 fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> anyhow::Result<RdpRoutingMode> {
-    if claims.jet_ap != ApplicationProtocol::Rdp {
+    if !matches!(claims.jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
         anyhow::bail!(
             "Expected RDP association, but found a different application protocol claim: {:?}",
             claims.jet_ap
