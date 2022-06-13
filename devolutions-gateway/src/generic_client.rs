@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::rdp::RdpClient;
-use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, TokenCache};
+use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, Protocol, TokenCache};
 use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
 use std::net::SocketAddr;
@@ -39,7 +39,7 @@ impl GenericClient {
 
         match association_claims.jet_ap {
             // We currently special case this because it may be the "RDP-TLS" protocol
-            ApplicationProtocol::Rdp => {
+            ApplicationProtocol::Known(Protocol::Rdp) => {
                 RdpClient {
                     config,
                     associations,

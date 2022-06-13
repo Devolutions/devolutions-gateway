@@ -111,9 +111,35 @@ impl AccessTokenClaims {
 
 // ----- Known application protocols -----
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum ApplicationProtocol {
+    Known(Protocol),
+    Unknown(SmolStr),
+}
+
+impl ApplicationProtocol {
+    pub fn unknown() -> Self {
+        Self::Unknown(SmolStr::new_inline("unknown"))
+    }
+
+    pub fn known_default_port(&self) -> Option<u16> {
+        match self {
+            Self::Known(known) => Some(known.known_default_port()),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+impl Default for ApplicationProtocol {
+    fn default() -> Self {
+        Self::unknown()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub enum ApplicationProtocol {
+pub enum Protocol {
     /// Wayk Remote Desktop Protocol
     Wayk,
     /// Remote Desktop Protocol
@@ -138,34 +164,24 @@ pub enum ApplicationProtocol {
     Http,
     /// Hypertext Transfer Protocol Secure
     Https,
-    /// Unknown Protocol
-    #[serde(other)]
-    Unknown,
 }
 
-impl ApplicationProtocol {
-    pub fn known_default_port(self) -> Option<u16> {
+impl Protocol {
+    pub fn known_default_port(self) -> u16 {
         match self {
-            ApplicationProtocol::Wayk => None,
-            ApplicationProtocol::Rdp => Some(3389),
-            ApplicationProtocol::Ard => Some(5900),
-            ApplicationProtocol::Vnc => Some(5900),
-            ApplicationProtocol::Ssh => Some(22),
-            ApplicationProtocol::SshPwsh => Some(22),
-            ApplicationProtocol::WinrmHttpPwsh => Some(5985),
-            ApplicationProtocol::WinrmHttpsPwsh => Some(5986),
-            ApplicationProtocol::Sftp => Some(22),
-            ApplicationProtocol::Scp => Some(22),
-            ApplicationProtocol::Http => Some(80),
-            ApplicationProtocol::Https => Some(443),
-            ApplicationProtocol::Unknown => None,
+            Self::Wayk => 12876,
+            Self::Rdp => 3389,
+            Self::Ard => 5900,
+            Self::Vnc => 5900,
+            Self::Ssh => 22,
+            Self::SshPwsh => 22,
+            Self::WinrmHttpPwsh => 5985,
+            Self::WinrmHttpsPwsh => 5986,
+            Self::Sftp => 22,
+            Self::Scp => 22,
+            Self::Http => 80,
+            Self::Https => 443,
         }
-    }
-}
-
-impl Default for ApplicationProtocol {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 
@@ -385,7 +401,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             jti: Uuid,
         }
 
-        fn parse_target_address(s: &str, jet_ap: ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
+        fn parse_target_address(s: &str, jet_ap: &ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
             const PORT_HTTP: u16 = 80;
             const PORT_HTTPS: u16 = 443;
             const PORT_FTP: u16 = 21;
@@ -405,7 +421,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
 
         let jet_ap = claims.jet_ap;
 
-        let primary = parse_target_address(&claims.dst_hst, jet_ap).map_err(de::Error::custom)?;
+        let primary = parse_target_address(&claims.dst_hst, &jet_ap).map_err(de::Error::custom)?;
 
         let mut hosts = NonEmpty {
             head: primary,
@@ -413,7 +429,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
         };
 
         for additional in claims.dst_addl {
-            let additional = parse_target_address(&additional, jet_ap).map_err(de::Error::custom)?;
+            let additional = parse_target_address(&additional, &jet_ap).map_err(de::Error::custom)?;
             hosts.push(additional);
         }
 
@@ -641,13 +657,13 @@ pub fn validate_token(
             JetAssociationTokenClaims {
                 jti: Some(id),
                 exp,
-                jet_ap: ApplicationProtocol::Rdp,
+                jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
                 ..
             }
             | JetAssociationTokenClaims {
                 jet_aid: id,
                 exp,
-                jet_ap: ApplicationProtocol::Rdp,
+                jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
                 ..
             },
         ) => match token_cache.lock().entry(id) {

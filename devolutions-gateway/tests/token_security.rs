@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims};
+use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
 use picky::jose::jwe;
@@ -215,7 +215,7 @@ fn token_cache() {
             &jrl,
         );
 
-        if same_ip && claims.jet_ap == ApplicationProtocol::Rdp {
+        if same_ip && matches!(claims.jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
             // RDP association tokens can be re-used if source IP is identical
             res?;
         } else {
