@@ -1,10 +1,11 @@
-use devolutions_gateway::token::{new_token_cache, CurrentJrl, JrlTokenClaims, TokenCache};
+use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims, TokenCache};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::{PrivateKey, PublicKey};
 use proptest::prelude::*;
+use rstest::{fixture, rstest};
 use serde::{Deserialize, Serialize};
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -62,6 +63,31 @@ where
     Ok(())
 }
 
+#[fixture]
+fn token_cache() -> TokenCache {
+    devolutions_gateway::token::new_token_cache()
+}
+
+#[fixture]
+fn jrl() -> Mutex<JrlTokenClaims> {
+    Mutex::new(JrlTokenClaims::default())
+}
+
+#[fixture]
+fn priv_key() -> PrivateKey {
+    PrivateKey::from_pem_str(KEY).unwrap()
+}
+
+#[fixture]
+fn pub_key() -> PublicKey {
+    priv_key().to_public_key()
+}
+
+#[fixture]
+fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
 mod as_of_v2022_2_0_0 {
     use super::*;
     use proptest::collection::vec;
@@ -70,8 +96,6 @@ mod as_of_v2022_2_0_0 {
     const CTY_ASSOCIATION: &str = "ASSOCIATION";
     const TYPE_ASSOCIATION: &str = "association";
     const JET_CM: &str = "fwd";
-
-    // TODO: also test jmux tokens
 
     #[derive(Serialize, Debug)]
     struct DvlsAssociationClaims {
@@ -131,13 +155,14 @@ mod as_of_v2022_2_0_0 {
     }
 
     /// Make sure current Gateway is able to validate association tokens provided by DVLS
-    #[test]
-    fn association_token_validation() {
-        let token_cache = new_token_cache();
-        let jrl = Mutex::new(JrlTokenClaims::default());
-        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
-        let pub_key = priv_key.to_public_key();
-        let now = chrono::Utc::now().timestamp();
+    #[rstest]
+    fn association_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_ASSOCIATION.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
@@ -184,30 +209,26 @@ mod as_of_v2022_2_0_0 {
     }
 
     /// Make sure current Gateway is able to validate JMUX tokens provided by DVLS
-    #[test]
-    fn jmux_token_validation() {
-        let token_cache = new_token_cache();
-        let jrl = Mutex::new(JrlTokenClaims::default());
-        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
-        let pub_key = priv_key.to_public_key();
-        let now = chrono::Utc::now().timestamp();
+    #[rstest]
+    fn jmux_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jmux_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_JMUX.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
-    const ASSOCIATION_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NTA0MDM2NzIsImV4cCI6MTY1MDQwMzk3MiwiaWF0IjoxNjUwNDAzNjcyLCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJzc2giLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTI4LjEyOC4xMjguMTgyOjIyIiwiamV0X2FpZCI6ImQwMWMwOWQ0LTc2NjItNDdlZS1hNzBkLWJmNDlkMDVlZDI2ZSIsImp0aSI6IjQzZWEyN2Y3LTk3NGEtNDVjZC1iMjdiLWI4OGQ3N2QzMzc4NCJ9.QLW4cjLj8hAz3iX5mNKXZtUXA0MaEfbrCbt8to2Ptqqv2iJSArTtCqvXCTnqpwKPKsHx25-2E8xHHfrXVrqLOZcwag-jECLNDggpwtHgm6YM4wZ44Rzh15hWjHUPi1ZwGmuiDuZbVLfCXt6SGeHpGmHr9YkIBd4ay2hs_pJ02faPYT5rJBA8LT1z-rRK76VhOlsrf4mrD43xH_2v3ANchIukp-kZOMouJNb6iU6ZBCzREaEY7gtGZCtTb4qleEHSlJ6r-Tu-w_lqCyuxKo5uO3mAGyHk5QRS83xfx1NV8VaWO4X4UzcL66TnkR5LOoIbf_x2Tw5teBF5QkxUZ7Q_8Q";
-    const SCOPE_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlNDT1BFIn0.eyJuYmYiOjE2NTA0MDM0ODEsImV4cCI6MTY1MDQwMzc4MSwiaWF0IjoxNjUwNDAzNDgxLCJzY29wZSI6ImdhdGV3YXkuZGlhZ25vc3RpY3MucmVhZCIsImp0aSI6Ijc4MTk2ODRkLTQ5ZjktNDExYy05ZGFiLTE2M2MwMjJiOTlhMCIsInR5cGUiOiJzY29wZSJ9.qxiHVjlvrbUdxyBApV1asWdYGE0VzF2FPiJtWYr0EjN7TJv3mWIZbpXGkQQoWoPs9qOBKOp6atrXXbhrfbxwIH32s07RI7W6_mOxRwIag1G7SRHXHLXZWH8Jw-t_my7BYS90-lr_hcLoirb6pDVhTFe70RoEL9rjl8jitWel8vC8rmbXIdzQGbcbA6Ed41mksCwEfvMCHIt8xnkmu7krFTbmN9kWwGgGnEryzX-tbq6H6DzQ26n9diliy6O24Zk5oKf8zZ6K5ACFEuL_xPnqr37Ttl7wmvt7bS3ugz6Lop5weXD9yB9GOxpai7yit0Ri-0qVNCt9rzQ-9od3_4Kj7Q";
-    const JMUX_TOKEN_SAMPLE: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpNVVgifQ.eyJuYmYiOjE2NTQ2MzAyODQsImV4cCI6MTY1NDYzMDU4NCwiaWF0IjoxNjU0NjMwMjg0LCJkc3RfaHN0IjoiaHR0cDovLzE5Mi4xNjguOC4xMjg6MTExMTEiLCJqZXRfYXAiOiJodHRwIiwiamV0X2FpZCI6ImJmMmQ5MmJhLTQ4OTktNGEzMi04ZWFjLTJlNzM3ZDA2ODg2ZiIsImp0aSI6IjhhNTk0OTQyLWRmODAtNDk0Mi05ZTBlLTVkYmIyNDI5NjA1ZiJ9.IayaQwjsHTHUbirO7VVXqgKyJI3jdQX5fcb2u_mSgV-oyJ6zKwh8h-LEhLMmp5dgoxorC4-dWPgHwnOjXWPvQDSragghyp2be9qW45va_r20gjUFOUVCV3lT9_XXVu6l46GlM6W3ZP_I67aEPbLHgL6-5qIxb-6SW_HkjWOGnc88Lcicv74ujgcyq0U4L_Mh1jLPaopDsGNhqtg4SHzbgayHU7yL7icgWWVDWz-MEWCZkwC1bk2IAJJCRd6YjlCNQhZpO5MRiD6omLLmtS-6npivKb94ao9J8R8mxrDQ9idgVXAgqY9uPHvKXAE2eDjt8xbsVbSss4yI8LGhoC-Rgg";
-    const SAMPLES: &[&str] = &[ASSOCIATION_TOKEN_SAMPLE, SCOPE_TOKEN_SAMPLE, JMUX_TOKEN_SAMPLE];
-
-    #[test]
-    fn samples() {
-        for (idx, sample) in SAMPLES.into_iter().enumerate() {
-            let idx = idx.to_string();
-            #[allow(deprecated)]
-            devolutions_gateway::token::unsafe_debug::dangerous_validate_token(sample, None).expect(&idx);
-        }
+    #[rstest]
+    #[case::assoc("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NTA0MDM2NzIsImV4cCI6MTY1MDQwMzk3MiwiaWF0IjoxNjUwNDAzNjcyLCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJzc2giLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTI4LjEyOC4xMjguMTgyOjIyIiwiamV0X2FpZCI6ImQwMWMwOWQ0LTc2NjItNDdlZS1hNzBkLWJmNDlkMDVlZDI2ZSIsImp0aSI6IjQzZWEyN2Y3LTk3NGEtNDVjZC1iMjdiLWI4OGQ3N2QzMzc4NCJ9.QLW4cjLj8hAz3iX5mNKXZtUXA0MaEfbrCbt8to2Ptqqv2iJSArTtCqvXCTnqpwKPKsHx25-2E8xHHfrXVrqLOZcwag-jECLNDggpwtHgm6YM4wZ44Rzh15hWjHUPi1ZwGmuiDuZbVLfCXt6SGeHpGmHr9YkIBd4ay2hs_pJ02faPYT5rJBA8LT1z-rRK76VhOlsrf4mrD43xH_2v3ANchIukp-kZOMouJNb6iU6ZBCzREaEY7gtGZCtTb4qleEHSlJ6r-Tu-w_lqCyuxKo5uO3mAGyHk5QRS83xfx1NV8VaWO4X4UzcL66TnkR5LOoIbf_x2Tw5teBF5QkxUZ7Q_8Q")]
+    #[case::scope("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlNDT1BFIn0.eyJuYmYiOjE2NTA0MDM0ODEsImV4cCI6MTY1MDQwMzc4MSwiaWF0IjoxNjUwNDAzNDgxLCJzY29wZSI6ImdhdGV3YXkuZGlhZ25vc3RpY3MucmVhZCIsImp0aSI6Ijc4MTk2ODRkLTQ5ZjktNDExYy05ZGFiLTE2M2MwMjJiOTlhMCIsInR5cGUiOiJzY29wZSJ9.qxiHVjlvrbUdxyBApV1asWdYGE0VzF2FPiJtWYr0EjN7TJv3mWIZbpXGkQQoWoPs9qOBKOp6atrXXbhrfbxwIH32s07RI7W6_mOxRwIag1G7SRHXHLXZWH8Jw-t_my7BYS90-lr_hcLoirb6pDVhTFe70RoEL9rjl8jitWel8vC8rmbXIdzQGbcbA6Ed41mksCwEfvMCHIt8xnkmu7krFTbmN9kWwGgGnEryzX-tbq6H6DzQ26n9diliy6O24Zk5oKf8zZ6K5ACFEuL_xPnqr37Ttl7wmvt7bS3ugz6Lop5weXD9yB9GOxpai7yit0Ri-0qVNCt9rzQ-9od3_4Kj7Q")]
+    #[case::jmux("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpNVVgifQ.eyJuYmYiOjE2NTQ2MzAyODQsImV4cCI6MTY1NDYzMDU4NCwiaWF0IjoxNjU0NjMwMjg0LCJkc3RfaHN0IjoiaHR0cDovLzE5Mi4xNjguOC4xMjg6MTExMTEiLCJqZXRfYXAiOiJodHRwIiwiamV0X2FpZCI6ImJmMmQ5MmJhLTQ4OTktNGEzMi04ZWFjLTJlNzM3ZDA2ODg2ZiIsImp0aSI6IjhhNTk0OTQyLWRmODAtNDk0Mi05ZTBlLTVkYmIyNDI5NjA1ZiJ9.IayaQwjsHTHUbirO7VVXqgKyJI3jdQX5fcb2u_mSgV-oyJ6zKwh8h-LEhLMmp5dgoxorC4-dWPgHwnOjXWPvQDSragghyp2be9qW45va_r20gjUFOUVCV3lT9_XXVu6l46GlM6W3ZP_I67aEPbLHgL6-5qIxb-6SW_HkjWOGnc88Lcicv74ujgcyq0U4L_Mh1jLPaopDsGNhqtg4SHzbgayHU7yL7icgWWVDWz-MEWCZkwC1bk2IAJJCRd6YjlCNQhZpO5MRiD6omLLmtS-6npivKb94ao9J8R8mxrDQ9idgVXAgqY9uPHvKXAE2eDjt8xbsVbSss4yI8LGhoC-Rgg")]
+    fn samples(#[case] sample: &str) {
+        #[allow(deprecated)]
+        devolutions_gateway::token::unsafe_debug::dangerous_validate_token(sample, None).unwrap();
     }
 }
 
@@ -274,13 +295,14 @@ mod as_of_v2021_2_13_0 {
     }
 
     /// Make sure current Gateway is able to validate association tokens provided by DVLS
-    #[test]
-    fn association_token_validation() {
-        let token_cache = new_token_cache();
-        let jrl = Mutex::new(JrlTokenClaims::default());
-        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
-        let pub_key = priv_key.to_public_key();
-        let now = chrono::Utc::now().timestamp();
+    #[rstest]
+    fn association_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
@@ -347,13 +369,14 @@ mod as_of_v2021_2_4 {
     }
 
     /// Make sure current Gateway is able to validate scope tokens provided by DVLS
-    #[test]
-    fn scope_token_validation() {
-        let token_cache = new_token_cache();
-        let jrl = Mutex::new(JrlTokenClaims::default());
-        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
-        let pub_key = priv_key.to_public_key();
-        let now = chrono::Utc::now().timestamp();
+    #[rstest]
+    fn scope_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
@@ -398,13 +421,14 @@ mod as_of_v2021_1_7_0 {
     }
 
     /// Make sure current Gateway is able to validate association tokens provided by DVLS
-    #[test]
-    fn association_token_validation() {
-        let token_cache = new_token_cache();
-        let jrl = Mutex::new(JrlTokenClaims::default());
-        let priv_key = PrivateKey::from_pem_str(KEY).unwrap();
-        let pub_key = priv_key.to_public_key();
-        let now = chrono::Utc::now().timestamp();
+    #[rstest]
+    fn association_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
             encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
