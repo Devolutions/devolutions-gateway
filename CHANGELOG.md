@@ -4,6 +4,15 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## Unpublished
 
+## 2022.2.2 (2022-06-14)
+  * Update dependencies with CVE reports
+  * *pwsh*: update token generation cmdlet
+  * *dgw*: remove unused `/jet/sessions/count` route
+  * *dgw*: lossless unknown application strings
+
+    > With this change, unknown application protocols will display session information as well.
+    > Previously, any unknown value was just treated as the "unknown" string.
+
 ## 2022.2.1 (2022-05-30)
   * Migrate logging infrastructure to `tracing`
   * *dgw*: duplicate `/jmux` and `/KdcProxy` endpoints under `/jet`
