@@ -219,26 +219,6 @@ jobs:
           name: jetsocat
           path: ${{ steps.build.outputs.staging-path }}
 
-      - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
-        with:
-          repository: Devolutions/actions
-          ref: master
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          path: ./.github/workflows
-
-      - name: Upload to OneDrive
-        if: matrix.os == 'windows'
-        # if: ${{ github.ref == 'refs/heads/main' }}
-        uses: ./.github/workflows/upload-onedrive
-        with:
-          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
-          remote: prereleases
-          destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ steps.get-commit.outputs.ref }}_${{ runner.os }}_${{ matrix.arch }}
-          conflict_behavior: replace
-          files: ${{ steps.build.outputs.staging-path }}
-
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
@@ -342,23 +322,54 @@ jobs:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
 
+  onedrive:
+    name: OneDrive
+    needs:
+      - devolutions-gateway
+      - jetsocat
+    runs-on: ubuntu-18.04
+    # if: ${{ github.ref == 'refs/heads/main' }}
+
+    steps:
       - name: Check out Devolutions/actions
         uses: actions/checkout@v3
         with:
           repository: Devolutions/actions
           ref: master
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          token: ${{ github.token }}
           path: ./.github/workflows
 
-      - name: Upload to OneDrive
+      # Devolutions Toolbox is required for OneDrive uploading
+
+      - Name: Install Devolutions Toolbox (Windows)
         if: matrix.os == 'windows'
-        # if: ${{ github.ref == 'refs/heads/main' }}
+        uses: ./.github"/workflows/windows-toolbox-install@master
+        with:
+          token: ${{ github.token }}
+
+      - Name: Install Devolutions Toolbox (Nix)
+        if: matrix.os != 'windows'
+        uses: ./.github"/workflows/toolbox-install@master
+        with:
+          token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+          path: ./artifacts
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+          path: ./artifacts
+
+      - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
           remote: prereleases
-          destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ steps.get-commit.outputs.ref }}_${{ runner.os }}_${{ matrix.arch }}
+          destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ needs.preflight.outputs.ref }}
           conflict_behavior: replace
-          files: ${{ steps.load-variables.outputs.staging-path }}
+          files: ./artifacts
 
