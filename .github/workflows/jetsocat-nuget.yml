@@ -21,8 +21,16 @@ jobs:
           $Version = '${{ github.event.inputs.version }}'
           pwsh package.ps1 -AccessToken ${{ secrets.GITHUB_TOKEN }} -Version $Version
 
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
       - name: Publish to Artifactory
-        uses: Devolutions/actions/nuget-publish-jfrog@master
+        uses: ./.github/workflows/nuget-publish-jfrog@master
         with:
           apikey: ${{ secrets.ARTIFACTORY_PASSWORD }}
           username: ${{ secrets.ARTIFACTORY_USERNAME }}

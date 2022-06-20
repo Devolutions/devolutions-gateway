@@ -225,15 +225,15 @@ jobs:
           repository: Devolutions/actions
           ref: master
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          path: ./.github/workflows     
+          path: ./.github/workflows
 
       - name: Upload to OneDrive
+        if: matrix.os == 'windows'
         # if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
-          # tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
           destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ steps.get-commit.outputs.ref }}_${{ runner.os }}_${{ matrix.arch }}
           conflict_behavior: replace
@@ -348,15 +348,15 @@ jobs:
           repository: Devolutions/actions
           ref: master
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          path: ./.github/workflows     
+          path: ./.github/workflows
 
       - name: Upload to OneDrive
+        if: matrix.os == 'windows'
         # if: ${{ github.ref == 'refs/heads/main' }}
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
-          # tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
           destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ steps.get-commit.outputs.ref }}_${{ runner.os }}_${{ matrix.arch }}
           conflict_behavior: replace
