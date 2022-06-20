@@ -336,7 +336,7 @@ jobs:
         with:
           repository: Devolutions/actions
           ref: master
-          token: ${{ github.token }}
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
       # Devolutions Toolbox is required for OneDrive uploading
@@ -345,13 +345,13 @@ jobs:
         if: matrix.os == 'windows'
         uses: ./.github"/workflows/windows-toolbox-install@master
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Install Devolutions Toolbox (Nix)
         if: matrix.os != 'windows'
         uses: ./.github"/workflows/toolbox-install@master
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - uses: actions/download-artifact@v3
         with:
