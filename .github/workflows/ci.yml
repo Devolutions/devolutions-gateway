@@ -343,13 +343,13 @@ jobs:
 
       - name: Install Devolutions Toolbox (Windows)
         if: matrix.os == 'windows'
-        uses: ./.github"/workflows/windows-toolbox-install
+        uses: ./.github/workflows/windows-toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Install Devolutions Toolbox (Nix)
         if: matrix.os != 'windows'
-        uses: ./.github"/workflows/toolbox-install
+        uses: ./.github/workflows/toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
       
