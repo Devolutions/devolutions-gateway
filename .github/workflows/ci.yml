@@ -219,9 +219,17 @@ jobs:
           name: jetsocat
           path: ${{ steps.build.outputs.staging-path }}
 
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows     
+
       - name: Upload to OneDrive
         # if: ${{ github.ref == 'refs/heads/main' }}
-        uses: Devolutions/actions/upload-onedrive@master
+        uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
@@ -333,10 +341,18 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
-      
+
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows     
+
       - name: Upload to OneDrive
         # if: ${{ github.ref == 'refs/heads/main' }}
-        uses: Devolutions/actions/upload-onedrive@master
+        uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
