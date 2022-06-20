@@ -328,6 +328,7 @@ jobs:
       - devolutions-gateway
       - jetsocat
     runs-on: ubuntu-18.04
+    # FIXME: do not forget to uncomment before merge
     # if: ${{ github.ref == 'refs/heads/main' }}
 
     steps:
@@ -364,12 +365,15 @@ jobs:
         with:
           name: devolutions-gateway
           path: ./artifacts
+      
+      ## Do the actual upload :tada:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
+          tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
           destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ needs.preflight.outputs.ref }}
           conflict_behavior: replace
