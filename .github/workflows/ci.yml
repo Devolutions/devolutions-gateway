@@ -388,7 +388,7 @@ jobs:
           # is that required? v
           tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
-          destination_path: /Gateway/${{ steps.info.outputs.version }}_${{ steps.info.outputs.short-ref }}
+          destination_path: /Gateway/${{ steps.info.outputs.version }}-${{ steps.info.outputs.short-ref }}
           conflict_behavior: replace
           files: ${{ runner.temp }}/artifacts
 
