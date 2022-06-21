@@ -385,8 +385,6 @@ jobs:
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
-          # is that required? v
-          tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
           destination_path: /Gateway/${{ steps.info.outputs.version }}-${{ steps.info.outputs.short-ref }}
           conflict_behavior: replace
