@@ -343,14 +343,7 @@ jobs:
 
       ## Devolutions Toolbox is required for OneDrive uploading
 
-      - name: Install Devolutions Toolbox (Windows)
-        if: matrix.os == 'windows'
-        uses: ./.github/workflows/windows-toolbox-install
-        with:
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-
-      - name: Install Devolutions Toolbox (Nix)
-        if: matrix.os != 'windows'
+      - name: Install Devolutions Toolbox
         uses: ./.github/workflows/toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
