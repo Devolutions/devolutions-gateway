@@ -369,12 +369,23 @@ jobs:
       
       ## Do the actual upload :tada:
       
-      - name: Print info
+      - name: Release info
+        id: info
         shell: pwsh
         run: |
+          $Version="${{ needs.preflight.outputs.version }}"
+          $Ref="${{ needs.preflight.outputs.ref }}"
+          $ShortRef=$Ref.Substring(0, 8)
+
+          Write-Host "Version = $Version"
+          Write-Host "Ref = $Ref"
+
+          Write-Host "::set-output name=version::${Version}.0"
+          Write-Host "::set-output name=short-ref::${ShortRef}"
+
+          Write-Host
+          Write-Host "Artifacts folder:"
           ls ${{ runner.temp }}/artifacts
-          Write-Host "VERSION = ${{ needs.preflight.outputs.version }}"
-          Write-Host "REF = ${{ needs.preflight.outputs.ref }}"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
@@ -384,7 +395,7 @@ jobs:
           # is that required? v
           tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
-          destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ needs.preflight.outputs.ref }}
+          destination_path: /Gateway/${{ steps.info.outputs.version }}_${{ steps.info.outputs.short-ref }}
           conflict_behavior: replace
           files: ${{ runner.temp }}/artifacts
 
