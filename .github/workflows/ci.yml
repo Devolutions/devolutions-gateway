@@ -324,12 +324,13 @@ jobs:
 
   onedrive:
     name: OneDrive
-    needs:
-      - devolutions-gateway
-      - jetsocat
     runs-on: ubuntu-18.04
     # FIXME: do not forget to uncomment before merge
     # if: ${{ github.ref == 'refs/heads/main' }}
+    needs:
+      - preflight
+      - devolutions-gateway
+      - jetsocat
 
     steps:
       - name: Check out Devolutions/actions
@@ -359,21 +360,21 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: jetsocat
-          path: ./artifacts
+          path: ${{ runner.temp }}/artifacts
 
       - uses: actions/download-artifact@v3
         with:
           name: devolutions-gateway
-          path: ./artifacts
+          path: ${{ runner.temp }}/artifacts
       
       ## Do the actual upload :tada:
       
       - name: Print info
         shell: pwsh
         run: |
-          ls ./artifacts
+          ls ${{ runner.temp }}/artifacts
           Write-Host "VERSION = ${{ needs.preflight.outputs.version }}"
-          Write-Host "REF = "${{ needs.preflight.outputs.ref }}"
+          Write-Host "REF = ${{ needs.preflight.outputs.ref }}"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
@@ -385,5 +386,5 @@ jobs:
           remote: prereleases
           destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ needs.preflight.outputs.ref }}
           conflict_behavior: replace
-          files: ./artifacts
+          files: ${{ runner.temp }}/artifacts
 
