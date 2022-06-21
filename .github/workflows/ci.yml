@@ -367,12 +367,20 @@ jobs:
           path: ./artifacts
       
       ## Do the actual upload :tada:
+      
+      - name: Print info
+        shell: pwsh
+        run: |
+          ls ./artifacts
+          Write-Host "VERSION = ${{ needs.preflight.outputs.version }}"
+          Write-Host "REF = "${{ needs.preflight.outputs.ref }}"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
+          # is that required? v
           tenant_id: ${{ secrets.AZURE_TENANT_ID }}
           remote: prereleases
           destination_path: /Gateway/${{ needs.preflight.outputs.version }}_${{ needs.preflight.outputs.ref }}
