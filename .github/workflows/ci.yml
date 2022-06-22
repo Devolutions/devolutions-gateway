@@ -353,32 +353,47 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: jetsocat
-          path: ${{ runner.temp }}/artifacts
+          path: ${{ runner.temp }}/artifacts_raw
 
       - uses: actions/download-artifact@v3
         with:
           name: devolutions-gateway
-          path: ${{ runner.temp }}/artifacts
+          path: ${{ runner.temp }}/artifacts_raw
       
       ## Do the actual upload :tada:
       
-      - name: Release info
-        id: info
+      - name: Prepare upload
+        id: prepare
         shell: pwsh
         run: |
-          $Version="${{ needs.preflight.outputs.version }}"
-          $Ref="${{ needs.preflight.outputs.ref }}"
-          $ShortRef=$Ref.Substring(0, 8)
+          $version="${{ needs.preflight.outputs.version }}"
+          $ref="${{ needs.preflight.outputs.ref }}"
+          $shortRef=$ref.Substring(0, 8)
 
-          Write-Host "Version = $Version"
-          Write-Host "Ref = $Ref"
+          Write-Host "version = $version"
+          Write-Host "ref = $ref"
 
-          Write-Host "::set-output name=version::${Version}.0"
-          Write-Host "::set-output name=short-ref::${ShortRef}"
+          Write-Host "::set-output name=version::${version}.0"
+          Write-Host "::set-output name=short-ref::${shortRef}"
+
+          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recursive | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
-          Write-Host "Artifacts folder:"
-          ls ${{ runner.temp }}/artifacts
+          Write-Host "Raw artifacts folder:"
+        
+          NewItem -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
+
+          foreach ($file in $allFiles) {
+            $dir = $file.Directory
+            $name = $file.Name
+            $path = "$dir/$name"
+            Write-Host $path
+            Move-Item -Path $path -Destination "${{ runner.temp }}/artifacts"
+          }
+
+          Write-Host
+          Write-Host "Final artifacts folder:"
+          Get-ChildItem -Path ${{ runner.temp }}/artifacts -Recursive
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
@@ -386,7 +401,7 @@ jobs:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
           remote: prereleases
-          destination_path: /Gateway/${{ steps.info.outputs.version }}-${{ steps.info.outputs.short-ref }}
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.prepare.outputs.short-ref }}
           conflict_behavior: replace
           files: ${{ runner.temp }}/artifacts
 
