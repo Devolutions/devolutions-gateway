@@ -376,13 +376,13 @@ jobs:
           Write-Host "::set-output name=version::${version}.0"
           Write-Host "::set-output name=short-ref::${shortRef}"
 
-          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recurse | Where { -Not $_.Mode.StartsWith('d') }
+          New-Item -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
+
+          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recurse -Exclude PowerShell | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
           Write-Host "Raw artifacts folder:"
         
-          New-Item -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
-
           foreach ($file in $allFiles) {
             $dir = $file.Directory
             $name = $file.Name
