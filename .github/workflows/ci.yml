@@ -325,8 +325,7 @@ jobs:
   onedrive:
     name: OneDrive
     runs-on: ubuntu-18.04
-    # FIXME: do not forget to uncomment before merge
-    # if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs:
       - preflight
       - devolutions-gateway
@@ -347,7 +346,7 @@ jobs:
         uses: ./.github/workflows/toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-      
+
       ## Download back the artifacts produced by the other jobs
 
       - uses: actions/download-artifact@v3
@@ -359,7 +358,7 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ runner.temp }}/artifacts_raw
-      
+
       ## Do the actual upload :tada:
       
       - name: Prepare upload
@@ -369,19 +368,19 @@ jobs:
           $version="${{ needs.preflight.outputs.version }}"
           $ref="${{ needs.preflight.outputs.ref }}"
           $shortRef=$ref.Substring(0, 8)
+          $sourceFolder = "${{ runner.temp }}/artifacts_raw"
+          $destinationFolder = "${{ runner.temp }}/artifacts"
 
           Write-Host "version = $version"
           Write-Host "ref = $ref"
 
-          Write-Host "::set-output name=version::${version}.0"
+          Write-Host "::set-output name=version::${version}"
           Write-Host "::set-output name=short-ref::${shortRef}"
+          Write-Host "::set-output name=files-to-upload::${destinationFolder}"
 
-          New-Item -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
+          New-Item -Path "$destinationFolder" -ItemType "directory"
 
-          $source_folder = "${{ runner.temp }}/artifacts_raw"
-          $destination_folder = "${{ runner.temp }}/artifacts"
-
-          $allFiles = Get-ChildItem -Path "$source_folder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
+          $allFiles = Get-ChildItem -Path "$sourceFolder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
         
@@ -404,5 +403,5 @@ jobs:
           remote: prereleases
           destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.prepare.outputs.short-ref }}
           conflict_behavior: replace
-          files: ${{ runner.temp }}/artifacts
+          files: ${{ steps.prepare.outputs.files-to-upload }}
 
