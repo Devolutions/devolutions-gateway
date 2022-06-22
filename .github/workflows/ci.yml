@@ -378,22 +378,23 @@ jobs:
 
           New-Item -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
 
-          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recurse -Exclude PowerShell | Where { -Not $_.Mode.StartsWith('d') }
+          $source_folder = "${{ runner.temp }}/artifacts_raw"
+          $destination_folder = "${{ runner.temp }}/artifacts"
+
+          $allFiles = Get-ChildItem -Path "$source_folder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
-          Write-Host "Raw artifacts folder:"
         
           foreach ($file in $allFiles) {
             $dir = $file.Directory
             $name = $file.Name
-            $path = "$dir/$name"
-            Write-Host $path
-            Move-Item -Path $path -Destination "${{ runner.temp }}/artifacts"
-          }
+            $source = "$dir/$name"
+            $destination = "$destination_folder/$name"
 
-          Write-Host
-          Write-Host "Final artifacts folder:"
-          Get-ChildItem -Path ${{ runner.temp }}/artifacts -Recurse
+            Write-Host "$source --> $destination"
+
+            Move-Item -Path "$source" -Destination "$destination"
+          }
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
