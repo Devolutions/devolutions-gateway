@@ -381,7 +381,7 @@ jobs:
           Write-Host
           Write-Host "Raw artifacts folder:"
         
-          NewItem -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
+          New-Item -Path "${{ runner.temp }}" -Name "artifacts" -ItemType "directory"
 
           foreach ($file in $allFiles) {
             $dir = $file.Directory
