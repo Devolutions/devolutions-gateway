@@ -376,7 +376,7 @@ jobs:
           Write-Host "::set-output name=version::${version}.0"
           Write-Host "::set-output name=short-ref::${shortRef}"
 
-          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recursive | Where { -Not $_.Mode.StartsWith('d') }
+          $allFiles = Get-ChildItem -Path ${{ runner.temp }}/artifacts_raw -Recurse | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
           Write-Host "Raw artifacts folder:"
@@ -393,7 +393,7 @@ jobs:
 
           Write-Host
           Write-Host "Final artifacts folder:"
-          Get-ChildItem -Path ${{ runner.temp }}/artifacts -Recursive
+          Get-ChildItem -Path ${{ runner.temp }}/artifacts -Recurse
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
