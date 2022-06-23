@@ -388,7 +388,7 @@ jobs:
             $dir = $file.Directory
             $name = $file.Name
             $source = "$dir/$name"
-            $destination = "$destination_folder/$name"
+            $destination = "$destinationFolder/$name"
 
             Write-Host "$source --> $destination"
 
