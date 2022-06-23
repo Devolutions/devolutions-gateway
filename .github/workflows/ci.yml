@@ -325,7 +325,7 @@ jobs:
   onedrive:
     name: OneDrive
     runs-on: ubuntu-18.04
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/master' }}
     needs:
       - preflight
       - devolutions-gateway
