@@ -321,3 +321,87 @@ jobs:
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
+
+  onedrive:
+    name: OneDrive
+    runs-on: ubuntu-18.04
+    if: ${{ github.ref == 'refs/heads/master' }}
+    needs:
+      - preflight
+      - devolutions-gateway
+      - jetsocat
+
+    steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      ## Devolutions Toolbox is required for OneDrive uploading
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
+      ## Download back the artifacts produced by the other jobs
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+          path: ${{ runner.temp }}/artifacts_raw
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+          path: ${{ runner.temp }}/artifacts_raw
+
+      ## Do the actual upload :tada:
+      
+      - name: Prepare upload
+        id: prepare
+        shell: pwsh
+        run: |
+          $version="${{ needs.preflight.outputs.version }}"
+          $ref="${{ needs.preflight.outputs.ref }}"
+          $shortRef=$ref.Substring(0, 8)
+          $sourceFolder = "${{ runner.temp }}/artifacts_raw"
+          $destinationFolder = "${{ runner.temp }}/artifacts"
+
+          Write-Host "version = $version"
+          Write-Host "ref = $ref"
+
+          Write-Host "::set-output name=version::${version}"
+          Write-Host "::set-output name=short-ref::${shortRef}"
+          Write-Host "::set-output name=files-to-upload::${destinationFolder}"
+
+          New-Item -Path "$destinationFolder" -ItemType "directory"
+
+          $allFiles = Get-ChildItem -Path "$sourceFolder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
+
+          Write-Host
+        
+          foreach ($file in $allFiles) {
+            $dir = $file.Directory
+            $name = $file.Name
+            $source = "$dir/$name"
+            $destination = "$destination_folder/$name"
+
+            Write-Host "$source --> $destination"
+
+            Move-Item -Path "$source" -Destination "$destination"
+          }
+
+      - name: Upload to OneDrive
+        uses: ./.github/workflows/upload-onedrive
+        with:
+          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
+          remote: prereleases
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.prepare.outputs.short-ref }}
+          conflict_behavior: replace
+          files: ${{ steps.prepare.outputs.files-to-upload }}
+

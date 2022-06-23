@@ -103,7 +103,7 @@ jobs:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
-    needs: [preflight]
+    needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
     strategy:
       matrix:
@@ -210,7 +210,7 @@ jobs:
     name: GitHub release
     runs-on: ubuntu-18.04
     environment: build-and-publish
-    needs: [preflight]
+    needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
@@ -339,3 +339,65 @@ jobs:
               exit 1
             }
           }
+
+  onedrive:
+    name: OneDrive
+    runs-on: ubuntu-18.04
+    needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+
+    steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      ## Devolutions Toolbox is required for OneDrive uploading
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
+      ## Download back the artifacts produced by the other jobs
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: devolutions-gateway
+
+      - name: Download artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
+      - name: Prepare upload
+        id: prepare
+        shell: pwsh
+        run: |
+          $destinationFolder = "${{ runner.temp }}/artifacts"
+          $version="${{ needs.preflight.outputs.version }}"
+
+          # Note that ".0" is appended here (required by release tooling downstream)
+          Write-Host "::set-output name=version::${version}.0"
+          Write-Host "::set-output name=files-to-upload::${destinationFolder}"
+
+          New-Item -Path "$destinationFolder" -ItemType "directory"
+          Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
+
+      - name: Upload to OneDrive
+        uses: ./.github/workflows/upload-onedrive
+        with:
+          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
+          remote: releases
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}
+          conflict_behavior: fail
+          files: ${{ steps.prepare.outputs.files-to-upload }}
+
