@@ -30,7 +30,7 @@ jobs:
           path: ./.github/workflows
 
       - name: Publish to Artifactory
-        uses: ./.github/workflows/nuget-publish-jfrog@master
+        uses: ./.github/workflows/nuget-publish-jfrog
         with:
           apikey: ${{ secrets.ARTIFACTORY_PASSWORD }}
           username: ${{ secrets.ARTIFACTORY_USERNAME }}

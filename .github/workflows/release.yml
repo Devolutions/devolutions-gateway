@@ -103,7 +103,7 @@ jobs:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
     environment: build-and-publish
-    needs: [preflight]
+    needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
     strategy:
       matrix:
