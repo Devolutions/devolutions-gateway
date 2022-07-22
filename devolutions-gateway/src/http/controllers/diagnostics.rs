@@ -5,16 +5,17 @@ use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use std::sync::Arc;
 
-#[derive(Serialize)]
-struct GatewayConfigurationResponse {
+#[derive(Serialize, utoipa::Component)]
+pub(crate) struct GatewayConfiguration {
     hostname: String,
     version: &'static str,
+    #[component(inline)]
     listeners: Vec<ListenerConfig>,
 }
 
-impl From<Arc<Config>> for GatewayConfigurationResponse {
+impl From<Arc<Config>> for GatewayConfiguration {
     fn from(config: Arc<Config>) -> Self {
-        GatewayConfigurationResponse {
+        GatewayConfiguration {
             listeners: config.listeners.clone(),
             version: env!("CARGO_PKG_VERSION"),
             hostname: config.hostname.clone(),
@@ -22,13 +23,13 @@ impl From<Arc<Config>> for GatewayConfigurationResponse {
     }
 }
 
-#[derive(Serialize)]
-struct GatewayClockResponse {
+#[derive(Serialize, utoipa::Component)]
+pub(crate) struct GatewayClock {
     timestamp_secs: i64,
     timestamp_millis: i64,
 }
 
-impl GatewayClockResponse {
+impl GatewayClock {
     pub fn now() -> Self {
         use chrono::prelude::*;
         let utc = Utc::now();
@@ -62,7 +63,7 @@ impl DiagnosticsController {
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
     async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
-        get_logs_stub(self).await
+        get_logs(self).await
     }
 
     // NOTE: this route is not secured by access token.
@@ -70,8 +71,8 @@ impl DiagnosticsController {
     // If there is clock drift, token validation will fail because claims such as `nbf` will then
     // be invalid, and thus prevent the clock drift diagnosis.
     #[get("/clock")]
-    async fn get_clock(&self) -> Json<GatewayClockResponse> {
-        Json(GatewayClockResponse::now())
+    async fn get_clock(&self) -> Json<GatewayClock> {
+        get_clock()
     }
 
     #[get("/configuration")]
@@ -79,21 +80,31 @@ impl DiagnosticsController {
         AccessGuard,
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
-    async fn get_configuration(&self) -> Json<GatewayConfigurationResponse> {
-        get_configuration_stub(self).await
+    async fn get_configuration(&self) -> Json<GatewayConfiguration> {
+        get_configuration(self).await
     }
 }
 
-async fn get_logs_stub(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
+/// Retrieve latest logs of this service.
+#[utoipa::path(
+    get,
+    path = "/jet/diagnostics/logs",
+    responses(
+        (status = 200, description = "Latest logs", body = String),
+        (status = 500, description = "Couldn't retrieve logs")
+    ),
+    security(("scope_token" = ["gateway.diagnostics.read"])),
+)]
+async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
     let log_file_path = controller
         .config
         .log_file
         .as_ref()
-        .ok_or_else(|| HttpErrorStatus::not_found("log file is not configured"))?;
+        .ok_or_else(|| HttpErrorStatus::internal("log file is not configured"))?;
 
     let latest_log_file_path = crate::log::find_latest_log_file(log_file_path.as_path())
         .await
-        .map_err(|e| HttpErrorStatus::not_found(format!("latest log file not found: {e:#}")))?;
+        .map_err(|e| HttpErrorStatus::internal(format!("latest log file not found: {e:#}")))?;
 
     let latest_log_file_path = latest_log_file_path
         .to_str()
@@ -104,8 +115,30 @@ async fn get_logs_stub(controller: &DiagnosticsController) -> Result<File, HttpE
         .map_err(HttpErrorStatus::internal)
 }
 
-async fn get_configuration_stub(controller: &DiagnosticsController) -> Json<GatewayConfigurationResponse> {
+/// Retrieve this Gateway's configuration.
+#[utoipa::path(
+    get,
+    path = "/jet/diagnostics/configuration",
+    responses(
+        (status = 200, description = "Gateway's configuration", body = inline(GatewayConfiguration)),
+    ),
+    security(("scope_token" = ["gateway.diagnostics.read"])),
+)]
+async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayConfiguration> {
     Json(controller.config.clone().into())
+}
+
+/// This route is used to retrieve server's clock when diagnosing clock drifting.
+/// Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
+#[utoipa::path(
+    get,
+    path = "/jet/diagnostics/clock",
+    responses(
+        (status = 200, description = "Server's clock", body = inline(GatewayClock)),
+    ),
+)]
+fn get_clock() -> Json<GatewayClock> {
+    Json(GatewayClock::now())
 }
 
 // NOTE: legacy controller starting 2021/11/25
@@ -122,7 +155,7 @@ impl LegacyDiagnosticsController {
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
     async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
-        get_logs_stub(&self.inner).await
+        get_logs(&self.inner).await
     }
 
     #[get("/configuration")]
@@ -130,7 +163,7 @@ impl LegacyDiagnosticsController {
         AccessGuard,
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
-    async fn get_configuration(&self) -> Json<GatewayConfigurationResponse> {
-        get_configuration_stub(&self.inner).await
+    async fn get_configuration(&self) -> Json<GatewayConfiguration> {
+        get_configuration(&self.inner).await
     }
 }

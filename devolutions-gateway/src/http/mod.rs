@@ -57,11 +57,6 @@ impl HttpErrorStatus {
     fn bad_gateway<T: Display + Send + 'static>(source: T) -> Self {
         Self::new(StatusCode::BAD_GATEWAY, source)
     }
-
-    #[track_caller]
-    fn not_found<T: Display + Send + 'static>(source: T) -> Self {
-        Self::new(StatusCode::NOT_FOUND, source)
-    }
 }
 
 impl Responder for HttpErrorStatus {

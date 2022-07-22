@@ -1,0 +1,11 @@
+[package]
+name = "generate-openapi"
+version = "0.0.0"
+authors = ["Devolutions Inc."]
+edition = "2021"
+publish = false
+
+[dependencies]
+devolutions-gateway = { path = "../../devolutions-gateway" }
+serde_yaml = "0.8.26"
+utoipa = { git = "https://github.com/juhaku/utoipa.git", rev = "baa394717f52f0007f9d4cc5dff077e92328cf7d", default-features = false, features = ["uuid", "chrono"] }

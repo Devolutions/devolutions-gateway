@@ -71,9 +71,11 @@ pub enum Protocol {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, utoipa::Component)]
 pub struct ListenerConfig {
+    #[component(value_type = String)]
     pub internal_url: Url,
+    #[component(value_type = String)]
     pub external_url: Url,
 }
 

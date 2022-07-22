@@ -21,11 +21,19 @@ impl HealthController {
 impl HealthController {
     #[get("/")]
     async fn get_health(&self) -> String {
-        get_health_stub(self)
+        get_health(self)
     }
 }
 
-fn get_health_stub(controller: &HealthController) -> String {
+/// Health check
+#[utoipa::path(
+    get,
+    path = "/jet/health",
+    responses(
+        (status = 200, description = "Gateway is alive and healthy", body = String),
+    ),
+)]
+fn get_health(controller: &HealthController) -> String {
     format!(
         "Devolutions Gateway \"{}\" is alive and healthy.",
         controller.config.hostname
@@ -42,6 +50,6 @@ pub struct LegacyHealthController {
 impl LegacyHealthController {
     #[get("/")]
     async fn get_health(&self) -> String {
-        get_health_stub(&self.inner)
+        get_health(&self.inner)
     }
 }
