@@ -763,7 +763,7 @@ dependencies = [
  "typed-builder",
  "url 2.2.2",
  "utoipa",
- "uuid 0.8.2",
+ "uuid 1.1.2",
  "zeroize",
 ]
 
@@ -774,7 +774,7 @@ dependencies = [
  "devolutions-gateway",
  "proptest",
  "serde",
- "uuid 0.8.2",
+ "uuid 1.1.2",
 ]
 
 [[package]]
@@ -1439,7 +1439,7 @@ dependencies = [
  "tokio-rustls",
  "ureq",
  "url 2.2.2",
- "uuid 0.8.2",
+ "uuid 1.1.2",
  "x509-parser 0.13.0",
 ]
 
@@ -1468,7 +1468,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "transport",
- "uuid 0.8.2",
+ "uuid 1.1.2",
 ]
 
 [[package]]
@@ -4004,6 +4004,10 @@ name = "uuid"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd6469f4314d5f1ffec476e05f17cc9a78bc7a27a6a857842170bdf8d6f98d2f"
+dependencies = [
+ "getrandom",
+ "serde",
+]
 
 [[package]]
 name = "valuable"
