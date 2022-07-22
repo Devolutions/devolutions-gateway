@@ -5,6 +5,7 @@ edition = "2021"
 readme = "README.md"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc."]
+description = "Devolutions' relay server"
 publish = false
 
 [dependencies]
@@ -84,6 +85,9 @@ http = "0.2.6"
 saphir = { version = "2.8", default-features = false, features = ["json", "macro", "form", "operation", "file"], git = "https://github.com/CBenoit/saphir", branch = "hyper-update" }
 # for KDC proxy
 portpicker = "0.1.1"
+# OpenAPI generator
+# FIXME: use v2.0.0 from crates.io when released
+utoipa = { git = "https://github.com/juhaku/utoipa.git", rev = "baa394717f52f0007f9d4cc5dff077e92328cf7d", default-features = false, features = ["uuid", "chrono", "chrono_with_format"] }
 
 # plugins
 dlopen = "0.1.8"

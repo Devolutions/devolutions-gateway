@@ -762,7 +762,8 @@ dependencies = [
  "transport",
  "typed-builder",
  "url 2.2.2",
- "uuid",
+ "utoipa",
+ "uuid 0.8.2",
  "zeroize",
 ]
 
@@ -773,7 +774,7 @@ dependencies = [
  "devolutions-gateway",
  "proptest",
  "serde",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -1095,6 +1096,15 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+]
+
+[[package]]
+name = "generate-openapi"
+version = "0.0.0"
+dependencies = [
+ "devolutions-gateway",
+ "serde_yaml",
+ "utoipa",
 ]
 
 [[package]]
@@ -1429,7 +1439,7 @@ dependencies = [
  "tokio-rustls",
  "ureq",
  "url 2.2.2",
- "uuid",
+ "uuid 0.8.2",
  "x509-parser 0.13.0",
 ]
 
@@ -1458,7 +1468,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "transport",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2271,6 +2281,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
 
 [[package]]
+name = "proc-macro-error"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
+dependencies = [
+ "proc-macro-error-attr",
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "syn 1.0.86",
+ "version_check",
+]
+
+[[package]]
+name = "proc-macro-error-attr"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1be40180e52ecc98ad80b184934baf3d0d29f979574e439af5a55274b35f869"
+dependencies = [
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "version_check",
+]
+
+[[package]]
 name = "proc-macro-hack"
 version = "0.5.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2852,7 +2886,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tower-service",
- "uuid",
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -2997,9 +3031,9 @@ dependencies = [
 
 [[package]]
 name = "serde_yaml"
-version = "0.8.23"
+version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a521f2940385c165a24ee286aa8599633d162077a54bdcae2a6fd5a7bfa7a0"
+checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
 dependencies = [
  "indexmap",
  "ryu",
@@ -3935,6 +3969,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ae116fef2b7fea257ed6440d3cfcff7f190865f170cdad00bb6465bf18ecba"
 
 [[package]]
+name = "utoipa"
+version = "1.1.0"
+source = "git+https://github.com/juhaku/utoipa.git?rev=baa394717f52f0007f9d4cc5dff077e92328cf7d#baa394717f52f0007f9d4cc5dff077e92328cf7d"
+dependencies = [
+ "serde",
+ "utoipa-gen",
+]
+
+[[package]]
+name = "utoipa-gen"
+version = "1.1.0"
+source = "git+https://github.com/juhaku/utoipa.git?rev=baa394717f52f0007f9d4cc5dff077e92328cf7d#baa394717f52f0007f9d4cc5dff077e92328cf7d"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2 1.0.36",
+ "quote 1.0.15",
+ "syn 1.0.86",
+ "uuid 1.1.2",
+]
+
+[[package]]
 name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3943,6 +3998,12 @@ dependencies = [
  "getrandom",
  "serde",
 ]
+
+[[package]]
+name = "uuid"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd6469f4314d5f1ffec476e05f17cc9a78bc7a27a6a857842170bdf8d6f98d2f"
 
 [[package]]
 name = "valuable"

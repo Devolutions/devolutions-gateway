@@ -1,5 +1,4 @@
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
 use crate::token::JetAccessScope;
 use crate::{GatewaySessionInfo, SESSIONS_IN_PROGRESS};
 use saphir::controller::Controller;
@@ -13,17 +12,24 @@ pub struct SessionsController;
 impl SessionsController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
-    async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
-        get_sessions_stub().await
+    async fn get_sessions(&self) -> Json<Vec<GatewaySessionInfo>> {
+        get_sessions().await
     }
 }
 
-async fn get_sessions_stub() -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
+/// List running sessions
+#[utoipa::path(
+    get,
+    path = "/jet/sessions",
+    responses(
+        (status = 200, description = "Running sessions", body = [SessionInfo]),
+    ),
+    security(("scope_token" = ["gateway.sessions.read"])),
+)]
+pub(crate) async fn get_sessions() -> Json<Vec<GatewaySessionInfo>> {
     let sessions = SESSIONS_IN_PROGRESS.read().await;
-
     let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();
-
-    Ok(Json(sessions_in_progress))
+    Json(sessions_in_progress)
 }
 
 // NOTE: legacy controller starting 2021/11/25
@@ -34,7 +40,7 @@ pub struct LegacySessionsController;
 impl LegacySessionsController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
-    async fn get_sessions(&self) -> Result<Json<Vec<GatewaySessionInfo>>, HttpErrorStatus> {
-        get_sessions_stub().await
+    async fn get_sessions(&self) -> Json<Vec<GatewaySessionInfo>> {
+        get_sessions().await
     }
 }

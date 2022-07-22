@@ -1,0 +1,163 @@
+---
+openapi: 3.0.3
+info:
+  title: devolutions-gateway
+  description: "Devolutions' relay server"
+  contact:
+    name: Devolutions Inc.
+    email: ""
+  license:
+    name: MIT/Apache-2.0
+  version: 2022.2.2
+paths:
+  /jet/diagnostics/clock:
+    get:
+      tags:
+        - "crate::http::controllers::diagnostics"
+      summary: "This route is used to retrieve server's clock when diagnosing clock drifting."
+      description: "This route is used to retrieve server's clock when diagnosing clock drifting.\nClock drift is an issue for token validation because of claims such as `nbf` and `exp`.\n"
+      operationId: get_clock
+      responses:
+        "200":
+          description: "Server's clock"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - timestamp_secs
+                  - timestamp_millis
+                properties:
+                  timestamp_millis:
+                    type: integer
+                    format: int64
+                  timestamp_secs:
+                    type: integer
+                    format: int64
+      deprecated: false
+  /jet/diagnostics/configuration:
+    get:
+      tags:
+        - "crate::http::controllers::diagnostics"
+      summary: "Retrieve this Gateway's configuration."
+      description: "Retrieve this Gateway's configuration.\n"
+      operationId: get_configuration
+      responses:
+        "200":
+          description: "Gateway's configuration"
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - hostname
+                  - version
+                  - listeners
+                properties:
+                  hostname:
+                    type: string
+                  listeners:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - internal_url
+                        - external_url
+                      properties:
+                        external_url:
+                          type: string
+                        internal_url:
+                          type: string
+                  version:
+                    type: string
+      deprecated: false
+      security:
+        - scope_token:
+            - gateway.diagnostics.read
+  /jet/diagnostics/logs:
+    get:
+      tags:
+        - "crate::http::controllers::diagnostics"
+      summary: Retrieve latest logs of this service.
+      description: "Retrieve latest logs of this service.\n"
+      operationId: get_logs
+      responses:
+        "200":
+          description: Latest logs
+          content:
+            text/plain:
+              schema:
+                type: string
+        "500":
+          description: "Couldn't retrieve logs"
+      deprecated: false
+      security:
+        - scope_token:
+            - gateway.diagnostics.read
+  /jet/health:
+    get:
+      tags:
+        - "crate::http::controllers::health"
+      summary: Health check
+      description: "Health check\n"
+      operationId: get_health
+      responses:
+        "200":
+          description: Gateway is alive and healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+      deprecated: false
+  /jet/sessions:
+    get:
+      tags:
+        - "crate::http::controllers::sessions"
+      summary: List running sessions
+      description: "List running sessions\n"
+      operationId: get_sessions
+      responses:
+        "200":
+          description: Running sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SessionInfo"
+      deprecated: false
+      security:
+        - scope_token:
+            - gateway.sessions.read
+components:
+  schemas:
+    SessionInfo:
+      type: object
+      required:
+        - association_id
+        - application_protocol
+        - recording_policy
+        - filtering_policy
+        - start_timestamp
+        - connection_mode
+      properties:
+        application_protocol:
+          type: string
+        association_id:
+          type: string
+          format: uuid
+        connection_mode:
+          type: string
+          enum:
+            - rdv
+            - fwd
+        destination_host:
+          type: string
+        filtering_policy:
+          type: boolean
+        recording_policy:
+          type: boolean
+        start_timestamp:
+          type: string
+          format: date-time
+

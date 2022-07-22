@@ -45,7 +45,7 @@ impl JrlController {
                 .as_deref()
                 .ok_or_else(|| HttpErrorStatus::internal("JRL file path is missing"))?;
 
-            info!("Writing JRL file to disk (path: {jrl_file})");
+            info!(path = %jrl_file, "Writing JRL file to disk");
 
             let mut file = tokio::fs::OpenOptions::new()
                 .write(true)
