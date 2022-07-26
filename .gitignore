@@ -9,3 +9,5 @@ clients/Devolutions.Gateway.Clients/.vs/
 clients/Devolutions.Gateway.Clients/bin/
 
 clients/Devolutions.Gateway.Clients/obj/
+
+*.DotSettings
