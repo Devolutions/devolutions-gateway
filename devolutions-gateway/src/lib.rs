@@ -14,6 +14,7 @@ pub mod jet_client;
 pub mod jet_rendezvous_tcp_proxy;
 pub mod listener;
 pub mod log;
+#[cfg(feature = "openapi")]
 pub mod openapi;
 pub mod plugin_manager;
 pub mod preconnection_pdu;

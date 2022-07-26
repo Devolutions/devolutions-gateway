@@ -1,5 +1,3 @@
-#![allow(non_camel_case_types)]
-
 use chrono::{DateTime, Utc};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -13,7 +11,13 @@ use uuid::Uuid;
         crate::http::controllers::diagnostics::get_configuration,
         crate::http::controllers::diagnostics::get_clock,
     ),
-    components(SessionInfo)
+    components(
+        SessionInfo,
+        ConnectionMode,
+        crate::http::controllers::diagnostics::GatewayConfiguration,
+        crate::config::ListenerConfig,
+        crate::http::controllers::diagnostics::GatewayClock,
+    )
 )]
 pub struct ApiDoc;
 
@@ -25,13 +29,13 @@ pub struct SessionInfo {
     recording_policy: bool,
     filtering_policy: bool,
     start_timestamp: DateTime<Utc>,
-    #[component(inline)]
     connection_mode: ConnectionMode,
     destination_host: Option<String>,
 }
 
-#[derive(utoipa::Component)]
+#[derive(Serialize, utoipa::Component)]
+#[serde(rename_all = "kebab-case")]
 pub enum ConnectionMode {
-    rdv,
-    fwd,
+    Rdv,
+    Fwd,
 }
