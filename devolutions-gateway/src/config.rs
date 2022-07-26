@@ -71,11 +71,12 @@ pub enum Protocol {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::Component)]
+#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[derive(Debug, Clone, Serialize)]
 pub struct ListenerConfig {
-    #[component(value_type = String)]
+    #[cfg_attr(feature = "openapi", component(value_type = String))]
     pub internal_url: Url,
-    #[component(value_type = String)]
+    #[cfg_attr(feature = "openapi", component(value_type = String))]
     pub external_url: Url,
 }
 

@@ -17,15 +17,21 @@ impl SessionsController {
     }
 }
 
-/// List running sessions
-#[utoipa::path(
+/// Lists running sessions
+#[cfg_attr(feature = "openapi", utoipa::path(
     get,
     path = "/jet/sessions",
     responses(
         (status = 200, description = "Running sessions", body = [SessionInfo]),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    params(
+        ("scope_token" = String, Header, description = "Scope token for gateway.sessions.read"),
     ),
     security(("scope_token" = ["gateway.sessions.read"])),
-)]
+))]
 pub(crate) async fn get_sessions() -> Json<Vec<GatewaySessionInfo>> {
     let sessions = SESSIONS_IN_PROGRESS.read().await;
     let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();

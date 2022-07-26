@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: devolutions-gateway
-  description: "Devolutions' relay server"
+  description: Protocol-aware fine-grained relay server
   contact:
     name: Devolutions Inc.
     email: ""
@@ -14,8 +14,8 @@ paths:
     get:
       tags:
         - "crate::http::controllers::diagnostics"
-      summary: "This route is used to retrieve server's clock when diagnosing clock drifting."
-      description: "This route is used to retrieve server's clock when diagnosing clock drifting.\nClock drift is an issue for token validation because of claims such as `nbf` and `exp`.\n"
+      summary: "Retrieves server's clock in order to diagnose clock drifting."
+      description: "Retrieves server's clock in order to diagnose clock drifting.\n\nClock drift is an issue for token validation because of claims such as `nbf` and `exp`.\n"
       operationId: get_clock
       responses:
         "200":
@@ -23,53 +23,36 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - timestamp_secs
-                  - timestamp_millis
-                properties:
-                  timestamp_millis:
-                    type: integer
-                    format: int64
-                  timestamp_secs:
-                    type: integer
-                    format: int64
+                $ref: "#/components/schemas/GatewayClock"
       deprecated: false
   /jet/diagnostics/configuration:
     get:
       tags:
         - "crate::http::controllers::diagnostics"
-      summary: "Retrieve this Gateway's configuration."
-      description: "Retrieve this Gateway's configuration.\n"
+      summary: Retrieves configuration.
+      description: "Retrieves configuration.\n"
       operationId: get_configuration
+      parameters:
+        - name: scope_token
+          in: header
+          description: Scope token for gateway.diagnostics.read
+          required: true
+          deprecated: false
+          schema:
+            type: string
       responses:
         "200":
-          description: "Gateway's configuration"
+          description: Service configuration
           content:
             application/json:
               schema:
-                type: object
-                required:
-                  - hostname
-                  - version
-                  - listeners
-                properties:
-                  hostname:
-                    type: string
-                  listeners:
-                    type: array
-                    items:
-                      type: object
-                      required:
-                        - internal_url
-                        - external_url
-                      properties:
-                        external_url:
-                          type: string
-                        internal_url:
-                          type: string
-                  version:
-                    type: string
+                $ref: "#/components/schemas/GatewayConfiguration"
+        "400":
+          description: Bad request
+        "401":
+          description: Invalid or missing authorization token
+        "403":
+          description: Insufficient permissions
       deprecated: false
       security:
         - scope_token:
@@ -78,9 +61,17 @@ paths:
     get:
       tags:
         - "crate::http::controllers::diagnostics"
-      summary: Retrieve latest logs of this service.
-      description: "Retrieve latest logs of this service.\n"
+      summary: Retrieves latest logs.
+      description: "Retrieves latest logs.\n"
       operationId: get_logs
+      parameters:
+        - name: scope_token
+          in: header
+          description: Scope token for gateway.diagnostics.read
+          required: true
+          deprecated: false
+          schema:
+            type: string
       responses:
         "200":
           description: Latest logs
@@ -88,8 +79,14 @@ paths:
             text/plain:
               schema:
                 type: string
+        "400":
+          description: Bad request
+        "401":
+          description: Invalid or missing authorization token
+        "403":
+          description: Insufficient permissions
         "500":
-          description: "Couldn't retrieve logs"
+          description: Failed to retrieve logs
       deprecated: false
       security:
         - scope_token:
@@ -98,12 +95,12 @@ paths:
     get:
       tags:
         - "crate::http::controllers::health"
-      summary: Health check
-      description: "Health check\n"
+      summary: Performs a health check
+      description: "Performs a health check\n"
       operationId: get_health
       responses:
         "200":
-          description: Gateway is alive and healthy
+          description: Healthy message
           content:
             text/plain:
               schema:
@@ -113,9 +110,17 @@ paths:
     get:
       tags:
         - "crate::http::controllers::sessions"
-      summary: List running sessions
-      description: "List running sessions\n"
+      summary: Lists running sessions
+      description: "Lists running sessions\n"
       operationId: get_sessions
+      parameters:
+        - name: scope_token
+          in: header
+          description: Scope token for gateway.sessions.read
+          required: true
+          deprecated: false
+          schema:
+            type: string
       responses:
         "200":
           description: Running sessions
@@ -125,12 +130,60 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SessionInfo"
+        "400":
+          description: Bad request
+        "401":
+          description: Invalid or missing authorization token
+        "403":
+          description: Insufficient permissions
       deprecated: false
       security:
         - scope_token:
             - gateway.sessions.read
 components:
   schemas:
+    ConnectionMode:
+      type: string
+      enum:
+        - rdv
+        - fwd
+    GatewayClock:
+      type: object
+      required:
+        - timestamp_secs
+        - timestamp_millis
+      properties:
+        timestamp_millis:
+          type: integer
+          format: int64
+        timestamp_secs:
+          type: integer
+          format: int64
+    GatewayConfiguration:
+      type: object
+      required:
+        - hostname
+        - version
+        - listeners
+      properties:
+        hostname:
+          type: string
+        listeners:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListenerConfig"
+        version:
+          type: string
+    ListenerConfig:
+      type: object
+      required:
+        - internal_url
+        - external_url
+      properties:
+        external_url:
+          type: string
+        internal_url:
+          type: string
     SessionInfo:
       type: object
       required:
@@ -147,10 +200,7 @@ components:
           type: string
           format: uuid
         connection_mode:
-          type: string
-          enum:
-            - rdv
-            - fwd
+          $ref: "#/components/schemas/ConnectionMode"
         destination_host:
           type: string
         filtering_policy:

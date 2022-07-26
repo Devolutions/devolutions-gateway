@@ -25,14 +25,14 @@ impl HealthController {
     }
 }
 
-/// Health check
-#[utoipa::path(
+/// Performs a health check
+#[cfg_attr(feature = "openapi", utoipa::path(
     get,
     path = "/jet/health",
     responses(
-        (status = 200, description = "Gateway is alive and healthy", body = String),
+        (status = 200, description = "Healthy message", body = String),
     ),
-)]
+))]
 fn get_health(controller: &HealthController) -> String {
     format!(
         "Devolutions Gateway \"{}\" is alive and healthy.",

@@ -5,11 +5,11 @@ use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use std::sync::Arc;
 
-#[derive(Serialize, utoipa::Component)]
-pub(crate) struct GatewayConfiguration {
+#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[derive(Serialize)]
+pub struct GatewayConfiguration {
     hostname: String,
     version: &'static str,
-    #[component(inline)]
     listeners: Vec<ListenerConfig>,
 }
 
@@ -23,8 +23,9 @@ impl From<Arc<Config>> for GatewayConfiguration {
     }
 }
 
-#[derive(Serialize, utoipa::Component)]
-pub(crate) struct GatewayClock {
+#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[derive(Serialize)]
+pub struct GatewayClock {
     timestamp_secs: i64,
     timestamp_millis: i64,
 }
@@ -85,16 +86,22 @@ impl DiagnosticsController {
     }
 }
 
-/// Retrieve latest logs of this service.
-#[utoipa::path(
+/// Retrieves latest logs.
+#[cfg_attr(feature = "openapi", utoipa::path(
     get,
     path = "/jet/diagnostics/logs",
     responses(
         (status = 200, description = "Latest logs", body = String),
-        (status = 500, description = "Couldn't retrieve logs")
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Failed to retrieve logs"),
+    ),
+    params(
+        ("scope_token" = String, Header, description = "Scope token for gateway.diagnostics.read"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
-)]
+))]
 async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
     let log_file_path = controller
         .config
@@ -115,28 +122,35 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
         .map_err(HttpErrorStatus::internal)
 }
 
-/// Retrieve this Gateway's configuration.
-#[utoipa::path(
+/// Retrieves configuration.
+#[cfg_attr(feature = "openapi", utoipa::path(
     get,
     path = "/jet/diagnostics/configuration",
     responses(
-        (status = 200, description = "Gateway's configuration", body = inline(GatewayConfiguration)),
+        (status = 200, description = "Service configuration", body = GatewayConfiguration),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+    ),
+    params(
+        ("scope_token" = String, Header, description = "Scope token for gateway.diagnostics.read"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
-)]
+))]
 async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayConfiguration> {
     Json(controller.config.clone().into())
 }
 
-/// This route is used to retrieve server's clock when diagnosing clock drifting.
+/// Retrieves server's clock in order to diagnose clock drifting.
+///
 /// Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
-#[utoipa::path(
+#[cfg_attr(feature = "openapi", utoipa::path(
     get,
     path = "/jet/diagnostics/clock",
     responses(
-        (status = 200, description = "Server's clock", body = inline(GatewayClock)),
+        (status = 200, description = "Server's clock", body = GatewayClock),
     ),
-)]
+))]
 fn get_clock() -> Json<GatewayClock> {
     Json(GatewayClock::now())
 }
