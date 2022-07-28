@@ -993,7 +993,7 @@ impl Config {
 
         let tls_certificate = config_file.certificate_file.map(|file| {
             let file = get_program_data_file_path(&file);
-            let pem_str = std::fs::read_to_string(file).expect("bad provisioner public key file");
+            let pem_str = std::fs::read_to_string(file).expect("bad TLS certificate file");
             let pem = pem_str.parse::<Pem>().expect("bad TLS certificate pem");
             if pem.label() != CERTIFICATE_LABEL {
                 panic!("bad pem label for TLS certificate (expected {})", CERTIFICATE_LABEL);
@@ -1003,7 +1003,7 @@ impl Config {
 
         let tls_private_key = config_file.private_key_file.map(|file| {
             let file = get_program_data_file_path(&file);
-            let pem_str = std::fs::read_to_string(file).expect("bad provisioner public key file");
+            let pem_str = std::fs::read_to_string(file).expect("bad TLS private key file");
             let pem = pem_str.parse::<Pem>().expect("bad TLS certificate pem");
             if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
                 panic!("bad pem label for TLS private key (expected {:?})", PRIVATE_KEY_LABELS);
