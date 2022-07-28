@@ -14,6 +14,7 @@ use std::io::BufReader;
 use std::sync::Arc;
 use tokio_rustls::{rustls, TlsAcceptor};
 use url::Url;
+use uuid::Uuid;
 
 pub const SERVICE_NAME: &str = "devolutions-gateway";
 pub const DISPLAY_NAME: &str = "Devolutions Gateway";
@@ -145,17 +146,18 @@ pub struct SogarUser {
 
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct SogarRegistryConfig {
-    pub serve_as_registry: Option<bool>,
+    pub serve_as_registry: bool,
     pub local_registry_name: Option<String>,
     pub local_registry_image: Option<String>,
-    pub keep_files: Option<bool>,
-    pub keep_time: Option<usize>,
-    pub push_files: Option<bool>,
+    pub keep_files: bool,
+    pub keep_time: Option<u64>,
+    pub push_files: bool,
     pub sogar_push_registry_info: SogarPushRegistryInfo,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub id: Option<Uuid>,
     pub service_mode: bool,
     pub service_name: String,
     pub display_name: String,
@@ -177,7 +179,7 @@ pub struct Config {
     pub plugins: Option<Vec<Utf8PathBuf>>,
     pub recording_path: Option<Utf8PathBuf>,
     pub sogar_registry_config: SogarRegistryConfig,
-    pub sogar_user: Vec<SogarUser>,
+    pub sogar_user_list: Vec<SogarUser>,
     pub jrl_file: Option<Utf8PathBuf>,
     pub debug: DebugOptions,
 }
@@ -187,6 +189,7 @@ impl Default for Config {
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_owned());
 
         Config {
+            id: None,
             service_mode: false,
             service_name: SERVICE_NAME.to_owned(),
             display_name: DISPLAY_NAME.to_owned(),
@@ -207,12 +210,12 @@ impl Default for Config {
             plugins: None,
             recording_path: None,
             sogar_registry_config: SogarRegistryConfig {
-                serve_as_registry: None,
+                serve_as_registry: false,
                 local_registry_name: None,
                 local_registry_image: None,
-                keep_files: None,
+                keep_files: false,
                 keep_time: None,
-                push_files: None,
+                push_files: false,
                 sogar_push_registry_info: SogarPushRegistryInfo {
                     registry_url: None,
                     username: None,
@@ -220,7 +223,7 @@ impl Default for Config {
                     image_name: None,
                 },
             },
-            sogar_user: Vec::new(),
+            sogar_user_list: Vec::new(),
             jrl_file: None,
             debug: DebugOptions::default(),
         }
@@ -265,59 +268,40 @@ fn url_map_scheme_http_to_ws(url: &mut Url) {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ConfigFile {
-    #[serde(rename = "FarmName")]
+    pub id: Option<Uuid>,
     pub farm_name: Option<String>,
-    #[serde(rename = "Hostname")]
     pub hostname: Option<String>,
-    #[serde(rename = "Listeners")]
     pub listeners: Vec<GatewayListener>,
-    #[serde(rename = "ApplicationProtocols")]
     pub application_protocols: Option<Vec<String>>,
-    #[serde(rename = "CertificateFile")]
     pub certificate_file: Option<Utf8PathBuf>,
-    #[serde(rename = "PrivateKeyFile")]
     pub private_key_file: Option<Utf8PathBuf>,
-    #[serde(rename = "ProvisionerPublicKeyFile")]
     pub provisioner_public_key_file: Option<Utf8PathBuf>,
-    #[serde(rename = "DelegationPrivateKeyFile")]
     pub delegation_private_key_file: Option<Utf8PathBuf>,
-    #[serde(rename = "Plugins")]
     pub plugins: Option<Vec<Utf8PathBuf>>,
-    #[serde(rename = "RecordingPath")]
     pub recording_path: Option<Utf8PathBuf>,
-    #[serde(rename = "SogarRegistryUrl")]
-    pub registry_url: Option<String>,
-    #[serde(rename = "SogarUsername")]
-    pub username: Option<String>,
-    #[serde(rename = "SogarPassword")]
-    pub password: Option<String>,
-    #[serde(rename = "SogarImageName")]
-    pub image_name: Option<String>,
-    #[serde(rename = "SogarUsersList")]
-    pub sogar_users_list: Option<Vec<SogarUser>>,
-    #[serde(rename = "ServeAsRegistry")]
-    pub serve_as_registry: Option<bool>,
-    #[serde(rename = "RegistryName")]
+    pub sogar_registry_url: Option<String>,
+    pub sogar_username: Option<String>,
+    pub sogar_password: Option<String>,
+    pub sogar_image_name: Option<String>,
+    #[serde(default)]
+    pub sogar_user_list: Vec<SogarUser>,
+    #[serde(default)]
+    pub serve_as_registry: bool,
     pub registry_name: Option<String>,
-    #[serde(rename = "RegistryImage")]
     pub registry_image: Option<String>,
-    #[serde(rename = "KeepFiles")]
-    pub keep_files: Option<bool>,
-    #[serde(rename = "KeepTime")]
-    pub keep_time: Option<usize>,
-    #[serde(rename = "PushFiles")]
-    pub push_files: Option<bool>,
+    #[serde(default)]
+    pub keep_files: bool,
+    pub keep_time: Option<u64>,
+    #[serde(default)]
+    pub push_files: bool,
 
     // unstable options (subject to change)
-    #[serde(rename = "LogFile")]
     pub log_file: Option<Utf8PathBuf>,
-    #[serde(rename = "JrlFile")]
     pub jrl_file: Option<Utf8PathBuf>,
-    #[serde(rename = "CapturePath")]
     pub capture_path: Option<Utf8PathBuf>,
     /// Directive string in the same form as the RUST_LOG environment variable.
-    #[serde(rename = "LogDirective")]
     pub log_directive: Option<String>,
 
     // unsafe debug options for developers
@@ -967,6 +951,8 @@ impl Config {
     pub fn load_from_file(file_path: &Utf8Path) -> Option<Self> {
         let config_file = load_config_file(file_path)?;
 
+        let id = config_file.id;
+
         let default_hostname = get_default_hostname().unwrap_or_else(|| "localhost".to_string());
         let hostname = config_file.hostname.unwrap_or(default_hostname);
         let farm_name = config_file.farm_name.unwrap_or_else(|| hostname.clone());
@@ -1030,22 +1016,23 @@ impl Config {
         let plugins = config_file.plugins;
         let recording_path = config_file.recording_path.map(Utf8PathBuf::from);
 
-        let registry_url = config_file.registry_url;
-        let username = config_file.username;
-        let password = config_file.password;
-        let image_name = config_file.image_name;
+        let registry_url = config_file.sogar_registry_url;
+        let username = config_file.sogar_username;
+        let password = config_file.sogar_password;
+        let image_name = config_file.sogar_image_name;
         let serve_as_registry = config_file.serve_as_registry;
         let registry_name = config_file.registry_name;
         let registry_image = config_file.registry_image;
         let keep_files = config_file.keep_files;
         let keep_time = config_file.keep_time;
         let push_files = config_file.push_files;
-        let sogar_user = config_file.sogar_users_list.unwrap_or_default();
+        let sogar_user = config_file.sogar_user_list;
 
         // unstable options (subject to change)
         let capture_path = config_file.capture_path;
 
         Some(Config {
+            id,
             listeners,
             farm_name,
             hostname,
@@ -1072,7 +1059,7 @@ impl Config {
                     image_name,
                 },
             },
-            sogar_user,
+            sogar_user_list: sogar_user,
             jrl_file: Some(jrl_file),
             debug: config_file.debug,
 

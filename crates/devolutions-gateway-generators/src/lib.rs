@@ -180,3 +180,13 @@ pub fn session_info_fwd_only() -> impl Strategy<Value = GatewaySessionInfo> {
         )
     })
 }
+
+#[derive(Debug, Serialize, Clone)]
+pub struct SubkeyClaims {
+    pub kid: String,
+    pub kty: String,
+    pub scope_ids: Vec<uuid::Uuid>,
+    pub iat: i64,
+    pub nbf: i64,
+    pub jti: uuid::Uuid,
+}

@@ -32,7 +32,15 @@ pub fn extract_association_claims(
         #[allow(deprecated)]
         crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
     } else {
-        validate_token(token, source_ip, provisioner_key, delegation_key, token_cache, jrl)
+        validate_token(
+            token,
+            source_ip,
+            provisioner_key,
+            delegation_key,
+            token_cache,
+            jrl,
+            config.id,
+        )
     }
     .context("token validation")?;
 

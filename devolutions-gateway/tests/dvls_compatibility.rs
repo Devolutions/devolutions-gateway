@@ -58,7 +58,7 @@ where
 
     // Gateway side
     let source_ip = std::net::IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None, token_cache, jrl)?;
+    devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None, token_cache, jrl, None)?;
 
     Ok(())
 }
