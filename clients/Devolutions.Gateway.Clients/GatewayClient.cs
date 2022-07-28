@@ -25,7 +25,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        GatewayClock Get_clock();
+        GatewayClock GetClock();
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -33,7 +33,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<GatewayClock> Get_clockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<GatewayClock> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves configuration.
@@ -41,7 +41,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        GatewayConfiguration Get_configuration(string scope_token);
+        GatewayConfiguration GetConfiguration(string scope_token);
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -50,7 +50,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<GatewayConfiguration> Get_configurationAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<GatewayConfiguration> GetConfigurationAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves latest logs.
@@ -58,7 +58,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Latest logs</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        string Get_logs(string scope_token);
+        string GetLogs(string scope_token);
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -67,14 +67,14 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Latest logs</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<string> Get_logsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<string> GetLogsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Performs a health check
         /// </summary>
         /// <returns>Healthy message</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        string Get_health();
+        string GetHealth();
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -82,7 +82,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Healthy message</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<string> Get_healthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<string> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Lists running sessions
@@ -90,7 +90,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.sessions.read</param>
         /// <returns>Running sessions</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Collections.Generic.ICollection<SessionInfo> Get_sessions(string scope_token);
+        System.Collections.Generic.ICollection<SessionInfo> GetSessions(string scope_token);
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -99,7 +99,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.sessions.read</param>
         /// <returns>Running sessions</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<System.Collections.Generic.ICollection<SessionInfo>> Get_sessionsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<System.Collections.Generic.ICollection<SessionInfo>> GetSessionsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
     }
 
@@ -143,9 +143,9 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual GatewayClock Get_clock()
+        public virtual GatewayClock GetClock()
         {
-            return System.Threading.Tasks.Task.Run(async () => await Get_clockAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
+            return System.Threading.Tasks.Task.Run(async () => await GetClockAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
@@ -154,7 +154,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<GatewayClock> Get_clockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<GatewayClock> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/diagnostics/clock");
@@ -224,9 +224,9 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual GatewayConfiguration Get_configuration(string scope_token)
+        public virtual GatewayConfiguration GetConfiguration(string scope_token)
         {
-            return System.Threading.Tasks.Task.Run(async () => await Get_configurationAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
+            return System.Threading.Tasks.Task.Run(async () => await GetConfigurationAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
@@ -236,7 +236,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<GatewayConfiguration> Get_configurationAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<GatewayConfiguration> GetConfigurationAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/diagnostics/configuration");
@@ -328,9 +328,9 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Latest logs</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual string Get_logs(string scope_token)
+        public virtual string GetLogs(string scope_token)
         {
-            return System.Threading.Tasks.Task.Run(async () => await Get_logsAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
+            return System.Threading.Tasks.Task.Run(async () => await GetLogsAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
@@ -340,7 +340,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.diagnostics.read</param>
         /// <returns>Latest logs</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<string> Get_logsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<string> GetLogsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/diagnostics/logs");
@@ -434,9 +434,9 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Healthy message</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual string Get_health()
+        public virtual string GetHealth()
         {
-            return System.Threading.Tasks.Task.Run(async () => await Get_healthAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
+            return System.Threading.Tasks.Task.Run(async () => await GetHealthAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
@@ -445,7 +445,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Healthy message</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<string> Get_healthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<string> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/health");
@@ -512,9 +512,9 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.sessions.read</param>
         /// <returns>Running sessions</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual System.Collections.Generic.ICollection<SessionInfo> Get_sessions(string scope_token)
+        public virtual System.Collections.Generic.ICollection<SessionInfo> GetSessions(string scope_token)
         {
-            return System.Threading.Tasks.Task.Run(async () => await Get_sessionsAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
+            return System.Threading.Tasks.Task.Run(async () => await GetSessionsAsync(scope_token, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
@@ -524,7 +524,7 @@ namespace Devolutions.Gateway.Clients
         /// <param name="scope_token">Scope token for gateway.sessions.read</param>
         /// <returns>Running sessions</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<System.Collections.Generic.ICollection<SessionInfo>> Get_sessionsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<System.Collections.Generic.ICollection<SessionInfo>> GetSessionsAsync(string scope_token, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/sessions");

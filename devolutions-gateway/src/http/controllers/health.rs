@@ -28,6 +28,7 @@ impl HealthController {
 /// Performs a health check
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
+    operation_id = "GetHealth",
     path = "/jet/health",
     responses(
         (status = 200, description = "Healthy message", body = String),
