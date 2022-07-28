@@ -70,7 +70,7 @@
       "enumNameGeneratorType": null,
       "serviceHost": null,
       "serviceSchemes": null,
-      "output": "../TypeScript/gateway.generated.ts",
+      "output": "./ts/gateway.generated.ts",
       "newLineBehavior": "Auto"
     },
     "openApiToCSharpClient": {
@@ -156,7 +156,7 @@
       "enumNameGeneratorType": null,
       "serviceHost": null,
       "serviceSchemes": null,
-      "output": "GatewayClient.cs",
+      "output": "./dotnet/Devolutions.Gateway.Clients/GatewayClient.cs",
       "newLineBehavior": "Auto"
     }
   }
