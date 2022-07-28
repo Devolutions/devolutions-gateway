@@ -16,7 +16,7 @@ paths:
         - "crate::http::controllers::diagnostics"
       summary: "Retrieves server's clock in order to diagnose clock drifting."
       description: "Retrieves server's clock in order to diagnose clock drifting.\n\nClock drift is an issue for token validation because of claims such as `nbf` and `exp`.\n"
-      operationId: get_clock
+      operationId: GetClock
       responses:
         "200":
           description: "Server's clock"
@@ -31,7 +31,7 @@ paths:
         - "crate::http::controllers::diagnostics"
       summary: Retrieves configuration.
       description: "Retrieves configuration.\n"
-      operationId: get_configuration
+      operationId: GetConfiguration
       parameters:
         - name: scope_token
           in: header
@@ -63,7 +63,7 @@ paths:
         - "crate::http::controllers::diagnostics"
       summary: Retrieves latest logs.
       description: "Retrieves latest logs.\n"
-      operationId: get_logs
+      operationId: GetLogs
       parameters:
         - name: scope_token
           in: header
@@ -97,7 +97,7 @@ paths:
         - "crate::http::controllers::health"
       summary: Performs a health check
       description: "Performs a health check\n"
-      operationId: get_health
+      operationId: GetHealth
       responses:
         "200":
           description: Healthy message
@@ -112,7 +112,7 @@ paths:
         - "crate::http::controllers::sessions"
       summary: Lists running sessions
       description: "Lists running sessions\n"
-      operationId: get_sessions
+      operationId: GetSessions
       parameters:
         - name: scope_token
           in: header

@@ -32,7 +32,7 @@ export class Client {
      * Retrieves server's clock in order to diagnose clock drifting.
      * @return Server's clock
      */
-    get_clock(): Observable<GatewayClock> {
+    getClock(): Observable<GatewayClock> {
         let url_ = this.baseUrl + "/jet/diagnostics/clock";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -45,11 +45,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGet_clock(response_);
+            return this.processGetClock(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGet_clock(response_ as any);
+                    return this.processGetClock(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<GatewayClock>;
                 }
@@ -58,7 +58,7 @@ export class Client {
         }));
     }
 
-    protected processGet_clock(response: HttpResponseBase): Observable<GatewayClock> {
+    protected processGetClock(response: HttpResponseBase): Observable<GatewayClock> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -85,7 +85,7 @@ export class Client {
      * @param scope_token Scope token for gateway.diagnostics.read
      * @return Service configuration
      */
-    get_configuration(scope_token: string): Observable<GatewayConfiguration> {
+    getConfiguration(scope_token: string): Observable<GatewayConfiguration> {
         let url_ = this.baseUrl + "/jet/diagnostics/configuration";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -99,11 +99,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGet_configuration(response_);
+            return this.processGetConfiguration(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGet_configuration(response_ as any);
+                    return this.processGetConfiguration(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<GatewayConfiguration>;
                 }
@@ -112,7 +112,7 @@ export class Client {
         }));
     }
 
-    protected processGet_configuration(response: HttpResponseBase): Observable<GatewayConfiguration> {
+    protected processGetConfiguration(response: HttpResponseBase): Observable<GatewayConfiguration> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -151,7 +151,7 @@ export class Client {
      * @param scope_token Scope token for gateway.diagnostics.read
      * @return Latest logs
      */
-    get_logs(scope_token: string): Observable<string> {
+    getLogs(scope_token: string): Observable<string> {
         let url_ = this.baseUrl + "/jet/diagnostics/logs";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -165,11 +165,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGet_logs(response_);
+            return this.processGetLogs(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGet_logs(response_ as any);
+                    return this.processGetLogs(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<string>;
                 }
@@ -178,7 +178,7 @@ export class Client {
         }));
     }
 
-    protected processGet_logs(response: HttpResponseBase): Observable<string> {
+    protected processGetLogs(response: HttpResponseBase): Observable<string> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -221,7 +221,7 @@ export class Client {
      * Performs a health check
      * @return Healthy message
      */
-    get_health(): Observable<string> {
+    getHealth(): Observable<string> {
         let url_ = this.baseUrl + "/jet/health";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -234,11 +234,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGet_health(response_);
+            return this.processGetHealth(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGet_health(response_ as any);
+                    return this.processGetHealth(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<string>;
                 }
@@ -247,7 +247,7 @@ export class Client {
         }));
     }
 
-    protected processGet_health(response: HttpResponseBase): Observable<string> {
+    protected processGetHealth(response: HttpResponseBase): Observable<string> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -275,7 +275,7 @@ export class Client {
      * @param scope_token Scope token for gateway.sessions.read
      * @return Running sessions
      */
-    get_sessions(scope_token: string): Observable<SessionInfo[]> {
+    getSessions(scope_token: string): Observable<SessionInfo[]> {
         let url_ = this.baseUrl + "/jet/sessions";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -289,11 +289,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGet_sessions(response_);
+            return this.processGetSessions(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGet_sessions(response_ as any);
+                    return this.processGetSessions(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<SessionInfo[]>;
                 }
@@ -302,7 +302,7 @@ export class Client {
         }));
     }
 
-    protected processGet_sessions(response: HttpResponseBase): Observable<SessionInfo[]> {
+    protected processGetSessions(response: HttpResponseBase): Observable<SessionInfo[]> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :

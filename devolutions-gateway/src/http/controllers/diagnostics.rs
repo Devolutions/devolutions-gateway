@@ -89,6 +89,7 @@ impl DiagnosticsController {
 /// Retrieves latest logs.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
+    operation_id = "GetLogs",
     path = "/jet/diagnostics/logs",
     responses(
         (status = 200, description = "Latest logs", body = String),
@@ -125,6 +126,7 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
 /// Retrieves configuration.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
+    operation_id = "GetConfiguration",
     path = "/jet/diagnostics/configuration",
     responses(
         (status = 200, description = "Service configuration", body = GatewayConfiguration),
@@ -146,6 +148,7 @@ async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayCo
 /// Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
+    operation_id = "GetClock",
     path = "/jet/diagnostics/clock",
     responses(
         (status = 200, description = "Server's clock", body = GatewayClock),

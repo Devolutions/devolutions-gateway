@@ -20,6 +20,7 @@ impl SessionsController {
 /// Lists running sessions
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
+    operation_id = "GetSessions",
     path = "/jet/sessions",
     responses(
         (status = 200, description = "Running sessions", body = [SessionInfo]),
