@@ -16,6 +16,15 @@ impl LogMiddleware {
         let method = request.method().to_owned();
         let is_health_check = uri.ends_with("health");
 
+        // Trim token from KdcProxy endpoint uri
+        let uri = if uri.starts_with("KdcProxy") {
+            String::from("/KdcProxy")
+        } else if uri.starts_with("/jet/KdcProxy") {
+            String::from("/jet/KdcProxy")
+        } else {
+            uri
+        };
+
         async move {
             let start_time = Instant::now();
 

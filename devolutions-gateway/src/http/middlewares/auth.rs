@@ -1,12 +1,15 @@
 use crate::config::Config;
-use crate::token::{validate_token, CurrentJrl, RawToken, TokenCache};
+use crate::http::HttpErrorStatus;
+use crate::token::{validate_token, AccessTokenClaims, CurrentJrl, RawToken, TokenCache};
 use futures::future::{BoxFuture, FutureExt};
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};
 use saphir::http_context::{HttpContext, State};
 use saphir::middleware::{Middleware, MiddlewareChain};
+use saphir::responder::Responder;
 use saphir::response::Builder as ResponseBuilder;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
@@ -101,36 +104,11 @@ async fn auth_middleware(
         }
     };
 
-    if config.debug.dump_tokens {
-        debug!(token, "**DEBUG OPTION**");
-    }
-
     let source_addr = request
         .peer_addr()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
 
-    let provisioner_key = config
-        .provisioner_public_key
-        .as_ref()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Provisioner key is missing"))?;
-
-    let delegation_key = config.delegation_private_key.as_ref();
-
-    let validation_result = if config.debug.disable_token_validation {
-        #[allow(deprecated)]
-        crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
-    } else {
-        validate_token(
-            token,
-            source_addr.ip(),
-            provisioner_key,
-            delegation_key,
-            &token_cache,
-            &jrl,
-        )
-    };
-
-    match validation_result {
+    match authenticate(*source_addr, token, &config, &token_cache, &jrl) {
         Ok(jet_token) => {
             let raw_token = RawToken(token.to_owned());
             let extensions = request.extensions_mut();
@@ -139,13 +117,46 @@ async fn auth_middleware(
             chain.next(ctx).await
         }
         Err(e) => {
-            error!("Invalid authorization token: {:#}", e);
-            let response = ResponseBuilder::new().status(StatusCode::UNAUTHORIZED).build()?;
+            let response = e.respond_with_builder(ResponseBuilder::new(), &ctx).build()?;
             let mut ctx = ctx.clone_with_empty_state();
             ctx.state = State::After(Box::new(response));
             Ok(ctx)
         }
     }
+}
+
+pub fn authenticate(
+    source_addr: SocketAddr,
+    token: &str,
+    config: &Config,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
+) -> Result<AccessTokenClaims, HttpErrorStatus> {
+    if config.debug.dump_tokens {
+        debug!(token, "**DEBUG OPTION**");
+    }
+
+    let provisioner_key = config
+        .provisioner_public_key
+        .as_ref()
+        .ok_or_else(|| HttpErrorStatus::internal("Provisioner key is missing"))?;
+
+    let delegation_key = config.delegation_private_key.as_ref();
+
+    if config.debug.disable_token_validation {
+        #[allow(deprecated)]
+        crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
+    } else {
+        validate_token(
+            token,
+            source_addr.ip(),
+            provisioner_key,
+            delegation_key,
+            token_cache,
+            jrl,
+        )
+    }
+    .map_err(HttpErrorStatus::unauthorized)
 }
 
 #[derive(PartialEq)]
