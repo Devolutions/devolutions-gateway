@@ -31,9 +31,16 @@ pub fn configure_http_server(
 
             middlewares
                 .apply(
-                    AuthMiddleware::new(config.clone(), token_cache, jrl.clone()),
+                    AuthMiddleware::new(config.clone(), token_cache.clone(), jrl.clone()),
                     vec!["/"],
-                    vec!["/registry", "/health", "/jet/health", "/jet/diagnostics/clock"],
+                    vec![
+                        "/registry",
+                        "/health",
+                        "/jet/health",
+                        "/jet/diagnostics/clock",
+                        "/KdcProxy",
+                        "/jet/KdcProxy",
+                    ],
                 )
                 .apply(
                     SogarAuthMiddleware::new(config.clone()),
@@ -49,9 +56,13 @@ pub fn configure_http_server(
             let (health, legacy_health) = HealthController::new(config.clone());
             let http_bridge = HttpBridgeController::new();
             let jet = AssociationController::new(config.clone(), associations.clone());
-            let jrl = JrlController::new(config.clone(), jrl);
-            let kdc_proxy = KdcProxyController { config: config.clone() };
+            let kdc_proxy = KdcProxyController {
+                config: config.clone(),
+                token_cache,
+                jrl: jrl.clone(),
+            };
             let duplicated_kdc_proxy = kdc_proxy.duplicated();
+            let jrl = JrlController::new(config.clone(), jrl);
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());

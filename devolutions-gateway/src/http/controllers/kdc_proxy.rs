@@ -1,7 +1,6 @@
 use crate::config::Config;
-use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
-use crate::token::AccessTokenClaims;
+use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache};
 use crate::utils::resolve_target_to_socket_addr;
 use picky_krb::messages::KdcProxyMessage;
 use saphir::controller::Controller;
@@ -17,6 +16,8 @@ const ERROR_BAD_FORMAT: &str = "\x0b";
 
 pub struct KdcProxyController {
     pub config: Arc<Config>,
+    pub token_cache: Arc<TokenCache>,
+    pub jrl: Arc<CurrentJrl>,
 }
 
 impl KdcProxyController {
@@ -24,6 +25,8 @@ impl KdcProxyController {
         DuplicatedKdcProxyController {
             inner: Self {
                 config: self.config.clone(),
+                token_cache: self.token_cache.clone(),
+                jrl: self.jrl.clone(),
             },
         }
     }
@@ -31,8 +34,7 @@ impl KdcProxyController {
 
 #[controller(name = "KdcProxy")]
 impl KdcProxyController {
-    #[post("/")]
-    #[guard(AccessGuard, init_expr = "TokenType::Kdc")]
+    #[post("/{kdc_token}")]
     async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
         proxy_kdc_message_stub(self, req).await
     }
@@ -45,20 +47,42 @@ pub struct DuplicatedKdcProxyController {
 
 #[controller(name = "jet/KdcProxy")]
 impl DuplicatedKdcProxyController {
-    #[post("/")]
-    #[guard(AccessGuard, init_expr = "TokenType::Kdc")]
+    #[post("/{kdc_token}")]
     async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
         proxy_kdc_message_stub(&self.inner, req).await
     }
 }
 
-async fn proxy_kdc_message_stub(this: &KdcProxyController, mut req: Request) -> Result<Builder, HttpErrorStatus> {
+async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Result<Builder, HttpErrorStatus> {
     use focaccia::unicode_full_case_eq;
 
-    let claims = req
-        .extensions_mut()
-        .remove::<AccessTokenClaims>()
-        .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
+    let claims = {
+        // Check KDC token
+
+        let token = req
+            .captures()
+            .get("kdc_token")
+            .ok_or_else(|| HttpErrorStatus::unauthorized("KDC token is missing"))?
+            .as_str();
+
+        let source_addr = req
+            .peer_addr()
+            .ok_or_else(|| HttpErrorStatus::internal("peer address missing"))?;
+
+        let claims = crate::http::middlewares::auth::authenticate(
+            *source_addr,
+            token,
+            &this.config,
+            &this.token_cache,
+            &this.jrl,
+        )?;
+
+        if let AccessTokenClaims::Kdc(claims) = claims {
+            claims
+        } else {
+            return Err(HttpErrorStatus::forbidden("token not allowed"));
+        }
+    };
 
     let kdc_proxy_message = KdcProxyMessage::from_raw(
         req.load_body()
@@ -83,12 +107,6 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, mut req: Request) -> 
     };
 
     debug!("Request is for realm (target_domain): {realm}");
-
-    let claims = if let AccessTokenClaims::Kdc(claims) = claims {
-        claims
-    } else {
-        return Err(HttpErrorStatus::forbidden("token not allowed"));
-    };
 
     if !unicode_full_case_eq(&claims.krb_realm, &realm) {
         if this.config.debug.disable_token_validation {

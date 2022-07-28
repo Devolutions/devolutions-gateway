@@ -11,9 +11,9 @@ use saphir::responder::Responder;
 use saphir::response::Builder;
 
 pub struct HttpErrorStatus {
-    code: StatusCode,
-    loc: &'static Location<'static>,
-    source: Box<dyn Display + Send + 'static>,
+    pub code: StatusCode,
+    pub loc: &'static Location<'static>,
+    pub source: Box<dyn Display + Send + 'static>,
 }
 
 impl<T: Display + Send + 'static> From<(StatusCode, T)> for HttpErrorStatus {
@@ -61,7 +61,7 @@ impl HttpErrorStatus {
 
 impl Responder for HttpErrorStatus {
     fn respond_with_builder(self, builder: Builder, _: &HttpContext) -> Builder {
-        error!("{} at {} [{}]", self.code, self.loc, self.source);
+        error!("{} at {} [{:#}]", self.code, self.loc, self.source);
         builder.status(self.code)
     }
 }
