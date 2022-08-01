@@ -10,9 +10,12 @@ resolver = "2"
 members = ["."]
 
 [dependencies]
-picky = { version = "7.0.0-rc.2", default-features = false, features = ["jose"], git = "https://github.com/Devolutions/picky-rs", rev = "59ff1aa07fcc8ae0ead49a6cb630189fc8992bf6" }
+picky = { version = "7.0.0-rc.3", default-features = false, features = ["jose"] }
 clap = { version = "3.0.5", features = ["derive"] }
 humantime = "2.1.0"
 serde = "1.0.131"
 serde_json = "1.0.79"
 uuid = { version = "1.1.2", features = ["v4", "serde"] }
+multibase = "0.9.1"
+multihash = "0.16.2"
+tap = "1.0.1"

@@ -126,7 +126,7 @@ If all the optional claims are provided RDP routing will start in **RDP-TLS** mo
 
 #### Token generation utilities
 
-JWT generation should be facilitated by a provider (such as the [WaykDen](https://github.com/Devolutions/WaykDen-ps)).
+JWT generation should be facilitated by a provisioner (such as the [WaykDen](https://github.com/Devolutions/WaykDen-ps)).
 However, you can easily generate a JWT for testing purposes by using CLI tools provided in `/tools` folder.
 
 ##### tokengen
@@ -142,13 +142,13 @@ The binary is produced inside a `target/release` folder.
 RDP-TCP example:
 
 ```
-$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem forward --dst-hst 192.168.122.70 --jet-ap rdp
+$ ./tokengen --provisioner-key /path/to/provisioner/private/key.pem forward --dst-hst 192.168.122.70 --jet-ap rdp
 ```
 
 RDP-TLS example:
 
 ```
-$ ./tokengen --provider-private-key /path/to/provisioner/private/key.pem --delegation-public-key /path/to/delegation/public/key.pem rdp-tls --dst-hst 192.168.122.70 --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
+$ ./tokengen --provisioner-key /path/to/provisioner/private/key.pem --delegation-key /path/to/delegation/public/key.pem rdp-tls --dst-hst 192.168.122.70 --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
 ```
 
 ##### rdp_token.sh
