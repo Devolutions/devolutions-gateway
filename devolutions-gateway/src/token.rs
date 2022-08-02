@@ -3,6 +3,7 @@ use anyhow::Context as _;
 use core::fmt;
 use nonempty::NonEmpty;
 use parking_lot::Mutex;
+use picky::jose::jws::RawJws;
 use picky::key::{PrivateKey, PublicKey};
 use serde::de;
 use smol_str::SmolStr;
@@ -36,6 +37,7 @@ pub enum ContentType {
     Jmux,
     Kdc,
     Jrl,
+    Subkey,
 }
 
 impl FromStr for ContentType {
@@ -49,6 +51,7 @@ impl FromStr for ContentType {
             "JMUX" => Ok(ContentType::Jmux),
             "KDC" => Ok(ContentType::Kdc),
             "JRL" => Ok(ContentType::Jrl),
+            "SUBKEY" => Ok(ContentType::Subkey),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -65,6 +68,7 @@ impl fmt::Display for ContentType {
             ContentType::Jmux => write!(f, "JMUX"),
             ContentType::Kdc => write!(f, "KDC"),
             ContentType::Jrl => write!(f, "JRL"),
+            ContentType::Subkey => write!(f, "SUBKEY"),
         }
     }
 }
@@ -94,6 +98,7 @@ pub enum AccessTokenClaims {
     Jmux(JmuxTokenClaims),
     Kdc(KdcTokenClaims),
     Jrl(JrlTokenClaims),
+    Subkey(SubkeyTokenClaims),
 }
 
 impl AccessTokenClaims {
@@ -105,6 +110,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Jmux(_) => false,
             AccessTokenClaims::Kdc(_) => false,
             AccessTokenClaims::Jrl(_) => false,
+            AccessTokenClaims::Subkey(_) => false,
         }
     }
 }
@@ -525,6 +531,38 @@ impl Default for JrlTokenClaims {
     }
 }
 
+// ----- jrl claims ----- //
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubkeyTokenClaims {
+    /// Key ID, multibase-encoded multihash digest of the key data binary representation (ASN.1)
+    pub kid: SmolStr,
+    /// Key Type, identifies the cryptographic algorithm family of the key
+    pub kty: KeyType,
+
+    /// Gateway ID this token is restricted to
+    pub jet_gw_id: Option<Uuid>,
+
+    // Unique ID for this token
+    jti: Uuid,
+}
+
+/// Cryptographic key algorithm family
+///
+/// Taken from [RFC7518 #6](https://tools.ietf.org/html/rfc7518#section-6.1)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum KeyType {
+    /// DER-encoded Subject Public Key Info structure
+    #[serde(rename = "SPKI")]
+    Spki,
+    /// Elliptic Curve
+    #[serde(rename = "EC")]
+    Ec,
+    /// Elliptic Curve
+    #[serde(rename = "RSA")]
+    Rsa,
+}
+
 // ----- cache clean up ----- //
 
 pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
@@ -559,6 +597,7 @@ pub fn validate_token(
     delegation_key: Option<&PrivateKey>,
     token_cache: &TokenCache,
     revocation_list: &CurrentJrl,
+    gw_id: Option<Uuid>,
 ) -> anyhow::Result<AccessTokenClaims> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
@@ -581,14 +620,90 @@ pub fn validate_token(
         token
     };
 
-    let jwt =
-        JwtSig::decode(signed_jwt, provisioner_key).context("Failed to decode signed payload of JWT routing token")?;
+    let jwt: JwtSig = {
+        let raw_jws = RawJws::decode(signed_jwt).context("Failed to decode signed payload of JWT routing token")?;
+
+        if let Some(serde_json::Value::String(subkey_token)) = raw_jws.header.additional.get("key_token") {
+            let subkey_claims = match validate_token(
+                subkey_token,
+                source_ip,
+                provisioner_key,
+                delegation_key,
+                token_cache,
+                revocation_list,
+                gw_id,
+            )
+            .context("Failed to validate key token")?
+            {
+                AccessTokenClaims::Subkey(claims) => claims,
+                _ => anyhow::bail!("invalid key token type"),
+            };
+
+            let key_data = raw_jws
+                .header
+                .additional
+                .get("key_data")
+                .context("`key_token` present but `key_data` additional header parameter is missing")?
+                .as_str()
+                .and_then(|s| multibase::decode(s).map(|(_, data)| data).ok())
+                .context("invalid `key_data` parameter in JWT routing token (expected multibase encoding)")?;
+
+            match (subkey_claims.jet_gw_id, gw_id) {
+                // There is no Gateway ID scope
+                (None, _) => {}
+                // Gateway ID is required and must be equal to the scope
+                (Some(expected_id), Some(this_gw_id)) if expected_id == this_gw_id => {}
+
+                // Gateway ID scope rule is not respected
+                (Some(_), Some(_)) => anyhow::bail!("Subkey can't be used for this Gateway (bad ID scope)"),
+                (Some(_), None) => anyhow::bail!("This gateway has no ID assigned"),
+            }
+
+            {
+                // Check subkey hash
+
+                use multihash::MultihashDigest;
+
+                let (_, expected_key_digest) = multibase::decode(subkey_claims.kid.as_str())
+                    .context("invalid multibase encoding for subkey id")?;
+                let expected_key_hash = multihash::Multihash::from_bytes(&expected_key_digest)
+                    .context("invalid multihash for subkey id")?;
+                let hash_code = multihash::Code::try_from(expected_key_hash.code())
+                    .context("unknown multihash code for subkey id")?;
+                let key_hash = hash_code.digest(&key_data);
+
+                if key_hash != expected_key_hash {
+                    anyhow::bail!("Bad subkey digest");
+                }
+            }
+
+            // Decode key data using the type metadata from the key token
+            let key = match subkey_claims.kty {
+                KeyType::Spki => PublicKey::from_der(&key_data),
+                KeyType::Rsa => PublicKey::from_rsa_der(&key_data),
+                KeyType::Ec => anyhow::bail!("Elliptic Curves not supported"),
+            }
+            .context("Failed to decode `key_data` additional header")?;
+
+            // Validate the outer token using the subkey
+            raw_jws
+                .verify(&key)
+                .map(JwtSig::from)
+                .context("Failed to verify signature of JWT routing token using `key_data` parameter")?
+        } else {
+            // Standard verification using master provisioner key
+            raw_jws
+                .verify(provisioner_key)
+                .map(JwtSig::from)
+                .context("Failed to verify signature of JWT routing token")?
+        }
+    };
 
     // === Extracting content type and validating JWT claims === //
 
     let timestamp_now = chrono::Utc::now().timestamp();
     let now = JwtDate::new_with_leeway(timestamp_now, LEEWAY_SECS);
-    let strict_validator = JwtValidator::strict(&now);
+    let strict_validator = JwtValidator::strict(now);
 
     let (claims, content_type) = if let Some(content_type) = jwt.header.cty.as_deref() {
         let content_type = content_type.parse::<ContentType>()?;
@@ -599,10 +714,11 @@ pub fn validate_token(
             | ContentType::Bridge
             | ContentType::Jmux
             | ContentType::Kdc => jwt.validate::<Value>(&strict_validator)?.state.claims,
-            ContentType::Jrl => {
-                // NOTE: JRL tokens are not expected to have any expiration.
-                // However, `iat` (Issued At) claim will be used, and only more recent tokens will
+            ContentType::Subkey | ContentType::Jrl => {
+                // NOTE: JRL and Subkey tokens are not expected to expire.
+                // NOTE: For JRL tokens, `iat` (Issued At) claim is required, and only more recent tokens will
                 // be accepted when updating the revocation list.
+                // NOTE: Subkey tokens should be revoked as necessity arises.
                 let lenient_validator = strict_validator.not_before_check_optional().expiration_check_optional();
                 jwt.validate::<Value>(&lenient_validator)?.state.claims
             }
@@ -625,8 +741,8 @@ pub fn validate_token(
     // === Check for revoked values in JWT Revocation List === //
 
     for (key, revoked_values) in &revocation_list.lock().jrl {
-        if let Some(token_value) = claims.get(key) {
-            if revoked_values.contains(token_value) {
+        if let Some(value) = claims.get(key) {
+            if revoked_values.contains(value) {
                 anyhow::bail!("Received a token containing a revoked value.");
             }
         }
@@ -641,6 +757,7 @@ pub fn validate_token(
         ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
         ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+        ContentType::Subkey => serde_json::from_value(claims).map(AccessTokenClaims::Subkey),
     }
     .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
 
@@ -702,8 +819,8 @@ pub fn validate_token(
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
 
-        // KDC tokens are long-lived and expected to be re-used
-        AccessTokenClaims::Kdc(_) => {}
+        // KDC and Subkey tokens are long-lived and expected to be re-used
+        AccessTokenClaims::Kdc(_) | AccessTokenClaims::Subkey(_) => {}
 
         // JRL token must be more recent than the current revocation list
         AccessTokenClaims::Jrl(JrlTokenClaims { iat, .. }) => {
@@ -754,8 +871,10 @@ pub mod unsafe_debug {
             token
         };
 
-        let jwt =
-            JwtSig::decode_dangerous(signed_jwt).context("Failed to decode signed payload of JWT routing token")?;
+        let jwt = RawJws::decode(signed_jwt)
+            .map(RawJws::discard_signature)
+            .map(JwtSig::from)
+            .context("Failed to decode signed payload of JWT routing token")?;
 
         // === Extracting content type BUT without validating JWT claims === //
 
@@ -785,6 +904,7 @@ pub mod unsafe_debug {
             ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
             ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+            ContentType::Subkey => serde_json::from_value(claims).map(AccessTokenClaims::Subkey),
         }
         .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
 

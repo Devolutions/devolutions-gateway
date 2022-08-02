@@ -154,6 +154,7 @@ pub fn authenticate(
             delegation_key,
             token_cache,
             jrl,
+            config.id,
         )
     }
     .map_err(HttpErrorStatus::unauthorized)

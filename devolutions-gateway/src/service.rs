@@ -152,7 +152,7 @@ fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
 }
 
 fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
-    use picky::jose::jwt;
+    use picky::jose::{jws, jwt};
 
     let jrl_file = config.jrl_file.as_deref().context("JRL file path is missing")?;
 
@@ -167,7 +167,10 @@ fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
 
         let jwt = if config.debug.disable_token_validation {
             warn!("**DEBUG OPTION** ignoring JRL token signature");
-            jwt::JwtSig::decode_dangerous(&token)
+            jws::RawJws::decode(&token)
+                .map(jws::RawJws::discard_signature)
+                .map(jwt::JwtSig::from)
+                .map_err(jwt::JwtError::from)
         } else {
             jwt::JwtSig::decode(&token, provisioner_key)
         }

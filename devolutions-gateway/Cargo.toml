@@ -56,13 +56,15 @@ focaccia = "1.1.2"
 native-tls = "0.2.8"
 zeroize = { version = "1.5.3", features = ["derive"] }
 rust-argon2 = "1.0.0"
-picky = { version = "7.0.0-rc.2", default-features = false, features = ["jose", "x509"] }
+picky = { version = "7.0.0-rc.3", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
 ring = "0.16.20"
 # (unrequired if using `axum`)
 sha1 = "0.10.1"
 # (unrequired if using `axum`)
 base64 = "0.13.0"
+multihash = "0.16.2"
+multibase = "0.9.1"
 
 # logging
 tracing = "0.1.34"

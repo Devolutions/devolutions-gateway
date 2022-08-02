@@ -42,18 +42,18 @@ impl Registry {
 
         let files = get_file_list_from_path(file_pattern.as_str(), recording_dir);
 
-        if let Some(true) = config.serve_as_registry {
+        if config.serve_as_registry {
             self.move_file_to_registry(files.clone(), tag.as_str());
         }
 
-        if let Some(true) = config.push_files {
+        if config.push_files {
             self.push_files(file_pattern, recording_dir, tag).await;
         }
 
-        if let Some(true) = config.keep_files {
+        if config.keep_files {
             if let Some(duration) = config.keep_time {
                 thread::spawn(move || {
-                    thread::sleep(Duration::from_secs(duration as u64));
+                    thread::sleep(Duration::from_secs(duration));
                     remove_files(files);
                 });
             }
@@ -210,9 +210,9 @@ mod tests {
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
-        config.sogar_registry_config.serve_as_registry = Some(true);
-        config.sogar_registry_config.push_files = Some(false);
-        config.sogar_registry_config.keep_files = Some(false);
+        config.sogar_registry_config.serve_as_registry = true;
+        config.sogar_registry_config.push_files = false;
+        config.sogar_registry_config.keep_files = false;
         config.sogar_registry_config.local_registry_name = Some(String::from("test_registry1"));
         config.sogar_registry_config.local_registry_image = Some(String::from("test_image1"));
 
@@ -252,9 +252,9 @@ mod tests {
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
-        config.sogar_registry_config.serve_as_registry = Some(true);
-        config.sogar_registry_config.push_files = Some(false);
-        config.sogar_registry_config.keep_files = Some(true);
+        config.sogar_registry_config.serve_as_registry = true;
+        config.sogar_registry_config.push_files = false;
+        config.sogar_registry_config.keep_files = true;
         config.sogar_registry_config.keep_time = None;
         config.sogar_registry_config.local_registry_name = Some(String::from("test_registry2"));
         config.sogar_registry_config.local_registry_image = Some(String::from("test_image2"));
@@ -295,9 +295,9 @@ mod tests {
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
         let mut config = Config::default();
-        config.sogar_registry_config.serve_as_registry = Some(true);
-        config.sogar_registry_config.push_files = Some(false);
-        config.sogar_registry_config.keep_files = Some(true);
+        config.sogar_registry_config.serve_as_registry = true;
+        config.sogar_registry_config.push_files = false;
+        config.sogar_registry_config.keep_files = true;
         config.sogar_registry_config.keep_time = Some(1);
         config.sogar_registry_config.local_registry_name = Some(String::from("test_registry3"));
         config.sogar_registry_config.local_registry_image = Some(String::from("test_image3"));
