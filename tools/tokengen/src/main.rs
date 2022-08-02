@@ -130,7 +130,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("JRL", serde_json::to_value(&claims)?)
         }
-        SubCommand::Subkey { id, path } => {
+        SubCommand::Subkey { jet_gw_id, path } => {
             use multihash::MultihashDigest;
 
             let subkey_data = std::fs::read_to_string(path)?
@@ -146,7 +146,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let claims = SubkeyClaims {
                 kid,
                 kty: String::from("SPKI"),
-                scope_ids: id,
+                jet_gw_id,
                 jti,
                 iat: nbf,
                 nbf,
@@ -230,7 +230,6 @@ enum SubCommand {
         dst_pwd: String,
     },
     Scope {
-        #[clap(long)]
         scope: String,
     },
     Jmux {
@@ -253,8 +252,7 @@ enum SubCommand {
     },
     Subkey {
         #[clap(long)]
-        id: Vec<Uuid>,
-        #[clap(long)]
+        jet_gw_id: Option<Uuid>,
         path: PathBuf,
     },
 }
@@ -321,7 +319,8 @@ struct JrlClaims<'a> {
 pub struct SubkeyClaims {
     kid: String,
     kty: String,
-    scope_ids: Vec<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jet_gw_id: Option<Uuid>,
     jti: Uuid,
     iat: i64,
     nbf: i64,

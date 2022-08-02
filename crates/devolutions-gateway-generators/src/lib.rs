@@ -185,7 +185,7 @@ pub fn session_info_fwd_only() -> impl Strategy<Value = GatewaySessionInfo> {
 pub struct SubkeyClaims {
     pub kid: String,
     pub kty: String,
-    pub scope_ids: Vec<uuid::Uuid>,
+    pub jet_gw_id: Option<uuid::Uuid>,
     pub iat: i64,
     pub nbf: i64,
     pub jti: uuid::Uuid,

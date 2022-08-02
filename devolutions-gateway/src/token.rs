@@ -540,8 +540,8 @@ pub struct SubkeyTokenClaims {
     /// Key Type, identifies the cryptographic algorithm family of the key
     pub kty: KeyType,
 
-    /// Gateway IDs this token is restricted to
-    pub scope_ids: Vec<Uuid>,
+    /// Gateway ID this token is restricted to
+    pub jet_gw_id: Option<Uuid>,
 
     // Unique ID for this token
     jti: Uuid,
@@ -648,17 +648,15 @@ pub fn validate_token(
                 .and_then(|s| multibase::decode(s).map(|(_, data)| data).ok())
                 .context("invalid `key_data` parameter in JWT routing token (expected standard base64 encoding)")?;
 
-            if !subkey_claims.scope_ids.is_empty() {
-                // Gateway's ID is required if this claim is not empty
+            match (subkey_claims.jet_gw_id, dgw_id) {
+                // There is no Gateway ID scope
+                (None, _) => {}
+                // Gateway ID is required and must be equal to the scope
+                (Some(expected_id), Some(this_gw_id)) if expected_id == this_gw_id => {}
 
-                match dgw_id {
-                    // This token is allowed to be used on this Gateway
-                    Some(id) if subkey_claims.scope_ids.contains(&id) => {}
-
-                    // Scope rule is not respected
-                    Some(_) => anyhow::bail!("Subkey can't be used for this Gateway (bad ID scope)"),
-                    None => anyhow::bail!("This gateway has no ID assigned"),
-                }
+                // Gateway ID scope rule is not respected
+                (Some(_), Some(_)) => anyhow::bail!("Subkey can't be used for this Gateway (bad ID scope)"),
+                (Some(_), None) => anyhow::bail!("This gateway has no ID assigned"),
             }
 
             {

@@ -303,13 +303,16 @@ fn token_cache() {
     });
 }
 
-fn scope_ids(this_dgw_id: Uuid) -> impl Strategy<Value = Vec<Uuid>> {
-    (vec(uuid_typed(), 0..3), any::<bool>()).prop_map(move |(mut ids, include_this_dgw_id)| {
-        if include_this_dgw_id {
-            ids.push(this_dgw_id);
-        }
-        ids
-    })
+fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
+    (option::of(uuid_typed()), any::<bool>()).prop_map(
+        move |(other_id, is_this_gw_id)| {
+            if is_this_gw_id {
+                Some(this_gw_id)
+            } else {
+                other_id
+            }
+        },
+    )
 }
 
 #[test]
@@ -326,7 +329,7 @@ fn subkey() {
     let source_ip = IpAddr::from([13u8, 12u8, 11u8, 10u8]);
     let now = chrono::Utc::now().timestamp();
 
-    let this_dgw_id = Uuid::try_from("123e4567-e89b-12d3-a456-426614174000").unwrap();
+    let this_gw_id = Uuid::try_from("123e4567-e89b-12d3-a456-426614174000").unwrap();
     let key_data = subkey_pub.to_der().unwrap();
     let kid = multibase::encode(
         multibase::Base::Base64,
@@ -334,13 +337,17 @@ fn subkey() {
     );
     let key_data = multibase::encode(multibase::Base::Base64, key_data);
 
-    let test_impl = |scope_ids: Vec<Uuid>, claims: AssociationClaims| -> anyhow::Result<()> {
-        let should_succeed = scope_ids.is_empty() || scope_ids.contains(&this_dgw_id);
+    let test_impl = |jet_gw_id: Option<Uuid>, claims: AssociationClaims| -> anyhow::Result<()> {
+        let should_succeed = match jet_gw_id {
+            None => true,
+            Some(id) if id == this_gw_id => true,
+            _ => false,
+        };
 
         let subkey_claims = SubkeyClaims {
             kid: kid.clone(),
             kty: "SPKI".to_owned(),
-            scope_ids,
+            jet_gw_id,
             jti: Uuid::nil(),
             iat: 1659357158,
             nbf: 1659357158,
@@ -376,7 +383,7 @@ fn subkey() {
             Some(&delegation_key),
             &token_cache,
             &jrl,
-            Some(this_dgw_id),
+            Some(this_gw_id),
         );
 
         if should_succeed {
@@ -388,7 +395,7 @@ fn subkey() {
         Ok(())
     };
 
-    proptest!(ProptestConfig::with_cases(16), |(scope_ids in scope_ids(this_dgw_id), claims in any_association_claims(now).no_shrink())| {
-        test_impl(scope_ids, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+    proptest!(ProptestConfig::with_cases(8), |(scope_dw_id in jet_gw_id(this_gw_id), claims in any_association_claims(now).no_shrink())| {
+        test_impl(scope_dw_id, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
     });
 }
