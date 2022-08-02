@@ -597,7 +597,7 @@ pub fn validate_token(
     delegation_key: Option<&PrivateKey>,
     token_cache: &TokenCache,
     revocation_list: &CurrentJrl,
-    dgw_id: Option<Uuid>,
+    gw_id: Option<Uuid>,
 ) -> anyhow::Result<AccessTokenClaims> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
@@ -631,7 +631,7 @@ pub fn validate_token(
                 delegation_key,
                 token_cache,
                 revocation_list,
-                dgw_id,
+                gw_id,
             )
             .context("Failed to validate key token")?
             {
@@ -646,9 +646,9 @@ pub fn validate_token(
                 .context("`key_token` present but `key_data` additional header parameter is missing")?
                 .as_str()
                 .and_then(|s| multibase::decode(s).map(|(_, data)| data).ok())
-                .context("invalid `key_data` parameter in JWT routing token (expected standard base64 encoding)")?;
+                .context("invalid `key_data` parameter in JWT routing token (expected multibase encoding)")?;
 
-            match (subkey_claims.jet_gw_id, dgw_id) {
+            match (subkey_claims.jet_gw_id, gw_id) {
                 // There is no Gateway ID scope
                 (None, _) => {}
                 // Gateway ID is required and must be equal to the scope
