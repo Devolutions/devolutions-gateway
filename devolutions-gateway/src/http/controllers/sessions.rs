@@ -28,9 +28,6 @@ impl SessionsController {
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
     ),
-    params(
-        ("scope_token" = String, Header, description = "Scope token for gateway.sessions.read"),
-    ),
     security(("scope_token" = ["gateway.sessions.read"])),
 ))]
 pub(crate) async fn get_sessions() -> Json<Vec<GatewaySessionInfo>> {

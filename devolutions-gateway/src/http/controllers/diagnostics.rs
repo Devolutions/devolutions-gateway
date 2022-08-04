@@ -98,9 +98,6 @@ impl DiagnosticsController {
         (status = 403, description = "Insufficient permissions"),
         (status = 500, description = "Failed to retrieve logs"),
     ),
-    params(
-        ("scope_token" = String, Header, description = "Scope token for gateway.diagnostics.read"),
-    ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
 async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
@@ -133,9 +130,6 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
-    ),
-    params(
-        ("scope_token" = String, Header, description = "Scope token for gateway.diagnostics.read"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
