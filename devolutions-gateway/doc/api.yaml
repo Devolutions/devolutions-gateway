@@ -32,14 +32,6 @@ paths:
       summary: Retrieves configuration.
       description: "Retrieves configuration.\n"
       operationId: GetConfiguration
-      parameters:
-        - name: scope_token
-          in: header
-          description: Scope token for gateway.diagnostics.read
-          required: true
-          deprecated: false
-          schema:
-            type: string
       responses:
         "200":
           description: Service configuration
@@ -64,14 +56,6 @@ paths:
       summary: Retrieves latest logs.
       description: "Retrieves latest logs.\n"
       operationId: GetLogs
-      parameters:
-        - name: scope_token
-          in: header
-          description: Scope token for gateway.diagnostics.read
-          required: true
-          deprecated: false
-          schema:
-            type: string
       responses:
         "200":
           description: Latest logs
@@ -113,14 +97,6 @@ paths:
       summary: Lists running sessions
       description: "Lists running sessions\n"
       operationId: GetSessions
-      parameters:
-        - name: scope_token
-          in: header
-          description: Scope token for gateway.sessions.read
-          required: true
-          deprecated: false
-          schema:
-            type: string
       responses:
         "200":
           description: Running sessions
