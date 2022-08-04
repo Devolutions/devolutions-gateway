@@ -82,10 +82,9 @@ export class Client {
 
     /**
      * Retrieves configuration.
-     * @param scope_token Scope token for gateway.diagnostics.read
      * @return Service configuration
      */
-    getConfiguration(scope_token: string): Observable<GatewayConfiguration> {
+    getConfiguration(): Observable<GatewayConfiguration> {
         let url_ = this.baseUrl + "/jet/diagnostics/configuration";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -93,7 +92,6 @@ export class Client {
             observe: "response",
             responseType: "blob",
             headers: new HttpHeaders({
-                "scope_token": scope_token !== undefined && scope_token !== null ? "" + scope_token : "",
                 "Accept": "application/json"
             })
         };
@@ -148,10 +146,9 @@ export class Client {
 
     /**
      * Retrieves latest logs.
-     * @param scope_token Scope token for gateway.diagnostics.read
      * @return Latest logs
      */
-    getLogs(scope_token: string): Observable<string> {
+    getLogs(): Observable<string> {
         let url_ = this.baseUrl + "/jet/diagnostics/logs";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -159,7 +156,6 @@ export class Client {
             observe: "response",
             responseType: "blob",
             headers: new HttpHeaders({
-                "scope_token": scope_token !== undefined && scope_token !== null ? "" + scope_token : "",
                 "Accept": "text/plain"
             })
         };
@@ -272,10 +268,9 @@ export class Client {
 
     /**
      * Lists running sessions
-     * @param scope_token Scope token for gateway.sessions.read
      * @return Running sessions
      */
-    getSessions(scope_token: string): Observable<SessionInfo[]> {
+    getSessions(): Observable<SessionInfo[]> {
         let url_ = this.baseUrl + "/jet/sessions";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -283,7 +278,6 @@ export class Client {
             observe: "response",
             responseType: "blob",
             headers: new HttpHeaders({
-                "scope_token": scope_token !== undefined && scope_token !== null ? "" + scope_token : "",
                 "Accept": "application/json"
             })
         };
