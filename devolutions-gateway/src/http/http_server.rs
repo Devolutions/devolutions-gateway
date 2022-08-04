@@ -8,6 +8,7 @@ use crate::http::controllers::kdc_proxy::KdcProxyController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
 use crate::http::controllers::sogar_token::TokenController;
 use crate::http::middlewares::auth::AuthMiddleware;
+use crate::http::middlewares::cors::CorsMiddleware;
 use crate::http::middlewares::log::LogMiddleware;
 use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
@@ -47,6 +48,7 @@ pub fn configure_http_server(
                     vec!["/registry"],
                     vec!["/registry/oauth2/token"],
                 )
+                .apply(CorsMiddleware, vec!["/"], None)
                 .apply(LogMiddleware, vec!["/"], None)
         })
         .configure_router(|router| {
