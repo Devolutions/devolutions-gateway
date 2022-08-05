@@ -728,6 +728,9 @@ namespace Devolutions.Gateway.Clients
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string Hostname { get; set; }
 
+        [Newtonsoft.Json.JsonProperty("id", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public System.Guid Id { get; set; }
+
         [Newtonsoft.Json.JsonProperty("listeners", Required = Newtonsoft.Json.Required.Always)]
         [System.ComponentModel.DataAnnotations.Required]
         public System.Collections.Generic.ICollection<ListenerConfig> Listeners { get; set; } = new System.Collections.ObjectModel.Collection<ListenerConfig>();

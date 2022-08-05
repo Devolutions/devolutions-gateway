@@ -392,6 +392,7 @@ export interface IGatewayClock {
 
 export class GatewayConfiguration implements IGatewayConfiguration {
     hostname!: string;
+    id?: string;
     listeners!: ListenerConfig[];
     version!: string;
 
@@ -417,6 +418,7 @@ export class GatewayConfiguration implements IGatewayConfiguration {
     init(_data?: any) {
         if (_data) {
             this.hostname = _data["hostname"];
+            this.id = _data["id"];
             if (Array.isArray(_data["listeners"])) {
                 this.listeners = [] as any;
                 for (let item of _data["listeners"])
@@ -436,6 +438,7 @@ export class GatewayConfiguration implements IGatewayConfiguration {
     toJSON(data?: any) {
         data = typeof data === 'object' ? data : {};
         data["hostname"] = this.hostname;
+        data["id"] = this.id;
         if (Array.isArray(this.listeners)) {
             data["listeners"] = [];
             for (let item of this.listeners)
@@ -455,6 +458,7 @@ export class GatewayConfiguration implements IGatewayConfiguration {
 
 export interface IGatewayConfiguration {
     hostname: string;
+    id?: string;
     listeners: IListenerConfig[];
     version: string;
 }
