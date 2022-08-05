@@ -4,10 +4,12 @@ use crate::http::HttpErrorStatus;
 use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use std::sync::Arc;
+use uuid::Uuid;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::Component))]
 #[derive(Serialize)]
 pub struct GatewayConfiguration {
+    id: Option<Uuid>,
     hostname: String,
     version: &'static str,
     listeners: Vec<ListenerConfig>,
@@ -16,6 +18,7 @@ pub struct GatewayConfiguration {
 impl From<Arc<Config>> for GatewayConfiguration {
     fn from(config: Arc<Config>) -> Self {
         GatewayConfiguration {
+            id: config.id,
             listeners: config.listeners.clone(),
             version: env!("CARGO_PKG_VERSION"),
             hostname: config.hostname.clone(),
