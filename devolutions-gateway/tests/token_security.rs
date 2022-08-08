@@ -156,12 +156,13 @@ fn revocable_item<'a>(
     delegation_key: &'a PublicKey,
     provisioner_key: &'a PrivateKey,
 ) -> impl Strategy<Value = RevocableItem> + 'a {
-    any_association_claims(now)
+    any_claims(now)
         .prop_flat_map(move |claims| {
-            let token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "ASSOCIATION", &claims)
+            let token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, claims.content_type(), &claims)
                 .encode(&provisioner_key)
                 .unwrap();
-            let token = if matches!(claims.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. }) {
+
+            let token = if claims.should_encrypt() {
                 jwe::Jwe::new(jwe::JweAlg::RsaOaep256, jwe::JweEnc::Aes256Gcm, token.into_bytes())
                     .encode(&delegation_key)
                     .unwrap()
@@ -301,9 +302,11 @@ fn token_cache(
     let provisioner_key_pub = provisioner_key.to_public_key();
     let delegation_key_pub = delegation_key.to_public_key();
 
-    let test_impl = |same_ip: bool, claims: AssociationClaims| -> anyhow::Result<()> {
-        let token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "ASSOCIATION", &claims).encode(&provisioner_key)?;
-        let token = if matches!(claims.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. }) {
+    let test_impl = |same_ip: bool, claims: TokenClaims| -> anyhow::Result<()> {
+        let token =
+            CheckedJwtSig::new_with_cty(JwsAlg::RS256, claims.content_type(), &claims).encode(&provisioner_key)?;
+
+        let token = if claims.should_encrypt() {
             jwe::Jwe::new(jwe::JweAlg::RsaOaep256, jwe::JweEnc::Aes256Gcm, token.into_bytes())
                 .encode(&delegation_key_pub)?
         } else {
@@ -336,7 +339,17 @@ fn token_cache(
             .build()
             .validate(&token);
 
-        if same_ip && matches!(claims.jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
+        let can_reuse = matches!(claims, TokenClaims::Kdc(_))
+            || same_ip
+                && matches!(
+                    claims,
+                    TokenClaims::Association(AssociationClaims {
+                        jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
+                        ..
+                    })
+                );
+
+        if can_reuse {
             // RDP association tokens can be re-used if source IP is identical
             res?;
         } else {
@@ -347,7 +360,7 @@ fn token_cache(
         Ok(())
     };
 
-    proptest!(ProptestConfig::with_cases(32), |(same_ip in any::<bool>(), claims in any_association_claims(now).no_shrink())| {
+    proptest!(ProptestConfig::with_cases(32), |(same_ip in any::<bool>(), claims in any_claims(now).no_shrink())| {
         test_impl(same_ip, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
     });
 }
@@ -401,13 +414,7 @@ fn with_scopes(
                 (true, _) => false,
             };
 
-        let should_encrypt = matches!(
-            claims,
-            TokenClaims::Association(AssociationClaims {
-                jet_cm: ConnectionMode::Fwd { creds: Some(_), .. },
-                ..
-            })
-        );
+        let should_encrypt = claims.should_encrypt();
 
         let content_type = claims.content_type();
 
@@ -506,13 +513,7 @@ fn with_subkey(
     let test_impl = |kid: String, claims: TokenClaims| -> anyhow::Result<()> {
         let should_succeed = kid == subkey_metadata.kid;
 
-        let should_encrypt = matches!(
-            claims,
-            TokenClaims::Association(AssociationClaims {
-                jet_cm: ConnectionMode::Fwd { creds: Some(_), .. },
-                ..
-            })
-        );
+        let should_encrypt = claims.should_encrypt();
 
         let content_type = claims.content_type();
 

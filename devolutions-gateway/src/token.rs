@@ -326,6 +326,8 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum JetAccessScope {
+    #[serde(rename = "*")]
+    Wildcard,
     #[serde(rename = "gateway.sessions.read")]
     GatewaySessionsRead,
     #[serde(rename = "gateway.associations.read")]
