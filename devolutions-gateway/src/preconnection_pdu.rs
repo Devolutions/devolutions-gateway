@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::token::{validate_token, AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache};
+use crate::token::{AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache, TokenValidator};
 use anyhow::Context as _;
 use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
@@ -32,15 +32,16 @@ pub fn extract_association_claims(
         #[allow(deprecated)]
         crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
     } else {
-        validate_token(
-            token,
-            source_ip,
-            provisioner_key,
-            delegation_key,
-            token_cache,
-            jrl,
-            config.id,
-        )
+        TokenValidator::builder()
+            .source_ip(source_ip)
+            .provisioner_key(provisioner_key)
+            .delegation_key(delegation_key)
+            .token_cache(token_cache)
+            .revocation_list(jrl)
+            .gw_id(config.id)
+            .subkey(None)
+            .build()
+            .validate(token)
     }
     .context("token validation")?;
 

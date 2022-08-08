@@ -1,17 +1,18 @@
-use devolutions_gateway::token::{self, ApplicationProtocol, Protocol};
+use devolutions_gateway::token::{self, ApplicationProtocol, JetAccessScope, Protocol};
 use devolutions_gateway::utils::TargetAddr;
 use devolutions_gateway::{ConnectionModeDetails, GatewaySessionInfo};
 use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
 use serde::Serialize;
+use uuid::Uuid;
 
 pub fn uuid_str() -> impl Strategy<Value = String> {
     "[[:digit:]]{8}-([[:digit:]]{4}-){3}[[:digit:]]{12}".no_shrink()
 }
 
-pub fn uuid_typed() -> impl Strategy<Value = uuid::Uuid> {
-    uuid_str().prop_map(|id| uuid::Uuid::parse_str(&id).unwrap())
+pub fn uuid_typed() -> impl Strategy<Value = Uuid> {
+    uuid_str().prop_map(|id| Uuid::parse_str(&id).unwrap())
 }
 
 pub fn token_content_type() -> impl Strategy<Value = token::ContentType> {
@@ -63,6 +64,15 @@ pub fn host_with_port() -> impl Strategy<Value = String> {
 
 pub fn alternate_hosts_with_ports() -> impl Strategy<Value = Vec<String>> {
     vec(host_with_port(), 0..4)
+}
+
+pub fn access_scope() -> impl Strategy<Value = JetAccessScope> {
+    prop_oneof![
+        Just(JetAccessScope::GatewaySessionsRead),
+        Just(JetAccessScope::GatewayAssociationsRead),
+        Just(JetAccessScope::GatewayDiagnosticsRead),
+        Just(JetAccessScope::GatewayJrlRead),
+    ]
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -138,7 +148,7 @@ pub fn jet_ap_and_jet_cm() -> impl Strategy<Value = (ApplicationProtocol, Connec
 
 #[derive(Debug, Serialize, Clone)]
 pub struct AssociationClaims {
-    pub jet_aid: uuid::Uuid,
+    pub jet_aid: Uuid,
     pub jet_ap: ApplicationProtocol,
     #[serde(flatten)]
     pub jet_cm: ConnectionMode,
@@ -146,7 +156,7 @@ pub struct AssociationClaims {
     pub jet_flt: bool,
     pub nbf: i64,
     pub exp: i64,
-    pub jti: uuid::Uuid,
+    pub jti: Uuid,
 }
 
 pub fn any_association_claims(now: i64) -> impl Strategy<Value = AssociationClaims> {
@@ -181,12 +191,123 @@ pub fn session_info_fwd_only() -> impl Strategy<Value = GatewaySessionInfo> {
     })
 }
 
-#[derive(Debug, Serialize, Clone)]
-pub struct SubkeyClaims {
-    pub kid: String,
-    pub kty: String,
-    pub jet_gw_id: Option<uuid::Uuid>,
-    pub iat: i64,
+#[derive(Debug, Clone, Serialize)]
+pub struct ScopeClaims {
+    pub scope: JetAccessScope,
     pub nbf: i64,
-    pub jti: uuid::Uuid,
+    pub exp: i64,
+    pub jti: Uuid,
+}
+
+pub fn any_scope_claims(now: i64) -> impl Strategy<Value = ScopeClaims> {
+    (access_scope(), uuid_typed()).prop_map(move |(scope, jti)| ScopeClaims {
+        scope,
+        jti,
+        nbf: now,
+        exp: now + 1000,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BridgeClaims {
+    pub target_host: TargetAddr,
+    pub nbf: i64,
+    pub exp: i64,
+    pub jti: Uuid,
+}
+
+pub fn any_bridge_claims(now: i64) -> impl Strategy<Value = BridgeClaims> {
+    (target_addr(), uuid_typed()).prop_map(move |(target_host, jti)| BridgeClaims {
+        target_host,
+        jti,
+        nbf: now,
+        exp: now + 1000,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JmuxClaims {
+    pub jet_aid: Uuid,
+    pub dst_hst: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dst_addl: Vec<String>,
+    pub jet_ap: ApplicationProtocol,
+    pub nbf: i64,
+    pub exp: i64,
+    pub jti: Uuid,
+}
+
+pub fn any_jmux_claims(now: i64) -> impl Strategy<Value = JmuxClaims> {
+    (
+        uuid_typed(),
+        host(),
+        alternate_hosts(),
+        application_protocol(),
+        uuid_typed(),
+    )
+        .prop_map(move |(jet_aid, dst_hst, dst_addl, jet_ap, jti)| JmuxClaims {
+            jet_aid,
+            dst_hst,
+            dst_addl,
+            jet_ap,
+            jti,
+            nbf: now,
+            exp: now + 1000,
+        })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct KdcClaims {
+    pub krb_realm: String,
+    pub krb_kdc: String,
+    pub nbf: i64,
+    pub exp: i64,
+    pub jti: Uuid,
+}
+
+pub fn any_kdc_claims(now: i64) -> impl Strategy<Value = KdcClaims> {
+    (
+        "[a-z0-9_-]{5,25}",
+        "(tcp|udp)://[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?",
+        uuid_typed(),
+    )
+        .prop_map(move |(krb_realm, krb_kdc, jti)| KdcClaims {
+            krb_realm,
+            krb_kdc,
+            jti,
+            nbf: now,
+            exp: now + 1000,
+        })
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(untagged)]
+pub enum TokenClaims {
+    Association(AssociationClaims),
+    Scope(ScopeClaims),
+    Bridge(BridgeClaims),
+    Jmux(JmuxClaims),
+    Kdc(KdcClaims),
+}
+
+impl TokenClaims {
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            TokenClaims::Association(_) => "ASSOCIATION",
+            TokenClaims::Scope(_) => "SCOPE",
+            TokenClaims::Bridge(_) => "BRIDGE",
+            TokenClaims::Jmux(_) => "JMUX",
+            TokenClaims::Kdc(_) => "KDC",
+        }
+    }
+}
+
+pub fn any_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
+    prop_oneof![
+        any_scope_claims(now).prop_map(TokenClaims::Scope),
+        any_bridge_claims(now).prop_map(TokenClaims::Bridge),
+        any_kdc_claims(now).prop_map(TokenClaims::Kdc),
+        any_jmux_claims(now).prop_map(TokenClaims::Jmux),
+        any_association_claims(now).prop_map(TokenClaims::Association),
+    ]
 }

@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol};
+use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
 use picky::jose::jwe;
@@ -9,6 +9,7 @@ use picky::key::{PrivateKey, PublicKey};
 use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
+use rstest::{fixture, rstest};
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -98,6 +99,51 @@ Gz2sM9EZDQGifSwkQLinBEc4pj4Ftp+XLm9Vx0HhWrT+TNLLvxrVpFAScxsXCykN
 02KdL+VAc/tazDW+zOcmLJVY
 -----END PRIVATE KEY-----"#;
 
+#[fixture]
+fn jrl() -> Mutex<JrlTokenClaims> {
+    Mutex::new(JrlTokenClaims::default())
+}
+
+#[fixture]
+fn provisioner_key() -> PrivateKey {
+    PrivateKey::from_pem_str(PROVISIONER_KEY).unwrap()
+}
+
+#[fixture]
+fn delegation_key() -> PrivateKey {
+    PrivateKey::from_pem_str(DELEGATION_KEY).unwrap()
+}
+
+#[fixture]
+fn subkey() -> PrivateKey {
+    PrivateKey::from_pem_str(SUBKEY).unwrap()
+}
+
+#[fixture]
+fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+#[fixture]
+fn source_ip() -> IpAddr {
+    IpAddr::from([13u8, 12u8, 11u8, 10u8])
+}
+
+#[fixture]
+fn source_ip_2() -> IpAddr {
+    IpAddr::from([15u8, 12u8, 11u8, 10u8])
+}
+
+#[fixture]
+fn this_gw_id() -> Uuid {
+    Uuid::try_from("123e4567-e89b-12d3-a456-426614174000").unwrap()
+}
+
+#[fixture]
+fn subkey_kid() -> &'static str {
+    "<subkey-kid>"
+}
+
 #[derive(Debug, Clone)]
 struct RevocableItem {
     claim_to_revoke: Option<(String, serde_json::Value)>,
@@ -141,14 +187,11 @@ fn revocable_item<'a>(
         .no_shrink()
 }
 
-#[test]
-fn revocation_list() {
-    let provisioner_key = PrivateKey::from_pem_str(PROVISIONER_KEY).unwrap();
+/// Assert that a token containing revoked claims is refused
+#[rstest]
+fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, source_ip: IpAddr, now: i64) {
     let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key = PrivateKey::from_pem_str(DELEGATION_KEY).unwrap();
     let delegation_key_pub = delegation_key.to_public_key();
-    let source_ip = IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    let now = chrono::Utc::now().timestamp();
 
     let test_impl = |items: Vec<RevocableItem>| -> anyhow::Result<()> {
         // Make sure all tokens are valid before any revocation
@@ -157,16 +200,17 @@ fn revocation_list() {
         let token_cache = new_token_cache();
 
         for (idx, item) in items.iter().enumerate() {
-            devolutions_gateway::token::validate_token(
-                &item.token,
-                source_ip,
-                &provisioner_key_pub,
-                Some(&delegation_key),
-                &token_cache,
-                &empty_jrl,
-                None,
-            )
-            .with_context(|| format!("Item n°{idx} validation failed"))?;
+            devolutions_gateway::token::TokenValidator::builder()
+                .source_ip(source_ip)
+                .provisioner_key(&provisioner_key_pub)
+                .delegation_key(Some(&delegation_key))
+                .token_cache(&token_cache)
+                .revocation_list(&empty_jrl)
+                .gw_id(None)
+                .subkey(None)
+                .build()
+                .validate(&item.token)
+                .with_context(|| format!("Item n°{idx} validation failed"))?;
         }
 
         // Revoke claims
@@ -215,15 +259,16 @@ fn revocation_list() {
         let token_cache = new_token_cache();
 
         for (idx, (item, is_revoked)) in items.into_iter().enumerate() {
-            let res = devolutions_gateway::token::validate_token(
-                &item.token,
-                source_ip,
-                &provisioner_key_pub,
-                Some(&delegation_key),
-                &token_cache,
-                &updated_jrl,
-                None,
-            );
+            let res = devolutions_gateway::token::TokenValidator::builder()
+                .source_ip(source_ip)
+                .provisioner_key(&provisioner_key_pub)
+                .delegation_key(Some(&delegation_key))
+                .token_cache(&token_cache)
+                .revocation_list(&updated_jrl)
+                .gw_id(None)
+                .subkey(None)
+                .build()
+                .validate(&item.token);
 
             if is_revoked {
                 let e = res
@@ -243,16 +288,18 @@ fn revocation_list() {
     });
 }
 
-#[test]
-fn token_cache() {
-    let jrl = Mutex::new(JrlTokenClaims::default());
-    let provisioner_key = PrivateKey::from_pem_str(PROVISIONER_KEY).unwrap();
+/// Assert that tokens can't be reused without any constaint
+#[rstest]
+fn token_cache(
+    jrl: Mutex<JrlTokenClaims>,
+    provisioner_key: PrivateKey,
+    delegation_key: PrivateKey,
+    source_ip: IpAddr,
+    source_ip_2: IpAddr,
+    now: i64,
+) {
     let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key = PrivateKey::from_pem_str(DELEGATION_KEY).unwrap();
     let delegation_key_pub = delegation_key.to_public_key();
-    let source_ip = IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    let source_ip_2 = IpAddr::from([15u8, 12u8, 11u8, 10u8]);
-    let now = chrono::Utc::now().timestamp();
 
     let test_impl = |same_ip: bool, claims: AssociationClaims| -> anyhow::Result<()> {
         let token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "ASSOCIATION", &claims).encode(&provisioner_key)?;
@@ -265,27 +312,29 @@ fn token_cache() {
 
         let token_cache = new_token_cache();
 
-        devolutions_gateway::token::validate_token(
-            &token,
-            source_ip,
-            &provisioner_key_pub,
-            Some(&delegation_key),
-            &token_cache,
-            &jrl,
-            None,
-        )?;
+        devolutions_gateway::token::TokenValidator::builder()
+            .source_ip(source_ip)
+            .provisioner_key(&provisioner_key_pub)
+            .delegation_key(Some(&delegation_key))
+            .token_cache(&token_cache)
+            .revocation_list(&jrl)
+            .gw_id(None)
+            .subkey(None)
+            .build()
+            .validate(&token)?;
 
         let ip_when_reusing = if same_ip { source_ip } else { source_ip_2 };
 
-        let res = devolutions_gateway::token::validate_token(
-            &token,
-            ip_when_reusing,
-            &provisioner_key_pub,
-            Some(&delegation_key),
-            &token_cache,
-            &jrl,
-            None,
-        );
+        let res = devolutions_gateway::token::TokenValidator::builder()
+            .source_ip(ip_when_reusing)
+            .provisioner_key(&provisioner_key_pub)
+            .delegation_key(Some(&delegation_key))
+            .token_cache(&token_cache)
+            .revocation_list(&jrl)
+            .gw_id(None)
+            .subkey(None)
+            .build()
+            .validate(&token);
 
         if same_ip && matches!(claims.jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
             // RDP association tokens can be re-used if source IP is identical
@@ -303,6 +352,7 @@ fn token_cache() {
     });
 }
 
+/// Randomly choose between the provided ID and a newly generated one
 fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
     (option::of(uuid_typed()), any::<bool>()).prop_map(
         move |(other_id, is_this_gw_id)| {
@@ -315,59 +365,68 @@ fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
     )
 }
 
-#[test]
-fn subkey() {
-    use multihash::MultihashDigest;
-
-    let jrl = Mutex::new(JrlTokenClaims::default());
-    let master_key = PrivateKey::from_pem_str(PROVISIONER_KEY).unwrap();
-    let master_key_pub = master_key.to_public_key();
-    let delegation_key = PrivateKey::from_pem_str(DELEGATION_KEY).unwrap();
+/// Assert that a token is refused if it doesn't conform to the scope rules:
+/// - Gateway ID if `jet_gw_id` claim is present
+/// - Content Type if `kid` header parameter is present and a subkey is used
+#[rstest]
+fn with_scopes(
+    jrl: Mutex<JrlTokenClaims>,
+    provisioner_key: PrivateKey,
+    delegation_key: PrivateKey,
+    subkey: PrivateKey,
+    subkey_kid: &str,
+    source_ip: IpAddr,
+    this_gw_id: Uuid,
+    now: i64,
+) {
+    let provisioner_key_pub = provisioner_key.to_public_key();
     let delegation_key_pub = delegation_key.to_public_key();
-    let subkey = PrivateKey::from_pem_str(SUBKEY).unwrap();
     let subkey_pub = subkey.to_public_key();
-    let source_ip = IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    let now = chrono::Utc::now().timestamp();
+    let subkey_metadata = Subkey {
+        data: subkey_pub,
+        kid: subkey_kid.into(),
+    };
 
-    let this_gw_id = Uuid::try_from("123e4567-e89b-12d3-a456-426614174000").unwrap();
-    let key_data = subkey_pub.to_der().unwrap();
-    let kid = multibase::encode(
-        multibase::Base::Base64,
-        multihash::Code::Sha2_256.digest(&key_data).to_bytes(),
-    );
-    let key_data = multibase::encode(multibase::Base::Base64, key_data);
-
-    let test_impl = |jet_gw_id: Option<Uuid>, claims: AssociationClaims| -> anyhow::Result<()> {
+    let test_impl = |jet_gw_id: Option<Uuid>, use_subkey: bool, claims: TokenClaims| -> anyhow::Result<()> {
         let should_succeed = match jet_gw_id {
             None => true,
             Some(id) if id == this_gw_id => true,
             _ => false,
         };
 
-        let subkey_claims = SubkeyClaims {
-            kid: kid.clone(),
-            kty: "SPKI".to_owned(),
-            jet_gw_id,
-            jti: Uuid::nil(),
-            iat: 1659357158,
-            nbf: 1659357158,
+        let should_succeed = should_succeed
+            && match (use_subkey, &claims) {
+                (false, _) => true,
+                (true, TokenClaims::Jmux(_) | TokenClaims::Association(_)) => true,
+                (true, _) => false,
+            };
+
+        let should_encrypt = matches!(
+            claims,
+            TokenClaims::Association(AssociationClaims {
+                jet_cm: ConnectionMode::Fwd { creds: Some(_), .. },
+                ..
+            })
+        );
+
+        let content_type = claims.content_type();
+
+        let mut claims = serde_json::to_value(claims).unwrap();
+
+        if let Some(id) = jet_gw_id {
+            claims["jet_gw_id"] = serde_json::Value::String(id.to_string());
+        }
+
+        let mut token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, content_type, &claims);
+
+        let token = if use_subkey {
+            token.header.kid = Some(subkey_metadata.kid.to_string());
+            token.encode(&subkey)?
+        } else {
+            token.encode(&provisioner_key)?
         };
-        let key_token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "SUBKEY", &subkey_claims)
-            .encode(&master_key)
-            .unwrap();
 
-        let mut token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, "ASSOCIATION", &claims);
-        token
-            .header
-            .additional
-            .insert("key_token".to_owned(), key_token.clone().into());
-        token
-            .header
-            .additional
-            .insert("key_data".to_owned(), key_data.clone().into());
-        let token = token.encode(&subkey)?;
-
-        let token = if matches!(claims.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. }) {
+        let token = if should_encrypt {
             jwe::Jwe::new(jwe::JweAlg::RsaOaep256, jwe::JweEnc::Aes256Gcm, token.into_bytes())
                 .encode(&delegation_key_pub)?
         } else {
@@ -376,15 +435,16 @@ fn subkey() {
 
         let token_cache = new_token_cache();
 
-        let result = devolutions_gateway::token::validate_token(
-            &token,
-            source_ip,
-            &master_key_pub,
-            Some(&delegation_key),
-            &token_cache,
-            &jrl,
-            Some(this_gw_id),
-        );
+        let result = devolutions_gateway::token::TokenValidator::builder()
+            .source_ip(source_ip)
+            .provisioner_key(&provisioner_key_pub)
+            .delegation_key(Some(&delegation_key))
+            .token_cache(&token_cache)
+            .revocation_list(&jrl)
+            .gw_id(Some(this_gw_id))
+            .subkey(Some(&subkey_metadata))
+            .build()
+            .validate(&token);
 
         if should_succeed {
             result.context("failure was unexpected")?;
@@ -395,7 +455,104 @@ fn subkey() {
         Ok(())
     };
 
-    proptest!(ProptestConfig::with_cases(8), |(scope_dw_id in jet_gw_id(this_gw_id), claims in any_association_claims(now).no_shrink())| {
-        test_impl(scope_dw_id, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
-    });
+    proptest!(
+        ProptestConfig::with_cases(32),
+        |(scope_dw_id in jet_gw_id(this_gw_id), use_subkey in any::<bool>(), claims in any_claims(now).no_shrink())| {
+            test_impl(scope_dw_id, use_subkey, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        }
+    );
+}
+
+fn association_or_jmux_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
+    prop_oneof![
+        any_jmux_claims(now).prop_map(TokenClaims::Jmux),
+        any_association_claims(now).prop_map(TokenClaims::Association),
+    ]
+}
+
+/// Randomly choose between the provided kid and a newly generated one
+fn kid(this_kid: &str) -> impl Strategy<Value = String> + '_ {
+    ("[a-zA-Z]{5,15}".no_shrink(), any::<bool>()).prop_map(
+        |(other_kid, use_this_kid)| {
+            if use_this_kid {
+                this_kid.to_owned()
+            } else {
+                other_kid
+            }
+        },
+    )
+}
+
+/// Assert that tokens using a subkey are allowed if properly configured
+#[rstest]
+fn with_subkey(
+    jrl: Mutex<JrlTokenClaims>,
+    provisioner_key: PrivateKey,
+    delegation_key: PrivateKey,
+    subkey: PrivateKey,
+    subkey_kid: &str,
+    source_ip: IpAddr,
+    this_gw_id: Uuid,
+    now: i64,
+) {
+    let provisioner_key_pub = provisioner_key.to_public_key();
+    let delegation_key_pub = delegation_key.to_public_key();
+    let subkey_pub = subkey.to_public_key();
+    let subkey_metadata = Subkey {
+        data: subkey_pub,
+        kid: subkey_kid.into(),
+    };
+
+    let test_impl = |kid: String, claims: TokenClaims| -> anyhow::Result<()> {
+        let should_succeed = kid == subkey_metadata.kid;
+
+        let should_encrypt = matches!(
+            claims,
+            TokenClaims::Association(AssociationClaims {
+                jet_cm: ConnectionMode::Fwd { creds: Some(_), .. },
+                ..
+            })
+        );
+
+        let content_type = claims.content_type();
+
+        let mut token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, content_type, &claims);
+        token.header.kid = Some(kid);
+        let token = token.encode(&subkey)?;
+
+        let token = if should_encrypt {
+            jwe::Jwe::new(jwe::JweAlg::RsaOaep256, jwe::JweEnc::Aes256Gcm, token.into_bytes())
+                .encode(&delegation_key_pub)?
+        } else {
+            token
+        };
+
+        let token_cache = new_token_cache();
+
+        let result = devolutions_gateway::token::TokenValidator::builder()
+            .source_ip(source_ip)
+            .provisioner_key(&provisioner_key_pub)
+            .delegation_key(Some(&delegation_key))
+            .token_cache(&token_cache)
+            .revocation_list(&jrl)
+            .gw_id(Some(this_gw_id))
+            .subkey(Some(&subkey_metadata))
+            .build()
+            .validate(&token);
+
+        if should_succeed {
+            result.context("failure was unexpected")?;
+        } else {
+            result.err().context("failure was expected")?;
+        }
+
+        Ok(())
+    };
+
+    proptest!(
+        ProptestConfig::with_cases(8),
+        |(kid in kid(&subkey_metadata.kid), claims in association_or_jmux_claims(now).no_shrink())| {
+            test_impl(kid, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        }
+    );
 }

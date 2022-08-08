@@ -57,8 +57,16 @@ where
     let token = token.encode(priv_key)?;
 
     // Gateway side
-    let source_ip = std::net::IpAddr::from([13u8, 12u8, 11u8, 10u8]);
-    devolutions_gateway::token::validate_token(&token, source_ip, pub_key, None, token_cache, jrl, None)?;
+    devolutions_gateway::token::TokenValidator::builder()
+        .source_ip(std::net::IpAddr::from([13u8, 12u8, 11u8, 10u8]))
+        .provisioner_key(pub_key)
+        .delegation_key(None)
+        .token_cache(token_cache)
+        .revocation_list(jrl)
+        .gw_id(None)
+        .subkey(None)
+        .build()
+        .validate(&token)?;
 
     Ok(())
 }
@@ -87,6 +95,8 @@ fn pub_key() -> PublicKey {
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
+
+// TODO: as_of_v2022_3_0_0
 
 mod as_of_v2022_2_0_0 {
     use super::*;
