@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::http::HttpErrorStatus;
-use crate::token::{validate_token, AccessTokenClaims, CurrentJrl, RawToken, TokenCache};
+use crate::token::{AccessTokenClaims, CurrentJrl, RawToken, TokenCache, TokenValidator};
 use futures::future::{BoxFuture, FutureExt};
 use saphir::error::SaphirError;
 use saphir::http::{self, StatusCode};
@@ -147,15 +147,16 @@ pub fn authenticate(
         #[allow(deprecated)]
         crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
     } else {
-        validate_token(
-            token,
-            source_addr.ip(),
-            provisioner_key,
-            delegation_key,
-            token_cache,
-            jrl,
-            config.id,
-        )
+        TokenValidator::builder()
+            .source_ip(source_addr.ip())
+            .provisioner_key(provisioner_key)
+            .delegation_key(delegation_key)
+            .token_cache(token_cache)
+            .revocation_list(jrl)
+            .gw_id(config.id)
+            .subkey(None)
+            .build()
+            .validate(token)
     }
     .map_err(HttpErrorStatus::unauthorized)
 }
