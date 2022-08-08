@@ -1,5 +1,5 @@
 use crate::http::HttpErrorStatus;
-use crate::token::{AccessTokenClaims, JetAccessScope};
+use crate::token::{AccessTokenClaims, JetAccessScope, ScopeTokenClaims};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
@@ -34,6 +34,13 @@ impl AccessGuard {
             {
                 true
             }
+            (
+                TokenType::Scope(_),
+                AccessTokenClaims::Scope(ScopeTokenClaims {
+                    scope: JetAccessScope::Wildcard,
+                    ..
+                }),
+            ) => true,
             (TokenType::Bridge, AccessTokenClaims::Bridge(_)) => true,
             (TokenType::Kdc, AccessTokenClaims::Kdc(_)) => true,
             (TokenType::Jrl, AccessTokenClaims::Jrl(_)) => true,

@@ -72,6 +72,7 @@ pub fn access_scope() -> impl Strategy<Value = JetAccessScope> {
         Just(JetAccessScope::GatewayAssociationsRead),
         Just(JetAccessScope::GatewayDiagnosticsRead),
         Just(JetAccessScope::GatewayJrlRead),
+        Just(JetAccessScope::Wildcard),
     ]
 }
 
@@ -157,6 +158,12 @@ pub struct AssociationClaims {
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,
+}
+
+impl AssociationClaims {
+    pub fn should_encrypt(&self) -> bool {
+        matches!(self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
+    }
 }
 
 pub fn any_association_claims(now: i64) -> impl Strategy<Value = AssociationClaims> {
@@ -298,6 +305,13 @@ impl TokenClaims {
             TokenClaims::Bridge(_) => "BRIDGE",
             TokenClaims::Jmux(_) => "JMUX",
             TokenClaims::Kdc(_) => "KDC",
+        }
+    }
+
+    pub fn should_encrypt(&self) -> bool {
+        match self {
+            TokenClaims::Association(assoc) => assoc.should_encrypt(),
+            _ => false,
         }
     }
 }
