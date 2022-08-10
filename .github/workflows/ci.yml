@@ -364,6 +364,12 @@ jobs:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
+      ## Fetch current date and time
+
+      - name: Get current timestamp
+        id: timestamp
+        run: echo "::set-output name=timestamp::$(date +'%Y%m%d%H%M')"
+
       ## Devolutions Toolbox is required for OneDrive uploading
 
       - name: Install Devolutions Toolbox
@@ -430,7 +436,7 @@ jobs:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
           remote: prereleases
-          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.prepare.outputs.short-ref }}
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}-${{ steps.prepare.outputs.short-ref }}
           conflict_behavior: replace
           files: ${{ steps.prepare.outputs.files-to-upload }}
 
