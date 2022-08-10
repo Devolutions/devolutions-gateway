@@ -13,6 +13,10 @@ use std::sync::Arc;
 use tap::Pipe as _;
 use tokio::runtime::{self, Runtime};
 
+pub const SERVICE_NAME: &str = "devolutions-gateway";
+pub const DISPLAY_NAME: &str = "Devolutions Gateway";
+pub const DESCRIPTION: &str = "Devolutions Gateway service";
+
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum GatewayState {
     Stopped,
@@ -28,11 +32,13 @@ pub struct GatewayService {
 impl GatewayService {
     pub fn load(config: Config) -> anyhow::Result<Self> {
         let logger_guard =
-            log::init(config.log_file.as_deref(), config.log_directive.as_deref()).context("failed to setup logger")?;
+            log::init(&config.log_file, config.log_directive.as_deref()).context("failed to setup logger")?;
 
-        config.validate().context("Invalid configuration")?;
+        debug!(?config, "config loaded");
 
-        if config.debug != crate::config::DebugOptions::default() {
+        crate::plugin_manager::load_plugins(&config).context("failed to load plugins")?;
+
+        if !config.debug.is_default() {
             warn!(
                 ?config.debug,
                 "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
@@ -53,15 +59,15 @@ impl GatewayService {
     }
 
     pub fn get_service_name(&self) -> &str {
-        self.config.service_name.as_str()
+        SERVICE_NAME
     }
 
     pub fn get_display_name(&self) -> &str {
-        self.config.display_name.as_str()
+        DISPLAY_NAME
     }
 
     pub fn get_description(&self) -> &str {
-        self.config.description.as_str()
+        DESCRIPTION
     }
 
     pub fn start(&mut self) {
@@ -144,7 +150,8 @@ fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
         Ok(())
     }));
 
-    if let Some(log_path) = config.log_file.clone() {
+    {
+        let log_path = config.log_file.clone();
         futures.push(Box::pin(async move { log_deleter_task(&log_path).await }));
     }
 
@@ -154,12 +161,7 @@ fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
 fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
     use picky::jose::{jws, jwt};
 
-    let jrl_file = config.jrl_file.as_deref().context("JRL file path is missing")?;
-
-    let provisioner_key = config
-        .provisioner_public_key
-        .as_ref()
-        .context("Provisioner key is missing")?;
+    let jrl_file = config.jrl_file.as_path();
 
     let claims: JrlTokenClaims = if jrl_file.exists() {
         info!("Reading JRL file from disk (path: {jrl_file})");
@@ -172,7 +174,7 @@ fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
                 .map(jwt::JwtSig::from)
                 .map_err(jwt::JwtError::from)
         } else {
-            jwt::JwtSig::decode(&token, provisioner_key)
+            jwt::JwtSig::decode(&token, &config.provisioner_public_key)
         }
         .context("Failed to decode JRL token")?;
 

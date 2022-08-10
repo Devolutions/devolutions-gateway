@@ -1,11 +1,9 @@
 use crate::config::Config;
 use crate::generic_client::GenericClient;
 use crate::jet_client::{JetAssociationsMap, JetClient};
-use crate::rdp::RdpClient;
-use crate::routing_client;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::url_to_socket_addr;
-use crate::websocket_client::{WebsocketService, WsClient};
+use crate::websocket_client::WebsocketService;
 use anyhow::Context;
 use hyper::service::service_fn;
 use std::net::SocketAddr;
@@ -13,9 +11,17 @@ use std::sync::Arc;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
-use tokio_rustls::TlsStream;
 use tracing::Instrument as _;
 use url::Url;
+
+#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[derive(Debug, Clone, Serialize)]
+pub struct ListenerUrls {
+    #[cfg_attr(feature = "openapi", component(value_type = String))]
+    pub internal_url: Url,
+    #[cfg_attr(feature = "openapi", component(value_type = String))]
+    pub external_url: Url,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListenerKind {
@@ -37,12 +43,14 @@ pub struct GatewayListener {
 
 impl GatewayListener {
     pub fn init_and_bind(
-        url: Url,
+        url: impl ToInternalUrl,
         config: Arc<Config>,
         associations: Arc<JetAssociationsMap>,
         token_cache: Arc<TokenCache>,
         jrl: Arc<CurrentJrl>,
     ) -> anyhow::Result<Self> {
+        let url = url.to_internal_url();
+
         info!("Initiating listener {}…", url);
 
         let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
@@ -167,108 +175,40 @@ async fn handle_tcp_client(
 ) -> anyhow::Result<()> {
     set_stream_option(&stream);
 
-    if let Some(routing_url) = &config.routing_url {
-        // TODO: should we keep support for this "routing URL" option? (it's not really used in
-        // real world usecases)
-        match routing_url.scheme() {
-            "tcp" => {
-                routing_client::Client::new(routing_url.clone(), config)
-                    .serve(peer_addr, stream)
-                    .instrument(info_span!("tcp-client"))
-                    .await?;
-            }
-            "tls" => {
-                let tls_stream = config
-                    .tls
-                    .as_ref()
-                    .unwrap()
-                    .acceptor
-                    .accept(stream)
-                    .await
-                    .context("TlsAcceptor handshake failed")?;
+    let mut peeked = [0; 4];
+    let n_read = stream
+        .peek(&mut peeked)
+        .await
+        .context("couldn't peek four first bytes")?;
 
-                routing_client::Client::new(routing_url.clone(), config)
-                    .serve(peer_addr, tls_stream)
-                    .instrument(info_span!("tls-client"))
-                    .await?;
-            }
-            "ws" => {
-                let stream = tokio_tungstenite::accept_async(stream)
-                    .await
-                    .context("WebSocket handshake failed")?;
-                let ws = transport::WebSocketStream::new(stream);
-                WsClient::new(routing_url.clone(), config)
-                    .serve(peer_addr, ws)
-                    .instrument(info_span!("ws-client"))
-                    .await?;
-            }
-            "wss" => {
-                let tls_stream = config
-                    .tls
-                    .as_ref()
-                    .unwrap()
-                    .acceptor
-                    .accept(stream)
-                    .await
-                    .context("TLS handshake failed")?;
-                let stream = tokio_tungstenite::accept_async(TlsStream::Server(tls_stream))
-                    .await
-                    .context("WebSocket handshake failed")?;
-                let ws = transport::WebSocketStream::new(stream);
-                WsClient::new(routing_url.clone(), config)
-                    .serve(peer_addr, ws)
-                    .instrument(info_span!("wss-client"))
-                    .await?;
-            }
-            "rdp" => {
-                RdpClient {
-                    config,
-                    associations,
-                    token_cache,
-                    jrl,
-                }
-                .serve(stream)
-                .instrument(info_span!("rdp-client"))
+    // Check if first four bytes contains some protocol magic bytes
+    match &peeked[..n_read] {
+        [b'J', b'E', b'T', b'\0'] => {
+            JetClient::builder()
+                .config(config)
+                .associations(associations)
+                .addr(peer_addr)
+                .transport(stream)
+                .build()
+                .serve()
+                .instrument(info_span!("jet-client"))
                 .await?;
-            }
-            scheme => anyhow::bail!("Unsupported routing URL scheme {}", scheme),
         }
-    } else {
-        let mut peeked = [0; 4];
-        let n_read = stream
-            .peek(&mut peeked)
-            .await
-            .context("couldn't peek four first bytes")?;
-
-        // Check if first four bytes contains some protocol magic bytes
-        match &peeked[..n_read] {
-            [b'J', b'E', b'T', b'\0'] => {
-                JetClient::builder()
-                    .config(config)
-                    .associations(associations)
-                    .addr(peer_addr)
-                    .transport(stream)
-                    .build()
-                    .serve()
-                    .instrument(info_span!("jet-client"))
-                    .await?;
-            }
-            [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
-            _ => {
-                GenericClient::builder()
-                    .config(config)
-                    .associations(associations)
-                    .client_addr(peer_addr)
-                    .client_stream(stream)
-                    .token_cache(token_cache)
-                    .jrl(jrl)
-                    .build()
-                    .serve()
-                    .instrument(info_span!("generic-client"))
-                    .await?;
-            }
+        [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
+        _ => {
+            GenericClient::builder()
+                .config(config)
+                .associations(associations)
+                .client_addr(peer_addr)
+                .client_stream(stream)
+                .token_cache(token_cache)
+                .jrl(jrl)
+                .build()
+                .serve()
+                .instrument(info_span!("generic-client"))
+                .await?;
         }
-    };
+    }
 
     Ok(())
 }
@@ -375,5 +315,27 @@ fn set_socket_options(socket: &TcpSocket) {
 fn set_stream_option(stream: &TcpStream) {
     if let Err(e) = stream.set_nodelay(true) {
         error!("set_nodelay on TcpStream failed: {}", e);
+    }
+}
+
+pub trait ToInternalUrl {
+    fn to_internal_url(self) -> Url;
+}
+
+impl ToInternalUrl for &'_ ListenerUrls {
+    fn to_internal_url(self) -> Url {
+        self.internal_url.clone()
+    }
+}
+
+impl ToInternalUrl for ListenerUrls {
+    fn to_internal_url(self) -> Url {
+        self.internal_url
+    }
+}
+
+impl ToInternalUrl for Url {
+    fn to_internal_url(self) -> Url {
+        self
     }
 }

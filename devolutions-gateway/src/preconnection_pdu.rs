@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::token::{AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache, TokenValidator};
 use anyhow::Context as _;
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use std::io;
 use std::net::IpAddr;
@@ -21,11 +21,6 @@ pub fn extract_association_claims(
         debug!(token, "**DEBUG OPTION**");
     }
 
-    let provisioner_key = config
-        .provisioner_public_key
-        .as_ref()
-        .context("Provisioner key is missing")?;
-
     let delegation_key = config.delegation_private_key.as_ref();
 
     let claims = if config.debug.disable_token_validation {
@@ -34,7 +29,7 @@ pub fn extract_association_claims(
     } else {
         TokenValidator::builder()
             .source_ip(source_ip)
-            .provisioner_key(provisioner_key)
+            .provisioner_key(&config.provisioner_public_key)
             .delegation_key(delegation_key)
             .token_cache(token_cache)
             .revocation_list(jrl)
@@ -52,10 +47,9 @@ pub fn extract_association_claims(
 }
 
 pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<PreconnectionPdu>, io::Error> {
-    let mut parsing_buffer = buf.as_ref();
-    match PreconnectionPdu::from_buffer_consume(&mut parsing_buffer) {
+    match PreconnectionPdu::from_buffer(buf.as_ref()) {
         Ok(preconnection_pdu) => {
-            buf.split_at(preconnection_pdu.buffer_length());
+            buf.advance(preconnection_pdu.buffer_length());
             Ok(Some(preconnection_pdu))
         }
         Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),

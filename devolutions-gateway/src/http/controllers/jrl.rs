@@ -40,10 +40,7 @@ impl JrlController {
         if let AccessTokenClaims::Jrl(claims) = claims {
             let config = self.config.clone();
 
-            let jrl_file = config
-                .jrl_file
-                .as_deref()
-                .ok_or_else(|| HttpErrorStatus::internal("JRL file path is missing"))?;
+            let jrl_file = config.jrl_file.as_path();
 
             info!(path = %jrl_file, "Writing JRL file to disk");
 

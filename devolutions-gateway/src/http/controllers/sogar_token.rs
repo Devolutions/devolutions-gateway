@@ -29,7 +29,7 @@ impl TokenController {
                 let password_out = body.password;
                 let username_out = body.username;
 
-                for user in &self.config.sogar_user_list {
+                for user in &self.config.sogar.user_list {
                     if let (Some(username), Some(hashed_password)) = (&user.username, &user.password) {
                         if username == &username_out {
                             let matched = argon2::verify_encoded(hashed_password.as_str(), password_out.as_bytes());

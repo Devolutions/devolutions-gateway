@@ -5,12 +5,15 @@ mod recording;
 pub use packets_parsing::PacketsParser;
 pub use recording::Recorder;
 
+use anyhow::Context as _;
 use camino::Utf8Path;
 use dlopen::symbor::Library;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
 use std::sync::Arc;
+
+use crate::config::Config;
 
 #[derive(Clone)]
 struct Plugin {
@@ -66,4 +69,17 @@ impl PluginManager {
 
         Ok(())
     }
+}
+
+pub fn load_plugins(conf: &Config) -> anyhow::Result<()> {
+    if let Some(plugins) = &conf.plugins {
+        let mut manager = PLUGIN_MANAGER.lock();
+        for plugin in plugins {
+            manager
+                .load_plugin(plugin)
+                .with_context(|| format!("Failed to load plugin {}", plugin))?;
+        }
+    }
+
+    Ok(())
 }

@@ -16,7 +16,7 @@ fn gateway_service_main(
     args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let config = Config::init();
+    let config = Config::init().expect("unable to initialize configuration");
     let mut service = GatewayService::load(config).expect("unable to load service");
 
     info!("{} service started", service.get_service_name());
@@ -43,8 +43,17 @@ fn gateway_service_main(
 Service!("gateway", gateway_service_main);
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if (args.len() > 1) && (!args[1].starts_with('-')) {
+    let service_name = devolutions_gateway::service::SERVICE_NAME;
+    let display_name = devolutions_gateway::service::DISPLAY_NAME;
+    let description = devolutions_gateway::service::DESCRIPTION;
+
+    let is_cli_app = match std::env::args().nth(1) {
+        Some(arg) if arg.starts_with('-') => true,
+        _ => false,
+    };
+
+    if is_cli_app {
+        // TODO: use a simpler dependency than clap for this
         let cli_app = App::new(crate_name!())
             .author("Devolutions Inc.")
             .version(concat!(crate_version!(), "\n"))
@@ -58,9 +67,6 @@ fn main() -> anyhow::Result<()> {
 
         match cli_app.get_matches().subcommand() {
             ("service", Some(matches)) => {
-                let service_name = devolutions_gateway::config::SERVICE_NAME;
-                let display_name = devolutions_gateway::config::DISPLAY_NAME;
-                let description = devolutions_gateway::config::DESCRIPTION;
                 let mut controller = Controller::new(service_name, display_name, description);
 
                 cfg_if! { if #[cfg(target_os = "linux")] {
@@ -93,7 +99,7 @@ fn main() -> anyhow::Result<()> {
             _ => anyhow::bail!("invalid command"),
         }
     } else {
-        let config = Config::init();
+        let config = Config::init().context("unable to initialize configuration")?;
 
         if !config.service_mode {
             let mut service = GatewayService::load(config).context("Service loading failed")?;
@@ -109,11 +115,7 @@ fn main() -> anyhow::Result<()> {
 
             service.stop();
         } else {
-            let mut controller = Controller::new(
-                config.service_name.as_str(),
-                config.display_name.as_str(),
-                config.description.as_str(),
-            );
+            let mut controller = Controller::new(service_name, display_name, description);
 
             controller
                 .register(service_main_wrapper)

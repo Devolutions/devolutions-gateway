@@ -17,9 +17,6 @@ use saphir::server::Server as SaphirServer;
 use sogar_core::registry::SogarController;
 use std::sync::Arc;
 
-pub const REGISTRY_NAME: &str = "devolutions_registry";
-pub const NAMESPACE: &str = "videos";
-
 pub fn configure_http_server(
     config: Arc<Config>,
     associations: Arc<JetAssociationsMap>,
@@ -68,17 +65,7 @@ pub fn configure_http_server(
 
             // sogar stuff
             let token_controller = TokenController::new(config.clone());
-            let registry_name = config
-                .sogar_registry_config
-                .local_registry_name
-                .as_deref()
-                .unwrap_or(REGISTRY_NAME);
-            let registry_namespace = config
-                .sogar_registry_config
-                .local_registry_image
-                .as_deref()
-                .unwrap_or(NAMESPACE);
-            let sogar = SogarController::new(registry_name, registry_namespace);
+            let sogar = SogarController::new(&config.sogar.registry_name, &config.sogar.registry_image);
 
             info!("Configuring HTTP router");
 
