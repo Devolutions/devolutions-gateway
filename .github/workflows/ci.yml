@@ -82,7 +82,7 @@ jobs:
           echo "::set-output name=rust-profile::$CargoProfile"
 
       - name: Upload version artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: version
           path: VERSION
@@ -214,7 +214,7 @@ jobs:
           echo "::set-output name=staging-path::$StagingPath"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: jetsocat
           path: ${{ steps.build.outputs.staging-path }}
@@ -317,10 +317,33 @@ jobs:
           ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: devolutions-gateway
           path: ${{ steps.load-variables.outputs.staging-path }}
+
+  upload-git-log:
+    name: Upload git-log output
+    runs-on: ubuntu-18.04
+    if: ${{ github.ref == 'refs/heads/master' }}
+    needs:
+      - preflight
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Generate git log
+        shell: pwsh
+        run: git log --max-count=10 > ./git-log.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: git-log
+          path: ./git-log.txt
 
   onedrive:
     name: OneDrive
@@ -330,6 +353,7 @@ jobs:
       - preflight
       - devolutions-gateway
       - jetsocat
+      - upload-git-log
 
     steps:
       - name: Check out Devolutions/actions
@@ -357,6 +381,11 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: devolutions-gateway
+          path: ${{ runner.temp }}/artifacts_raw
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: git-log
           path: ${{ runner.temp }}/artifacts_raw
 
       ## Do the actual upload :tada:
