@@ -21,7 +21,7 @@ jobs:
 
   preflight:
     name: preflight
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
@@ -102,7 +102,7 @@ jobs:
             - os: windows
               runner: windows-2019
             - os: linux
-              runner: ubuntu-18.04
+              runner: ubuntu-20.04
 
       steps:
         - name: Checkout ${{ github.repository }}
@@ -148,7 +148,7 @@ jobs:
           - os: macos
             runner: macos-10.15
           - os: linux
-            runner: ubuntu-18.04
+            runner: ubuntu-20.04
         exclude:
           - arch: x86
             os: macos
@@ -234,7 +234,7 @@ jobs:
           - os: windows
             runner: windows-2019
           - os: linux
-            runner: ubuntu-18.04
+            runner: ubuntu-20.04
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -324,7 +324,7 @@ jobs:
 
   upload-git-log:
     name: Upload git-log output
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
       - preflight
@@ -347,7 +347,7 @@ jobs:
 
   onedrive:
     name: OneDrive
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
       - preflight

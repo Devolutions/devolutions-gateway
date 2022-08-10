@@ -24,7 +24,7 @@ concurrency: gateway-release
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     outputs:
       run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
