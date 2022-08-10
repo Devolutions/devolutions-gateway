@@ -530,9 +530,10 @@ impl Default for JrlTokenClaims {
 
 // ----- subkey ----- //
 
+#[derive(Debug, Clone)]
 pub struct Subkey {
     pub data: PublicKey,
-    pub kid: SmolStr,
+    pub kid: String,
 }
 
 /// Cryptographic key algorithm family

@@ -1,6 +1,7 @@
-use crate::config::{Config, Protocol};
+use crate::config::Config;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
+use crate::token::{ApplicationProtocol, Protocol};
 use crate::{add_session_in_progress, remove_session_in_progress, GatewaySessionInfo};
 use camino::Utf8PathBuf;
 use std::net::SocketAddr;
@@ -91,12 +92,12 @@ where
     B: AsyncWrite + AsyncRead + Unpin,
 {
     pub async fn select_dissector_and_forward(self) -> anyhow::Result<()> {
-        match self.config.0.protocol {
-            Protocol::Wayk => {
-                debug!("WaykMessageReader will be used to interpret application protocol.");
+        match self.session_info.0.application_protocol {
+            ApplicationProtocol::Known(Protocol::Wayk) => {
+                trace!("WaykDissector will be used to interpret application protocol.");
                 self.forward_using_dissector(WaykDissector).await
             }
-            // Protocol::Rdp => {
+            // ApplicationProtocol::Known(Protocol::Rdp) => {
             //     debug!("RdpMessageReader will be used to interpret application protocol");
             //     self.build_with_message_reader(
             //         server_transport,
@@ -110,8 +111,8 @@ where
             //     )
             //     .await
             // }
-            Protocol::Unknown | Protocol::Rdp => {
-                debug!("Protocol is unknown. Data received will not be split to get application message.");
+            _ => {
+                trace!("No dissector available for this protocol. Data received will not be split to get application message.");
                 self.forward_using_dissector(DummyDissector).await
             }
         }

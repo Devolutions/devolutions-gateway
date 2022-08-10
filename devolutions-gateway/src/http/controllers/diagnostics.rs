@@ -1,6 +1,7 @@
-use crate::config::{Config, ListenerConfig};
+use crate::config::Config;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
+use crate::listener::ListenerUrls;
 use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ pub struct GatewayConfiguration {
     id: Option<Uuid>,
     hostname: String,
     version: &'static str,
-    listeners: Vec<ListenerConfig>,
+    listeners: Vec<ListenerUrls>,
 }
 
 impl From<Arc<Config>> for GatewayConfiguration {
@@ -104,13 +105,7 @@ impl DiagnosticsController {
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
 async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
-    let log_file_path = controller
-        .config
-        .log_file
-        .as_ref()
-        .ok_or_else(|| HttpErrorStatus::internal("log file is not configured"))?;
-
-    let latest_log_file_path = crate::log::find_latest_log_file(log_file_path.as_path())
+    let latest_log_file_path = crate::log::find_latest_log_file(controller.config.log_file.as_path())
         .await
         .map_err(|e| HttpErrorStatus::internal(format!("latest log file not found: {e:#}")))?;
 

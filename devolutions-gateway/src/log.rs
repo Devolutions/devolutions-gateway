@@ -12,7 +12,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
 
 pub struct LoggerGuard {
-    _file_guard: Option<WorkerGuard>,
+    _file_guard: WorkerGuard,
     _stdio_guard: WorkerGuard,
 }
 
@@ -37,17 +37,15 @@ impl<'a> LogPathCfg<'a> {
     }
 }
 
-pub fn init(path: Option<&Utf8Path>, filtering_directive: Option<&str>) -> anyhow::Result<LoggerGuard> {
-    let (file_layer, file_guard) = if let Some(path) = path {
+pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Result<LoggerGuard> {
+    let (file_layer, file_guard) = {
         let cfg = LogPathCfg::from_path(path)?;
 
         let file_appender = tracing_appender::rolling::daily(cfg.folder, cfg.prefix);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
         let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
 
-        (Some(file_layer), Some(guard))
-    } else {
-        (None, None)
+        (file_layer, guard)
     };
 
     let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(std::io::stdout());

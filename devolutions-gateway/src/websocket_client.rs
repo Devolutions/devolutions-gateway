@@ -2,11 +2,9 @@ use crate::config::Config;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
-use crate::token::{ApplicationProtocol, CurrentJrl, TokenCache};
+use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::association::remove_jet_association;
-use crate::utils::TargetAddr;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
-use anyhow::Context as _;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use jmux_proxy::JmuxProxy;
 use saphir::error;
@@ -14,10 +12,9 @@ use sha1::Digest as _;
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tracing::Instrument as _;
 use transport::{ErasedRead, ErasedWrite};
-use url::Url;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -575,85 +572,4 @@ async fn handle_jmux(
     });
 
     Ok(rsp)
-}
-
-pub struct WsClient {
-    routing_url: Url,
-    config: Arc<Config>,
-}
-
-impl WsClient {
-    pub fn new(routing_url: Url, config: Arc<Config>) -> Self {
-        WsClient { routing_url, config }
-    }
-
-    pub async fn serve<T>(self, client_addr: SocketAddr, client_transport: T) -> anyhow::Result<()>
-    where
-        T: AsyncRead + AsyncWrite + Unpin,
-    {
-        let server_transport = connect_server(&self.routing_url).await?;
-
-        let destination_host = TargetAddr::try_from(&self.routing_url)?;
-
-        Proxy::init()
-            .config(self.config)
-            .session_info(GatewaySessionInfo::new(
-                Uuid::new_v4(),
-                ApplicationProtocol::unknown(),
-                ConnectionModeDetails::Fwd { destination_host },
-            ))
-            .addrs(client_addr, server_transport.addr)
-            .transports(client_transport, server_transport)
-            .select_dissector_and_forward()
-            .await
-    }
-}
-
-async fn connect_server(url: &Url) -> anyhow::Result<transport::Transport> {
-    use crate::utils;
-    use tokio::net::TcpStream;
-    use tokio_rustls::{rustls, TlsConnector, TlsStream};
-
-    let socket_addr = utils::resolve_url_to_socket_addr(url)
-        .await
-        .with_context(|| format!("couldn't resolve {}", url))?;
-
-    let request = Request::builder()
-        .uri(url.as_str())
-        .body(())
-        .context("request build failure")?;
-
-    match url.scheme() {
-        "ws" => {
-            let stream = TcpStream::connect(&socket_addr).await?;
-            let (stream, _) = tokio_tungstenite::client_async(request, stream)
-                .await
-                .context("WebSocket handshake failed")?;
-            let ws = transport::WebSocketStream::new(stream);
-            Ok(transport::Transport::new(ws, socket_addr))
-        }
-        "wss" => {
-            let tcp_stream = TcpStream::connect(&socket_addr).await?;
-
-            let dns_name = rustls::ServerName::try_from("stub_string").unwrap();
-
-            let rustls_client_conf = rustls::ClientConfig::builder()
-                .with_safe_defaults()
-                .with_custom_certificate_verifier(Arc::new(utils::danger_transport::NoCertificateVerification))
-                .with_no_client_auth();
-            let rustls_client_conf = Arc::new(rustls_client_conf);
-            let cx = TlsConnector::from(rustls_client_conf);
-            let tls_stream = cx.connect(dns_name, tcp_stream).await?;
-
-            let (stream, _) = tokio_tungstenite::client_async(request, TlsStream::Client(tls_stream))
-                .await
-                .context("WebSocket handshake failed")?;
-            let ws = transport::WebSocketStream::new(stream);
-
-            Ok(transport::Transport::new(ws, socket_addr))
-        }
-        scheme => {
-            anyhow::bail!("Unsupported scheme: {}", scheme);
-        }
-    }
 }

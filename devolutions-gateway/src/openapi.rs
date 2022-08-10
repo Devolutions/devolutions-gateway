@@ -15,7 +15,7 @@ use uuid::Uuid;
         SessionInfo,
         ConnectionMode,
         crate::http::controllers::diagnostics::GatewayConfiguration,
-        crate::config::ListenerConfig,
+        crate::listener::ListenerUrls,
         crate::http::controllers::diagnostics::GatewayClock,
     )
 )]

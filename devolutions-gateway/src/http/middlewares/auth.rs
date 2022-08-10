@@ -136,11 +136,6 @@ pub fn authenticate(
         debug!(token, "**DEBUG OPTION**");
     }
 
-    let provisioner_key = config
-        .provisioner_public_key
-        .as_ref()
-        .ok_or_else(|| HttpErrorStatus::internal("Provisioner key is missing"))?;
-
     let delegation_key = config.delegation_private_key.as_ref();
 
     if config.debug.disable_token_validation {
@@ -149,7 +144,7 @@ pub fn authenticate(
     } else {
         TokenValidator::builder()
             .source_ip(source_addr.ip())
-            .provisioner_key(provisioner_key)
+            .provisioner_key(&config.provisioner_public_key)
             .delegation_key(delegation_key)
             .token_cache(token_cache)
             .revocation_list(jrl)

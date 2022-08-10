@@ -31,6 +31,7 @@ hostname = "0.3.1"
 serde = "1.0.143"
 serde_derive = "1.0.143"
 serde_json = "1.0.83"
+serde_with = "2.0.0"
 
 # utils, misc
 camino = { version = "1.0.9", features = ["serde1"] }
@@ -53,11 +54,11 @@ typed-builder = "0.10.0"
 focaccia = "1.2.0"
 
 # security, crypto…
-native-tls = "0.2.10"
 zeroize = { version = "1.5.7", features = ["derive"] }
 rust-argon2 = "1.0.0"
 picky = { version = "7.0.0-rc.3", default-features = false, features = ["jose", "x509"] }
 sspi = "0.3.2"
+# evaluate use of ring in our codebase
 ring = "0.16.20"
 # (unrequired if using `axum`)
 sha1 = "0.10.1"
