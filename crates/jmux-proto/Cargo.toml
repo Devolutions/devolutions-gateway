@@ -6,8 +6,8 @@ edition = "2021"
 publish = false
 
 [dependencies]
-bytes = "1.1.0"
-smol_str = "0.1.21"
+bytes = "1.2.1"
+smol_str = "0.1.23"
 
 [dev-dependencies]
 proptest = "1.0.0"
