@@ -14,6 +14,3 @@ default-members = [
 [profile.production]
 inherits = "release"
 lto = true
-
-[patch.crates-io]
-tokio-tungstenite = { git = "https://github.com/CBenoit/tokio-tungstenite", rev = "ab11df60902fc1f6a0323c5368888026e1a3c65b" }
