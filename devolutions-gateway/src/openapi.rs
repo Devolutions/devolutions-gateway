@@ -10,6 +10,7 @@ use uuid::Uuid;
         crate::http::controllers::diagnostics::get_logs,
         crate::http::controllers::diagnostics::get_configuration,
         crate::http::controllers::diagnostics::get_clock,
+        crate::http::controllers::config::patch_config,
     ),
     components(
         SessionInfo,

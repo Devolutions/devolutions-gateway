@@ -37,7 +37,7 @@ impl GatewayService {
             log::init(&conf.log_file, conf.log_directive.as_deref()).context("failed to setup logger")?;
 
         let conf_file = conf_handle.get_conf_file();
-        debug!(?conf_file);
+        trace!(?conf_file);
 
         crate::plugin_manager::load_plugins(&conf).context("failed to load plugins")?;
 
