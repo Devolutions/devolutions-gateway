@@ -29,6 +29,75 @@ export class Client {
     }
 
     /**
+     * Modifies configuration
+     * @param body Partial JSON-encoded configuration
+     * @return Configuration has been patched with success
+     */
+    patchConfig(body: string): Observable<void> {
+        let url_ = this.baseUrl + "/jet/config";
+        url_ = url_.replace(/[?&]$/, "");
+
+        const content_ = JSON.stringify(body);
+
+        let options_ : any = {
+            body: content_,
+            observe: "response",
+            responseType: "blob",
+            headers: new HttpHeaders({
+                "Content-Type": "application/json",
+            })
+        };
+
+        return this.http.request("patch", url_, options_).pipe(_observableMergeMap((response_ : any) => {
+            return this.processPatchConfig(response_);
+        })).pipe(_observableCatch((response_: any) => {
+            if (response_ instanceof HttpResponseBase) {
+                try {
+                    return this.processPatchConfig(response_ as any);
+                } catch (e) {
+                    return _observableThrow(e) as any as Observable<void>;
+                }
+            } else
+                return _observableThrow(response_) as any as Observable<void>;
+        }));
+    }
+
+    protected processPatchConfig(response: HttpResponseBase): Observable<void> {
+        const status = response.status;
+        const responseBlob =
+            response instanceof HttpResponse ? response.body :
+            (response as any).error instanceof Blob ? (response as any).error : undefined;
+
+        let _headers: any = {}; if (response.headers) { for (let key of response.headers.keys()) { _headers[key] = response.headers.get(key); }}
+        if (status === 200) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return _observableOf<void>(null as any);
+            }));
+        } else if (status === 400) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Bad patch request", status, _responseText, _headers);
+            }));
+        } else if (status === 401) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Invalid or missing authorization token", status, _responseText, _headers);
+            }));
+        } else if (status === 403) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Insufficient permissions", status, _responseText, _headers);
+            }));
+        } else if (status === 500) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Failed to patch configuration", status, _responseText, _headers);
+            }));
+        } else if (status !== 200 && status !== 204) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            }));
+        }
+        return _observableOf<void>(null as any);
+    }
+
+    /**
      * Retrieves server's clock in order to diagnose clock drifting.
      * @return Server's clock
      */
@@ -393,7 +462,7 @@ export interface IGatewayClock {
 export class GatewayConfiguration implements IGatewayConfiguration {
     hostname!: string;
     id?: string;
-    listeners!: ListenerConfig[];
+    listeners!: ListenerUrls[];
     version!: string;
 
     constructor(data?: IGatewayConfiguration) {
@@ -406,7 +475,7 @@ export class GatewayConfiguration implements IGatewayConfiguration {
                 this.listeners = [];
                 for (let i = 0; i < data.listeners.length; i++) {
                     let item = data.listeners[i];
-                    this.listeners[i] = item && !(<any>item).toJSON ? new ListenerConfig(item) : <ListenerConfig>item;
+                    this.listeners[i] = item && !(<any>item).toJSON ? new ListenerUrls(item) : <ListenerUrls>item;
                 }
             }
         }
@@ -422,7 +491,7 @@ export class GatewayConfiguration implements IGatewayConfiguration {
             if (Array.isArray(_data["listeners"])) {
                 this.listeners = [] as any;
                 for (let item of _data["listeners"])
-                    this.listeners!.push(ListenerConfig.fromJS(item));
+                    this.listeners!.push(ListenerUrls.fromJS(item));
             }
             this.version = _data["version"];
         }
@@ -459,15 +528,15 @@ export class GatewayConfiguration implements IGatewayConfiguration {
 export interface IGatewayConfiguration {
     hostname: string;
     id?: string;
-    listeners: IListenerConfig[];
+    listeners: IListenerUrls[];
     version: string;
 }
 
-export class ListenerConfig implements IListenerConfig {
+export class ListenerUrls implements IListenerUrls {
     external_url!: string;
     internal_url!: string;
 
-    constructor(data?: IListenerConfig) {
+    constructor(data?: IListenerUrls) {
         if (data) {
             for (var property in data) {
                 if (data.hasOwnProperty(property))
@@ -483,9 +552,9 @@ export class ListenerConfig implements IListenerConfig {
         }
     }
 
-    static fromJS(data: any): ListenerConfig {
+    static fromJS(data: any): ListenerUrls {
         data = typeof data === 'object' ? data : {};
-        let result = new ListenerConfig();
+        let result = new ListenerUrls();
         result.init(data);
         return result;
     }
@@ -497,15 +566,15 @@ export class ListenerConfig implements IListenerConfig {
         return data;
     }
 
-    clone(): ListenerConfig {
+    clone(): ListenerUrls {
         const json = this.toJSON();
-        let result = new ListenerConfig();
+        let result = new ListenerUrls();
         result.init(json);
         return result;
     }
 }
 
-export interface IListenerConfig {
+export interface IListenerUrls {
     external_url: string;
     internal_url: string;
 }
