@@ -283,17 +283,17 @@ impl ConfHandle {
         })
     }
 
-    /// Returns current configuration state (do not hold it forever)
+    /// Returns current configuration state (do not hold it forever as it may become outdated)
     pub fn get_conf(&self) -> Arc<Conf> {
         self.inner.conf.read().clone()
     }
 
-    /// Returns current configuration file state (do not hold it forever)
+    /// Returns current configuration file state (do not hold it forever as it may become outdated)
     pub fn get_conf_file(&self) -> Arc<dto::ConfFile> {
         self.inner.conf_file.read().clone()
     }
 
-    /// Saves and replace current configuration with a new one
+    /// Atomatically saves and replaces current configuration with a new one
     pub fn save_new_conf_file(&self, conf_file: dto::ConfFile) -> anyhow::Result<()> {
         let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
         save_config(&conf_file).context("Failed to save configuration")?;

@@ -1,5 +1,6 @@
 use crate::config::ConfHandle;
 use crate::http::controllers::association::AssociationController;
+use crate::http::controllers::config::ConfigController;
 use crate::http::controllers::diagnostics::DiagnosticsController;
 use crate::http::controllers::health::HealthController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
@@ -62,10 +63,11 @@ pub fn configure_http_server(
             };
             let duplicated_kdc_proxy = kdc_proxy.duplicated();
             let jrl = JrlController::new(conf_handle.clone(), jrl);
+            let config = ConfigController::new(conf_handle.clone());
 
             // sogar stuff
             let conf = conf_handle.get_conf();
-            let token_controller = TokenController::new(conf_handle);
+            let sogar_token = TokenController::new(conf_handle);
             let sogar = SogarController::new(&conf.sogar.registry_name, &conf.sogar.registry_image);
 
             info!("Configuring HTTP router");
@@ -77,13 +79,14 @@ pub fn configure_http_server(
                 .controller(jet)
                 .controller(SessionsController)
                 .controller(sogar)
-                .controller(token_controller)
+                .controller(sogar_token)
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
                 .controller(LegacySessionsController)
                 .controller(kdc_proxy)
                 .controller(duplicated_kdc_proxy)
                 .controller(jrl)
+                .controller(config)
         })
         .configure_listener(|listener| listener.server_name("Devolutions Gateway"))
         .build_stack_only()?;

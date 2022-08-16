@@ -1,4 +1,5 @@
 pub mod association;
+pub mod config;
 pub mod diagnostics;
 pub mod health;
 pub mod http_bridge;

@@ -198,10 +198,9 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
 -----END PUBLIC KEY-----"#;
 
     #[fixture]
-    fn config() -> Conf {
+    fn conf() -> Conf {
         Conf {
             id: None,
-            service_mode: false,
             listeners: Vec::new(),
             hostname: "hostname".to_owned(),
             capture_path: None,
@@ -220,7 +219,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_moved_to_registry(mut config: Conf) {
+    fn test_files_moved_to_registry(mut conf: Conf) {
         let files_dir_name = "dir_with_file1";
         let file_name = "test1.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
@@ -228,13 +227,13 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
         let path_buf = PathBuf::from("test_registry1/test_image1").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
-        config.sogar.serve_as_registry = true;
-        config.sogar.push_files = false;
-        config.sogar.keep_files = false;
-        config.sogar.registry_name = String::from("test_registry1");
-        config.sogar.registry_image = String::from("test_image1");
+        conf.sogar.serve_as_registry = true;
+        conf.sogar.push_files = false;
+        conf.sogar.keep_files = false;
+        conf.sogar.registry_name = String::from("test_registry1");
+        conf.sogar.registry_image = String::from("test_image1");
 
-        let registry = Registry::new(Arc::new(config));
+        let registry = Registry::new(Arc::new(conf));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
@@ -261,7 +260,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_not_removed(mut config: Conf) {
+    fn test_files_not_removed(mut conf: Conf) {
         let files_dir_name = "dir_with_file2";
         let file_name = "test2.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
@@ -269,14 +268,14 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
         let path_buf = PathBuf::from("test_registry2/test_image2").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
-        config.sogar.serve_as_registry = true;
-        config.sogar.push_files = false;
-        config.sogar.keep_files = true;
-        config.sogar.keep_time = None;
-        config.sogar.registry_name = String::from("test_registry2");
-        config.sogar.registry_image = String::from("test_image2");
+        conf.sogar.serve_as_registry = true;
+        conf.sogar.push_files = false;
+        conf.sogar.keep_files = true;
+        conf.sogar.keep_time = None;
+        conf.sogar.registry_name = String::from("test_registry2");
+        conf.sogar.registry_image = String::from("test_image2");
 
-        let registry = Registry::new(Arc::new(config));
+        let registry = Registry::new(Arc::new(conf));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);
@@ -303,7 +302,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_removed_after_timeout(mut config: Conf) {
+    fn test_files_removed_after_timeout(mut conf: Conf) {
         let files_dir_name = "dir_with_file3";
         let file_name = "test3.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
@@ -311,14 +310,14 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
         let path_buf = PathBuf::from("test_registry3/test_image3").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
 
-        config.sogar.serve_as_registry = true;
-        config.sogar.push_files = false;
-        config.sogar.keep_files = true;
-        config.sogar.keep_time = Some(1);
-        config.sogar.registry_name = String::from("test_registry3");
-        config.sogar.registry_image = String::from("test_image3");
+        conf.sogar.serve_as_registry = true;
+        conf.sogar.push_files = false;
+        conf.sogar.keep_files = true;
+        conf.sogar.keep_time = Some(1);
+        conf.sogar.registry_name = String::from("test_registry3");
+        conf.sogar.registry_image = String::from("test_image3");
 
-        let registry = Registry::new(Arc::new(config));
+        let registry = Registry::new(Arc::new(conf));
 
         assert_eq!(path_buf.exists(), true);
         assert_eq!(path_buf.is_dir(), true);

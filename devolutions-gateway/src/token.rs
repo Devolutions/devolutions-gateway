@@ -336,6 +336,8 @@ pub enum JetAccessScope {
     GatewayDiagnosticsRead,
     #[serde(rename = "gateway.jrl.read")]
     GatewayJrlRead,
+    #[serde(rename = "gateway.config.write")]
+    GatewayConfigWrite,
 }
 
 #[derive(Clone, Deserialize)]
