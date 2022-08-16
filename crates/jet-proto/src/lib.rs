@@ -47,7 +47,7 @@ pub fn get_mask_value() -> u8 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JetMessage {
     JetTestReq(JetTestReq),
     JetTestRsp(JetTestRsp),

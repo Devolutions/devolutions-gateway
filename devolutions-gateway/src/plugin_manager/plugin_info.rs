@@ -9,7 +9,7 @@ use std::slice::from_raw_parts;
 use std::sync::Arc;
 use tap::TapFallible;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PluginCapabilities {
     PacketsParsing = 1,
     Recording = 2,

@@ -4,7 +4,7 @@ use http::StatusCode;
 use std::io;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetTestReq {
     pub version: u32,
     pub host: String,
@@ -53,7 +53,7 @@ impl JetTestReq {
         Err(format!("Invalid test request: {:?}", request).into())
     }
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetTestRsp {
     pub status_code: StatusCode,
     pub version: u32,

@@ -10,7 +10,7 @@ fn parse() {
         let s = format!("{}://{}:{}", scheme, host, port);
         let parsed = DestinationUrl::parse_str(&s).map_err(|e| TestCaseError::fail(e.to_string()))?;
         let as_str = parsed.as_str();
-        let reparsed = DestinationUrl::parse_str(&as_str).map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let reparsed = DestinationUrl::parse_str(as_str).map_err(|e| TestCaseError::fail(e.to_string()))?;
         prop_assert_eq!(parsed, reparsed);
     })
 }

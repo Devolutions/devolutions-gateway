@@ -156,7 +156,7 @@ pub fn authenticate(
     .map_err(HttpErrorStatus::unauthorized)
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum AuthHeaderType {
     Bearer,
     Signature,

@@ -8,7 +8,7 @@ use std::io;
 use std::str::FromStr;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetAcceptReq {
     pub version: u32,
     pub host: String,
@@ -82,7 +82,7 @@ impl JetAcceptReq {
         Err(format!("Invalid accept request: {:?}", request).into())
     }
 }
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetAcceptRsp {
     pub status_code: StatusCode,
     pub version: u32,

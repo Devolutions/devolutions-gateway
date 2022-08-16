@@ -159,12 +159,12 @@ fn revocable_item<'a>(
     any_claims(now)
         .prop_flat_map(move |claims| {
             let token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, claims.content_type(), &claims)
-                .encode(&provisioner_key)
+                .encode(provisioner_key)
                 .unwrap();
 
             let token = if claims.should_encrypt() {
                 jwe::Jwe::new(jwe::JweAlg::RsaOaep256, jwe::JweEnc::Aes256Gcm, token.into_bytes())
-                    .encode(&delegation_key)
+                    .encode(delegation_key)
                     .unwrap()
             } else {
                 token
