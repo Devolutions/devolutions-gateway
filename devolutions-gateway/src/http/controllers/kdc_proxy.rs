@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::ConfHandle;
 use crate::http::HttpErrorStatus;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache};
 use crate::utils::resolve_target_to_socket_addr;
@@ -15,7 +15,7 @@ use tokio::net::{TcpStream, UdpSocket};
 const ERROR_BAD_FORMAT: &str = "\x0b";
 
 pub struct KdcProxyController {
-    pub config: Arc<Config>,
+    pub conf_handle: ConfHandle,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,
 }
@@ -24,7 +24,7 @@ impl KdcProxyController {
     pub fn duplicated(&self) -> DuplicatedKdcProxyController {
         DuplicatedKdcProxyController {
             inner: Self {
-                config: self.config.clone(),
+                conf_handle: self.conf_handle.clone(),
                 token_cache: self.token_cache.clone(),
                 jrl: self.jrl.clone(),
             },
@@ -56,6 +56,8 @@ impl DuplicatedKdcProxyController {
 async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Result<Builder, HttpErrorStatus> {
     use focaccia::unicode_full_case_eq;
 
+    let conf = this.conf_handle.get_conf();
+
     let claims = {
         // Check KDC token
 
@@ -69,13 +71,8 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
             .peer_addr()
             .ok_or_else(|| HttpErrorStatus::internal("peer address missing"))?;
 
-        let claims = crate::http::middlewares::auth::authenticate(
-            *source_addr,
-            token,
-            &this.config,
-            &this.token_cache,
-            &this.jrl,
-        )?;
+        let claims =
+            crate::http::middlewares::auth::authenticate(*source_addr, token, &conf, &this.token_cache, &this.jrl)?;
 
         if let AccessTokenClaims::Kdc(claims) = claims {
             claims
@@ -109,14 +106,14 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
     debug!("Request is for realm (target_domain): {realm}");
 
     if !unicode_full_case_eq(&claims.krb_realm, &realm) {
-        if this.config.debug.disable_token_validation {
+        if conf.debug.disable_token_validation {
             warn!("**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token");
         } else {
             return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
         }
     }
 
-    let kdc_addr = if let Some(kdc_addr) = &this.config.debug.override_kdc {
+    let kdc_addr = if let Some(kdc_addr) = &conf.debug.override_kdc {
         warn!("**DEBUG OPTION** KDC address has been overridden with {kdc_addr}");
         kdc_addr
     } else {

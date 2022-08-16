@@ -1,4 +1,4 @@
-use crate::config::{Config, SogarUser};
+use crate::config::{ConfHandle, SogarUser};
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::PrivateKey;
@@ -8,15 +8,14 @@ use saphir::macros::controller;
 use saphir::prelude::Request;
 use serde::{Deserialize, Serialize};
 use sogar_core::AccessToken;
-use std::sync::Arc;
 
 pub struct TokenController {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
 }
 
 impl TokenController {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub fn new(conf_handle: ConfHandle) -> Self {
+        Self { conf_handle }
     }
 }
 
@@ -26,10 +25,12 @@ impl TokenController {
     async fn get_token(&self, mut req: Request) -> (StatusCode, Option<String>) {
         match req.form::<AccessToken>().await {
             Ok(body) => {
+                let conf = self.conf_handle.get_conf();
+
                 let password_out = body.password;
                 let username_out = body.username;
 
-                for user in &self.config.sogar.user_list {
+                for user in &conf.sogar.user_list {
                     if let (Some(username), Some(hashed_password)) = (&user.username, &user.password) {
                         if username == &username_out {
                             let matched = argon2::verify_encoded(hashed_password.as_str(), password_out.as_bytes());
@@ -37,7 +38,7 @@ impl TokenController {
                                 return (StatusCode::UNAUTHORIZED, None);
                             }
 
-                            return create_token(&self.config.delegation_private_key, user);
+                            return create_token(&conf.delegation_private_key, user);
                         }
                     }
                 }

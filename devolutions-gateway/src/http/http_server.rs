@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::ConfHandle;
 use crate::http::controllers::association::AssociationController;
 use crate::http::controllers::diagnostics::DiagnosticsController;
 use crate::http::controllers::health::HealthController;
@@ -18,7 +18,7 @@ use sogar_core::registry::SogarController;
 use std::sync::Arc;
 
 pub fn configure_http_server(
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
@@ -29,7 +29,7 @@ pub fn configure_http_server(
 
             middlewares
                 .apply(
-                    AuthMiddleware::new(config.clone(), token_cache.clone(), jrl.clone()),
+                    AuthMiddleware::new(conf_handle.clone(), token_cache.clone(), jrl.clone()),
                     vec!["/"],
                     vec![
                         "/registry",
@@ -41,7 +41,7 @@ pub fn configure_http_server(
                     ],
                 )
                 .apply(
-                    SogarAuthMiddleware::new(config.clone()),
+                    SogarAuthMiddleware::new(conf_handle.clone()),
                     vec!["/registry"],
                     vec!["/registry/oauth2/token"],
                 )
@@ -51,21 +51,22 @@ pub fn configure_http_server(
         .configure_router(|router| {
             info!("Loading HTTP controllers");
 
-            let (diagnostics, legacy_diagnostics) = DiagnosticsController::new(config.clone());
-            let (health, legacy_health) = HealthController::new(config.clone());
+            let (diagnostics, legacy_diagnostics) = DiagnosticsController::new(conf_handle.clone());
+            let (health, legacy_health) = HealthController::new(conf_handle.clone());
             let http_bridge = HttpBridgeController::new();
-            let jet = AssociationController::new(config.clone(), associations.clone());
+            let jet = AssociationController::new(conf_handle.clone(), associations.clone());
             let kdc_proxy = KdcProxyController {
-                config: config.clone(),
+                conf_handle: conf_handle.clone(),
                 token_cache,
                 jrl: jrl.clone(),
             };
             let duplicated_kdc_proxy = kdc_proxy.duplicated();
-            let jrl = JrlController::new(config.clone(), jrl);
+            let jrl = JrlController::new(conf_handle.clone(), jrl);
 
             // sogar stuff
-            let token_controller = TokenController::new(config.clone());
-            let sogar = SogarController::new(&config.sogar.registry_name, &config.sogar.registry_image);
+            let conf = conf_handle.get_conf();
+            let token_controller = TokenController::new(conf_handle);
+            let sogar = SogarController::new(&conf.sogar.registry_name, &conf.sogar.registry_image);
 
             info!("Configuring HTTP router");
 

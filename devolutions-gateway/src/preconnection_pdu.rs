@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::token::{AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache, TokenValidator};
 use anyhow::Context as _;
 use bytes::{Buf, BytesMut};
@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 pub fn extract_association_claims(
     pdu: &PreconnectionPdu,
     source_ip: IpAddr,
-    config: &Config,
+    config: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> anyhow::Result<JetAssociationTokenClaims> {

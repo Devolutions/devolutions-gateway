@@ -1,18 +1,21 @@
-use crate::config::Config;
+use crate::config::ConfHandle;
 use saphir::controller::Controller;
 use saphir::http::Method;
 use saphir::macros::controller;
-use std::sync::Arc;
 
 pub struct HealthController {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
 }
 
 impl HealthController {
-    pub fn new(config: Arc<Config>) -> (Self, LegacyHealthController) {
+    pub fn new(conf_handle: ConfHandle) -> (Self, LegacyHealthController) {
         (
-            Self { config: config.clone() },
-            LegacyHealthController { inner: Self { config } },
+            Self {
+                conf_handle: conf_handle.clone(),
+            },
+            LegacyHealthController {
+                inner: Self { conf_handle },
+            },
         )
     }
 }
@@ -35,10 +38,8 @@ impl HealthController {
     ),
 ))]
 fn get_health(controller: &HealthController) -> String {
-    format!(
-        "Devolutions Gateway \"{}\" is alive and healthy.",
-        controller.config.hostname
-    )
+    let conf = controller.conf_handle.get_conf();
+    format!("Devolutions Gateway \"{}\" is alive and healthy.", conf.hostname)
 }
 
 // NOTE: legacy controller starting 2021/11/25

@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
@@ -15,13 +15,16 @@ use tokio::runtime::Handle;
 use uuid::Uuid;
 
 pub struct AssociationController {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
     associations: Arc<JetAssociationsMap>,
 }
 
 impl AssociationController {
-    pub fn new(config: Arc<Config>, associations: Arc<JetAssociationsMap>) -> Self {
-        Self { config, associations }
+    pub fn new(conf_handle: ConfHandle, associations: Arc<JetAssociationsMap>) -> Self {
+        Self {
+            conf_handle,
+            associations,
+        }
     }
 }
 
@@ -127,8 +130,10 @@ impl AssociationController {
                 return (StatusCode::INTERNAL_SERVER_ERROR, None);
             };
 
+            let conf = self.conf_handle.get_conf();
+
             if association.get_candidates().is_empty() {
-                for listener in &self.config.listeners {
+                for listener in &conf.listeners {
                     if let Some(candidate) = Candidate::new(listener.external_url.as_str().trim_end_matches('/')) {
                         association.add_candidate(candidate);
                     }

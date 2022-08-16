@@ -1,10 +1,9 @@
-use crate::config::Config;
+use crate::config::{Conf, ConfHandle};
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::listener::ListenerUrls;
 use crate::token::JetAccessScope;
 use saphir::prelude::*;
-use std::sync::Arc;
 use uuid::Uuid;
 
 #[cfg_attr(feature = "openapi", derive(utoipa::Component))]
@@ -16,13 +15,13 @@ pub struct GatewayConfiguration {
     listeners: Vec<ListenerUrls>,
 }
 
-impl From<Arc<Config>> for GatewayConfiguration {
-    fn from(config: Arc<Config>) -> Self {
+impl From<&Conf> for GatewayConfiguration {
+    fn from(conf: &Conf) -> Self {
         GatewayConfiguration {
-            id: config.id,
-            listeners: config.listeners.clone(),
+            id: conf.id,
+            listeners: conf.listeners.clone(),
             version: env!("CARGO_PKG_VERSION"),
-            hostname: config.hostname.clone(),
+            hostname: conf.hostname.clone(),
         }
     }
 }
@@ -46,15 +45,17 @@ impl GatewayClock {
 }
 
 pub struct DiagnosticsController {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
 }
 
 impl DiagnosticsController {
-    pub fn new(config: Arc<Config>) -> (Self, LegacyDiagnosticsController) {
+    pub fn new(conf_handle: ConfHandle) -> (Self, LegacyDiagnosticsController) {
         (
-            DiagnosticsController { config: config.clone() },
+            DiagnosticsController {
+                conf_handle: conf_handle.clone(),
+            },
             LegacyDiagnosticsController {
-                inner: DiagnosticsController { config },
+                inner: DiagnosticsController { conf_handle },
             },
         )
     }
@@ -105,7 +106,9 @@ impl DiagnosticsController {
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
 async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
-    let latest_log_file_path = crate::log::find_latest_log_file(controller.config.log_file.as_path())
+    let conf = controller.conf_handle.get_conf();
+
+    let latest_log_file_path = crate::log::find_latest_log_file(conf.log_file.as_path())
         .await
         .map_err(|e| HttpErrorStatus::internal(format!("latest log file not found: {e:#}")))?;
 
@@ -132,7 +135,7 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
 async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayConfiguration> {
-    Json(controller.config.clone().into())
+    Json(GatewayConfiguration::from(controller.conf_handle.get_conf().as_ref()))
 }
 
 /// Retrieves server's clock in order to diagnose clock drifting.

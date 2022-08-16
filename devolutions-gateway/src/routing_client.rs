@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::proxy::Proxy;
 use crate::token::ApplicationProtocol;
 use crate::utils::TargetAddr;
@@ -10,11 +10,11 @@ use url::Url;
 
 pub struct Client {
     routing_url: Url,
-    config: Arc<Config>,
+    config: Arc<Conf>,
 }
 
 impl Client {
-    pub fn new(routing_url: Url, config: Arc<Config>) -> Self {
+    pub fn new(routing_url: Url, config: Arc<Conf>) -> Self {
         Client { routing_url, config }
     }
 

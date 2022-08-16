@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Conf, ConfHandle};
 use crate::generic_client::GenericClient;
 use crate::jet_client::{JetAssociationsMap, JetClient};
 use crate::token::{CurrentJrl, TokenCache};
@@ -38,13 +38,13 @@ pub struct GatewayListener {
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
 }
 
 impl GatewayListener {
     pub fn init_and_bind(
         url: impl ToInternalUrl,
-        config: Arc<Config>,
+        conf_handle: ConfHandle,
         associations: Arc<JetAssociationsMap>,
         token_cache: Arc<TokenCache>,
         jrl: Arc<CurrentJrl>,
@@ -76,7 +76,7 @@ impl GatewayListener {
             listener_url: url,
             kind,
             listener,
-            config,
+            conf_handle,
             associations,
             token_cache,
             jrl,
@@ -102,13 +102,13 @@ impl GatewayListener {
                     .context("failed to accept connection")
                 {
                     Ok((stream, peer_addr)) => {
-                        let config = self.config.clone();
+                        let conf = self.conf_handle.get_conf();
                         let associations = self.associations.clone();
                         let token_cache = self.token_cache.clone();
                         let jrl = self.jrl.clone();
 
                         let fut = async move {
-                            if let Err(e) = $handler(config, associations, token_cache, jrl, stream, peer_addr).await {
+                            if let Err(e) = $handler(conf, associations, token_cache, jrl, stream, peer_addr).await {
                                 error!(concat!(stringify!($handler), " failure: {:#}"), e);
                             }
                         }
@@ -138,24 +138,24 @@ impl GatewayListener {
     pub async fn handle_one(&self) -> anyhow::Result<()> {
         let (conn, peer_addr) = self.listener.accept().await.context("failed to accept connection")?;
 
-        let config = self.config.clone();
+        let conf = self.conf_handle.get_conf();
         let associations = self.associations.clone();
         let token_cache = self.token_cache.clone();
         let jrl = self.jrl.clone();
 
         match self.kind() {
             ListenerKind::Tcp => {
-                handle_tcp_client(config, associations, token_cache, jrl, conn, peer_addr)
+                handle_tcp_client(conf, associations, token_cache, jrl, conn, peer_addr)
                     .instrument(info_span!("tcp", client = %peer_addr))
                     .await?
             }
             ListenerKind::Ws => {
-                handle_ws_client(config, associations, token_cache, jrl, conn, peer_addr)
+                handle_ws_client(conf, associations, token_cache, jrl, conn, peer_addr)
                     .instrument(info_span!("ws", client = %peer_addr))
                     .await?
             }
             ListenerKind::Wss => {
-                handle_wss_client(config, associations, token_cache, jrl, conn, peer_addr)
+                handle_wss_client(conf, associations, token_cache, jrl, conn, peer_addr)
                     .instrument(info_span!("wss", client = %peer_addr))
                     .await?
             }
@@ -166,7 +166,7 @@ impl GatewayListener {
 }
 
 async fn handle_tcp_client(
-    config: Arc<Config>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
@@ -185,7 +185,7 @@ async fn handle_tcp_client(
     match &peeked[..n_read] {
         [b'J', b'E', b'T', b'\0'] => {
             JetClient::builder()
-                .config(config)
+                .config(conf)
                 .associations(associations)
                 .addr(peer_addr)
                 .transport(stream)
@@ -197,7 +197,7 @@ async fn handle_tcp_client(
         [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
         _ => {
             GenericClient::builder()
-                .config(config)
+                .config(conf)
                 .associations(associations)
                 .client_addr(peer_addr)
                 .client_stream(stream)
@@ -214,7 +214,7 @@ async fn handle_tcp_client(
 }
 
 async fn handle_ws_client(
-    config: Arc<Config>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
@@ -226,13 +226,13 @@ async fn handle_ws_client(
     // Annonate using the type alias from `transport` just for sanity
     let conn: transport::TcpStream = conn;
 
-    process_ws_stream(conn, peer_addr, config, associations, token_cache, jrl).await?;
+    process_ws_stream(conn, peer_addr, conf, associations, token_cache, jrl).await?;
 
     Ok(())
 }
 
 async fn handle_wss_client(
-    config: Arc<Config>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
@@ -241,7 +241,7 @@ async fn handle_wss_client(
 ) -> anyhow::Result<()> {
     set_stream_option(&stream);
 
-    let tls_conf = config.tls.as_ref().context("TLS configuration is missing")?;
+    let tls_conf = conf.tls.as_ref().context("TLS configuration is missing")?;
 
     // Annotate using the type alias from `transport` just for sanity
     let tls_stream: transport::TlsStream = tls_conf
@@ -251,7 +251,7 @@ async fn handle_wss_client(
         .context("TLS handshake failed")?
         .pipe(tokio_rustls::TlsStream::Server);
 
-    process_ws_stream(tls_stream, peer_addr, config, associations, token_cache, jrl).await?;
+    process_ws_stream(tls_stream, peer_addr, conf, associations, token_cache, jrl).await?;
 
     Ok(())
 }
@@ -259,7 +259,7 @@ async fn handle_wss_client(
 async fn process_ws_stream<I>(
     io: I,
     remote_addr: SocketAddr,
-    config: Arc<Config>,
+    config: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
@@ -284,9 +284,8 @@ where
         }
     });
 
-    let http = hyper::server::conn::Http::new();
-
-    http.serve_connection(io, service)
+    hyper::server::conn::Http::new()
+        .serve_connection(io, service)
         .with_upgrades()
         .instrument(info_span!("http"))
         .await?;
