@@ -112,7 +112,7 @@ impl AccessTokenClaims {
 
 // ----- Known application protocols -----
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum ApplicationProtocol {
     Known(Protocol),
@@ -138,7 +138,7 @@ impl Default for ApplicationProtocol {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Protocol {
     /// Wayk Remote Desktop Protocol
@@ -324,7 +324,7 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
 
 // ----- scope claims ----- //
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum JetAccessScope {
     #[serde(rename = "*")]
     Wildcard,

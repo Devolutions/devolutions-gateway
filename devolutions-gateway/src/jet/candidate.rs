@@ -113,7 +113,7 @@ impl Candidate {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum CandidateState {
     Initial,
     Accepted,

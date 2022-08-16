@@ -296,7 +296,7 @@ fn process_send_data_indication_pdu(
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SequenceState {
     ClientInfo,
     ServerLicenseRequest,

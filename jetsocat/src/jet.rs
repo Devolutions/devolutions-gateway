@@ -46,12 +46,10 @@ pub async fn read_jet_accept_response(reader: &mut (dyn AsyncRead + Send + Unpin
             rsp.status_code
         )),
         JetMessage::JetAcceptRsp(_) => Ok(()),
-        unexpected => {
-            return Err(anyhow!(
-                "received {:?} message from Devolutions-Gateway instead of JetAcceptRsp",
-                unexpected
-            ))
-        }
+        unexpected => Err(anyhow!(
+            "received {:?} message from Devolutions-Gateway instead of JetAcceptRsp",
+            unexpected
+        )),
     }
 }
 
@@ -98,11 +96,9 @@ pub async fn read_jet_connect_response(reader: &mut (dyn AsyncRead + Send + Unpi
             rsp.status_code
         )),
         JetMessage::JetConnectRsp(_) => Ok(()),
-        unexpected => {
-            return Err(anyhow!(
-                "received {:?} message from Devolutions-Gateway instead of JetConnectRsp",
-                unexpected
-            ))
-        }
+        unexpected => Err(anyhow!(
+            "received {:?} message from Devolutions-Gateway instead of JetConnectRsp",
+            unexpected
+        )),
     }
 }

@@ -4,7 +4,7 @@ use std::convert::TryFrom;
 pub mod association;
 pub mod candidate;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum TransportType {
     Tcp,
     Tls,

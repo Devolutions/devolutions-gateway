@@ -8,7 +8,7 @@ use std::io;
 use std::str::FromStr;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetConnectReq {
     pub version: u32,
     pub host: String,
@@ -109,7 +109,7 @@ impl JetConnectReq {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JetConnectRsp {
     pub status_code: StatusCode,
     pub version: u32,

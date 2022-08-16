@@ -198,7 +198,7 @@ macro_rules! ensure_size {
     }};
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Message {
     Open(ChannelOpen),
     OpenSuccess(ChannelOpenSuccess),
@@ -443,7 +443,7 @@ impl TryFrom<u8> for MessageType {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Header {
     pub ty: MessageType,
     pub size: u16,
@@ -470,7 +470,7 @@ impl Header {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelOpen {
     pub sender_channel_id: u32,
     pub initial_window_size: u32,
@@ -526,7 +526,7 @@ impl ChannelOpen {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelOpenSuccess {
     pub recipient_channel_id: u32,
     pub sender_channel_id: u32,
@@ -571,7 +571,7 @@ impl ChannelOpenSuccess {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelOpenFailure {
     pub recipient_channel_id: u32,
     pub reason_code: ReasonCode,
@@ -621,7 +621,7 @@ impl ChannelOpenFailure {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelWindowAdjust {
     pub recipient_channel_id: u32,
     pub window_adjustment: u32,
@@ -652,7 +652,7 @@ impl ChannelWindowAdjust {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct ChannelData {
     pub recipient_channel_id: u32,
     pub transfer_data: Vec<u8>,
@@ -697,7 +697,7 @@ impl ChannelData {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelEof {
     pub recipient_channel_id: u32,
 }
@@ -724,7 +724,7 @@ impl ChannelEof {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct ChannelClose {
     pub recipient_channel_id: u32,
 }

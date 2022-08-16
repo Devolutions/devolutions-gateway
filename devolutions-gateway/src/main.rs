@@ -47,10 +47,7 @@ fn main() -> anyhow::Result<()> {
     let display_name = devolutions_gateway::service::DISPLAY_NAME;
     let description = devolutions_gateway::service::DESCRIPTION;
 
-    let is_cli_app = match std::env::args().nth(1) {
-        Some(arg) if arg.starts_with('-') => true,
-        _ => false,
-    };
+    let is_cli_app = matches!(std::env::args().nth(1), Some(arg) if arg.starts_with('-'));
 
     if is_cli_app {
         // TODO: use a simpler dependency than clap for this

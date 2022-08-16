@@ -1,4 +1,5 @@
-use devolutions_gateway::config::{dto::*, DataEncoding, PrivKeyFormat, PubKeyFormat};
+use devolutions_gateway::config::dto::*;
+use devolutions_gateway::config::{DataEncoding, PrivKeyFormat, PubKeyFormat};
 use rstest::*;
 use std::str::FromStr as _;
 use tap::prelude::*;
