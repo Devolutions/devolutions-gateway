@@ -1,6 +1,6 @@
 mod push_files;
 
-use crate::config::Config;
+use crate::config::Conf;
 use sogar_core::{create_annotation_for_filename, parse_digest, read_file_data, registry, FileInfo, Layer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,12 +9,12 @@ use std::{fs, thread};
 use tempfile::NamedTempFile;
 
 pub struct Registry {
-    config: Arc<Config>,
+    config: Arc<Conf>,
     registry_path: PathBuf,
 }
 
 impl Registry {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<Conf>) -> Self {
         let registry_name = config.sogar.registry_name.clone();
         let registry_namespace = config.sogar.registry_image.clone();
         let registry_path = format!("{}/{}", registry_name, registry_namespace);
@@ -198,8 +198,8 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
 -----END PUBLIC KEY-----"#;
 
     #[fixture]
-    fn config() -> Config {
-        Config {
+    fn config() -> Conf {
+        Conf {
             id: None,
             service_mode: false,
             listeners: Vec::new(),
@@ -220,7 +220,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_moved_to_registry(mut config: Config) {
+    fn test_files_moved_to_registry(mut config: Conf) {
         let files_dir_name = "dir_with_file1";
         let file_name = "test1.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
@@ -261,7 +261,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_not_removed(mut config: Config) {
+    fn test_files_not_removed(mut config: Conf) {
         let files_dir_name = "dir_with_file2";
         let file_name = "test2.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);
@@ -303,7 +303,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     }
 
     #[rstest]
-    fn test_files_removed_after_timeout(mut config: Config) {
+    fn test_files_removed_after_timeout(mut config: Conf) {
         let files_dir_name = "dir_with_file3";
         let file_name = "test3.txt";
         let file_path = format!("{}/{}", files_dir_name, file_name);

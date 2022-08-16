@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use plugin_info::{PluginCapabilities, PluginInformation};
 use std::sync::Arc;
 
-use crate::config::Config;
+use crate::config::Conf;
 
 #[derive(Clone)]
 struct Plugin {
@@ -71,7 +71,7 @@ impl PluginManager {
     }
 }
 
-pub fn load_plugins(conf: &Config) -> anyhow::Result<()> {
+pub fn load_plugins(conf: &Conf) -> anyhow::Result<()> {
     if let Some(plugins) = &conf.plugins {
         let mut manager = PLUGIN_MANAGER.lock();
         for plugin in plugins {

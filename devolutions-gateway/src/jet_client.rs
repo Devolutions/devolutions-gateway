@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::interceptor::plugin_recording::PluginRecordingInspector;
 use crate::interceptor::Interceptor;
 use crate::jet::association::Association;
@@ -34,7 +34,7 @@ pub type JetAssociationsMap = Mutex<HashMap<Uuid, Association>>;
 
 #[derive(TypedBuilder)]
 pub struct JetClient {
-    config: Arc<Config>,
+    config: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     addr: SocketAddr,
     transport: TcpStream,
@@ -108,7 +108,7 @@ async fn handle_build_tls_proxy(
 
 async fn handle_build_proxy(
     associations: &JetAssociationsMap,
-    config: Arc<Config>,
+    config: Arc<Conf>,
     response: HandleConnectJetMsgResponse,
 ) -> anyhow::Result<()> {
     let mut recording_inspector: Option<(PluginRecordingInspector, PluginRecordingInspector)> = None;
@@ -214,7 +214,7 @@ async fn read_jet_message(transport: &mut TcpStream) -> anyhow::Result<JetMessag
 }
 
 struct HandleAcceptJetMsg {
-    config: Arc<Config>,
+    config: Arc<Conf>,
     transport: Option<(SocketAddr, TcpStream)>,
     request_msg: JetAcceptReq,
     associations: Arc<JetAssociationsMap>,
@@ -223,7 +223,7 @@ struct HandleAcceptJetMsg {
 
 impl HandleAcceptJetMsg {
     fn new(
-        config: Arc<Config>,
+        config: Arc<Conf>,
         addr: SocketAddr,
         transport: TcpStream,
         msg: JetAcceptReq,

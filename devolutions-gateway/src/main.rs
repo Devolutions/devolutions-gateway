@@ -3,7 +3,7 @@ use ceviche::controller::{dispatch, Controller, ControllerInterface};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
 use clap::{crate_name, crate_version, App, SubCommand};
-use devolutions_gateway::config::Config;
+use devolutions_gateway::config::ConfHandle;
 use devolutions_gateway::service::GatewayService;
 use std::sync::mpsc;
 use tracing::info;
@@ -16,8 +16,8 @@ fn gateway_service_main(
     args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let config = Config::init().expect("unable to initialize configuration");
-    let mut service = GatewayService::load(config).expect("unable to load service");
+    let conf_handle = ConfHandle::init().expect("unable to initialize configuration");
+    let mut service = GatewayService::load(conf_handle).expect("unable to load service");
 
     info!("{} service started", service.get_service_name());
     info!("args: {:?}", args);
@@ -96,9 +96,10 @@ fn main() -> anyhow::Result<()> {
             _ => anyhow::bail!("invalid command"),
         }
     } else {
-        let config = Config::init().context("unable to initialize configuration")?;
+        let config = ConfHandle::init().context("unable to initialize configuration")?;
+        let service_mode = std::env::args().any(|arg| arg == "--service");
 
-        if !config.service_mode {
+        if !service_mode {
             let mut service = GatewayService::load(config).context("Service loading failed")?;
 
             service.start();

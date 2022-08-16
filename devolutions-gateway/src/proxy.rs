@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
 use crate::token::{ApplicationProtocol, Protocol};
@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct IsMissing;
 
-pub struct HasConfig(Arc<Config>);
+pub struct HasConfig(Arc<Conf>);
 
 pub struct HasSessionInfo(GatewaySessionInfo);
 
@@ -43,7 +43,7 @@ impl Proxy<IsMissing, IsMissing, IsMissing, IsMissing> {
 }
 
 impl<INFO, TRANSPORT, ADDR> Proxy<IsMissing, INFO, TRANSPORT, ADDR> {
-    pub fn config(self, config: Arc<Config>) -> Proxy<HasConfig, INFO, TRANSPORT, ADDR> {
+    pub fn config(self, config: Arc<Conf>) -> Proxy<HasConfig, INFO, TRANSPORT, ADDR> {
         Proxy {
             config: HasConfig(config),
             session_info: self.session_info,

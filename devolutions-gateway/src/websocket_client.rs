@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
@@ -22,7 +22,7 @@ pub struct WebsocketService {
     pub associations: Arc<JetAssociationsMap>,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,
-    pub config: Arc<Config>,
+    pub config: Arc<Conf>,
 }
 
 impl WebsocketService {
@@ -178,7 +178,7 @@ async fn handle_jet_connect(
     req: Request<Body>,
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
-    config: Arc<Config>,
+    config: Arc<Conf>,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
     match handle_jet_connect_impl(req, client_addr, associations, config).await {
         Ok(res) => Ok(res),
@@ -194,7 +194,7 @@ async fn handle_jet_connect_impl(
     mut req: Request<Body>,
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
-    config: Arc<Config>,
+    config: Arc<Conf>,
 ) -> Result<Response<Body>, ()> {
     use crate::interceptor::plugin_recording::PluginRecordingInspector;
     use crate::interceptor::Interceptor;
@@ -465,7 +465,7 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 async fn handle_jmux(
     mut req: Request<Body>,
     client_addr: SocketAddr,
-    config: &Config,
+    config: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> io::Result<Response<Body>> {

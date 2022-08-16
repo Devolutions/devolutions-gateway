@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Conf, ConfHandle};
 use crate::http::http_server::configure_http_server;
 use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
@@ -24,35 +24,36 @@ enum GatewayState {
 }
 
 pub struct GatewayService {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
     state: GatewayState,
     _logger_guard: LoggerGuard,
 }
 
 impl GatewayService {
-    pub fn load(config: Config) -> anyhow::Result<Self> {
+    pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
+        let conf = conf_handle.get_conf();
+
         let logger_guard =
-            log::init(&config.log_file, config.log_directive.as_deref()).context("failed to setup logger")?;
+            log::init(&conf.log_file, conf.log_directive.as_deref()).context("failed to setup logger")?;
 
-        debug!(?config, "config loaded");
+        let conf_file = conf_handle.get_conf_file();
+        debug!(?conf_file);
 
-        crate::plugin_manager::load_plugins(&config).context("failed to load plugins")?;
+        crate::plugin_manager::load_plugins(&conf).context("failed to load plugins")?;
 
-        if !config.debug.is_default() {
+        if !conf.debug.is_default() {
             warn!(
-                ?config.debug,
+                ?conf.debug,
                 "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
             );
         }
-
-        let config = Arc::new(config);
 
         if let Err(e) = crate::tls_sanity::check_default_configuration() {
             warn!("Anomality detected with TLS configuration: {e:#}");
         }
 
         Ok(GatewayService {
-            config,
+            conf_handle,
             state: GatewayState::Stopped,
             _logger_guard: logger_guard,
         })
@@ -76,7 +77,7 @@ impl GatewayService {
             .build()
             .expect("failed to create runtime");
 
-        let config = self.config.clone();
+        let config = self.conf_handle.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
         let futures = runtime.block_on(async { create_futures(config).expect("failed to initiate gateway") });
@@ -114,24 +115,31 @@ impl GatewayService {
 // TODO: when benchmarking facility is ready, use Handle instead of pinned futures
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
 
-fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
+fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
+    let conf = conf_handle.get_conf();
+
     let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
     let token_cache = crate::token::new_token_cache().pipe(Arc::new);
-    let jrl = load_jrl_from_disk(&config)?;
+    let jrl = load_jrl_from_disk(&conf)?;
 
     // Configure http server
-    configure_http_server(config.clone(), associations.clone(), token_cache.clone(), jrl.clone())
-        .context("failed to configure http server")?;
+    configure_http_server(
+        conf_handle.clone(),
+        associations.clone(),
+        token_cache.clone(),
+        jrl.clone(),
+    )
+    .context("failed to configure http server")?;
 
-    let mut futures: VecOfFuturesType = Vec::with_capacity(config.listeners.len());
+    let mut futures: VecOfFuturesType = Vec::with_capacity(conf.listeners.len());
 
-    let listeners = config
+    let listeners = conf
         .listeners
         .iter()
         .map(|listener| {
             GatewayListener::init_and_bind(
                 listener.internal_url.clone(),
-                config.clone(),
+                conf_handle.clone(),
                 associations.clone(),
                 token_cache.clone(),
                 jrl.clone(),
@@ -151,14 +159,14 @@ fn create_futures(config: Arc<Config>) -> anyhow::Result<VecOfFuturesType> {
     }));
 
     {
-        let log_path = config.log_file.clone();
+        let log_path = conf.log_file.clone();
         futures.push(Box::pin(async move { log_deleter_task(&log_path).await }));
     }
 
     Ok(futures)
 }
 
-fn load_jrl_from_disk(config: &Config) -> anyhow::Result<Arc<CurrentJrl>> {
+fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
     use picky::jose::{jws, jwt};
 
     let jrl_file = config.jrl_file.as_path();

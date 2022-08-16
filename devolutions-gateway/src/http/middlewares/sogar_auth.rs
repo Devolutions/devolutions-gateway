@@ -1,4 +1,4 @@
-use crate::config::{Config, SogarPermission, SogarUser};
+use crate::config::{Conf, ConfHandle, SogarPermission, SogarUser};
 use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
 use picky::jose::jwt::{JwtSig, NO_CHECK_VALIDATOR};
 use saphir::http;
@@ -12,12 +12,12 @@ use sogar_core::registry::{
 use std::sync::Arc;
 
 pub struct SogarAuthMiddleware {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
 }
 
 impl SogarAuthMiddleware {
-    pub fn new(config: Arc<Config>) -> Self {
-        Self { config }
+    pub fn new(conf_handle: ConfHandle) -> Self {
+        Self { conf_handle }
     }
 }
 
@@ -27,14 +27,14 @@ impl Middleware for SogarAuthMiddleware {
         ctx: HttpContext,
         chain: &'static dyn MiddlewareChain,
     ) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
-        auth_middleware(ctx, chain, self.config.clone()).boxed()
+        auth_middleware(ctx, chain, self.conf_handle.get_conf()).boxed()
     }
 }
 
 async fn auth_middleware(
     ctx: HttpContext,
     chain: &'static dyn MiddlewareChain,
-    config: Arc<Config>,
+    config: Arc<Conf>,
 ) -> Result<HttpContext, SaphirError> {
     if let Some(metadata) = ctx.metadata.name {
         let auth_header = ctx

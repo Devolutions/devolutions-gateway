@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::{AccessTokenClaims, CurrentJrl, JetAccessScope, RawToken};
@@ -9,14 +9,14 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use uuid::Uuid;
 
 pub struct JrlController {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
     revocation_list: Arc<CurrentJrl>,
 }
 
 impl JrlController {
-    pub fn new(config: Arc<Config>, revocation_list: Arc<CurrentJrl>) -> Self {
+    pub fn new(config: ConfHandle, revocation_list: Arc<CurrentJrl>) -> Self {
         Self {
-            config,
+            conf_handle: config,
             revocation_list,
         }
     }
@@ -38,9 +38,9 @@ impl JrlController {
             .ok_or_else(|| HttpErrorStatus::internal("raw token is missing"))?;
 
         if let AccessTokenClaims::Jrl(claims) = claims {
-            let config = self.config.clone();
+            let conf = self.conf_handle.get_conf();
 
-            let jrl_file = config.jrl_file.as_path();
+            let jrl_file = conf.jrl_file.as_path();
 
             info!(path = %jrl_file, "Writing JRL file to disk");
 

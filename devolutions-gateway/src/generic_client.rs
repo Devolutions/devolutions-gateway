@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::rdp::RdpClient;
@@ -14,7 +14,7 @@ use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
 pub struct GenericClient {
-    config: Arc<Config>,
+    config: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,

@@ -7,7 +7,7 @@ pub use self::dvc_manager::{DvcManager, RDP8_GRAPHICS_PIPELINE_NAME};
 
 use self::connection_sequence_future::ConnectionSequenceFuture;
 use self::sequence_future::create_downgrade_dvc_capabilities_future;
-use crate::config::Config;
+use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, Protocol, TokenCache};
@@ -59,7 +59,7 @@ impl credssp::CredentialsProxy for RdpIdentity {
 }
 
 pub struct RdpClient {
-    pub config: Arc<Config>,
+    pub config: Arc<Conf>,
     pub associations: Arc<JetAssociationsMap>,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,

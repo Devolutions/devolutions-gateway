@@ -78,14 +78,6 @@ impl Tls {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
-pub struct SogarPushRegistryInfo {
-    pub registry_url: Option<String>,
-    pub username: Option<String>,
-    pub password: Option<String>,
-    pub image_name: Option<String>,
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum SogarPermission {
     Push,
@@ -97,17 +89,6 @@ pub struct SogarUser {
     pub password: Option<String>,
     pub username: Option<String>,
     pub permission: Option<SogarPermission>,
-}
-
-#[derive(Debug, Default, Clone, Deserialize)]
-pub struct SogarRegistryConfig {
-    pub serve_as_registry: bool,
-    pub local_registry_name: Option<String>,
-    pub local_registry_image: Option<String>,
-    pub keep_files: bool,
-    pub keep_time: Option<u64>,
-    pub push_files: bool,
-    pub sogar_push_registry_info: SogarPushRegistryInfo,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
@@ -142,9 +123,8 @@ pub enum PubKeyFormat {
 }
 
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct Conf {
     pub id: Option<Uuid>,
-    pub service_mode: bool,
     pub listeners: Vec<ListenerUrls>,
     pub hostname: String,
     pub capture_path: Option<Utf8PathBuf>,
@@ -161,23 +141,8 @@ pub struct Config {
     pub debug: dto::DebugConf,
 }
 
-impl Config {
-    pub fn init() -> anyhow::Result<Self> {
-        let service_mode = std::env::args().any(|arg| arg == "--service");
-        let conf_file_path = get_conf_file_path();
-        let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
-            Some(conf_file) => conf_file,
-            None => {
-                let defaults = dto::ConfFile::default();
-                println!("Write default configuration to disk…");
-                save_config(&defaults).context("Failed to save configuration")?;
-                defaults
-            }
-        };
-        Self::from_conf_file(&conf_file, service_mode).context("Invalid configuration file")
-    }
-
-    pub fn from_conf_file(conf_file: &dto::ConfFile, service_mode: bool) -> anyhow::Result<Self> {
+impl Conf {
+    pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
         let has_http_listener = conf_file
             .listeners
             .iter()
@@ -233,7 +198,7 @@ impl Config {
                     .tls_private_key
                     .read_rustls_priv_key()
                     .context("TLS private key")?;
-                Tls::init(tls_certificate, tls_private_key).context("failed to init TLS config")
+                Tls::init(tls_certificate, tls_private_key).context("Failed to init TLS config")
             })
             .transpose()?;
 
@@ -260,9 +225,8 @@ impl Config {
             .map(|key| key.read_priv_key().context("Delegation private key"))
             .transpose()?;
 
-        Ok(Config {
+        Ok(Conf {
             id: conf_file.id,
-            service_mode,
             listeners,
             hostname,
             capture_path: conf_file.capture_path.clone(),
@@ -281,7 +245,65 @@ impl Config {
     }
 }
 
-pub fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
+/// Configuration Handle, source of truth for current configuration state
+#[derive(Clone)]
+pub struct ConfHandle {
+    inner: Arc<ConfHandleInner>,
+}
+
+struct ConfHandleInner {
+    conf: parking_lot::RwLock<Arc<Conf>>,
+    conf_file: parking_lot::RwLock<Arc<dto::ConfFile>>,
+}
+
+impl ConfHandle {
+    /// Initializes configuration for this instance.
+    ///
+    /// It's best to call this only once to avoid inconsistancies.
+    pub fn init() -> anyhow::Result<Self> {
+        let conf_file_path = get_conf_file_path();
+
+        let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
+            Some(conf_file) => conf_file,
+            None => {
+                let defaults = dto::ConfFile::default();
+                println!("Write default configuration to disk…");
+                save_config(&defaults).context("Failed to save configuration")?;
+                defaults
+            }
+        };
+
+        let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
+
+        Ok(Self {
+            inner: Arc::new(ConfHandleInner {
+                conf: parking_lot::RwLock::new(Arc::new(conf)),
+                conf_file: parking_lot::RwLock::new(Arc::new(conf_file)),
+            }),
+        })
+    }
+
+    /// Returns current configuration state (do not hold it forever)
+    pub fn get_conf(&self) -> Arc<Conf> {
+        self.inner.conf.read().clone()
+    }
+
+    /// Returns current configuration file state (do not hold it forever)
+    pub fn get_conf_file(&self) -> Arc<dto::ConfFile> {
+        self.inner.conf_file.read().clone()
+    }
+
+    /// Saves and replace current configuration with a new one
+    pub fn save_new_conf_file(&self, conf_file: dto::ConfFile) -> anyhow::Result<()> {
+        let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
+        save_config(&conf_file).context("Failed to save configuration")?;
+        *self.inner.conf.write() = Arc::new(conf);
+        *self.inner.conf_file.write() = Arc::new(conf_file);
+        Ok(())
+    }
+}
+
+fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("Failed JSON serialization of configuration")?;
     std::fs::write(&conf_file_path, &json).context("Failed to write to file")?;
@@ -350,14 +372,12 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ConfFile {
-        //== Gateway Identity ==//
         /// This Gateway unique ID (e.g.: 123e4567-e89b-12d3-a456-426614174000)
         pub id: Option<Uuid>,
         /// This Gateway hostname (e.g.: my-relay.ngrok.io)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub hostname: Option<String>,
 
-        //== Tokens related keys ==//
         /// Provisioner key to verify token with no restriction
         #[serde(flatten, with = "provisioner_public_key")]
         pub provisioner_public_key: Option<ConfFileOrData<PubKeyFormat>>,
@@ -368,11 +388,10 @@ pub mod dto {
         #[serde(flatten, with = "delegation_private_key", skip_serializing_if = "Option::is_none")]
         pub delegation_private_key: Option<ConfFileOrData<PrivKeyFormat>>,
 
-        //== TLS config ==//
+        /// TLS config
         #[serde(flatten)]
         pub tls: Option<TlsConf>,
 
-        //== Listeners configuration ==//
         /// Listeners to launch at startup
         pub listeners: Vec<ListenerConf>,
 
@@ -386,7 +405,6 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directive: Option<String>,
 
-        //== Plugins ==//
         /// (Unstable) Plugin paths to load at startup
         #[serde(skip_serializing_if = "Option::is_none")]
         pub plugins: Option<Vec<Utf8PathBuf>>,
@@ -398,13 +416,11 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub capture_path: Option<Utf8PathBuf>,
 
-        //== Sogar (generic OCI registry) ==//
-        /// (Unstable)
+        /// (Unstable) Sogar (generic OCI registry)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub sogar: Option<SogarConf>,
 
-        //== Unsafe debug options for developers ==//
-        /// (Unstable)
+        /// (Unstable) Unsafe debug options for developers
         #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
     }

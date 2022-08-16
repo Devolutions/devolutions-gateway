@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Conf, ConfHandle};
 use crate::http::HttpErrorStatus;
 use crate::token::{AccessTokenClaims, CurrentJrl, RawToken, TokenCache, TokenValidator};
 use futures::future::{BoxFuture, FutureExt};
@@ -15,15 +15,15 @@ use std::sync::Arc;
 const GATEWAY_AUTHORIZATION_HDR_NAME: &str = "Gateway-Authorization";
 
 pub struct AuthMiddleware {
-    config: Arc<Config>,
+    conf_handle: ConfHandle,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
 }
 
 impl AuthMiddleware {
-    pub fn new(config: Arc<Config>, token_cache: Arc<TokenCache>, jrl: Arc<CurrentJrl>) -> Self {
+    pub fn new(conf_handle: ConfHandle, token_cache: Arc<TokenCache>, jrl: Arc<CurrentJrl>) -> Self {
         Self {
-            config,
+            conf_handle,
             token_cache,
             jrl,
         }
@@ -37,7 +37,7 @@ impl Middleware for AuthMiddleware {
         chain: &'static dyn MiddlewareChain,
     ) -> BoxFuture<'static, Result<HttpContext, SaphirError>> {
         auth_middleware(
-            self.config.clone(),
+            self.conf_handle.get_conf(),
             self.token_cache.clone(),
             self.jrl.clone(),
             ctx,
@@ -48,7 +48,7 @@ impl Middleware for AuthMiddleware {
 }
 
 async fn auth_middleware(
-    config: Arc<Config>,
+    config: Arc<Conf>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     mut ctx: HttpContext,
@@ -128,27 +128,27 @@ async fn auth_middleware(
 pub fn authenticate(
     source_addr: SocketAddr,
     token: &str,
-    config: &Config,
+    conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> Result<AccessTokenClaims, HttpErrorStatus> {
-    if config.debug.dump_tokens {
+    if conf.debug.dump_tokens {
         debug!(token, "**DEBUG OPTION**");
     }
 
-    let delegation_key = config.delegation_private_key.as_ref();
+    let delegation_key = conf.delegation_private_key.as_ref();
 
-    if config.debug.disable_token_validation {
+    if conf.debug.disable_token_validation {
         #[allow(deprecated)]
         crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
     } else {
         TokenValidator::builder()
             .source_ip(source_addr.ip())
-            .provisioner_key(&config.provisioner_public_key)
+            .provisioner_key(&conf.provisioner_public_key)
             .delegation_key(delegation_key)
             .token_cache(token_cache)
             .revocation_list(jrl)
-            .gw_id(config.id)
+            .gw_id(conf.id)
             .subkey(None)
             .build()
             .validate(token)
