@@ -1,4 +1,5 @@
-use crate::config::{Conf, ConfHandle, SogarPermission, SogarUser};
+use crate::config::dto::{SogarPermission, SogarUser};
+use crate::config::{Conf, ConfHandle};
 use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
 use picky::jose::jwt::{JwtSig, NO_CHECK_VALIDATOR};
 use saphir::http;

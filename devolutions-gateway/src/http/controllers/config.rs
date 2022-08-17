@@ -1,4 +1,5 @@
-use crate::config::{ConfHandle, DataEncoding, PubKeyFormat};
+use crate::config::dto::{DataEncoding, PubKeyFormat};
+use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::JetAccessScope;
