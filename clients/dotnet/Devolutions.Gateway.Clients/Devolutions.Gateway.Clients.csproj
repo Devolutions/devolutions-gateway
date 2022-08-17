@@ -3,7 +3,7 @@
     <TargetFrameworks>net6.0;net4.8;netstandard2.1</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <Version>2022.8.16.2</Version>
+    <Version>2022.8.17.3</Version>
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
   </PropertyGroup>

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 #[derive(OpenApi)]
 #[openapi(
-    handlers(
+    paths(
         crate::http::controllers::health::get_health,
         crate::http::controllers::sessions::get_sessions,
         crate::http::controllers::diagnostics::get_logs,
@@ -12,18 +12,22 @@ use uuid::Uuid;
         crate::http::controllers::diagnostics::get_clock,
         crate::http::controllers::config::patch_config,
     ),
-    components(
+    components(schemas(
         SessionInfo,
         ConnectionMode,
-        crate::http::controllers::diagnostics::GatewayConfiguration,
         crate::listener::ListenerUrls,
-        crate::http::controllers::diagnostics::GatewayClock,
-    )
+        crate::config::DataEncoding,
+        crate::config::PubKeyFormat,
+        crate::http::controllers::config::SubProvisionerKey,
+        crate::http::controllers::config::ConfigPatch,
+        crate::http::controllers::diagnostics::ConfigDiagnostic,
+        crate::http::controllers::diagnostics::ClockDiagnostic,
+    ))
 )]
 pub struct ApiDoc;
 
 #[allow(dead_code)]
-#[derive(utoipa::Component)]
+#[derive(utoipa::ToSchema)]
 pub struct SessionInfo {
     association_id: Uuid,
     application_protocol: String,
@@ -34,7 +38,7 @@ pub struct SessionInfo {
     destination_host: Option<String>,
 }
 
-#[derive(Serialize, utoipa::Component)]
+#[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConnectionMode {
     Rdv,

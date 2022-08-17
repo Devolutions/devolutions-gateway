@@ -6,18 +6,18 @@ use crate::token::JetAccessScope;
 use saphir::prelude::*;
 use uuid::Uuid;
 
-#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
-pub struct GatewayConfiguration {
+pub struct ConfigDiagnostic {
     id: Option<Uuid>,
     hostname: String,
     version: &'static str,
     listeners: Vec<ListenerUrls>,
 }
 
-impl From<&Conf> for GatewayConfiguration {
+impl From<&Conf> for ConfigDiagnostic {
     fn from(conf: &Conf) -> Self {
-        GatewayConfiguration {
+        ConfigDiagnostic {
             id: conf.id,
             listeners: conf.listeners.clone(),
             version: env!("CARGO_PKG_VERSION"),
@@ -26,14 +26,14 @@ impl From<&Conf> for GatewayConfiguration {
     }
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
-pub struct GatewayClock {
+pub struct ClockDiagnostic {
     timestamp_secs: i64,
     timestamp_millis: i64,
 }
 
-impl GatewayClock {
+impl ClockDiagnostic {
     pub fn now() -> Self {
         use chrono::prelude::*;
         let utc = Utc::now();
@@ -77,7 +77,7 @@ impl DiagnosticsController {
     // If there is clock drift, token validation will fail because claims such as `nbf` will then
     // be invalid, and thus prevent the clock drift diagnosis.
     #[get("/clock")]
-    async fn get_clock(&self) -> Json<GatewayClock> {
+    async fn get_clock(&self) -> Json<ClockDiagnostic> {
         get_clock()
     }
 
@@ -86,7 +86,7 @@ impl DiagnosticsController {
         AccessGuard,
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
-    async fn get_configuration(&self) -> Json<GatewayConfiguration> {
+    async fn get_configuration(&self) -> Json<ConfigDiagnostic> {
         get_configuration(self).await
     }
 }
@@ -127,15 +127,15 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
     operation_id = "GetConfiguration",
     path = "/jet/diagnostics/configuration",
     responses(
-        (status = 200, description = "Service configuration", body = GatewayConfiguration),
+        (status = 200, description = "Service configuration", body = ConfigDiagnostic),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
-async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayConfiguration> {
-    Json(GatewayConfiguration::from(controller.conf_handle.get_conf().as_ref()))
+async fn get_configuration(controller: &DiagnosticsController) -> Json<ConfigDiagnostic> {
+    Json(ConfigDiagnostic::from(controller.conf_handle.get_conf().as_ref()))
 }
 
 /// Retrieves server's clock in order to diagnose clock drifting.
@@ -146,11 +146,11 @@ async fn get_configuration(controller: &DiagnosticsController) -> Json<GatewayCo
     operation_id = "GetClock",
     path = "/jet/diagnostics/clock",
     responses(
-        (status = 200, description = "Server's clock", body = GatewayClock),
+        (status = 200, description = "Server's clock", body = ClockDiagnostic),
     ),
 ))]
-fn get_clock() -> Json<GatewayClock> {
-    Json(GatewayClock::now())
+fn get_clock() -> Json<ClockDiagnostic> {
+    Json(ClockDiagnostic::now())
 }
 
 // NOTE: legacy controller starting 2021/11/25
@@ -175,7 +175,7 @@ impl LegacyDiagnosticsController {
         AccessGuard,
         init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
     )]
-    async fn get_configuration(&self) -> Json<GatewayConfiguration> {
+    async fn get_configuration(&self) -> Json<ConfigDiagnostic> {
         get_configuration(&self.inner).await
     }
 }
