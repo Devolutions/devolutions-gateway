@@ -23,16 +23,13 @@ ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", r
 ceviche = "0.5.2"
 picky-krb = "0.3.1"
 
-# cli
-clap = "2.33"
-hostname = "0.3.1"
-
 # serialization
 serde = "1.0.143"
 serde_derive = "1.0.143"
 serde_json = "1.0.83"
 
 # utils, misc
+hostname = "0.3.1"
 camino = { version = "1.0.9", features = ["serde1"] }
 smol_str = "0.1.23"
 nonempty = "0.8.0"

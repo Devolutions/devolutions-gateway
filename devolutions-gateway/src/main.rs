@@ -2,11 +2,108 @@ use anyhow::Context;
 use ceviche::controller::{dispatch, Controller, ControllerInterface};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
-use clap::{crate_name, crate_version, App, SubCommand};
 use devolutions_gateway::config::ConfHandle;
-use devolutions_gateway::service::GatewayService;
+use devolutions_gateway::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 use std::sync::mpsc;
 use tracing::info;
+
+enum CliAction {
+    ShowHelp,
+    RegisterService,
+    UnregisterService,
+    Run { service_mode: bool },
+}
+
+fn main() -> anyhow::Result<()> {
+    let mut args = std::env::args();
+
+    let executable = args.next().unwrap();
+
+    let action = match args.next().as_deref() {
+        Some("--service") => CliAction::Run { service_mode: true },
+        Some("service") => match args.next().as_deref() {
+            Some("register") => CliAction::RegisterService,
+            Some("unregister") => CliAction::UnregisterService,
+            _ => CliAction::ShowHelp,
+        },
+        None => CliAction::Run { service_mode: false },
+        Some(_) => CliAction::ShowHelp,
+    };
+
+    match action {
+        CliAction::ShowHelp => {
+            println!(
+                r#"HELP:
+
+    Run:
+        {executable}
+
+    Run as service:
+        {executable} --service
+
+    Install service:
+        {executable} service register
+
+    Uninstall service:
+        {executable} service unregister
+"#
+            )
+        }
+        CliAction::RegisterService => {
+            let mut controller = service_controller();
+
+            cfg_if! { if #[cfg(target_os = "linux")] {
+                controller.config = Some(r#"
+                        [Unit]
+                        After=
+                        After=network-online.target
+
+                        [Service]
+                        ExecStart=
+                        ExecStart=/usr/bin/devolutions-gateway --service
+                        Restart=on-failure
+
+                        [Install]
+                        WantedBy=
+                        WantedBy=multi-user.target
+                    "#.to_string());
+            }}
+
+            controller.create().context("failed to register service")?;
+        }
+        CliAction::UnregisterService => {
+            service_controller().delete().context("failed to unregister service")?;
+        }
+        CliAction::Run { service_mode } => {
+            let config = ConfHandle::init().context("unable to initialize configuration")?;
+
+            if service_mode {
+                service_controller()
+                    .register(service_main_wrapper)
+                    .context("failed to register service")?;
+            } else {
+                let mut service = GatewayService::load(config).context("Service loading failed")?;
+
+                service.start();
+
+                // Waiting for some stop signal (CTRL-C…)
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_io()
+                    .build()
+                    .unwrap();
+                rt.block_on(build_signals_fut())?;
+
+                service.stop();
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn service_controller() -> Controller {
+    Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION)
+}
 
 enum GatewayServiceEvent {}
 
@@ -41,88 +138,6 @@ fn gateway_service_main(
 }
 
 Service!("gateway", gateway_service_main);
-
-fn main() -> anyhow::Result<()> {
-    let service_name = devolutions_gateway::service::SERVICE_NAME;
-    let display_name = devolutions_gateway::service::DISPLAY_NAME;
-    let description = devolutions_gateway::service::DESCRIPTION;
-
-    let is_cli_app = matches!(std::env::args().nth(1), Some(arg) if arg.starts_with('-'));
-
-    if is_cli_app {
-        // TODO: use a simpler dependency than clap for this
-        let cli_app = App::new(crate_name!())
-            .author("Devolutions Inc.")
-            .version(concat!(crate_version!(), "\n"))
-            .version_short("v")
-            .about("Devolutions Gateway")
-            .subcommand(
-                SubCommand::with_name("service")
-                    .subcommand(SubCommand::with_name("register"))
-                    .subcommand(SubCommand::with_name("unregister")),
-            );
-
-        match cli_app.get_matches().subcommand() {
-            ("service", Some(matches)) => {
-                let mut controller = Controller::new(service_name, display_name, description);
-
-                cfg_if! { if #[cfg(target_os = "linux")] {
-                    controller.config = Some(r#"
-                        [Unit]
-                        After=
-                        After=network-online.target
-
-                        [Service]
-                        ExecStart=
-                        ExecStart=/usr/bin/devolutions-gateway --service
-                        Restart=on-failure
-
-                        [Install]
-                        WantedBy=
-                        WantedBy=multi-user.target
-                    "#.to_string());
-                }}
-
-                match matches.subcommand() {
-                    ("register", Some(_matches)) => {
-                        controller.create().context("failed to register service")?;
-                    }
-                    ("unregister", Some(_matches)) => {
-                        controller.delete().context("failed to unregister service")?;
-                    }
-                    _ => anyhow::bail!("invalid service subcommand"),
-                }
-            }
-            _ => anyhow::bail!("invalid command"),
-        }
-    } else {
-        let config = ConfHandle::init().context("unable to initialize configuration")?;
-        let service_mode = std::env::args().any(|arg| arg == "--service");
-
-        if !service_mode {
-            let mut service = GatewayService::load(config).context("Service loading failed")?;
-
-            service.start();
-
-            // Waiting for some stop signals (CTRL-C…)
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_io()
-                .build()
-                .unwrap();
-            rt.block_on(build_signals_fut())?;
-
-            service.stop();
-        } else {
-            let mut controller = Controller::new(service_name, display_name, description);
-
-            controller
-                .register(service_main_wrapper)
-                .context("failed to register service")?;
-        }
-    }
-
-    Ok(())
-}
 
 #[cfg(unix)]
 async fn build_signals_fut() -> anyhow::Result<()> {
