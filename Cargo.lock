@@ -782,7 +782,6 @@ dependencies = [
  "ceviche",
  "cfg-if 1.0.0",
  "chrono",
- "clap",
  "devolutions-gateway-generators",
  "dlopen",
  "dlopen_derive",
