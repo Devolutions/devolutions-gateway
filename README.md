@@ -1,4 +1,4 @@
-# devolutions-gateway
+# Devolutions Gateway
 
 [![Build Status](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Devolutions/devolutions-gateway/actions/workflows/ci.yml)
 
@@ -6,76 +6,49 @@ A blazing fast relay server adaptable to different protocols and desired levels 
 
 Use `cargo build --release` to build a release version of `devolutions-gateway` locally.
 
-## Command-line Interface
+## Configuration
 
-```
-USAGE:
-    devolutions-gateway [FLAGS] [OPTIONS]
+Devolutions Gateway is configured using a JSON document.
+The file must be named `gateway.json` and exist under the following path:
 
-FLAGS:
-    -h, --help
-            Prints help information
+- `%ProgramData%\Devolutions\Gateway\` under Windows,
+- `/Library/Application Support/devolutions-gateway/` under MacOS, or
+- `/etc/devolutions-gateway/` under Linux.
 
-        --service
-            Enable service mode
+This path may be overriden using the `DGATEWAY_CONFIG_PATH` environment variable.
 
-    -v, --version
-            Prints version information
+A default template with minimal options is generated in this location if the file doesn't exist yet.
 
+Currently stable options are:
 
-OPTIONS:
-        --api-key <KEY>
-            The API key used by the server to authenticate client queries. [env: DGATEWAY_API_KEY=]
+- `Id`: this Gateway's unique ID,
 
-        --capture-path <PATH>
-            Path to the pcap files. If not set, no pcap files will be created. WaykNow and RDP protocols can be saved.
-            [env: DGATEWAY_CAPTURE_PATH=]
+- `Hostname`: this Gateway's hostname (used when inferring external URLs),
 
-        --certificate-data <DATA>
-            Certificate data, base64-encoded X509 DER. [env: DGATEWAY_CERTIFICATE_DATA=]
+- `ProvisionerPublicKeyFile`: path to the provisioner public key (used to verify tokens without any specfic restriction),
 
-        --certificate-file <FILE>
-            Path to the certificate file. [env: DGATEWAY_CERTIFICATE_FILE=]
+- `SubProvisionerPublicKey`: a JSON object describing the sub provisioner public key (may only be used to verify tokens when establishing a session).
+    The schema is:
 
-        --delegation-private-key-data <DATA>
-            Private key data, base64-encoded PKCS10. [env: DGATEWAY_DELEGATION_PRIVATE_KEY_DATA=]
+    * `Id`: the key ID for this subkey,
+    * `Value`: the binary-to-text-encoded key data,
+    * `Format`: the format used for the key data (`Spki` or `Rsa`),
+    * `Encoding`: the binary-to-text encoding used for the key data (`Multibase`, `Base64`, `Base64Pad`, `Base64Url`, `Base64UrlPad`),
+    * `File`: may replace the three aforementioned options in order to specify a path instead.
 
-        --delegation-private-key-file <FILE>
-            Path to the private key file. [env: DGATEWAY_DELEGATION_PRIVATE_KEY_FILE=]
+- `DelegationPrivateKeyFile`: path to the delegation private key (used to decypher sensitive data from tokens),
 
-        --farm-name <FARM-NAME>
-            Farm name [env: DGATEWAY_FARM_NAME=]
+- `TlsCertificateFile`: path to the certificate to use for TLS,
 
-        --hostname <HOSTNAME>
-            Specific name to reach that instance of Devolutions Gateway. [env: DGATEWAY_HOSTNAME=]
+- `TlsPrivateKeyFile`: path to the private key to use for TLS,
 
-    -l, --listener <URL>...
-            An URL on which the server will listen on. The external URL returned as candidate can be specified after the
-            listener, separated with a comma. <scheme>://<local_iface_ip>:<port>,<scheme>://<external>:<port> If it is
-            not specified, the external url will be <scheme>://<hostname>:<port> where <hostname> is the value of the
-            hostname parameter. [env: DGATEWAY_LISTENERS=]
+- `Listeners`: array of listener URLs.
+    Each element has the following schema: 
 
-        --log-file <LOG_FILE>
-            A file with logs
+    * `InternalUrl`: internal URL for this listener,
+    * `ExternalUrl`: external URL for this listener.
 
-        --private-key-data <DATA>
-            Private key data, base64-encoded PKCS10. [env: DGATEWAY_PRIVATE_KEY_DATA=]
-
-        --private-key-file <FILE>
-            Path to the private key file. [env: DGATEWAY_PRIVATE_KEY_FILE=]
-
-        --provisioner-public-key-data <DATA>
-            Public key data, base64-encoded PKCS10. [env: DGATEWAY_PROVISIONER_PUBLIC_KEY_DATA=]
-
-        --provisioner-public-key-file <FILE>
-            Path to the public key file. [env: DGATEWAY_PROVISIONER_PUBLIC_KEY_FILE=]
-
-    -r, --routing-url <URL>
-            An address on which the server will route all packets.
-            Format: <scheme>://<ip>:<port>.
-            Supported schemes: tcp, tls.
-            If it is not specified, the JET protocol will be used.
-```
+    Host segment may be abridged with `*`.
 
 ## Sample Usage
 
@@ -83,14 +56,12 @@ OPTIONS:
 
 Devolutions Gateway can redirect RDP traffic authorized by a JWT (Json Web Token) both signed (JWS) and encrypted (JWE).
 
-The key used to sign must be known by the Gateway. You can provide the public
-key to use using `--provisioner-public-key-file` with a path to a PEM file; or `--provisioner-public-key-data`
-with a base64-encoded pkcs10 value.
+The key used to sign must be known by the Gateway.
+This key is provided through the `ProvisionerPublicKeyFile` option in the configuration file.
 The provisioner can then use its private key to sign a JWT and authorize RDP routing.
 
-The key used for token encryption is provided using `--delegation-private-key-data` or `--delegation-private-key-file`
-similarly to the provisioner key.
-The public counter part of the delegation key must then be used for token encryption.
+Similarly, The key used for token decryption is provided through the `DelegationPrivateKeyFile` option.
+The public counterpart of the delegation key must then be used for token encryption.
 
 #### JWT structure and claims
 
@@ -126,7 +97,7 @@ If all the optional claims are provided RDP routing will start in **RDP-TLS** mo
 
 #### Token generation utilities
 
-JWT generation should be facilitated by a provisioner (such as the [WaykDen](https://github.com/Devolutions/WaykDen-ps)).
+JWT generation should be facilitated by a provisioner (such as [Devolutions Server](https://devolutions.net/server) or [Devolutions Password Hub](https://devolutions.net/password-hub)).
 However, you can easily generate a JWT for testing purposes by using CLI tools provided in `/tools` folder.
 
 ##### tokengen
@@ -149,23 +120,6 @@ RDP-TLS example:
 
 ```
 $ ./tokengen --provisioner-key /path/to/provisioner/private/key.pem --delegation-key /path/to/delegation/public/key.pem rdp-tls --dst-hst 192.168.122.70 --prx-usr proxy_username --prx-pwd proxy_password --dst-usr host_username --dst-pwd host_password
-```
-
-##### rdp_token.sh
-
-A bash script. Requires [smallstep CLI's tool](https://github.com/smallstep/cli).
-Check out the [installation](https://github.com/smallstep/cli#installation) section.
-
-RDP-TCP example:
-
-```
-$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem target_address
-```
-
-RDP-TLS example:
-
-```
-$ ./rdp_token.sh 15 /path/to/private/provisioner/private/key.pem /path/to/public/delegation/public/key.pem target_address proxy_username proxy_password host_username host_password
 ```
 
 #### Inject token in RDP connection using MSTSC
@@ -212,9 +166,9 @@ Using FreeRDP, token can be provided using `/pcb` argument with `xfreerdp`.
 ### Redirection to Microsoft Windows 7/8/8.1/Server 2008/Server 2012 server
 
 Unfortunately, Microsoft Windows 7/8/8.1/Server 2008/Server 2012 machines
-cannot accept connections from [rustls](https://crates.io/crates/rustls)
-client. Support for required cipher suits was not implemented until Windows 10.
+cannot accept connections from [rustls](https://crates.io/crates/rustls) client.
+Support for required cipher suits was not implemented until Windows 10.
 
 ## Continuous Integration and Delivery
 
-See the dedicated [README](.github/workflows//README.md) in the workflows directory.
+See the dedicated [README](.github/workflows/README.md) in the workflows directory.
