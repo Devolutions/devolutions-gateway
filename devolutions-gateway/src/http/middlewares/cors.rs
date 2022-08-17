@@ -14,7 +14,7 @@ impl CorsMiddleware {
             let cors_rsp = match Builder::new()
                 .header("Access-Control-Allow-Origin", "*")
                 .header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-                .header("Access-Control-Allow-Headers", "Authorization")
+                .header("Access-Control-Allow-Headers", "Authorization, Content-Type")
                 .header("Access-Control-Allow-Credentials", "true")
                 .header("Access-Control-Max-Age", "7200")
                 .status(StatusCode::NO_CONTENT)
