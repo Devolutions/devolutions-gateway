@@ -1,5 +1,4 @@
 use devolutions_gateway::config::dto::*;
-use devolutions_gateway::config::{DataEncoding, PrivKeyFormat, PubKeyFormat};
 use rstest::*;
 use std::str::FromStr as _;
 use tap::prelude::*;
@@ -42,32 +41,24 @@ fn sample_1() -> Sample {
         file_conf: ConfFile {
             id: Some(Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap()),
             hostname: Some("hostname.example.io".to_owned()),
-            provisioner_public_key: Some(ConfFileOrData::Path {
-                file: "/path/to/provisioner.pub.key".into(),
-            }),
+            provisioner_public_key_file: Some("/path/to/provisioner.pub.key".into()),
+            provisioner_public_key_data: None,
             sub_provisioner_public_key: Some(SubProvisionerKeyConf {
                 id: "subkey-id".to_owned(),
-                inner: ConfFileOrData::Flattened(ConfData {
+                data: ConfData {
                     value: "subkey-value".to_owned(),
                     format: PubKeyFormat::Rsa,
                     encoding: DataEncoding::Base64Pad,
-                }),
-            }),
-            delegation_private_key: Some(ConfFileOrData::Inlined {
-                data: ConfData {
-                    value: "delegation-key-value".to_owned(),
-                    format: PrivKeyFormat::Pkcs8,
-                    encoding: DataEncoding::Multibase,
                 },
             }),
-            tls: Some(TlsConf {
-                tls_certificate: ConfFileOrData::Path {
-                    file: "/path/to/tls-certificate.pem".into(),
-                },
-                tls_private_key: ConfFileOrData::Path {
-                    file: "/path/to/tls-private.key".into(),
-                },
+            delegation_private_key_file: None,
+            delegation_private_key_data: Some(ConfData {
+                value: "delegation-key-value".to_owned(),
+                format: PrivKeyFormat::Pkcs8,
+                encoding: DataEncoding::Multibase,
             }),
+            tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
+            tls_private_key_file: Some("/path/to/tls-private.key".into()),
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".try_into().unwrap(),
@@ -86,6 +77,7 @@ fn sample_1() -> Sample {
             capture_path: None,
             sogar: None,
             debug: None,
+            rest: Default::default(),
         },
     }
 }
@@ -102,19 +94,13 @@ fn sample_2() -> Sample {
         file_conf: ConfFile {
             id: None,
             hostname: None,
-            provisioner_public_key: Some(ConfFileOrData::Path {
-                file: "/path/to/provisioner.pub.key".into(),
-            }),
+            provisioner_public_key_file: Some("/path/to/provisioner.pub.key".into()),
+            provisioner_public_key_data: None,
             sub_provisioner_public_key: None,
-            delegation_private_key: None,
-            tls: Some(TlsConf {
-                tls_certificate: ConfFileOrData::Path {
-                    file: "/path/to/tls-certificate.pem".into(),
-                },
-                tls_private_key: ConfFileOrData::Path {
-                    file: "/path/to/tls-private.key".into(),
-                },
-            }),
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
+            tls_private_key_file: Some("/path/to/tls-private.key".into()),
             listeners: vec![],
             log_file: Some("/path/to/log/file.log".into()),
             jrl_file: None,
@@ -124,6 +110,7 @@ fn sample_2() -> Sample {
             capture_path: None,
             sogar: None,
             debug: None,
+            rest: Default::default(),
         },
     }
 }

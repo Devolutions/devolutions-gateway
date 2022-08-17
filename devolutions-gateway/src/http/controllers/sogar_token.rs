@@ -1,4 +1,5 @@
-use crate::config::{ConfHandle, SogarUser};
+use crate::config::dto::SogarUser;
+use crate::config::ConfHandle;
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::PrivateKey;

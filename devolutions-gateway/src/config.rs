@@ -51,7 +51,6 @@ impl fmt::Debug for Tls {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsConfig")
             .field("certificate", &self.certificate)
-            .field("private_key", &self.private_key)
             .field("public_key", &self.public_key)
             .finish_non_exhaustive()
     }
@@ -78,52 +77,6 @@ impl Tls {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-pub enum SogarPermission {
-    Push,
-    Pull,
-}
-
-#[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
-pub struct SogarUser {
-    pub password: Option<String>,
-    pub username: Option<String>,
-    pub permission: Option<SogarPermission>,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
-pub enum DataEncoding {
-    #[default]
-    Multibase,
-    Base64,
-    Base64Pad,
-    Base64Url,
-    Base64UrlPad,
-}
-
-#[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
-pub enum CertFormat {
-    #[default]
-    X509,
-}
-
-#[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
-pub enum PrivKeyFormat {
-    #[default]
-    Pkcs8,
-    Ec,
-    Rsa,
-}
-
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
-pub enum PubKeyFormat {
-    #[default]
-    Spki,
-    Rsa,
-}
-
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub id: Option<Uuid>,
@@ -145,24 +98,6 @@ pub struct Conf {
 
 impl Conf {
     pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
-        let has_http_listener = conf_file
-            .listeners
-            .iter()
-            .any(|l| matches!(l.internal_url.scheme(), "http" | "https" | "ws" | "wss"));
-
-        if !has_http_listener {
-            anyhow::bail!("At least one HTTP-capable listener is required");
-        }
-
-        let requires_tls = conf_file
-            .listeners
-            .iter()
-            .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
-
-        if requires_tls && conf_file.tls.is_none() {
-            anyhow::bail!("TLS usage implied but TLS configuration is missing (certificate or/and private key)");
-        }
-
         let hostname = conf_file
             .hostname
             .clone()
@@ -171,8 +106,36 @@ impl Conf {
         let listeners: Vec<_> = conf_file
             .listeners
             .iter()
-            .map(|l| dto::ListenerConf::to_listener_urls(l, &hostname))
-            .collect();
+            .enumerate()
+            .map(|(i, l)| to_listener_urls(l, &hostname).with_context(|| format!("Listener at position {i}")))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
+        let has_http_listener = listeners
+            .iter()
+            .any(|l| matches!(l.internal_url.scheme(), "http" | "https" | "ws" | "wss"));
+
+        if !has_http_listener {
+            anyhow::bail!("At least one HTTP-capable listener is required");
+        }
+
+        let tls = conf_file
+            .tls_certificate_file
+            .as_ref()
+            .zip(conf_file.tls_private_key_file.as_ref())
+            .map(|(cert_file, key_file)| {
+                let tls_certificate = read_rustls_certificate_file(cert_file).context("TLS certificate")?;
+                let tls_private_key = read_rustls_priv_key_file(key_file).context("TLS private key")?;
+                Tls::init(tls_certificate, tls_private_key).context("Failed to init TLS config")
+            })
+            .transpose()?;
+
+        let requires_tls = listeners
+            .iter()
+            .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
+
+        if requires_tls && tls.is_none() {
+            anyhow::bail!("TLS usage implied but TLS configuration is missing (certificate or/and private key)");
+        }
 
         let data_dir = get_data_dir();
 
@@ -188,44 +151,28 @@ impl Conf {
             .unwrap_or_else(|| Utf8PathBuf::from("jrl.json"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
-        let tls = conf_file
-            .tls
-            .as_ref()
-            .map(|tls_conf| {
-                let tls_certificate = tls_conf
-                    .tls_certificate
-                    .read_rustls_certificate()
-                    .context("TLS certificate")?;
-                let tls_private_key = tls_conf
-                    .tls_private_key
-                    .read_rustls_priv_key()
-                    .context("TLS private key")?;
-                Tls::init(tls_certificate, tls_private_key).context("Failed to init TLS config")
-            })
-            .transpose()?;
-
-        let provisioner_public_key = conf_file
-            .provisioner_public_key
-            .as_ref()
-            .context("Provisioner public key is missing")?
-            .read_pub_key()
-            .context("Provisioner public key")?;
+        let provisioner_public_key = read_pub_key(
+            conf_file.provisioner_public_key_file.as_deref(),
+            conf_file.provisioner_public_key_data.as_ref(),
+        )
+        .context("Provisioner public key")?
+        .context("Provisioner public key is missing (no path nor inlined data provided)")?;
 
         let sub_provisioner_public_key = conf_file
             .sub_provisioner_public_key
             .as_ref()
             .map(|subkey| {
                 let kid = subkey.id.clone();
-                let key = subkey.inner.read_pub_key().context("Sub provisioner public key")?;
+                let key = read_pub_key_data(&subkey.data).context("Sub provisioner public key")?;
                 Ok::<_, anyhow::Error>(Subkey { data: key, kid })
             })
             .transpose()?;
 
-        let delegation_private_key = conf_file
-            .delegation_private_key
-            .as_ref()
-            .map(|key| key.read_priv_key().context("Delegation private key"))
-            .transpose()?;
+        let delegation_private_key = read_priv_key(
+            conf_file.delegation_private_key_file.as_deref(),
+            conf_file.delegation_private_key_data.as_ref(),
+        )
+        .context("Delegation private key")?;
 
         Ok(Conf {
             id: conf_file.id,
@@ -268,7 +215,7 @@ impl ConfHandle {
         let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
             Some(conf_file) => conf_file,
             None => {
-                let defaults = dto::ConfFile::default();
+                let defaults = dto::ConfFile::generate_new();
                 println!("Write default configuration to disk…");
                 save_config(&defaults).context("Failed to save configuration")?;
                 defaults
@@ -308,7 +255,7 @@ impl ConfHandle {
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("Failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, &json).context("Failed to write to file")?;
+    std::fs::write(&conf_file_path, &json).with_context(|| format!("Failed to write at {conf_file_path}"))?;
     Ok(())
 }
 
@@ -362,6 +309,152 @@ fn default_hostname() -> Option<String> {
     hostname::get().ok()?.into_string().ok()
 }
 
+fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<rustls::Certificate> {
+    read_rustls_certificate(Some(path), None).transpose().unwrap()
+}
+
+fn read_rustls_certificate(
+    path: Option<&Utf8Path>,
+    data: Option<&dto::ConfData<dto::CertFormat>>,
+) -> anyhow::Result<Option<rustls::Certificate>> {
+    match (path, data) {
+        (Some(path), _) => {
+            let pem: Pem = normalize_data_path(path, &get_data_dir())
+                .pipe_ref(std::fs::read_to_string)
+                .with_context(|| format!("Couldn't read file at {path}"))?
+                .pipe_deref(str::parse)
+                .context("Couldn't parse pem document")?;
+
+            if pem.label() != CERTIFICATE_LABEL {
+                anyhow::bail!("bad pem label (expected {})", CERTIFICATE_LABEL);
+            }
+
+            Ok(Some(rustls::Certificate(pem.into_data().into_owned())))
+        }
+        (None, Some(data)) => {
+            let value = data.decode_value()?;
+
+            match data.format {
+                dto::CertFormat::X509 => Ok(Some(rustls::Certificate(value))),
+            }
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn read_pub_key_data(data: &dto::ConfData<dto::PubKeyFormat>) -> anyhow::Result<PublicKey> {
+    read_pub_key(None, Some(data)).transpose().unwrap()
+}
+
+fn read_pub_key(
+    path: Option<&Utf8Path>,
+    data: Option<&dto::ConfData<dto::PubKeyFormat>>,
+) -> anyhow::Result<Option<PublicKey>> {
+    match (path, data) {
+        (Some(path), _) => normalize_data_path(path, &get_data_dir())
+            .pipe_ref(std::fs::read_to_string)
+            .with_context(|| format!("Couldn't read file at {path}"))?
+            .pipe_deref(PublicKey::from_pem_str)
+            .context("Couldn't parse pem document")
+            .map(Some),
+        (None, Some(data)) => {
+            let value = data.decode_value()?;
+
+            match data.format {
+                dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("Bad SPKI"),
+                dto::PubKeyFormat::Rsa => PublicKey::from_rsa_der(&value).context("Bad RSA value"),
+            }
+            .map(Some)
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<rustls::PrivateKey> {
+    read_rustls_priv_key(Some(path), None).transpose().unwrap()
+}
+
+fn read_rustls_priv_key(
+    path: Option<&Utf8Path>,
+    data: Option<&dto::ConfData<dto::PrivKeyFormat>>,
+) -> anyhow::Result<Option<rustls::PrivateKey>> {
+    let data = match (path, data) {
+        (Some(path), _) => {
+            let pem: Pem = normalize_data_path(path, &get_data_dir())
+                .pipe_ref(std::fs::read_to_string)
+                .with_context(|| format!("Couldn't read file at {path}"))?
+                .pipe_deref(str::parse)
+                .context("Couldn't parse pem document")?;
+
+            if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
+                anyhow::bail!("bad pem label (expected one of {:?})", PRIVATE_KEY_LABELS);
+            }
+
+            pem.into_data().into_owned()
+        }
+        (None, Some(data)) => data.decode_value()?,
+        (None, None) => return Ok(None),
+    };
+
+    Ok(Some(rustls::PrivateKey(data)))
+}
+
+fn read_priv_key(
+    path: Option<&Utf8Path>,
+    data: Option<&dto::ConfData<dto::PrivKeyFormat>>,
+) -> anyhow::Result<Option<PrivateKey>> {
+    match (path, data) {
+        (Some(path), _) => normalize_data_path(path, &get_data_dir())
+            .pipe_ref(std::fs::read_to_string)
+            .with_context(|| format!("Couldn't read file at {path}"))?
+            .pipe_deref(PrivateKey::from_pem_str)
+            .context("Couldn't parse pem document")
+            .map(Some),
+        (None, Some(data)) => {
+            let value = data.decode_value()?;
+
+            match data.format {
+                dto::PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("Bad PKCS8"),
+                dto::PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("Bad EC value"),
+                dto::PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("Bad RSA value"),
+            }
+            .map(Some)
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str) -> anyhow::Result<ListenerUrls> {
+    fn map_scheme(url: &mut Url) {
+        match url.scheme() {
+            "http" => url.set_scheme("ws").unwrap(),
+            "https" => url.set_scheme("wss").unwrap(),
+            _ => (),
+        }
+    }
+
+    let mut internal_url = Url::parse(&conf.internal_url)
+        .context("Invalid internal URL")?
+        .tap_mut(map_scheme);
+
+    if internal_url.host_str() == Some("*") {
+        let _ = internal_url.set_host(Some("0.0.0.0"));
+    }
+
+    let mut external_url = Url::parse(&conf.external_url)
+        .context("Invalid external URL")?
+        .tap_mut(map_scheme);
+
+    if external_url.host_str() == Some("*") {
+        let _ = external_url.set_host(Some(hostname));
+    }
+
+    Ok(ListenerUrls {
+        internal_url,
+        external_url,
+    })
+}
+
 pub mod dto {
     use super::*;
 
@@ -380,19 +473,30 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub hostname: Option<String>,
 
-        /// Provisioner key to verify token with no restriction
-        #[serde(flatten, with = "provisioner_public_key")]
-        pub provisioner_public_key: Option<ConfFileOrData<PubKeyFormat>>,
+        /// Path to provisioner key to verify tokens without restriction
+        pub provisioner_public_key_file: Option<Utf8PathBuf>,
+        /// Inlined provisioner key to verify tokens without restriction
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub provisioner_public_key_data: Option<ConfData<PubKeyFormat>>,
+
         /// Sub provisioner key which can only be used when establishing a session
         #[serde(skip_serializing_if = "Option::is_none")]
         pub sub_provisioner_public_key: Option<SubProvisionerKeyConf>,
-        /// Delegation key used to decrypt sensitive data
-        #[serde(flatten, with = "delegation_private_key", skip_serializing_if = "Option::is_none")]
-        pub delegation_private_key: Option<ConfFileOrData<PrivKeyFormat>>,
 
-        /// TLS config
-        #[serde(flatten)]
-        pub tls: Option<TlsConf>,
+        /// Delegation key used to decypher sensitive data
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub delegation_private_key_file: Option<Utf8PathBuf>,
+        /// Inlined delegation key to decypher sensitive data
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
+
+        // TLS config
+        /// Certificate to use for TLS
+        #[serde(alias = "CertificateFile")]
+        pub tls_certificate_file: Option<Utf8PathBuf>,
+        /// Private key to use for TLS
+        #[serde(alias = "PrivateKeyFile")]
+        pub tls_private_key_file: Option<Utf8PathBuf>,
 
         /// Listeners to launch at startup
         pub listeners: Vec<ListenerConf>,
@@ -425,26 +529,26 @@ pub mod dto {
         /// (Unstable) Unsafe debug options for developers
         #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
+
+        // Other unofficial options.
+        // This field is useful so that we can deserialize
+        // and then losslessly serialize back all root keys of the config file.
+        #[serde(flatten)]
+        pub rest: serde_json::Map<String, serde_json::Value>,
     }
 
-    impl Default for ConfFile {
-        fn default() -> Self {
+    impl ConfFile {
+        pub fn generate_new() -> Self {
             Self {
-                id: None,
+                id: Some(Uuid::new_v4()),
                 hostname: None,
-                provisioner_public_key: Some(ConfFileOrData::Path {
-                    file: "provisioner.pub.key".into(),
-                }),
+                provisioner_public_key_file: Some("provisioner.pub.key".into()),
+                provisioner_public_key_data: None,
                 sub_provisioner_public_key: None,
-                delegation_private_key: None,
-                tls: Some(TlsConf {
-                    tls_certificate: ConfFileOrData::Path {
-                        file: "tls-certificate.pem".into(),
-                    },
-                    tls_private_key: ConfFileOrData::Path {
-                        file: "tls-private.key".into(),
-                    },
-                }),
+                delegation_private_key_file: None,
+                delegation_private_key_data: None,
+                tls_certificate_file: Some("tls-certificate.pem".into()),
+                tls_private_key_file: Some("tls-private.key".into()),
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8080".try_into().unwrap(),
@@ -463,12 +567,10 @@ pub mod dto {
                 capture_path: None,
                 sogar: None,
                 debug: None,
+                rest: serde_json::Map::new(),
             }
         }
     }
-
-    serde_with::with_prefix!(provisioner_public_key "ProvisionerPublicKey");
-    serde_with::with_prefix!(delegation_private_key "DelegationPrivateKey");
 
     /// Unsafe debug options that should only ever be used at development stage
     ///
@@ -510,6 +612,7 @@ pub mod dto {
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     pub struct SogarConf {
         pub registry_url: String,
         pub username: String,
@@ -548,6 +651,52 @@ pub mod dto {
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    pub enum SogarPermission {
+        Push,
+        Pull,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
+    pub struct SogarUser {
+        pub password: Option<String>,
+        pub username: Option<String>,
+        pub permission: Option<SogarPermission>,
+    }
+
+    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    pub enum DataEncoding {
+        #[default]
+        Multibase,
+        Base64,
+        Base64Pad,
+        Base64Url,
+        Base64UrlPad,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    pub enum CertFormat {
+        #[default]
+        X509,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    pub enum PrivKeyFormat {
+        #[default]
+        Pkcs8,
+        Ec,
+        Rsa,
+    }
+
+    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    pub enum PubKeyFormat {
+        #[default]
+        Spki,
+        Rsa,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ConfData<Format> {
         pub value: String,
@@ -558,7 +707,7 @@ pub mod dto {
     }
 
     impl<Format> ConfData<Format> {
-        fn decode_value(&self) -> anyhow::Result<Vec<u8>> {
+        pub fn decode_value(&self) -> anyhow::Result<Vec<u8>> {
             match self.encoding {
                 DataEncoding::Multibase => multibase::decode(&self.value).map(|o| o.1),
                 DataEncoding::Base64 => multibase::Base::Base64.decode(&self.value),
@@ -571,229 +720,17 @@ pub mod dto {
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(untagged)]
-    pub enum ConfFileOrData<Format> {
-        #[serde(rename_all = "PascalCase")]
-        Path {
-            file: Utf8PathBuf,
-        },
-        #[serde(rename_all = "PascalCase")]
-        Inlined {
-            #[serde(bound(deserialize = "ConfData<Format>: Deserialize<'de>"))]
-            data: ConfData<Format>,
-        },
-        Flattened(#[serde(bound(deserialize = "ConfData<Format>: Deserialize<'de>"))] ConfData<Format>),
-    }
-
-    impl ConfFileOrData<CertFormat> {
-        pub(super) fn read_rustls_certificate(&self) -> anyhow::Result<rustls::Certificate> {
-            match self {
-                Self::Path { file } => {
-                    let path = normalize_data_path(file, &get_data_dir());
-                    let pem: Pem = std::fs::read_to_string(&path)
-                        .with_context(|| format!("Couldn't read file at {path}"))?
-                        .pipe_deref(str::parse)
-                        .context("Couldn't parse pem document")?;
-
-                    if pem.label() != CERTIFICATE_LABEL {
-                        anyhow::bail!("bad pem label (expected {})", CERTIFICATE_LABEL);
-                    }
-
-                    Ok(rustls::Certificate(pem.into_data().into_owned()))
-                }
-                Self::Inlined { data } | Self::Flattened(data) => {
-                    let value = data.decode_value()?;
-
-                    match data.format {
-                        CertFormat::X509 => Ok(rustls::Certificate(value)),
-                    }
-                }
-            }
-        }
-    }
-
-    impl ConfFileOrData<PubKeyFormat> {
-        pub(super) fn read_pub_key(&self) -> anyhow::Result<PublicKey> {
-            match self {
-                Self::Path { file } => {
-                    let path = normalize_data_path(file, &get_data_dir());
-                    std::fs::read_to_string(&path)
-                        .with_context(|| format!("Couldn't read file at {path}"))?
-                        .pipe_deref(PublicKey::from_pem_str)
-                        .context("Couldn't parse pem document")
-                }
-                Self::Inlined { data } | Self::Flattened(data) => {
-                    let value = data.decode_value()?;
-
-                    match data.format {
-                        PubKeyFormat::Spki => PublicKey::from_der(&value).context("Bad SPKI"),
-                        PubKeyFormat::Rsa => PublicKey::from_rsa_der(&value).context("Bad RSA value"),
-                    }
-                }
-            }
-        }
-    }
-
-    impl ConfFileOrData<PrivKeyFormat> {
-        pub(super) fn read_rustls_priv_key(&self) -> anyhow::Result<rustls::PrivateKey> {
-            let data = match self {
-                Self::Path { file } => {
-                    let path = normalize_data_path(file, &get_data_dir());
-                    let pem: Pem = std::fs::read_to_string(&path)
-                        .with_context(|| format!("Couldn't read file at {path}"))?
-                        .pipe_deref(str::parse)
-                        .context("Couldn't parse pem document")?;
-
-                    if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
-                        anyhow::bail!("bad pem label (expected one of {:?})", PRIVATE_KEY_LABELS);
-                    }
-
-                    pem.into_data().into_owned()
-                }
-                Self::Inlined { data } | Self::Flattened(data) => data.decode_value()?,
-            };
-
-            Ok(rustls::PrivateKey(data))
-        }
-
-        pub(super) fn read_priv_key(&self) -> anyhow::Result<PrivateKey> {
-            match self {
-                Self::Path { file } => {
-                    let path = normalize_data_path(file, &get_data_dir());
-                    std::fs::read_to_string(&path)
-                        .with_context(|| format!("Couldn't read file at {path}"))?
-                        .pipe_deref(PrivateKey::from_pem_str)
-                        .context("Couldn't parse pem document")
-                }
-                Self::Inlined { data } | Self::Flattened(data) => {
-                    let value = data.decode_value()?;
-
-                    match data.format {
-                        PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("Bad PKCS8"),
-                        PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("Bad EC value"),
-                        PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("Bad RSA value"),
-                    }
-                }
-            }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct SubProvisionerKeyConf {
         pub id: String,
         #[serde(flatten)]
-        pub inner: ConfFileOrData<PubKeyFormat>,
-    }
-
-    serde_with::with_prefix!(certificate "Certificate");
-    serde_with::with_prefix!(private_key "PrivateKey");
-    serde_with::with_prefix!(tls_certificate "TlsCertificate");
-    serde_with::with_prefix!(tls_private_key "TlsPrivateKey");
-
-    /// TLS config    
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize)]
-    pub struct TlsConf {
-        /// Certificate to use for TLS
-        #[serde(flatten, with = "tls_certificate")]
-        pub tls_certificate: ConfFileOrData<CertFormat>,
-        /// Private key to use for TLS
-        #[serde(flatten, with = "tls_private_key")]
-        pub tls_private_key: ConfFileOrData<PrivKeyFormat>,
-    }
-
-    impl<'de> Deserialize<'de> for TlsConf {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            use serde::de::Error as _;
-
-            #[derive(Deserialize)]
-            pub struct Helper {
-                #[serde(flatten, with = "tls_certificate")]
-                pub tls_certificate: Option<ConfFileOrData<CertFormat>>,
-                #[serde(flatten, with = "certificate")]
-                pub certificate: Option<ConfFileOrData<CertFormat>>,
-                #[serde(flatten, with = "tls_private_key")]
-                pub tls_private_key: Option<ConfFileOrData<PrivKeyFormat>>,
-                #[serde(flatten, with = "private_key")]
-                pub private_key: Option<ConfFileOrData<PrivKeyFormat>>,
-            }
-
-            let conf = Helper::deserialize(deserializer)?;
-
-            let certificate = match (conf.tls_certificate, conf.certificate) {
-                (Some(certificate), _) => certificate,
-                (None, Some(certificate)) => certificate,
-                _ => return Err(D::Error::missing_field("TlsCertificateFile")),
-            };
-
-            let key = match (conf.tls_private_key, conf.private_key) {
-                (Some(key), _) => key,
-                (None, Some(key)) => key,
-                _ => return Err(D::Error::missing_field("TlsPrivateKeyFile")),
-            };
-
-            Ok(Self {
-                tls_certificate: certificate,
-                tls_private_key: key,
-            })
-        }
-
-        fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            // Default implementation just delegates to `deserialize` impl.
-            *place = Deserialize::deserialize(deserializer)?;
-            Ok(())
-        }
+        pub data: ConfData<PubKeyFormat>,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ListenerConf {
-        pub internal_url: Url,
-        pub external_url: Url,
-    }
-
-    impl ListenerConf {
-        pub(super) fn to_listener_urls(&self, hostname: &str) -> ListenerUrls {
-            fn map_scheme(url: &Url) -> &str {
-                match url.scheme() {
-                    "http" => "ws",
-                    "https" => "wss",
-                    other => other,
-                }
-            }
-
-            let mut internal_url = self.internal_url.clone();
-
-            // Should not panic because initial scheme is valid, and the mapping closure can't return a bad scheme
-            internal_url
-                .set_scheme(map_scheme(&self.internal_url))
-                .expect("valid scheme mapping");
-
-            if internal_url.host_str() == Some("*") {
-                let _ = internal_url.set_host(Some("0.0.0.0"));
-            }
-
-            let mut external_url = self.external_url.clone();
-
-            // Should not panic because initial scheme is valid, and the mapping closure can't return a bad scheme
-            external_url
-                .set_scheme(map_scheme(&self.external_url))
-                .expect("valid scheme mapping");
-
-            if external_url.host_str() == Some("*") {
-                let _ = external_url.set_host(Some(hostname));
-            }
-
-            ListenerUrls {
-                internal_url,
-                external_url,
-            }
-        }
+        pub internal_url: String,
+        pub external_url: String,
     }
 }
