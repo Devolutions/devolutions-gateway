@@ -18,11 +18,11 @@ paths:
         Modifies configuration
       operationId: PatchConfig
       requestBody:
-        description: Partial JSON-encoded configuration
+        description: JSON-encoded configuration patch
         content:
           application/json:
             schema:
-              type: string
+              $ref: '#/components/schemas/ConfigPatch'
         required: true
       responses:
         '200':
@@ -55,7 +55,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GatewayClock'
+                $ref: '#/components/schemas/ClockDiagnostic'
       deprecated: false
   /jet/diagnostics/configuration:
     get:
@@ -71,7 +71,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GatewayConfiguration'
+                $ref: '#/components/schemas/ConfigDiagnostic'
         '400':
           description: Bad request
         '401':
@@ -154,12 +154,7 @@ paths:
         - gateway.sessions.read
 components:
   schemas:
-    ConnectionMode:
-      type: string
-      enum:
-      - rdv
-      - fwd
-    GatewayClock:
+    ClockDiagnostic:
       type: object
       required:
       - timestamp_secs
@@ -171,7 +166,7 @@ components:
         timestamp_secs:
           type: integer
           format: int64
-    GatewayConfiguration:
+    ConfigDiagnostic:
       type: object
       required:
       - hostname
@@ -189,6 +184,27 @@ components:
             $ref: '#/components/schemas/ListenerUrls'
         version:
           type: string
+    ConfigPatch:
+      type: object
+      properties:
+        Id:
+          type: string
+          format: uuid
+        SubProvisionerPublicKey:
+          $ref: '#/components/schemas/SubProvisionerKey'
+    ConnectionMode:
+      type: string
+      enum:
+      - rdv
+      - fwd
+    DataEncoding:
+      type: string
+      enum:
+      - Multibase
+      - Base64
+      - Base64Pad
+      - Base64Url
+      - Base64UrlPad
     ListenerUrls:
       type: object
       required:
@@ -199,6 +215,11 @@ components:
           type: string
         internal_url:
           type: string
+    PubKeyFormat:
+      type: string
+      enum:
+      - Spki
+      - Rsa
     SessionInfo:
       type: object
       required:
@@ -225,4 +246,18 @@ components:
         start_timestamp:
           type: string
           format: date-time
+    SubProvisionerKey:
+      type: object
+      required:
+      - Id
+      - Value
+      properties:
+        Encoding:
+          $ref: '#/components/schemas/DataEncoding'
+        Format:
+          $ref: '#/components/schemas/PubKeyFormat'
+        Id:
+          type: string
+        Value:
+          type: string
 

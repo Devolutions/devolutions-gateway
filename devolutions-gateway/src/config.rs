@@ -91,6 +91,7 @@ pub struct SogarUser {
     pub permission: Option<SogarPermission>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
 pub enum DataEncoding {
     #[default]
@@ -115,6 +116,7 @@ pub enum PrivKeyFormat {
     Rsa,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
 pub enum PubKeyFormat {
     #[default]

@@ -23,26 +23,26 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Modifies configuration
         /// </summary>
-        /// <param name="body">Partial JSON-encoded configuration</param>
+        /// <param name="body">JSON-encoded configuration patch</param>
         /// <returns>Configuration has been patched with success</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        void PatchConfig(string body);
+        void PatchConfig(ConfigPatch body);
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
         /// Modifies configuration
         /// </summary>
-        /// <param name="body">Partial JSON-encoded configuration</param>
+        /// <param name="body">JSON-encoded configuration patch</param>
         /// <returns>Configuration has been patched with success</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task PatchConfigAsync(string body, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch body, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves server's clock in order to diagnose clock drifting.
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        GatewayClock GetClock();
+        ClockDiagnostic GetClock();
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -50,14 +50,14 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<GatewayClock> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ClockDiagnostic> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves configuration.
         /// </summary>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        GatewayConfiguration GetConfiguration();
+        ConfigDiagnostic GetConfiguration();
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
@@ -65,7 +65,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<GatewayConfiguration> GetConfigurationAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Retrieves latest logs.
@@ -152,10 +152,10 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Modifies configuration
         /// </summary>
-        /// <param name="body">Partial JSON-encoded configuration</param>
+        /// <param name="body">JSON-encoded configuration patch</param>
         /// <returns>Configuration has been patched with success</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual void PatchConfig(string body)
+        public virtual void PatchConfig(ConfigPatch body)
         {
             System.Threading.Tasks.Task.Run(async () => await PatchConfigAsync(body, System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
@@ -164,10 +164,10 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Modifies configuration
         /// </summary>
-        /// <param name="body">Partial JSON-encoded configuration</param>
+        /// <param name="body">JSON-encoded configuration patch</param>
         /// <returns>Configuration has been patched with success</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task PatchConfigAsync(string body, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task PatchConfigAsync(ConfigPatch body, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             if (body == null)
                 throw new System.ArgumentNullException("body");
@@ -260,7 +260,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual GatewayClock GetClock()
+        public virtual ClockDiagnostic GetClock()
         {
             return System.Threading.Tasks.Task.Run(async () => await GetClockAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
@@ -271,7 +271,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Server's clock</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<GatewayClock> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<ClockDiagnostic> GetClockAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/diagnostics/clock");
@@ -308,7 +308,7 @@ namespace Devolutions.Gateway.Clients
                         var status_ = (int)response_.StatusCode;
                         if (status_ == 200)
                         {
-                            var objectResponse_ = await ReadObjectResponseAsync<GatewayClock>(response_, headers_, cancellationToken).ConfigureAwait(false);
+                            var objectResponse_ = await ReadObjectResponseAsync<ClockDiagnostic>(response_, headers_, cancellationToken).ConfigureAwait(false);
                             if (objectResponse_.Object == null)
                             {
                                 throw new ApiException("Response was null which was not expected.", status_, objectResponse_.Text, headers_, null);
@@ -340,7 +340,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual GatewayConfiguration GetConfiguration()
+        public virtual ConfigDiagnostic GetConfiguration()
         {
             return System.Threading.Tasks.Task.Run(async () => await GetConfigurationAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
@@ -351,7 +351,7 @@ namespace Devolutions.Gateway.Clients
         /// </summary>
         /// <returns>Service configuration</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<GatewayConfiguration> GetConfigurationAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<ConfigDiagnostic> GetConfigurationAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/diagnostics/configuration");
@@ -388,7 +388,7 @@ namespace Devolutions.Gateway.Clients
                         var status_ = (int)response_.StatusCode;
                         if (status_ == 200)
                         {
-                            var objectResponse_ = await ReadObjectResponseAsync<GatewayConfiguration>(response_, headers_, cancellationToken).ConfigureAwait(false);
+                            var objectResponse_ = await ReadObjectResponseAsync<ConfigDiagnostic>(response_, headers_, cancellationToken).ConfigureAwait(false);
                             if (objectResponse_.Object == null)
                             {
                                 throw new ApiException("Response was null which was not expected.", status_, objectResponse_.Text, headers_, null);
@@ -813,19 +813,7 @@ namespace Devolutions.Gateway.Clients
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
-    public enum ConnectionMode
-    {
-
-        [System.Runtime.Serialization.EnumMember(Value = @"rdv")]
-        Rdv = 0,
-
-        [System.Runtime.Serialization.EnumMember(Value = @"fwd")]
-        Fwd = 1,
-
-    }
-
-    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
-    public partial class GatewayClock
+    public partial class ClockDiagnostic
     {
         [Newtonsoft.Json.JsonProperty("timestamp_millis", Required = Newtonsoft.Json.Required.Always)]
         public long Timestamp_millis { get; set; }
@@ -845,7 +833,7 @@ namespace Devolutions.Gateway.Clients
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
-    public partial class GatewayConfiguration
+    public partial class ConfigDiagnostic
     {
         [Newtonsoft.Json.JsonProperty("hostname", Required = Newtonsoft.Json.Required.Always)]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
@@ -874,6 +862,59 @@ namespace Devolutions.Gateway.Clients
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class ConfigPatch
+    {
+        [Newtonsoft.Json.JsonProperty("Id", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public System.Guid Id { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("SubProvisionerPublicKey", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public SubProvisionerKey SubProvisionerPublicKey { get; set; }
+
+        private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
+
+        [Newtonsoft.Json.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties; }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public enum ConnectionMode
+    {
+
+        [System.Runtime.Serialization.EnumMember(Value = @"rdv")]
+        Rdv = 0,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"fwd")]
+        Fwd = 1,
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public enum DataEncoding
+    {
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Multibase")]
+        Multibase = 0,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Base64")]
+        Base64 = 1,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Base64Pad")]
+        Base64Pad = 2,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Base64Url")]
+        Base64Url = 3,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Base64UrlPad")]
+        Base64UrlPad = 4,
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class ListenerUrls
     {
         [Newtonsoft.Json.JsonProperty("external_url", Required = Newtonsoft.Json.Required.Always)]
@@ -892,6 +933,18 @@ namespace Devolutions.Gateway.Clients
             get { return _additionalProperties; }
             set { _additionalProperties = value; }
         }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public enum PubKeyFormat
+    {
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Spki")]
+        Spki = 0,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"Rsa")]
+        Rsa = 1,
 
     }
 
@@ -923,6 +976,36 @@ namespace Devolutions.Gateway.Clients
         [Newtonsoft.Json.JsonProperty("start_timestamp", Required = Newtonsoft.Json.Required.Always)]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public System.DateTime Start_timestamp { get; set; }
+
+        private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
+
+        [Newtonsoft.Json.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties; }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class SubProvisionerKey
+    {
+        [Newtonsoft.Json.JsonProperty("Encoding", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [Newtonsoft.Json.JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
+        public DataEncoding Encoding { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("Format", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        [Newtonsoft.Json.JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
+        public PubKeyFormat Format { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("Id", Required = Newtonsoft.Json.Required.Always)]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Id { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("Value", Required = Newtonsoft.Json.Required.Always)]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Value { get; set; }
 
         private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
 

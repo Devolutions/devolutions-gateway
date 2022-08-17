@@ -30,10 +30,10 @@ export class Client {
 
     /**
      * Modifies configuration
-     * @param body Partial JSON-encoded configuration
+     * @param body JSON-encoded configuration patch
      * @return Configuration has been patched with success
      */
-    patchConfig(body: string): Observable<void> {
+    patchConfig(body: ConfigPatch): Observable<void> {
         let url_ = this.baseUrl + "/jet/config";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -101,7 +101,7 @@ export class Client {
      * Retrieves server's clock in order to diagnose clock drifting.
      * @return Server's clock
      */
-    getClock(): Observable<GatewayClock> {
+    getClock(): Observable<ClockDiagnostic> {
         let url_ = this.baseUrl + "/jet/diagnostics/clock";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -120,14 +120,14 @@ export class Client {
                 try {
                     return this.processGetClock(response_ as any);
                 } catch (e) {
-                    return _observableThrow(e) as any as Observable<GatewayClock>;
+                    return _observableThrow(e) as any as Observable<ClockDiagnostic>;
                 }
             } else
-                return _observableThrow(response_) as any as Observable<GatewayClock>;
+                return _observableThrow(response_) as any as Observable<ClockDiagnostic>;
         }));
     }
 
-    protected processGetClock(response: HttpResponseBase): Observable<GatewayClock> {
+    protected processGetClock(response: HttpResponseBase): Observable<ClockDiagnostic> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -138,7 +138,7 @@ export class Client {
             return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
             let result200: any = null;
             let resultData200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver);
-            result200 = GatewayClock.fromJS(resultData200);
+            result200 = ClockDiagnostic.fromJS(resultData200);
             return _observableOf(result200);
             }));
         } else if (status !== 200 && status !== 204) {
@@ -146,14 +146,14 @@ export class Client {
             return throwException("An unexpected server error occurred.", status, _responseText, _headers);
             }));
         }
-        return _observableOf<GatewayClock>(null as any);
+        return _observableOf<ClockDiagnostic>(null as any);
     }
 
     /**
      * Retrieves configuration.
      * @return Service configuration
      */
-    getConfiguration(): Observable<GatewayConfiguration> {
+    getConfiguration(): Observable<ConfigDiagnostic> {
         let url_ = this.baseUrl + "/jet/diagnostics/configuration";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -172,14 +172,14 @@ export class Client {
                 try {
                     return this.processGetConfiguration(response_ as any);
                 } catch (e) {
-                    return _observableThrow(e) as any as Observable<GatewayConfiguration>;
+                    return _observableThrow(e) as any as Observable<ConfigDiagnostic>;
                 }
             } else
-                return _observableThrow(response_) as any as Observable<GatewayConfiguration>;
+                return _observableThrow(response_) as any as Observable<ConfigDiagnostic>;
         }));
     }
 
-    protected processGetConfiguration(response: HttpResponseBase): Observable<GatewayConfiguration> {
+    protected processGetConfiguration(response: HttpResponseBase): Observable<ConfigDiagnostic> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -190,7 +190,7 @@ export class Client {
             return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
             let result200: any = null;
             let resultData200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver);
-            result200 = GatewayConfiguration.fromJS(resultData200);
+            result200 = ConfigDiagnostic.fromJS(resultData200);
             return _observableOf(result200);
             }));
         } else if (status === 400) {
@@ -210,7 +210,7 @@ export class Client {
             return throwException("An unexpected server error occurred.", status, _responseText, _headers);
             }));
         }
-        return _observableOf<GatewayConfiguration>(null as any);
+        return _observableOf<ConfigDiagnostic>(null as any);
     }
 
     /**
@@ -407,16 +407,11 @@ export class Client {
     }
 }
 
-export enum ConnectionMode {
-    Rdv = "rdv",
-    Fwd = "fwd",
-}
-
-export class GatewayClock implements IGatewayClock {
+export class ClockDiagnostic implements IClockDiagnostic {
     timestamp_millis!: number;
     timestamp_secs!: number;
 
-    constructor(data?: IGatewayClock) {
+    constructor(data?: IClockDiagnostic) {
         if (data) {
             for (var property in data) {
                 if (data.hasOwnProperty(property))
@@ -432,9 +427,9 @@ export class GatewayClock implements IGatewayClock {
         }
     }
 
-    static fromJS(data: any): GatewayClock {
+    static fromJS(data: any): ClockDiagnostic {
         data = typeof data === 'object' ? data : {};
-        let result = new GatewayClock();
+        let result = new ClockDiagnostic();
         result.init(data);
         return result;
     }
@@ -446,26 +441,26 @@ export class GatewayClock implements IGatewayClock {
         return data;
     }
 
-    clone(): GatewayClock {
+    clone(): ClockDiagnostic {
         const json = this.toJSON();
-        let result = new GatewayClock();
+        let result = new ClockDiagnostic();
         result.init(json);
         return result;
     }
 }
 
-export interface IGatewayClock {
+export interface IClockDiagnostic {
     timestamp_millis: number;
     timestamp_secs: number;
 }
 
-export class GatewayConfiguration implements IGatewayConfiguration {
+export class ConfigDiagnostic implements IConfigDiagnostic {
     hostname!: string;
     id?: string;
     listeners!: ListenerUrls[];
     version!: string;
 
-    constructor(data?: IGatewayConfiguration) {
+    constructor(data?: IConfigDiagnostic) {
         if (data) {
             for (var property in data) {
                 if (data.hasOwnProperty(property))
@@ -497,9 +492,9 @@ export class GatewayConfiguration implements IGatewayConfiguration {
         }
     }
 
-    static fromJS(data: any): GatewayConfiguration {
+    static fromJS(data: any): ConfigDiagnostic {
         data = typeof data === 'object' ? data : {};
-        let result = new GatewayConfiguration();
+        let result = new ConfigDiagnostic();
         result.init(data);
         return result;
     }
@@ -517,19 +512,80 @@ export class GatewayConfiguration implements IGatewayConfiguration {
         return data;
     }
 
-    clone(): GatewayConfiguration {
+    clone(): ConfigDiagnostic {
         const json = this.toJSON();
-        let result = new GatewayConfiguration();
+        let result = new ConfigDiagnostic();
         result.init(json);
         return result;
     }
 }
 
-export interface IGatewayConfiguration {
+export interface IConfigDiagnostic {
     hostname: string;
     id?: string;
     listeners: IListenerUrls[];
     version: string;
+}
+
+export class ConfigPatch implements IConfigPatch {
+    id?: string;
+    subProvisionerPublicKey?: SubProvisionerKey;
+
+    constructor(data?: IConfigPatch) {
+        if (data) {
+            for (var property in data) {
+                if (data.hasOwnProperty(property))
+                    (<any>this)[property] = (<any>data)[property];
+            }
+            this.subProvisionerPublicKey = data.subProvisionerPublicKey && !(<any>data.subProvisionerPublicKey).toJSON ? new SubProvisionerKey(data.subProvisionerPublicKey) : <SubProvisionerKey>this.subProvisionerPublicKey;
+        }
+    }
+
+    init(_data?: any) {
+        if (_data) {
+            this.id = _data["Id"];
+            this.subProvisionerPublicKey = _data["SubProvisionerPublicKey"] ? SubProvisionerKey.fromJS(_data["SubProvisionerPublicKey"]) : <any>undefined;
+        }
+    }
+
+    static fromJS(data: any): ConfigPatch {
+        data = typeof data === 'object' ? data : {};
+        let result = new ConfigPatch();
+        result.init(data);
+        return result;
+    }
+
+    toJSON(data?: any) {
+        data = typeof data === 'object' ? data : {};
+        data["Id"] = this.id;
+        data["SubProvisionerPublicKey"] = this.subProvisionerPublicKey ? this.subProvisionerPublicKey.toJSON() : <any>undefined;
+        return data;
+    }
+
+    clone(): ConfigPatch {
+        const json = this.toJSON();
+        let result = new ConfigPatch();
+        result.init(json);
+        return result;
+    }
+}
+
+export interface IConfigPatch {
+    id?: string;
+    subProvisionerPublicKey?: ISubProvisionerKey;
+}
+
+export enum ConnectionMode {
+    Rdv = "rdv",
+    Fwd = "fwd",
+}
+
+export enum DataEncoding {
+    Multibase = "Multibase",
+    Base64 = "Base64",
+    Base64Pad = "Base64Pad",
+    Base64Url = "Base64Url",
+    Base64UrlPad = "Base64UrlPad",
 }
 
 export class ListenerUrls implements IListenerUrls {
@@ -577,6 +633,11 @@ export class ListenerUrls implements IListenerUrls {
 export interface IListenerUrls {
     external_url: string;
     internal_url: string;
+}
+
+export enum PubKeyFormat {
+    Spki = "Spki",
+    Rsa = "Rsa",
 }
 
 export class SessionInfo implements ISessionInfo {
@@ -644,6 +705,61 @@ export interface ISessionInfo {
     filtering_policy: boolean;
     recording_policy: boolean;
     start_timestamp: Date;
+}
+
+export class SubProvisionerKey implements ISubProvisionerKey {
+    encoding?: DataEncoding;
+    format?: PubKeyFormat;
+    id!: string;
+    value!: string;
+
+    constructor(data?: ISubProvisionerKey) {
+        if (data) {
+            for (var property in data) {
+                if (data.hasOwnProperty(property))
+                    (<any>this)[property] = (<any>data)[property];
+            }
+        }
+    }
+
+    init(_data?: any) {
+        if (_data) {
+            this.encoding = _data["Encoding"];
+            this.format = _data["Format"];
+            this.id = _data["Id"];
+            this.value = _data["Value"];
+        }
+    }
+
+    static fromJS(data: any): SubProvisionerKey {
+        data = typeof data === 'object' ? data : {};
+        let result = new SubProvisionerKey();
+        result.init(data);
+        return result;
+    }
+
+    toJSON(data?: any) {
+        data = typeof data === 'object' ? data : {};
+        data["Encoding"] = this.encoding;
+        data["Format"] = this.format;
+        data["Id"] = this.id;
+        data["Value"] = this.value;
+        return data;
+    }
+
+    clone(): SubProvisionerKey {
+        const json = this.toJSON();
+        let result = new SubProvisionerKey();
+        result.init(json);
+        return result;
+    }
+}
+
+export interface ISubProvisionerKey {
+    encoding?: DataEncoding;
+    format?: PubKeyFormat;
+    id: string;
+    value: string;
 }
 
 export class ApiException extends Error {

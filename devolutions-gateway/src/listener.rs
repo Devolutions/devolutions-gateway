@@ -14,12 +14,12 @@ use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tracing::Instrument as _;
 use url::Url;
 
-#[cfg_attr(feature = "openapi", derive(utoipa::Component))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ListenerUrls {
-    #[cfg_attr(feature = "openapi", component(value_type = String))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub internal_url: Url,
-    #[cfg_attr(feature = "openapi", component(value_type = String))]
+    #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub external_url: Url,
 }
 

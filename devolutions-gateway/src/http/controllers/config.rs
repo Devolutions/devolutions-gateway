@@ -1,4 +1,4 @@
-use crate::config::ConfHandle;
+use crate::config::{ConfHandle, DataEncoding, PubKeyFormat};
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::token::JetAccessScope;
@@ -7,6 +7,7 @@ use saphir::http::Method;
 use saphir::macros::controller;
 use saphir::request::Request;
 use tap::prelude::*;
+use uuid::Uuid;
 
 pub struct ConfigController {
     conf_handle: ConfHandle,
@@ -29,12 +30,32 @@ impl ConfigController {
 
 const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey"];
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ConfigPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_provisioner_public_key: Option<SubProvisionerKey>,
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SubProvisionerKey {
+    pub id: String,
+    pub value: String,
+    pub format: Option<PubKeyFormat>,
+    pub encoding: Option<DataEncoding>,
+}
+
 /// Modifies configuration
 #[cfg_attr(feature = "openapi", utoipa::path(
     patch,
     operation_id = "PatchConfig",
     path = "/jet/config",
-    request_body(content = String, description = "Partial JSON-encoded configuration", content_type = "application/json"),
+    request_body(content = ConfigPatch, description = "JSON-encoded configuration patch", content_type = "application/json"),
     responses(
         (status = 200, description = "Configuration has been patched with success"),
         (status = 400, description = "Bad patch request"),
