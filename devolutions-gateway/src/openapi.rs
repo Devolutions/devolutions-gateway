@@ -11,6 +11,8 @@ use uuid::Uuid;
         crate::http::controllers::diagnostics::get_configuration,
         crate::http::controllers::diagnostics::get_clock,
         crate::http::controllers::config::patch_config,
+        crate::http::controllers::jrl::update_jrl,
+        crate::http::controllers::jrl::get_jrl_info,
     ),
     components(schemas(
         SessionInfo,
@@ -18,10 +20,11 @@ use uuid::Uuid;
         crate::listener::ListenerUrls,
         crate::config::dto::DataEncoding,
         crate::config::dto::PubKeyFormat,
-        crate::http::controllers::config::SubProvisionerKey,
-        crate::http::controllers::config::ConfigPatch,
         crate::http::controllers::diagnostics::ConfigDiagnostic,
         crate::http::controllers::diagnostics::ClockDiagnostic,
+        crate::http::controllers::config::SubProvisionerKey,
+        crate::http::controllers::config::ConfigPatch,
+        crate::http::controllers::jrl::JrlInfo,
     ))
 )]
 pub struct ApiDoc;

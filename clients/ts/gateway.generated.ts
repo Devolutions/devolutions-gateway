@@ -101,7 +101,7 @@ export class Client {
      * Retrieves server's clock in order to diagnose clock drifting.
      * @return Server's clock
      */
-    getClock(): Observable<ClockDiagnostic> {
+    getClockDiagnostic(): Observable<ClockDiagnostic> {
         let url_ = this.baseUrl + "/jet/diagnostics/clock";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -114,11 +114,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGetClock(response_);
+            return this.processGetClockDiagnostic(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGetClock(response_ as any);
+                    return this.processGetClockDiagnostic(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<ClockDiagnostic>;
                 }
@@ -127,7 +127,7 @@ export class Client {
         }));
     }
 
-    protected processGetClock(response: HttpResponseBase): Observable<ClockDiagnostic> {
+    protected processGetClockDiagnostic(response: HttpResponseBase): Observable<ClockDiagnostic> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -151,9 +151,9 @@ export class Client {
 
     /**
      * Retrieves configuration.
-     * @return Service configuration
+     * @return Service configuration diagnostic (including version)
      */
-    getConfiguration(): Observable<ConfigDiagnostic> {
+    getConfigurationDiagnostic(): Observable<ConfigDiagnostic> {
         let url_ = this.baseUrl + "/jet/diagnostics/configuration";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -166,11 +166,11 @@ export class Client {
         };
 
         return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
-            return this.processGetConfiguration(response_);
+            return this.processGetConfigurationDiagnostic(response_);
         })).pipe(_observableCatch((response_: any) => {
             if (response_ instanceof HttpResponseBase) {
                 try {
-                    return this.processGetConfiguration(response_ as any);
+                    return this.processGetConfigurationDiagnostic(response_ as any);
                 } catch (e) {
                     return _observableThrow(e) as any as Observable<ConfigDiagnostic>;
                 }
@@ -179,7 +179,7 @@ export class Client {
         }));
     }
 
-    protected processGetConfiguration(response: HttpResponseBase): Observable<ConfigDiagnostic> {
+    protected processGetConfigurationDiagnostic(response: HttpResponseBase): Observable<ConfigDiagnostic> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -333,6 +333,138 @@ export class Client {
             }));
         }
         return _observableOf<string>(null as any);
+    }
+
+    /**
+     * Updates JRL (Json Revocation List) using a JRL token
+     * @return JRL updated successfuly
+     */
+    updateJrl(): Observable<void> {
+        let url_ = this.baseUrl + "/jet/jrl";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_ : any = {
+            observe: "response",
+            responseType: "blob",
+            headers: new HttpHeaders({
+            })
+        };
+
+        return this.http.request("post", url_, options_).pipe(_observableMergeMap((response_ : any) => {
+            return this.processUpdateJrl(response_);
+        })).pipe(_observableCatch((response_: any) => {
+            if (response_ instanceof HttpResponseBase) {
+                try {
+                    return this.processUpdateJrl(response_ as any);
+                } catch (e) {
+                    return _observableThrow(e) as any as Observable<void>;
+                }
+            } else
+                return _observableThrow(response_) as any as Observable<void>;
+        }));
+    }
+
+    protected processUpdateJrl(response: HttpResponseBase): Observable<void> {
+        const status = response.status;
+        const responseBlob =
+            response instanceof HttpResponse ? response.body :
+            (response as any).error instanceof Blob ? (response as any).error : undefined;
+
+        let _headers: any = {}; if (response.headers) { for (let key of response.headers.keys()) { _headers[key] = response.headers.get(key); }}
+        if (status === 200) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return _observableOf<void>(null as any);
+            }));
+        } else if (status === 400) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Bad request", status, _responseText, _headers);
+            }));
+        } else if (status === 401) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Invalid or missing authorization token", status, _responseText, _headers);
+            }));
+        } else if (status === 403) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Insufficient permissions", status, _responseText, _headers);
+            }));
+        } else if (status === 500) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Failed to update the JRL", status, _responseText, _headers);
+            }));
+        } else if (status !== 200 && status !== 204) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            }));
+        }
+        return _observableOf<void>(null as any);
+    }
+
+    /**
+     * Retrieves current JRL (Json Revocation List) info
+     * @return Current JRL Info
+     */
+    getJrlInfo(): Observable<JrlInfo> {
+        let url_ = this.baseUrl + "/jet/jrl/info";
+        url_ = url_.replace(/[?&]$/, "");
+
+        let options_ : any = {
+            observe: "response",
+            responseType: "blob",
+            headers: new HttpHeaders({
+                "Accept": "application/json"
+            })
+        };
+
+        return this.http.request("get", url_, options_).pipe(_observableMergeMap((response_ : any) => {
+            return this.processGetJrlInfo(response_);
+        })).pipe(_observableCatch((response_: any) => {
+            if (response_ instanceof HttpResponseBase) {
+                try {
+                    return this.processGetJrlInfo(response_ as any);
+                } catch (e) {
+                    return _observableThrow(e) as any as Observable<JrlInfo>;
+                }
+            } else
+                return _observableThrow(response_) as any as Observable<JrlInfo>;
+        }));
+    }
+
+    protected processGetJrlInfo(response: HttpResponseBase): Observable<JrlInfo> {
+        const status = response.status;
+        const responseBlob =
+            response instanceof HttpResponse ? response.body :
+            (response as any).error instanceof Blob ? (response as any).error : undefined;
+
+        let _headers: any = {}; if (response.headers) { for (let key of response.headers.keys()) { _headers[key] = response.headers.get(key); }}
+        if (status === 200) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            let result200: any = null;
+            let resultData200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver);
+            result200 = JrlInfo.fromJS(resultData200);
+            return _observableOf(result200);
+            }));
+        } else if (status === 400) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Bad request", status, _responseText, _headers);
+            }));
+        } else if (status === 401) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Invalid or missing authorization token", status, _responseText, _headers);
+            }));
+        } else if (status === 403) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Insufficient permissions", status, _responseText, _headers);
+            }));
+        } else if (status === 500) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("Failed to update the JRL", status, _responseText, _headers);
+            }));
+        } else if (status !== 200 && status !== 204) {
+            return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
+            return throwException("An unexpected server error occurred.", status, _responseText, _headers);
+            }));
+        }
+        return _observableOf<JrlInfo>(null as any);
     }
 
     /**
@@ -586,6 +718,57 @@ export enum DataEncoding {
     Base64Pad = "Base64Pad",
     Base64Url = "Base64Url",
     Base64UrlPad = "Base64UrlPad",
+}
+
+export class JrlInfo implements IJrlInfo {
+    /** JWT "Issued At" claim of JRL */
+    iat!: number;
+    /** Unique ID for current  JRL */
+    jti!: string;
+
+    constructor(data?: IJrlInfo) {
+        if (data) {
+            for (var property in data) {
+                if (data.hasOwnProperty(property))
+                    (<any>this)[property] = (<any>data)[property];
+            }
+        }
+    }
+
+    init(_data?: any) {
+        if (_data) {
+            this.iat = _data["iat"];
+            this.jti = _data["jti"];
+        }
+    }
+
+    static fromJS(data: any): JrlInfo {
+        data = typeof data === 'object' ? data : {};
+        let result = new JrlInfo();
+        result.init(data);
+        return result;
+    }
+
+    toJSON(data?: any) {
+        data = typeof data === 'object' ? data : {};
+        data["iat"] = this.iat;
+        data["jti"] = this.jti;
+        return data;
+    }
+
+    clone(): JrlInfo {
+        const json = this.toJSON();
+        let result = new JrlInfo();
+        result.init(json);
+        return result;
+    }
+}
+
+export interface IJrlInfo {
+    /** JWT "Issued At" claim of JRL */
+    iat: number;
+    /** Unique ID for current  JRL */
+    jti: string;
 }
 
 export class ListenerUrls implements IListenerUrls {

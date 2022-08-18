@@ -124,10 +124,10 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
 /// Retrieves configuration.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
-    operation_id = "GetConfiguration",
+    operation_id = "GetConfigurationDiagnostic",
     path = "/jet/diagnostics/configuration",
     responses(
-        (status = 200, description = "Service configuration", body = ConfigDiagnostic),
+        (status = 200, description = "Service configuration diagnostic (including version)", body = ConfigDiagnostic),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
@@ -143,7 +143,7 @@ async fn get_configuration(controller: &DiagnosticsController) -> Json<ConfigDia
 /// Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
-    operation_id = "GetClock",
+    operation_id = "GetClockDiagnostic",
     path = "/jet/diagnostics/clock",
     responses(
         (status = 200, description = "Server's clock", body = ClockDiagnostic),

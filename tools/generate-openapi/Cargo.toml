@@ -7,5 +7,5 @@ publish = false
 
 [dependencies]
 devolutions-gateway = { path = "../../devolutions-gateway", features = ["openapi"] }
-utoipa = { git = "https://github.com/CBenoit/utoipa", rev = "a251e42c3b9d9abf122c", default-features = false, features = ["uuid", "chrono"] }
+utoipa = { git = "https://github.com/juhaku/utoipa", rev = "d58e2cce493a0ec72c", default-features = false, features = ["uuid", "chrono", "chrono_with_format"] }
 serde_yaml = "0.9.4"
