@@ -48,7 +48,7 @@ paths:
         Retrieves server's clock in order to diagnose clock drifting.
 
         Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
-      operationId: GetClock
+      operationId: GetClockDiagnostic
       responses:
         '200':
           description: Server's clock
@@ -64,10 +64,10 @@ paths:
       summary: Retrieves configuration.
       description: |
         Retrieves configuration.
-      operationId: GetConfiguration
+      operationId: GetConfigurationDiagnostic
       responses:
         '200':
-          description: Service configuration
+          description: Service configuration diagnostic (including version)
           content:
             application/json:
               schema:
@@ -125,6 +125,55 @@ paths:
               schema:
                 type: string
       deprecated: false
+  /jet/jrl:
+    post:
+      tags:
+      - crate::http::controllers::jrl
+      summary: Updates JRL (Json Revocation List) using a JRL token
+      description: |
+        Updates JRL (Json Revocation List) using a JRL token
+      operationId: UpdateJrl
+      responses:
+        '200':
+          description: JRL updated successfuly
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to update the JRL
+      deprecated: false
+      security:
+      - jrl_token: []
+  /jet/jrl/info:
+    get:
+      tags:
+      - crate::http::controllers::jrl
+      summary: Retrieves current JRL (Json Revocation List) info
+      description: |
+        Retrieves current JRL (Json Revocation List) info
+      operationId: GetJrlInfo
+      responses:
+        '200':
+          description: Current JRL Info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JrlInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to update the JRL
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.jrl.read
   /jet/sessions:
     get:
       tags:
@@ -205,6 +254,20 @@ components:
       - Base64Pad
       - Base64Url
       - Base64UrlPad
+    JrlInfo:
+      type: object
+      required:
+      - jti
+      - iat
+      properties:
+        iat:
+          type: integer
+          format: int64
+          description: JWT "Issued At" claim of JRL
+        jti:
+          type: string
+          format: uuid
+          description: Unique ID for current  JRL
     ListenerUrls:
       type: object
       required:

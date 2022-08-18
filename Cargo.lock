@@ -4155,7 +4155,7 @@ checksum = "b4ae116fef2b7fea257ed6440d3cfcff7f190865f170cdad00bb6465bf18ecba"
 [[package]]
 name = "utoipa"
 version = "1.1.0"
-source = "git+https://github.com/CBenoit/utoipa?rev=a251e42c3b9d9abf122c#a251e42c3b9d9abf122cdd402fad90e1e14c6327"
+source = "git+https://github.com/juhaku/utoipa?rev=d58e2cce493a0ec72c#d58e2cce493a0ec72c385acf59ad518d2b5467dd"
 dependencies = [
  "serde",
  "utoipa-gen",
@@ -4164,7 +4164,7 @@ dependencies = [
 [[package]]
 name = "utoipa-gen"
 version = "1.1.0"
-source = "git+https://github.com/CBenoit/utoipa?rev=a251e42c3b9d9abf122c#a251e42c3b9d9abf122cdd402fad90e1e14c6327"
+source = "git+https://github.com/juhaku/utoipa?rev=d58e2cce493a0ec72c#d58e2cce493a0ec72c385acf59ad518d2b5467dd"
 dependencies = [
  "proc-macro-error",
  "proc-macro2 1.0.43",

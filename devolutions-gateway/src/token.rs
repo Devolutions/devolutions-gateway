@@ -24,9 +24,6 @@ pub fn new_token_cache() -> TokenCache {
     Mutex::new(HashMap::new())
 }
 
-#[derive(Clone, Debug)]
-pub struct RawToken(pub String);
-
 // ----- token types -----
 
 #[derive(Clone, Copy, Debug, Deserialize)]

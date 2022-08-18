@@ -167,30 +167,14 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
 }
 
 fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
-    use picky::jose::{jws, jwt};
-
     let jrl_file = config.jrl_file.as_path();
 
     let claims: JrlTokenClaims = if jrl_file.exists() {
         info!("Reading JRL file from disk (path: {jrl_file})");
-        let token = std::fs::read_to_string(jrl_file).context("Couldn't read JRL file")?;
-
-        let jwt = if config.debug.disable_token_validation {
-            warn!("**DEBUG OPTION** ignoring JRL token signature");
-            jws::RawJws::decode(&token)
-                .map(jws::RawJws::discard_signature)
-                .map(jwt::JwtSig::from)
-                .map_err(jwt::JwtError::from)
-        } else {
-            jwt::JwtSig::decode(&token, &config.provisioner_public_key)
-        }
-        .context("Failed to decode JRL token")?;
-
-        let jwt = jwt
-            .validate::<JrlTokenClaims>(&jwt::NO_CHECK_VALIDATOR) // we don't expect any expiration for JRL tokens
-            .context("JRL token validation failed")?;
-
-        jwt.state.claims
+        std::fs::read_to_string(jrl_file)
+            .context("Couldn't read JRL file")?
+            .pipe_deref(serde_json::from_str)
+            .context("Invalid JRL")?
     } else {
         info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL (JWT Revocation List).");
         JrlTokenClaims::default()
