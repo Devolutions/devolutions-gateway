@@ -242,12 +242,14 @@ impl ConfHandle {
         self.inner.conf_file.read().clone()
     }
 
-    /// Atomatically saves and replaces current configuration with a new one
+    /// Atomically saves and replaces current configuration with a new one
+    #[instrument(skip(self))]
     pub fn save_new_conf_file(&self, conf_file: dto::ConfFile) -> anyhow::Result<()> {
         let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
         save_config(&conf_file).context("Failed to save configuration")?;
         *self.inner.conf.write() = Arc::new(conf);
         *self.inner.conf_file.write() = Arc::new(conf_file);
+        trace!("success");
         Ok(())
     }
 }
