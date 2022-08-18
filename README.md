@@ -34,7 +34,6 @@ Currently stable options are:
     * `Value`: the binary-to-text-encoded key data,
     * `Format`: the format used for the key data (`Spki` or `Rsa`),
     * `Encoding`: the binary-to-text encoding used for the key data (`Multibase`, `Base64`, `Base64Pad`, `Base64Url`, `Base64UrlPad`),
-    * `File`: may replace the three aforementioned options in order to specify a path instead.
 
 - `DelegationPrivateKeyFile`: path to the delegation private key (used to decypher sensitive data from tokens),
 
