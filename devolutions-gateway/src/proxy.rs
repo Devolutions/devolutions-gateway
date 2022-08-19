@@ -1,8 +1,9 @@
 use crate::config::Conf;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
+use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
-use crate::{add_session_in_progress, remove_session_in_progress, GatewaySessionInfo};
+use crate::GatewaySessionInfo;
 use camino::Utf8PathBuf;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct IsMissing;
 
-pub struct HasConfig(Arc<Conf>);
+pub struct HasConf(Arc<Conf>);
 
 pub struct HasSessionInfo(GatewaySessionInfo);
 
@@ -24,69 +25,91 @@ pub struct HasAddresses {
     b: SocketAddr,
 }
 
-pub struct Proxy<CONF, INFO, TRANSPORT, ADDR> {
-    pub config: CONF,
+pub struct HasSubscriber {
+    tx: SubscriberSender,
+}
+
+pub struct Proxy<CONF, INFO, TRANSPORT, ADDR, SUBSCRIBER> {
+    pub conf: CONF,
     pub session_info: INFO,
     pub transports: TRANSPORT,
     pub addrs: ADDR,
+    pub subscriber: SUBSCRIBER,
 }
 
-impl Proxy<IsMissing, IsMissing, IsMissing, IsMissing> {
+impl Proxy<IsMissing, IsMissing, IsMissing, IsMissing, IsMissing> {
     pub fn init() -> Self {
         Self {
-            config: IsMissing,
+            conf: IsMissing,
             session_info: IsMissing,
             transports: IsMissing,
             addrs: IsMissing,
+            subscriber: IsMissing,
         }
     }
 }
 
-impl<INFO, TRANSPORT, ADDR> Proxy<IsMissing, INFO, TRANSPORT, ADDR> {
-    pub fn config(self, config: Arc<Conf>) -> Proxy<HasConfig, INFO, TRANSPORT, ADDR> {
+impl<INFO, TRANSPORT, ADDR, SUBSCRIBER> Proxy<IsMissing, INFO, TRANSPORT, ADDR, SUBSCRIBER> {
+    pub fn conf(self, conf: Arc<Conf>) -> Proxy<HasConf, INFO, TRANSPORT, ADDR, SUBSCRIBER> {
         Proxy {
-            config: HasConfig(config),
+            conf: HasConf(conf),
             session_info: self.session_info,
             transports: self.transports,
             addrs: self.addrs,
+            subscriber: self.subscriber,
         }
     }
 }
 
-impl<CONF, TRANSPORT, ADDR> Proxy<CONF, IsMissing, TRANSPORT, ADDR> {
-    pub fn session_info(self, info: GatewaySessionInfo) -> Proxy<CONF, HasSessionInfo, TRANSPORT, ADDR> {
+impl<CONF, TRANSPORT, ADDR, SUBSCRIBER> Proxy<CONF, IsMissing, TRANSPORT, ADDR, SUBSCRIBER> {
+    pub fn session_info(self, info: GatewaySessionInfo) -> Proxy<CONF, HasSessionInfo, TRANSPORT, ADDR, SUBSCRIBER> {
         Proxy {
-            config: self.config,
+            conf: self.conf,
             session_info: HasSessionInfo(info),
             transports: self.transports,
             addrs: self.addrs,
+            subscriber: self.subscriber,
         }
     }
 }
 
-impl<CONF, INFO, ADDR> Proxy<CONF, INFO, IsMissing, ADDR> {
-    pub fn transports<A, B>(self, a: A, b: B) -> Proxy<CONF, INFO, HasTransports<A, B>, ADDR> {
+impl<CONF, INFO, ADDR, SUBSCRIBER> Proxy<CONF, INFO, IsMissing, ADDR, SUBSCRIBER> {
+    pub fn transports<A, B>(self, a: A, b: B) -> Proxy<CONF, INFO, HasTransports<A, B>, ADDR, SUBSCRIBER> {
         Proxy {
-            config: self.config,
+            conf: self.conf,
             session_info: self.session_info,
             transports: HasTransports { a, b },
             addrs: self.addrs,
+            subscriber: self.subscriber,
         }
     }
 }
 
-impl<CONF, INFO, TRANSPORT> Proxy<CONF, INFO, TRANSPORT, IsMissing> {
-    pub fn addrs(self, a: SocketAddr, b: SocketAddr) -> Proxy<CONF, INFO, TRANSPORT, HasAddresses> {
+impl<CONF, INFO, TRANSPORT, SUBSCRIBER> Proxy<CONF, INFO, TRANSPORT, IsMissing, SUBSCRIBER> {
+    pub fn addrs(self, a: SocketAddr, b: SocketAddr) -> Proxy<CONF, INFO, TRANSPORT, HasAddresses, SUBSCRIBER> {
         Proxy {
-            config: self.config,
+            conf: self.conf,
             session_info: self.session_info,
             transports: self.transports,
             addrs: HasAddresses { a, b },
+            subscriber: self.subscriber,
         }
     }
 }
 
-impl<A, B> Proxy<HasConfig, HasSessionInfo, HasTransports<A, B>, HasAddresses>
+impl<CONF, INFO, TRANSPORT, ADDRS> Proxy<CONF, INFO, TRANSPORT, ADDRS, IsMissing> {
+    pub fn subscriber(self, tx: SubscriberSender) -> Proxy<CONF, INFO, TRANSPORT, ADDRS, HasSubscriber> {
+        Proxy {
+            conf: self.conf,
+            session_info: self.session_info,
+            transports: self.transports,
+            addrs: self.addrs,
+            subscriber: HasSubscriber { tx },
+        }
+    }
+}
+
+impl<A, B> Proxy<HasConf, HasSessionInfo, HasTransports<A, B>, HasAddresses, HasSubscriber>
 where
     A: AsyncWrite + AsyncRead + Unpin,
     B: AsyncWrite + AsyncRead + Unpin,
@@ -122,7 +145,7 @@ where
     where
         D: Dissector + Send + 'static,
     {
-        if let Some(capture_path) = self.config.0.capture_path.as_ref() {
+        if let Some(capture_path) = self.conf.0.capture_path.as_ref() {
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 self.addrs.a.ip(),
@@ -144,10 +167,11 @@ where
             b.inspectors.push(Box::new(server_inspector));
 
             Proxy {
-                config: self.config,
+                conf: self.conf,
                 session_info: self.session_info,
                 transports: HasTransports { a, b },
                 addrs: self.addrs,
+                subscriber: self.subscriber,
             }
             .forward()
             .await
@@ -157,7 +181,7 @@ where
     }
 }
 
-impl<A, B, CONF, ADDR> Proxy<CONF, HasSessionInfo, HasTransports<A, B>, ADDR>
+impl<CONF, A, B, ADDR> Proxy<CONF, HasSessionInfo, HasTransports<A, B>, ADDR, HasSubscriber>
 where
     A: AsyncWrite + AsyncRead + Unpin,
     B: AsyncWrite + AsyncRead + Unpin,
@@ -165,9 +189,9 @@ where
     pub async fn forward(self) -> anyhow::Result<()> {
         let session_id = self.session_info.0.id();
 
-        add_session_in_progress(self.session_info.0).await;
+        crate::add_session_in_progress(&self.subscriber.tx, self.session_info.0);
         let res = transport::forward_bidirectional(self.transports.a, self.transports.b).await;
-        remove_session_in_progress(session_id).await;
+        crate::remove_session_in_progress(&self.subscriber.tx, session_id);
 
         res.map(|_| ())
     }

@@ -31,8 +31,7 @@ impl SessionsController {
     security(("scope_token" = ["gateway.sessions.read"])),
 ))]
 pub(crate) async fn get_sessions() -> Json<Vec<GatewaySessionInfo>> {
-    let sessions = SESSIONS_IN_PROGRESS.read().await;
-    let sessions_in_progress: Vec<GatewaySessionInfo> = sessions.values().cloned().collect();
+    let sessions_in_progress: Vec<GatewaySessionInfo> = SESSIONS_IN_PROGRESS.read().values().cloned().collect();
     Json(sessions_in_progress)
 }
 

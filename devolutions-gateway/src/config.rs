@@ -13,6 +13,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 use tap::prelude::*;
+use tokio::sync::Notify;
 use tokio_rustls::rustls;
 use url::Url;
 use uuid::Uuid;
@@ -80,8 +81,9 @@ impl Tls {
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub id: Option<Uuid>,
-    pub listeners: Vec<ListenerUrls>,
     pub hostname: String,
+    pub listeners: Vec<ListenerUrls>,
+    pub subscriber: Option<dto::Subscriber>,
     pub capture_path: Option<Utf8PathBuf>,
     pub log_file: Utf8PathBuf,
     pub log_directive: Option<String>,
@@ -176,8 +178,9 @@ impl Conf {
 
         Ok(Conf {
             id: conf_file.id,
-            listeners,
             hostname,
+            listeners,
+            subscriber: conf_file.subscriber.clone(),
             capture_path: conf_file.capture_path.clone(),
             log_file,
             log_directive: conf_file.log_directive.clone(),
@@ -203,6 +206,7 @@ pub struct ConfHandle {
 struct ConfHandleInner {
     conf: parking_lot::RwLock<Arc<Conf>>,
     conf_file: parking_lot::RwLock<Arc<dto::ConfFile>>,
+    changed: Notify,
 }
 
 impl ConfHandle {
@@ -228,6 +232,7 @@ impl ConfHandle {
             inner: Arc::new(ConfHandleInner {
                 conf: parking_lot::RwLock::new(Arc::new(conf)),
                 conf_file: parking_lot::RwLock::new(Arc::new(conf_file)),
+                changed: Notify::new(),
             }),
         })
     }
@@ -242,6 +247,11 @@ impl ConfHandle {
         self.inner.conf_file.read().clone()
     }
 
+    /// Waits for configuration to be changed
+    pub async fn change_notified(&self) {
+        self.inner.changed.notified().await;
+    }
+
     /// Atomically saves and replaces current configuration with a new one
     #[instrument(skip(self))]
     pub fn save_new_conf_file(&self, conf_file: dto::ConfFile) -> anyhow::Result<()> {
@@ -249,6 +259,7 @@ impl ConfHandle {
         save_config(&conf_file).context("Failed to save configuration")?;
         *self.inner.conf.write() = Arc::new(conf);
         *self.inner.conf_file.write() = Arc::new(conf_file);
+        self.inner.changed.notify_waiters();
         trace!("success");
         Ok(())
     }
@@ -503,6 +514,10 @@ pub mod dto {
         /// Listeners to launch at startup
         pub listeners: Vec<ListenerConf>,
 
+        /// Subscriber API
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub subscriber: Option<Subscriber>,
+
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
@@ -561,6 +576,7 @@ pub mod dto {
                         external_url: "wss://*:7171".try_into().unwrap(),
                     },
                 ],
+                subscriber: None,
                 log_file: None,
                 jrl_file: None,
                 log_directive: None,
@@ -734,5 +750,14 @@ pub mod dto {
     pub struct ListenerConf {
         pub internal_url: String,
         pub external_url: String,
+    }
+
+    #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct Subscriber {
+        #[cfg_attr(feature = "openapi", schema(value_type = String))]
+        pub url: Url,
+        pub token: String,
     }
 }

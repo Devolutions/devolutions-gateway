@@ -5,6 +5,7 @@ use crate::jet::association::Association;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::registry::Registry;
+use crate::subscriber::SubscriberSender;
 use crate::token::JetAssociationTokenClaims;
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::create_tls_connector;
@@ -34,19 +35,21 @@ pub type JetAssociationsMap = Mutex<HashMap<Uuid, Association>>;
 
 #[derive(TypedBuilder)]
 pub struct JetClient {
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     addr: SocketAddr,
     transport: TcpStream,
+    subscriber_tx: SubscriberSender,
 }
 
 impl JetClient {
     pub async fn serve(self) -> anyhow::Result<()> {
         let Self {
-            config,
+            conf,
             associations,
             addr,
             mut transport,
+            subscriber_tx,
         } = self;
 
         let msg = read_jet_message(&mut transport).await?;
@@ -54,7 +57,7 @@ impl JetClient {
         match msg {
             JetMessage::JetTestReq(jet_test_req) => handle_test_jet_msg(transport, jet_test_req).await,
             JetMessage::JetAcceptReq(jet_accept_req) => {
-                HandleAcceptJetMsg::new(config, addr, transport, jet_accept_req, associations.clone())
+                HandleAcceptJetMsg::new(conf, addr, transport, jet_accept_req, associations.clone())
                     .accept()
                     .await
             }
@@ -64,7 +67,7 @@ impl JetClient {
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
 
-                let proxy_result = handle_build_proxy(&associations, config, response).await;
+                let proxy_result = handle_build_proxy(&associations, conf, subscriber_tx, response).await;
 
                 remove_jet_association(&associations, association_id, Some(candidate_id));
 
@@ -82,6 +85,7 @@ async fn handle_build_tls_proxy(
     client_inspector: PluginRecordingInspector,
     server_inspector: PluginRecordingInspector,
     tls_acceptor: &TlsAcceptor,
+    subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
     let client_stream = tls_acceptor.accept(response.client_transport).await?;
     let mut client_transport = Interceptor::new(client_stream);
@@ -102,13 +106,15 @@ async fn handle_build_tls_proxy(
     Proxy::init()
         .session_info(info)
         .transports(client_transport, server_transport)
+        .subscriber(subscriber_tx)
         .forward()
         .await
 }
 
 async fn handle_build_proxy(
     associations: &JetAssociationsMap,
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
+    subscriber_tx: SubscriberSender,
     response: HandleConnectJetMsgResponse,
 ) -> anyhow::Result<()> {
     let mut recording_inspector: Option<(PluginRecordingInspector, PluginRecordingInspector)> = None;
@@ -117,12 +123,12 @@ async fn handle_build_proxy(
     let mut file_pattern = None;
 
     if let Some(association) = associations.lock().get(&association_id) {
-        match (association.record_session(), config.plugins.is_some()) {
+        match (association.record_session(), conf.plugins.is_some()) {
             (true, true) => {
                 let init_result = PluginRecordingInspector::init(
                     association_id,
                     response.candidate_id,
-                    config.recording_path.as_ref().map(|path| path.as_str()),
+                    conf.recording_path.as_ref().map(|path| path.as_str()),
                 )?;
                 recording_dir = init_result.recording_dir;
                 file_pattern = Some(init_result.filename_pattern);
@@ -134,16 +140,23 @@ async fn handle_build_proxy(
     }
 
     if let Some((client_inspector, server_inspector)) = recording_inspector {
-        let tls_acceptor = config
+        let tls_acceptor = conf
             .tls
             .as_ref()
             .map(|conf| &conf.acceptor)
             .context("TLS configuration is missing")?;
 
-        let proxy_result = handle_build_tls_proxy(response, client_inspector, server_inspector, tls_acceptor).await;
+        let proxy_result = handle_build_tls_proxy(
+            response,
+            client_inspector,
+            server_inspector,
+            tls_acceptor,
+            subscriber_tx,
+        )
+        .await;
 
         if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
-            let registry = Registry::new(config);
+            let registry = Registry::new(conf);
             registry.manage_files(association_id.to_string(), pattern, &dir).await;
         };
 
@@ -160,6 +173,7 @@ async fn handle_build_proxy(
         Proxy::init()
             .session_info(info)
             .transports(response.server_transport, response.client_transport)
+            .subscriber(subscriber_tx)
             .forward()
             .await
     }
@@ -214,7 +228,7 @@ async fn read_jet_message(transport: &mut TcpStream) -> anyhow::Result<JetMessag
 }
 
 struct HandleAcceptJetMsg {
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
     transport: Option<(SocketAddr, TcpStream)>,
     request_msg: JetAcceptReq,
     associations: Arc<JetAssociationsMap>,
@@ -223,14 +237,14 @@ struct HandleAcceptJetMsg {
 
 impl HandleAcceptJetMsg {
     fn new(
-        config: Arc<Conf>,
+        conf: Arc<Conf>,
         addr: SocketAddr,
         transport: TcpStream,
         msg: JetAcceptReq,
         associations: Arc<JetAssociationsMap>,
     ) -> Self {
         HandleAcceptJetMsg {
-            config,
+            conf,
             transport: Some((addr, transport)),
             request_msg: msg,
             associations,
@@ -270,7 +284,7 @@ impl HandleAcceptJetMsg {
             status_code,
             version: self.request_msg.version,
             association: association_id,
-            instance: self.config.hostname.clone(),
+            instance: self.conf.hostname.clone(),
             timeout: ACCEPT_REQUEST_TIMEOUT.as_secs() as u32,
         });
         let mut response_msg_buffer = Vec::with_capacity(512);

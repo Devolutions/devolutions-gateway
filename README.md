@@ -49,6 +49,11 @@ Currently stable options are:
 
     Host segment may be abridged with `*`.
 
+- `Subscriber`: subscriber configuration:
+    
+    * `Url`: HTTP URL where notification messages are to be sent,
+    * `Token`: bearer token to use when making HTTP requests.
+
 ## Sample Usage
 
 ### RDP routing

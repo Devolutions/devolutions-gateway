@@ -203,6 +203,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
             id: None,
             listeners: Vec::new(),
             hostname: "hostname".to_owned(),
+            subscriber: None,
             capture_path: None,
             log_file: String::new().into(),
             log_directive: None,

@@ -2,7 +2,8 @@ use crate::config::{Conf, ConfHandle};
 use crate::http::http_server::configure_http_server;
 use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
-use crate::log::{self, log_deleter_task, LoggerGuard};
+use crate::log::{self, LoggerGuard};
+use crate::subscriber::subscriber_channel;
 use crate::token::{CurrentJrl, JrlTokenClaims};
 use anyhow::Context;
 use parking_lot::Mutex;
@@ -10,7 +11,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tap::Pipe as _;
+use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
 pub const SERVICE_NAME: &str = "devolutions-gateway";
@@ -71,7 +72,7 @@ impl GatewayService {
         DESCRIPTION
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> anyhow::Result<()> {
         let runtime = runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -80,7 +81,7 @@ impl GatewayService {
         let config = self.conf_handle.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
-        let futures = runtime.block_on(async { create_futures(config).expect("failed to initiate gateway") });
+        let futures = runtime.block_on(async { create_futures(config) })?;
 
         let join_all = futures::future::join_all(futures);
 
@@ -93,6 +94,8 @@ impl GatewayService {
         });
 
         self.state = GatewayState::Running { runtime };
+
+        Ok(())
     }
 
     pub fn stop(&mut self) {
@@ -133,6 +136,8 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
 
     let mut futures: VecOfFuturesType = Vec::with_capacity(conf.listeners.len());
 
+    let (subscriber_tx, subscriber_rx) = subscriber_channel();
+
     let listeners = conf
         .listeners
         .iter()
@@ -143,6 +148,7 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
                 associations.clone(),
                 token_cache.clone(),
                 jrl.clone(),
+                subscriber_tx.clone(),
             )
             .with_context(|| format!("Failed to initialize {}", listener.internal_url))
         })
@@ -160,8 +166,16 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
 
     {
         let log_path = conf.log_file.clone();
-        futures.push(Box::pin(async move { log_deleter_task(&log_path).await }));
+        futures.push(Box::pin(async move { crate::log::log_deleter_task(&log_path).await }));
     }
+
+    futures.push(Box::pin(async move {
+        crate::subscriber::subscriber_polling_task(subscriber_tx).await
+    }));
+
+    futures.push(Box::pin(async move {
+        crate::subscriber::subscriber_task(conf_handle.clone(), subscriber_rx).await
+    }));
 
     Ok(futures)
 }
