@@ -2,6 +2,7 @@ use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::rdp::RdpClient;
+use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, Protocol, TokenCache};
 use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
@@ -14,37 +15,40 @@ use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
 pub struct GenericClient {
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     client_addr: SocketAddr,
     client_stream: TcpStream,
+    subscriber_tx: SubscriberSender,
 }
 
 impl GenericClient {
     pub async fn serve(self) -> anyhow::Result<()> {
         let Self {
-            config,
+            conf,
             associations,
             token_cache,
             jrl,
             client_addr,
             mut client_stream,
+            subscriber_tx,
         } = self;
 
         let (pdu, mut leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
         let source_ip = client_addr.ip();
-        let association_claims = extract_association_claims(&pdu, source_ip, &config, &token_cache, &jrl)?;
+        let association_claims = extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl)?;
 
         match association_claims.jet_ap {
             // We currently special case this because it may be the "RDP-TLS" protocol
             ApplicationProtocol::Known(Protocol::Rdp) => {
                 RdpClient {
-                    config,
+                    conf,
                     associations,
                     token_cache,
                     jrl,
+                    subscriber_tx,
                 }
                 .serve_with_association_claims_and_leftover_bytes(
                     client_addr,
@@ -72,6 +76,7 @@ impl GenericClient {
                             .associations(associations)
                             .association_id(association_id)
                             .client_transport(AnyStream::from(client_stream))
+                            .subscriber_tx(subscriber_tx)
                             .build()
                             .start(&leftover_bytes)
                             .await
@@ -105,10 +110,11 @@ impl GenericClient {
                         .with_filtering_policy(filtering_policy);
 
                         Proxy::init()
-                            .config(config)
+                            .conf(conf)
                             .session_info(info)
                             .addrs(client_addr, server_transport.addr)
                             .transports(client_stream, server_transport)
+                            .subscriber(subscriber_tx)
                             .select_dissector_and_forward()
                             .await
                             .context("Encountered a failure during plain tcp traffic proxying")

@@ -10,6 +10,7 @@ use self::sequence_future::create_downgrade_dvc_capabilities_future;
 use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
+use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, Protocol, TokenCache};
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
@@ -59,10 +60,11 @@ impl credssp::CredentialsProxy for RdpIdentity {
 }
 
 pub struct RdpClient {
-    pub config: Arc<Conf>,
+    pub conf: Arc<Conf>,
     pub associations: Arc<JetAssociationsMap>,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,
+    pub subscriber_tx: SubscriberSender,
 }
 
 impl RdpClient {
@@ -70,8 +72,7 @@ impl RdpClient {
         let (pdu, leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
         let client_addr = client_stream.peer_addr()?;
         let source_ip = client_addr.ip();
-        let association_claims =
-            extract_association_claims(&pdu, source_ip, &self.config, &self.token_cache, &self.jrl)?;
+        let association_claims = extract_association_claims(&pdu, source_ip, &self.conf, &self.token_cache, &self.jrl)?;
         self.serve_with_association_claims_and_leftover_bytes(
             client_addr,
             client_stream,
@@ -89,7 +90,10 @@ impl RdpClient {
         mut leftover_bytes: BytesMut,
     ) -> anyhow::Result<()> {
         let Self {
-            config, associations, ..
+            conf,
+            associations,
+            subscriber_tx,
+            ..
         } = self;
 
         if association_claims.jet_rec {
@@ -121,10 +125,11 @@ impl RdpClient {
                 .with_filtering_policy(association_claims.jet_flt);
 
                 Proxy::init()
-                    .config(config)
+                    .conf(conf)
                     .session_info(info)
                     .addrs(client_addr, server_transport.addr)
                     .transports(client_stream, server_transport)
+                    .subscriber(subscriber_tx)
                     .select_dissector_and_forward()
                     .await
                     .context("plain tcp traffic proxying failed")
@@ -134,7 +139,7 @@ impl RdpClient {
                 info!("Starting RDP-TLS redirection");
                 anyhow::bail!("RDP-TLS is temporary disabled");
 
-                let tls_conf = config.tls.clone().context("TLS configuration is missing")?;
+                let tls_conf = conf.tls.clone().context("TLS configuration is missing")?;
 
                 // We can't use FramedRead directly here, because we still have to use
                 // the leftover bytes. As an alternative, the decoder could be modified to use the
@@ -234,6 +239,7 @@ impl RdpClient {
                     .associations(associations)
                     .client_transport(AnyStream::from(client_stream))
                     .association_id(association_id)
+                    .subscriber_tx(subscriber_tx)
                     .build()
                     .start(&leftover_bytes)
                     .await

@@ -121,7 +121,7 @@ async fn get_jrl_info(revocation_list: &CurrentJrl) -> Json<JrlInfo> {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub struct JrlInfo {
-    /// Unique ID for current  JRL
+    /// Unique ID for current JRL
     pub jti: Uuid,
     /// JWT "Issued At" claim of JRL
     pub iat: i64,

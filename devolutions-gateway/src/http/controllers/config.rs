@@ -1,4 +1,4 @@
-use crate::config::dto::{DataEncoding, PubKeyFormat};
+use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
@@ -29,8 +29,6 @@ impl ConfigController {
     }
 }
 
-const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey"];
-
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -39,6 +37,8 @@ pub struct ConfigPatch {
     pub id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_provisioner_public_key: Option<SubProvisionerKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscriber: Option<Subscriber>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -50,6 +50,8 @@ pub struct SubProvisionerKey {
     pub format: Option<PubKeyFormat>,
     pub encoding: Option<DataEncoding>,
 }
+
+const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey", "Subscriber"];
 
 /// Modifies configuration
 #[cfg_attr(feature = "openapi", utoipa::path(

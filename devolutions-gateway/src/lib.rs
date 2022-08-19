@@ -5,6 +5,9 @@ extern crate serde_derive;
 #[macro_use]
 extern crate tracing;
 
+#[cfg(feature = "openapi")]
+pub mod openapi;
+
 pub mod config;
 pub mod generic_client;
 pub mod http;
@@ -14,31 +17,27 @@ pub mod jet_client;
 pub mod jet_rendezvous_tcp_proxy;
 pub mod listener;
 pub mod log;
-#[cfg(feature = "openapi")]
-pub mod openapi;
 pub mod plugin_manager;
 pub mod preconnection_pdu;
 pub mod proxy;
 pub mod rdp;
 pub mod registry;
-pub mod routing_client;
 pub mod service;
+pub mod subscriber;
 pub mod token;
 pub mod transport;
 pub mod utils;
 pub mod websocket_client;
 
-pub use proxy::Proxy;
-
 use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
+use parking_lot::RwLock;
+use proxy::Proxy;
 use std::collections::HashMap;
 use token::ApplicationProtocol;
-use tokio::sync::RwLock;
 use utils::TargetAddr;
 use uuid::Uuid;
 
-// TODO: investigate if parking_lot::RwLock should be used instead
 lazy_static! {
     pub static ref SESSIONS_IN_PROGRESS: RwLock<HashMap<Uuid, GatewaySessionInfo>> = RwLock::new(HashMap::new());
 }
@@ -89,13 +88,41 @@ impl GatewaySessionInfo {
     }
 }
 
-pub async fn add_session_in_progress(session: GatewaySessionInfo) {
-    let mut sessions = SESSIONS_IN_PROGRESS.write().await;
-    sessions.insert(session.association_id, session);
+#[instrument]
+pub fn add_session_in_progress(tx: &subscriber::SubscriberSender, session: GatewaySessionInfo) {
+    let association_id = session.association_id;
+    let start_timestamp = session.start_timestamp;
+
+    SESSIONS_IN_PROGRESS.write().insert(association_id, session);
+
+    let message = subscriber::SubscriberMessage::SessionStarted {
+        session: subscriber::SubscriberSessionInfo {
+            association_id,
+            start_timestamp,
+        },
+    };
+
+    if let Err(error) = tx.try_send(message) {
+        warn!(%error, "Failed to send subscriber message");
+    }
 }
 
-pub async fn remove_session_in_progress(id: Uuid) {
-    SESSIONS_IN_PROGRESS.write().await.remove(&id);
+#[instrument]
+pub fn remove_session_in_progress(tx: &subscriber::SubscriberSender, id: Uuid) {
+    let terminated_session = SESSIONS_IN_PROGRESS.write().remove(&id);
+
+    if let Some(session) = terminated_session {
+        let message = subscriber::SubscriberMessage::SessionEnded {
+            session: subscriber::SubscriberSessionInfo {
+                association_id: id,
+                start_timestamp: session.start_timestamp,
+            },
+        };
+
+        if let Err(error) = tx.try_send(message) {
+            warn!(%error, "Failed to send subscriber message");
+        }
+    }
 }
 
 pub mod tls_sanity {

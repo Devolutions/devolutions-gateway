@@ -5,6 +5,7 @@ use cfg_if::cfg_if;
 use devolutions_gateway::config::ConfHandle;
 use devolutions_gateway::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 use std::sync::mpsc;
+use tap::prelude::*;
 use tracing::info;
 
 enum CliAction {
@@ -84,7 +85,9 @@ fn main() -> anyhow::Result<()> {
             } else {
                 let mut service = GatewayService::load(config).context("Service loading failed")?;
 
-                service.start();
+                service
+                    .start()
+                    .tap_err(|error| tracing::error!(?error, "Failed to start"))?;
 
                 // Waiting for some stop signal (CTRL-C…)
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -119,7 +122,10 @@ fn gateway_service_main(
     info!("{} service started", service.get_service_name());
     info!("args: {:?}", args);
 
-    service.start();
+    service
+        .start()
+        .tap_err(|error| tracing::error!(?error, "Failed to start"))
+        .expect("start service");
 
     loop {
         if let Ok(control_code) = rx.recv() {

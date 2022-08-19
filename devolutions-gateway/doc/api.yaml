@@ -4,7 +4,7 @@ info:
   description: Protocol-aware fine-grained relay server
   contact:
     name: Devolutions Inc.
-    email: ''
+    email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
   version: 2022.2.2
@@ -241,6 +241,8 @@ components:
           format: uuid
         SubProvisionerPublicKey:
           $ref: '#/components/schemas/SubProvisionerKey'
+        Subscriber:
+          $ref: '#/components/schemas/Subscriber'
     ConnectionMode:
       type: string
       enum:
@@ -267,7 +269,7 @@ components:
         jti:
           type: string
           format: uuid
-          description: Unique ID for current  JRL
+          description: Unique ID for current JRL
     ListenerUrls:
       type: object
       required:
@@ -323,4 +325,25 @@ components:
           type: string
         Value:
           type: string
+    Subscriber:
+      type: object
+      required:
+      - Url
+      - Token
+      properties:
+        Token:
+          type: string
+        Url:
+          type: string
+  securitySchemes:
+    jrl_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Contains the JRL to apply if newer
+    scope_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token allowing a single HTTP request for a specific scope
 

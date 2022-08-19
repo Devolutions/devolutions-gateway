@@ -1,6 +1,7 @@
 use crate::config::{Conf, ConfHandle};
 use crate::generic_client::GenericClient;
 use crate::jet_client::{JetAssociationsMap, JetClient};
+use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::url_to_socket_addr;
 use crate::websocket_client::WebsocketService;
@@ -39,6 +40,7 @@ pub struct GatewayListener {
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     conf_handle: ConfHandle,
+    subscriber_tx: SubscriberSender,
 }
 
 impl GatewayListener {
@@ -48,6 +50,7 @@ impl GatewayListener {
         associations: Arc<JetAssociationsMap>,
         token_cache: Arc<TokenCache>,
         jrl: Arc<CurrentJrl>,
+        subscriber_tx: SubscriberSender,
     ) -> anyhow::Result<Self> {
         let url = url.to_internal_url();
 
@@ -80,6 +83,7 @@ impl GatewayListener {
             associations,
             token_cache,
             jrl,
+            subscriber_tx,
         })
     }
 
@@ -106,9 +110,10 @@ impl GatewayListener {
                         let associations = self.associations.clone();
                         let token_cache = self.token_cache.clone();
                         let jrl = self.jrl.clone();
+                        let subscriber_tx = self.subscriber_tx.clone();
 
                         let fut = async move {
-                            if let Err(e) = $handler(conf, associations, token_cache, jrl, stream, peer_addr).await {
+                            if let Err(e) = $handler(conf, associations, token_cache, jrl, subscriber_tx, stream, peer_addr).await {
                                 error!(concat!(stringify!($handler), " failure: {:#}"), e);
                             }
                         }
@@ -142,20 +147,21 @@ impl GatewayListener {
         let associations = self.associations.clone();
         let token_cache = self.token_cache.clone();
         let jrl = self.jrl.clone();
+        let subscriber_tx = self.subscriber_tx.clone();
 
         match self.kind() {
             ListenerKind::Tcp => {
-                handle_tcp_client(conf, associations, token_cache, jrl, conn, peer_addr)
+                handle_tcp_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
                     .instrument(info_span!("tcp", client = %peer_addr))
                     .await?
             }
             ListenerKind::Ws => {
-                handle_ws_client(conf, associations, token_cache, jrl, conn, peer_addr)
+                handle_ws_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
                     .instrument(info_span!("ws", client = %peer_addr))
                     .await?
             }
             ListenerKind::Wss => {
-                handle_wss_client(conf, associations, token_cache, jrl, conn, peer_addr)
+                handle_wss_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
                     .instrument(info_span!("wss", client = %peer_addr))
                     .await?
             }
@@ -170,6 +176,7 @@ async fn handle_tcp_client(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    subscriber_tx: SubscriberSender,
     stream: TcpStream,
     peer_addr: SocketAddr,
 ) -> anyhow::Result<()> {
@@ -185,10 +192,11 @@ async fn handle_tcp_client(
     match &peeked[..n_read] {
         [b'J', b'E', b'T', b'\0'] => {
             JetClient::builder()
-                .config(conf)
+                .conf(conf)
                 .associations(associations)
                 .addr(peer_addr)
                 .transport(stream)
+                .subscriber_tx(subscriber_tx)
                 .build()
                 .serve()
                 .instrument(info_span!("jet-client"))
@@ -197,12 +205,13 @@ async fn handle_tcp_client(
         [b'J', b'M', b'U', b'X'] => anyhow::bail!("JMUX TCP listener not yet implemented"),
         _ => {
             GenericClient::builder()
-                .config(conf)
+                .conf(conf)
                 .associations(associations)
                 .client_addr(peer_addr)
                 .client_stream(stream)
                 .token_cache(token_cache)
                 .jrl(jrl)
+                .subscriber_tx(subscriber_tx)
                 .build()
                 .serve()
                 .instrument(info_span!("generic-client"))
@@ -218,6 +227,7 @@ async fn handle_ws_client(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    subscriber_tx: SubscriberSender,
     conn: TcpStream,
     peer_addr: SocketAddr,
 ) -> anyhow::Result<()> {
@@ -226,7 +236,7 @@ async fn handle_ws_client(
     // Annonate using the type alias from `transport` just for sanity
     let conn: transport::TcpStream = conn;
 
-    process_ws_stream(conn, peer_addr, conf, associations, token_cache, jrl).await?;
+    process_ws_stream(conn, peer_addr, conf, associations, token_cache, jrl, subscriber_tx).await?;
 
     Ok(())
 }
@@ -236,6 +246,7 @@ async fn handle_wss_client(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    subscriber_tx: SubscriberSender,
     stream: TcpStream,
     peer_addr: SocketAddr,
 ) -> anyhow::Result<()> {
@@ -251,7 +262,16 @@ async fn handle_wss_client(
         .context("TLS handshake failed")?
         .pipe(tokio_rustls::TlsStream::Server);
 
-    process_ws_stream(tls_stream, peer_addr, conf, associations, token_cache, jrl).await?;
+    process_ws_stream(
+        tls_stream,
+        peer_addr,
+        conf,
+        associations,
+        token_cache,
+        jrl,
+        subscriber_tx,
+    )
+    .await?;
 
     Ok(())
 }
@@ -259,19 +279,21 @@ async fn handle_wss_client(
 async fn process_ws_stream<I>(
     io: I,
     remote_addr: SocketAddr,
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()>
 where
     I: AsyncWrite + AsyncRead + Unpin + Send + Sync + 'static,
 {
     let websocket_service = WebsocketService {
         associations,
-        config,
+        conf,
         token_cache,
         jrl,
+        subscriber_tx,
     };
 
     let service = service_fn(move |req| {

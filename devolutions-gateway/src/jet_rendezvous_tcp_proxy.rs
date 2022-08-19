@@ -2,6 +2,7 @@ use crate::http::controllers::association::start_remove_association_future;
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
+use crate::subscriber::SubscriberSender;
 use crate::{ConnectionModeDetails, GatewaySessionInfo};
 use anyhow::Context;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct JetRendezvousTcpProxy {
     associations: Arc<JetAssociationsMap>,
     client_transport: AnyStream,
     association_id: Uuid,
+    subscriber_tx: SubscriberSender,
 }
 
 impl JetRendezvousTcpProxy {
@@ -23,6 +25,7 @@ impl JetRendezvousTcpProxy {
             associations,
             mut client_transport,
             association_id,
+            subscriber_tx,
         } = self;
 
         let (mut server_transport, server_leftover, info) = {
@@ -70,6 +73,7 @@ impl JetRendezvousTcpProxy {
         let proxy_result = Proxy::init()
             .session_info(info)
             .transports(client_transport, server_transport)
+            .subscriber(subscriber_tx)
             .forward()
             .await
             .context("An error occurred while running JetRendezvousTcpProxy");

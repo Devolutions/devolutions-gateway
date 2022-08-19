@@ -2,6 +2,7 @@ use crate::config::Conf;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
+use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::association::remove_jet_association;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -22,7 +23,8 @@ pub struct WebsocketService {
     pub associations: Arc<JetAssociationsMap>,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,
-    pub config: Arc<Conf>,
+    pub conf: Arc<Conf>,
+    pub subscriber_tx: SubscriberSender,
 }
 
 impl WebsocketService {
@@ -36,18 +38,31 @@ impl WebsocketService {
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/connect") {
             info!("{} {}", req.method(), req_uri);
-            handle_jet_connect(req, client_addr, self.associations.clone(), self.config.clone())
-                .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
+            handle_jet_connect(
+                req,
+                client_addr,
+                self.associations.clone(),
+                self.conf.clone(),
+                self.subscriber_tx.clone(),
+            )
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/test") {
             info!("{} {}", req.method(), req_uri);
             handle_jet_test(req, &self.associations)
                 .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
         } else if req.method() == Method::GET && (req_uri.starts_with("/jmux") || req_uri.starts_with("/jet/jmux")) {
             info!("{} {}", req.method(), req_uri);
-            handle_jmux(req, client_addr, &self.config, &self.token_cache, &self.jrl)
-                .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
+            handle_jmux(
+                req,
+                client_addr,
+                self.conf.clone(),
+                &self.token_cache,
+                &self.jrl,
+                self.subscriber_tx.clone(),
+            )
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
@@ -179,8 +194,9 @@ async fn handle_jet_connect(
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
     config: Arc<Conf>,
+    subscriber_tx: SubscriberSender,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_connect_impl(req, client_addr, associations, config).await {
+    match handle_jet_connect_impl(req, client_addr, associations, config, subscriber_tx).await {
         Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
@@ -194,7 +210,8 @@ async fn handle_jet_connect_impl(
     mut req: Request<Body>,
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
-    config: Arc<Conf>,
+    conf: Arc<Conf>,
+    subscriber_tx: SubscriberSender,
 ) -> Result<Response<Body>, ()> {
     use crate::interceptor::plugin_recording::PluginRecordingInspector;
     use crate::interceptor::Interceptor;
@@ -291,12 +308,12 @@ async fn handle_jet_connect_impl(
                     let association_id = candidate.association_id();
                     let candidate_id = candidate.id();
 
-                    match (association.record_session(), config.plugins.is_some()) {
+                    match (association.record_session(), conf.plugins.is_some()) {
                         (true, true) => {
                             let init_result = PluginRecordingInspector::init(
                                 association_id,
                                 candidate_id,
-                                config.recording_path.as_ref().map(|path| path.as_str()),
+                                conf.recording_path.as_ref().map(|path| path.as_str()),
                             )
                             .map_err(|e| error!("Couldn't initialize PluginRecordingInspector: {}", e))?;
 
@@ -339,11 +356,12 @@ async fn handle_jet_connect_impl(
                     let proxy_result = Proxy::init()
                         .session_info(info)
                         .transports(client_transport, server_transport)
+                        .subscriber(subscriber_tx)
                         .forward()
                         .await;
 
                     if let (Some(dir), Some(pattern)) = (recording_dir, file_pattern) {
-                        let registry = crate::registry::Registry::new(config);
+                        let registry = crate::registry::Registry::new(conf);
                         registry
                             .manage_files(association_id.to_string(), pattern, dir.as_path())
                             .await;
@@ -366,6 +384,7 @@ async fn handle_jet_connect_impl(
                     Proxy::init()
                         .session_info(info)
                         .transports(client_transport, server_transport)
+                        .subscriber(subscriber_tx)
                         .forward()
                         .await
                 };
@@ -465,9 +484,10 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
 async fn handle_jmux(
     mut req: Request<Body>,
     client_addr: SocketAddr,
-    config: &Conf,
+    conf: Arc<Conf>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    subscriber_tx: SubscriberSender,
 ) -> io::Result<Response<Body>> {
     use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
     use crate::token::AccessTokenClaims;
@@ -490,7 +510,7 @@ async fn handle_jmux(
         return Err(io::Error::new(io::ErrorKind::Other, "missing authorization"));
     };
 
-    let claims = match crate::http::middlewares::auth::authenticate(client_addr, token, config, token_cache, jrl) {
+    let claims = match crate::http::middlewares::auth::authenticate(client_addr, token, &conf, token_cache, jrl) {
         Ok(AccessTokenClaims::Jmux(claims)) => claims,
         Ok(_) => {
             return Err(io::Error::new(io::ErrorKind::Other, "token not allowed"));
@@ -557,7 +577,7 @@ async fn handle_jmux(
             },
         );
 
-        crate::add_session_in_progress(info).await;
+        crate::add_session_in_progress(&subscriber_tx, info);
 
         JmuxProxy::new(reader, writer)
             .with_config(config)
@@ -566,7 +586,7 @@ async fn handle_jmux(
             .await
             .map_err(|e| error!("JMUX proxy error: {}", e))?;
 
-        crate::remove_session_in_progress(session_id).await;
+        crate::remove_session_in_progress(&subscriber_tx, session_id);
 
         Ok::<(), ()>(())
     });
