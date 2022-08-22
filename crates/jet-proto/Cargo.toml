@@ -2,7 +2,7 @@
 name = "jet-proto"
 version = "0.0.0"
 edition = "2021"
-authors = ["Devolutions Inc."]
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
 
 [dependencies]
