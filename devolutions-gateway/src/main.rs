@@ -13,6 +13,7 @@ enum CliAction {
     RegisterService,
     UnregisterService,
     Run { service_mode: bool },
+    ConfigInitOnly,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -27,6 +28,7 @@ fn main() -> anyhow::Result<()> {
             Some("unregister") => CliAction::UnregisterService,
             _ => CliAction::ShowHelp,
         },
+        Some("--config-init-only") => CliAction::ConfigInitOnly,
         None => CliAction::Run { service_mode: false },
         Some(_) => CliAction::ShowHelp,
     };
@@ -41,6 +43,9 @@ fn main() -> anyhow::Result<()> {
 
     Run as service:
         {executable} --service
+
+    Initialize configuration only (will not override existing configuration):
+        {executable} --config-init-only
 
     Install service:
         {executable} service register
@@ -75,15 +80,28 @@ fn main() -> anyhow::Result<()> {
         CliAction::UnregisterService => {
             service_controller().delete().context("failed to unregister service")?;
         }
+        CliAction::ConfigInitOnly => {
+            let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
+            let conf_file = conf_handle.get_conf_file();
+            let conf = conf_handle.get_conf();
+            println!(
+                r#"============------ Configuration ------============
+{conf_file:?}
+------------
+{conf:?}
+============---------------------------============
+"#
+            );
+        }
         CliAction::Run { service_mode } => {
-            let config = ConfHandle::init().context("unable to initialize configuration")?;
+            let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
 
             if service_mode {
                 service_controller()
                     .register(service_main_wrapper)
                     .context("failed to register service")?;
             } else {
-                let mut service = GatewayService::load(config).context("Service loading failed")?;
+                let mut service = GatewayService::load(conf_handle).context("Service loading failed")?;
 
                 service
                     .start()
