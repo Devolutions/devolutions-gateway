@@ -46,12 +46,9 @@ pub fn extract_association_claims(
     }
 }
 
-pub fn decode_preconnection_pdu(buf: &mut BytesMut) -> Result<Option<PreconnectionPdu>, io::Error> {
-    match PreconnectionPdu::from_buffer(buf.as_ref()) {
-        Ok(preconnection_pdu) => {
-            buf.advance(preconnection_pdu.buffer_length());
-            Ok(Some(preconnection_pdu))
-        }
+pub fn decode_preconnection_pdu(buf: &[u8]) -> Result<Option<PreconnectionPdu>, io::Error> {
+    match PreconnectionPdu::from_buffer(buf) {
+        Ok(preconnection_pdu) => Ok(Some(preconnection_pdu)),
         Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
         Err(e) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
