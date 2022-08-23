@@ -537,8 +537,7 @@ async fn handle_jmux(
                     .into_iter()
                     .map(|addr| {
                         if addr.host() == "*" {
-                            // Basically allow all
-                            FilteringRule::Allow
+                            FilteringRule::port(addr.port())
                         } else {
                             FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
                         }
