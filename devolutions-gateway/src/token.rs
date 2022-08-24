@@ -667,7 +667,7 @@ fn validate_token_impl(
             // Subkey is missing or kid does not match
             (Some(provided_kid), maybe_subkey) => {
                 debug!(kid = %provided_kid, subkey = ?maybe_subkey, "bad subkey usage detected");
-                anyhow::bail!("kid in token is refering to an unknown subkey")
+                anyhow::bail!("kid in token is referring to an unknown subkey")
             }
         }
     };
