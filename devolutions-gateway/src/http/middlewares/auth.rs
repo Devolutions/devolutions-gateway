@@ -146,7 +146,7 @@ pub fn authenticate(
             .token_cache(token_cache)
             .revocation_list(jrl)
             .gw_id(conf.id)
-            .subkey(None)
+            .subkey(conf.sub_provisioner_public_key.as_ref())
             .build()
             .validate(token)
     }
