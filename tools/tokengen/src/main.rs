@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(&claims)?)
@@ -55,6 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
                 jet_aid: Uuid::new_v4(),
+                jet_gw_id: app.jet_gw_id,
                 creds: Some(CredsClaims {
                     prx_usr: &prx_usr,
                     prx_pwd: &prx_pwd,
@@ -73,6 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
             ("ASSOCIATION", serde_json::to_value(&claims)?)
@@ -83,6 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 nbf,
                 jti,
                 scope: &scope,
+                jet_gw_id: app.jet_gw_id,
             };
             ("SCOPE", serde_json::to_value(&claims)?)
         }
@@ -96,6 +100,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_gw_id: app.jet_gw_id,
                 exp,
                 nbf,
                 jti,
@@ -108,6 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 nbf,
                 krb_realm: &krb_realm,
                 krb_kdc: &krb_kdc,
+                jet_gw_id: app.jet_gw_id,
                 jti,
             };
             ("KDC", serde_json::to_value(&claims)?)
@@ -127,49 +133,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
                     jrl
                 },
+                jet_gw_id: app.jet_gw_id,
             };
             ("JRL", serde_json::to_value(&claims)?)
-        }
-        SubCommand::Subkey { jet_gw_id, path } => {
-            use multihash::MultihashDigest;
-
-            let subkey_data = std::fs::read_to_string(path)?
-                .pipe_deref(PrivateKey::from_pem_str)?
-                .pipe_ref(PrivateKey::to_public_key)
-                .pipe_ref(PublicKey::to_der)?;
-
-            let kid = multibase::encode(
-                multibase::Base::Base64,
-                multihash::Code::Sha2_256.digest(&subkey_data).to_bytes(),
-            );
-
-            let claims = SubkeyClaims {
-                kid,
-                kty: String::from("SPKI"),
-                jet_gw_id,
-                jti,
-                iat: nbf,
-                nbf,
-            };
-
-            ("SUBKEY", serde_json::to_value(&claims)?)
         }
     };
 
     let mut jwt_sig = CheckedJwtSig::new_with_cty(JwsAlg::RS256, cty, claims);
 
-    if let Some(subkey_token) = app.subkey_token {
-        let subkey_data = provisioner_key.to_public_key().to_der()?;
-
-        jwt_sig
-            .header
-            .additional
-            .insert("key_token".to_owned(), subkey_token.into());
-
-        jwt_sig.header.additional.insert(
-            "key_data".to_owned(),
-            multibase::encode(multibase::Base::Base64, &subkey_data).into(),
-        );
+    if let Some(kid) = app.kid {
+        jwt_sig.header.kid = Some(kid)
     }
 
     let signed = jwt_sig.encode(&provisioner_key)?;
@@ -200,7 +173,9 @@ struct App {
     #[clap(long)]
     delegation_key: Option<PathBuf>,
     #[clap(long)]
-    subkey_token: Option<String>,
+    kid: Option<String>,
+    #[clap(long)]
+    jet_gw_id: Option<Uuid>,
     #[clap(subcommand)]
     subcmd: SubCommand,
 }
@@ -250,11 +225,6 @@ enum SubCommand {
         #[clap(long)]
         jti: Vec<Uuid>,
     },
-    Subkey {
-        #[clap(long)]
-        jet_gw_id: Option<Uuid>,
-        path: PathBuf,
-    },
 }
 
 // --- claims --- //
@@ -267,6 +237,8 @@ struct AssociationClaims<'a> {
     jet_cm: &'a str,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jet_gw_id: Option<Uuid>,
     dst_hst: Option<&'a str>,
     #[serde(flatten)]
     creds: Option<CredsClaims<'a>>,
@@ -286,6 +258,8 @@ struct ScopeClaims<'a> {
     nbf: i64,
     jti: Uuid,
     scope: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jet_gw_id: Option<Uuid>,
 }
 
 #[derive(Clone, Serialize)]
@@ -294,6 +268,8 @@ struct JmuxClaims<'a> {
     dst_addl: Vec<&'a str>,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jet_gw_id: Option<Uuid>,
     exp: i64,
     nbf: i64,
     jti: Uuid,
@@ -303,6 +279,8 @@ struct JmuxClaims<'a> {
 struct KdcClaims<'a> {
     krb_realm: &'a str,
     krb_kdc: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jet_gw_id: Option<Uuid>,
     exp: i64,
     nbf: i64,
     jti: Uuid,
@@ -313,17 +291,8 @@ struct JrlClaims<'a> {
     jti: Uuid,
     iat: i64,
     jrl: HashMap<&'a str, Vec<serde_json::Value>>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct SubkeyClaims {
-    kid: String,
-    kty: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
-    jti: Uuid,
-    iat: i64,
-    nbf: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
