@@ -11,30 +11,30 @@ use tokio::net::TcpStream;
 pub fn extract_association_claims(
     pdu: &PreconnectionPdu,
     source_ip: IpAddr,
-    config: &Conf,
+    conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> anyhow::Result<JetAssociationTokenClaims> {
     let token = pdu.payload.as_deref().context("Empty preconnection PDU")?;
 
-    if config.debug.dump_tokens {
+    if conf.debug.dump_tokens {
         debug!(token, "**DEBUG OPTION**");
     }
 
-    let delegation_key = config.delegation_private_key.as_ref();
+    let delegation_key = conf.delegation_private_key.as_ref();
 
-    let claims = if config.debug.disable_token_validation {
+    let claims = if conf.debug.disable_token_validation {
         #[allow(deprecated)]
         crate::token::unsafe_debug::dangerous_validate_token(token, delegation_key)
     } else {
         TokenValidator::builder()
             .source_ip(source_ip)
-            .provisioner_key(&config.provisioner_public_key)
+            .provisioner_key(&conf.provisioner_public_key)
             .delegation_key(delegation_key)
             .token_cache(token_cache)
             .revocation_list(jrl)
-            .gw_id(config.id)
-            .subkey(None)
+            .gw_id(conf.id)
+            .subkey(conf.sub_provisioner_public_key.as_ref())
             .build()
             .validate(token)
     }
