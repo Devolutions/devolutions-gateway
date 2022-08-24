@@ -78,6 +78,8 @@ async fn patch_config(conf_handle: &ConfHandle, req: Request) -> Result<(), Http
     let patch: serde_json::Map<String, serde_json::Value> =
         serde_json::from_slice(body).map_err(|e| HttpErrorStatus::bad_request(format!("invalid JSON payload: {e}")))?;
 
+    trace!(?patch, "received JSON config patch");
+
     if !patch.iter().all(|(key, _)| KEY_ALLOWLIST.contains(&key.as_str())) {
         return Err(HttpErrorStatus::bad_request(
             "patch request contains a key that is not allowed",
