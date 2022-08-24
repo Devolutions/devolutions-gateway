@@ -1,7 +1,7 @@
 use crate::config::Conf;
 use crate::token::{AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache, TokenValidator};
 use anyhow::Context as _;
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
 use std::io;
 use std::net::IpAddr;
@@ -71,7 +71,7 @@ pub async fn read_preconnection_pdu(stream: &mut TcpStream) -> io::Result<(Preco
             ));
         }
 
-        if let Some(pdu) = decode_preconnection_pdu(&mut buf)? {
+        if let Some(pdu) = decode_preconnection_pdu(&buf)? {
             let leftover_bytes = buf.split_off(pdu.buffer_length());
             return Ok((pdu, leftover_bytes));
         }
