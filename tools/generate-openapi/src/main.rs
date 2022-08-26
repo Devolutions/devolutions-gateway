@@ -8,12 +8,9 @@ fn main() {
             api.info.title = "devolutions-gateway-subscriber".to_owned();
             api.info.description =
                 Some("API a service must implement in order to receive Devolutions Gateway notifications".to_owned());
-            serde_yaml::to_string(&api).unwrap()
+            api.to_yaml().unwrap()
         }
-        Some("gateway") | None => {
-            let api = ApiDoc::openapi();
-            serde_yaml::to_string(&api).unwrap()
-        }
+        Some("gateway") | None => ApiDoc::openapi().to_yaml().unwrap(),
         _ => panic!("Unknown API doc"),
     };
     println!("{yaml}");

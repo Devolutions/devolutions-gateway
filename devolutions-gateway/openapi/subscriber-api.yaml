@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: devolutions-gateway-subscriber
+  description: API a service must implement in order to receive Devolutions Gateway
+    notifications
+  contact:
+    name: Devolutions Inc.
+    email: infos@devolutions.net
+  license:
+    name: MIT/Apache-2.0
+  version: 2022.2.2
+paths:
+  /dgw/subscriber:
+    post:
+      tags:
+      - Subscriber
+      summary: Process a message originating from a Devolutions Gateway instance
+      description: |
+        Process a message originating from a Devolutions Gateway instance
+      operationId: PostMessage
+      requestBody:
+        description: Message
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscriberMessage'
+        required: true
+      responses:
+        '200':
+          description: Message received and processed successfuly
+        '400':
+          description: Bad message
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Gateway Subscriber not found
+      deprecated: false
+      security:
+      - subscriber_token: []
+components:
+  schemas:
+    SubscriberMessage:
+      type: object
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/SubscriberMessageKind'
+        session:
+          $ref: '#/components/schemas/SubscriberSessionInfo'
+        session_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubscriberSessionInfo'
+    SubscriberMessageKind:
+      type: string
+      enum:
+      - session.started
+      - session.ended
+      - session.list
+    SubscriberSessionInfo:
+      type: object
+      required:
+      - association_id
+      - start_timestamp
+      properties:
+        association_id:
+          type: string
+          format: uuid
+        start_timestamp:
+          type: string
+          format: date-time
+  securitySchemes:
+    subscriber_token:
+      type: http
+      scheme: bearer
+      description: Token allowing to push messages
+

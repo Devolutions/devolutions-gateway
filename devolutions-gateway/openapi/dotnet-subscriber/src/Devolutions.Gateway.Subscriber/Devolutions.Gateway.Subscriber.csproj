@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>C# interface to implement Devolutions Gateway Subscriber API</Description>
+    <Copyright>No Copyright</Copyright>
+    <Authors>Devolutions Inc.</Authors>
+    <TargetFramework>net6.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PreserveCompilationContext>true</PreserveCompilationContext>
+    <Version>2022.9.1.0</Version>
+    <Nullable>annotations</Nullable>
+    <OutputType>Library</OutputType>
+    <AssemblyName>Devolutions.Gateway.Subscriber</AssemblyName>
+    <PackageId>Devolutions.Gateway.Subscriber</PackageId>
+    <UserSecretsId>3175144f-93ce-4559-b95e-9c97551eca74</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <DockerfileContext>..\..</DockerfileContext>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0"/>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="3.0.0" />
+    <PackageReference Include="JsonSubTypes" Version="1.8.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--<DotNetCliToolReference Include="Microsoft.VisualStudio.Web.CodeGeneration.Design" Version="6.0.0" />-->
+  </ItemGroup>
+</Project>

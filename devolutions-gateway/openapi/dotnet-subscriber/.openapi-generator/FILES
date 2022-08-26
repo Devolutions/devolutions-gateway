@@ -1,0 +1,14 @@
+Devolutions.Gateway.Subscriber.sln
+README.md
+src/Devolutions.Gateway.Subscriber/.gitignore
+src/Devolutions.Gateway.Subscriber/Attributes/ValidateModelStateAttribute.cs
+src/Devolutions.Gateway.Subscriber/Authentication/ApiAuthentication.cs
+src/Devolutions.Gateway.Subscriber/Controllers/SubscriberApi.cs
+src/Devolutions.Gateway.Subscriber/Converters/CustomEnumConverter.cs
+src/Devolutions.Gateway.Subscriber/Devolutions.Gateway.Subscriber.csproj
+src/Devolutions.Gateway.Subscriber/Devolutions.Gateway.Subscriber.nuspec
+src/Devolutions.Gateway.Subscriber/Formatters/InputFormatterStream.cs
+src/Devolutions.Gateway.Subscriber/Models/SubscriberMessage.cs
+src/Devolutions.Gateway.Subscriber/Models/SubscriberMessageKind.cs
+src/Devolutions.Gateway.Subscriber/Models/SubscriberSessionInfo.cs
+src/Devolutions.Gateway.Subscriber/OpenApi/TypeExtensions.cs

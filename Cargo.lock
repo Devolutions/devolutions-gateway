@@ -1181,7 +1181,6 @@ name = "generate-openapi"
 version = "0.0.0"
 dependencies = [
  "devolutions-gateway",
- "serde_yaml 0.9.4",
  "utoipa",
 ]
 
@@ -1453,6 +1452,7 @@ checksum = "10a35a97730320ffe8e2d410b5d3b69279b98d2c14bdb8b70ea89ecf7888d41e"
 dependencies = [
  "autocfg 1.1.0",
  "hashbrown",
+ "serde",
 ]
 
 [[package]]
@@ -4154,17 +4154,21 @@ checksum = "b4ae116fef2b7fea257ed6440d3cfcff7f190865f170cdad00bb6465bf18ecba"
 
 [[package]]
 name = "utoipa"
-version = "1.1.0"
-source = "git+https://github.com/juhaku/utoipa?rev=d58e2cce493a0ec72c#d58e2cce493a0ec72c385acf59ad518d2b5467dd"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035e5a4314681e845a8d2f44d19aa1974384024b1129fd492cbdb8abe1b1479"
 dependencies = [
+ "indexmap",
  "serde",
+ "serde_yaml 0.9.4",
  "utoipa-gen",
 ]
 
 [[package]]
 name = "utoipa-gen"
-version = "1.1.0"
-source = "git+https://github.com/juhaku/utoipa?rev=d58e2cce493a0ec72c#d58e2cce493a0ec72c385acf59ad518d2b5467dd"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5d62661083d9a2471687ac93ea3e2638e41ec26a618d32154b584102f6fecf5"
 dependencies = [
  "proc-macro-error",
  "proc-macro2 1.0.43",

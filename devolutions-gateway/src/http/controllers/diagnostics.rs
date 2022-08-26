@@ -89,6 +89,7 @@ impl DiagnosticsController {
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetLogs",
+    tag = "Diagnostics",
     path = "/jet/diagnostics/logs",
     responses(
         (status = 200, description = "Latest logs", body = String),
@@ -119,6 +120,7 @@ async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorS
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetConfigurationDiagnostic",
+    tag = "Diagnostics",
     path = "/jet/diagnostics/configuration",
     responses(
         (status = 200, description = "Service configuration diagnostic (including version)", body = ConfigDiagnostic),
@@ -138,6 +140,7 @@ async fn get_configuration(controller: &DiagnosticsController) -> Json<ConfigDia
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetClockDiagnostic",
+    tag = "Diagnostics",
     path = "/jet/diagnostics/clock",
     responses(
         (status = 200, description = "Server's clock", body = ClockDiagnostic),

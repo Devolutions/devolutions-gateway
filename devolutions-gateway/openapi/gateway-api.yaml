@@ -1,0 +1,368 @@
+openapi: 3.0.3
+info:
+  title: devolutions-gateway
+  description: Protocol-aware fine-grained relay server
+  contact:
+    name: Devolutions Inc.
+    email: infos@devolutions.net
+  license:
+    name: MIT/Apache-2.0
+  version: 2022.2.2
+paths:
+  /jet/config:
+    patch:
+      tags:
+      - Config
+      summary: Modifies configuration
+      description: |
+        Modifies configuration
+      operationId: PatchConfig
+      requestBody:
+        description: JSON-encoded configuration patch
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigPatch'
+        required: true
+      responses:
+        '200':
+          description: Configuration has been patched with success
+        '400':
+          description: Bad patch request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to patch configuration
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.config.write
+  /jet/diagnostics/clock:
+    get:
+      tags:
+      - Diagnostics
+      summary: Retrieves server's clock in order to diagnose clock drifting.
+      description: |
+        Retrieves server's clock in order to diagnose clock drifting.
+
+        Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
+      operationId: GetClockDiagnostic
+      responses:
+        '200':
+          description: Server's clock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClockDiagnostic'
+      deprecated: false
+  /jet/diagnostics/configuration:
+    get:
+      tags:
+      - Diagnostics
+      summary: Retrieves configuration.
+      description: |
+        Retrieves configuration.
+      operationId: GetConfigurationDiagnostic
+      responses:
+        '200':
+          description: Service configuration diagnostic (including version)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigDiagnostic'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.diagnostics.read
+  /jet/diagnostics/logs:
+    get:
+      tags:
+      - Diagnostics
+      summary: Retrieves latest logs.
+      description: |
+        Retrieves latest logs.
+      operationId: GetLogs
+      responses:
+        '200':
+          description: Latest logs
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to retrieve logs
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.diagnostics.read
+  /jet/health:
+    get:
+      tags:
+      - Health
+      summary: Performs a health check
+      description: |
+        Performs a health check
+      operationId: GetHealth
+      responses:
+        '200':
+          description: Identity for this Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+      deprecated: false
+  /jet/jrl:
+    post:
+      tags:
+      - Jrl
+      summary: Updates JRL (Json Revocation List) using a JRL token
+      description: |
+        Updates JRL (Json Revocation List) using a JRL token
+      operationId: UpdateJrl
+      responses:
+        '200':
+          description: JRL updated successfuly
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to update the JRL
+      deprecated: false
+      security:
+      - jrl_token: []
+  /jet/jrl/info:
+    get:
+      tags:
+      - Jrl
+      summary: Retrieves current JRL (Json Revocation List) info
+      description: |
+        Retrieves current JRL (Json Revocation List) info
+      operationId: GetJrlInfo
+      responses:
+        '200':
+          description: Current JRL Info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JrlInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Failed to update the JRL
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.jrl.read
+  /jet/sessions:
+    get:
+      tags:
+      - Sessions
+      summary: Lists running sessions
+      description: |
+        Lists running sessions
+      operationId: GetSessions
+      responses:
+        '200':
+          description: Running sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SessionInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.sessions.read
+components:
+  schemas:
+    AccessScope:
+      type: string
+      enum:
+      - '*'
+      - gateway.sessions.read
+      - gateway.associations.read
+      - gateway.diagnostics.read
+      - gateway.jrl.read
+      - gateway.config.write
+    ClockDiagnostic:
+      type: object
+      required:
+      - timestamp_secs
+      - timestamp_millis
+      properties:
+        timestamp_millis:
+          type: integer
+          format: int64
+        timestamp_secs:
+          type: integer
+          format: int64
+    ConfigDiagnostic:
+      type: object
+      required:
+      - hostname
+      - version
+      - listeners
+      properties:
+        hostname:
+          type: string
+        id:
+          type: string
+          format: uuid
+        listeners:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListenerUrls'
+        version:
+          type: string
+    ConfigPatch:
+      type: object
+      properties:
+        Id:
+          type: string
+          format: uuid
+        SubProvisionerPublicKey:
+          $ref: '#/components/schemas/SubProvisionerKey'
+        Subscriber:
+          $ref: '#/components/schemas/Subscriber'
+    ConnectionMode:
+      type: string
+      enum:
+      - rdv
+      - fwd
+    DataEncoding:
+      type: string
+      enum:
+      - Multibase
+      - Base64
+      - Base64Pad
+      - Base64Url
+      - Base64UrlPad
+    Identity:
+      type: object
+      required:
+      - hostname
+      properties:
+        hostname:
+          type: string
+        id:
+          type: string
+          format: uuid
+    JrlInfo:
+      type: object
+      required:
+      - jti
+      - iat
+      properties:
+        iat:
+          type: integer
+          format: int64
+          description: JWT "Issued At" claim of JRL
+        jti:
+          type: string
+          format: uuid
+          description: Unique ID for current JRL
+    ListenerUrls:
+      type: object
+      required:
+      - internal_url
+      - external_url
+      properties:
+        external_url:
+          type: string
+        internal_url:
+          type: string
+    PubKeyFormat:
+      type: string
+      enum:
+      - Spki
+      - Rsa
+    SessionInfo:
+      type: object
+      required:
+      - association_id
+      - application_protocol
+      - recording_policy
+      - filtering_policy
+      - start_timestamp
+      - connection_mode
+      properties:
+        application_protocol:
+          type: string
+        association_id:
+          type: string
+          format: uuid
+        connection_mode:
+          $ref: '#/components/schemas/ConnectionMode'
+        destination_host:
+          type: string
+        filtering_policy:
+          type: boolean
+        recording_policy:
+          type: boolean
+        start_timestamp:
+          type: string
+          format: date-time
+    SubProvisionerKey:
+      type: object
+      required:
+      - Id
+      - Value
+      properties:
+        Encoding:
+          $ref: '#/components/schemas/DataEncoding'
+        Format:
+          $ref: '#/components/schemas/PubKeyFormat'
+        Id:
+          type: string
+        Value:
+          type: string
+    Subscriber:
+      type: object
+      required:
+      - Url
+      - Token
+      properties:
+        Token:
+          type: string
+        Url:
+          type: string
+  securitySchemes:
+    jrl_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Contains the JRL to apply if newer
+    scope_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token allowing a single HTTP request for a specific scope
+
