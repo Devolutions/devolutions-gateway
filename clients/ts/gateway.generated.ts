@@ -284,9 +284,9 @@ export class Client {
 
     /**
      * Performs a health check
-     * @return Healthy message
+     * @return Identity for this Gateway
      */
-    getHealth(): Observable<string> {
+    getHealth(): Observable<Identity> {
         let url_ = this.baseUrl + "/jet/health";
         url_ = url_.replace(/[?&]$/, "");
 
@@ -294,7 +294,7 @@ export class Client {
             observe: "response",
             responseType: "blob",
             headers: new HttpHeaders({
-                "Accept": "text/plain"
+                "Accept": "application/json"
             })
         };
 
@@ -305,14 +305,14 @@ export class Client {
                 try {
                     return this.processGetHealth(response_ as any);
                 } catch (e) {
-                    return _observableThrow(e) as any as Observable<string>;
+                    return _observableThrow(e) as any as Observable<Identity>;
                 }
             } else
-                return _observableThrow(response_) as any as Observable<string>;
+                return _observableThrow(response_) as any as Observable<Identity>;
         }));
     }
 
-    protected processGetHealth(response: HttpResponseBase): Observable<string> {
+    protected processGetHealth(response: HttpResponseBase): Observable<Identity> {
         const status = response.status;
         const responseBlob =
             response instanceof HttpResponse ? response.body :
@@ -322,9 +322,8 @@ export class Client {
         if (status === 200) {
             return blobToText(responseBlob).pipe(_observableMergeMap(_responseText => {
             let result200: any = null;
-            let resultData200 = _responseText === "" ? null : _responseText;
-                result200 = resultData200 !== undefined ? resultData200 : <any>null;
-    
+            let resultData200 = _responseText === "" ? null : JSON.parse(_responseText, this.jsonParseReviver);
+            result200 = Identity.fromJS(resultData200);
             return _observableOf(result200);
             }));
         } else if (status !== 200 && status !== 204) {
@@ -332,7 +331,7 @@ export class Client {
             return throwException("An unexpected server error occurred.", status, _responseText, _headers);
             }));
         }
-        return _observableOf<string>(null as any);
+        return _observableOf<Identity>(null as any);
     }
 
     /**
@@ -539,6 +538,15 @@ export class Client {
     }
 }
 
+export enum AccessScope {
+    _ = "*",
+    Gateway_sessions_read = "gateway.sessions.read",
+    Gateway_associations_read = "gateway.associations.read",
+    Gateway_diagnostics_read = "gateway.diagnostics.read",
+    Gateway_jrl_read = "gateway.jrl.read",
+    Gateway_config_write = "gateway.config.write",
+}
+
 export class ClockDiagnostic implements IClockDiagnostic {
     timestamp_millis!: number;
     timestamp_secs!: number;
@@ -662,6 +670,7 @@ export interface IConfigDiagnostic {
 export class ConfigPatch implements IConfigPatch {
     id?: string;
     subProvisionerPublicKey?: SubProvisionerKey;
+    subscriber?: Subscriber;
 
     constructor(data?: IConfigPatch) {
         if (data) {
@@ -670,6 +679,7 @@ export class ConfigPatch implements IConfigPatch {
                     (<any>this)[property] = (<any>data)[property];
             }
             this.subProvisionerPublicKey = data.subProvisionerPublicKey && !(<any>data.subProvisionerPublicKey).toJSON ? new SubProvisionerKey(data.subProvisionerPublicKey) : <SubProvisionerKey>this.subProvisionerPublicKey;
+            this.subscriber = data.subscriber && !(<any>data.subscriber).toJSON ? new Subscriber(data.subscriber) : <Subscriber>this.subscriber;
         }
     }
 
@@ -677,6 +687,7 @@ export class ConfigPatch implements IConfigPatch {
         if (_data) {
             this.id = _data["Id"];
             this.subProvisionerPublicKey = _data["SubProvisionerPublicKey"] ? SubProvisionerKey.fromJS(_data["SubProvisionerPublicKey"]) : <any>undefined;
+            this.subscriber = _data["Subscriber"] ? Subscriber.fromJS(_data["Subscriber"]) : <any>undefined;
         }
     }
 
@@ -691,6 +702,7 @@ export class ConfigPatch implements IConfigPatch {
         data = typeof data === 'object' ? data : {};
         data["Id"] = this.id;
         data["SubProvisionerPublicKey"] = this.subProvisionerPublicKey ? this.subProvisionerPublicKey.toJSON() : <any>undefined;
+        data["Subscriber"] = this.subscriber ? this.subscriber.toJSON() : <any>undefined;
         return data;
     }
 
@@ -705,6 +717,7 @@ export class ConfigPatch implements IConfigPatch {
 export interface IConfigPatch {
     id?: string;
     subProvisionerPublicKey?: ISubProvisionerKey;
+    subscriber?: ISubscriber;
 }
 
 export enum ConnectionMode {
@@ -720,10 +733,57 @@ export enum DataEncoding {
     Base64UrlPad = "Base64UrlPad",
 }
 
+export class Identity implements IIdentity {
+    hostname!: string;
+    id?: string;
+
+    constructor(data?: IIdentity) {
+        if (data) {
+            for (var property in data) {
+                if (data.hasOwnProperty(property))
+                    (<any>this)[property] = (<any>data)[property];
+            }
+        }
+    }
+
+    init(_data?: any) {
+        if (_data) {
+            this.hostname = _data["hostname"];
+            this.id = _data["id"];
+        }
+    }
+
+    static fromJS(data: any): Identity {
+        data = typeof data === 'object' ? data : {};
+        let result = new Identity();
+        result.init(data);
+        return result;
+    }
+
+    toJSON(data?: any) {
+        data = typeof data === 'object' ? data : {};
+        data["hostname"] = this.hostname;
+        data["id"] = this.id;
+        return data;
+    }
+
+    clone(): Identity {
+        const json = this.toJSON();
+        let result = new Identity();
+        result.init(json);
+        return result;
+    }
+}
+
+export interface IIdentity {
+    hostname: string;
+    id?: string;
+}
+
 export class JrlInfo implements IJrlInfo {
     /** JWT "Issued At" claim of JRL */
     iat!: number;
-    /** Unique ID for current  JRL */
+    /** Unique ID for current JRL */
     jti!: string;
 
     constructor(data?: IJrlInfo) {
@@ -767,7 +827,7 @@ export class JrlInfo implements IJrlInfo {
 export interface IJrlInfo {
     /** JWT "Issued At" claim of JRL */
     iat: number;
-    /** Unique ID for current  JRL */
+    /** Unique ID for current JRL */
     jti: string;
 }
 
@@ -943,6 +1003,53 @@ export interface ISubProvisionerKey {
     format?: PubKeyFormat;
     id: string;
     value: string;
+}
+
+export class Subscriber implements ISubscriber {
+    token!: string;
+    url!: string;
+
+    constructor(data?: ISubscriber) {
+        if (data) {
+            for (var property in data) {
+                if (data.hasOwnProperty(property))
+                    (<any>this)[property] = (<any>data)[property];
+            }
+        }
+    }
+
+    init(_data?: any) {
+        if (_data) {
+            this.token = _data["Token"];
+            this.url = _data["Url"];
+        }
+    }
+
+    static fromJS(data: any): Subscriber {
+        data = typeof data === 'object' ? data : {};
+        let result = new Subscriber();
+        result.init(data);
+        return result;
+    }
+
+    toJSON(data?: any) {
+        data = typeof data === 'object' ? data : {};
+        data["Token"] = this.token;
+        data["Url"] = this.url;
+        return data;
+    }
+
+    clone(): Subscriber {
+        const json = this.toJSON();
+        let result = new Subscriber();
+        result.init(json);
+        return result;
+    }
+}
+
+export interface ISubscriber {
+    token: string;
+    url: string;
 }
 
 export class ApiException extends Error {
