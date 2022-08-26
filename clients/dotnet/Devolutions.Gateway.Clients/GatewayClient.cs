@@ -85,17 +85,17 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Performs a health check
         /// </summary>
-        /// <returns>Healthy message</returns>
+        /// <returns>Identity for this Gateway</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        string GetHealth();
+        Identity GetHealth();
 
         /// <param name="cancellationToken">A cancellation token that can be used by other objects or threads to receive notice of cancellation.</param>
         /// <summary>
         /// Performs a health check
         /// </summary>
-        /// <returns>Healthy message</returns>
+        /// <returns>Identity for this Gateway</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        System.Threading.Tasks.Task<string> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Updates JRL (Json Revocation List) using a JRL token
@@ -567,9 +567,9 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Performs a health check
         /// </summary>
-        /// <returns>Healthy message</returns>
+        /// <returns>Identity for this Gateway</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual string GetHealth()
+        public virtual Identity GetHealth()
         {
             return System.Threading.Tasks.Task.Run(async () => await GetHealthAsync(System.Threading.CancellationToken.None)).GetAwaiter().GetResult();
         }
@@ -578,9 +578,9 @@ namespace Devolutions.Gateway.Clients
         /// <summary>
         /// Performs a health check
         /// </summary>
-        /// <returns>Healthy message</returns>
+        /// <returns>Identity for this Gateway</returns>
         /// <exception cref="ApiException">A server side error occurred.</exception>
-        public virtual async System.Threading.Tasks.Task<string> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        public virtual async System.Threading.Tasks.Task<Identity> GetHealthAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
             var urlBuilder_ = new System.Text.StringBuilder();
             urlBuilder_.Append(BaseUrl != null ? BaseUrl.TrimEnd('/') : "").Append("/jet/health");
@@ -592,7 +592,7 @@ namespace Devolutions.Gateway.Clients
                 using (var request_ = new System.Net.Http.HttpRequestMessage())
                 {
                     request_.Method = new System.Net.Http.HttpMethod("GET");
-                    request_.Headers.Accept.Add(System.Net.Http.Headers.MediaTypeWithQualityHeaderValue.Parse("text/plain"));
+                    request_.Headers.Accept.Add(System.Net.Http.Headers.MediaTypeWithQualityHeaderValue.Parse("application/json"));
 
                     PrepareRequest(client_, request_, urlBuilder_);
 
@@ -617,9 +617,12 @@ namespace Devolutions.Gateway.Clients
                         var status_ = (int)response_.StatusCode;
                         if (status_ == 200)
                         {
-                            var responseData_ = response_.Content == null ? null : await response_.Content.ReadAsStringAsync().ConfigureAwait(false);
-                            var result_ = (string)System.Convert.ChangeType(responseData_, typeof(string));
-                            return result_;
+                            var objectResponse_ = await ReadObjectResponseAsync<Identity>(response_, headers_, cancellationToken).ConfigureAwait(false);
+                            if (objectResponse_.Object == null)
+                            {
+                                throw new ApiException("Response was null which was not expected.", status_, objectResponse_.Text, headers_, null);
+                            }
+                            return objectResponse_.Object;
                         }
                         else
                         {
@@ -1046,6 +1049,30 @@ namespace Devolutions.Gateway.Clients
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public enum AccessScope
+    {
+
+        [System.Runtime.Serialization.EnumMember(Value = @"*")]
+        _ = 0,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"gateway.sessions.read")]
+        Gateway_sessions_read = 1,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"gateway.associations.read")]
+        Gateway_associations_read = 2,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"gateway.diagnostics.read")]
+        Gateway_diagnostics_read = 3,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"gateway.jrl.read")]
+        Gateway_jrl_read = 4,
+
+        [System.Runtime.Serialization.EnumMember(Value = @"gateway.config.write")]
+        Gateway_config_write = 5,
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class ClockDiagnostic
     {
         [Newtonsoft.Json.JsonProperty("timestamp_millis", Required = Newtonsoft.Json.Required.Always)]
@@ -1103,6 +1130,9 @@ namespace Devolutions.Gateway.Clients
         [Newtonsoft.Json.JsonProperty("SubProvisionerPublicKey", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
         public SubProvisionerKey SubProvisionerPublicKey { get; set; }
 
+        [Newtonsoft.Json.JsonProperty("Subscriber", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public Subscriber Subscriber { get; set; }
+
         private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
 
         [Newtonsoft.Json.JsonExtensionData]
@@ -1148,6 +1178,27 @@ namespace Devolutions.Gateway.Clients
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class Identity
+    {
+        [Newtonsoft.Json.JsonProperty("hostname", Required = Newtonsoft.Json.Required.Always)]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Hostname { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("id", Required = Newtonsoft.Json.Required.DisallowNull, NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public System.Guid Id { get; set; }
+
+        private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
+
+        [Newtonsoft.Json.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties; }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class JrlInfo
     {
         /// <summary>
@@ -1157,7 +1208,7 @@ namespace Devolutions.Gateway.Clients
         public long Iat { get; set; }
 
         /// <summary>
-        /// Unique ID for current  JRL
+        /// Unique ID for current JRL
         /// </summary>
         [Newtonsoft.Json.JsonProperty("jti", Required = Newtonsoft.Json.Required.Always)]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
@@ -1266,6 +1317,28 @@ namespace Devolutions.Gateway.Clients
         [Newtonsoft.Json.JsonProperty("Value", Required = Newtonsoft.Json.Required.Always)]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string Value { get; set; }
+
+        private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
+
+        [Newtonsoft.Json.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties; }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "13.16.1.0 (NJsonSchema v10.7.2.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class Subscriber
+    {
+        [Newtonsoft.Json.JsonProperty("Token", Required = Newtonsoft.Json.Required.Always)]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Token { get; set; }
+
+        [Newtonsoft.Json.JsonProperty("Url", Required = Newtonsoft.Json.Required.Always)]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Url { get; set; }
 
         private System.Collections.Generic.IDictionary<string, object> _additionalProperties = new System.Collections.Generic.Dictionary<string, object>();
 
