@@ -1,7 +1,9 @@
 use crate::config::ConfHandle;
+use saphir::body::Json;
 use saphir::controller::Controller;
 use saphir::http::Method;
 use saphir::macros::controller;
+use uuid::Uuid;
 
 pub struct HealthController {
     conf_handle: ConfHandle,
@@ -23,9 +25,16 @@ impl HealthController {
 #[controller(name = "jet/health")]
 impl HealthController {
     #[get("/")]
-    async fn get_health(&self) -> String {
+    async fn get_health(&self) -> Json<Identity> {
         get_health(self)
     }
+}
+
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Serialize)]
+pub struct Identity {
+    id: Option<Uuid>,
+    hostname: String,
 }
 
 /// Performs a health check
@@ -34,12 +43,15 @@ impl HealthController {
     operation_id = "GetHealth",
     path = "/jet/health",
     responses(
-        (status = 200, description = "Healthy message", body = String),
+        (status = 200, description = "Identity for this Gateway", body = Identity),
     ),
 ))]
-fn get_health(controller: &HealthController) -> String {
+fn get_health(controller: &HealthController) -> Json<Identity> {
     let conf = controller.conf_handle.get_conf();
-    format!("Devolutions Gateway \"{}\" is alive and healthy.", conf.hostname)
+    Json(Identity {
+        id: conf.id,
+        hostname: conf.hostname.clone(),
+    })
 }
 
 // NOTE: legacy controller starting 2021/11/25
@@ -51,7 +63,7 @@ pub struct LegacyHealthController {
 #[controller(name = "health")]
 impl LegacyHealthController {
     #[get("/")]
-    async fn get_health(&self) -> String {
+    async fn get_health(&self) -> Json<Identity> {
         get_health(&self.inner)
     }
 }
