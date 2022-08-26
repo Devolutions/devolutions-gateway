@@ -1,10 +1,10 @@
 use crate::http::HttpErrorStatus;
-use crate::token::{AccessTokenClaims, JetAccessScope, ScopeTokenClaims};
+use crate::token::{AccessScope, AccessTokenClaims, ScopeTokenClaims};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
 pub enum TokenType {
-    Scope(JetAccessScope),
+    Scope(AccessScope),
     Bridge,
     Association,
     Kdc,
@@ -37,7 +37,7 @@ impl AccessGuard {
             (
                 TokenType::Scope(_),
                 AccessTokenClaims::Scope(ScopeTokenClaims {
-                    scope: JetAccessScope::Wildcard,
+                    scope: AccessScope::Wildcard,
                     ..
                 }),
             ) => true,

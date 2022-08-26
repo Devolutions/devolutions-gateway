@@ -2,7 +2,7 @@ use crate::config::{Conf, ConfHandle};
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::listener::ListenerUrls;
-use crate::token::JetAccessScope;
+use crate::token::AccessScope;
 use saphir::prelude::*;
 use uuid::Uuid;
 
@@ -64,10 +64,7 @@ impl DiagnosticsController {
 #[controller(name = "jet/diagnostics")]
 impl DiagnosticsController {
     #[get("/logs")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
     async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
         get_logs(self).await
     }
@@ -82,10 +79,7 @@ impl DiagnosticsController {
     }
 
     #[get("/configuration")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
     async fn get_configuration(&self) -> Json<ConfigDiagnostic> {
         get_configuration(self).await
     }
@@ -162,19 +156,13 @@ pub struct LegacyDiagnosticsController {
 #[controller(name = "diagnostics")]
 impl LegacyDiagnosticsController {
     #[get("/logs")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
     async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
         get_logs(&self.inner).await
     }
 
     #[get("/configuration")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayDiagnosticsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
     async fn get_configuration(&self) -> Json<ConfigDiagnostic> {
         get_configuration(&self.inner).await
     }

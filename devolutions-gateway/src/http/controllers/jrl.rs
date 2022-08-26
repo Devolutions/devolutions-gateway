@@ -1,7 +1,7 @@
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
-use crate::token::{AccessTokenClaims, CurrentJrl, JetAccessScope};
+use crate::token::{AccessScope, AccessTokenClaims, CurrentJrl};
 use saphir::prelude::*;
 use std::sync::Arc;
 use tap::Pipe as _;
@@ -31,7 +31,7 @@ impl JrlController {
     }
 
     #[get("/info")]
-    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewayJrlRead)"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::JrlRead)"#)]
     async fn get_jrl_info(&self) -> Json<JrlInfo> {
         get_jrl_info(&self.revocation_list).await
     }

@@ -1,5 +1,5 @@
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::token::JetAccessScope;
+use crate::token::AccessScope;
 use crate::{GatewaySessionInfo, SESSIONS_IN_PROGRESS};
 use saphir::controller::Controller;
 use saphir::http::Method;
@@ -11,7 +11,7 @@ pub struct SessionsController;
 #[controller(name = "jet/sessions")]
 impl SessionsController {
     #[get("/")]
-    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::SessionsRead)"#)]
     async fn get_sessions(&self) -> Json<Vec<GatewaySessionInfo>> {
         get_sessions().await
     }
@@ -42,7 +42,7 @@ pub struct LegacySessionsController;
 #[controller(name = "sessions")]
 impl LegacySessionsController {
     #[get("/")]
-    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewaySessionsRead)"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::SessionsRead)"#)]
     async fn get_sessions(&self) -> Json<Vec<GatewaySessionInfo>> {
         get_sessions().await
     }

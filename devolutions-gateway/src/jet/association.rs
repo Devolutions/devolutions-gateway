@@ -1,6 +1,6 @@
 use crate::jet::candidate::{Candidate, CandidateResponse, CandidateState};
 use crate::jet::TransportType;
-use crate::token::JetAssociationTokenClaims;
+use crate::token::AssociationTokenClaims;
 use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
@@ -12,11 +12,11 @@ pub struct Association {
     version: u8,
     creation_timestamp: DateTime<Utc>,
     candidates: IndexMap<Uuid, Candidate>,
-    association_token: JetAssociationTokenClaims,
+    association_token: AssociationTokenClaims,
 }
 
 impl Association {
-    pub fn new(id: Uuid, version: u8, association_token: JetAssociationTokenClaims) -> Self {
+    pub fn new(id: Uuid, version: u8, association_token: AssociationTokenClaims) -> Self {
         Association {
             id,
             version,
@@ -92,7 +92,7 @@ impl Association {
             .any(|(_, candidate)| candidate.state() == CandidateState::Connected)
     }
 
-    pub fn get_token_claims(&self) -> &JetAssociationTokenClaims {
+    pub fn get_token_claims(&self) -> &AssociationTokenClaims {
         &self.association_token
     }
 

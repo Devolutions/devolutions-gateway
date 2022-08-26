@@ -2,7 +2,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
-use crate::token::JetAccessScope;
+use crate::token::AccessScope;
 use saphir::controller::Controller;
 use saphir::http::Method;
 use saphir::macros::controller;
@@ -23,7 +23,7 @@ impl ConfigController {
 #[controller(name = "jet/config")]
 impl ConfigController {
     #[patch("/")]
-    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(JetAccessScope::GatewayConfigWrite)"#)]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::ConfigWrite)"#)]
     async fn patch_config(&self, req: Request) -> Result<(), HttpErrorStatus> {
         patch_config(&self.conf_handle, req).await
     }

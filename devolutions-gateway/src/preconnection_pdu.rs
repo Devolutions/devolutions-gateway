@@ -1,5 +1,5 @@
 use crate::config::Conf;
-use crate::token::{AccessTokenClaims, CurrentJrl, JetAssociationTokenClaims, TokenCache, TokenValidator};
+use crate::token::{AccessTokenClaims, AssociationTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 use anyhow::Context as _;
 use bytes::BytesMut;
 use ironrdp::{PduBufferParsing, PreconnectionPdu, PreconnectionPduError};
@@ -14,7 +14,7 @@ pub fn extract_association_claims(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
-) -> anyhow::Result<JetAssociationTokenClaims> {
+) -> anyhow::Result<AssociationTokenClaims> {
     let token = pdu.payload.as_deref().context("Empty preconnection PDU")?;
 
     if conf.debug.dump_tokens {

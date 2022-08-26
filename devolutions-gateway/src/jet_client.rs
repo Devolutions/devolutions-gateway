@@ -6,7 +6,7 @@ use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::registry::Registry;
 use crate::subscriber::SubscriberSender;
-use crate::token::JetAssociationTokenClaims;
+use crate::token::AssociationTokenClaims;
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::create_tls_connector;
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -418,7 +418,7 @@ pub struct HandleConnectJetMsgResponse {
     pub server_transport: TcpStream,
     pub association_id: Uuid,
     pub candidate_id: Uuid,
-    pub association_claims: JetAssociationTokenClaims,
+    pub association_claims: AssociationTokenClaims,
 }
 
 async fn handle_test_jet_msg(transport: impl AsyncWrite, request: JetTestReq) -> anyhow::Result<()> {
