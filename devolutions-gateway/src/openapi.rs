@@ -16,6 +16,7 @@ use uuid::Uuid;
         crate::http::controllers::jrl::get_jrl_info,
     ),
     components(schemas(
+        crate::http::controllers::health::Identity,
         SessionInfo,
         ConnectionMode,
         crate::listener::ListenerUrls,
