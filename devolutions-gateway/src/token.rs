@@ -86,7 +86,7 @@ impl std::error::Error for BadContentType {}
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
 pub enum AccessTokenClaims {
-    Association(JetAssociationTokenClaims),
+    Association(AssociationTokenClaims),
     Scope(ScopeTokenClaims),
     Bridge(BridgeTokenClaims),
     Jmux(JmuxTokenClaims),
@@ -214,20 +214,20 @@ pub struct CredsClaims {
 }
 
 #[derive(Clone)]
-pub struct JetAssociationTokenClaims {
-    /// Jet Association ID (= Session ID)
+pub struct AssociationTokenClaims {
+    /// Association ID (= Session ID)
     pub jet_aid: Uuid,
 
-    /// Jet Application protocol
+    /// Application protocol
     pub jet_ap: ApplicationProtocol,
 
-    /// Jet Connection Mode
+    /// Connection Mode
     pub jet_cm: ConnectionMode,
 
-    /// Jet Recording Policy
+    /// Recording Policy
     pub jet_rec: bool,
 
-    /// Jet Filtering Policy
+    /// Filtering Policy
     pub jet_flt: bool,
 
     // JWT expiration time claim.
@@ -240,13 +240,13 @@ pub struct JetAssociationTokenClaims {
     jti: Option<Uuid>,
 }
 
-impl JetAssociationTokenClaims {
+impl AssociationTokenClaims {
     fn contains_secret(&self) -> bool {
         matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
     }
 }
 
-impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
+impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -321,25 +321,26 @@ impl<'de> de::Deserialize<'de> for JetAssociationTokenClaims {
 
 // ----- scope claims ----- //
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum JetAccessScope {
+pub enum AccessScope {
     #[serde(rename = "*")]
     Wildcard,
     #[serde(rename = "gateway.sessions.read")]
-    GatewaySessionsRead,
+    SessionsRead,
     #[serde(rename = "gateway.associations.read")]
-    GatewayAssociationsRead,
+    AssociationsRead,
     #[serde(rename = "gateway.diagnostics.read")]
-    GatewayDiagnosticsRead,
+    DiagnosticsRead,
     #[serde(rename = "gateway.jrl.read")]
-    GatewayJrlRead,
+    JrlRead,
     #[serde(rename = "gateway.config.write")]
-    GatewayConfigWrite,
+    ConfigWrite,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct ScopeTokenClaims {
-    pub scope: JetAccessScope,
+    pub scope: AccessScope,
 
     // JWT expiration time claim.
     exp: i64,
@@ -766,13 +767,13 @@ fn validate_token_impl(
         // Mitigate replay attacks for RDP associations by rejecting token re-use from a different
         // source address IP (RDP requires multiple connections, so we can't just reject everything)
         AccessTokenClaims::Association(
-            JetAssociationTokenClaims {
+            AssociationTokenClaims {
                 jti: Some(id),
                 exp,
                 jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
                 ..
             }
-            | JetAssociationTokenClaims {
+            | AssociationTokenClaims {
                 jet_aid: id,
                 exp,
                 jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
@@ -795,8 +796,8 @@ fn validate_token_impl(
         },
 
         // All other tokens can't be re-used even if source IP is identical
-        AccessTokenClaims::Association(JetAssociationTokenClaims { jti: Some(id), exp, .. })
-        | AccessTokenClaims::Association(JetAssociationTokenClaims { jet_aid: id, exp, .. })
+        AccessTokenClaims::Association(AssociationTokenClaims { jti: Some(id), exp, .. })
+        | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {

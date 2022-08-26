@@ -11,7 +11,7 @@ use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
 use crate::subscriber::SubscriberSender;
-use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, JetAssociationTokenClaims, Protocol, TokenCache};
+use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, CurrentJrl, Protocol, TokenCache};
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
 use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
@@ -86,7 +86,7 @@ impl RdpClient {
         self,
         client_addr: SocketAddr,
         client_stream: TcpStream,
-        association_claims: JetAssociationTokenClaims,
+        association_claims: AssociationTokenClaims,
         mut leftover_bytes: BytesMut,
     ) -> anyhow::Result<()> {
         let Self {
@@ -254,7 +254,7 @@ enum RdpRoutingMode {
     TcpRendezvous(Uuid),
 }
 
-fn resolve_rdp_routing_mode(claims: &JetAssociationTokenClaims) -> anyhow::Result<RdpRoutingMode> {
+fn resolve_rdp_routing_mode(claims: &AssociationTokenClaims) -> anyhow::Result<RdpRoutingMode> {
     if !matches!(claims.jet_ap, ApplicationProtocol::Known(Protocol::Rdp)) {
         anyhow::bail!(
             "Expected RDP association, but found a different application protocol claim: {:?}",

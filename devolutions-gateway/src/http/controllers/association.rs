@@ -3,7 +3,7 @@ use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::jet::association::{Association, AssociationResponse};
 use crate::jet::candidate::Candidate;
 use crate::jet_client::JetAssociationsMap;
-use crate::token::{AccessTokenClaims, ConnectionMode, JetAccessScope};
+use crate::token::{AccessScope, AccessTokenClaims, ConnectionMode};
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use jet_proto::JET_VERSION_V2;
 use saphir::controller::Controller;
@@ -31,10 +31,7 @@ impl AssociationController {
 #[controller(name = "jet/association")]
 impl AssociationController {
     #[get("/")]
-    #[guard(
-        AccessGuard,
-        init_expr = r#"TokenType::Scope(JetAccessScope::GatewayAssociationsRead)"#
-    )]
+    #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::AssociationsRead)"#)]
     async fn get_associations(&self, detail: Option<bool>) -> (StatusCode, Option<String>) {
         let with_detail = detail.unwrap_or(false);
         let associations = self.associations.lock();

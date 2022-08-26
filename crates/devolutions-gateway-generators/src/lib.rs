@@ -1,4 +1,4 @@
-use devolutions_gateway::token::{self, ApplicationProtocol, JetAccessScope, Protocol};
+use devolutions_gateway::token::{self, AccessScope, ApplicationProtocol, Protocol};
 use devolutions_gateway::utils::TargetAddr;
 use devolutions_gateway::{ConnectionModeDetails, GatewaySessionInfo};
 use proptest::collection::vec;
@@ -66,13 +66,13 @@ pub fn alternate_hosts_with_ports() -> impl Strategy<Value = Vec<String>> {
     vec(host_with_port(), 0..4)
 }
 
-pub fn access_scope() -> impl Strategy<Value = JetAccessScope> {
+pub fn access_scope() -> impl Strategy<Value = AccessScope> {
     prop_oneof![
-        Just(JetAccessScope::GatewaySessionsRead),
-        Just(JetAccessScope::GatewayAssociationsRead),
-        Just(JetAccessScope::GatewayDiagnosticsRead),
-        Just(JetAccessScope::GatewayJrlRead),
-        Just(JetAccessScope::Wildcard),
+        Just(AccessScope::SessionsRead),
+        Just(AccessScope::AssociationsRead),
+        Just(AccessScope::DiagnosticsRead),
+        Just(AccessScope::JrlRead),
+        Just(AccessScope::Wildcard),
     ]
 }
 
@@ -200,7 +200,7 @@ pub fn session_info_fwd_only() -> impl Strategy<Value = GatewaySessionInfo> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScopeClaims {
-    pub scope: JetAccessScope,
+    pub scope: AccessScope,
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,

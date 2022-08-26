@@ -203,6 +203,15 @@ paths:
         - gateway.sessions.read
 components:
   schemas:
+    AccessScope:
+      type: string
+      enum:
+      - '*'
+      - gateway.sessions.read
+      - gateway.associations.read
+      - gateway.diagnostics.read
+      - gateway.jrl.read
+      - gateway.config.write
     ClockDiagnostic:
       type: object
       required:

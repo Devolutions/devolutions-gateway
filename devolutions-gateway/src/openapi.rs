@@ -28,6 +28,7 @@ use uuid::Uuid;
         crate::http::controllers::config::SubProvisionerKey,
         crate::http::controllers::config::ConfigPatch,
         crate::http::controllers::jrl::JrlInfo,
+        crate::token::AccessScope,
     )),
     modifiers(&SecurityAddon),
 )]
