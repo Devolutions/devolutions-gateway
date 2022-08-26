@@ -340,6 +340,58 @@ jobs:
             }
           }
 
+  Upload-SBOM:
+    name: Upload SBOM
+    runs-on: ubuntu-latest
+    needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+
+    steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: master
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
+      - name: Download cargo-cyclonedx from OneDrive
+        uses: devolutions/actions/download-onedrive@master
+        with:
+          files: /Binaries/cargo-cyclonedx/linux/cargo-cyclonedx
+          recursive: 'false'
+          destination_path: /home/runner/.cargo/bin/
+          remote: dev
+          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+
+      - name: Set execute permission on cargo-cyclonedx
+        run: |
+          chmod +x /home/runner/.cargo/bin/cargo-cyclonedx
+
+      - name: Generate SBOM
+        uses: devolutions/actions/cyclonedx-rust-generate@master
+
+      - name: Save SBOM
+        uses: actions/upload-artifact@v3
+        with:
+          name: bom.xml
+          path: bom.xml
+
+      - name: Upload SBOM
+        uses: devolutions/actions/dtrack-upload-sbom@master
+        with:
+          serverhostname: dtrack-api.devolutions.com
+          apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
+          projectname: devolutions-gateway
+          projectversion: ${{ needs.preflight.outputs.version }}
+          autocreate: 'true'
+
   onedrive:
     name: OneDrive
     runs-on: ubuntu-18.04
