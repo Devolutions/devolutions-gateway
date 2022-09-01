@@ -1,0 +1,134 @@
+name: Publish clients
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run'
+        required: true
+        type: boolean
+        default: 'true'
+  schedule:
+    - cron: '49 3 * * 1' # 3:49 AM UTC every Monday
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-20.04
+    outputs:
+      dry-run: ${{ steps.get-dry-run.outputs.dry-run }}
+
+    steps:
+      - name: Get dry run
+        id: get-dry-run
+        shell: pwsh
+        run: |
+          $IsDryRun = '${{ github.event.inputs.dry-run }}' -Eq 'true' -Or '${{ github.event_name }}' -Eq 'schedule'
+
+          if ($IsDryRun) {
+            Write-Host '::set-output name=dry-run::true'
+          } else {
+            Write-Host '::set-output name=dry-run::false'
+          }
+
+  nuget-build:
+    name: NuGet package build [${{matrix.library}}]
+    runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        library: [ dotnet-client, dotnet-subscriber ]
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v3
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $Path = "./devolutions-gateway/openapi/${{matrix.library}}"
+          & "$Path/build.ps1"
+          New-Item -ItemType "directory" -Path . -Name "nuget-packages"
+          Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v3
+        with:
+          name: nupkg
+          path: nuget-packages/*.nupkg
+
+  npm-build:
+    name: NPM build
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v3
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $Path = "./devolutions-gateway/openapi/ts-fetch-client"
+          & "$Path/build.ps1"
+
+  nuget-publish:
+    name: Publish NuGet packages
+    runs-on: ubuntu-20.04
+    environment: build-and-publish
+    if: needs.preflight.outputs.dry-run == 'false'
+    needs:
+      - preflight
+      - nuget-build
+
+    steps:
+      - name: Download NuGet package artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: nupkg
+          path: nuget-packages
+
+      - name: Publish to nuget.org
+        shell: pwsh
+        env:
+          API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
+    
+          foreach ($File in $Files) {
+            $PushCmd = @(
+              'dotnet', 
+              'nuget', 
+              'push', 
+              "$File",
+              '--api-key',
+              "$Env:API_KEY",
+              '--source',
+              'https://api.nuget.org/v3/index.json',
+            )
+
+            Write-Host "Publishing $($File.Name)..."
+            $PushCmd = $PushCmd -Join ' '
+            Invoke-Expression $PushCmd
+          }
+
+  npm-publish:
+    name: Publish NPM packages
+    runs-on: ubuntu-20.04
+    environment: build-and-publish
+    if: needs.preflight.outputs.dry-run == 'false'
+    needs:
+      - preflight
+      - npm-build
+
+    steps:
+      - name: Check out ${{ github.repository }}
+        uses: actions/checkout@v3
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $Path = "./devolutions-gateway/openapi/ts-fetch-client"
+          Set-Location "$Path"
+          npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
+          npm publish --access=public
