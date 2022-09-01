@@ -23,6 +23,8 @@ jobs:
         id: get-dry-run
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $IsDryRun = '${{ github.event.inputs.dry-run }}' -Eq 'true' -Or '${{ github.event_name }}' -Eq 'schedule'
 
           if ($IsDryRun) {
@@ -47,6 +49,8 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $Path = "./devolutions-gateway/openapi/${{matrix.library}}"
           & "$Path/build.ps1"
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
@@ -69,6 +73,8 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $Path = "./devolutions-gateway/openapi/ts-fetch-client"
           & "$Path/build.ps1"
 
@@ -93,6 +99,8 @@ jobs:
         env:
           API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
+          Set-PSDebug -Trace 1
+
           $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
     
           foreach ($File in $Files) {
@@ -105,6 +113,7 @@ jobs:
               "$Env:API_KEY",
               '--source',
               'https://api.nuget.org/v3/index.json',
+              '--skip-duplicate'
             )
 
             Write-Host "Publishing $($File.Name)..."
@@ -128,7 +137,10 @@ jobs:
       - name: Publish
         shell: pwsh
         run: |
+          Set-PSDebug -Trace 1
+
           $Path = "./devolutions-gateway/openapi/ts-fetch-client"
           Set-Location "$Path"
+
           npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
           npm publish --access=public
