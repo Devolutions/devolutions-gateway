@@ -89,8 +89,7 @@ saphir = { version = "2.8", default-features = false, features = ["json", "macro
 # for KDC proxy
 portpicker = "0.1.1"
 # OpenAPI generator
-# FIXME: use v2.0.0 from crates.io when released
-utoipa = { git = "https://github.com/juhaku/utoipa", rev = "d58e2cce493a0ec72c", default-features = false, features = ["uuid", "chrono", "chrono_with_format"], optional = true }
+utoipa = { version = "2.0.1", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # plugins
 dlopen = "0.1.8"

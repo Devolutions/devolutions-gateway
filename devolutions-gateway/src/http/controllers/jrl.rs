@@ -41,6 +41,7 @@ impl JrlController {
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     operation_id = "UpdateJrl",
+    tag = "Jrl",
     path = "/jet/jrl",
     responses(
         (status = 200, description = "JRL updated successfuly"),
@@ -100,6 +101,7 @@ async fn update_jrl(
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetJrlInfo",
+    tag = "Jrl",
     path = "/jet/jrl/info",
     responses(
         (status = 200, description = "Current JRL Info", body = JrlInfo),

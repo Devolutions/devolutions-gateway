@@ -57,6 +57,7 @@ const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey", "Subscriber"];
 #[cfg_attr(feature = "openapi", utoipa::path(
     patch,
     operation_id = "PatchConfig",
+    tag = "Config",
     path = "/jet/config",
     request_body(content = ConfigPatch, description = "JSON-encoded configuration patch", content_type = "application/json"),
     responses(

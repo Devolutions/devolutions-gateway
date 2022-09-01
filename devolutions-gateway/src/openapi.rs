@@ -89,7 +89,7 @@ impl Modify for SecurityAddon {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(crate::subscriber::post_subscriber_message),
+    paths(post_subscriber_message),
     components(schemas(SubscriberMessage, SubscriberSessionInfo, SubscriberMessageKind)),
     modifiers(&SubscriberSecurityAddon),
 )]
@@ -136,3 +136,22 @@ impl Modify for SubscriberSecurityAddon {
         );
     }
 }
+
+/// Process a message originating from a Devolutions Gateway instance
+#[allow(unused)]
+#[utoipa::path(
+    post,
+    operation_id = "PostMessage",
+    tag = "Subscriber",
+    path = "/dgw/subscriber",
+    request_body(content = SubscriberMessage, description = "Message", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Message received and processed successfully"),
+        (status = 400, description = "Bad message"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 404, description = "Gateway Subscriber not found"),
+    ),
+    security(("subscriber_token" = [])),
+)]
+fn post_subscriber_message() {}

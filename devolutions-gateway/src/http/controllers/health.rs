@@ -41,6 +41,7 @@ pub struct Identity {
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetHealth",
+    tag = "Health",
     path = "/jet/health",
     responses(
         (status = 200, description = "Identity for this Gateway", body = Identity),

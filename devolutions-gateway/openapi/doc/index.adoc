@@ -1,0 +1,1070 @@
+= devolutions-gateway
+infos@devolutions.net
+2022.2.2
+:toc: left
+:numbered:
+:toclevels: 3
+:source-highlighter: highlightjs
+:keywords: openapi, rest, devolutions-gateway
+:specDir: 
+:snippetDir: 
+:generator-template: v1 2019-12-20
+:info-url: https://openapi-generator.tech
+:app-name: devolutions-gateway
+
+[abstract]
+.Abstract
+Protocol-aware fine-grained relay server
+
+
+// markup not found, no include::{specDir}intro.adoc[opts=optional]
+
+
+== Access
+
+
+* *Bearer* Authentication 
+
+
+
+* *Bearer* Authentication 
+
+
+
+
+== Endpoints
+
+
+[.Config]
+=== Config
+
+
+[.patchConfig]
+==== patchConfig
+
+`PATCH /jet/config`
+
+Modifies configuration
+
+===== Description
+
+Modifies configuration 
+
+
+// markup not found, no include::{specDir}jet/config/PATCH/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| ConfigPatch
+| JSON-encoded configuration patch <<ConfigPatch>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Configuration has been patched with success
+|  <<>>
+
+
+| 400
+| Bad patch request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Failed to patch configuration
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/config/PATCH/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/config/PATCH/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/config/PATCH/PATCH.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/config/PATCH/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Diagnostics]
+=== Diagnostics
+
+
+[.getClockDiagnostic]
+==== getClockDiagnostic
+
+`GET /jet/diagnostics/clock`
+
+Retrieves server's clock in order to diagnose clock drifting.
+
+===== Description
+
+Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as `nbf` and `exp`. 
+
+
+// markup not found, no include::{specDir}jet/diagnostics/clock/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+<<ClockDiagnostic>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Server&#39;s clock
+|  <<ClockDiagnostic>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/clock/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/clock/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/diagnostics/clock/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/diagnostics/clock/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.getConfigurationDiagnostic]
+==== getConfigurationDiagnostic
+
+`GET /jet/diagnostics/configuration`
+
+Retrieves configuration.
+
+===== Description
+
+Retrieves configuration. 
+
+
+// markup not found, no include::{specDir}jet/diagnostics/configuration/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+<<ConfigDiagnostic>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Service configuration diagnostic (including version)
+|  <<ConfigDiagnostic>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/configuration/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/configuration/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/diagnostics/configuration/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/diagnostics/configuration/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.getLogs]
+==== getLogs
+
+`GET /jet/diagnostics/logs`
+
+Retrieves latest logs.
+
+===== Description
+
+Retrieves latest logs. 
+
+
+// markup not found, no include::{specDir}jet/diagnostics/logs/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+
+<<String>>
+
+
+===== Content Type
+
+* text/plain
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Latest logs
+|  <<String>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Failed to retrieve logs
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/logs/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/diagnostics/logs/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/diagnostics/logs/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/diagnostics/logs/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Health]
+=== Health
+
+
+[.getHealth]
+==== getHealth
+
+`GET /jet/health`
+
+Performs a health check
+
+===== Description
+
+Performs a health check 
+
+
+// markup not found, no include::{specDir}jet/health/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+<<Identity>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Identity for this Gateway
+|  <<Identity>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/health/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/health/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/health/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/health/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Jrl]
+=== Jrl
+
+
+[.getJrlInfo]
+==== getJrlInfo
+
+`GET /jet/jrl/info`
+
+Retrieves current JRL (Json Revocation List) info
+
+===== Description
+
+Retrieves current JRL (Json Revocation List) info 
+
+
+// markup not found, no include::{specDir}jet/jrl/info/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+<<JrlInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Current JRL Info
+|  <<JrlInfo>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Failed to update the JRL
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/jrl/info/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/jrl/info/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/jrl/info/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrl/info/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.updateJrl]
+==== updateJrl
+
+`POST /jet/jrl`
+
+Updates JRL (Json Revocation List) using a JRL token
+
+===== Description
+
+Updates JRL (Json Revocation List) using a JRL token 
+
+
+// markup not found, no include::{specDir}jet/jrl/POST/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| JRL updated successfuly
+|  <<>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 500
+| Failed to update the JRL
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/jrl/POST/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/jrl/POST/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/jrl/POST/POST.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrl/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Sessions]
+=== Sessions
+
+
+[.getSessions]
+==== getSessions
+
+`GET /jet/sessions`
+
+Lists running sessions
+
+===== Description
+
+Lists running sessions 
+
+
+// markup not found, no include::{specDir}jet/sessions/GET/spec.adoc[opts=optional]
+
+
+
+===== Parameters
+
+
+
+
+
+
+
+===== Return Type
+
+array[<<SessionInfo>>]
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Running sessions
+| List[<<SessionInfo>>] 
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+===== Samples
+
+
+// markup not found, no include::{snippetDir}jet/sessions/GET/http-request.adoc[opts=optional]
+
+
+// markup not found, no include::{snippetDir}jet/sessions/GET/http-response.adoc[opts=optional]
+
+
+
+// file not found, no * wiremock data link :jet/sessions/GET/GET.json[]
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/sessions/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[#models]
+== Models
+
+
+[#AccessScope]
+=== _AccessScope_ 
+
+
+
+[.fields-AccessScope]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+|===
+
+
+[#ClockDiagnostic]
+=== _ClockDiagnostic_ 
+
+
+
+[.fields-ClockDiagnostic]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| timestamp_millis
+| X
+| Long 
+| 
+| int64 
+
+| timestamp_secs
+| X
+| Long 
+| 
+| int64 
+
+|===
+
+
+[#ConfigDiagnostic]
+=== _ConfigDiagnostic_ 
+
+
+
+[.fields-ConfigDiagnostic]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| hostname
+| X
+| String 
+| 
+|  
+
+| id
+| 
+| UUID 
+| 
+| uuid 
+
+| listeners
+| X
+| List  of <<ListenerUrls>>
+| 
+|  
+
+| version
+| X
+| String 
+| 
+|  
+
+|===
+
+
+[#ConfigPatch]
+=== _ConfigPatch_ 
+
+
+
+[.fields-ConfigPatch]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| Id
+| 
+| UUID 
+| 
+| uuid 
+
+| SubProvisionerPublicKey
+| 
+| SubProvisionerKey 
+| 
+|  
+
+| Subscriber
+| 
+| Subscriber 
+| 
+|  
+
+|===
+
+
+[#ConnectionMode]
+=== _ConnectionMode_ 
+
+
+
+[.fields-ConnectionMode]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+|===
+
+
+[#DataEncoding]
+=== _DataEncoding_ 
+
+
+
+[.fields-DataEncoding]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+|===
+
+
+[#Identity]
+=== _Identity_ 
+
+
+
+[.fields-Identity]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| hostname
+| X
+| String 
+| 
+|  
+
+| id
+| 
+| UUID 
+| 
+| uuid 
+
+|===
+
+
+[#JrlInfo]
+=== _JrlInfo_ 
+
+
+
+[.fields-JrlInfo]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| iat
+| X
+| Long 
+| JWT \&quot;Issued At\&quot; claim of JRL
+| int64 
+
+| jti
+| X
+| UUID 
+| Unique ID for current JRL
+| uuid 
+
+|===
+
+
+[#ListenerUrls]
+=== _ListenerUrls_ 
+
+
+
+[.fields-ListenerUrls]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| external_url
+| X
+| String 
+| 
+|  
+
+| internal_url
+| X
+| String 
+| 
+|  
+
+|===
+
+
+[#PubKeyFormat]
+=== _PubKeyFormat_ 
+
+
+
+[.fields-PubKeyFormat]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+|===
+
+
+[#SessionInfo]
+=== _SessionInfo_ 
+
+
+
+[.fields-SessionInfo]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| application_protocol
+| X
+| String 
+| 
+|  
+
+| association_id
+| X
+| UUID 
+| 
+| uuid 
+
+| connection_mode
+| X
+| ConnectionMode 
+| 
+|  
+
+| destination_host
+| 
+| String 
+| 
+|  
+
+| filtering_policy
+| X
+| Boolean 
+| 
+|  
+
+| recording_policy
+| X
+| Boolean 
+| 
+|  
+
+| start_timestamp
+| X
+| Date 
+| 
+| date-time 
+
+|===
+
+
+[#SubProvisionerKey]
+=== _SubProvisionerKey_ 
+
+
+
+[.fields-SubProvisionerKey]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| Encoding
+| 
+| DataEncoding 
+| 
+|  
+
+| Format
+| 
+| PubKeyFormat 
+| 
+|  
+
+| Id
+| X
+| String 
+| 
+|  
+
+| Value
+| X
+| String 
+| 
+|  
+
+|===
+
+
+[#Subscriber]
+=== _Subscriber_ 
+
+
+
+[.fields-Subscriber]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| Token
+| X
+| String 
+| 
+|  
+
+| Url
+| X
+| String 
+| 
+|  
+
+|===
+
+

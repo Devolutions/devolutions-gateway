@@ -101,21 +101,3 @@ pub async fn subscriber_task(conf_handle: ConfHandle, mut rx: SubscriberReceiver
         }
     }
 }
-
-/// Process a message originating from a Devolutions Gateway instance
-#[cfg(feature = "openapi")]
-#[allow(unused)]
-#[utoipa::path(
-    post,
-    operation_id = "PostMessage",
-    path = "/",
-    request_body(content = SubscriberMessage, description = "Message", content_type = "application/json"),
-    responses(
-        (status = 200, description = "Message received and processed successfuly"),
-        (status = 400, description = "Bad message"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-    ),
-    security(("subscriber_token" = [])),
-)]
-fn post_subscriber_message() {}
