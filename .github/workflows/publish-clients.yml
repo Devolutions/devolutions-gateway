@@ -112,7 +112,8 @@ jobs:
               '--api-key',
               "$Env:API_KEY",
               '--source',
-              'https://api.nuget.org/v3/index.json'
+              'https://api.nuget.org/v3/index.json',
+              '--skip-duplicate'
             )
 
             Write-Host "Publishing $($File.Name)..."
