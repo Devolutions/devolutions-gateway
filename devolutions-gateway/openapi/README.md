@@ -6,7 +6,7 @@ C# and TypeScript clients are generated using [OpenAPI Generator](https://openap
 
 ## Generate clients code
 
-1. Make OpenAPI documents are up to date by running `TODO`
+1. Make sure that OpenAPI documents are up to date by running `../../tools/generate-openapi/generate.ps1`
 
 2. Install `openapi-generator-cli`.
 

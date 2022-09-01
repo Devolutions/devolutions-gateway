@@ -30,7 +30,7 @@ namespace Devolutions.Gateway.Subscriber.Controllers
         /// </summary>
         /// <remarks>Process a message originating from a Devolutions Gateway instance </remarks>
         /// <param name="subscriberMessage">Message</param>
-        /// <response code="200">Message received and processed successfuly</response>
+        /// <response code="200">Message received and processed successfully</response>
         /// <response code="400">Bad message</response>
         /// <response code="401">Invalid or missing authorization token</response>
         /// <response code="403">Insufficient permissions</response>

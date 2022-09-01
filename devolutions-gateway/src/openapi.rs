@@ -146,7 +146,7 @@ impl Modify for SubscriberSecurityAddon {
     path = "/dgw/subscriber",
     request_body(content = SubscriberMessage, description = "Message", content_type = "application/json"),
     responses(
-        (status = 200, description = "Message received and processed successfuly"),
+        (status = 200, description = "Message received and processed successfully"),
         (status = 400, description = "Bad message"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),

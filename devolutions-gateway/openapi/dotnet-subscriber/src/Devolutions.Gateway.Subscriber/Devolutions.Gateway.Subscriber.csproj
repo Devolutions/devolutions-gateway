@@ -11,7 +11,7 @@
     <OutputType>Library</OutputType>
     <AssemblyName>Devolutions.Gateway.Subscriber</AssemblyName>
     <PackageId>Devolutions.Gateway.Subscriber</PackageId>
-    <UserSecretsId>3175144f-93ce-4559-b95e-9c97551eca74</UserSecretsId>
+    <UserSecretsId>3b001e1c-0763-49e5-9592-2dfc9caaadfd</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>

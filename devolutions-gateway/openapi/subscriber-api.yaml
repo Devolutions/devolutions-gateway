@@ -27,7 +27,7 @@ paths:
         required: true
       responses:
         '200':
-          description: Message received and processed successfuly
+          description: Message received and processed successfully
         '400':
           description: Bad message
         '401':
