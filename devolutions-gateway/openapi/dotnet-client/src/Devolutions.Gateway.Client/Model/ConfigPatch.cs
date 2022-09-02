@@ -35,7 +35,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="ConfigPatch" /> class.
         /// </summary>
-        /// <param name="id">id.</param>
+        /// <param name="id">This Gateway&#39;s unique ID.</param>
         /// <param name="subProvisionerPublicKey">subProvisionerPublicKey.</param>
         /// <param name="subscriber">subscriber.</param>
         public ConfigPatch(Guid id = default(Guid), SubProvisionerKey subProvisionerPublicKey = default(SubProvisionerKey), Subscriber subscriber = default(Subscriber))
@@ -46,8 +46,9 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets Id
+        /// This Gateway&#39;s unique ID
         /// </summary>
+        /// <value>This Gateway&#39;s unique ID</value>
         [DataMember(Name = "Id", EmitDefaultValue = false)]
         public Guid Id { get; set; }
 

@@ -33,7 +33,7 @@ import {
  */
 export interface ConfigPatch {
     /**
-     * 
+     * This Gateway's unique ID
      * @type {string}
      * @memberof ConfigPatch
      */

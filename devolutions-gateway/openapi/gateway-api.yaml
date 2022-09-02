@@ -223,11 +223,14 @@ components:
         timestamp_millis:
           type: integer
           format: int64
+          description: Current time in milliseconds
         timestamp_secs:
           type: integer
           format: int64
+          description: Current time in seconds
     ConfigDiagnostic:
       type: object
+      description: Service configuration diagnostic
       required:
       - hostname
       - version
@@ -235,21 +238,25 @@ components:
       properties:
         hostname:
           type: string
+          description: This Gateway's hostname
         id:
           type: string
           format: uuid
+          description: This Gateway's unique ID
         listeners:
           type: array
           items:
             $ref: '#/components/schemas/ListenerUrls'
         version:
           type: string
+          description: Gateway service version
     ConfigPatch:
       type: object
       properties:
         Id:
           type: string
           format: uuid
+          description: This Gateway's unique ID
         SubProvisionerPublicKey:
           $ref: '#/components/schemas/SubProvisionerKey'
         Subscriber:
@@ -274,9 +281,11 @@ components:
       properties:
         hostname:
           type: string
+          description: This Gateway's hostname
         id:
           type: string
           format: uuid
+          description: This Gateway's unique ID
     JrlInfo:
       type: object
       required:
@@ -299,8 +308,10 @@ components:
       properties:
         external_url:
           type: string
+          description: URL to use from external networks
         internal_url:
           type: string
+          description: URL to use on local network
     PubKeyFormat:
       type: string
       enum:
@@ -344,18 +355,23 @@ components:
           $ref: '#/components/schemas/PubKeyFormat'
         Id:
           type: string
+          description: The key ID for this subkey
         Value:
           type: string
+          description: The binary-to-text-encoded key data
     Subscriber:
       type: object
+      description: Subscriber configuration
       required:
       - Url
       - Token
       properties:
         Token:
           type: string
+          description: Bearer token to use when making HTTP requests
         Url:
           type: string
+          description: HTTP URL where notification messages are to be sent
   securitySchemes:
     jrl_token:
       type: http

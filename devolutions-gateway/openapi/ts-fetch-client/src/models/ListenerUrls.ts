@@ -20,13 +20,13 @@ import { exists, mapValues } from '../runtime';
  */
 export interface ListenerUrls {
     /**
-     * 
+     * URL to use from external networks
      * @type {string}
      * @memberof ListenerUrls
      */
     externalUrl: string;
     /**
-     * 
+     * URL to use on local network
      * @type {string}
      * @memberof ListenerUrls
      */

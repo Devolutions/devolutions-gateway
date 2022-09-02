@@ -20,13 +20,13 @@ import { exists, mapValues } from '../runtime';
  */
 export interface Identity {
     /**
-     * 
+     * This Gateway's hostname
      * @type {string}
      * @memberof Identity
      */
     hostname: string;
     /**
-     * 
+     * This Gateway's unique ID
      * @type {string}
      * @memberof Identity
      */

@@ -1,4 +1,4 @@
-## @devolutions/gateway-client@0.1.1
+## @devolutions/gateway-client@0.1.2
 
 This generator creates TypeScript/JavaScript client that utilizes [Fetch API](https://fetch.spec.whatwg.org/). The generated Node module can be used in the following environments:
 
@@ -36,7 +36,7 @@ navigate to the folder of your consuming project and run one of the following co
 _published:_
 
 ```
-npm install @devolutions/gateway-client@0.1.1 --save
+npm install @devolutions/gateway-client@0.1.2 --save
 ```
 
 _unPublished (not recommended):_

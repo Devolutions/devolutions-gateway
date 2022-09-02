@@ -36,7 +36,9 @@ impl HealthController {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub struct Identity {
+    /// This Gateway's unique ID
     id: Option<Uuid>,
+    /// This Gateway's hostname
     hostname: String,
 }
 

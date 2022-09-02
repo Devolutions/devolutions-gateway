@@ -20,13 +20,13 @@ import { exists, mapValues } from '../runtime';
  */
 export interface ClockDiagnostic {
     /**
-     * 
+     * Current time in milliseconds
      * @type {number}
      * @memberof ClockDiagnostic
      */
     timestampMillis: number;
     /**
-     * 
+     * Current time in seconds
      * @type {number}
      * @memberof ClockDiagnostic
      */
