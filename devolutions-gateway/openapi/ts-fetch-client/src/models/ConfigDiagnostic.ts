@@ -21,19 +21,19 @@ import {
 } from './ListenerUrls';
 
 /**
- * 
+ * Service configuration diagnostic
  * @export
  * @interface ConfigDiagnostic
  */
 export interface ConfigDiagnostic {
     /**
-     * 
+     * This Gateway's hostname
      * @type {string}
      * @memberof ConfigDiagnostic
      */
     hostname: string;
     /**
-     * 
+     * This Gateway's unique ID
      * @type {string}
      * @memberof ConfigDiagnostic
      */
@@ -45,7 +45,7 @@ export interface ConfigDiagnostic {
      */
     listeners: Array<ListenerUrls>;
     /**
-     * 
+     * Gateway service version
      * @type {string}
      * @memberof ConfigDiagnostic
      */

@@ -27,7 +27,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Subscriber
+    /// Subscriber configuration
     /// </summary>
     [DataContract(Name = "Subscriber")]
     public partial class Subscriber : IEquatable<Subscriber>, IValidatableObject
@@ -40,8 +40,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="Subscriber" /> class.
         /// </summary>
-        /// <param name="token">token (required).</param>
-        /// <param name="url">url (required).</param>
+        /// <param name="token">Bearer token to use when making HTTP requests (required).</param>
+        /// <param name="url">HTTP URL where notification messages are to be sent (required).</param>
         public Subscriber(string token = default(string), string url = default(string))
         {
             // to ensure "token" is required (not null)
@@ -59,14 +59,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets Token
+        /// Bearer token to use when making HTTP requests
         /// </summary>
+        /// <value>Bearer token to use when making HTTP requests</value>
         [DataMember(Name = "Token", IsRequired = true, EmitDefaultValue = false)]
         public string Token { get; set; }
 
         /// <summary>
-        /// Gets or Sets Url
+        /// HTTP URL where notification messages are to be sent
         /// </summary>
+        /// <value>HTTP URL where notification messages are to be sent</value>
         [DataMember(Name = "Url", IsRequired = true, EmitDefaultValue = false)]
         public string Url { get; set; }
 

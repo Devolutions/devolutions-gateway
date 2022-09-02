@@ -18,8 +18,10 @@ use url::Url;
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ListenerUrls {
+    /// URL to use on local network
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub internal_url: Url,
+    /// URL to use from external networks
     #[cfg_attr(feature = "openapi", schema(value_type = String))]
     pub external_url: Url,
 }

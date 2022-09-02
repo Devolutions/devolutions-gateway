@@ -40,8 +40,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="Identity" /> class.
         /// </summary>
-        /// <param name="hostname">hostname (required).</param>
-        /// <param name="id">id.</param>
+        /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
+        /// <param name="id">This Gateway&#39;s unique ID.</param>
         public Identity(string hostname = default(string), Guid id = default(Guid))
         {
             // to ensure "hostname" is required (not null)
@@ -54,14 +54,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets Hostname
+        /// This Gateway&#39;s hostname
         /// </summary>
+        /// <value>This Gateway&#39;s hostname</value>
         [DataMember(Name = "hostname", IsRequired = true, EmitDefaultValue = false)]
         public string Hostname { get; set; }
 
         /// <summary>
-        /// Gets or Sets Id
+        /// This Gateway&#39;s unique ID
         /// </summary>
+        /// <value>This Gateway&#39;s unique ID</value>
         [DataMember(Name = "id", EmitDefaultValue = false)]
         public Guid Id { get; set; }
 

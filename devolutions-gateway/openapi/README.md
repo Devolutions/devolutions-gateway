@@ -16,4 +16,6 @@ Code is generated using [OpenAPI Generator](https://openapi-generator.tech/) and
 
 3. Bump versions appropriately in `config.json` files
 
-4. Run `./generate.psd1` script.
+4. Run `./generate_clients.ps1` script.
+
+Note: script `./generate_all.ps1` will do both 1. and 4. at once.

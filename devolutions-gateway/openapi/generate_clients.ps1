@@ -1,5 +1,9 @@
 #!/bin/env pwsh
 
+$ErrorActionPreference = "Stop"
+
+Push-Location -Path $PSScriptRoot
+
 $targets = @(
 	@{
 		Folder = "./doc"
@@ -41,3 +45,4 @@ ForEach ($target in $targets)
 	Write-Host
 }
 
+Pop-Location

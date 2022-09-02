@@ -54,8 +54,8 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="encoding">encoding.</param>
         /// <param name="format">format.</param>
-        /// <param name="id">id (required).</param>
-        /// <param name="value">value (required).</param>
+        /// <param name="id">The key ID for this subkey (required).</param>
+        /// <param name="value">The binary-to-text-encoded key data (required).</param>
         public SubProvisionerKey(DataEncoding? encoding = default(DataEncoding?), PubKeyFormat? format = default(PubKeyFormat?), string id = default(string), string value = default(string))
         {
             // to ensure "id" is required (not null)
@@ -75,14 +75,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets Id
+        /// The key ID for this subkey
         /// </summary>
+        /// <value>The key ID for this subkey</value>
         [DataMember(Name = "Id", IsRequired = true, EmitDefaultValue = false)]
         public string Id { get; set; }
 
         /// <summary>
-        /// Gets or Sets Value
+        /// The binary-to-text-encoded key data
         /// </summary>
+        /// <value>The binary-to-text-encoded key data</value>
         [DataMember(Name = "Value", IsRequired = true, EmitDefaultValue = false)]
         public string Value { get; set; }
 

@@ -6,12 +6,17 @@ use crate::token::AccessScope;
 use saphir::prelude::*;
 use uuid::Uuid;
 
+/// Service configuration diagnostic
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub struct ConfigDiagnostic {
+    /// This Gateway's unique ID
     id: Option<Uuid>,
+    /// This Gateway's hostname
     hostname: String,
+    /// Gateway service version
     version: &'static str,
+    /// Listeners configured on this instance
     listeners: Vec<ListenerUrls>,
 }
 
@@ -29,7 +34,9 @@ impl From<&Conf> for ConfigDiagnostic {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 pub struct ClockDiagnostic {
+    /// Current time in seconds
     timestamp_secs: i64,
+    /// Current time in milliseconds
     timestamp_millis: i64,
 }
 

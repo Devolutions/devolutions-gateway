@@ -33,10 +33,13 @@ impl ConfigController {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ConfigPatch {
+    /// This Gateway's unique ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<Uuid>,
+    /// The sub provisioner public key (may only be used to verify tokens when establishing a session)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub_provisioner_public_key: Option<SubProvisionerKey>,
+    /// Subscriber configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscriber: Option<Subscriber>,
 }
@@ -45,9 +48,13 @@ pub struct ConfigPatch {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct SubProvisionerKey {
+    /// The key ID for this subkey
     pub id: String,
+    /// The binary-to-text-encoded key data
     pub value: String,
+    /// The format used for the key data
     pub format: Option<PubKeyFormat>,
+    /// The binary-to-text encoding used for the key data
     pub encoding: Option<DataEncoding>,
 }
 

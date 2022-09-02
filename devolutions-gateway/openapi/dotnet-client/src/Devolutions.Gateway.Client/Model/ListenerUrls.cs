@@ -40,8 +40,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="ListenerUrls" /> class.
         /// </summary>
-        /// <param name="externalUrl">externalUrl (required).</param>
-        /// <param name="internalUrl">internalUrl (required).</param>
+        /// <param name="externalUrl">URL to use from external networks (required).</param>
+        /// <param name="internalUrl">URL to use on local network (required).</param>
         public ListenerUrls(string externalUrl = default(string), string internalUrl = default(string))
         {
             // to ensure "externalUrl" is required (not null)
@@ -59,14 +59,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets ExternalUrl
+        /// URL to use from external networks
         /// </summary>
+        /// <value>URL to use from external networks</value>
         [DataMember(Name = "external_url", IsRequired = true, EmitDefaultValue = false)]
         public string ExternalUrl { get; set; }
 
         /// <summary>
-        /// Gets or Sets InternalUrl
+        /// URL to use on local network
         /// </summary>
+        /// <value>URL to use on local network</value>
         [DataMember(Name = "internal_url", IsRequired = true, EmitDefaultValue = false)]
         public string InternalUrl { get; set; }
 

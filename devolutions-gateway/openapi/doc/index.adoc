@@ -762,13 +762,13 @@ endif::internal-generation[]
 | timestamp_millis
 | X
 | Long 
-| 
+| Current time in milliseconds
 | int64 
 
 | timestamp_secs
 | X
 | Long 
-| 
+| Current time in seconds
 | int64 
 
 |===
@@ -777,7 +777,7 @@ endif::internal-generation[]
 [#ConfigDiagnostic]
 === _ConfigDiagnostic_ 
 
-
+Service configuration diagnostic
 
 [.fields-ConfigDiagnostic]
 [cols="2,1,2,4,1"]
@@ -787,13 +787,13 @@ endif::internal-generation[]
 | hostname
 | X
 | String 
-| 
+| This Gateway&#39;s hostname
 |  
 
 | id
 | 
 | UUID 
-| 
+| This Gateway&#39;s unique ID
 | uuid 
 
 | listeners
@@ -805,7 +805,7 @@ endif::internal-generation[]
 | version
 | X
 | String 
-| 
+| Gateway service version
 |  
 
 |===
@@ -824,7 +824,7 @@ endif::internal-generation[]
 | Id
 | 
 | UUID 
-| 
+| This Gateway&#39;s unique ID
 | uuid 
 
 | SubProvisionerPublicKey
@@ -881,13 +881,13 @@ endif::internal-generation[]
 | hostname
 | X
 | String 
-| 
+| This Gateway&#39;s hostname
 |  
 
 | id
 | 
 | UUID 
-| 
+| This Gateway&#39;s unique ID
 | uuid 
 
 |===
@@ -931,13 +931,13 @@ endif::internal-generation[]
 | external_url
 | X
 | String 
-| 
+| URL to use from external networks
 |  
 
 | internal_url
 | X
 | String 
-| 
+| URL to use on local network
 |  
 
 |===
@@ -1036,13 +1036,13 @@ endif::internal-generation[]
 | Id
 | X
 | String 
-| 
+| The key ID for this subkey
 |  
 
 | Value
 | X
 | String 
-| 
+| The binary-to-text-encoded key data
 |  
 
 |===
@@ -1051,7 +1051,7 @@ endif::internal-generation[]
 [#Subscriber]
 === _Subscriber_ 
 
-
+Subscriber configuration
 
 [.fields-Subscriber]
 [cols="2,1,2,4,1"]
@@ -1061,13 +1061,13 @@ endif::internal-generation[]
 | Token
 | X
 | String 
-| 
+| Bearer token to use when making HTTP requests
 |  
 
 | Url
 | X
 | String 
-| 
+| HTTP URL where notification messages are to be sent
 |  
 
 |===

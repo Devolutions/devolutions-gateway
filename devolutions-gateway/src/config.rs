@@ -748,16 +748,21 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ListenerConf {
+        /// URL to use on local network
         pub internal_url: String,
+        /// URL to use from external networks
         pub external_url: String,
     }
 
+    /// Subscriber configuration
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct Subscriber {
+        /// HTTP URL where notification messages are to be sent
         #[cfg_attr(feature = "openapi", schema(value_type = String))]
         pub url: Url,
+        /// Bearer token to use when making HTTP requests
         pub token: String,
     }
 }

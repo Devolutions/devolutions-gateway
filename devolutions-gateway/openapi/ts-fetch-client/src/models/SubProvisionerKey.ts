@@ -45,13 +45,13 @@ export interface SubProvisionerKey {
      */
     format?: PubKeyFormat;
     /**
-     * 
+     * The key ID for this subkey
      * @type {string}
      * @memberof SubProvisionerKey
      */
     id: string;
     /**
-     * 
+     * The binary-to-text-encoded key data
      * @type {string}
      * @memberof SubProvisionerKey
      */

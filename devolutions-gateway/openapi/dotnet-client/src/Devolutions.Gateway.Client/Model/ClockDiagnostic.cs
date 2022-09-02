@@ -40,8 +40,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="ClockDiagnostic" /> class.
         /// </summary>
-        /// <param name="timestampMillis">timestampMillis (required).</param>
-        /// <param name="timestampSecs">timestampSecs (required).</param>
+        /// <param name="timestampMillis">Current time in milliseconds (required).</param>
+        /// <param name="timestampSecs">Current time in seconds (required).</param>
         public ClockDiagnostic(long timestampMillis = default(long), long timestampSecs = default(long))
         {
             this.TimestampMillis = timestampMillis;
@@ -49,14 +49,16 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Gets or Sets TimestampMillis
+        /// Current time in milliseconds
         /// </summary>
+        /// <value>Current time in milliseconds</value>
         [DataMember(Name = "timestamp_millis", IsRequired = true, EmitDefaultValue = false)]
         public long TimestampMillis { get; set; }
 
         /// <summary>
-        /// Gets or Sets TimestampSecs
+        /// Current time in seconds
         /// </summary>
+        /// <value>Current time in seconds</value>
         [DataMember(Name = "timestamp_secs", IsRequired = true, EmitDefaultValue = false)]
         public long TimestampSecs { get; set; }
 

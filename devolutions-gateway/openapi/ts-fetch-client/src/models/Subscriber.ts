@@ -14,19 +14,19 @@
 
 import { exists, mapValues } from '../runtime';
 /**
- * 
+ * Subscriber configuration
  * @export
  * @interface Subscriber
  */
 export interface Subscriber {
     /**
-     * 
+     * Bearer token to use when making HTTP requests
      * @type {string}
      * @memberof Subscriber
      */
     token: string;
     /**
-     * 
+     * HTTP URL where notification messages are to be sent
      * @type {string}
      * @memberof Subscriber
      */
