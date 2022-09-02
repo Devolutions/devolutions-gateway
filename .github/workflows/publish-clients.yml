@@ -96,8 +96,6 @@ jobs:
 
       - name: Publish to nuget.org
         shell: pwsh
-        env:
-          API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           Set-PSDebug -Trace 1
 
@@ -110,7 +108,7 @@ jobs:
               'push', 
               "$File",
               '--api-key',
-              "$Env:API_KEY",
+              "${{ secrets.NUGET_API_KEY }}",
               '--source',
               'https://api.nuget.org/v3/index.json',
               '--skip-duplicate'
