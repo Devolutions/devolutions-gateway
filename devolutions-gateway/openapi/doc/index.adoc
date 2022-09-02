@@ -435,6 +435,11 @@ Performs a health check
 | Identity for this Gateway
 |  <<Identity>>
 
+
+| 400
+| Invalid Accept header
+|  <<>>
+
 |===
 
 ===== Samples

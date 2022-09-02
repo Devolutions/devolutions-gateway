@@ -124,6 +124,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Identity'
+        '400':
+          description: Invalid Accept header
       deprecated: false
   /jet/jrl:
     post:
