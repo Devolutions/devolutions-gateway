@@ -1,10 +1,10 @@
-# REST API clients
+# OpenAPI libraries
 
-Clients to use the Devolutions Gateway REST API.
+Clients to use the Devolutions Gateway REST API and C# interface to support Gateway subscription.
 
-C# and TypeScript clients are generated using [OpenAPI Generator](https://openapi-generator.tech/) and OpenAPI documents.
+Code is generated using [OpenAPI Generator](https://openapi-generator.tech/) and OpenAPI documents.
 
-## Generate clients code
+## Howto
 
 1. Make sure that OpenAPI documents are up to date by running `../../tools/generate-openapi/generate.ps1`
 
@@ -14,5 +14,6 @@ C# and TypeScript clients are generated using [OpenAPI Generator](https://openap
   npm install @openapitools/openapi-generator-cli
   ```
 
-3. Run `./generate.psd1` script.
+3. Bump versions appropriately in `config.json` files
 
+4. Run `./generate.psd1` script.

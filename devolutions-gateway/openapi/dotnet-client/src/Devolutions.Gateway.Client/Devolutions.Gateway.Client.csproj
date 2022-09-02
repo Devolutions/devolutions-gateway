@@ -12,7 +12,7 @@
     <Description>A library generated from a OpenAPI doc</Description>
     <Copyright>No Copyright</Copyright>
     <RootNamespace>Devolutions.Gateway.Client</RootNamespace>
-    <Version>2022.9.1.0</Version>
+    <Version>2022.9.2.0</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Gateway.Client.xml</DocumentationFile>
     <RepositoryUrl>https://github.com/GIT_USER_ID/GIT_REPO_ID.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/gateway-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenAPI client for @devolutions/gateway-client",
   "author": "OpenAPI-Generator",
   "repository": {
