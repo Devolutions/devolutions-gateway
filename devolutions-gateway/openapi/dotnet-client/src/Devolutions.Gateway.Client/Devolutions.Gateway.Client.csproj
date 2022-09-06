@@ -6,11 +6,11 @@
     <AssemblyName>Devolutions.Gateway.Client</AssemblyName>
     <PackageId>Devolutions.Gateway.Client</PackageId>
     <OutputType>Library</OutputType>
-    <Authors>OpenAPI</Authors>
+    <Authors>Devolutions Inc.</Authors>
     <Company>OpenAPI</Company>
-    <AssemblyTitle>OpenAPI Library</AssemblyTitle>
-    <Description>A library generated from a OpenAPI doc</Description>
-    <Copyright>No Copyright</Copyright>
+    <AssemblyTitle>Devolutions Gateway REST API Client</AssemblyTitle>
+    <Description>Client for Devolutions Gateway REST API</Description>
+    <Copyright>MIT/Apache-2.0</Copyright>
     <RootNamespace>Devolutions.Gateway.Client</RootNamespace>
     <Version>2022.9.2.1</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Gateway.Client.xml</DocumentationFile>
