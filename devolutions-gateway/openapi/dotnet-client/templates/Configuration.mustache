@@ -59,7 +59,7 @@ namespace {{packageName}}.Client
             {{/netStandard}}
             if (response.Content == null) {
                 return new ApiException(status,
-                    string.Format("Error calling {0}: {1}", methodName, response.RawContent),
+                    string.Format("Error calling {0}: {1}", methodName, response.ErrorText),
                     response.RawContent, response.Headers);
             }
             return null;
