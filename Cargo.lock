@@ -3003,7 +3003,7 @@ checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 [[package]]
 name = "saphir"
 version = "2.8.2"
-source = "git+https://github.com/CBenoit/saphir?branch=hyper-update#dff5d11a57b7ae93e3004fccef6dc85a31753d12"
+source = "git+https://github.com/CBenoit/saphir?branch=hyper-update#7d5e0991281805d51a23ccbdd5568b254877c5e2"
 dependencies = [
  "brotli",
  "chrono",
@@ -3044,7 +3044,7 @@ dependencies = [
 [[package]]
 name = "saphir_macro"
 version = "2.1.1"
-source = "git+https://github.com/CBenoit/saphir?branch=hyper-update#dff5d11a57b7ae93e3004fccef6dc85a31753d12"
+source = "git+https://github.com/CBenoit/saphir?branch=hyper-update#7d5e0991281805d51a23ccbdd5568b254877c5e2"
 dependencies = [
  "http",
  "proc-macro2 1.0.43",
