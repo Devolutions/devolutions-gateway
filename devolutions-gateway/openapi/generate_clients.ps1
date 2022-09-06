@@ -16,6 +16,7 @@ $targets = @(
 		Config = "./dotnet-client/config.json"
 		Generator = "csharp-netcore"
 		SpecFile = "./gateway-api.yaml"
+		TemplatesDir = "./dotnet-client/templates"
 	}
 	@{
 		Folder = "./ts-fetch-client"
@@ -41,7 +42,31 @@ ForEach ($target in $targets)
 	Write-Host
 
 	Write-Host "Generate target"
-	npx openapi-generator-cli generate -i $target.SpecFile -g $target.Generator -c $target.Config -o $target.Folder
+
+    $Cmd = @(
+		'npx', 
+		'openapi-generator-cli', 
+		'generate', 
+		'-i',
+		$target.SpecFile,
+		'-g',
+		$target.Generator,
+		'-c',
+		$target.Config,
+		'-o',
+		$target.Folder
+    )
+	
+	if ($target.TemplatesDir -Ne $null)
+	{
+		$Cmd += '-t'
+		$Cmd += $target.TemplatesDir
+	}
+
+    $Cmd = $Cmd -Join ' '
+	Write-Host $Cmd
+    Invoke-Expression $Cmd
+
 	Write-Host
 }
 
