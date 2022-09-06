@@ -10,10 +10,11 @@
     <Company>OpenAPI</Company>
     <AssemblyTitle>Devolutions Gateway REST API Client</AssemblyTitle>
     <Description>Client for Devolutions Gateway REST API</Description>
-    <Copyright>MIT/Apache-2.0</Copyright>
+    <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Gateway.Client</RootNamespace>
-    <Version>2022.9.6.1</Version>
+    <Version>2022.9.6.2</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Gateway.Client.xml</DocumentationFile>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/GIT_USER_ID/GIT_REPO_ID.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReleaseNotes>Minor update</PackageReleaseNotes>

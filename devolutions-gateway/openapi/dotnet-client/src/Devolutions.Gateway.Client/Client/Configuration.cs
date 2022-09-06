@@ -32,7 +32,7 @@ namespace Devolutions.Gateway.Client.Client
         /// Version of the package.
         /// </summary>
         /// <value>Version of the package.</value>
-        public const string Version = "2022.9.6.1";
+        public const string Version = "2022.9.6.2";
 
         /// <summary>
         /// Identifier for ISO 8601 DateTime Format
@@ -114,7 +114,7 @@ namespace Devolutions.Gateway.Client.Client
         public Configuration()
         {
             Proxy = null;
-            UserAgent = "OpenAPI-Generator/2022.9.6.1/csharp";
+            UserAgent = "OpenAPI-Generator/2022.9.6.2/csharp";
             BasePath = "http://localhost";
             DefaultHeaders = new ConcurrentDictionary<string, string>();
             ApiKey = new ConcurrentDictionary<string, string>();
@@ -522,7 +522,7 @@ namespace Devolutions.Gateway.Client.Client
             report += "    OS: " + System.Environment.OSVersion + "\n";
             report += "    .NET Framework Version: " + System.Environment.Version  + "\n";
             report += "    Version of the API: 2022.2.2\n";
-            report += "    SDK Package Version: 2022.9.6.1\n";
+            report += "    SDK Package Version: 2022.9.6.2\n";
 
             return report;
         }
