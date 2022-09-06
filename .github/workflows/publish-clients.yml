@@ -51,7 +51,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Path = "./devolutions-gateway/openapi/${{matrix.library}}"
+          $Path = './devolutions-gateway/openapi/${{matrix.library}}'
           & "$Path/build.ps1"
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
           Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
@@ -75,7 +75,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Path = "./devolutions-gateway/openapi/ts-fetch-client"
+          $Path = './devolutions-gateway/openapi/ts-fetch-client'
           & "$Path/build.ps1"
 
   nuget-publish:
@@ -131,14 +131,13 @@ jobs:
     steps:
       - name: Check out ${{ github.repository }}
         uses: actions/checkout@v3
+      
+      - name: Configure NPM
+        shell: pwsh
+        run: npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
 
       - name: Publish
         shell: pwsh
         run: |
           Set-PSDebug -Trace 1
-
-          $Path = "./devolutions-gateway/openapi/ts-fetch-client"
-          Set-Location "$Path"
-
-          npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"
-          npm publish --access=public
+          ./ci/npm-publish.ps1 -Path './devolutions-gateway/openapi/ts-fetch-client' -Access 'public'
