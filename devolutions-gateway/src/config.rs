@@ -212,7 +212,7 @@ struct ConfHandleInner {
 impl ConfHandle {
     /// Initializes configuration for this instance.
     ///
-    /// It's best to call this only once to avoid inconsistancies.
+    /// It's best to call this only once to avoid inconsistencies.
     pub fn init() -> anyhow::Result<Self> {
         let conf_file_path = get_conf_file_path();
 
@@ -496,10 +496,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub sub_provisioner_public_key: Option<SubProvisionerKeyConf>,
 
-        /// Delegation key used to decypher sensitive data
+        /// Delegation key used to decipher sensitive data
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_file: Option<Utf8PathBuf>,
-        /// Inlined delegation key to decypher sensitive data
+        /// Inlined delegation key to decipher sensitive data
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
 

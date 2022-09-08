@@ -44,7 +44,7 @@ impl JrlController {
     tag = "Jrl",
     path = "/jet/jrl",
     responses(
-        (status = 200, description = "JRL updated successfuly"),
+        (status = 200, description = "JRL updated successfully"),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
