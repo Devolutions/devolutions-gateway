@@ -1,0 +1,41 @@
+[#models]
+== Models
+
+{{#models}}
+    {{#model}}
+
+[#{{classname}}]
+=== _{{classname}}_ {{title}}
+
+{{unescapedDescription}}
+
+{{^isEnum}}
+[.fields-{{classname}}]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+{{#vars}}
+| {{baseName}}
+| {{#required}}X{{/required}}
+| {{dataType}} {{#isContainer}} of <<{{complexType}}>>{{/isContainer}}
+| {{{description}}}
+| {{{dataFormat}}}
+
+{{/vars}}
+|===
+{{/isEnum}}
+
+{{#allowableValues}}
+[cols="1"]
+|===
+| Allowed values
+{{#values}}
+
+| `"{{{this}}}"`
+{{/values}}
+|===
+{{/allowableValues}}
+
+    {{/model}}
+{{/models}}

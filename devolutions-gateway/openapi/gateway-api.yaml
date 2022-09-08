@@ -137,7 +137,7 @@ paths:
       operationId: UpdateJrl
       responses:
         '200':
-          description: JRL updated successfuly
+          description: JRL updated successfully
         '400':
           description: Bad request
         '401':

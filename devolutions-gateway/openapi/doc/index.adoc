@@ -23,16 +23,17 @@ Protocol-aware fine-grained relay server
 == Access
 
 
-* *Bearer* Authentication 
+* *Bearer* Authentication `jrl_token`
 
 
 
-* *Bearer* Authentication 
+* *Bearer* Authentication `scope_token`
 
 
 
 
 == Endpoints
+
 
 
 [.Config]
@@ -54,6 +55,16 @@ Modifies configuration
 // markup not found, no include::{specDir}jet/config/PATCH/spec.adoc[opts=optional]
 
 
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
 
 ===== Parameters
 
@@ -117,18 +128,6 @@ Modifies configuration
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/config/PATCH/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/config/PATCH/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/config/PATCH/PATCH.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -137,6 +136,7 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
+
 
 
 [.Diagnostics]
@@ -158,13 +158,9 @@ Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an
 // markup not found, no include::{specDir}jet/diagnostics/clock/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
-
-
-
-
-
+-
 
 
 ===== Return Type
@@ -189,18 +185,6 @@ Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an
 |  <<ClockDiagnostic>>
 
 |===
-
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/clock/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/clock/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/diagnostics/clock/GET/GET.json[]
 
 
 ifdef::internal-generation[]
@@ -227,13 +211,16 @@ Retrieves configuration.
 // markup not found, no include::{specDir}jet/diagnostics/configuration/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
 
-
-
-
-
+| `scope_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -274,18 +261,6 @@ Retrieves configuration.
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/configuration/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/configuration/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/diagnostics/configuration/GET/GET.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -311,13 +286,16 @@ Retrieves latest logs.
 // markup not found, no include::{specDir}jet/diagnostics/logs/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
 
-
-
-
-
+| `scope_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -364,18 +342,6 @@ Retrieves latest logs.
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/logs/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/diagnostics/logs/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/diagnostics/logs/GET/GET.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -384,6 +350,7 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
+
 
 
 [.Health]
@@ -405,13 +372,9 @@ Performs a health check
 // markup not found, no include::{specDir}jet/health/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
-
-
-
-
-
+-
 
 
 ===== Return Type
@@ -442,18 +405,6 @@ Performs a health check
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/health/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/health/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/health/GET/GET.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -462,6 +413,7 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
+
 
 
 [.Jrl]
@@ -483,13 +435,16 @@ Retrieves current JRL (Json Revocation List) info
 // markup not found, no include::{specDir}jet/jrl/info/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
 
-
-
-
-
+| `scope_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -535,18 +490,6 @@ Retrieves current JRL (Json Revocation List) info
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/jrl/info/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/jrl/info/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/jrl/info/GET/GET.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -572,13 +515,16 @@ Updates JRL (Json Revocation List) using a JRL token
 // markup not found, no include::{specDir}jet/jrl/POST/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
 
-
-
-
-
+| `jrl_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -597,7 +543,7 @@ Updates JRL (Json Revocation List) using a JRL token
 
 
 | 200
-| JRL updated successfuly
+| JRL updated successfully
 |  <<>>
 
 
@@ -622,18 +568,6 @@ Updates JRL (Json Revocation List) using a JRL token
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/jrl/POST/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/jrl/POST/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/jrl/POST/POST.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -642,6 +576,7 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
+
 
 
 [.Sessions]
@@ -663,13 +598,16 @@ Lists running sessions
 // markup not found, no include::{specDir}jet/sessions/GET/spec.adoc[opts=optional]
 
 
+===== Security
 
-===== Parameters
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
 
-
-
-
-
+| `scope_token`
+| http
+| bearer
+|===
 
 
 ===== Return Type
@@ -710,18 +648,6 @@ array[<<SessionInfo>>]
 
 |===
 
-===== Samples
-
-
-// markup not found, no include::{snippetDir}jet/sessions/GET/http-request.adoc[opts=optional]
-
-
-// markup not found, no include::{snippetDir}jet/sessions/GET/http-response.adoc[opts=optional]
-
-
-
-// file not found, no * wiremock data link :jet/sessions/GET/GET.json[]
-
 
 ifdef::internal-generation[]
 ===== Implementation
@@ -741,11 +667,22 @@ endif::internal-generation[]
 
 
 
-[.fields-AccessScope]
-[cols="2,1,2,4,1"]
-|===
-| Field Name| Required| Type| Description| Format
 
+[cols="1"]
+|===
+| Allowed values
+
+| `"*"`
+
+| `"gateway.sessions.read"`
+
+| `"gateway.associations.read"`
+
+| `"gateway.diagnostics.read"`
+
+| `"gateway.jrl.read"`
+
+| `"gateway.config.write"`
 |===
 
 
@@ -763,15 +700,16 @@ endif::internal-generation[]
 | X
 | Long 
 | Current time in milliseconds
-| int64 
+| int64
 
 | timestamp_secs
 | X
 | Long 
 | Current time in seconds
-| int64 
+| int64
 
 |===
+
 
 
 [#ConfigDiagnostic]
@@ -787,28 +725,29 @@ Service configuration diagnostic
 | hostname
 | X
 | String 
-| This Gateway&#39;s hostname
-|  
+| This Gateway's hostname
+| 
 
 | id
 | 
 | UUID 
-| This Gateway&#39;s unique ID
-| uuid 
+| This Gateway's unique ID
+| uuid
 
 | listeners
 | X
 | List  of <<ListenerUrls>>
 | 
-|  
+| 
 
 | version
 | X
 | String 
 | Gateway service version
-|  
+| 
 
 |===
+
 
 
 [#ConfigPatch]
@@ -824,22 +763,23 @@ Service configuration diagnostic
 | Id
 | 
 | UUID 
-| This Gateway&#39;s unique ID
-| uuid 
+| This Gateway's unique ID
+| uuid
 
 | SubProvisionerPublicKey
 | 
 | SubProvisionerKey 
 | 
-|  
+| 
 
 | Subscriber
 | 
 | Subscriber 
 | 
-|  
+| 
 
 |===
+
 
 
 [#ConnectionMode]
@@ -847,11 +787,14 @@ Service configuration diagnostic
 
 
 
-[.fields-ConnectionMode]
-[cols="2,1,2,4,1"]
-|===
-| Field Name| Required| Type| Description| Format
 
+[cols="1"]
+|===
+| Allowed values
+
+| `"rdv"`
+
+| `"fwd"`
 |===
 
 
@@ -860,11 +803,20 @@ Service configuration diagnostic
 
 
 
-[.fields-DataEncoding]
-[cols="2,1,2,4,1"]
-|===
-| Field Name| Required| Type| Description| Format
 
+[cols="1"]
+|===
+| Allowed values
+
+| `"Multibase"`
+
+| `"Base64"`
+
+| `"Base64Pad"`
+
+| `"Base64Url"`
+
+| `"Base64UrlPad"`
 |===
 
 
@@ -881,16 +833,17 @@ Service configuration diagnostic
 | hostname
 | X
 | String 
-| This Gateway&#39;s hostname
-|  
+| This Gateway's hostname
+| 
 
 | id
 | 
 | UUID 
-| This Gateway&#39;s unique ID
-| uuid 
+| This Gateway's unique ID
+| uuid
 
 |===
+
 
 
 [#JrlInfo]
@@ -906,16 +859,17 @@ Service configuration diagnostic
 | iat
 | X
 | Long 
-| JWT \&quot;Issued At\&quot; claim of JRL
-| int64 
+| JWT \"Issued At\" claim of JRL
+| int64
 
 | jti
 | X
 | UUID 
 | Unique ID for current JRL
-| uuid 
+| uuid
 
 |===
+
 
 
 [#ListenerUrls]
@@ -932,15 +886,16 @@ Service configuration diagnostic
 | X
 | String 
 | URL to use from external networks
-|  
+| 
 
 | internal_url
 | X
 | String 
 | URL to use on local network
-|  
+| 
 
 |===
+
 
 
 [#PubKeyFormat]
@@ -948,11 +903,14 @@ Service configuration diagnostic
 
 
 
-[.fields-PubKeyFormat]
-[cols="2,1,2,4,1"]
-|===
-| Field Name| Required| Type| Description| Format
 
+[cols="1"]
+|===
+| Allowed values
+
+| `"Spki"`
+
+| `"Rsa"`
 |===
 
 
@@ -970,45 +928,46 @@ Service configuration diagnostic
 | X
 | String 
 | 
-|  
+| 
 
 | association_id
 | X
 | UUID 
 | 
-| uuid 
+| uuid
 
 | connection_mode
 | X
 | ConnectionMode 
 | 
-|  
+| 
 
 | destination_host
 | 
 | String 
 | 
-|  
+| 
 
 | filtering_policy
 | X
 | Boolean 
 | 
-|  
+| 
 
 | recording_policy
 | X
 | Boolean 
 | 
-|  
+| 
 
 | start_timestamp
 | X
 | Date 
 | 
-| date-time 
+| date-time
 
 |===
+
 
 
 [#SubProvisionerKey]
@@ -1025,27 +984,28 @@ Service configuration diagnostic
 | 
 | DataEncoding 
 | 
-|  
+| 
 
 | Format
 | 
 | PubKeyFormat 
 | 
-|  
+| 
 
 | Id
 | X
 | String 
 | The key ID for this subkey
-|  
+| 
 
 | Value
 | X
 | String 
 | The binary-to-text-encoded key data
-|  
+| 
 
 |===
+
 
 
 [#Subscriber]
@@ -1062,14 +1022,15 @@ Subscriber configuration
 | X
 | String 
 | Bearer token to use when making HTTP requests
-|  
+| 
 
 | Url
 | X
 | String 
 | HTTP URL where notification messages are to be sent
-|  
+| 
 
 |===
+
 
 

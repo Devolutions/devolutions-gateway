@@ -22,7 +22,5 @@
 # Then explicitly reverse the ignore rule for a single file:
 #!docs/README.md
 
-/Devolutions.Gateway.Client.sln
-/src/Devolutions.Gateway.Client.Test/
 /appveyor.yml
 /git_push.sh

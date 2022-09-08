@@ -2,10 +2,11 @@
   "packageAuthors": "Devolutions Inc.",
   "packageName": "Devolutions.Gateway.Subscriber",
   "packageTitle": "Devolutions Gateway Subscriber Interface",
-  "packageVersion": "2022.9.1.0",
+  "packageVersion": "2022.9.8.0",
   "packageDescription": "C# interface to implement Devolutions Gateway Subscriber API",
   "packageGuid": "1C473E6A-6B52-45B4-96A0-3DC1485776D6",
   "licenseName": "MIT/Apache-2.0",
+  "userSecretsGuid": "06fa9777-a859-4fe6-a84c-cd853e072b44",
 
   "buildTarget": "library",
 

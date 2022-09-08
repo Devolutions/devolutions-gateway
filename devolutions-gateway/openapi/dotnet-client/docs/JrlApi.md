@@ -181,7 +181,7 @@ void (empty response body)
 ### HTTP response details
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-| **200** | JRL updated successfuly |  -  |
+| **200** | JRL updated successfully |  -  |
 | **400** | Bad request |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
