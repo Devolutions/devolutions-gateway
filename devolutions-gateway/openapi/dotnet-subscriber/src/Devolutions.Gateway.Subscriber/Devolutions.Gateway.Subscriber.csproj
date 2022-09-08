@@ -6,12 +6,12 @@
     <TargetFramework>net6.0</TargetFramework>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PreserveCompilationContext>true</PreserveCompilationContext>
-    <Version>2022.9.1.0</Version>
+    <Version>2022.9.8.0</Version>
     <Nullable>annotations</Nullable>
     <OutputType>Library</OutputType>
     <AssemblyName>Devolutions.Gateway.Subscriber</AssemblyName>
     <PackageId>Devolutions.Gateway.Subscriber</PackageId>
-    <UserSecretsId>1c72a18b-bccf-42df-9df9-38eaeda3d031</UserSecretsId>
+    <UserSecretsId>06fa9777-a859-4fe6-a84c-cd853e072b44</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>

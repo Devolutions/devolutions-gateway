@@ -6,29 +6,31 @@ Push-Location -Path $PSScriptRoot
 
 $targets = @(
 	@{
-		Folder = "./doc"
-		Config = "./doc/config.json"
-		Generator = "asciidoc"
-		SpecFile = "./gateway-api.yaml"
+		Folder = './doc'
+		Config = './doc/config.json'
+		Generator = 'asciidoc'
+		SpecFile = './gateway-api.yaml'
+		TemplatesDir = './doc/templates'
 	}
 	@{
-		Folder = "./dotnet-client"
-		Config = "./dotnet-client/config.json"
-		Generator = "csharp-netcore"
-		SpecFile = "./gateway-api.yaml"
-		TemplatesDir = "./dotnet-client/templates"
+		Folder = './dotnet-client'
+		Config = './dotnet-client/config.json'
+		Generator = 'csharp-netcore'
+		SpecFile = './gateway-api.yaml'
+		TemplatesDir = './dotnet-client/templates'
 	}
 	@{
-		Folder = "./ts-fetch-client"
-		Config = "./ts-fetch-client/config.json"
-		Generator = "typescript-fetch"
-		SpecFile = "./gateway-api.yaml"
+		Folder = './ts-fetch-client'
+		Config = './ts-fetch-client/config.json'
+		Generator = 'typescript-fetch'
+		SpecFile = './gateway-api.yaml'
+		TemplatesDir = './ts-fetch-client/templates'
 	}
 	@{
-		Folder = "./dotnet-subscriber"
-		Config = "./dotnet-subscriber/config.json"
-		Generator = "aspnetcore"
-		SpecFile = "./subscriber-api.yaml"
+		Folder = './dotnet-subscriber'
+		Config = './dotnet-subscriber/config.json'
+		Generator = 'aspnetcore'
+		SpecFile = './subscriber-api.yaml'
 	}
 )
 
@@ -43,7 +45,7 @@ ForEach ($target in $targets)
 
 	Write-Host "Generate target"
 
-    $Cmd = @(
+	$Cmd = @(
 		'npx', 
 		'openapi-generator-cli', 
 		'generate', 
@@ -55,17 +57,16 @@ ForEach ($target in $targets)
 		$target.Config,
 		'-o',
 		$target.Folder
-    )
-	
+	)
+
 	if ($target.TemplatesDir -Ne $null)
 	{
-		$Cmd += '-t'
-		$Cmd += $target.TemplatesDir
+		$Cmd += @('-t', $target.TemplatesDir)
 	}
 
-    $Cmd = $Cmd -Join ' '
+	$Cmd = $Cmd -Join ' '
 	Write-Host $Cmd
-    Invoke-Expression $Cmd
+	Invoke-Expression $Cmd
 
 	Write-Host
 }

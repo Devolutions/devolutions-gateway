@@ -1,4 +1,5 @@
 .gitignore
+Devolutions.Gateway.Client.sln
 README.md
 docs/AccessScope.md
 docs/ClockDiagnostic.md
