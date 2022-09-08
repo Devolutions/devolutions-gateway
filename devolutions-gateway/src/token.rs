@@ -730,7 +730,7 @@ fn validate_token_impl(
             // Gateway ID scope rule is not respected
             Some(_) => anyhow::bail!("This token can't be used for this Gateway (bad ID scope)"),
             None => {
-                warn!("This token is restricted to a specific gateway, but not ID has been assigned. This may become a hard error in the future.")
+                warn!("This token is restricted to a specific gateway, but no ID has been assigned. This may become a hard error in the future.")
             }
         }
     }
