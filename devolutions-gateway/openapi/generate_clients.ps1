@@ -20,11 +20,11 @@ $targets = @(
 		TemplatesDir = './dotnet-client/templates'
 	}
 	@{
-		Folder = './ts-fetch-client'
-		Config = './ts-fetch-client/config.json'
-		Generator = 'typescript-fetch'
+		Folder = './ts-angular-client'
+		Config = './ts-angular-client/config.json'
+		Generator = 'typescript-angular'
 		SpecFile = './gateway-api.yaml'
-		TemplatesDir = './ts-fetch-client/templates'
+		TemplatesDir = './ts-angular-client/templates'
 	}
 	@{
 		Folder = './dotnet-subscriber'

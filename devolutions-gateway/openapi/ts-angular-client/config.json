@@ -1,0 +1,13 @@
+{
+  "npmName": "@devolutions/gateway-client",
+  "npmVersion": "0.2.0",
+  "license": "MIT OR Apache-2.0",
+
+  "gitHost": "github.com",
+  "gitUserId": "Devolutions",
+  "gitRepoId": "devolutions-gateway",
+
+  "providedIn": "root",
+  "enumNameSuffix": "",
+  "enumUnknownDefaultCase": false
+}
