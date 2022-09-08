@@ -75,7 +75,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Path = './devolutions-gateway/openapi/ts-fetch-client'
+          $Path = './devolutions-gateway/openapi/ts-angular-client'
           & "$Path/build.ps1"
 
   nuget-publish:
@@ -140,4 +140,4 @@ jobs:
         shell: pwsh
         run: |
           Set-PSDebug -Trace 1
-          ./ci/npm-publish.ps1 -Path './devolutions-gateway/openapi/ts-fetch-client' -Access 'public'
+          ./ci/npm-publish.ps1 -Path './devolutions-gateway/openapi/ts-angular-client' -Access 'public'
