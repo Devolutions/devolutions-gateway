@@ -40,7 +40,7 @@ ForEach ($target in $targets)
 	Write-Host
 
 	Write-Host "Clean target"
-	Get-Content -Path "$($target.Folder)/.openapi-generator/FILES" | Where { $_ -Ne ".openapi-generator-ignore" } | ForEach { Write-Host "REMOVE $($target.Folder)/$_"; Remove-Item -Path "$($target.Folder)/$_" -Force }
+	Get-Content -Path "$($target.Folder)/.openapi-generator/FILES" | Where { $_ -Ne ".openapi-generator-ignore" } | ForEach { Write-Host "REMOVE $($target.Folder)/$_"; Remove-Item -Path "$($target.Folder)/$_" -Force -ErrorAction Ignore }
 	Write-Host
 
 	Write-Host "Generate target"
