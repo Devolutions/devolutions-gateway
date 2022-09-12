@@ -230,6 +230,17 @@
     </UI>
 
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+
+    <!-- Generate the default configuration if necessary -->
+    <CustomAction Id="InitConfigAfterFinalize"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"
+                  FileKey="DevolutionsGateway.exe"
+                  ExeCommand="--config-init-only" />
+    <InstallExecuteSequence>
+      <Custom Action="InitConfigAfterFinalize" Before="InstallFinalize">NOT Installed OR REINSTALL</Custom>
+    </InstallExecuteSequence>
   </Product>
 
 </Wix>

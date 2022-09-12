@@ -81,14 +81,10 @@ fn main() -> anyhow::Result<()> {
             service_controller().delete().context("failed to unregister service")?;
         }
         CliAction::ConfigInitOnly => {
-            let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
-            let conf_file = conf_handle.get_conf_file();
-            let conf = conf_handle.get_conf();
+            let conf_file = devolutions_gateway::config::load_conf_file_or_generate_new()?;
             println!(
                 r#"============------ Configuration ------============
 {conf_file:?}
-------------
-{conf:?}
 ============---------------------------============
 "#
             );

@@ -214,18 +214,7 @@ impl ConfHandle {
     ///
     /// It's best to call this only once to avoid inconsistencies.
     pub fn init() -> anyhow::Result<Self> {
-        let conf_file_path = get_conf_file_path();
-
-        let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
-            Some(conf_file) => conf_file,
-            None => {
-                let defaults = dto::ConfFile::generate_new();
-                println!("Write default configuration to disk…");
-                save_config(&defaults).context("Failed to save configuration")?;
-                defaults
-            }
-        };
-
+        let conf_file = load_conf_file_or_generate_new()?;
         let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
 
         Ok(Self {
@@ -268,7 +257,7 @@ impl ConfHandle {
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("Failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, &json).with_context(|| format!("Failed to write at {conf_file_path}"))?;
+    std::fs::write(&conf_file_path, &json).with_context(|| format!("Failed to write file at {conf_file_path}"))?;
     Ok(())
 }
 
@@ -316,6 +305,22 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(anyhow::anyhow!(e).context(format!("Couldn't open config file at {conf_path}"))),
     }
+}
+
+pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
+    let conf_file_path = get_conf_file_path();
+
+    let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
+        Some(conf_file) => conf_file,
+        None => {
+            let defaults = dto::ConfFile::generate_new();
+            println!("Write default configuration to disk…");
+            save_config(&defaults).context("Failed to save configuration")?;
+            defaults
+        }
+    };
+
+    Ok(conf_file)
 }
 
 fn default_hostname() -> Option<String> {
@@ -564,8 +569,8 @@ pub mod dto {
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,
                 delegation_private_key_data: None,
-                tls_certificate_file: Some("tls-certificate.pem".into()),
-                tls_private_key_file: Some("tls-private.key".into()),
+                tls_certificate_file: Some("tls.crt".into()),
+                tls_private_key_file: Some("tls.private.key".into()),
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8080".try_into().unwrap(),
