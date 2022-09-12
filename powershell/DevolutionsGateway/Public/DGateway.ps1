@@ -5,12 +5,12 @@
 . "$PSScriptRoot/../Private/TokenHelper.ps1"
 
 $script:DGatewayConfigFileName = 'gateway.json'
-$script:DGatewayCertificateFileName = 'certificate.pem'
-$script:DGatewayPrivateKeyFileName = 'certificate.key'
-$script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pem'
-$script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.key'
-$script:DGatewayDelegationPublicKeyFileName = 'delegation.pem'
-$script:DGatewayDelegationPrivateKeyFileName = 'delegation.key'
+$script:DGatewayCertificateFileName = 'server.crt'
+$script:DGatewayPrivateKeyFileName = 'server.key'
+$script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pub.key'
+$script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.priv.key'
+$script:DGatewayDelegationPublicKeyFileName = 'delegation.pub.key'
+$script:DGatewayDelegationPrivateKeyFileName = 'delegation.priv.key'
 
 function Get-DGatewayVersion {
     param(
@@ -87,26 +87,102 @@ function New-DGatewayListener() {
     return [DGatewayListener]::new($ListenerUrl, $ExternalUrl)
 }
 
+class DGatewaySubProvisionerKey {
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $Id
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $Value
+
+    [ValidateNotNullOrEmpty()]
+    [ValidateSet('Spki','Rsa')]
+    [string] $Format
+
+    [ValidateNotNullOrEmpty()]
+    [ValidateSet('Multibase','Base64', 'Base64Pad', 'Base64Url', 'Base64UrlPad')]
+    [string] $Encoding
+
+    DGatewaySubProvisionerKey(
+        [string] $Id,
+        [string] $Value,
+        [string] $Format = 'Spki',
+        [string] $Encoding = 'Multibase'
+    ) {
+        $this.Id = $Id
+        $this.Value = $Value
+        $this.Format = $Format
+        $this.Encoding = $Encoding
+    }
+
+    DGatewaySubProvisionerKey([PSCustomObject] $object) {
+        $this.Id = $object.Id
+        $this.Value = $object.Value
+        $this.Format = $object.Format
+        $this.Encoding = $object.Encoding
+    }
+
+    DGatewaySubProvisionerKey([Hashtable] $table) {
+        $this.Id = $table.Id
+        $this.Value = $table.Value
+        $this.Format = $table.Format
+        $this.Encoding = $table.Encoding
+    }
+}
+
+class DGatewaySubscriber {
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [System.Uri] $Url
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $Token
+
+    DGatewaySubscriber(
+        [System.Uri] $Url,
+        [string] $Token
+    ) {
+        $this.Url = $Url
+        $this.Token = $Token
+    }
+
+    DGatewaySubscriber([PSCustomObject] $object) {
+        $this.Url = $object.Url
+        $this.Token = $object.Token
+    }
+
+    DGatewaySubscriber([Hashtable] $table) {
+        $this.Url = $table.Url
+        $this.Token = $table.Token
+    }
+}
+
 class DGatewayConfig {
+    [Guid] $Id
+    [string] $Hostname
     [string] $FarmName
     [string[]] $FarmMembers
 
-    [string] $Hostname
-    [DGatewayListener[]] $Listeners
-    [string[]] $ApplicationProtocols
-
-    [string] $CertificateFile
-    [string] $PrivateKeyFile
+    [string] $TlsCertificateFile
+    [string] $TlsPrivateKeyFile
     [string] $ProvisionerPublicKeyFile
     [string] $ProvisionerPrivateKeyFile
     [string] $DelegationPublicKeyFile
     [string] $DelegationPrivateKeyFile
+    [DGatewaySubProvisionerKey] $SubProvisionerPublicKey
+
+    [DGatewayListener[]] $Listeners
+    [DGatewaySubscriber] $Subscriber
 
     [string] $DockerPlatform
     [string] $DockerIsolation
     [string] $DockerRestartPolicy
     [string] $DockerImage
     [string] $DockerContainerName
+
+    [string] $LogDirective
 }
 
 function Save-DGatewayConfig {
@@ -131,18 +207,31 @@ function Set-DGatewayConfig {
     [CmdletBinding()]
     param(
         [string] $ConfigPath,
+        [string] $Force,
+
+        [Guid] $Id,
+        [string] $Hostname,
         [string] $FarmName,
         [string[]] $FarmMembers,
-        [string] $Hostname,
-        [DGatewayListener[]] $Listeners,
-        [string[]] $ApplicationProtocols,
 
+        [DGatewayListener[]] $Listeners,
+        [DGatewaySubscriber] $Subscriber,
+
+        [Obsolete("You should use TlsCertificateFile")]
         [string] $CertificateFile,
+        [Obsolete("You should use TlsPrivateKeyFile")]
         [string] $PrivateKeyFile,
+
+        [string] $TlsCertificateFile,
+        [string] $TlsPrivateKeyFile,
+
         [string] $ProvisionerPublicKeyFile,
         [string] $ProvisionerPrivateKeyFile,
+
         [string] $DelegationPublicKeyFile,
         [string] $DelegationPrivateKeyFile,
+
+        [DGatewaySubProvisionerKey] $SubProvisionerPublicKey,
 
         [ValidateSet('linux', 'windows')]
         [string] $DockerPlatform,
@@ -151,8 +240,7 @@ function Set-DGatewayConfig {
         [ValidateSet('no', 'on-failure', 'always', 'unless-stopped')]
         [string] $DockerRestartPolicy,
         [string] $DockerImage,
-        [string] $DockerContainerName,
-        [string] $Force
+        [string] $DockerContainerName
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
@@ -167,6 +255,14 @@ function Set-DGatewayConfig {
         $config = [DGatewayConfig]::new()
     } else {
         $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+    }
+
+    if ($PSBoundParameters.ContainsKey('CertificateFile')) {
+        $PSBoundParameters.TlsCertificateFile = $CertificateFile
+    }
+
+    if ($PSBoundParameters.ContainsKey('PrivateKeyFile')) {
+        $PSBoundParameters.TlsPrivateKeyFile = $PrivateKeyFile
     }
 
     $properties = [DGatewayConfig].GetProperties() | ForEach-Object { $_.Name }
@@ -210,6 +306,14 @@ function Get-DGatewayConfig {
             $Value = $Property.Value
             $config.$Name = $Value
         }
+    }
+    
+    if ($json.CertificateFile -Ne $null) {
+        $config.TlsCertificateFile = $json.CertificateFile
+    }
+
+    if ($json.PrivateKeyFile -Ne $null) {
+        $config.TlsPrivateKeyFile = $json.PrivateKeyFile
     }
 
     if ($Expand) {
@@ -419,30 +523,6 @@ function Set-DGatewayListeners {
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
-function Get-DGatewayApplicationProtocols {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath
-    )
-
-    $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).ApplicationProtocols
-}
-
-function Set-DGatewayApplicationProtocols {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath,
-        [Parameter(Mandatory = $true, Position = 0)]
-        [AllowEmptyCollection()]
-        [ValidateSet('unknown', 'wayk', 'rdp', 'ard', 'vnc', 'ssh', 'ssh-pwsh', 'sftp', 'scp', 'winrm-http-pwsh', 'winrm-https-pwsh', 'http', 'https')]
-        [string[]] $ApplicationProtocols
-    )
-
-    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    $Config.ApplicationProtocols = $ApplicationProtocols
-    Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
-}
-
 function Import-DGatewayCertificate {
     [CmdletBinding()]
     param(
@@ -469,8 +549,8 @@ function Import-DGatewayCertificate {
     Set-Content -Path $CertificateFile -Value $CertificateData -Force
     Set-Content -Path $PrivateKeyFile -Value $PrivateKeyData -Force
 
-    $Config.CertificateFile = $DGatewayCertificateFileName
-    $Config.PrivateKeyFile = $DGatewayPrivateKeyFileName
+    $Config.TlsCertificateFile = $DGatewayCertificateFileName
+    $Config.TlsPrivateKeyFile = $DGatewayPrivateKeyFileName
 
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
