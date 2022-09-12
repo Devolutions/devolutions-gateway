@@ -15,5 +15,5 @@ fi
 
 if [ -d /run/systemd/system ]; then
   systemctl stop devolutions-gateway >/dev/null 2>&1
-	/usr/bin/devolutions-gateway service unregister >/dev/null
+  /usr/bin/devolutions-gateway service unregister >/dev/null
 fi
