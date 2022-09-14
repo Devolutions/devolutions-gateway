@@ -569,8 +569,8 @@ pub mod dto {
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,
                 delegation_private_key_data: None,
-                tls_certificate_file: Some("server.crt".into()),
-                tls_private_key_file: Some("server.key".into()),
+                tls_certificate_file: None,
+                tls_private_key_file: None,
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8080".try_into().unwrap(),
