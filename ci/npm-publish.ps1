@@ -2,28 +2,32 @@
 
 param(
 	[Parameter(Mandatory=$true)]
-	[string] $Path,
+	[string] $Tarball,
 	[string] $Access = 'restricted'
 )
 
 $ErrorActionPreference = "Stop"
 
-Push-Location -Path $Path
+$tmpFolder = [System.IO.Path]::GetTempPath() + [System.Guid]::NewGuid()
+Write-Host "Temporary directory to extract package tarball: $tmpFolder"
+New-Item -ItemType "directory" -Path "$tmpFolder" | Out-Null
 
 try
 {
-	$localInfo = Get-Content -Path ./package.json | ConvertFrom-Json
+	tar xf "$Tarball" --directory "$tmpFolder"
+
+	$localInfo = Get-Content -Path "$tmpFolder/package/package.json" | ConvertFrom-Json
 	$packageName = $localInfo.name
 	$localVersion = $localInfo.version
 
 	Write-Host "Found package $packageName"
 	Write-Host "Local version is $localVersion"
-	
-	$distantInfo = npm search "$packageName" --json | ConvertFrom-Json | Where { $_.name -Eq "$packageName" }
+
+	$distantInfo = npm view "$packageName" --json | ConvertFrom-Json
 	$distantVersion = $distantInfo.version
 
 	Write-Host "Latest version on registry is $distantVersion"
-	
+
 	if ($localVersion -Eq $distantVersion)
 	{
 		Write-Host "Local and distant versions are identical. Skip publishing."
@@ -31,10 +35,10 @@ try
 	else
 	{
 		Write-Host "Publishing..."
-		npm publish "--access=$Access"
+		npm publish "$Tarball" "--access=$Access"
 	}
 }
 finally
 {
-	Pop-Location
+	Remove-Item -Path "$tmpFolder" -Recurse -Force
 }
