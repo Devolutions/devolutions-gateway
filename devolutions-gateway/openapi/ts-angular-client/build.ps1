@@ -4,7 +4,16 @@ $ErrorActionPreference = "Stop"
 
 Push-Location -Path $PSScriptRoot
 
-npm install
-npm run build
+try
+{
+	npm install
 
-Pop-Location
+	npm run build
+
+	Set-Location -Path ./dist/
+	npm pack
+}
+finally
+{
+	Pop-Location
+}

@@ -53,6 +53,7 @@ jobs:
 
           $Path = './devolutions-gateway/openapi/${{matrix.library}}'
           & "$Path/build.ps1"
+
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
           Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
 
@@ -63,7 +64,7 @@ jobs:
           path: nuget-packages/*.nupkg
 
   npm-build:
-    name: NPM build
+    name: NPM package build
     runs-on: ubuntu-20.04
 
     steps:
@@ -78,6 +79,15 @@ jobs:
           $Path = './devolutions-gateway/openapi/ts-angular-client'
           & "$Path/build.ps1"
 
+          New-Item -ItemType "directory" -Path . -Name "npm-packages"
+          Get-ChildItem -Path $Path -Recurse *.tgz | ForEach { Copy-Item $_ "./npm-packages" }
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v3
+        with:
+          name: npm
+          path: npm-packages/*.tgz
+
   nuget-publish:
     name: Publish NuGet packages
     runs-on: ubuntu-20.04
@@ -88,7 +98,7 @@ jobs:
       - nuget-build
 
     steps:
-      - name: Download NuGet package artifact
+      - name: Download NuGet packages artifact
         uses: actions/download-artifact@v3
         with:
           name: nupkg
@@ -129,8 +139,11 @@ jobs:
       - npm-build
 
     steps:
-      - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v3
+      - name: Download NPM packages artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: npm
+          path: npm-packages
       
       - name: Configure NPM
         shell: pwsh
@@ -140,4 +153,10 @@ jobs:
         shell: pwsh
         run: |
           Set-PSDebug -Trace 1
-          ./ci/npm-publish.ps1 -Path './devolutions-gateway/openapi/ts-angular-client' -Access 'public'
+
+          $Files = Get-ChildItem -Recurse npm-packages/*.tgz
+
+          foreach ($File in $Files) {
+            Write-Host "Publishing $($File.Name)..."
+            ./ci/npm-publish.ps1 -Tarball "$File" -Access 'public'
+          }
