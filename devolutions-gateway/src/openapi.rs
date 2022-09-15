@@ -101,22 +101,34 @@ struct SubscriberSessionInfo {
     start_timestamp: DateTime<Utc>,
 }
 
+/// Event type for messages
 #[allow(unused)]
 #[derive(utoipa::ToSchema, Serialize)]
 enum SubscriberMessageKind {
+    /// A new session started
     #[serde(rename = "session.started")]
     SessionStarted,
+    /// A session terminated
     #[serde(rename = "session.ended")]
     SessionEnded,
+    /// Periodic running session listing
     #[serde(rename = "session.list")]
     SessionList,
 }
 
+/// Message produced on various Gateway events
 #[derive(utoipa::ToSchema, Serialize)]
 #[serde(tag = "kind")]
 struct SubscriberMessage {
+    /// Name of the event type associated to this message
+    ///
+    /// Presence or absence of additionnal fields depends on the value of this field.
     kind: SubscriberMessageKind,
+    /// Date and time this message was produced
+    timestamp: DateTime<Utc>,
+    /// Session information associated to this event
     session: Option<SubscriberSessionInfo>,
+    /// Session list associated to this event
     session_list: Option<Vec<SubscriberSessionInfo>>,
 }
 

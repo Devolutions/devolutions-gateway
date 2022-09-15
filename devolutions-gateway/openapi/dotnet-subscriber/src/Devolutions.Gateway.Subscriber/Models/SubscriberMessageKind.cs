@@ -21,8 +21,9 @@ using Devolutions.Gateway.Subscriber.Converters;
 namespace Devolutions.Gateway.Subscriber.Models
 { 
         /// <summary>
-        /// Gets or Sets SubscriberMessageKind
+        /// Event type for messages
         /// </summary>
+        /// <value>Event type for messages</value>
         [TypeConverter(typeof(CustomEnumConverter<SubscriberMessageKind>))]
         [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
         public enum SubscriberMessageKind
