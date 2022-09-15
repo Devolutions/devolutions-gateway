@@ -1,6 +1,6 @@
+use devolutions_gateway::session::{ConnectionModeDetails, SessionInfo};
 use devolutions_gateway::token::{self, AccessScope, ApplicationProtocol, Protocol};
 use devolutions_gateway::utils::TargetAddr;
-use devolutions_gateway::{ConnectionModeDetails, GatewaySessionInfo};
 use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
@@ -188,9 +188,9 @@ pub fn any_association_claims(now: i64) -> impl Strategy<Value = AssociationClai
         )
 }
 
-pub fn session_info_fwd_only() -> impl Strategy<Value = GatewaySessionInfo> {
+pub fn session_info_fwd_only() -> impl Strategy<Value = SessionInfo> {
     (uuid_typed(), application_protocol(), target_addr()).prop_map(|(id, application_protocol, destination_host)| {
-        GatewaySessionInfo::new(
+        SessionInfo::new(
             id,
             application_protocol,
             ConnectionModeDetails::Fwd { destination_host },

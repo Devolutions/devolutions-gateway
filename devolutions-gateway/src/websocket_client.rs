@@ -2,10 +2,11 @@ use crate::config::Conf;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
 use crate::jet_client::JetAssociationsMap;
+use crate::proxy::Proxy;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::association::remove_jet_association;
-use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
 use jmux_proxy::JmuxProxy;
 use saphir::error;
@@ -14,6 +15,7 @@ use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Notify;
 use tracing::Instrument as _;
 use transport::{ErasedRead, ErasedWrite};
 use uuid::Uuid;
@@ -25,6 +27,7 @@ pub struct WebsocketService {
     pub jrl: Arc<CurrentJrl>,
     pub conf: Arc<Conf>,
     pub subscriber_tx: SubscriberSender,
+    pub sessions: SessionManagerHandle,
 }
 
 impl WebsocketService {
@@ -43,6 +46,7 @@ impl WebsocketService {
                 client_addr,
                 self.associations.clone(),
                 self.conf.clone(),
+                self.sessions.clone(),
                 self.subscriber_tx.clone(),
             )
             .await
@@ -59,6 +63,7 @@ impl WebsocketService {
                 self.conf.clone(),
                 &self.token_cache,
                 &self.jrl,
+                self.sessions.clone(),
                 self.subscriber_tx.clone(),
             )
             .await
@@ -194,9 +199,10 @@ async fn handle_jet_connect(
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
     config: Arc<Conf>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 ) -> Result<Response<Body>, saphir::error::InternalError> {
-    match handle_jet_connect_impl(req, client_addr, associations, config, subscriber_tx).await {
+    match handle_jet_connect_impl(req, client_addr, associations, config, sessions, subscriber_tx).await {
         Ok(res) => Ok(res),
         Err(()) => {
             let mut res = Response::new(Body::empty());
@@ -211,6 +217,7 @@ async fn handle_jet_connect_impl(
     client_addr: SocketAddr,
     associations: Arc<JetAssociationsMap>,
     conf: Arc<Conf>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 ) -> Result<Response<Body>, ()> {
     use crate::interceptor::plugin_recording::PluginRecordingInspector;
@@ -329,10 +336,9 @@ async fn handle_jet_connect_impl(
                     }
                 }
 
-                let info =
-                    GatewaySessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
-                        .with_recording_policy(association_claims.jet_rec)
-                        .with_filtering_policy(association_claims.jet_flt);
+                let info = SessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
+                    .with_recording_policy(association_claims.jet_rec)
+                    .with_filtering_policy(association_claims.jet_flt);
 
                 let proxy_result = if let Some((client_inspector, server_inspector)) = recording_inspector {
                     let mut client_transport = Interceptor::new(client_transport);
@@ -353,10 +359,16 @@ async fn handle_jet_connect_impl(
                             .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
                     }
 
-                    let proxy_result = Proxy::init()
+                    let proxy_result = Proxy::builder()
+                        .conf(conf.clone())
                         .session_info(info)
-                        .transports(client_transport, server_transport)
-                        .subscriber(subscriber_tx)
+                        .address_a(client_addr)
+                        .transport_a(client_transport)
+                        .address_b(server_transport.inner.addr)
+                        .transport_b(server_transport)
+                        .subscriber_tx(subscriber_tx)
+                        .sessions(sessions)
+                        .build()
                         .forward()
                         .await;
 
@@ -381,10 +393,16 @@ async fn handle_jet_connect_impl(
                             .map_err(|e| error!("Failed to write server leftover request: {}", e))?;
                     }
 
-                    Proxy::init()
+                    Proxy::builder()
+                        .conf(conf)
                         .session_info(info)
-                        .transports(client_transport, server_transport)
-                        .subscriber(subscriber_tx)
+                        .address_a(client_addr)
+                        .transport_a(client_transport)
+                        .address_b(server_transport.addr)
+                        .transport_b(server_transport)
+                        .subscriber_tx(subscriber_tx)
+                        .sessions(sessions)
+                        .build()
                         .forward()
                         .await
                 };
@@ -487,10 +505,12 @@ async fn handle_jmux(
     conf: Arc<Conf>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 ) -> io::Result<Response<Body>> {
     use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
     use crate::token::AccessTokenClaims;
+    use futures::future::Either;
 
     let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
         let authorization_value = authorization_value
@@ -568,7 +588,7 @@ async fn handle_jmux(
 
         let session_id = claims.jet_aid;
 
-        let info = GatewaySessionInfo::new(
+        let info = SessionInfo::new(
             session_id,
             claims.jet_ap,
             ConnectionModeDetails::Fwd {
@@ -576,18 +596,40 @@ async fn handle_jmux(
             },
         );
 
-        crate::add_session_in_progress(&subscriber_tx, info);
+        let notify_kill = Arc::new(Notify::new());
 
-        JmuxProxy::new(reader, writer)
+        crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, notify_kill.clone())
+            .await
+            .map_err(|e| error!("{e:#?}"))?;
+
+        let proxy_fut = JmuxProxy::new(reader, writer)
             .with_config(config)
             .run()
-            .instrument(info_span!("jmux", client=%client_addr))
+            .instrument(info_span!("jmux", client=%client_addr));
+
+        let proxy_handle = tokio::spawn(proxy_fut);
+        let kill_notified = notify_kill.notified();
+
+        tokio::pin!(proxy_handle);
+        tokio::pin!(kill_notified);
+
+        let res = match futures::future::select(proxy_handle, kill_notified).await {
+            Either::Left((res, _)) => res
+                .map_err(|e| error!("Failed to wait for proxy task: {e}"))
+                .map(|res| {
+                    let _ = res.map_err(|e| error!("JMUX proxy error: {e}"));
+                }),
+            Either::Right((_, proxy_handle)) => {
+                proxy_handle.abort();
+                Ok(())
+            }
+        };
+
+        crate::session::remove_session_in_progress(&sessions, &subscriber_tx, session_id)
             .await
-            .map_err(|e| error!("JMUX proxy error: {}", e))?;
+            .map_err(|e| error!("{e:#?}"))?;
 
-        crate::remove_session_in_progress(&subscriber_tx, session_id);
-
-        Ok::<(), ()>(())
+        res
     });
 
     Ok(rsp)

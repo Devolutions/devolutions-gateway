@@ -1,16 +1,18 @@
 use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
+use crate::proxy::Proxy;
 use crate::rdp::RdpClient;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, ConnectionMode, CurrentJrl, Protocol, TokenCache};
-use crate::{utils, ConnectionModeDetails, GatewaySessionInfo, Proxy};
+use crate::utils;
 use anyhow::Context;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use transport::AnyStream;
+use transport::Transport;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder)]
@@ -21,6 +23,7 @@ pub struct GenericClient {
     jrl: Arc<CurrentJrl>,
     client_addr: SocketAddr,
     client_stream: TcpStream,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 }
 
@@ -33,6 +36,7 @@ impl GenericClient {
             jrl,
             client_addr,
             mut client_stream,
+            sessions,
             subscriber_tx,
         } = self;
 
@@ -48,6 +52,7 @@ impl GenericClient {
                     associations,
                     token_cache,
                     jrl,
+                    sessions,
                     subscriber_tx,
                 }
                 .serve_with_association_claims_and_leftover_bytes(
@@ -73,9 +78,11 @@ impl GenericClient {
                             application_protocol
                         );
                         crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy::builder()
+                            .conf(conf)
                             .associations(associations)
                             .association_id(association_id)
-                            .client_transport(AnyStream::from(client_stream))
+                            .client_transport(Transport::new(client_stream, client_addr))
+                            .sessions(sessions)
                             .subscriber_tx(subscriber_tx)
                             .build()
                             .start(&leftover_bytes)
@@ -99,7 +106,7 @@ impl GenericClient {
                             .await
                             .context("Failed to write leftover bytes")?;
 
-                        let info = GatewaySessionInfo::new(
+                        let info = SessionInfo::new(
                             association_id,
                             application_protocol,
                             ConnectionModeDetails::Fwd {
@@ -109,12 +116,16 @@ impl GenericClient {
                         .with_recording_policy(recording_policy)
                         .with_filtering_policy(filtering_policy);
 
-                        Proxy::init()
+                        Proxy::builder()
                             .conf(conf)
                             .session_info(info)
-                            .addrs(client_addr, server_transport.addr)
-                            .transports(client_stream, server_transport)
-                            .subscriber(subscriber_tx)
+                            .address_a(client_addr)
+                            .transport_a(client_stream)
+                            .address_b(server_transport.addr)
+                            .transport_b(server_transport)
+                            .sessions(sessions)
+                            .subscriber_tx(subscriber_tx)
+                            .build()
                             .select_dissector_and_forward()
                             .await
                             .context("Encountered a failure during plain tcp traffic proxying")

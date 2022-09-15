@@ -1,6 +1,7 @@
 use crate::config::{Conf, ConfHandle};
 use crate::generic_client::GenericClient;
 use crate::jet_client::{JetAssociationsMap, JetClient};
+use crate::session::SessionManagerHandle;
 use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::url_to_socket_addr;
@@ -42,6 +43,7 @@ pub struct GatewayListener {
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     conf_handle: ConfHandle,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 }
 
@@ -52,6 +54,7 @@ impl GatewayListener {
         associations: Arc<JetAssociationsMap>,
         token_cache: Arc<TokenCache>,
         jrl: Arc<CurrentJrl>,
+        sessions: SessionManagerHandle,
         subscriber_tx: SubscriberSender,
     ) -> anyhow::Result<Self> {
         let url = url.to_internal_url();
@@ -85,6 +88,7 @@ impl GatewayListener {
             associations,
             token_cache,
             jrl,
+            sessions,
             subscriber_tx,
         })
     }
@@ -112,10 +116,11 @@ impl GatewayListener {
                         let associations = self.associations.clone();
                         let token_cache = self.token_cache.clone();
                         let jrl = self.jrl.clone();
+                        let sessions = self.sessions.clone();
                         let subscriber_tx = self.subscriber_tx.clone();
 
                         let fut = async move {
-                            if let Err(e) = $handler(conf, associations, token_cache, jrl, subscriber_tx, stream, peer_addr).await {
+                            if let Err(e) = $handler(conf, associations, token_cache, jrl, sessions, subscriber_tx, stream, peer_addr).await {
                                 error!(concat!(stringify!($handler), " failure: {:#}"), e);
                             }
                         }
@@ -149,23 +154,51 @@ impl GatewayListener {
         let associations = self.associations.clone();
         let token_cache = self.token_cache.clone();
         let jrl = self.jrl.clone();
+        let sessions = self.sessions.clone();
         let subscriber_tx = self.subscriber_tx.clone();
 
         match self.kind() {
             ListenerKind::Tcp => {
-                handle_tcp_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
-                    .instrument(info_span!("tcp", client = %peer_addr))
-                    .await?
+                handle_tcp_client(
+                    conf,
+                    associations,
+                    token_cache,
+                    jrl,
+                    sessions,
+                    subscriber_tx,
+                    conn,
+                    peer_addr,
+                )
+                .instrument(info_span!("tcp", client = %peer_addr))
+                .await?
             }
             ListenerKind::Ws => {
-                handle_ws_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
-                    .instrument(info_span!("ws", client = %peer_addr))
-                    .await?
+                handle_ws_client(
+                    conf,
+                    associations,
+                    token_cache,
+                    jrl,
+                    sessions,
+                    subscriber_tx,
+                    conn,
+                    peer_addr,
+                )
+                .instrument(info_span!("ws", client = %peer_addr))
+                .await?
             }
             ListenerKind::Wss => {
-                handle_wss_client(conf, associations, token_cache, jrl, subscriber_tx, conn, peer_addr)
-                    .instrument(info_span!("wss", client = %peer_addr))
-                    .await?
+                handle_wss_client(
+                    conf,
+                    associations,
+                    token_cache,
+                    jrl,
+                    sessions,
+                    subscriber_tx,
+                    conn,
+                    peer_addr,
+                )
+                .instrument(info_span!("wss", client = %peer_addr))
+                .await?
             }
         }
 
@@ -173,11 +206,13 @@ impl GatewayListener {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_tcp_client(
     conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
     stream: TcpStream,
     peer_addr: SocketAddr,
@@ -198,6 +233,7 @@ async fn handle_tcp_client(
                 .associations(associations)
                 .addr(peer_addr)
                 .transport(stream)
+                .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
                 .build()
                 .serve()
@@ -213,6 +249,7 @@ async fn handle_tcp_client(
                 .client_stream(stream)
                 .token_cache(token_cache)
                 .jrl(jrl)
+                .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
                 .build()
                 .serve()
@@ -224,11 +261,13 @@ async fn handle_tcp_client(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_ws_client(
     conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
     conn: TcpStream,
     peer_addr: SocketAddr,
@@ -238,16 +277,28 @@ async fn handle_ws_client(
     // Annonate using the type alias from `transport` just for sanity
     let conn: transport::TcpStream = conn;
 
-    process_ws_stream(conn, peer_addr, conf, associations, token_cache, jrl, subscriber_tx).await?;
+    process_ws_stream(
+        conn,
+        peer_addr,
+        conf,
+        associations,
+        token_cache,
+        jrl,
+        sessions,
+        subscriber_tx,
+    )
+    .await?;
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_wss_client(
     conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
     stream: TcpStream,
     peer_addr: SocketAddr,
@@ -271,6 +322,7 @@ async fn handle_wss_client(
         associations,
         token_cache,
         jrl,
+        sessions,
         subscriber_tx,
     )
     .await?;
@@ -278,6 +330,7 @@ async fn handle_wss_client(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_ws_stream<I>(
     io: I,
     remote_addr: SocketAddr,
@@ -285,6 +338,7 @@ async fn process_ws_stream<I>(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()>
 where
@@ -295,6 +349,7 @@ where
         conf,
         token_cache,
         jrl,
+        sessions,
         subscriber_tx,
     };
 

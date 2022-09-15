@@ -3,6 +3,7 @@ use crate::http::http_server::configure_http_server;
 use crate::jet_client::JetAssociationsMap;
 use crate::listener::GatewayListener;
 use crate::log::{self, LoggerGuard};
+use crate::session::{session_manager_channel, SessionManagerTask};
 use crate::subscriber::subscriber_channel;
 use crate::token::{CurrentJrl, JrlTokenClaims};
 use anyhow::Context;
@@ -124,6 +125,7 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
     let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
     let token_cache = crate::token::new_token_cache().pipe(Arc::new);
     let jrl = load_jrl_from_disk(&conf)?;
+    let (session_manager_handle, session_manager_rx) = session_manager_channel();
 
     // Configure http server
     configure_http_server(
@@ -131,6 +133,7 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
         associations.clone(),
         token_cache.clone(),
         jrl.clone(),
+        session_manager_handle.clone(),
     )
     .context("failed to configure http server")?;
 
@@ -148,6 +151,7 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
                 associations.clone(),
                 token_cache.clone(),
                 jrl.clone(),
+                session_manager_handle.clone(),
                 subscriber_tx.clone(),
             )
             .with_context(|| format!("Failed to initialize {}", listener.internal_url))
@@ -170,11 +174,15 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
     }
 
     futures.push(Box::pin(async move {
-        crate::subscriber::subscriber_polling_task(subscriber_tx).await
+        crate::subscriber::subscriber_polling_task(session_manager_handle, subscriber_tx).await
     }));
 
     futures.push(Box::pin(async move {
         crate::subscriber::subscriber_task(conf_handle.clone(), subscriber_rx).await
+    }));
+
+    futures.push(Box::pin(async move {
+        crate::session::session_manager_task(SessionManagerTask::new(session_manager_rx)).await
     }));
 
     Ok(futures)

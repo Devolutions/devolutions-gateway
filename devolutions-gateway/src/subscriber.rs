@@ -1,6 +1,6 @@
 use crate::config::dto::Subscriber;
 use crate::config::ConfHandle;
-use crate::SESSIONS_IN_PROGRESS;
+use crate::session::SessionManagerHandle;
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use std::time::Duration;
@@ -132,8 +132,11 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
     Ok(())
 }
 
-#[instrument(skip(tx))]
-pub async fn subscriber_polling_task(tx: SubscriberSender) -> anyhow::Result<()> {
+#[instrument(skip_all)]
+pub async fn subscriber_polling_task(
+    sessions: SessionManagerHandle,
+    subscriber: SubscriberSender,
+) -> anyhow::Result<()> {
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 20); // once per 20 minutes
 
     debug!("Task started");
@@ -141,26 +144,33 @@ pub async fn subscriber_polling_task(tx: SubscriberSender) -> anyhow::Result<()>
     loop {
         trace!("Send session list message");
 
-        let session_list: Vec<_> = SESSIONS_IN_PROGRESS
-            .read()
-            .values()
-            .map(|session| SubscriberSessionInfo {
-                association_id: session.association_id,
-                start_timestamp: session.start_timestamp,
-            })
-            .collect();
+        match sessions.get_running_sessions().await {
+            Ok(sessions) => {
+                let session_list = sessions
+                    .into_values()
+                    .map(|session| SubscriberSessionInfo {
+                        association_id: session.association_id,
+                        start_timestamp: session.start_timestamp,
+                    })
+                    .collect();
 
-        let message = Message::session_list(session_list);
+                let message = Message::session_list(session_list);
 
-        tx.send(message)
-            .await
-            .map_err(|e| anyhow::anyhow!("Subscriber Task ended: {e}"))?;
+                subscriber
+                    .send(message)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Subscriber Task ended: {e}"))?;
+            }
+            Err(e) => {
+                warn!(error = format!("{e:#}"), "Couldn't retrieve running session list");
+            }
+        }
 
         sleep(TASK_INTERVAL).await;
     }
 }
 
-#[instrument(skip(conf_handle, rx))]
+#[instrument(skip_all)]
 pub async fn subscriber_task(conf_handle: ConfHandle, mut rx: SubscriberReceiver) -> anyhow::Result<()> {
     debug!("Task started");
 
