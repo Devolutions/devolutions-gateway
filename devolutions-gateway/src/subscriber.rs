@@ -8,8 +8,8 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-pub type SubscriberSender = mpsc::Sender<SubscriberMessage>;
-pub type SubscriberReceiver = mpsc::Receiver<SubscriberMessage>;
+pub type SubscriberSender = mpsc::Sender<Message>;
+pub type SubscriberReceiver = mpsc::Receiver<Message>;
 
 pub fn subscriber_channel() -> (SubscriberSender, SubscriberReceiver) {
     mpsc::channel(64)
@@ -23,7 +23,8 @@ pub struct SubscriberSessionInfo {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]
-pub enum SubscriberMessage {
+#[allow(clippy::enum_variant_names)]
+enum MessageInner {
     #[serde(rename = "session.started")]
     SessionStarted { session: SubscriberSessionInfo },
     #[serde(rename = "session.ended")]
@@ -32,7 +33,37 @@ pub enum SubscriberMessage {
     SessionList { session_list: Vec<SubscriberSessionInfo> },
 }
 
-pub async fn send_message(subscriber: &Subscriber, message: &SubscriberMessage) -> anyhow::Result<()> {
+#[derive(Debug, Serialize)]
+pub struct Message {
+    timestamp: DateTime<Utc>,
+    #[serde(flatten)]
+    inner: MessageInner,
+}
+
+impl Message {
+    pub fn session_started(session: SubscriberSessionInfo) -> Self {
+        Self {
+            timestamp: session.start_timestamp,
+            inner: MessageInner::SessionStarted { session },
+        }
+    }
+
+    pub fn session_ended(session: SubscriberSessionInfo) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            inner: MessageInner::SessionEnded { session },
+        }
+    }
+
+    pub fn session_list(session_list: Vec<SubscriberSessionInfo>) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            inner: MessageInner::SessionList { session_list },
+        }
+    }
+}
+
+pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
 
     client
@@ -66,7 +97,7 @@ pub async fn subscriber_polling_task(tx: SubscriberSender) -> anyhow::Result<()>
             })
             .collect();
 
-        let message = SubscriberMessage::SessionList { session_list };
+        let message = Message::session_list(session_list);
 
         tx.send(message)
             .await

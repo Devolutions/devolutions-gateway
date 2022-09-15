@@ -21,7 +21,7 @@ using Devolutions.Gateway.Subscriber.Converters;
 namespace Devolutions.Gateway.Subscriber.Models
 { 
     /// <summary>
-    /// 
+    /// Message produced on various Gateway events
     /// </summary>
     [DataContract]
     public class SubscriberMessage : IEquatable<SubscriberMessage>
@@ -46,6 +46,14 @@ namespace Devolutions.Gateway.Subscriber.Models
         public List<SubscriberSessionInfo> SessionList { get; set; }
 
         /// <summary>
+        /// Date and time this message was produced
+        /// </summary>
+        /// <value>Date and time this message was produced</value>
+        [Required]
+        [DataMember(Name="timestamp", EmitDefaultValue=false)]
+        public DateTime Timestamp { get; set; }
+
+        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
@@ -56,6 +64,7 @@ namespace Devolutions.Gateway.Subscriber.Models
             sb.Append("  Kind: ").Append(Kind).Append("\n");
             sb.Append("  Session: ").Append(Session).Append("\n");
             sb.Append("  SessionList: ").Append(SessionList).Append("\n");
+            sb.Append("  Timestamp: ").Append(Timestamp).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
@@ -107,6 +116,11 @@ namespace Devolutions.Gateway.Subscriber.Models
                     SessionList != null &&
                     other.SessionList != null &&
                     SessionList.SequenceEqual(other.SessionList)
+                ) && 
+                (
+                    Timestamp == other.Timestamp ||
+                    Timestamp != null &&
+                    Timestamp.Equals(other.Timestamp)
                 );
         }
 
@@ -126,6 +140,8 @@ namespace Devolutions.Gateway.Subscriber.Models
                     hashCode = hashCode * 59 + Session.GetHashCode();
                     if (SessionList != null)
                     hashCode = hashCode * 59 + SessionList.GetHashCode();
+                    if (Timestamp != null)
+                    hashCode = hashCode * 59 + Timestamp.GetHashCode();
                 return hashCode;
             }
         }

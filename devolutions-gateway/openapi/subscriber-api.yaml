@@ -43,8 +43,10 @@ components:
   schemas:
     SubscriberMessage:
       type: object
+      description: Message produced on various Gateway events
       required:
       - kind
+      - timestamp
       properties:
         kind:
           $ref: '#/components/schemas/SubscriberMessageKind'
@@ -54,8 +56,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubscriberSessionInfo'
+        timestamp:
+          type: string
+          format: date-time
+          description: Date and time this message was produced
     SubscriberMessageKind:
       type: string
+      description: Event type for messages
       enum:
       - session.started
       - session.ended

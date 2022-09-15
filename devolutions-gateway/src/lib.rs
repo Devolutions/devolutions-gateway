@@ -95,12 +95,10 @@ pub fn add_session_in_progress(tx: &subscriber::SubscriberSender, session: Gatew
 
     SESSIONS_IN_PROGRESS.write().insert(association_id, session);
 
-    let message = subscriber::SubscriberMessage::SessionStarted {
-        session: subscriber::SubscriberSessionInfo {
-            association_id,
-            start_timestamp,
-        },
-    };
+    let message = subscriber::Message::session_started(subscriber::SubscriberSessionInfo {
+        association_id,
+        start_timestamp,
+    });
 
     if let Err(error) = tx.try_send(message) {
         warn!(%error, "Failed to send subscriber message");
@@ -112,12 +110,10 @@ pub fn remove_session_in_progress(tx: &subscriber::SubscriberSender, id: Uuid) {
     let terminated_session = SESSIONS_IN_PROGRESS.write().remove(&id);
 
     if let Some(session) = terminated_session {
-        let message = subscriber::SubscriberMessage::SessionEnded {
-            session: subscriber::SubscriberSessionInfo {
-                association_id: id,
-                start_timestamp: session.start_timestamp,
-            },
-        };
+        let message = subscriber::Message::session_ended(subscriber::SubscriberSessionInfo {
+            association_id: id,
+            start_timestamp: session.start_timestamp,
+        });
 
         if let Err(error) = tx.try_send(message) {
             warn!(%error, "Failed to send subscriber message");
