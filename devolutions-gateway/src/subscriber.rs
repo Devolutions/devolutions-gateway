@@ -63,18 +63,71 @@ impl Message {
     }
 }
 
+#[instrument(skip(subscriber))]
 pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow::Result<()> {
+    use backoff::backoff::Backoff as _;
+    use std::time::Duration;
+
+    const RETRY_INITIAL_INTERVAL: Duration = Duration::from_secs(3); // initial retry interval on failure
+    const RETRY_MAX_ELAPSED_TIME: Duration = Duration::from_secs(60 * 3); // retry for at most 3 minutes
+    const RETRY_MULTIPLIER: f64 = 1.75; // 75% increase per back off retry
+
+    let mut backoff = backoff::ExponentialBackoffBuilder::default()
+        .with_initial_interval(RETRY_INITIAL_INTERVAL)
+        .with_max_elapsed_time(Some(RETRY_MAX_ELAPSED_TIME))
+        .with_multiplier(RETRY_MULTIPLIER)
+        .build();
+
     let client = reqwest::Client::new();
 
-    client
-        .post(subscriber.url.clone())
-        .header("Authorization", format!("Bearer {}", subscriber.token))
-        .json(message)
-        .send()
-        .await
-        .context("Failed to post message at the subscriber URL")?
-        .error_for_status()
-        .context("Subscriber responded with an error code")?;
+    let op = || async {
+        let response = client
+            .post(subscriber.url.clone())
+            .header("Authorization", format!("Bearer {}", subscriber.token))
+            .json(message)
+            .send()
+            .await
+            .context("Failed to post message at the subscriber URL")
+            .map_err(backoff::Error::permanent)?;
+
+        let status = response.status();
+
+        if status.is_client_error() {
+            // A client error suggest the request will never succeed no matter how many times we try
+            Err(backoff::Error::permanent(anyhow::anyhow!(
+                "Subscriber responded with a client error status: {status}"
+            )))
+        } else if status.is_server_error() {
+            // However, server errors are mostly transient
+            Err(backoff::Error::transient(anyhow::anyhow!(
+                "Subscriber responded with a server error status: {status}"
+            )))
+        } else {
+            Ok::<(), backoff::Error<anyhow::Error>>(())
+        }
+    };
+
+    loop {
+        match op().await {
+            Ok(()) => break,
+            Err(backoff::Error::Permanent(e)) => return Err(e),
+            Err(backoff::Error::Transient { err, retry_after }) => {
+                match retry_after.or_else(|| backoff.next_backoff()) {
+                    Some(duration) => {
+                        debug!(
+                            error = format!("{err:#}"),
+                            retry_after = format!("{}s", duration.as_secs()),
+                            "a transient error occured"
+                        );
+                        tokio::time::sleep(duration).await;
+                    }
+                    None => return Err(err),
+                }
+            }
+        };
+    }
+
+    trace!("message successfully sent to subscriber");
 
     Ok(())
 }
@@ -120,11 +173,15 @@ pub async fn subscriber_task(conf_handle: ConfHandle, mut rx: SubscriberReceiver
             }
             msg = rx.recv() => {
                 let msg = msg.context("All senders are dead")?;
-                if let Some(subscriber) = conf.subscriber.as_ref() {
+                if let Some(subscriber) = conf.subscriber.clone() {
                     debug!(?msg, %subscriber.url, "Send message");
-                    if let Err(error) = send_message(subscriber, &msg).await {
-                        warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
-                    }
+                    tokio::spawn(async {
+                        let msg = msg;
+                        let subscriber = subscriber;
+                        if let Err(error) = send_message(&subscriber, &msg).await {
+                            warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
+                        }
+                    });
                 } else {
                     trace!(?msg, "Subscriber is not configured, ignore message");
                 }

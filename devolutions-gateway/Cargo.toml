@@ -48,6 +48,7 @@ anyhow = "1.0.61"
 typed-builder = "0.10.0"
 # Unicode case folding comparisons
 focaccia = "1.2.0"
+backoff = "0.4.0"
 
 # security, crypto…
 zeroize = { version = "1.5.7", features = ["derive"] }
