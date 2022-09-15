@@ -4,12 +4,13 @@ use crate::interceptor::Interceptor;
 use crate::jet::association::Association;
 use crate::jet::candidate::CandidateState;
 use crate::jet::TransportType;
+use crate::proxy::Proxy;
 use crate::registry::Registry;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::AssociationTokenClaims;
 use crate::utils::association::{remove_jet_association, ACCEPT_REQUEST_TIMEOUT};
 use crate::utils::create_tls_connector;
-use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context as _;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use jet_proto::accept::{JetAcceptReq, JetAcceptRsp};
@@ -39,6 +40,7 @@ pub struct JetClient {
     associations: Arc<JetAssociationsMap>,
     addr: SocketAddr,
     transport: TcpStream,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 }
 
@@ -49,6 +51,7 @@ impl JetClient {
             associations,
             addr,
             mut transport,
+            sessions,
             subscriber_tx,
         } = self;
 
@@ -67,7 +70,7 @@ impl JetClient {
                 let association_id = response.association_id;
                 let candidate_id = response.candidate_id;
 
-                let proxy_result = handle_build_proxy(&associations, conf, subscriber_tx, response).await;
+                let proxy_result = handle_build_proxy(&associations, conf, sessions, subscriber_tx, response).await;
 
                 remove_jet_association(&associations, association_id, Some(candidate_id));
 
@@ -81,10 +84,12 @@ impl JetClient {
 }
 
 async fn handle_build_tls_proxy(
+    conf: Arc<Conf>,
     response: HandleConnectJetMsgResponse,
     client_inspector: PluginRecordingInspector,
     server_inspector: PluginRecordingInspector,
     tls_acceptor: &TlsAcceptor,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
     let client_stream = tls_acceptor.accept(response.client_transport).await?;
@@ -95,7 +100,7 @@ async fn handle_build_tls_proxy(
     let mut server_transport = Interceptor::new(server_stream);
     server_transport.inspectors.push(Box::new(server_inspector));
 
-    let info = GatewaySessionInfo::new(
+    let info = SessionInfo::new(
         response.association_id,
         response.association_claims.jet_ap,
         ConnectionModeDetails::Rdv,
@@ -103,10 +108,16 @@ async fn handle_build_tls_proxy(
     .with_recording_policy(response.association_claims.jet_rec)
     .with_filtering_policy(response.association_claims.jet_flt);
 
-    Proxy::init()
+    Proxy::builder()
+        .conf(conf)
         .session_info(info)
-        .transports(client_transport, server_transport)
-        .subscriber(subscriber_tx)
+        .address_a(response.client_addr)
+        .transport_a(client_transport)
+        .address_b(response.server_addr)
+        .transport_b(server_transport)
+        .sessions(sessions)
+        .subscriber_tx(subscriber_tx)
+        .build()
         .forward()
         .await
 }
@@ -114,6 +125,7 @@ async fn handle_build_tls_proxy(
 async fn handle_build_proxy(
     associations: &JetAssociationsMap,
     conf: Arc<Conf>,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
     response: HandleConnectJetMsgResponse,
 ) -> anyhow::Result<()> {
@@ -147,10 +159,12 @@ async fn handle_build_proxy(
             .context("TLS configuration is missing")?;
 
         let proxy_result = handle_build_tls_proxy(
+            conf.clone(),
             response,
             client_inspector,
             server_inspector,
             tls_acceptor,
+            sessions,
             subscriber_tx,
         )
         .await;
@@ -162,7 +176,7 @@ async fn handle_build_proxy(
 
         proxy_result
     } else {
-        let info = GatewaySessionInfo::new(
+        let info = SessionInfo::new(
             response.association_id,
             response.association_claims.jet_ap,
             ConnectionModeDetails::Rdv,
@@ -170,10 +184,16 @@ async fn handle_build_proxy(
         .with_recording_policy(response.association_claims.jet_rec)
         .with_filtering_policy(response.association_claims.jet_flt);
 
-        Proxy::init()
+        Proxy::builder()
+            .conf(conf)
             .session_info(info)
-            .transports(response.server_transport, response.client_transport)
-            .subscriber(subscriber_tx)
+            .transport_a(response.client_transport)
+            .address_a(response.client_addr)
+            .transport_b(response.server_transport)
+            .address_b(response.server_addr)
+            .sessions(sessions)
+            .subscriber_tx(subscriber_tx)
+            .build()
             .forward()
             .await
     }
@@ -398,7 +418,11 @@ async fn handle_connect_jet_msg(
     ) {
         (Some((server_transport, None)), Some(association_id), Some(candidate_id), Some(token)) => {
             Ok(HandleConnectJetMsgResponse {
+                client_addr: client_transport
+                    .peer_addr()
+                    .context("client transport should have a peer address")?,
                 client_transport,
+                server_addr: server_transport.addr,
                 server_transport: server_transport
                     .stream
                     .into_tcp()
@@ -414,7 +438,9 @@ async fn handle_connect_jet_msg(
 }
 
 pub struct HandleConnectJetMsgResponse {
+    pub client_addr: SocketAddr,
     pub client_transport: TcpStream,
+    pub server_addr: SocketAddr,
     pub server_transport: TcpStream,
     pub association_id: Uuid,
     pub candidate_id: Uuid,

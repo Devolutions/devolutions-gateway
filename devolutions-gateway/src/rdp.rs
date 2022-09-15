@@ -10,11 +10,12 @@ use self::sequence_future::create_downgrade_dvc_capabilities_future;
 use crate::config::Conf;
 use crate::jet_client::JetAssociationsMap;
 use crate::preconnection_pdu::{extract_association_claims, read_preconnection_pdu};
+use crate::proxy::Proxy;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, CurrentJrl, Protocol, TokenCache};
 use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
-use crate::{ConnectionModeDetails, GatewaySessionInfo, Proxy};
 use anyhow::Context;
 use bytes::BytesMut;
 use sspi::internal::credssp;
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_util::codec::Decoder;
-use transport::AnyStream;
+use transport::Transport;
 use uuid::Uuid;
 
 pub const GLOBAL_CHANNEL_NAME: &str = "GLOBAL";
@@ -64,6 +65,7 @@ pub struct RdpClient {
     pub associations: Arc<JetAssociationsMap>,
     pub token_cache: Arc<TokenCache>,
     pub jrl: Arc<CurrentJrl>,
+    pub sessions: SessionManagerHandle,
     pub subscriber_tx: SubscriberSender,
 }
 
@@ -92,6 +94,7 @@ impl RdpClient {
         let Self {
             conf,
             associations,
+            sessions,
             subscriber_tx,
             ..
         } = self;
@@ -114,7 +117,7 @@ impl RdpClient {
                     .await
                     .context("Failed to write leftover bytes")?;
 
-                let info = GatewaySessionInfo::new(
+                let info = SessionInfo::new(
                     association_claims.jet_aid,
                     association_claims.jet_ap,
                     ConnectionModeDetails::Fwd {
@@ -124,12 +127,16 @@ impl RdpClient {
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
-                Proxy::init()
+                Proxy::builder()
                     .conf(conf)
                     .session_info(info)
-                    .addrs(client_addr, server_transport.addr)
-                    .transports(client_stream, server_transport)
-                    .subscriber(subscriber_tx)
+                    .address_a(client_addr)
+                    .transport_a(client_stream)
+                    .address_b(server_transport.addr)
+                    .transport_b(server_transport)
+                    .sessions(sessions)
+                    .subscriber_tx(subscriber_tx)
+                    .build()
                     .select_dissector_and_forward()
                     .await
                     .context("plain tcp traffic proxying failed")
@@ -214,7 +221,7 @@ impl RdpClient {
                 let client_tls = client_transport.into_inner();
                 let server_tls = server_transport.into_inner();
 
-                let info = GatewaySessionInfo::new(
+                let info = SessionInfo::new(
                     association_claims.jet_aid,
                     association_claims.jet_ap,
                     ConnectionModeDetails::Fwd { destination_host },
@@ -236,9 +243,11 @@ impl RdpClient {
             RdpRoutingMode::TcpRendezvous(association_id) => {
                 info!("Starting RdpTcpRendezvous redirection");
                 crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy::builder()
+                    .conf(conf)
                     .associations(associations)
-                    .client_transport(AnyStream::from(client_stream))
+                    .client_transport(Transport::new(client_stream, client_addr))
                     .association_id(association_id)
+                    .sessions(sessions)
                     .subscriber_tx(subscriber_tx)
                     .build()
                     .start(&leftover_bytes)

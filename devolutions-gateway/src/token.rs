@@ -328,6 +328,8 @@ pub enum AccessScope {
     Wildcard,
     #[serde(rename = "gateway.sessions.read")]
     SessionsRead,
+    #[serde(rename = "gateway.session.terminate")]
+    SessionTerminate,
     #[serde(rename = "gateway.associations.read")]
     AssociationsRead,
     #[serde(rename = "gateway.diagnostics.read")]

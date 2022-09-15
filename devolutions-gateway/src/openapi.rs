@@ -8,6 +8,7 @@ use uuid::Uuid;
     paths(
         crate::http::controllers::health::get_health,
         crate::http::controllers::sessions::get_sessions,
+        crate::http::controllers::session::terminate_session,
         crate::http::controllers::diagnostics::get_logs,
         crate::http::controllers::diagnostics::get_configuration,
         crate::http::controllers::diagnostics::get_clock,

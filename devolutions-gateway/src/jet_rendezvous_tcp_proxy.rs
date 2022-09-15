@@ -1,30 +1,35 @@
+use crate::config::Conf;
 use crate::http::controllers::association::start_remove_association_future;
 use crate::jet::candidate::CandidateState;
 use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
-use crate::{ConnectionModeDetails, GatewaySessionInfo};
 use anyhow::Context;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use transport::AnyStream;
+use transport::Transport;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
 #[derive(TypedBuilder)]
 pub struct JetRendezvousTcpProxy {
+    conf: Arc<Conf>,
     associations: Arc<JetAssociationsMap>,
-    client_transport: AnyStream,
+    client_transport: Transport,
     association_id: Uuid,
+    sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 }
 
 impl JetRendezvousTcpProxy {
     pub async fn start(self, mut client_leftover: &[u8]) -> anyhow::Result<()> {
         let Self {
+            conf,
             associations,
             mut client_transport,
             association_id,
+            sessions,
             subscriber_tx,
         } = self;
 
@@ -41,7 +46,7 @@ impl JetRendezvousTcpProxy {
                 anyhow::bail!("can't meet recording policy");
             }
 
-            let info = GatewaySessionInfo::new(association_id, claims.jet_ap.clone(), ConnectionModeDetails::Rdv)
+            let info = SessionInfo::new(association_id, claims.jet_ap.clone(), ConnectionModeDetails::Rdv)
                 .with_recording_policy(claims.jet_rec)
                 .with_filtering_policy(claims.jet_flt);
 
@@ -70,10 +75,16 @@ impl JetRendezvousTcpProxy {
                 .context("Failed to write server leftover")?;
         }
 
-        let proxy_result = Proxy::init()
+        let proxy_result = Proxy::builder()
+            .conf(conf)
             .session_info(info)
-            .transports(client_transport, server_transport)
-            .subscriber(subscriber_tx)
+            .address_a(client_transport.addr)
+            .transport_a(client_transport)
+            .address_b(server_transport.addr)
+            .transport_b(server_transport)
+            .sessions(sessions)
+            .subscriber_tx(subscriber_tx)
+            .build()
             .forward()
             .await
             .context("An error occurred while running JetRendezvousTcpProxy");

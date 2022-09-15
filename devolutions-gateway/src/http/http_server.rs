@@ -6,6 +6,7 @@ use crate::http::controllers::health::HealthController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
 use crate::http::controllers::jrl::JrlController;
 use crate::http::controllers::kdc_proxy::KdcProxyController;
+use crate::http::controllers::session::SessionController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
 use crate::http::controllers::sogar_token::TokenController;
 use crate::http::middlewares::auth::AuthMiddleware;
@@ -13,6 +14,7 @@ use crate::http::middlewares::cors::CorsMiddleware;
 use crate::http::middlewares::log::LogMiddleware;
 use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
+use crate::session::SessionManagerHandle;
 use crate::token::{CurrentJrl, TokenCache};
 use saphir::server::Server as SaphirServer;
 use sogar_core::registry::SogarController;
@@ -23,6 +25,7 @@ pub fn configure_http_server(
     associations: Arc<JetAssociationsMap>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
 ) -> anyhow::Result<()> {
     SaphirServer::builder()
         .configure_middlewares(|middlewares| {
@@ -65,6 +68,15 @@ pub fn configure_http_server(
             let jrl = JrlController::new(conf_handle.clone(), jrl);
             let config = ConfigController::new(conf_handle.clone());
 
+            let session_controller = SessionController {
+                sessions: sessions.clone(),
+            };
+
+            let sessions_controller = SessionsController {
+                sessions: sessions.clone(),
+            };
+            let legacy_sessions_controller = LegacySessionsController { sessions };
+
             // sogar stuff
             let conf = conf_handle.get_conf();
             let sogar_token = TokenController::new(conf_handle);
@@ -77,12 +89,13 @@ pub fn configure_http_server(
                 .controller(health)
                 .controller(http_bridge)
                 .controller(jet)
-                .controller(SessionsController)
+                .controller(session_controller)
+                .controller(sessions_controller)
                 .controller(sogar)
                 .controller(sogar_token)
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
-                .controller(LegacySessionsController)
+                .controller(legacy_sessions_controller)
                 .controller(kdc_proxy)
                 .controller(duplicated_kdc_proxy)
                 .controller(jrl)
