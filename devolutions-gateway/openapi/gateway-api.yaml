@@ -176,6 +176,40 @@ paths:
       security:
       - scope_token:
         - gateway.jrl.read
+  /jet/session/{id}/terminate:
+    post:
+      tags:
+      - Sessions
+      summary: Terminate forcefully a running session
+      description: |
+        Terminate forcefully a running session
+      operationId: TerminateSession
+      parameters:
+      - name: id
+        in: path
+        description: Session / association ID of the session to terminate
+        required: true
+        deprecated: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Session terminated successfully
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: No running session found with provided ID
+        '500':
+          description: Unexpected server error
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.session.terminate
   /jet/sessions:
     get:
       tags:
@@ -199,6 +233,8 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
+        '500':
+          description: Unexpected server error
       deprecated: false
       security:
       - scope_token:
@@ -210,6 +246,7 @@ components:
       enum:
       - '*'
       - gateway.sessions.read
+      - gateway.session.terminate
       - gateway.associations.read
       - gateway.diagnostics.read
       - gateway.jrl.read
