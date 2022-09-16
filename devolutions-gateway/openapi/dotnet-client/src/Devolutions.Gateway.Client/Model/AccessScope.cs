@@ -45,28 +45,34 @@ namespace Devolutions.Gateway.Client.Model
         GatewaySessionsRead = 2,
 
         /// <summary>
+        /// Enum GatewaySessionTerminate for value: gateway.session.terminate
+        /// </summary>
+        [EnumMember(Value = "gateway.session.terminate")]
+        GatewaySessionTerminate = 3,
+
+        /// <summary>
         /// Enum GatewayAssociationsRead for value: gateway.associations.read
         /// </summary>
         [EnumMember(Value = "gateway.associations.read")]
-        GatewayAssociationsRead = 3,
+        GatewayAssociationsRead = 4,
 
         /// <summary>
         /// Enum GatewayDiagnosticsRead for value: gateway.diagnostics.read
         /// </summary>
         [EnumMember(Value = "gateway.diagnostics.read")]
-        GatewayDiagnosticsRead = 4,
+        GatewayDiagnosticsRead = 5,
 
         /// <summary>
         /// Enum GatewayJrlRead for value: gateway.jrl.read
         /// </summary>
         [EnumMember(Value = "gateway.jrl.read")]
-        GatewayJrlRead = 5,
+        GatewayJrlRead = 6,
 
         /// <summary>
         /// Enum GatewayConfigWrite for value: gateway.config.write
         /// </summary>
         [EnumMember(Value = "gateway.config.write")]
-        GatewayConfigWrite = 6
+        GatewayConfigWrite = 7
 
     }
 

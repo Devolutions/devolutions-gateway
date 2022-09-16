@@ -646,6 +646,11 @@ array[<<SessionInfo>>]
 | Insufficient permissions
 |  <<>>
 
+
+| 500
+| Unexpected server error
+|  <<>>
+
 |===
 
 
@@ -653,6 +658,109 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/sessions/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.terminateSession]
+==== terminateSession
+
+`POST /jet/session/{id}/terminate`
+
+Terminate forcefully a running session
+
+===== Description
+
+Terminate forcefully a running session 
+
+
+// markup not found, no include::{specDir}jet/session/\{id\}/terminate/POST/spec.adoc[opts=optional]
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| id
+| Session / association ID of the session to terminate 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+
+
+-
+
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Session terminated successfully
+|  <<>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| No running session found with provided ID
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/session/\{id\}/terminate/POST/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -675,6 +783,8 @@ endif::internal-generation[]
 | `"*"`
 
 | `"gateway.sessions.read"`
+
+| `"gateway.session.terminate"`
 
 | `"gateway.associations.read"`
 
