@@ -35,15 +35,26 @@ use uuid::Uuid;
 )]
 pub struct ApiDoc;
 
+/// Information about an ongoing Gateway session
 #[allow(dead_code)]
 #[derive(utoipa::ToSchema)]
 struct SessionInfo {
+    /// Unique ID for this session
     association_id: Uuid,
+    /// Protocol used during this session
     application_protocol: String,
+    /// Recording Policy
     recording_policy: bool,
+    /// Filtering Policy
     filtering_policy: bool,
+    /// Date this session was started
     start_timestamp: DateTime<Utc>,
+    /// Maximum session duration in minutes (0 is used for the infinite duration)
+    // NOTE: Optional purely for client code generation (this field didn't always exist)
+    time_to_live: Option<u64>,
+    /// Jet Connection Mode
     connection_mode: ConnectionMode,
+    /// Destination Host
     destination_host: Option<String>,
 }
 

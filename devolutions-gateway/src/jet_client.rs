@@ -105,6 +105,7 @@ async fn handle_build_tls_proxy(
         response.association_claims.jet_ap,
         ConnectionModeDetails::Rdv,
     )
+    .with_ttl(response.association_claims.jet_ttl)
     .with_recording_policy(response.association_claims.jet_rec)
     .with_filtering_policy(response.association_claims.jet_flt);
 
@@ -181,6 +182,7 @@ async fn handle_build_proxy(
             response.association_claims.jet_ap,
             ConnectionModeDetails::Rdv,
         )
+        .with_ttl(response.association_claims.jet_ttl)
         .with_recording_policy(response.association_claims.jet_rec)
         .with_filtering_policy(response.association_claims.jet_flt);
 

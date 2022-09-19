@@ -5,10 +5,11 @@ use nonempty::NonEmpty;
 use parking_lot::Mutex;
 use picky::jose::jws::RawJws;
 use picky::key::{PrivateKey, PublicKey};
-use serde::de;
+use serde::{de, ser};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -213,6 +214,35 @@ pub struct CredsClaims {
     pub dst_pwd: String,
 }
 
+/// Maximum duration in minutes for a session (aka time to live)
+#[derive(Debug, Clone, Copy)]
+pub enum SessionTtl {
+    Unlimited,
+    Limited { minutes: NonZeroU64 },
+}
+
+impl From<u64> for SessionTtl {
+    fn from(minutes: u64) -> Self {
+        if let Some(minutes) = NonZeroU64::new(minutes) {
+            Self::Limited { minutes }
+        } else {
+            Self::Unlimited
+        }
+    }
+}
+
+impl ser::Serialize for SessionTtl {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            SessionTtl::Unlimited => serializer.serialize_u64(0),
+            SessionTtl::Limited { minutes } => serializer.serialize_u64(minutes.get()),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AssociationTokenClaims {
     /// Association ID (= Session ID)
@@ -229,6 +259,9 @@ pub struct AssociationTokenClaims {
 
     /// Filtering Policy
     pub jet_flt: bool,
+
+    /// Max session duration
+    pub jet_ttl: SessionTtl,
 
     // JWT expiration time claim.
     // We need this to build our token invalidation cache.
@@ -279,6 +312,8 @@ impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
             jet_rec: bool,
             #[serde(default)]
             jet_flt: bool,
+            #[serde(default)]
+            jet_ttl: u64,
             exp: i64,
             jti: Option<Uuid>, // DVLS up to 2022.1.9 do not generate this claim.
         }
@@ -307,12 +342,15 @@ impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
             }
         };
 
+        let jet_ttl = SessionTtl::from(claims.jet_ttl);
+
         Ok(Self {
             jet_aid: claims.jet_aid,
             jet_ap: claims.jet_ap,
             jet_cm,
             jet_rec: claims.jet_rec,
             jet_flt: claims.jet_flt,
+            jet_ttl,
             exp: claims.exp,
             jti: claims.jti,
         })
@@ -378,6 +416,9 @@ pub struct JmuxTokenClaims {
     /// Application Protocol (mostly used to find a known default port)
     pub jet_ap: ApplicationProtocol,
 
+    /// Max duration
+    pub jet_ttl: SessionTtl,
+
     // JWT expiration time claim.
     exp: i64,
 
@@ -402,6 +443,8 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             #[serde(default)]
             jet_ap: ApplicationProtocol,
             jet_aid: Uuid,
+            #[serde(default)]
+            jet_ttl: u64,
             exp: i64,
             jti: Uuid,
         }
@@ -438,10 +481,13 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
             hosts.push(additional);
         }
 
+        let jet_ttl = SessionTtl::from(claims.jet_ttl);
+
         Ok(Self {
             jet_aid: claims.jet_aid,
             hosts,
             jet_ap,
+            jet_ttl,
             exp: claims.exp,
             jti: claims.jti,
         })

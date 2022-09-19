@@ -124,6 +124,7 @@ impl RdpClient {
                         destination_host: destination_host.clone(),
                     },
                 )
+                .with_ttl(association_claims.jet_ttl)
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 
@@ -226,6 +227,7 @@ impl RdpClient {
                     association_claims.jet_ap,
                     ConnectionModeDetails::Fwd { destination_host },
                 )
+                .with_ttl(association_claims.jet_ttl)
                 .with_recording_policy(association_claims.jet_rec)
                 .with_filtering_policy(association_claims.jet_flt);
 

@@ -5,6 +5,7 @@ use crate::session::{SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
 use camino::Utf8PathBuf;
+use futures::future::Either;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -109,9 +110,15 @@ where
         )
         .await?;
 
-        let res = tokio::select! {
-            res = transport::forward_bidirectional(self.transport_a, self.transport_b) => res.map(|_| ()),
-            _ = notify_kill.notified() => Ok(()),
+        let forward_fut = transport::forward_bidirectional(self.transport_a, self.transport_b);
+        tokio::pin!(forward_fut);
+
+        let kill_notified = notify_kill.notified();
+        tokio::pin!(kill_notified);
+
+        let res = match futures::future::select(forward_fut, kill_notified).await {
+            Either::Left((res, _)) => res.map(|_| ()),
+            Either::Right(_) => Ok(()),
         };
 
         crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;

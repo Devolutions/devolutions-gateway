@@ -27,7 +27,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// SessionInfo
+    /// Information about an ongoing Gateway session
     /// </summary>
     [DataContract(Name = "SessionInfo")]
     public partial class SessionInfo : IEquatable<SessionInfo>, IValidatableObject
@@ -46,14 +46,15 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="SessionInfo" /> class.
         /// </summary>
-        /// <param name="applicationProtocol">applicationProtocol (required).</param>
-        /// <param name="associationId">associationId (required).</param>
+        /// <param name="applicationProtocol">Protocol used during this session (required).</param>
+        /// <param name="associationId">Unique ID for this session (required).</param>
         /// <param name="connectionMode">connectionMode (required).</param>
-        /// <param name="destinationHost">destinationHost.</param>
-        /// <param name="filteringPolicy">filteringPolicy (required).</param>
-        /// <param name="recordingPolicy">recordingPolicy (required).</param>
-        /// <param name="startTimestamp">startTimestamp (required).</param>
-        public SessionInfo(string applicationProtocol = default(string), Guid associationId = default(Guid), ConnectionMode connectionMode = default(ConnectionMode), string destinationHost = default(string), bool filteringPolicy = default(bool), bool recordingPolicy = default(bool), DateTime startTimestamp = default(DateTime))
+        /// <param name="destinationHost">Destination Host.</param>
+        /// <param name="filteringPolicy">Filtering Policy (required).</param>
+        /// <param name="recordingPolicy">Recording Policy (required).</param>
+        /// <param name="startTimestamp">Date this session was started (required).</param>
+        /// <param name="timeToLive">Maximum session duration in minutes (0 is used for the infinite duration).</param>
+        public SessionInfo(string applicationProtocol = default(string), Guid associationId = default(Guid), ConnectionMode connectionMode = default(ConnectionMode), string destinationHost = default(string), bool filteringPolicy = default(bool), bool recordingPolicy = default(bool), DateTime startTimestamp = default(DateTime), long timeToLive = default(long))
         {
             // to ensure "applicationProtocol" is required (not null)
             if (applicationProtocol == null)
@@ -67,43 +68,57 @@ namespace Devolutions.Gateway.Client.Model
             this.RecordingPolicy = recordingPolicy;
             this.StartTimestamp = startTimestamp;
             this.DestinationHost = destinationHost;
+            this.TimeToLive = timeToLive;
         }
 
         /// <summary>
-        /// Gets or Sets ApplicationProtocol
+        /// Protocol used during this session
         /// </summary>
+        /// <value>Protocol used during this session</value>
         [DataMember(Name = "application_protocol", IsRequired = true, EmitDefaultValue = false)]
         public string ApplicationProtocol { get; set; }
 
         /// <summary>
-        /// Gets or Sets AssociationId
+        /// Unique ID for this session
         /// </summary>
+        /// <value>Unique ID for this session</value>
         [DataMember(Name = "association_id", IsRequired = true, EmitDefaultValue = false)]
         public Guid AssociationId { get; set; }
 
         /// <summary>
-        /// Gets or Sets DestinationHost
+        /// Destination Host
         /// </summary>
+        /// <value>Destination Host</value>
         [DataMember(Name = "destination_host", EmitDefaultValue = false)]
         public string DestinationHost { get; set; }
 
         /// <summary>
-        /// Gets or Sets FilteringPolicy
+        /// Filtering Policy
         /// </summary>
+        /// <value>Filtering Policy</value>
         [DataMember(Name = "filtering_policy", IsRequired = true, EmitDefaultValue = true)]
         public bool FilteringPolicy { get; set; }
 
         /// <summary>
-        /// Gets or Sets RecordingPolicy
+        /// Recording Policy
         /// </summary>
+        /// <value>Recording Policy</value>
         [DataMember(Name = "recording_policy", IsRequired = true, EmitDefaultValue = true)]
         public bool RecordingPolicy { get; set; }
 
         /// <summary>
-        /// Gets or Sets StartTimestamp
+        /// Date this session was started
         /// </summary>
+        /// <value>Date this session was started</value>
         [DataMember(Name = "start_timestamp", IsRequired = true, EmitDefaultValue = false)]
         public DateTime StartTimestamp { get; set; }
+
+        /// <summary>
+        /// Maximum session duration in minutes (0 is used for the infinite duration)
+        /// </summary>
+        /// <value>Maximum session duration in minutes (0 is used for the infinite duration)</value>
+        [DataMember(Name = "time_to_live", EmitDefaultValue = false)]
+        public long TimeToLive { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
@@ -120,6 +135,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("  FilteringPolicy: ").Append(FilteringPolicy).Append("\n");
             sb.Append("  RecordingPolicy: ").Append(RecordingPolicy).Append("\n");
             sb.Append("  StartTimestamp: ").Append(StartTimestamp).Append("\n");
+            sb.Append("  TimeToLive: ").Append(TimeToLive).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
@@ -186,6 +202,10 @@ namespace Devolutions.Gateway.Client.Model
                     this.StartTimestamp == input.StartTimestamp ||
                     (this.StartTimestamp != null &&
                     this.StartTimestamp.Equals(input.StartTimestamp))
+                ) && 
+                (
+                    this.TimeToLive == input.TimeToLive ||
+                    this.TimeToLive.Equals(input.TimeToLive)
                 );
         }
 
@@ -217,6 +237,7 @@ namespace Devolutions.Gateway.Client.Model
                 {
                     hashCode = (hashCode * 59) + this.StartTimestamp.GetHashCode();
                 }
+                hashCode = (hashCode * 59) + this.TimeToLive.GetHashCode();
                 return hashCode;
             }
         }

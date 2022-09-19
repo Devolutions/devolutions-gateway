@@ -337,6 +337,7 @@ async fn handle_jet_connect_impl(
                 }
 
                 let info = SessionInfo::new(association_id, association_claims.jet_ap, ConnectionModeDetails::Rdv)
+                    .with_ttl(association_claims.jet_ttl)
                     .with_recording_policy(association_claims.jet_rec)
                     .with_filtering_policy(association_claims.jet_flt);
 
@@ -594,7 +595,8 @@ async fn handle_jmux(
             ConnectionModeDetails::Fwd {
                 destination_host: main_destination_host,
             },
-        );
+        )
+        .with_ttl(claims.jet_ttl);
 
         let notify_kill = Arc::new(Notify::new());
 
@@ -608,9 +610,9 @@ async fn handle_jmux(
             .instrument(info_span!("jmux", client=%client_addr));
 
         let proxy_handle = tokio::spawn(proxy_fut);
-        let kill_notified = notify_kill.notified();
-
         tokio::pin!(proxy_handle);
+
+        let kill_notified = notify_kill.notified();
         tokio::pin!(kill_notified);
 
         let res = match futures::future::select(proxy_handle, kill_notified).await {
