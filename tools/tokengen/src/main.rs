@@ -27,7 +27,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let jti = Uuid::new_v4();
 
     let (cty, claims) = match app.subcmd {
-        SubCommand::Forward { dst_hst, jet_ap } => {
+        SubCommand::Forward {
+            dst_hst,
+            jet_ap,
+            jet_ttl,
+        } => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
@@ -36,6 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
@@ -56,6 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
                 jet_aid: Uuid::new_v4(),
+                jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: Some(CredsClaims {
                     prx_usr: &prx_usr,
@@ -75,6 +81,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
@@ -94,12 +101,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_ap,
             dst_hst,
             dst_addl,
+            jet_ttl,
         } => {
             let claims = JmuxClaims {
                 dst_hst: &dst_hst,
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_aid: Uuid::new_v4(),
+                jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 exp,
                 nbf,
@@ -187,6 +196,8 @@ enum SubCommand {
         dst_hst: String,
         #[clap(long)]
         jet_ap: Option<ApplicationProtocol>,
+        #[clap(long)]
+        jet_ttl: Option<u64>,
     },
     Rendezvous {
         #[clap(long)]
@@ -214,6 +225,8 @@ enum SubCommand {
         dst_hst: String,
         #[clap(long)]
         dst_addl: Vec<String>,
+        #[clap(long)]
+        jet_ttl: Option<u64>,
     },
     Kdc {
         #[clap(long)]
@@ -237,6 +250,7 @@ struct AssociationClaims<'a> {
     jet_cm: &'a str,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    jet_ttl: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
     dst_hst: Option<&'a str>,
@@ -268,6 +282,7 @@ struct JmuxClaims<'a> {
     dst_addl: Vec<&'a str>,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    jet_ttl: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
     exp: i64,
