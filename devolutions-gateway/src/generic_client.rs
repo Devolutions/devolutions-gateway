@@ -113,6 +113,7 @@ impl GenericClient {
                                 destination_host: selected_target.clone(),
                             },
                         )
+                        .with_ttl(association_claims.jet_ttl)
                         .with_recording_policy(recording_policy)
                         .with_filtering_policy(filtering_policy);
 

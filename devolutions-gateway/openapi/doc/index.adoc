@@ -1027,7 +1027,7 @@ Service configuration diagnostic
 [#SessionInfo]
 === _SessionInfo_ 
 
-
+Information about an ongoing Gateway session
 
 [.fields-SessionInfo]
 [cols="2,1,2,4,1"]
@@ -1037,13 +1037,13 @@ Service configuration diagnostic
 | application_protocol
 | X
 | String 
-| 
+| Protocol used during this session
 | 
 
 | association_id
 | X
 | UUID 
-| 
+| Unique ID for this session
 | uuid
 
 | connection_mode
@@ -1055,26 +1055,32 @@ Service configuration diagnostic
 | destination_host
 | 
 | String 
-| 
+| Destination Host
 | 
 
 | filtering_policy
 | X
 | Boolean 
-| 
+| Filtering Policy
 | 
 
 | recording_policy
 | X
 | Boolean 
-| 
+| Recording Policy
 | 
 
 | start_timestamp
 | X
 | Date 
-| 
+| Date this session was started
 | date-time
+
+| time_to_live
+| 
+| Long 
+| Maximum session duration in minutes (0 is used for the infinite duration)
+| int64
 
 |===
 

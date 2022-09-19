@@ -356,6 +356,7 @@ components:
       - Rsa
     SessionInfo:
       type: object
+      description: Information about an ongoing Gateway session
       required:
       - association_id
       - application_protocol
@@ -366,20 +367,31 @@ components:
       properties:
         application_protocol:
           type: string
+          description: Protocol used during this session
         association_id:
           type: string
           format: uuid
+          description: Unique ID for this session
         connection_mode:
           $ref: '#/components/schemas/ConnectionMode'
         destination_host:
           type: string
+          description: Destination Host
         filtering_policy:
           type: boolean
+          description: Filtering Policy
         recording_policy:
           type: boolean
+          description: Recording Policy
         start_timestamp:
           type: string
           format: date-time
+          description: Date this session was started
+        time_to_live:
+          type: integer
+          format: int64
+          description: Maximum session duration in minutes (0 is used for the infinite
+            duration)
     SubProvisionerKey:
       type: object
       required:

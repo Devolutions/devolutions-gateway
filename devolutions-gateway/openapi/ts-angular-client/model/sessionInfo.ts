@@ -12,13 +12,38 @@
 import { ConnectionMode } from './connectionMode';
 
 
+/**
+ * Information about an ongoing Gateway session
+ */
 export interface SessionInfo { 
+    /**
+     * Protocol used during this session
+     */
     application_protocol: string;
+    /**
+     * Unique ID for this session
+     */
     association_id: string;
     connection_mode: ConnectionMode;
+    /**
+     * Destination Host
+     */
     destination_host?: string;
+    /**
+     * Filtering Policy
+     */
     filtering_policy: boolean;
+    /**
+     * Recording Policy
+     */
     recording_policy: boolean;
+    /**
+     * Date this session was started
+     */
     start_timestamp: string;
+    /**
+     * Maximum session duration in minutes (0 is used for the infinite duration)
+     */
+    time_to_live?: number;
 }
 

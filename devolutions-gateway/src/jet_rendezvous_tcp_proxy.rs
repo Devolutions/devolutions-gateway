@@ -47,6 +47,7 @@ impl JetRendezvousTcpProxy {
             }
 
             let info = SessionInfo::new(association_id, claims.jet_ap.clone(), ConnectionModeDetails::Rdv)
+                .with_ttl(claims.jet_ttl)
                 .with_recording_policy(claims.jet_rec)
                 .with_filtering_policy(claims.jet_flt);
 
