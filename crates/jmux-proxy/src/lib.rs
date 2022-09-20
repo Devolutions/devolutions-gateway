@@ -89,34 +89,26 @@ impl JmuxProxy {
         self
     }
 
+    // TODO: consider using something like ChildTask<T> more widely in Devolutions Gateway
     pub fn spawn(self) -> JoinHandle<anyhow::Result<()>> {
         let fut = self.run();
         tokio::spawn(fut)
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
-        let Self {
-            cfg,
-            api_request_rx,
-            jmux_reader,
-            jmux_writer,
-        } = self;
-
         let span = Span::current();
-
-        run_proxy_impl(cfg, api_request_rx, jmux_reader, jmux_writer, span.clone())
-            .instrument(span)
-            .await
+        run_proxy_impl(self, span.clone()).instrument(span).await
     }
 }
 
-async fn run_proxy_impl(
-    cfg: JmuxConfig,
-    api_request_rx: Option<ApiRequestReceiver>,
-    jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
-    jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
-    span: Span,
-) -> anyhow::Result<()> {
+async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
+    let JmuxProxy {
+        cfg,
+        api_request_rx,
+        jmux_reader,
+        jmux_writer,
+    } = proxy;
+
     let (msg_to_send_tx, msg_to_send_rx) = mpsc::unbounded_channel::<Message>();
 
     let jmux_stream = FramedRead::new(jmux_reader, JmuxCodec);
@@ -128,11 +120,7 @@ async fn run_proxy_impl(
     }
     .spawn(span.clone());
 
-    let api_request_rx = if let Some(rx) = api_request_rx {
-        rx
-    } else {
-        mpsc::channel(1).1
-    };
+    let api_request_rx = api_request_rx.unwrap_or_else(|| mpsc::channel(1).1);
 
     let scheduler_task_handle = JmuxSchedulerTask {
         cfg,
@@ -143,7 +131,7 @@ async fn run_proxy_impl(
     }
     .spawn();
 
-    match tokio::try_join!(scheduler_task_handle, sender_task_handle).context("task join failed")? {
+    match tokio::try_join!(scheduler_task_handle.join(), sender_task_handle.join()).context("task join failed")? {
         (Ok(_), Err(e)) => debug!("Sender task failed: {}", e),
         (Err(e), Ok(_)) => debug!("Scheduler task failed: {}", e),
         (Err(scheduler_e), Err(sender_e)) => {
@@ -245,9 +233,9 @@ struct JmuxSenderTask<T: AsyncWrite + Unpin + Send + 'static> {
 }
 
 impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
-    fn spawn(self, span: Span) -> JoinHandle<anyhow::Result<()>> {
+    fn spawn(self, span: Span) -> ChildTask<anyhow::Result<()>> {
         let fut = self.run().instrument(span);
-        tokio::spawn(fut)
+        ChildTask(tokio::spawn(fut))
     }
 
     #[instrument("sender", skip_all)]
@@ -280,10 +268,10 @@ struct JmuxSchedulerTask<T: AsyncRead + Unpin + Send + 'static> {
 }
 
 impl<T: AsyncRead + Unpin + Send + 'static> JmuxSchedulerTask<T> {
-    fn spawn(self) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+    fn spawn(self) -> ChildTask<anyhow::Result<()>> {
         let parent_span = self.parent_span.clone();
         let fut = scheduler_task_impl(self).instrument(parent_span);
-        tokio::spawn(fut)
+        ChildTask(tokio::spawn(fut))
     }
 }
 
@@ -351,7 +339,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
-                        }.spawn(channel.span.clone());
+                        }
+                        .spawn(channel.span.clone())
+                        .detach();
 
                         DataReaderTask {
                             reader,
@@ -362,7 +352,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size: channel.maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
-                        }.spawn(channel.span.clone());
+                        }
+                        .spawn(channel.span.clone())
+                        .detach();
                     }
                 }
             }
@@ -430,7 +422,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         DataWriterTask {
                             writer,
                             data_rx,
-                        }.spawn(channel_span.clone());
+                        }
+                        .spawn(channel_span.clone())
+                        .detach();
 
                         DataReaderTask {
                             reader,
@@ -441,7 +435,9 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             maximum_packet_size,
                             msg_to_send_tx: msg_to_send_tx.clone(),
                             internal_msg_tx: internal_msg_tx.clone(),
-                        }.spawn(channel_span);
+                        }
+                        .spawn(channel_span)
+                        .detach();
                     }
                 }
             }
@@ -530,7 +526,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             internal_msg_tx: internal_msg_tx.clone(),
                             msg_to_send_tx: msg_to_send_tx.clone(),
                         }
-                        .spawn();
+                        .spawn()
+                        .detach();
                     }
                     Message::OpenSuccess(msg) => {
                         let local_id = LocalChannelId::from(msg.recipient_channel_id);
@@ -706,8 +703,8 @@ struct DataReaderTask {
 }
 
 impl DataReaderTask {
-    fn spawn(self, span: Span) {
-        tokio::spawn(
+    fn spawn(self, span: Span) -> ChildTask<()> {
+        let handle = tokio::spawn(
             async move {
                 if let Err(error) = self.run().await {
                     warn!(%error, "reader task failed");
@@ -715,6 +712,7 @@ impl DataReaderTask {
             }
             .instrument(span),
         );
+        ChildTask(handle)
     }
 
     async fn run(self) -> anyhow::Result<()> {
@@ -789,13 +787,13 @@ struct DataWriterTask {
 }
 
 impl DataWriterTask {
-    fn spawn(self, span: Span) {
+    fn spawn(self, span: Span) -> ChildTask<()> {
         let Self {
             mut writer,
             mut data_rx,
         } = self;
 
-        tokio::spawn(
+        let handle = tokio::spawn(
             async move {
                 while let Some(data) = data_rx.recv().await {
                     if let Err(error) = writer.write_all(&data).await {
@@ -806,6 +804,8 @@ impl DataWriterTask {
             }
             .instrument(span),
         );
+
+        ChildTask(handle)
     }
 }
 
@@ -819,9 +819,10 @@ struct StreamResolverTask {
 }
 
 impl StreamResolverTask {
-    fn spawn(self) {
+    fn spawn(self) -> ChildTask<()> {
         let span = self.channel.span.clone();
-        tokio::spawn(
+
+        let handle = tokio::spawn(
             async move {
                 if let Err(error) = self.run().await {
                     warn!(%error, "resolver task failed");
@@ -829,6 +830,8 @@ impl StreamResolverTask {
             }
             .instrument(span),
         );
+
+        ChildTask(handle)
     }
 
     async fn run(self) -> anyhow::Result<()> {
@@ -882,5 +885,30 @@ impl StreamResolverTask {
         }
 
         Ok(())
+    }
+}
+
+/// Aborts the running task when dropped.
+/// Also see https://github.com/tokio-rs/tokio/issues/1830 for some background.
+#[must_use]
+struct ChildTask<T>(JoinHandle<T>);
+
+impl<T> ChildTask<T> {
+    async fn join(mut self) -> Result<T, tokio::task::JoinError> {
+        (&mut self.0).await
+    }
+
+    fn abort(&self) {
+        self.0.abort()
+    }
+
+    fn detach(self) {
+        core::mem::forget(self);
+    }
+}
+
+impl<T> Drop for ChildTask<T> {
+    fn drop(&mut self) {
+        self.abort();
     }
 }
