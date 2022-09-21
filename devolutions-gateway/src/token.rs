@@ -833,7 +833,7 @@ fn validate_token_impl(
             let now = chrono::Utc::now().timestamp();
 
             match token_cache.lock().entry(id) {
-                Entry::Occupied(bucket) => {
+                Entry::Occupied(mut bucket) => {
                     if bucket.get().ip != source_ip {
                         anyhow::bail!(
                             "A token was reused from another IP for RDP protocol. A replay attack may have been attempted."
