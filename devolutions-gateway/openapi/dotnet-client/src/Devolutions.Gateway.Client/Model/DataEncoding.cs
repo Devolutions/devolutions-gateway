@@ -64,4 +64,29 @@ namespace Devolutions.Gateway.Client.Model
 
     }
 
+    public static class DataEncodingExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this DataEncoding variant)
+        {
+            switch (variant)
+            {
+                case DataEncoding.Multibase:
+                    return "Multibase";
+                case DataEncoding.Base64:
+                    return "Base64";
+                case DataEncoding.Base64Pad:
+                    return "Base64Pad";
+                case DataEncoding.Base64Url:
+                    return "Base64Url";
+                case DataEncoding.Base64UrlPad:
+                    return "Base64UrlPad";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

@@ -46,4 +46,23 @@ namespace Devolutions.Gateway.Client.Model
 
     }
 
+    public static class ConnectionModeExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this ConnectionMode variant)
+        {
+            switch (variant)
+            {
+                case ConnectionMode.Rdv:
+                    return "rdv";
+                case ConnectionMode.Fwd:
+                    return "fwd";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }

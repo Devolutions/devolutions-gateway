@@ -76,4 +76,33 @@ namespace Devolutions.Gateway.Client.Model
 
     }
 
+    public static class AccessScopeExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this AccessScope variant)
+        {
+            switch (variant)
+            {
+                case AccessScope.Star:
+                    return "*";
+                case AccessScope.GatewaySessionsRead:
+                    return "gateway.sessions.read";
+                case AccessScope.GatewaySessionTerminate:
+                    return "gateway.session.terminate";
+                case AccessScope.GatewayAssociationsRead:
+                    return "gateway.associations.read";
+                case AccessScope.GatewayDiagnosticsRead:
+                    return "gateway.diagnostics.read";
+                case AccessScope.GatewayJrlRead:
+                    return "gateway.jrl.read";
+                case AccessScope.GatewayConfigWrite:
+                    return "gateway.config.write";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }
