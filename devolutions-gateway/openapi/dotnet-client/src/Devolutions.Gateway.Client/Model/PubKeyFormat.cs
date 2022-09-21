@@ -46,4 +46,23 @@ namespace Devolutions.Gateway.Client.Model
 
     }
 
+    public static class PubKeyFormatExtensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        public static string ToValue(this PubKeyFormat variant)
+        {
+            switch (variant)
+            {
+                case PubKeyFormat.Spki:
+                    return "Spki";
+                case PubKeyFormat.Rsa:
+                    return "Rsa";
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+
 }
