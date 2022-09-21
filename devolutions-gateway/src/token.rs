@@ -842,7 +842,7 @@ fn validate_token_impl(
 
                     if now > bucket.get().last_use_timestamp + MAX_REUSE_INTERVAL_SECS {
                         anyhow::bail!(
-                            "A token was reused from the same IP for RDP protocol but the maximum reuse interval is exceeded."
+                            "A token was reused from the same IP for RDP protocol, but the maximum reuse interval is exceeded."
                         );
                     }
 
