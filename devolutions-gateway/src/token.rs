@@ -17,6 +17,7 @@ use zeroize::Zeroize;
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
+const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
 
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
@@ -620,6 +621,7 @@ pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
 pub struct TokenSource {
     ip: IpAddr,
     expiration_timestamp: i64,
+    last_use_timestamp: i64,
 }
 
 fn is_encrypted(token: &str) -> bool {
@@ -812,7 +814,7 @@ fn validate_token_impl(
     }
 
     match claims {
-        // Mitigate replay attacks for RDP associations by rejecting token re-use from a different
+        // Mitigate replay attacks for RDP associations by rejecting token reuse from a different
         // source address IP (RDP requires multiple connections, so we can't just reject everything)
         AccessTokenClaims::Association(
             AssociationTokenClaims {
@@ -827,23 +829,37 @@ fn validate_token_impl(
                 jet_ap: ApplicationProtocol::Known(Protocol::Rdp),
                 ..
             },
-        ) => match token_cache.lock().entry(id) {
-            Entry::Occupied(bucket) => {
-                if bucket.get().ip != source_ip {
-                    anyhow::bail!(
-                        "Received identical token twice from another IP for RDP protocol. A replay attack may have been attempted."
-                    );
+        ) => {
+            let now = chrono::Utc::now().timestamp();
+
+            match token_cache.lock().entry(id) {
+                Entry::Occupied(mut bucket) => {
+                    if bucket.get().ip != source_ip {
+                        anyhow::bail!(
+                            "A token was reused from another IP for RDP protocol. A replay attack may have been attempted."
+                        );
+                    }
+
+                    if now > bucket.get().last_use_timestamp + MAX_REUSE_INTERVAL_SECS {
+                        anyhow::bail!(
+                            "A token was reused from the same IP for RDP protocol, but the maximum reuse interval is exceeded."
+                        );
+                    }
+
+                    // Refresh the last use timestamp
+                    bucket.get_mut().last_use_timestamp = now;
+                }
+                Entry::Vacant(bucket) => {
+                    bucket.insert(TokenSource {
+                        ip: source_ip,
+                        expiration_timestamp: exp,
+                        last_use_timestamp: now,
+                    });
                 }
             }
-            Entry::Vacant(bucket) => {
-                bucket.insert(TokenSource {
-                    ip: source_ip,
-                    expiration_timestamp: exp,
-                });
-            }
-        },
+        }
 
-        // All other tokens can't be re-used even if source IP is identical
+        // All other tokens can't be reused even if source IP is identical
         AccessTokenClaims::Association(AssociationTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
@@ -856,6 +872,7 @@ fn validate_token_impl(
                 bucket.insert(TokenSource {
                     ip: source_ip,
                     expiration_timestamp: exp,
+                    last_use_timestamp: chrono::Utc::now().timestamp(),
                 });
             }
         },
@@ -863,7 +880,7 @@ fn validate_token_impl(
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
 
-        // KDC tokens are long-lived and may be re-used safely
+        // KDC tokens are long-lived and may be reused safely
         AccessTokenClaims::Kdc(_) => {}
 
         // JRL token must be more recent than the current revocation list
