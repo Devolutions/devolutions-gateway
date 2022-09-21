@@ -1,8 +1,15 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-    <ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
         <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/jetsocat.exe">
             <Link>runtimes\win-x64\native\%(Filename)%(Extension)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
+    </ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+        <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat">
+            <Link>%(Filename)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <PublishState>Included</PublishState>
+        </Content>
     </ItemGroup>
 </Project>
