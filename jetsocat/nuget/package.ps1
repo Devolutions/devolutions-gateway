@@ -12,8 +12,8 @@ function Package-Jetsocat {
     New-Item -ItemType Directory -Force -Path "bin"
 
     $Org = "Devolutions"
-    $Repo = "devolutions-gateway" # public repo, no API key needed
-    $Architectures = ( "x86_64" )
+    $Repo = "devolutions-gateway"
+    $Platforms = ( "windows", "macos" )
 
     $Release = Invoke-WebRequest https://api.github.com/repos/$Org/$Repo/releases/latest -Headers @{ 
         "accept" = "application/json" 
@@ -22,21 +22,36 @@ function Package-Jetsocat {
     $ReleaseJson = $Release.Content | ConvertFrom-Json
     $JetsocatVersion = $ReleaseJson.tag_name
 
-    foreach ($Architecture in $Architectures) {
-        $ArchDir = $Architecture
-
-        if ($Architecture -eq "x86_64") {
-            $ArchDir = "x64"
+    foreach ($Platform in $Platforms) {
+        $Architectures = switch ($Platform) {
+            'windows' { ('x86_64') }
+            'macos' { ('x86_64', 'arm64', 'universal') }
         }
 
-        $DestPath = Join-Path -Path "bin" -ChildPath $ArchDir
-        New-Item -ItemType Directory -Force -Path $DestPath
-        $Asset = $ReleaseJson.assets | Where-Object name -Match "jetsocat_windows_.*_${Architecture}.exe"
+        foreach ($Architecture in $Architectures) {
+            Write-Host $Platform $Architecture
 
-        Invoke-WebRequest $Asset.url -Headers @{ 
-            "accept" = "application/octet-stream" 
-            "authorization" = "Bearer $AccessToken"
-        } -OutFile (Join-Path -Path $DestPath -ChildPath "jetsocat.exe")
+            $ArchDir = $Architecture
+
+            if ($Architecture -eq "x86_64") {
+                $ArchDir = "x64"
+            }
+
+            $DestPath = Join-Path "bin" $Platform $ArchDir
+            New-Item -ItemType Directory -Force -Path $DestPath
+            $Asset = $ReleaseJson.assets | Where-Object name -Match "jetsocat_${Platform}_.*_${Architecture}*"
+
+            $OutFile = "jetsocat"
+
+            if ($Platform -Eq "windows") {
+                $OutFile += ".exe"
+            }
+
+            Invoke-WebRequest $Asset.url -Headers @{ 
+                "accept" = "application/octet-stream" 
+                "authorization" = "Bearer $AccessToken"
+            } -OutFile (Join-Path -Path $DestPath -ChildPath $OutFile)
+        }
     }
 
     $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
