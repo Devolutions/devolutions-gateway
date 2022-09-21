@@ -219,6 +219,39 @@ jobs:
           name: jetsocat
           path: ${{ steps.build.outputs.staging-path }}
 
+  jetsocat-lipo:
+    name: jetsocat macos universal
+    runs-on: ubuntu-20.04
+    needs: [preflight, jetsocat]
+
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+
+      - name: Configure runner
+        run: |
+          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2021.2.4/cctools-x86_64-ubuntu-20.04.tar.xz
+          tar -xf cctools-x86_64-ubuntu-20.04.tar.xz -C /tmp
+          sudo mv /tmp/cctools-x86_64-ubuntu-20.04/bin/lipo /usr/local/bin
+          rm -r cctools-x86_64-ubuntu-20.04.tar.xz
+
+      - name: Lipo
+        shell: pwsh
+        run: |
+          $OutputPath = Join-Path "macos" "universal"
+          New-Item -ItemType Directory -Path $OutputPath | Out-Null
+          $Binaries = Get-ChildItem -Recurse -Path "macos" -Filter "jetsocat_*" | Foreach-Object { $_.FullName } | Select -Unique
+          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath "jetsocat_macos_${{ needs.preflight.outputs.version }}_universal")) + $Binaries) -Join ' '
+          Write-Host $LipoCmd
+          Invoke-Expression $LipoCmd
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: jetsocat
+          path: .
+
   devolutions-gateway:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
@@ -354,6 +387,7 @@ jobs:
       - preflight
       - devolutions-gateway
       - jetsocat
+      - jetsocat-lipo
       - upload-git-log
 
     steps:
