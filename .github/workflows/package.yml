@@ -129,7 +129,7 @@ jobs:
           - os: windows
             runner: windows-2019
           - os: macos
-            runner: macos-10.11
+            runner: macos-10.12
           - os: linux
             runner: ubuntu-20.04
         exclude:
