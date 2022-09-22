@@ -100,7 +100,7 @@ jobs:
           os: [ windows, linux ]
           include:
             - os: windows
-              runner: windows-2019
+              runner: windows-2022
             - os: linux
               runner: ubuntu-20.04
 
