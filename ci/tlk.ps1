@@ -593,6 +593,9 @@ class TlkRecipe
             $CargoArgs += '--workspace'
         }
 
+        $CargoArgs += '--verbose'
+        $CargoArgs += '--locked'
+
         $CargoTarget = $this.Target.CargoTarget()
         $CargoProfile = $this.Target.CargoProfile
 

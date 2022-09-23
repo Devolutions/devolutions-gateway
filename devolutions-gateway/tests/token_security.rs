@@ -1,5 +1,7 @@
 use anyhow::Context as _;
-use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey};
+use devolutions_gateway::token::{
+    new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
 use picky::jose::jwe;
@@ -381,6 +383,7 @@ fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
 /// Assert that a token is refused if it doesn't conform to the scope rules:
 /// - Gateway ID if `jet_gw_id` claim is present
 /// - Content Type if `kid` header parameter is present and a subkey is used
+/// - The validity duration is small enough when a subkey is used
 #[rstest]
 fn with_scopes(
     jrl: Mutex<JrlTokenClaims>,
@@ -410,7 +413,12 @@ fn with_scopes(
         let should_succeed = should_succeed
             && match (use_subkey, &claims) {
                 (false, _) => true,
-                (true, TokenClaims::Jmux(_) | TokenClaims::Association(_)) => true,
+                (
+                    true,
+                    TokenClaims::Jmux(JmuxClaims { nbf, exp, .. })
+                    | TokenClaims::Association(AssociationClaims { nbf, exp, .. })
+                    | TokenClaims::Kdc(KdcClaims { nbf, exp, .. }),
+                ) => exp - nbf <= MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
                 (true, _) => false,
             };
 
@@ -470,11 +478,14 @@ fn with_scopes(
     );
 }
 
-fn association_or_jmux_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
-    prop_oneof![
-        any_jmux_claims(now).prop_map(TokenClaims::Jmux),
-        any_association_claims(now).prop_map(TokenClaims::Association),
-    ]
+fn subkey_compatible_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
+    (15..MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS).prop_flat_map(move |validity_duration| {
+        prop_oneof![
+            any_jmux_claims(now, validity_duration).prop_map(TokenClaims::Jmux),
+            any_association_claims(now, validity_duration).prop_map(TokenClaims::Association),
+            any_kdc_claims(now, validity_duration).prop_map(TokenClaims::Kdc),
+        ]
+    })
 }
 
 /// Randomly choose between the provided kid and a newly generated one
@@ -552,7 +563,7 @@ fn with_subkey(
 
     proptest!(
         ProptestConfig::with_cases(8),
-        |(kid in kid(&subkey_metadata.kid), claims in association_or_jmux_claims(now).no_shrink())| {
+        |(kid in kid(&subkey_metadata.kid), claims in subkey_compatible_claims(now).no_shrink())| {
             test_impl(kid, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         }
     );
