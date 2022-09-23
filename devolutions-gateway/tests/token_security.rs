@@ -1,5 +1,7 @@
 use anyhow::Context as _;
-use devolutions_gateway::token::{new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey};
+use devolutions_gateway::token::{
+    new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
 use picky::jose::jwe;
@@ -416,7 +418,7 @@ fn with_scopes(
                     TokenClaims::Jmux(JmuxClaims { nbf, exp, .. })
                     | TokenClaims::Association(AssociationClaims { nbf, exp, .. })
                     | TokenClaims::Kdc(KdcClaims { nbf, exp, .. }),
-                ) => exp - nbf <= 10 * 60,
+                ) => exp - nbf <= MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
                 (true, _) => false,
             };
 
@@ -477,7 +479,7 @@ fn with_scopes(
 }
 
 fn subkey_compatible_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
-    (15..600i64).prop_flat_map(move |validity_duration| {
+    (15..MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS).prop_flat_map(move |validity_duration| {
         prop_oneof![
             any_jmux_claims(now, validity_duration).prop_map(TokenClaims::Jmux),
             any_association_claims(now, validity_duration).prop_map(TokenClaims::Association),

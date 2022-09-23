@@ -1,5 +1,7 @@
 use devolutions_gateway::session::{ConnectionModeDetails, SessionInfo};
-use devolutions_gateway::token::{self, AccessScope, ApplicationProtocol, Protocol};
+use devolutions_gateway::token::{
+    self, AccessScope, ApplicationProtocol, Protocol, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+};
 use devolutions_gateway::utils::TargetAddr;
 use proptest::collection::vec;
 use proptest::option;
@@ -327,5 +329,6 @@ pub fn any_claims_with_validity_duration(now: i64, validity_duration: i64) -> im
 }
 
 pub fn any_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
-    (15..1500i64).prop_flat_map(move |validity_duration| any_claims_with_validity_duration(now, validity_duration))
+    (15..(MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS * 2))
+        .prop_flat_map(move |validity_duration| any_claims_with_validity_duration(now, validity_duration))
 }
