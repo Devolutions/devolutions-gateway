@@ -18,6 +18,7 @@ use zeroize::Zeroize;
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
 const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
 const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
+const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: u64 = 60 * 10; // 10 minutes
 
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
 pub type CurrentJrl = Mutex<JrlTokenClaims>;
@@ -765,8 +766,19 @@ fn validate_token_impl(
 
     if using_subkey {
         match content_type {
-            ContentType::Association | ContentType::Jmux => {}
+            ContentType::Association | ContentType::Jmux | ContentType::Kdc => {}
             _ => anyhow::bail!("Subkey can't be used to sign a {content_type:?} token"),
+        }
+
+        // Subkeys can only be used to sign short-lived token
+        if claims
+            .get("nbf")
+            .and_then(Value::as_u64)
+            .zip(claims.get("exp").and_then(Value::as_u64))
+            .into_iter()
+            .any(|(nbf, exp)| exp - nbf > MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS)
+        {
+            anyhow::bail!("invalid `nbf` and `exp` claims for subkey-signed token");
         }
     }
 

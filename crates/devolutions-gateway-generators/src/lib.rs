@@ -166,7 +166,7 @@ impl AssociationClaims {
     }
 }
 
-pub fn any_association_claims(now: i64) -> impl Strategy<Value = AssociationClaims> {
+pub fn any_association_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = AssociationClaims> {
     (
         uuid_typed(),
         jet_ap_and_jet_cm(),
@@ -183,7 +183,7 @@ pub fn any_association_claims(now: i64) -> impl Strategy<Value = AssociationClai
                 jet_flt,
                 jti,
                 nbf: now,
-                exp: now + 1000,
+                exp: now + validity_duration,
             },
         )
 }
@@ -206,12 +206,12 @@ pub struct ScopeClaims {
     pub jti: Uuid,
 }
 
-pub fn any_scope_claims(now: i64) -> impl Strategy<Value = ScopeClaims> {
+pub fn any_scope_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = ScopeClaims> {
     (access_scope(), uuid_typed()).prop_map(move |(scope, jti)| ScopeClaims {
         scope,
         jti,
         nbf: now,
-        exp: now + 1000,
+        exp: now + validity_duration,
     })
 }
 
@@ -223,12 +223,12 @@ pub struct BridgeClaims {
     pub jti: Uuid,
 }
 
-pub fn any_bridge_claims(now: i64) -> impl Strategy<Value = BridgeClaims> {
+pub fn any_bridge_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = BridgeClaims> {
     (target_addr(), uuid_typed()).prop_map(move |(target_host, jti)| BridgeClaims {
         target_host,
         jti,
         nbf: now,
-        exp: now + 1000,
+        exp: now + validity_duration,
     })
 }
 
@@ -244,7 +244,7 @@ pub struct JmuxClaims {
     pub jti: Uuid,
 }
 
-pub fn any_jmux_claims(now: i64) -> impl Strategy<Value = JmuxClaims> {
+pub fn any_jmux_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = JmuxClaims> {
     (
         uuid_typed(),
         host(),
@@ -259,7 +259,7 @@ pub fn any_jmux_claims(now: i64) -> impl Strategy<Value = JmuxClaims> {
             jet_ap,
             jti,
             nbf: now,
-            exp: now + 1000,
+            exp: now + validity_duration,
         })
 }
 
@@ -272,7 +272,7 @@ pub struct KdcClaims {
     pub jti: Uuid,
 }
 
-pub fn any_kdc_claims(now: i64) -> impl Strategy<Value = KdcClaims> {
+pub fn any_kdc_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = KdcClaims> {
     (
         "[a-z0-9_-]{5,25}",
         "(tcp|udp)://[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?",
@@ -283,7 +283,7 @@ pub fn any_kdc_claims(now: i64) -> impl Strategy<Value = KdcClaims> {
             krb_kdc,
             jti,
             nbf: now,
-            exp: now + 1000,
+            exp: now + validity_duration,
         })
 }
 
@@ -316,12 +316,16 @@ impl TokenClaims {
     }
 }
 
-pub fn any_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
+pub fn any_claims_with_validity_duration(now: i64, validity_duration: i64) -> impl Strategy<Value = TokenClaims> {
     prop_oneof![
-        any_scope_claims(now).prop_map(TokenClaims::Scope),
-        any_bridge_claims(now).prop_map(TokenClaims::Bridge),
-        any_kdc_claims(now).prop_map(TokenClaims::Kdc),
-        any_jmux_claims(now).prop_map(TokenClaims::Jmux),
-        any_association_claims(now).prop_map(TokenClaims::Association),
+        any_scope_claims(now, validity_duration).prop_map(TokenClaims::Scope),
+        any_bridge_claims(now, validity_duration).prop_map(TokenClaims::Bridge),
+        any_kdc_claims(now, validity_duration).prop_map(TokenClaims::Kdc),
+        any_jmux_claims(now, validity_duration).prop_map(TokenClaims::Jmux),
+        any_association_claims(now, validity_duration).prop_map(TokenClaims::Association),
     ]
+}
+
+pub fn any_claims(now: i64) -> impl Strategy<Value = TokenClaims> {
+    (15..1500i64).prop_flat_map(move |validity_duration| any_claims_with_validity_duration(now, validity_duration))
 }
