@@ -242,7 +242,7 @@ jobs:
           $OutputPath = Join-Path "macos" "universal"
           New-Item -ItemType Directory -Path $OutputPath | Out-Null
           $Binaries = Get-ChildItem -Recurse -Path "macos" -Filter "jetsocat_*" | Foreach-Object { $_.FullName } | Select -Unique
-          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath "jetsocat_macos_${{ needs.preflight.outputs.version }}_universal")) + $Binaries) -Join ' '
+          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath "jetsocat_macOS_${{ needs.preflight.outputs.version }}_universal")) + $Binaries) -Join ' '
           Write-Host $LipoCmd
           Invoke-Expression $LipoCmd
 
