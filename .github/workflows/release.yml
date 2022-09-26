@@ -347,16 +347,11 @@ jobs:
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
     steps:
-      - name: Check out Devolutions/actions
+      - name: Check out ${{ github.repository }}
         uses: actions/checkout@v3
-        with:
-          repository: Devolutions/actions
-          ref: master
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-          path: ./.github/workflows
 
       - name: Install Devolutions Toolbox
-        uses: ./.github/workflows/toolbox-install
+        uses: devolutions/actions/toolbox-install@master
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
