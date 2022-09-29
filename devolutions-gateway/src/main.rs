@@ -39,19 +39,19 @@ fn main() -> anyhow::Result<()> {
                 r#"HELP:
 
     Run:
-        {executable}
+        "{executable}"
 
     Run as service:
-        {executable} --service
+        "{executable}" --service
 
     Initialize configuration only (will not override existing configuration):
-        {executable} --config-init-only
+        "{executable}" --config-init-only
 
     Install service:
-        {executable} service register
+        "{executable}" service register
 
     Uninstall service:
-        {executable} service unregister
+        "{executable}" service unregister
 "#
             )
         }
@@ -82,12 +82,9 @@ fn main() -> anyhow::Result<()> {
         }
         CliAction::ConfigInitOnly => {
             let conf_file = devolutions_gateway::config::load_conf_file_or_generate_new()?;
-            println!(
-                r#"============------ Configuration ------============
-{conf_file:?}
-============---------------------------============
-"#
-            );
+            let conf_file_json =
+                serde_json::to_string_pretty(&conf_file).context("Couldn't represent config file as JSON")?;
+            println!("{conf_file_json}");
         }
         CliAction::Run { service_mode } => {
             let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
