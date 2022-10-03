@@ -5,6 +5,12 @@
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+        <None Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/jetsocat.exe">
+            <Link>runtimes\win-arm64\native\%(Filename)%(Extension)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
     <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat">
             <Link>%(Filename)</Link>
