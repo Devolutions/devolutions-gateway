@@ -2,7 +2,23 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway by release.
 
-## Unpublished
+## [Unreleased]
+
+## 2022.3.1 (2022-10-03)
+
+### Improvements
+
+- _dgw_: improve CLI output ([#338](https://github.com/Devolutions/devolutions-gateway/pull/338)) (d7bd9dc67c25dc7b67d1f10d8ce77290ec32186a)
+
+### Features
+
+- _dgw_: extend subkey capabilities to KDC tokens ([#334](https://github.com/Devolutions/devolutions-gateway/pull/334)) (cdc53d0e989b091800f02489d2ce4d5ce9763ac1)
+
+  With this change, a subkey is allowed to sign a short-lived KDC token.
+
+### Build
+
+- _jetsocat-nuget_: add win-arm64 to nuget package ([#339](https://github.com/Devolutions/devolutions-gateway/pull/339)) (2a676caddfd1ba8c437ed6f20e6f646bae64326f)
 
 ## 2022.3.0 (2022-09-21)
 
