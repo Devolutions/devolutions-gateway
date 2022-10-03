@@ -155,8 +155,6 @@ jobs:
           - arch: x86
             os: linux
           - arch: arm64
-            os: windows
-          - arch: arm64
             os: linux
 
     steps:
@@ -177,6 +175,20 @@ jobs:
       - name: Configure Windows runner
         if: matrix.os == 'windows' && matrix.arch == 'x86'
         run: rustup target add i686-pc-windows-msvc
+
+      - name: Fix ring dependency for Windows ARM64
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          rustup target add aarch64-pc-windows-msvc
+          @('', '[patch.crates-io]',
+          'ring = { git = "https://github.com/awakecoding/ring", branch = "0.16.20_alpha" }') | % {
+            Add-Content -Path "./Cargo.toml" -Value $_
+          }
+          $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
+          $VCINSTALLDIR = Join-Path $VSINSTALLDIR "VC"
+          $LLVM_ROOT = Join-Path $VCINSTALLDIR "Tools\Llvm\x64"
+          echo "PATH=$Env:PATH;${LLVM_ROOT}\bin" >> $Env:GITHUB_ENV
 
       - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
