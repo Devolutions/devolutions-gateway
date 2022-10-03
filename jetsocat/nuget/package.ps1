@@ -24,7 +24,7 @@ function Package-Jetsocat {
 
     foreach ($Platform in $Platforms) {
         $Architectures = switch ($Platform) {
-            'windows' { ('x86_64') }
+            'windows' { ('x86_64', 'arm64') }
             'macos' { ('x86_64', 'arm64', 'universal') }
         }
 
