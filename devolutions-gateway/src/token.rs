@@ -1,5 +1,4 @@
 use crate::utils::TargetAddr;
-use anyhow::Context as _;
 use core::fmt;
 use nonempty::NonEmpty;
 use parking_lot::Mutex;
@@ -12,6 +11,7 @@ use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -78,7 +78,7 @@ pub struct BadContentType {
 
 impl fmt::Display for BadContentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unexpected content type: {}", self.value)
+        write!(f, "Unexpected content type: {}", self.value)
     }
 }
 
@@ -136,6 +136,15 @@ impl ApplicationProtocol {
 impl Default for ApplicationProtocol {
     fn default() -> Self {
         Self::unknown()
+    }
+}
+
+impl fmt::Display for ApplicationProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApplicationProtocol::Known(protocol) => write!(f, "{protocol:?}"),
+            ApplicationProtocol::Unknown(protocol) => write!(f, "{protocol}"),
+        }
     }
 }
 
@@ -631,6 +640,62 @@ fn is_encrypted(token: &str) -> bool {
     num_dots == 4
 }
 
+#[derive(Error, Debug)]
+pub enum TokenError {
+    #[error("Delegation key is missing")]
+    MissingDelegationKey,
+    #[error("Invalid JWE token")]
+    Jwe {
+        #[from]
+        source: picky::jose::jwe::JweError,
+    },
+    #[error("Invalid JWE token payload")]
+    JwePayload { source: std::str::Utf8Error },
+    #[error("Invalid JWS token")]
+    Jws {
+        #[from]
+        source: picky::jose::jws::JwsError,
+    },
+    #[error("Failed to verify token signature using {key}")]
+    SignatureVerification {
+        source: picky::jose::jws::JwsError,
+        key: &'static str,
+    },
+    #[error("Key ID (kid) {provided_kid} in token is referring to an unknown subkey")]
+    UnknownSubkey { provided_kid: String },
+    #[error("Invalid content type for token")]
+    BadContentType {
+        #[from]
+        source: BadContentType,
+    },
+    #[error("Invalid JWT")]
+    Jwt {
+        #[from]
+        source: picky::jose::jwt::JwtError,
+    },
+    #[error("Subkey can't be used to sign a {content_type:?} token")]
+    ContentTypeNotAllowedForSubkey { content_type: ContentType },
+    #[error("Invalid `nbf` and `exp` claims for subkey-signed token")]
+    InvalidValidityForSubkey,
+    #[error("Claim `{name}` is malformed")]
+    MalformedClaim { name: &'static str, source: anyhow::Error },
+    #[error("Gateway ID scope mismatch")]
+    GatewayIdScopeMismatch,
+    #[error("A revoked value is contained")]
+    Revoked,
+    #[error("Invalid claims for {content_type:?} token")]
+    InvalidClaimScheme {
+        content_type: ContentType,
+        source: serde_json::Error,
+    },
+    #[error("Payload contains secrets that were not encrypted inside a JWE token")]
+    PlaintextSecrets,
+    #[error("Previously used token unexpectedly reused ({reason})")]
+    UnexpectedReplay { reason: &'static str },
+    #[error("JSON Revocation List")]
+    OldJrl,
+}
+
 #[derive(typed_builder::TypedBuilder)]
 pub struct TokenValidator<'a> {
     source_ip: IpAddr,
@@ -643,7 +708,7 @@ pub struct TokenValidator<'a> {
 }
 
 impl TokenValidator<'_> {
-    pub fn validate(&self, token: &str) -> anyhow::Result<AccessTokenClaims> {
+    pub fn validate(&self, token: &str) -> Result<AccessTokenClaims, TokenError> {
         validate_token_impl(
             token,
             self.source_ip,
@@ -667,7 +732,7 @@ fn validate_token_impl(
     delegation_key: Option<&PrivateKey>,
     subkey: Option<&Subkey>,
     gw_id: Option<Uuid>,
-) -> anyhow::Result<AccessTokenClaims> {
+) -> Result<AccessTokenClaims, TokenError> {
     use picky::jose::jwe::Jwe;
     use picky::jose::jwt::{JwtDate, JwtSig, JwtValidator};
     use serde_json::Value;
@@ -681,24 +746,25 @@ fn validate_token_impl(
 
     let signed_jwt = if is_encrypted {
         let encrypted_jwt = token;
-        let delegation_key = delegation_key.context("Delegation key is missing")?;
-        jwe_token =
-            Jwe::decode(encrypted_jwt, delegation_key).context("Failed to decode encrypted JWT routing token")?;
-        std::str::from_utf8(&jwe_token.payload).context("Failed to decode encrypted JWT routing token payload")?
+        let delegation_key = delegation_key.ok_or_else(|| TokenError::MissingDelegationKey)?;
+        jwe_token = Jwe::decode(encrypted_jwt, delegation_key)?;
+        std::str::from_utf8(&jwe_token.payload).map_err(|source| TokenError::JwePayload { source })?
     } else {
         token
     };
 
     let (jwt, using_subkey): (JwtSig, bool) = {
-        let raw_jws = RawJws::decode(signed_jwt).context("Failed to decode signed payload of JWT routing token")?;
+        let raw_jws = RawJws::decode(signed_jwt)?;
 
         match (&raw_jws.header.kid, subkey) {
             // Standard verification using master provisioner key
             (None, _) => (
-                raw_jws
-                    .verify(provisioner_key)
-                    .map(JwtSig::from)
-                    .context("Failed to verify signature of JWT routing token using the provisioner key")?,
+                raw_jws.verify(provisioner_key).map(JwtSig::from).map_err(|source| {
+                    TokenError::SignatureVerification {
+                        source,
+                        key: "main provisioner key",
+                    }
+                })?,
                 false,
             ),
 
@@ -713,14 +779,19 @@ fn validate_token_impl(
                 raw_jws
                     .verify(subkey)
                     .map(JwtSig::from)
-                    .context("Failed to verify signature of JWT routing token using the subkey")?,
+                    .map_err(|source| TokenError::SignatureVerification {
+                        source,
+                        key: "sub provisioner key",
+                    })?,
                 true,
             ),
 
             // Subkey is missing or kid does not match
             (Some(provided_kid), maybe_subkey) => {
                 debug!(kid = %provided_kid, subkey = ?maybe_subkey, "bad subkey usage detected");
-                anyhow::bail!("kid in token is referring to an unknown subkey")
+                return Err(TokenError::UnknownSubkey {
+                    provided_kid: provided_kid.to_owned(),
+                });
             }
         }
     };
@@ -732,7 +803,9 @@ fn validate_token_impl(
     let strict_validator = JwtValidator::strict(now);
 
     let (claims, content_type) = if let Some(content_type) = jwt.header.cty.as_deref() {
-        let content_type = content_type.parse::<ContentType>()?;
+        let content_type = content_type
+            .parse::<ContentType>()
+            .map_err(|source| TokenError::BadContentType { source })?;
 
         let claims = match content_type {
             ContentType::Association
@@ -768,7 +841,7 @@ fn validate_token_impl(
     if using_subkey {
         match content_type {
             ContentType::Association | ContentType::Jmux | ContentType::Kdc => {}
-            _ => anyhow::bail!("Subkey can't be used to sign a {content_type:?} token"),
+            _ => return Err(TokenError::ContentTypeNotAllowedForSubkey { content_type }),
         }
 
         // Subkeys can only be used to sign short-lived token
@@ -779,19 +852,22 @@ fn validate_token_impl(
             .into_iter()
             .any(|(nbf, exp)| exp - nbf > MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS)
         {
-            anyhow::bail!("invalid `nbf` and `exp` claims for subkey-signed token");
+            return Err(TokenError::InvalidValidityForSubkey);
         }
     }
 
     if let Some(Value::String(expected_id)) = claims.get("jet_gw_id") {
-        let expected_id = Uuid::parse_str(expected_id).context("bad claim `jet_gw_id`")?;
+        let expected_id = Uuid::parse_str(expected_id).map_err(|source| TokenError::MalformedClaim {
+            name: "jet_gw_id",
+            source: anyhow::Error::from(source),
+        })?;
 
         match gw_id {
             // Gateway ID is required and must be equal to the scope
             Some(this_gw_id) if expected_id == this_gw_id => {}
 
             // Gateway ID scope rule is not respected
-            Some(_) => anyhow::bail!("This token can't be used for this Gateway (bad ID scope)"),
+            Some(_) => return Err(TokenError::GatewayIdScopeMismatch),
             None => {
                 warn!("This token is restricted to a specific gateway, but no ID has been assigned. This may become a hard error in the future.")
             }
@@ -803,7 +879,7 @@ fn validate_token_impl(
     for (key, revoked_values) in &revocation_list.lock().jrl {
         if let Some(value) = claims.get(key) {
             if revoked_values.contains(value) {
-                anyhow::bail!("Received a token containing a revoked value.");
+                return Err(TokenError::Revoked);
             }
         }
     }
@@ -818,12 +894,12 @@ fn validate_token_impl(
         ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
     }
-    .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
+    .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
     // === Applying additional validations as appropriate === //
 
     if claims.contains_secret() && !is_encrypted {
-        anyhow::bail!("Received a non encrypted JWT containing secrets. This is unacceptable, do it right!");
+        return Err(TokenError::PlaintextSecrets);
     }
 
     match claims {
@@ -846,21 +922,19 @@ fn validate_token_impl(
             let now = chrono::Utc::now().timestamp();
 
             match token_cache.lock().entry(id) {
-                Entry::Occupied(mut bucket) => {
+                Entry::Occupied(bucket) => {
                     if bucket.get().ip != source_ip {
-                        anyhow::bail!(
-                            "A token was reused from another IP for RDP protocol. A replay attack may have been attempted."
-                        );
+                        warn!("A replay attack may have been attempted.");
+                        return Err(TokenError::UnexpectedReplay {
+                            reason: "different source IP",
+                        });
                     }
 
                     if now > bucket.get().last_use_timestamp + MAX_REUSE_INTERVAL_SECS {
-                        anyhow::bail!(
-                            "A token was reused from the same IP for RDP protocol, but the maximum reuse interval is exceeded."
-                        );
+                        return Err(TokenError::UnexpectedReplay {
+                            reason: "maximum reuse interval is exceeded",
+                        });
                     }
-
-                    // Refresh the last use timestamp
-                    bucket.get_mut().last_use_timestamp = now;
                 }
                 Entry::Vacant(bucket) => {
                     bucket.insert(TokenSource {
@@ -879,7 +953,10 @@ fn validate_token_impl(
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
-                anyhow::bail!("Received identical token twice. A replay attack may have been attempted.");
+                warn!("A replay attack may have been attempted.");
+                return Err(TokenError::UnexpectedReplay {
+                    reason: "never allowed for this usecase",
+                });
             }
             Entry::Vacant(bucket) => {
                 bucket.insert(TokenSource {
@@ -899,7 +976,7 @@ fn validate_token_impl(
         // JRL token must be more recent than the current revocation list
         AccessTokenClaims::Jrl(JrlTokenClaims { iat, .. }) => {
             if iat < revocation_list.lock().iat {
-                anyhow::bail!("Received an older JWT Revocation List token.");
+                return Err(TokenError::OldJrl);
             }
         }
     }
@@ -922,7 +999,7 @@ pub mod unsafe_debug {
     pub fn dangerous_validate_token(
         token: &str,
         delegation_key: Option<&PrivateKey>,
-    ) -> anyhow::Result<AccessTokenClaims> {
+    ) -> Result<AccessTokenClaims, TokenError> {
         use picky::jose::jwe::Jwe;
         use picky::jose::jwt::JwtSig;
         use serde_json::Value;
@@ -937,18 +1014,16 @@ pub mod unsafe_debug {
 
         let signed_jwt = if is_encrypted {
             let encrypted_jwt = token;
-            let delegation_key = delegation_key.context("Delegation key is missing")?;
-            jwe_token =
-                Jwe::decode(encrypted_jwt, delegation_key).context("Failed to decode encrypted JWT routing token")?;
-            std::str::from_utf8(&jwe_token.payload).context("Failed to decode encrypted JWT routing token payload")?
+            let delegation_key = delegation_key.ok_or_else(|| TokenError::MissingDelegationKey)?;
+            jwe_token = Jwe::decode(encrypted_jwt, delegation_key)?;
+            std::str::from_utf8(&jwe_token.payload).map_err(|source| TokenError::JwePayload { source })?
         } else {
             token
         };
 
         let jwt = RawJws::decode(signed_jwt)
             .map(RawJws::discard_signature)
-            .map(JwtSig::from)
-            .context("Failed to decode signed payload of JWT routing token")?;
+            .map(JwtSig::from)?;
 
         // === Extracting content type BUT without validating JWT claims === //
 
@@ -979,7 +1054,7 @@ pub mod unsafe_debug {
             ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
         }
-        .with_context(|| format!("Invalid claims for {content_type:?} token"))?;
+        .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
         // Other checks are removed as well
 

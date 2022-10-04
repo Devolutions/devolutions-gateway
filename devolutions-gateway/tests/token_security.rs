@@ -1,6 +1,7 @@
 use anyhow::Context as _;
 use devolutions_gateway::token::{
-    new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+    new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, TokenError,
+    MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
 };
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
@@ -277,7 +278,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
                 let e = res
                     .err()
                     .with_context(|| format!("Item n°{idx} validation should have failed, but it didn't"))?;
-                assert!(e.to_string().contains("Received a token containing a revoked value"));
+                assert!(matches!(e, TokenError::Revoked), "Unexpected error kind: {e:?}");
             } else {
                 res.with_context(|| format!("Item n°{idx} validation failed, but it wasn't expected to"))?;
             }
@@ -356,13 +357,16 @@ fn token_cache(
             res?;
         } else {
             let e = res.err().context("validation should have failed")?;
-            assert!(e.to_string().contains("Received identical token twice"));
+            assert!(
+                matches!(e, TokenError::UnexpectedReplay { .. }),
+                "Unexpected error kind: {e:?}"
+            );
         }
 
         Ok(())
     };
 
-    proptest!(ProptestConfig::with_cases(32), |(same_ip in any::<bool>(), claims in any_claims(now).no_shrink())| {
+    proptest!(ProptestConfig::with_cases(64), |(same_ip in any::<bool>(), claims in any_claims(now).no_shrink())| {
         test_impl(same_ip, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
     });
 }
@@ -471,7 +475,7 @@ fn with_scopes(
     };
 
     proptest!(
-        ProptestConfig::with_cases(32),
+        ProptestConfig::with_cases(64),
         |(scope_dw_id in jet_gw_id(this_gw_id), use_subkey in any::<bool>(), claims in any_claims(now).no_shrink())| {
             test_impl(scope_dw_id, use_subkey, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         }
@@ -562,7 +566,7 @@ fn with_subkey(
     };
 
     proptest!(
-        ProptestConfig::with_cases(8),
+        ProptestConfig::with_cases(16),
         |(kid in kid(&subkey_metadata.kid), claims in subkey_compatible_claims(now).no_shrink())| {
             test_impl(kid, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         }
