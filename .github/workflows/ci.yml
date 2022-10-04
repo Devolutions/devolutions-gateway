@@ -75,10 +75,10 @@ jobs:
         run: |
           $CargoProfile = "release"
           if ("${{ github.ref }}" -Eq "refs/heads/master") {
-            echo "::notice::Building production profile" 
+            echo "::notice::Building production profile"
             $CargoProfile = "production"
           }
-        
+
           echo "::set-output name=rust-profile::$CargoProfile"
 
       - name: Upload version artifact
@@ -91,9 +91,6 @@ jobs:
       name: test [${{ matrix.os }} ${{ matrix.arch }}]
       runs-on: ${{ matrix.runner }}
       needs: preflight
-      env:
-        CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-        CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
       strategy:
         matrix:
           arch: [ x86_64 ]
@@ -117,19 +114,11 @@ jobs:
           if: matrix.os == 'linux'
           run: |
             sudo apt update
-            sudo apt install python3-wget python3-setuptools libsystemd-dev
-
-        - name: Configure conan
-          run: |
-            pip3 install conan==${{ env.conan-version }} --upgrade
-            conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-            conan remote clean
-            conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
+            sudo apt install libsystemd-dev
 
         - name: Test
-          shell: pwsh
-          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
-
+          shell: bash
+          run: cargo test --workspace --locked --profile ${{ needs.preflight.outputs.rust-profile }}
 
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
@@ -210,7 +199,7 @@ jobs:
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
           $ExecutableFileName = 'jetsocat_${{ runner.os }}_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}'
-          
+
           if ($Env:RUNNER_OS -eq "Windows") {
             $ExecutableFileName = "$($ExecutableFileName).exe"
             $Env:CARGO_NO_DEFAULT_FEATURES = "true"
@@ -442,7 +431,7 @@ jobs:
           path: ${{ runner.temp }}/artifacts_raw
 
       ## Do the actual upload :tada:
-      
+
       - name: Prepare upload
         id: prepare
         shell: pwsh
@@ -465,7 +454,7 @@ jobs:
           $allFiles = Get-ChildItem -Path "$sourceFolder" -Exclude PowerShell | Get-ChildItem -Recurse | Where { -Not $_.Mode.StartsWith('d') }
 
           Write-Host
-        
+
           foreach ($file in $allFiles) {
             $dir = $file.Directory
             $name = $file.Name
@@ -481,7 +470,7 @@ jobs:
         uses: ./.github/workflows/upload-onedrive
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
+          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
           remote: prereleases
           destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}-${{ steps.prepare.outputs.short-ref }}
           conflict_behavior: replace
