@@ -115,7 +115,7 @@ jobs:
           - os: windows
             runner: windows-2019
           - os: linux
-            runner: ubuntu-18.04
+            runner: ubuntu-20.04
         exclude:
           - os: windows
             base-image: buster
@@ -208,7 +208,7 @@ jobs:
 
   github-release:
     name: GitHub release
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     environment: build-and-publish
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
@@ -285,7 +285,7 @@ jobs:
 
   psgallery-release:
     name: PowerShell release
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     environment: build-and-publish
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
@@ -373,7 +373,7 @@ jobs:
 
   onedrive:
     name: OneDrive
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
