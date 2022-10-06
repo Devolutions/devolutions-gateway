@@ -280,7 +280,7 @@ class TlkRecipe
 
         $CargoCmd = $(@('cargo') + $CargoArgs) -Join ' '
         Write-Host $CargoCmd
-        & $CargoCmd | Out-Host
+        & cargo $CargoArgs | Out-Host
     }
 
     [void] Build() {
