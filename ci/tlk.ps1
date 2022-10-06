@@ -254,7 +254,7 @@ class TlkRecipe
 
         Write-Host "conan profile: $ConanProfile"
 
-        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release'
+        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release' | Out-Host
         $dotenv = Get-DotEnvFile ".\environment.sh.env"
     
         Get-ChildItem 'conanbuildinfo.*' | Remove-Item
@@ -280,7 +280,7 @@ class TlkRecipe
 
         $CargoCmd = $(@('cargo') + $CargoArgs) -Join ' '
         Write-Host $CargoCmd
-        Invoke-Expression $CargoCmd
+        & $CargoCmd | Out-Host
     }
 
     [void] Build() {
@@ -317,7 +317,7 @@ class TlkRecipe
         $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
 
         if (-Not $this.Target.IsWindows()) {
-            & 'strip' $SrcExecutablePath
+            & 'strip' $SrcExecutablePath | Out-Host
         }
 
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
@@ -343,7 +343,7 @@ class TlkRecipe
                     '/td', 'sha256',
                     $DestinationExecutable
                 )
-                & 'signtool' $SignToolArgs
+                & 'signtool' $SignToolArgs | Out-Host
             }
         }
 
@@ -401,7 +401,7 @@ class TlkRecipe
             '-var', 'var.DGatewayPSSourceDir',
             '-nologo', '-srd', '-suid', '-scom', '-sreg', '-sfrag', '-gg')
         
-        & 'heat.exe' $HeatArgs + @('-t', 'HeatTransform64.xslt', '-o', "$($this.PackageName)-$TargetArch.wxs")
+        & 'heat.exe' $HeatArgs + @('-t', 'HeatTransform64.xslt', '-o', "$($this.PackageName)-$TargetArch.wxs") | Out-Host
         
         $InputFiles = $WixFiles | ForEach-Object { "$_.wxs" }
         $ObjectFiles = $WixFiles | ForEach-Object { "$_.wixobj" }
@@ -409,7 +409,7 @@ class TlkRecipe
         $Cultures = @('en-US', 'fr-FR')
         
         foreach ($Culture in $Cultures) {
-            & 'candle.exe' "-nologo" $InputFiles $WixArgs "-dPlatform=$TargetArch"
+            & 'candle.exe' "-nologo" $InputFiles $WixArgs "-dPlatform=$TargetArch" | Out-Host
             $OutputFile = "$($this.PackageName)_${Culture}.msi"
         
             if ($Culture -eq 'en-US') {
@@ -417,13 +417,13 @@ class TlkRecipe
             }
         
             & 'light.exe' "-v" "-nologo" $ObjectFiles "-cultures:${Culture}" "-loc" "$($this.PackageName)_${Culture}.wxl" `
-                "-out" $OutputFile $WixArgs "-dPlatform=$TargetArch" "-sice:ICE61"
+                "-out" $OutputFile $WixArgs "-dPlatform=$TargetArch" "-sice:ICE61" | Out-Host
         }
         
         foreach ($Culture in $($Cultures | Select-Object -Skip 1)) {
-            & 'torch.exe' "-v" "$($this.PackageName).msi" "$($this.PackageName)_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst"
-            & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName).msi" "${Culture}_$TargetArch.mst" "1036"
-            & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036"
+            & 'torch.exe' "-v" "$($this.PackageName).msi" "$($this.PackageName)_${Culture}.msi" "-o" "${Culture}_$TargetArch.mst" | Out-Host
+            & 'cscript.exe' "/nologo" "WiSubStg.vbs" "$($this.PackageName).msi" "${Culture}_$TargetArch.mst" "1036" | Out-Host
+            & 'cscript.exe' "/nologo" "WiLangId.vbs" "$($this.PackageName).msi" "Package" "1033,1036" | Out-Host
         }
 
         if (Test-Path Env:DGATEWAY_PSMODULE_CLEAN) {
@@ -445,7 +445,7 @@ class TlkRecipe
                     '/td', 'sha256',
                     $DGatewayPackage
                 )
-                & 'signtool' $SignToolArgs
+                & 'signtool' $SignToolArgs | Out-Host
             }
         }
 
@@ -497,7 +497,7 @@ class TlkRecipe
             '-y', '-c', 'custom',
             "--copyrightfile=$CopyrightFile")
 
-        & 'dh_make' $DhMakeArgs
+        & 'dh_make' $DhMakeArgs | Out-Host
 
         # debian/docs
         Set-Content -Path "$OutputDebianPath/docs" -Value ""
@@ -558,7 +558,7 @@ class TlkRecipe
         }
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
-        & 'dpkg-buildpackage' $DpkgBuildPackageArgs
+        & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
             $TargetOutputPath = $Env:TARGET_OUTPUT_PATH
@@ -579,8 +579,6 @@ class TlkRecipe
     }
 
     [void] Test() {
-        $this.BootstrapOpenSSL()
-    
         Push-Location
         Set-Location $this.SourcePath
 
