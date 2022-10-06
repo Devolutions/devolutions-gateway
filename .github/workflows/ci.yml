@@ -117,8 +117,8 @@ jobs:
             sudo apt install libsystemd-dev
 
         - name: Test
-          shell: bash
-          run: cargo test --workspace --locked --profile ${{ needs.preflight.outputs.rust-profile }}
+          shell: pwsh
+          run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
   jetsocat:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
