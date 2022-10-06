@@ -5,7 +5,7 @@
    <String Id="VendorName">Devolutions</String>
    <String Id="VendorFullName">Devolutions Inc.</String>
    <String Id="ProductDescription">A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection.</String>
-   <String Id="OS2Old">This product requires at least Windows 7 / Windows Server 2008 R2</String>
+   <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
    <String Id="NewerInstalled">A newer version of this product is already installed.</String>
    <String Id="x64VersionRequired">You need to install the 64-bit version of this product on 64-bit Windows.</String>
    <String Id="x86VersionRequired">You need to install the 32-bit version of this product on 32-bit Windows.</String>
@@ -30,12 +30,12 @@
   <!--All following strings should be copied from Wix directly. The only goal to have those strings here is to change the 
       font color for white. No other way has been found to change that.-->
   <String Id="AdvancedWelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Please read the [ProductName] License Agreement</String>
-  
+
   <String Id="BrowseDlgTitle">{\MyWixUI_Font_Title}Change destination folder</String>
   <String Id="BrowseDlgDescription">{\MyWixUI_Font_Description}Browse to the destination folder</String>
   
-  <String Id="CustomizeDlgTitle">{\MyWixUI_Font_Title}Custom Setup</String>
-  <String Id="CustomizeDlgDescription">{\MyWixUI_Font_Description}Select the way you want features to be installed.</String>
+  <String Id="CustomizeInstallDlgTitle">{\MyWixUI_Font_Title}Custom Setup</String>
+  <String Id="CustomizeInstallDlgDescription">{\MyWixUI_Font_Description}Select the way you want features to be installed.</String>
   
   <String Id="DiskCostDlgTitle">{\MyWixUI_Font_Title}Disk Space Requirements</String>
   <String Id="DiskCostDlgDescription">{\MyWixUI_Font_Description}The disk space required for the installation of the selected features.</String>
@@ -82,6 +82,74 @@
   <String Id="VerifyReadyDlgRemoveTitle">{\MyWixUI_Font_Title}Ready to remove [ProductName]</String>
   <String Id="VerifyReadyDlgUpdateTitle">{\MyWixUI_Font_Title}Ready to update [ProductName]</String>
   
+  <!-- Custom UI -->
+    <!-- <String Id="AdvancedWelcomeEulaDlg_Title" Overridable="yes">Installation de [ProductName]</String> -->
+  <String Id="AccessUriDlg_Title">[ProductName] Setup</String>
+  <String Id="AccessUriDlgTitle">{\MyWixUI_Font_Title}External URL</String>
+  <String Id="AccessUriDlgDescription">{\MyWixUI_Font_Description}URL to reach Devolutions Gateway.</String>
+  <String Id="AccessUriDlgAccessUriLabel">Access URI</String>
+
+  <String Id="CertificateDlg_Title">[ProductName] Setup</String>
+  <String Id="CertificateDlgTitle">{\MyWixUI_Font_Title}Certificate</String>
+  <String Id="CertificateDlgDescription">{\MyWixUI_Font_Description}A certificate is required when using an HTTPS listener.</String>
+  <String Id="CertificateDlgCertConfigLabel">Certificate Configuration</String>
+  <String Id="CertificateDlgCertFileLabel">Certificate File</String>
+  <String Id="CertificateDlgCertPasswordLabel">Certificate Password</String>
+  <String Id="CertificateDlgCertKeyFileLabel">Private Key File</String>
+
+  <String Id="CustomInstallDlg_Title">[ProductName] Setup</String>
+  <String Id="CustomInstallDlgTitle">{\MyWixUI_Font_Title}Configuration</String>
+  <String Id="CustomInstallDlgDescription">{\MyWixUI_Font_Description}Choose how to configure Devolutions Gateway.</String>
+  <String Id="CustomInstallDlgInfoLabel">The Setup Wizard will generate a configuration which you can update later; or you can provide configuration information now.</String>
+  <String Id="CustomInstallDlgConfigureNowLabel">Configure now</String>
+  <String Id="CustomInstallDlgConfigureLaterLabel">Configure later</String>
+
+  <String Id="InvalidConfigurationDlg_Title">[ProductName] Setup</String>
+  <String Id="InvalidConfigurationDlgInfoLabel">There is a problem with the entered data. Please correct the issue and try again.</String>
+
+  <String Id="ListenersDlg_Title">[ProductName] Setup</String>
+  <String Id="ListenersDlgTitle">{\MyWixUI_Font_Title}Listeners</String>
+  <String Id="ListenersDlgDescription">{\MyWixUI_Font_Description}HTTP(S) and TCP port listeners.</String>
+  <String Id="ListenersDlgListenersLabel">Listeners</String>
+  <String Id="ListenersDlgHTTPLabel">HTTP Listener</String>
+  <String Id="ListenersDlgTCPLabel">TCP Listener</String>
+
+  <String Id="PublicKeyDlg_Title">[ProductName] Setup</String>
+  <String Id="PublicKeyDlgTitle">{\MyWixUI_Font_Title}Key Pair</String>
+  <String Id="PublicKeyDlgDescription">{\MyWixUI_Font_Description}Provisioner public key for token verification.</String>
+  <String Id="PublicKeyDlgInfoLabel">Provisioner Public Key</String>
+  <String Id="PublicKeyDlgFromFileLabel">From file</String>
+
+  <String Id="ServiceDlg_Title">[ProductName] Setup</String>
+  <String Id="ServiceDlgTitle">{\MyWixUI_Font_Title}Service Options</String>
+  <String Id="ServiceDlgDescription">{\MyWixUI_Font_Description}Configuration for the Devolutions Gateway service.</String>
+  <String Id="ServiceDlgInfoLabel">Service Startup</String>
+  <String Id="ServiceDlgStartTypeLabel">Start the Devolutions Gateway service:</String>
+  <String Id="ServiceDlgStartManualLabel">Manually</String>
+  <String Id="ServiceDlgStartAutoLabel">Automatically</String>
+
+  <String Id="SummaryDlg_Title">[ProductName] Setup</String>
+  <String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Summary</String>
+  <String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Click Next to use this configuration or click Back to make changes.</String>
+  <String Id="SummaryDlgAccessUriLabel">Access URI: [P.ACCESSURI_SCHEME]://[P.ACCESSURI_HOST]:[P.ACCESSURI_PORT]</String>
+  <String Id="SummaryDlgHTTPLabel">HTTP Listener: [P.HTTPURI_SCHEME]://*:[P.HTTPURI_PORT]</String>
+  <String Id="SummaryDlgTCPLabel">TCP Listener: [P.TCPURI_SCHEME]://*:[P.TCPURI_PORT]</String>
+  <String Id="SummaryDlgListenersLabel">Devolutions Gateway Listeners</String>
+  <String Id="SummaryDlgKeyPairLabel">Devolutions Gateway Key Pair Configuration</String>
+  <String Id="SummaryDlgPublicKeyLabel">Provisioner Public Key: [P.PUBLIC_KEY_FILE]</String>
+  <String Id="SummaryDlgCertificateLabel">Devolutions Gateway Certificate Configuration</String>
+  <String Id="SummaryDlgCertificateFileLabel">Certificate File: [P.CERT_FILE]</String>
+  <String Id="SummaryDlgCertificatePasswordLabel">Certificate Password: [P.CERT_PASS_MASKED]</String>
+  <String Id="SummaryDlgCertificateKeyLabel">Certificate Private Key: [P.CERT_PK_FILE]</String>
+
+  <String Id="WelcomeDlgTitle" Overridable="yes"><!-- _locID_text="WelcomeDlgTitle" _locComment="WelcomeDlgTitle" -->{\WixUI_Font_Bigger}Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
   <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Please read the [ProductName] License Agreement</String>
 
+  <String Id="Error29994">Failed to query existing service configuration</String> 
+  <String Id="Error29995">You must provide a valid certificate file and either a password or private key file</String>
+  <String Id="Error29996">The specified file was invalid or not accessible</String>
+  <String Id="Error29997">You must enter a filename</String>
+  <String Id="Error29998">You must enter a valid protocol</String>
+  <String Id="Error29999">You must enter a valid port</String>
+  <String Id="Error30000">You must provide a valid hostname</String>
 </WixLocalization>

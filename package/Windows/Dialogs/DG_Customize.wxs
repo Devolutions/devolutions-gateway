@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) .NET Foundation and contributors. All rights reserved. Licensed under the Microsoft Reciprocal License. See LICENSE.TXT file in the project root for full license information. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <UI>
+            <Dialog Id="DG_Customize" Width="370" Height="270" Title="!(loc.CustomInstallDlg_Title)">
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)"></Control>
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)"></Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+                    <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+                </Control>
+                <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.CustomInstallDlgDescription)" />
+                <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.CustomInstallDlgTitle)" />
+                <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+                <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+                <Control Type="RadioButtonGroup" Property="P.CONFIGURE" Id="rgConfigure" Width="322" Height="50" X="11" Y="84">
+                    <RadioButtonGroup Property="P.CONFIGURE">
+                        <RadioButton Text="!(loc.CustomInstallDlgConfigureLaterLabel)" Height="17" Width="200" X="0" Y="0" Value="1" />
+                        <RadioButton Text="!(loc.CustomInstallDlgConfigureNowLabel)" Height="17" Width="200" X="0" Y="25" Value="0" />
+                    </RadioButtonGroup>
+                    <Condition Action="enable"><![CDATA[P.HASPWSH = "0"]]></Condition>
+                    <Condition Action="disable"><![CDATA[P.HASPWSH <> "0"]]></Condition>
+                </Control>
+                <Control Type="Text" Id="lblDescription" Width="354" Height="22" X="8" Y="52">
+                    <Text>!(loc.CustomInstallDlgInfoLabel)</Text>
+                </Control>
+            </Dialog>
+        </UI>
+    </Fragment>
+</Wix>

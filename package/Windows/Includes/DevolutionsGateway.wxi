@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Include>
+  <?define VendorName = "Devolutions" ?>
+  <?define ProductName = "Devolutions Gateway" ?>
+  <?define ServiceName = "DevolutionsGateway" ?>
+  <?define ServiceDisplayName = "Devolutions Gateway Service" ?>
+  <?define ServiceDescription = "Devolutions Gateway Service" ?>
+
+  <!-- Upgrade code HAS to be the same for all updates. Once you've chosen it don't change it. -->
+  <?define UpgradeCode="db3903d6-c451-4393-bd80-eb9f45b90214" ?>
+
+  <!-- The URL for add/remove programs -->
+  <?define InfoURL="https://server.devolutions.net" ?>
+
+  <!-- SDDL string representing desired %programdata%\devolutions\gateway ACL -->
+  <!-- SYSTEM/BuiltInAdministrators = Full Control, BuiltInUsers - Read/Execute -->
+  <?define ProgramDataSddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" ?>
+
+  <!-- 32-bit / 64-bit variables -->
+  <?if $(var.Platform) = x64 ?>
+  <?define Win64 = "yes" ?>
+  <?define ProcessorBits = "64" ?>
+  <?define ProcessorArchitecture = "x64" ?>
+  <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+  <?else ?>
+  <?define Win64 = "no" ?>
+  <?define ProcessorBits = "32" ?>
+  <?define ProcessorArchitecture = "x86" ?>
+  <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+  <?endif ?>
+</Include>

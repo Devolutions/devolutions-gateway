@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) .NET Foundation and contributors. All rights reserved. Licensed under the Microsoft Reciprocal License. See LICENSE.TXT file in the project root for full license information. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <UI>
+            <Dialog Id="DG_InvalidConfig" Width="400" Height="85" Title="!(loc.InvalidConfigurationDlg_Title)">
+                <Control Id="OK" Type="PushButton" X="172" Y="57" Width="56" Height="17" Default="yes" Cancel="yes" Text="!(loc.WixUIOK)">
+                    <Publish Event="EndDialog" Value="Return">1</Publish>
+                </Control>
+                <Control Id="Text" Type="Text" X="47" Y="8" Width="345" Height="24" Text="!(loc.InvalidConfigurationDlgInfoLabel)" />
+                <Control Id="Icon" Type="Icon" X="15" Y="15" Width="24" Height="24" ToolTip="Information icon" FixedSize="yes" IconSize="32" Text="!(loc.InvalidDirDlgIcon)" />
+                <Control Type="Text" Id="lblErrorMessage" Width="345" Height="17" X="47" Y="34" Text="[P.ERROR].">
+                    <Condition Action="show"><![CDATA[P.ERROR <> ""]]></Condition>
+                    <Condition Action="hide"><![CDATA[P.ERROR = ""]]></Condition>
+                </Control>
+            </Dialog>
+        </UI>
+    </Fragment>
+</Wix>
