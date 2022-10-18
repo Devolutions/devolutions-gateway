@@ -131,7 +131,7 @@ Example: unauthenticated sftp client
 
 pub fn forward_action(c: &Context) {
     let res = ForwardArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging);
 
         let cfg = jetsocat::ForwardCfg {
             pipe_a_mode: args.pipe_a_mode,
@@ -189,7 +189,7 @@ Example: SOCKS5 to JMUX proxy
 
 pub fn jmux_proxy_action(c: &Context) {
     let res = JmuxProxyArgs::parse(c).and_then(|args| {
-        let _log_guard = setup_logger(args.common.logging);
+        let _log_guard = setup_logger(&args.common.logging);
 
         let cfg = jetsocat::JmuxProxyCfg {
             pipe_mode: args.pipe_mode,
@@ -264,9 +264,10 @@ fn apply_common_flags(cmd: Command) -> Command {
         .flag(Flag::new("watch-process", FlagType::Int).description("Watch given process and stop piping when it dies"))
 }
 
+#[derive(Debug)]
 enum Logging {
     Term,
-    File { filepath: PathBuf },
+    File { filepath: PathBuf, clean_old: bool },
 }
 
 struct CommonArgs {
@@ -282,7 +283,10 @@ impl CommonArgs {
             Logging::Term
         } else if let Ok(filepath) = c.string_flag("log-file") {
             let filepath = PathBuf::from(filepath);
-            Logging::File { filepath }
+            Logging::File {
+                filepath,
+                clean_old: false,
+            }
         } else if let Some(mut filepath) = dirs_next::data_dir() {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now()
@@ -292,7 +296,10 @@ impl CommonArgs {
             std::fs::create_dir_all(&filepath).context("couldn't create jetsocat folder")?;
             filepath.push(format!("{}_{}", action, now.as_secs()));
             filepath.set_extension("log");
-            Logging::File { filepath }
+            Logging::File {
+                filepath,
+                clean_old: true,
+            }
         } else {
             eprintln!("Couldn't retrieve data directory for log files. Enabling --no-log flag implicitly.");
             Logging::Term
@@ -521,20 +528,20 @@ struct LoggerGuard {
     _worker_guard: tracing_appender::non_blocking::WorkerGuard,
 }
 
-fn setup_logger(logging: Logging) -> LoggerGuard {
+fn setup_logger(logging: &Logging) -> LoggerGuard {
     use std::fs::OpenOptions;
     use std::panic;
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt, EnvFilter};
 
-    let (layer, guard) = match logging {
+    let (layer, guard) = match &logging {
         Logging::Term => {
             let (non_blocking_stdio, guard) = tracing_appender::non_blocking(std::io::stdout());
             let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
             (stdio_layer, guard)
         }
-        Logging::File { filepath } => {
+        Logging::File { filepath, clean_old: _ } => {
             let file = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -563,5 +570,74 @@ fn setup_logger(logging: Logging) -> LoggerGuard {
         eprintln!("{}", panic_info);
     }));
 
+    warn_span!("clean_old_log_files", file_name = tracing::field::Empty,).in_scope(|| {
+        debug!(?logging);
+        if let Err(error) = clean_old_log_files(&logging) {
+            warn!(error = format!("{error:#}"), "Failed to clean old log files")
+        }
+    });
+
     LoggerGuard { _worker_guard: guard }
+}
+
+fn clean_old_log_files(logging: &Logging) -> anyhow::Result<()> {
+    use std::time::Duration;
+    use std::{fs, io, path};
+
+    const MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 5); // 5 days
+
+    let folder = if let Logging::File {
+        filepath,
+        clean_old: true,
+    } = &logging
+    {
+        filepath.parent().context("Invalid log path")?
+    } else {
+        return Ok(());
+    };
+
+    let mut read_dir = fs::read_dir(folder).context("Failed to read directory")?;
+
+    while let Some(entry) = read_dir.next() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warn!(%error, "Couldn't read next file");
+                continue;
+            }
+        };
+
+        let file_name = entry.file_name();
+        let file_path = path::Path::new(&file_name);
+
+        let _entered = info_span!("found_candidate", file_name = %file_path.display()).entered();
+
+        match file_path.extension().and_then(|ext| ext.to_str()) {
+            Some("log") => {
+                debug!("Found a log file");
+            }
+            _ => continue,
+        }
+
+        match entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .and_then(|time| time.elapsed().map_err(|e| io::Error::new(io::ErrorKind::Other, e)))
+        {
+            Ok(modified) if modified > MAX_AGE => {
+                info!("Delete log file");
+                if let Err(error) = fs::remove_file(entry.path()) {
+                    warn!(%error, "Couldn't delete log file");
+                }
+            }
+            Ok(_) => {
+                trace!("Keep this log file");
+            }
+            Err(error) => {
+                warn!(%error, "Couldn't retrieve metadata for file");
+            }
+        }
+    }
+
+    Ok(())
 }
