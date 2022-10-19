@@ -7,6 +7,7 @@ use picky::key::{PrivateKey, PublicKey};
 use proptest::prelude::*;
 use rstest::{fixture, rstest};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 const KEY: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDkrPiL/5dmGIT5
@@ -43,6 +44,7 @@ fn encode_decode_round_trip<C>(
     priv_key: &PrivateKey,
     claims: C,
     cty: Option<String>,
+    gw_id: Option<Uuid>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
 ) -> anyhow::Result<()>
@@ -63,7 +65,7 @@ where
         .delegation_key(None)
         .token_cache(token_cache)
         .revocation_list(jrl)
-        .gw_id(None)
+        .gw_id(gw_id)
         .subkey(None)
         .build()
         .validate(&token)?;
@@ -96,7 +98,360 @@ fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-// TODO: as_of_v2022_3_0_0
+mod as_of_v2022_3_0_0 {
+    use super::*;
+    use proptest::collection::vec;
+
+    const CTY_JMUX: &str = "JMUX";
+    const CTY_ASSOCIATION: &str = "ASSOCIATION";
+    const CTY_KDC: &str = "KDC";
+    const CTY_JRL: &str = "JRL";
+    const CTY_SCOPE: &str = "SCOPE";
+
+    const TYPE_SCOPE: &str = "scope";
+    const TYPE_ASSOCIATION: &str = "association";
+
+    const JET_CM: &str = "fwd";
+
+    #[derive(Debug, Serialize)]
+    struct DvlsScopeClaims {
+        #[serde(rename = "type")]
+        ty: &'static str,
+        jet_gw_id: Uuid,
+        scope: DvlsAccessScope,
+        nbf: i64,
+        exp: i64,
+    }
+
+    #[derive(Clone, Debug, Serialize)]
+    pub enum DvlsAccessScope {
+        #[serde(rename = "gateway.sessions.read")]
+        SessionsRead,
+        #[serde(rename = "gateway.session.terminate")]
+        SessionTerminate,
+        #[serde(rename = "gateway.associations.read")]
+        AssociationsRead,
+        #[serde(rename = "gateway.diagnostics.read")]
+        DiagnosticsRead,
+        #[serde(rename = "gateway.jrl.read")]
+        JrlRead,
+        #[serde(rename = "gateway.config.write")]
+        ConfigWrite,
+    }
+
+    fn dvls_access_scope() -> impl Strategy<Value = DvlsAccessScope> {
+        prop_oneof![
+            Just(DvlsAccessScope::SessionsRead),
+            Just(DvlsAccessScope::SessionTerminate),
+            Just(DvlsAccessScope::AssociationsRead),
+            Just(DvlsAccessScope::DiagnosticsRead),
+            Just(DvlsAccessScope::JrlRead),
+            Just(DvlsAccessScope::ConfigWrite),
+            Just(DvlsAccessScope::ConfigWrite),
+        ]
+    }
+
+    fn dvls_scope_claims(now: i64) -> impl Strategy<Value = DvlsScopeClaims> {
+        (dvls_access_scope(), uuid_typed()).prop_map(move |(scope, jet_gw_id)| DvlsScopeClaims {
+            ty: TYPE_SCOPE,
+            jet_gw_id,
+            scope,
+            nbf: now,
+            exp: now + 1000,
+        })
+    }
+
+    /// Make sure current Gateway is able to validate scope tokens provided by DVLS
+    #[rstest]
+    fn scope_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_SCOPE.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    #[derive(Serialize, Debug)]
+    struct DvlsAssociationClaims {
+        #[serde(rename = "type")]
+        ty: &'static str,
+        jet_aid: String,
+        jet_ap: String,
+        jet_cm: &'static str,
+        jet_gw_id: Uuid,
+        dst_hst: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dst_alt: Vec<String>,
+        nbf: i64,
+        exp: i64,
+        jti: String,
+    }
+
+    fn dvls_host() -> impl Strategy<Value = String> {
+        "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?"
+    }
+
+    fn dvls_application_protocol_assoc() -> impl Strategy<Value = String> {
+        "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc)"
+    }
+
+    fn dvls_alternate_hosts() -> impl Strategy<Value = Vec<String>> {
+        vec(dvls_host(), 0..4)
+    }
+
+    prop_compose! {
+        fn dvls_association_claims(
+            now: i64
+        )(
+            jet_aid in uuid_str(),
+            jet_ap in dvls_application_protocol_assoc(),
+            jet_gw_id in uuid_typed(),
+            dst_hst in dvls_host(),
+            dst_alt in dvls_alternate_hosts(),
+            jti in uuid_str(),
+        ) -> DvlsAssociationClaims {
+            DvlsAssociationClaims {
+                ty: TYPE_ASSOCIATION,
+                jet_aid,
+                jet_ap,
+                jet_cm: JET_CM,
+                jet_gw_id,
+                dst_hst,
+                dst_alt,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            }
+        }
+    }
+
+    /// Make sure current Gateway is able to validate association tokens provided by DVLS
+    #[rstest]
+    fn association_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_ASSOCIATION.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    #[derive(Serialize, Debug)]
+    struct DvlsJmuxClaims {
+        dst_hst: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        dst_addl: Vec<String>,
+        jet_ap: String,
+        jet_aid: String,
+        jet_gw_id: Uuid,
+        nbf: i64,
+        exp: i64,
+        jti: String,
+    }
+
+    fn dvls_application_protocol_jmux() -> impl Strategy<Value = String> {
+        "(winrm-http-pwsh|winrm-https-pwsh|http|https)"
+    }
+
+    prop_compose! {
+        fn dvls_jmux_claims(
+            now: i64
+        )(
+            jet_aid in uuid_str(),
+            jet_ap in dvls_application_protocol_jmux(),
+            jet_gw_id in uuid_typed(),
+            dst_hst in dvls_host(),
+            dst_addl in dvls_alternate_hosts(),
+            jti in uuid_str(),
+        ) -> DvlsJmuxClaims {
+            DvlsJmuxClaims {
+                dst_hst,
+                dst_addl,
+                jet_ap,
+                jet_aid,
+                jet_gw_id,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            }
+        }
+    }
+
+    /// Make sure current Gateway is able to validate JMUX tokens provided by DVLS
+    #[rstest]
+    fn jmux_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jmux_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_JMUX.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    #[derive(Serialize, Debug)]
+    struct DvlsKdcClaims {
+        krb_kdc: String,
+        krb_realm: String,
+        jet_gw_id: Uuid,
+        nbf: i64,
+        exp: i64,
+        jti: String,
+    }
+
+    fn dvls_krb_realm() -> impl Strategy<Value = String> {
+        "([a-z]{2,5}\\.){0,5}[a-z]{1,3}"
+    }
+
+    fn dvls_krb_kdc() -> impl Strategy<Value = String> {
+        "(tcp://|udp://)?(?-u:(\\w{2,5}\\.){0,5}\\w{1,3})(:[0-9]{1,4})?"
+    }
+
+    prop_compose! {
+        fn dvls_kdc_claims(
+            now: i64
+        )(
+            krb_kdc in dvls_krb_kdc(),
+            krb_realm in dvls_krb_realm(),
+            jet_gw_id in uuid_typed(),
+            jti in uuid_str(),
+        ) -> DvlsKdcClaims {
+            DvlsKdcClaims {
+                krb_kdc,
+                krb_realm,
+                jet_gw_id,
+                nbf: now,
+                exp: now + 1000,
+                jti,
+            }
+        }
+    }
+
+    #[rstest]
+    fn kdc_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_kdc_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_KDC.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    #[derive(Serialize, Debug)]
+    struct DvlsJrlClaims {
+        jrl: DvlsJrl,
+        jet_gw_id: Uuid,
+        iat: i64,
+        jti: String,
+    }
+
+    prop_compose! {
+        fn dvls_jrl_claims(
+            now: i64
+        )(
+            jrl in dvls_jrl(),
+            jet_gw_id in uuid_typed(),
+            jti in uuid_str(),
+        ) -> DvlsJrlClaims {
+            DvlsJrlClaims {
+                jrl,
+                jet_gw_id,
+                iat: now,
+                jti,
+            }
+        }
+    }
+
+    #[derive(Serialize, Debug)]
+    struct DvlsJrl {
+        jti: Vec<String>,
+    }
+
+    fn dvls_jrl() -> impl Strategy<Value = DvlsJrl> {
+        vec(uuid_str(), 0..3).prop_map(|jti| DvlsJrl { jti })
+    }
+
+    #[rstest]
+    fn jrl_token_validation(
+        token_cache: TokenCache,
+        jrl: Mutex<JrlTokenClaims>,
+        priv_key: PrivateKey,
+        pub_key: PublicKey,
+        now: i64,
+    ) {
+        proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jrl_claims(now).no_shrink())| {
+            let jet_gw_id = claims.jet_gw_id;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_JRL.to_owned()),
+                Some(jet_gw_id),
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        });
+    }
+
+    #[rstest]
+    #[case::assoc_vnc("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NjYxMjk2NjQsImV4cCI6MTY2NjEyOTk2NCwiaWF0IjoxNjY2MTI5NjY0LCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJ2bmMiLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTI3LjAuMC4xOjU5MDAiLCJqZXRfYWlkIjoiNDIzZmU3MGQtNDcxOS00YTU0LTg3NTItZTAwNDY0ZjE3NDhjIiwianRpIjoiZTE2NTk3ZWMtM2NmNi00Mzk0LTlhYTMtMDRkMzBjNDY1MTY0IiwiamV0X2d3X2lkIjoiYjhhMWEwNjQtMTk4NS00ZDc5LWIwYzQtOWFjMTFiM2U4NGUxIn0.whUS7l8xJ6zvjrZBD2Tu1zEI84oMRdFnwivhLkwIr9qDygpKmZsMZnSZSNv4BC3rs2Le3VjDiUEc-rWkwQJWba5WSE6LLZdufJUVJ-S0XzjVMsqP8zc6VQJLx2j86fnivedYQsfwCjK4w8zcj8Fy2dd4lyjWTq-sAKfSftMwJ2Ic_uchwdDnMZdUTmG2y6h6gCpAZSkValr-LUbj4tsj08CnWOkh1fBRmRwhMoE14dB9QQ76oPiY1CbtzqPvah8ogwd66iHctamn5UwpgvlUyzfle3EHaCVlw14Q6x1c8j4s74L_CAycI6Npk61X1vx1k6GNU2wGmo3m00tGcFH8eA")]
+    #[case::assoc_ssh("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkFTU09DSUFUSU9OIn0.eyJuYmYiOjE2NjYxMjk3NDQsImV4cCI6MTY2NjEzMDA0NCwiaWF0IjoxNjY2MTI5NzQ0LCJ0eXBlIjoiYXNzb2NpYXRpb24iLCJqZXRfYXAiOiJzc2giLCJqZXRfY20iOiJmd2QiLCJkc3RfaHN0IjoiMTAuMTAuMC4yOjIyIiwiamV0X2FpZCI6IjBjNzdlZDM2LTljODEtNGE2Mi1iZDViLTVmMzNiMjM5NmRkNCIsImp0aSI6ImUyYmU3Y2U5LTc3YTQtNGYzNi04YmFlLTM0N2UyYmY2Mjk5MCIsImpldF9nd19pZCI6ImI4YTFhMDY0LTE5ODUtNGQ3OS1iMGM0LTlhYzExYjNlODRlMSJ9.sbZtiJMamnslZScOwl1jeHcGwkYGk_L-un-mveimo3gikfFRJ-_coWd4tT9HIWpahGVzjRyuSWTUBgCSM6Ho6K4AtfFuoISYIRDW_mT-MqM3tUVV0Ro4nMId4hze8jh6e0swxxjP6Ln7vKs15FEEcxH82Tk42qWmFxBafqI229RQzTPFsVCOd_nRwDRZcf9WMrTvJw89A0i-DpAko7QqVyYnFQvPjX3I0ZhvDck6BvESf2LkW5iVNp1BbNtLOazQgEoGoSnHiTO-YglW_t2OyLHnZRJ82jT0hdlRXSEFsp4GTK11XAh_NqSTR3fiKuFkOUfT8zP5r7doiF1dpJ0_bA")]
+    #[case::jrl("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpSTCJ9.eyJqcmwiOnsianRpIjpbXX0sImp0aSI6IjliYTdmNmI2LWUwYzYtNDhkMC05MGU1LWFkMWUzMmIwZTFmNCIsImlhdCI6MTY2NjEyOTg0MCwiamV0X2d3X2lkIjoiYjhhMWEwNjQtMTk4NS00ZDc5LWIwYzQtOWFjMTFiM2U4NGUxIn0.v14JZ6eM2yk0iJ56ZOjPhkPFW-KklBxKbmohjZS_EfXr6Wmgfz-vQZ5xOxb9ZNRt545IH7135-1e5xw4tLmyj3VajeJ890viEVetdOzU4-bh4vPfQHcsN6Wf__eFPd_O4bNVIbFi_b1oNVNSRUd51jb5-5w_PVHzUgSMDNUZoW1OgIiHlzr45Z0MLPjlyfn2zbrqgIWE2LlYV3gIxOny4Z_LMNI8dqzrPSm8s7F6vNb7fq4m9RVVuoaZ8J327ZXq-SnRUGmFzFJlVtmGTm--51MAKEi_pmk8f9KwYCtw_2cA3rTHslO4mfyActVPbISvm4oECJYETVO-4btAsNdzmg")]
+    #[case::scope("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IlNDT1BFIn0.eyJuYmYiOjE2NjYxMjk4OTQsImV4cCI6MTY2NjEzMDE5NCwiaWF0IjoxNjY2MTI5ODk0LCJ0eXBlIjoic2NvcGUiLCJzY29wZSI6ImdhdGV3YXkuZGlhZ25vc3RpY3MucmVhZCIsImp0aSI6ImY3NGQ0ZWViLTBjMGYtNDYzNi05OGZhLWYzNDQ5YzhlZTA4MyIsImpldF9nd19pZCI6ImI4YTFhMDY0LTE5ODUtNGQ3OS1iMGM0LTlhYzExYjNlODRlMSJ9.tsM8h5fnVMxszpkjHQdsVZFZInUtCcLyPdlFewiit_9rPLJV7H_vhqKKDWZbqzOAyO5r5cuR3guT9b8gqD5kEn8NOG58ItBh4MDWKwHB0n8GOUZ-ZeWBAqV-LkOYj--3nhW2vuqXifFbQJUIuDvY1_9VTFej-XR2N-zns8i2nbMJL1JjA-mF7sFbeCZE4Nc-d221bu0DHbchdDKDFMoBKXZ6PT301jjpnD_exRVY1MlZYPC2Xh3IcwDO0JXqOMjvi8feEpdgDX3khEjvN63O8cPF7Hw6RV3PULyBQcEreo-mntMFkCoHv1mOO4M56ssLx99nI4PfhRkLwZfBESYhuA")]
+    #[case::jmux("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpNVVgifQ.eyJuYmYiOjE2NjYxMjk3OTksImV4cCI6MTY2NjEzMDA5OSwiaWF0IjoxNjY2MTI5Nzk5LCJkc3RfaHN0IjoiaHR0cHM6Ly93d3cuZ29vZ2xlLmNvbTo0NDMiLCJqZXRfYXAiOiJodHRwcyIsImpldF9haWQiOiJlNDA3ZGIyMy1lNWUyLTQwOTMtYTRlOC02OTVlMmQyMjc3YmIiLCJqdGkiOiJmMjJhYjcwNi0yM2UyLTQwZGUtOTU3NC1iNWZiYzczZTRkYmMiLCJqZXRfZ3dfaWQiOiJiOGExYTA2NC0xOTg1LTRkNzktYjBjNC05YWMxMWIzZTg0ZTEifQ.Onvt9g_pquwMGfbJUng0xF_7bfh6aj_-Q_32snHVpPQJvwVTsy6J9ftq4emhlpBbk7NRdZkLh2WNzLNZKcPGD0_lC1D5NKTqHbwoWUcRWfFvedacecvnGcNx6DXZRT3iyBF9EgqMVYiEI1KsuGDCd4scL76JeR9WIBI2Nt3TWS93GcxkGZX_5JsgyyJD0toy78YcrcWpq7SW58JqpH12FBXcUU_D_WWoHF1UvbHQg9oPvcBXuHRY5EviO_dYrsiQqVLTDtbvJL8v0G1jtGLLsVm6S4pTaPxVMnaqi7Rmxbz7ADRkAhrzFnBprHQhn7CW1zTe3lrZCvgV3YB7dJiWug")]
+    fn samples(#[case] sample: &str) {
+        #[allow(deprecated)]
+        devolutions_gateway::token::unsafe_debug::dangerous_validate_token(sample, None).unwrap();
+    }
+}
 
 mod as_of_v2022_2_0_0 {
     use super::*;
@@ -122,22 +477,16 @@ mod as_of_v2022_2_0_0 {
         jti: String,
     }
 
-    prop_compose! {
-        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?") -> String {
-            host
-        }
+    fn dvls_host() -> impl Strategy<Value = String> {
+        "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?"
     }
 
-    prop_compose! {
-        fn dvls_application_protocol_assoc()(protocol in "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc)") -> String {
-            protocol
-        }
+    fn dvls_application_protocol_assoc() -> impl Strategy<Value = String> {
+        "(rdp|ssh|ssh-pwsh|sftp|scp|ard|vnc)"
     }
 
-    prop_compose! {
-        fn dvls_alternate_hosts()(alternates in vec(dvls_host(), 0..4)) -> Vec<String> {
-            alternates
-        }
+    fn dvls_alternate_hosts() -> impl Strategy<Value = Vec<String>> {
+        vec(dvls_host(), 0..4)
     }
 
     prop_compose! {
@@ -174,7 +523,15 @@ mod as_of_v2022_2_0_0 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_ASSOCIATION.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_ASSOCIATION.to_owned()),
+                None,
+                &token_cache,
+                &jrl
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
@@ -190,10 +547,8 @@ mod as_of_v2022_2_0_0 {
         jti: String,
     }
 
-    prop_compose! {
-        fn dvls_application_protocol_jmux()(protocol in "(winrm-http-pwsh|winrm-https-pwsh|http|https)") -> String {
-            protocol
-        }
+    fn dvls_application_protocol_jmux() -> impl Strategy<Value = String> {
+        "(winrm-http-pwsh|winrm-https-pwsh|http|https)"
     }
 
     prop_compose! {
@@ -201,7 +556,7 @@ mod as_of_v2022_2_0_0 {
             now: i64
         )(
             jet_aid in uuid_str(),
-            jet_ap in dvls_application_protocol_assoc(),
+            jet_ap in dvls_application_protocol_jmux(),
             dst_hst in dvls_host(),
             dst_addl in dvls_alternate_hosts(),
             jti in uuid_str(),
@@ -228,7 +583,15 @@ mod as_of_v2022_2_0_0 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_jmux_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, Some(CTY_JMUX.to_owned()), &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                Some(CTY_JMUX.to_owned()),
+                None,
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
@@ -264,22 +627,16 @@ mod as_of_v2021_2_13_0 {
         exp: i64,
     }
 
-    prop_compose! {
-        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?") -> String {
-            host
-        }
+    fn dvls_host() -> impl Strategy<Value = String> {
+        "[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?"
     }
 
-    prop_compose! {
-        fn dvls_application_protocol()(protocol in "(rdp|ssh)") -> String {
-            protocol
-        }
+    fn dvls_application_protocol() -> impl Strategy<Value = String> {
+        "(rdp|ssh)"
     }
 
-    prop_compose! {
-        fn dvls_alternate_hosts()(alternates in vec(dvls_host(), 0..4)) -> Vec<String> {
-            alternates
-        }
+    fn dvls_alternate_hosts() -> impl Strategy<Value = Vec<String>> {
+        vec(dvls_host(), 0..4)
     }
 
     prop_compose! {
@@ -314,7 +671,15 @@ mod as_of_v2021_2_13_0 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                None,
+                None,
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 
@@ -359,10 +724,8 @@ mod as_of_v2021_2_4 {
         exp: i64,
     }
 
-    prop_compose! {
-        fn dvls_access_scope()(scope in "(gateway\\.sessions\\.read|gateway\\.associations\\.read|gateway\\.diagnostics\\.read)") -> String {
-            scope
-        }
+    fn dvls_access_scope() -> impl Strategy<Value = String> {
+        "(gateway\\.sessions\\.read|gateway\\.associations\\.read|gateway\\.diagnostics\\.read)"
     }
 
     prop_compose! {
@@ -388,7 +751,15 @@ mod as_of_v2021_2_4 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_scope_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                None,
+                None,
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }
@@ -408,10 +779,8 @@ mod as_of_v2021_1_7_0 {
         exp: i64,
     }
 
-    prop_compose! {
-        fn dvls_host()(host in "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}") -> String {
-            host
-        }
+    fn dvls_host() -> impl Strategy<Value = String> {
+        "[a-z]{1,10}\\.[a-z]{1,5}:[0-9]{3,4}"
     }
 
     prop_compose! {
@@ -440,7 +809,15 @@ mod as_of_v2021_1_7_0 {
         now: i64,
     ) {
         proptest!(ProptestConfig::with_cases(32), |(claims in dvls_association_claims(now).no_shrink())| {
-            encode_decode_round_trip(&pub_key, &priv_key, claims, None, &token_cache, &jrl).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            encode_decode_round_trip(
+                &pub_key,
+                &priv_key,
+                claims,
+                None,
+                None,
+                &token_cache,
+                &jrl,
+            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
         });
     }
 }
