@@ -1,0 +1,13 @@
+LIBRARY
+
+EXPORTS
+    CheckPowerShellVersion
+    BrowseForCertificate
+    BrowseForPrivateKey
+    BrowseForPublicKey
+    SetGatewayStartupType
+    QueryGatewayStartupType
+    ValidateAccessUri
+    ValidateListeners
+    ValidateCertificate
+    ValidatePublicKey

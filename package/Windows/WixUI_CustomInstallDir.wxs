@@ -34,6 +34,14 @@ Patch dialog sequence:
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Fragment>
         <UI Id="WixUI_CustomInstallDir">
+            <Error Id="29994">!(loc.Error29994)</Error>
+            <Error Id="29995">!(loc.Error29995)</Error>
+            <Error Id="29996">!(loc.Error29996)</Error>
+            <Error Id="29997">!(loc.Error29997)</Error>
+            <Error Id="29998">!(loc.Error29998)</Error>
+            <Error Id="29999">!(loc.Error29999)</Error>
+            <Error Id="30000">!(loc.Error30000)</Error>
+
             <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
             <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
             <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
@@ -51,6 +59,7 @@ Patch dialog sequence:
             <DialogRef Id="ProgressDlg" />
             <DialogRef Id="ResumeDlg" />
             <DialogRef Id="UserExit" />
+            <DialogRef Id="DG_InvalidConfig" />
             
             <Publish Dialog="BrowseDlg" Control="OK" Event="DoAction" Value="WixUIValidatePath" Order="3">1</Publish>
             <Publish Dialog="BrowseDlg" Control="OK" Event="SpawnDialog" Value="InvalidDirDlg" Order="4"><![CDATA[WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
@@ -59,6 +68,7 @@ Patch dialog sequence:
 
             <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg">NOT Installed</Publish>
             <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">Installed AND PATCH</Publish>
+            <!-- <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="TestDlg"></Publish> -->
 
             <!-- Remove the EULA from the UI sequence -->
             <!-- <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
@@ -68,13 +78,48 @@ Patch dialog sequence:
             <Publish Dialog="InstallDirDlg" Control="Next" Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
             <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath" Order="2">NOT WIXUI_DONTVALIDATEPATH</Publish>
             <Publish Dialog="InstallDirDlg" Control="Next" Event="SpawnDialog" Value="InvalidDirDlg" Order="3"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
-            <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4">WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID="1"</Publish>
+            <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4">NOT FirstInstall AND (WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID="1")</Publish>
+            <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="DG_Customize" Order="5">FirstInstall AND (WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID="1")</Publish>
             <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
             <Publish Dialog="InstallDirDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
             
-            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="1">NOT Installed</Publish>
-            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed AND NOT PATCH</Publish>
-            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">Installed AND PATCH</Publish>
+            <Publish Dialog="DG_Customize" Control="Back" Event="NewDialog" Value="InstallDirDlg"></Publish>
+            <Publish Dialog="DG_Customize" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">P.CONFIGURE = "1"</Publish>
+            <Publish Dialog="DG_Customize" Control="Next" Event="NewDialog" Value="DG_AccessUri">P.CONFIGURE = "0"</Publish>
+
+            <Publish Dialog="DG_AccessUri" Control="Back" Event="NewDialog" Value="DG_Customize"></Publish>
+            <Publish Dialog="DG_AccessUri" Control="Next" Event="DoAction" Value="CA.ValidateAccessUri" Order="1">1</Publish>
+            <Publish Dialog="DG_AccessUri" Control="Next" Event="SpawnDialog" Value="DG_InvalidConfig" Order="2"><![CDATA[P.ERROR <> ""]]></Publish>
+            <Publish Dialog="DG_AccessUri" Control="Next" Event="NewDialog" Value="DG_Listeners" Order="3"><![CDATA[P.ERROR = ""]]></Publish>
+
+            <Publish Dialog="DG_Listeners" Control="Back" Event="NewDialog" Value="DG_AccessUri"></Publish>
+            <Publish Dialog="DG_Listeners" Control="Next" Event="DoAction" Value="CA.ValidateListeners" Order="1">1</Publish>
+            <Publish Dialog="DG_Listeners" Control="Next" Event="SpawnDialog" Value="DG_InvalidConfig" Order="2"><![CDATA[P.ERROR <> ""]]></Publish>
+            <Publish Dialog="DG_Listeners" Control="Next" Event="NewDialog" Value="DG_Certificate" Order="2"><![CDATA[P.ERROR = "" AND P.HTTPURI_SCHEME = "https"]]></Publish>
+            <Publish Dialog="DG_Listeners" Control="Next" Event="NewDialog" Value="DG_PublicKey" Order="3"><![CDATA[P.ERROR = "" AND P.HTTPURI_SCHEME = "http"]]></Publish>
+
+            <Publish Dialog="DG_Certificate" Control="Back" Event="NewDialog" Value="DG_Listeners"></Publish>
+            <Publish Dialog="DG_Certificate" Control="Next" Event="DoAction" Value="CA.ValidateCertificate" Order="1">1</Publish>
+            <Publish Dialog="DG_Certificate" Control="Next" Event="SpawnDialog" Value="DG_InvalidConfig" Order="2"><![CDATA[P.ERROR <> ""]]></Publish>
+            <Publish Dialog="DG_Certificate" Control="Next" Event="NewDialog" Value="DG_PublicKey" Order="3"><![CDATA[P.ERROR = ""]]></Publish>
+
+            <Publish Dialog="DG_PublicKey" Control="Back" Event="NewDialog" Value="DG_Certificate" Order="1"><![CDATA[P.HTTPURI_SCHEME = "https"]]></Publish>
+            <Publish Dialog="DG_PublicKey" Control="Back" Event="NewDialog" Value="DG_Listeners" Order="2"><![CDATA[P.HTTPURI_SCHEME = "http"]]></Publish>
+            <Publish Dialog="DG_PublicKey" Control="Next" Event="DoAction" Value="CA.ValidatePublicKey" Order="1">1</Publish>
+            <Publish Dialog="DG_PublicKey" Control="Next" Event="SpawnDialog" Value="DG_InvalidConfig" Order="2"><![CDATA[P.ERROR <> ""]]></Publish>
+            <Publish Dialog="DG_PublicKey" Control="Next" Event="NewDialog" Value="DG_Service" Order="3"><![CDATA[P.ERROR = ""]]></Publish>
+
+            <Publish Dialog="DG_Service" Control="Back" Event="NewDialog" Value="DG_PublicKey"></Publish>
+            <Publish Dialog="DG_Service" Control="Next" Event="NewDialog" Value="DG_Summary"></Publish>
+
+            <Publish Dialog="DG_Summary" Control="Back" Event="NewDialog" Value="DG_Service"></Publish>
+            <Publish Dialog="DG_Summary" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DG_Customize" Order="1">FirstInstall AND P.CONFIGURE = "1"</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DG_Summary" Order="2">FirstInstall AND P.CONFIGURE = "0"</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" Order="3">NOT FirstInstall</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="4">Installed AND NOT PATCH</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="5">Installed AND PATCH</Publish>
 
             <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
 

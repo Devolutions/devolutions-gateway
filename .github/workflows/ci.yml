@@ -133,7 +133,7 @@ jobs:
         os: [ windows, macos, linux ]
         include:
           - os: windows
-            runner: windows-2019
+            runner: windows-2022
           - os: macos
             runner: macos-11
           - os: linux
@@ -266,7 +266,7 @@ jobs:
         os: [ windows, linux ]
         include:
           - os: windows
-            runner: windows-2019
+            runner: windows-2022
           - os: linux
             runner: ubuntu-20.04
 
@@ -336,6 +336,10 @@ jobs:
         env:
           PSMODULE_OUTPUT_PATH: ${{ steps.load-variables.outputs.psmodule-output-path }}
         run: .\powershell\build.ps1
+
+      - name: Add msbuild to PATH
+        if: matrix.os == 'windows'
+        uses: microsoft/setup-msbuild@v1.1
 
       - name: Package
         shell: pwsh
