@@ -329,14 +329,21 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ needs.preflight.outputs.commit }}
+          
+      - name: Check out devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
 
       - name: Install Devolutions Toolbox
-        uses: devolutions/actions/toolbox-install@master
+        uses: ./.github/workflows/toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Download cargo-cyclonedx from OneDrive
-        uses: devolutions/actions/download-onedrive@master
+        uses: ./.github/workflows/download-onedrive
         with:
           files: /Binaries/cargo-cyclonedx/linux/cargo-cyclonedx
           recursive: 'false'
@@ -350,7 +357,7 @@ jobs:
           chmod +x /home/runner/.cargo/bin/cargo-cyclonedx
 
       - name: Generate SBOM
-        uses: devolutions/actions/cyclonedx-rust-generate@master
+        uses: ./.github/workflows/cyclonedx-rust-generate
 
       - name: Save SBOM
         uses: actions/upload-artifact@v3
