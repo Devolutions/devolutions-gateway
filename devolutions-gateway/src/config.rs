@@ -105,12 +105,15 @@ impl Conf {
             .clone()
             .unwrap_or_else(|| default_hostname().unwrap_or_else(|| "localhost".to_owned()));
 
-        let listeners: Vec<_> = conf_file
-            .listeners
-            .iter()
-            .enumerate()
-            .map(|(i, l)| to_listener_urls(l, &hostname).with_context(|| format!("Listener at position {i}")))
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let auto_ipv6 = detect_ipv6_support();
+
+        let mut listeners = Vec::new();
+
+        for (idx, listener) in conf_file.listeners.iter().enumerate() {
+            let mut listener_urls = to_listener_urls(listener, &hostname, auto_ipv6)
+                .with_context(|| format!("Listener at position {idx}"))?;
+            listeners.append(&mut listener_urls);
+        }
 
         let has_http_listener = listeners
             .iter()
@@ -195,6 +198,10 @@ impl Conf {
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
+}
+
+fn detect_ipv6_support() -> bool {
+    std::net::TcpListener::bind(("[::]", 0)).is_ok()
 }
 
 /// Configuration Handle, source of truth for current configuration state
@@ -442,7 +449,7 @@ fn read_priv_key(
     }
 }
 
-fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str) -> anyhow::Result<ListenerUrls> {
+fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -> anyhow::Result<Vec<ListenerUrls>> {
     fn map_scheme(url: &mut Url) {
         match url.scheme() {
             "http" => url.set_scheme("ws").unwrap(),
@@ -455,8 +462,21 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str) -> anyhow::Result<
         .context("Invalid internal URL")?
         .tap_mut(map_scheme);
 
+    let mut internal_url_ipv6 = None;
+
     if internal_url.host_str() == Some("*") {
-        let _ = internal_url.set_host(Some("0.0.0.0"));
+        internal_url
+            .set_host(Some("0.0.0.0"))
+            .context("Internal URL IPv4 bind address")?;
+
+        if auto_ipv6 {
+            let mut ipv6_version = internal_url.clone();
+            ipv6_version
+                .set_host(Some("[::]"))
+                .context("Internal URL IPv6 bind address")?;
+            internal_url_ipv6 = Some(ipv6_version);
+            println!("{:?}", internal_url_ipv6);
+        }
     }
 
     let mut external_url = Url::parse(&conf.external_url)
@@ -464,13 +484,24 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str) -> anyhow::Result<
         .tap_mut(map_scheme);
 
     if external_url.host_str() == Some("*") {
-        let _ = external_url.set_host(Some(hostname));
+        external_url.set_host(Some(hostname)).context("External URL hostname")?;
     }
 
-    Ok(ListenerUrls {
+    let mut out = Vec::new();
+
+    if let Some(internal_url_ipv6) = internal_url_ipv6 {
+        out.push(ListenerUrls {
+            internal_url: internal_url_ipv6,
+            external_url: external_url.clone(),
+        })
+    }
+
+    out.push(ListenerUrls {
         internal_url,
         external_url,
-    })
+    });
+
+    Ok(out)
 }
 
 pub mod dto {

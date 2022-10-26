@@ -63,8 +63,12 @@ impl GatewayListener {
 
         let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
 
-        let socket = TcpSocket::new_v4().context("failed to create TCP socket")?;
-        socket.bind(socket_addr).context("failed to bind TCP socket")?;
+        let socket = if socket_addr.is_ipv4() {
+            TcpSocket::new_v4().context("Failed to create IPv4 TCP socket")?
+        } else {
+            TcpSocket::new_v6().context("Failed to created IPv6 TCP socket")?
+        };
+        socket.bind(socket_addr).context("Failed to bind TCP socket")?;
         set_socket_options(&socket);
         let listener = socket
             .listen(64)
