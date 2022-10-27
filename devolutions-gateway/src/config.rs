@@ -475,7 +475,6 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
                 .set_host(Some("[::]"))
                 .context("Internal URL IPv6 bind address")?;
             internal_url_ipv6 = Some(ipv6_version);
-            println!("{:?}", internal_url_ipv6);
         }
     }
 

@@ -87,13 +87,12 @@ fn main() -> anyhow::Result<()> {
             println!("{conf_file_json}");
         }
         CliAction::Run { service_mode } => {
-            let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
-
             if service_mode {
                 service_controller()
                     .register(service_main_wrapper)
                     .context("failed to register service")?;
             } else {
+                let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
                 let mut service = GatewayService::load(conf_handle).context("Service loading failed")?;
 
                 service
