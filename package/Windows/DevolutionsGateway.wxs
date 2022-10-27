@@ -92,7 +92,7 @@
     <Property Id="P.PK_CMD" Secure="yes" />
 
     <SetProperty Id="CA.SetProgramDataPermissions" 
-                 Value='"cmd.exe" /c ECHO Y| &quot;%windir%\System32\cacls.exe&quot; %ProgramData%\Devolutions\Gateway /S:$(var.ProgramDataSddl) /C' 
+                 Value='"cmd.exe" /c ECHO Y| &quot;%windir%\System32\cacls.exe&quot; %ProgramData%\Devolutions\Gateway /S:$(var.ProgramDataSddl) /C /t' 
                  Sequence="execute" 
                  Before="CA.SetProgramDataPermissions" />
     <SetProperty Id="CA.InitConfigAfterFinalize" Value="&quot;[INSTALLDIR]\DevolutionsGateway.exe&quot; --config-init-only" Sequence="execute" Before="CA.InitConfigAfterFinalize" />
