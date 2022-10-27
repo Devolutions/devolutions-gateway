@@ -541,7 +541,6 @@ UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
 	{
 		DWORD dwError = GetLastError();
 		LogGLE(hInstall, L"OpenSCManager failed", dwError);
-		ShowErrorMessage(hInstall, Errors::ServiceQueryFailure);
 		hr = HRESULT_FROM_WIN32(dwError);
 
 		goto LExit;
@@ -553,7 +552,6 @@ UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
 	{
 		DWORD dwError = GetLastError();
 		LogGLE(hInstall, L"OpenService failed", dwError);
-		ShowErrorMessage(hInstall, Errors::ServiceQueryFailure);
 		hr = HRESULT_FROM_WIN32(dwError);
 
 		goto LExit;
