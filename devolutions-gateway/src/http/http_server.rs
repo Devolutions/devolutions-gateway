@@ -8,16 +8,13 @@ use crate::http::controllers::jrl::JrlController;
 use crate::http::controllers::kdc_proxy::KdcProxyController;
 use crate::http::controllers::session::SessionController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
-use crate::http::controllers::sogar_token::TokenController;
 use crate::http::middlewares::auth::AuthMiddleware;
 use crate::http::middlewares::cors::CorsMiddleware;
 use crate::http::middlewares::log::LogMiddleware;
-use crate::http::middlewares::sogar_auth::SogarAuthMiddleware;
 use crate::jet_client::JetAssociationsMap;
 use crate::session::SessionManagerHandle;
 use crate::token::{CurrentJrl, TokenCache};
 use saphir::server::Server as SaphirServer;
-use sogar_core::registry::SogarController;
 use std::sync::Arc;
 
 pub fn configure_http_server(
@@ -44,11 +41,12 @@ pub fn configure_http_server(
                         "/jet/KdcProxy",
                     ],
                 )
-                .apply(
-                    SogarAuthMiddleware::new(conf_handle.clone()),
-                    vec!["/registry"],
-                    vec!["/registry/oauth2/token"],
-                )
+                // NOTE: disabled for now
+                // .apply(
+                //     SogarAuthMiddleware::new(conf_handle.clone()),
+                //     vec!["/registry"],
+                //     vec!["/registry/oauth2/token"],
+                // )
                 .apply(CorsMiddleware, vec!["/"], None)
                 .apply(LogMiddleware, vec!["/"], None)
         })
@@ -78,9 +76,10 @@ pub fn configure_http_server(
             let legacy_sessions_controller = LegacySessionsController { sessions };
 
             // sogar stuff
-            let conf = conf_handle.get_conf();
-            let sogar_token = TokenController::new(conf_handle);
-            let sogar = SogarController::new(&conf.sogar.registry_name, &conf.sogar.registry_image);
+            // NOTE: disabled for now
+            // let conf = conf_handle.get_conf();
+            // let sogar_token = TokenController::new(conf_handle);
+            // let sogar = SogarController::new(&conf.sogar.registry_name, &conf.sogar.registry_image);
 
             info!("Configuring HTTP router");
 
@@ -91,8 +90,8 @@ pub fn configure_http_server(
                 .controller(jet)
                 .controller(session_controller)
                 .controller(sessions_controller)
-                .controller(sogar)
-                .controller(sogar_token)
+                // .controller(sogar)
+                // .controller(sogar_token)
                 .controller(legacy_health)
                 .controller(legacy_diagnostics)
                 .controller(legacy_sessions_controller)

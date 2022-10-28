@@ -22,7 +22,7 @@ mod win {
         let legal_copyright = format!("Copyright 2020 {}", company_name);
 
         let version_number = env::var("CARGO_PKG_VERSION").unwrap() + ".0";
-        let version_commas = version_number.replace(".", ",");
+        let version_commas = version_number.replace('.', ",");
         let file_description = output_name;
         let file_version = version_number.clone();
         let internal_name = filename.clone();
