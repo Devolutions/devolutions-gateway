@@ -13,8 +13,10 @@
   <?define InfoURL="https://server.devolutions.net" ?>
 
   <!-- SDDL string representing desired %programdata%\devolutions\gateway ACL -->
-  <!-- SYSTEM/BuiltInAdministrators = Full Control, BuiltInUsers - Read/Execute -->
-  <?define ProgramDataSddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" ?>
+  <!-- Easiest way to generate an SDDL is to configure the required access, and then query -->
+  <!-- the path with PowerShell: `Get-Acl | Format-List`-->
+  <!-- SYSTEM/BuiltInAdministrators = Full Control, LocalService = Read/Write/Execute, BuiltInUsers - Read/Execute -->
+  <?define ProgramDataSddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" ?>
 
   <!-- 32-bit / 64-bit variables -->
   <?if $(var.Platform) = x64 ?>
