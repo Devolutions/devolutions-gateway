@@ -341,32 +341,33 @@ jobs:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
           path: ./.github/workflows
 
-      - name: Install Devolutions Toolbox
-        uses: ./.github/workflows/toolbox-install
-        with:
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+      # - name: Install Devolutions Toolbox
+      #   uses: ./.github/workflows/toolbox-install
+      #   with:
+      #     token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
-      - name: Download cargo-cyclonedx from OneDrive
-        uses: ./.github/workflows/download-onedrive
-        with:
-          files: /Binaries/cargo-cyclonedx/linux/cargo-cyclonedx
-          recursive: 'false'
-          destination_path: /home/runner/.cargo/bin/
-          remote: dev
-          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+      # - name: Download cargo-cyclonedx from OneDrive
+      #   uses: ./.github/workflows/download-onedrive
+      #   with:
+      #     files: /Binaries/cargo-cyclonedx/linux/cargo-cyclonedx
+      #     recursive: 'false'
+      #     destination_path: /home/runner/.cargo/bin/
+      #     remote: dev
+      #     client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+      #     client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
 
-      - name: Set execute permission on cargo-cyclonedx
-        run: |
-          chmod +x /home/runner/.cargo/bin/cargo-cyclonedx
+      - name: Install cycloneDX
+        run: cargo install cargo-cyclonedx
+
+      # - name: Set execute permission on cargo-cyclonedx
+      #   run: |
+      #     chmod +x /home/runner/.cargo/bin/cargo-cyclonedx
           
       - name: Set rust to nightly build
         run: rustup default nightly
 
       - name: Generate SBOM
         uses: ./.github/workflows/cyclonedx-rust-generate
-        with:
-          path: /home/runner/.cargo/bin/cargo-cyclonedx
 
       - name: Save SBOM
         uses: actions/upload-artifact@v3
