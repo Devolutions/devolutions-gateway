@@ -359,6 +359,9 @@ jobs:
       - name: Set execute permission on cargo-cyclonedx
         run: |
           chmod +x /home/runner/.cargo/bin/cargo-cyclonedx
+          
+      - name: Set rust to nightly build
+        run: rustup default nightly
 
       - name: Generate SBOM
         uses: ./.github/workflows/cyclonedx-rust-generate
