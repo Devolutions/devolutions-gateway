@@ -365,7 +365,7 @@ jobs:
 
       - name: Generate SBOM
         uses: ./.github/workflows/cyclonedx-rust-generate
-        uses:
+        with:
           path: /home/runner/.cargo/bin/cargo-cyclonedx
 
       - name: Save SBOM
