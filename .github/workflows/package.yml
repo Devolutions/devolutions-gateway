@@ -367,4 +367,14 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: bom.xml
-          path: bom.xml
+          path: devolutions-gateway/bom.xml
+
+      - name: Upload SBOM to Dependency-Track
+        uses: ./.github/workflows/dtrack-upload-sbom@master
+        with:
+          serverhostname: 'dtrack-api.devolutions.com'
+          apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
+          projectname: devolutions-gateway
+          projectversion: ${{ needs.preflight.outputs.version }}
+          bomfilename: devolutions-gateway/bom.xml
+          autocreate: 'true'
