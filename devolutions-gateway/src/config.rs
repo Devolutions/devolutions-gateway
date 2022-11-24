@@ -43,37 +43,37 @@ pub struct TlsPublicKey(pub Vec<u8>);
 #[derive(Clone)]
 pub struct Tls {
     pub acceptor: tokio_rustls::TlsAcceptor,
-    pub certificate: rustls::Certificate,
-    pub private_key: rustls::PrivateKey,
-    pub public_key: TlsPublicKey,
+    pub leaf_certificate: rustls::Certificate,
+    pub leaf_public_key: TlsPublicKey,
 }
 
 impl fmt::Debug for Tls {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TlsConfig")
-            .field("certificate", &self.certificate)
-            .field("public_key", &self.public_key)
+            .field("certificate", &self.leaf_certificate)
+            .field("public_key", &self.leaf_public_key)
             .finish_non_exhaustive()
     }
 }
 
 impl Tls {
-    fn init(certificate: rustls::Certificate, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
-        let public_key = {
-            let cert = picky::x509::Cert::from_der(&certificate.0).context("Failed to parse TLS certificate")?;
+    fn init(certificates: Vec<rustls::Certificate>, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
+        let leaf_certificate = certificates.last().context("TLS leaf certificate is missing")?.clone();
+
+        let leaf_public_key = {
+            let cert = picky::x509::Cert::from_der(&leaf_certificate.0).context("Failed to parse TLS certificate")?;
             TlsPublicKey(cert.public_key().to_der().unwrap())
         };
 
-        let rustls_config = crate::tls_sanity::build_rustls_config(certificate.clone(), private_key.clone())
-            .context("Failed build TLS config")?;
+        let rustls_config =
+            crate::tls_sanity::build_rustls_config(certificates, private_key).context("Failed build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(rustls_config));
 
         Ok(Self {
             acceptor,
-            certificate,
-            private_key,
-            public_key,
+            leaf_certificate,
+            leaf_public_key,
         })
     }
 }
@@ -334,33 +334,63 @@ fn default_hostname() -> Option<String> {
     hostname::get().ok()?.into_string().ok()
 }
 
-fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<rustls::Certificate> {
+fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::Certificate>> {
     read_rustls_certificate(Some(path), None).transpose().unwrap()
 }
 
 fn read_rustls_certificate(
     path: Option<&Utf8Path>,
     data: Option<&dto::ConfData<dto::CertFormat>>,
-) -> anyhow::Result<Option<rustls::Certificate>> {
+) -> anyhow::Result<Option<Vec<rustls::Certificate>>> {
+    use picky::pem::{read_pem, PemError};
+
     match (path, data) {
         (Some(path), _) => {
-            let pem: Pem = normalize_data_path(path, &get_data_dir())
-                .pipe_ref(std::fs::read_to_string)
-                .with_context(|| format!("Couldn't read file at {path}"))?
-                .pipe_deref(str::parse)
-                .context("Couldn't parse pem document")?;
+            let mut x509_chain_file = normalize_data_path(path, &get_data_dir())
+                .pipe_ref(File::open)
+                .with_context(|| format!("Couldn't open file at {path}"))?
+                .pipe(std::io::BufReader::new);
 
-            if pem.label() != CERTIFICATE_LABEL {
-                anyhow::bail!("bad pem label (expected {})", CERTIFICATE_LABEL);
+            let mut x509_chain = Vec::new();
+
+            loop {
+                match read_pem(&mut x509_chain_file) {
+                    Ok(pem) => {
+                        if pem.label() != CERTIFICATE_LABEL {
+                            anyhow::bail!(
+                                "bad pem label (got {}, expected {}) at position {}",
+                                pem.label(),
+                                CERTIFICATE_LABEL,
+                                x509_chain.len(),
+                            );
+                        }
+
+                        x509_chain.push(rustls::Certificate(pem.into_data().into_owned()));
+                    }
+                    Err(e @ PemError::HeaderNotFound) => {
+                        if x509_chain.is_empty() {
+                            return anyhow::Error::new(e)
+                                .context("Couldn't parse first pem document")
+                                .pipe(Err);
+                        }
+
+                        break;
+                    }
+                    Err(e) => {
+                        return anyhow::Error::new(e)
+                            .context(format!("Couldn't parse pem document at position {}", x509_chain.len()))
+                            .pipe(Err)
+                    }
+                }
             }
 
-            Ok(Some(rustls::Certificate(pem.into_data().into_owned())))
+            Ok(Some(x509_chain))
         }
         (None, Some(data)) => {
             let value = data.decode_value()?;
 
             match data.format {
-                dto::CertFormat::X509 => Ok(Some(rustls::Certificate(value))),
+                dto::CertFormat::X509 => Ok(Some(vec![rustls::Certificate(value)])),
             }
         }
         (None, None) => Ok(None),

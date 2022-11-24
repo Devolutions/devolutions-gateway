@@ -80,7 +80,7 @@ pub mod tls_sanity {
     }
 
     pub fn build_rustls_config(
-        certificate: rustls::Certificate,
+        certificates: Vec<rustls::Certificate>,
         private_key: rustls::PrivateKey,
     ) -> anyhow::Result<rustls::ServerConfig> {
         rustls::ServerConfig::builder()
@@ -89,7 +89,7 @@ pub mod tls_sanity {
             .with_protocol_versions(rustls::DEFAULT_VERSIONS) // = with_safe_default_protocol_versions, but explicit as well
             .context("couldn't set supported TLS protocol versions")?
             .with_no_client_auth()
-            .with_single_cert(vec![certificate], private_key)
+            .with_single_cert(certificates, private_key)
             .context("couldn't set server config cert")
     }
 }

@@ -180,7 +180,7 @@ impl RdpClient {
                 let proxy_connection = ConnectionSequenceFuture::new(
                     client_stream,
                     request,
-                    tls_conf.public_key.0,
+                    tls_conf.leaf_public_key.0,
                     tls_conf.acceptor,
                     identity.clone(),
                 )
