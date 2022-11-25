@@ -495,3 +495,19 @@ jobs:
           conflict_behavior: replace
           files: ${{ steps.prepare.outputs.files-to-upload }}
 
+  dotnet-utils-tests:
+      name: dotnet utils tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v3
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Test
+          shell: pwsh
+          run: |
+            Set-PSDebug -Trace 1
+            dotnet test utils/dotnet/GatewayUtils.sln
