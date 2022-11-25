@@ -305,9 +305,8 @@ pub async fn session_manager_task(mut manager: SessionManagerTask) -> anyhow::Re
                 }
 
                 // Re-arm the Sleep instance with the next deadline if required
-                match with_ttl.peek() {
-                    Some(next) => auto_kill_sleep.as_mut().reset(next.deadline),
-                    None => {}
+                if let Some(next) = with_ttl.peek() {
+                    auto_kill_sleep.as_mut().reset(next.deadline)
                 }
             }
             res = manager.rx.0.recv() => {

@@ -572,7 +572,7 @@ fn setup_logger(logging: &Logging) -> LoggerGuard {
 
     warn_span!("clean_old_log_files", file_name = tracing::field::Empty,).in_scope(|| {
         debug!(?logging);
-        if let Err(error) = clean_old_log_files(&logging) {
+        if let Err(error) = clean_old_log_files(logging) {
             warn!(error = format!("{error:#}"), "Failed to clean old log files")
         }
     });
@@ -596,9 +596,9 @@ fn clean_old_log_files(logging: &Logging) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let mut read_dir = fs::read_dir(folder).context("Failed to read directory")?;
+    let read_dir = fs::read_dir(folder).context("Failed to read directory")?;
 
-    while let Some(entry) = read_dir.next() {
+    for entry in read_dir {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
