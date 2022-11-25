@@ -370,7 +370,7 @@ jobs:
           path: devolutions-gateway/bom.xml
 
       - name: Upload SBOM to Dependency-Track
-        uses: ./.github/workflows/dtrack-upload-sbom@master
+        uses: ./.github/workflows/dtrack-upload-sbom
         with:
           serverhostname: 'dtrack-api.devolutions.com'
           apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
