@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2022.3.1"
+version = "2022.3.2"
 dependencies = [
  "anyhow",
  "backoff",

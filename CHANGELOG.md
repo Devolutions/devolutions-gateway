@@ -4,6 +4,23 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2022.3.2 (2022-11-25)
+
+### Improvements
+
+- _installer_: install service as "Local Service" again (fewer permissions) ([#353](https://github.com/Devolutions/devolutions-gateway/pull/353), [#354](https://github.com/Devolutions/devolutions-gateway/pull/354))
+- _jetsocat_: automatically clean old log files ([#346](https://github.com/Devolutions/devolutions-gateway/pull/346)) (d0325307e7c5c8d38b05ebf5218729e0d21795a2)
+- _dgw_: IPv6 support ([#350](https://github.com/Devolutions/devolutions-gateway/pull/350)) (d591085a6974f1a9c59bf66a094a09cd3d4d9f3e)
+- _dgw_: support for full TLS certificate chain ([#359](https://github.com/Devolutions/devolutions-gateway/pull/359)) (ee1f560fd534fd19d5704da96f0138be0247abc8)
+
+### Features
+
+- _installer_: enable configuration of Devolutions Gateway via installer UI on Windows ([#348](https://github.com/Devolutions/devolutions-gateway/pull/348)) (6392ed9f860e3df80adca1709bf8fda2b43d6035)
+
+### Build
+
+- _dgw_: disable sogar ([#355](https://github.com/Devolutions/devolutions-gateway/pull/355)) (90d57ac4d9d108f7196609e34d7802ecd7e8160f)
+
 ## 2022.3.1 (2022-10-03)
 
 ### Improvements
