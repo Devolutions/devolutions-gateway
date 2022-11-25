@@ -442,7 +442,7 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         let mut hasher = sha1::Sha1::new();
         hasher.update(input);
         hasher.update(WS_GUID);
-        base64::encode(&hasher.finalize())
+        base64::encode(hasher.finalize())
     }
     fn connection_has(value: &header::HeaderValue, needle: &str) -> bool {
         if let Ok(v) = value.to_str() {
@@ -524,7 +524,7 @@ async fn handle_jmux(
     } else if let Some(token) = req.uri().query().and_then(|q| {
         q.split('&')
             .filter_map(|segment| segment.split_once('='))
-            .find_map(|(key, val)| key.eq("token").then(|| val))
+            .find_map(|(key, val)| key.eq("token").then_some(val))
     }) {
         token
     } else {

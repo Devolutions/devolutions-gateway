@@ -746,7 +746,7 @@ fn validate_token_impl(
 
     let signed_jwt = if is_encrypted {
         let encrypted_jwt = token;
-        let delegation_key = delegation_key.ok_or_else(|| TokenError::MissingDelegationKey)?;
+        let delegation_key = delegation_key.ok_or(TokenError::MissingDelegationKey)?;
         jwe_token = Jwe::decode(encrypted_jwt, delegation_key)?;
         std::str::from_utf8(&jwe_token.payload).map_err(|source| TokenError::JwePayload { source })?
     } else {
@@ -1014,7 +1014,7 @@ pub mod unsafe_debug {
 
         let signed_jwt = if is_encrypted {
             let encrypted_jwt = token;
-            let delegation_key = delegation_key.ok_or_else(|| TokenError::MissingDelegationKey)?;
+            let delegation_key = delegation_key.ok_or(TokenError::MissingDelegationKey)?;
             jwe_token = Jwe::decode(encrypted_jwt, delegation_key)?;
             std::str::from_utf8(&jwe_token.payload).map_err(|source| TokenError::JwePayload { source })?
         } else {

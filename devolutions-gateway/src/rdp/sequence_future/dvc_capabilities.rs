@@ -113,7 +113,7 @@ impl SequenceFutureProperties<TlsStream<TcpStream>, RdpTransport, RdpPdu> for Do
                         let mut data = BytesMut::with_capacity(next_mcs_pdu.buffer_length() + pdu_data.len());
                         data.resize(next_mcs_pdu.buffer_length() + pdu_data.len(), 0);
                         next_mcs_pdu.to_buffer(data.as_mut())?;
-                        (&mut data[next_mcs_pdu.buffer_length()..]).clone_from_slice(&pdu_data);
+                        data[next_mcs_pdu.buffer_length()..].clone_from_slice(&pdu_data);
 
                         (SequenceState::DvcCapabilities(next_state), RdpPdu::Data(data))
                     }
@@ -355,7 +355,7 @@ where
     let mut pdu = BytesMut::with_capacity(svc_header.buffer_length() + dvc_pdu_buffer.len());
     pdu.resize(svc_header.buffer_length() + dvc_pdu_buffer.len(), 0);
     svc_header.to_buffer(pdu.as_mut())?;
-    (&mut pdu[svc_header.buffer_length()..]).clone_from_slice(&dvc_pdu_buffer);
+    pdu[svc_header.buffer_length()..].clone_from_slice(&dvc_pdu_buffer);
 
     Ok((next_state, pdu))
 }

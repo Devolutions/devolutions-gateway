@@ -91,7 +91,7 @@ async fn auth_middleware(
             if let Some(token) = request.uri().query().and_then(|q| {
                 q.split('&')
                     .filter_map(|segment| segment.split_once('='))
-                    .find_map(|(key, val)| key.eq("token").then(|| val))
+                    .find_map(|(key, val)| key.eq("token").then_some(val))
             }) {
                 token
             } else {
