@@ -340,37 +340,6 @@ jobs:
             }
           }
 
-  Upload-SBOM:
-    name: Upload SBOM
-    runs-on: ubuntu-latest
-    needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'false'
-
-    steps:
-      ## Download back the artifacts produced by the other jobs
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: bom.xml
-
-      - name: Download artifacts (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n bom.xml --repo $Env:GITHUB_REPOSITORY
-
-      - name: Upload SBOM
-        uses: devolutions/actions/dtrack-upload-sbom@master
-        with:
-          serverhostname: dtrack-api.devolutions.com
-          apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
-          projectname: devolutions-gateway
-          projectversion: ${{ needs.preflight.outputs.version }}
-          autocreate: 'true'
-
   onedrive:
     name: OneDrive
     runs-on: ubuntu-20.04
