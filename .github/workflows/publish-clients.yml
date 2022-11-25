@@ -1,4 +1,4 @@
-name: Publish clients
+name: Publish libraries
 
 on:
   workflow_dispatch:
@@ -40,7 +40,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ dotnet-client, dotnet-subscriber ]
+        library: [ dotnet-client, dotnet-subscriber, utils ]
+        include:
+          - library: dotnet-client
+            libpath: ./devolutions-gateway/openapi/dotnet-client
+          - library: dotnet-subscriber
+            libpath: ./devolutions-gateway/openapi/dotnet-subscriber
+          - library: utils
+            libpath: ./utils/dotnet
 
     steps:
       - name: Check out ${{ github.repository }}
@@ -51,7 +58,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Path = './devolutions-gateway/openapi/${{matrix.library}}'
+          $Path = '${{matrix.libpath}}'
           & "$Path/build.ps1"
 
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
