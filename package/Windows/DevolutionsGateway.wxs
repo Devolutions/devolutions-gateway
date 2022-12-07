@@ -61,6 +61,9 @@
       <RegistrySearch Id="DetermineInstallLocation" Type="raw" Root="HKLM" Key="Software\$(var.VendorName)\InstalledProducts\$(var.ProductName)" Name="InstallLocation" />
     </Property>
 
+    <!-- Public properties (supported) -->
+    <Property Id="P.DGW.NO_START_SERVICE" Secure="yes" />
+
     <!-- Properties to support Gateway configuration via Installer UI-->
     <Property Id="P.CONFIGURE" Value="1" />
     <Property Id="P.ERROR" Secure="yes" />
@@ -120,6 +123,7 @@
     <CustomAction Id="CA.BrowseForPublicKey" BinaryKey="B.HELPER" DllEntry="BrowseForPublicKey" Execute="immediate" Return="ignore" />
     <CustomAction Id="CA.QueryGatewayStartupType" BinaryKey="B.HELPER" DllEntry="QueryGatewayStartupType" Execute="immediate" Return="ignore" />
     <CustomAction Id="CA.SetGatewayStartupType" BinaryKey="B.HELPER" DllEntry="SetGatewayStartupType" Execute="deferred" Impersonate="no" Return="ignore" />
+    <CustomAction Id="CA.StartGatewayIfNeeded" BinaryKey="B.HELPER" DllEntry="StartGatewayIfNeeded" Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="CA.ConfigHostname" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check"/>
     <CustomAction Id="CA.ConfigListeners" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check"/>
     <CustomAction Id="CA.ConfigCert" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
@@ -141,6 +145,7 @@
       <Custom Action="CA.ConfigListeners" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
       <Custom Action="CA.ConfigCert" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
       <Custom Action="CA.ConfigPk" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.StartGatewayIfNeeded" After="StartServices">(NOT Uninstalling) AND (NOT P.DGW.NO_START_SERVICE)</Custom>
     </InstallExecuteSequence>
 
     <Media Id="1" Cabinet="dgateway.cab" EmbedCab="yes" />
