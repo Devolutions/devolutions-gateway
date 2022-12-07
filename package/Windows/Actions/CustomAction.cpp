@@ -13,6 +13,8 @@ enum Errors
 	InvalidHost = 30000
 };
 
+constexpr auto DG_SERVICE_NAME = L"DevolutionsGateway";
+
 /// <summary>
 /// Write a message to the installer log
 /// </summary>
@@ -346,7 +348,7 @@ UINT __stdcall BrowseForCertificate(MSIHANDLE hInstall)
 	er = BrowseForFile(
 		hInstall, 
 		propertyName, 
-		L"PFX Files (*.pfx, *.p12)\0*.pfx;*.p12\0Certificate Files (*.pem, *.crt)\0*.pem;*.crt\0\0"
+		L"PFX Files (*.pfx, *.p12)\0*.pfx;*.p12\0Certificate Files (*.pem, *.crt)\0*.pem;*.crt\0All Files\0*.*\0\0"
 	);
 
 	if (er != ERROR_SUCCESS)
@@ -386,7 +388,7 @@ UINT __stdcall BrowseForPrivateKey(MSIHANDLE hInstall)
 
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
-	er = BrowseForFile(hInstall, L"P.CERT_PK_FILE", L"Private Key Files (*.key)\0*.key\0\0");
+	er = BrowseForFile(hInstall, L"P.CERT_PK_FILE", L"Private Key Files (*.key)\0*.key\0All Files\0*.*\0\0");
 
 	if (er != ERROR_SUCCESS)
 	{
@@ -412,7 +414,7 @@ UINT __stdcall BrowseForPublicKey(MSIHANDLE hInstall)
 	er = BrowseForFile(
 		hInstall, 
 		L"P.PUBLIC_KEY_FILE", 
-		L"Key Files (*.pem, *.key)\0*.pem;*.key\0All Files\0*.*\0\0"
+		L"Public Key Files (*.pem)\0*.pem\0Private Key Files (*.key)\0*.key\0All Files\0*.*\0\0"
 	);
 
 	if (er != ERROR_SUCCESS)
@@ -424,6 +426,44 @@ UINT __stdcall BrowseForPublicKey(MSIHANDLE hInstall)
 LExit:
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
+}
+
+HRESULT __stdcall OpenServiceManagerX(MSIHANDLE hInstall, DWORD dwDesiredAccess, SC_HANDLE* lpHandle)
+{
+	HRESULT hr = S_OK;
+	SC_HANDLE hSCM = NULL;
+
+	hSCM = OpenSCManagerW(NULL, NULL, dwDesiredAccess);
+
+	if (hSCM == NULL)
+	{
+		DWORD dwError = GetLastError();
+		LogGLE(hInstall, L"OpenSCManager failed", dwError);
+		hr = HRESULT_FROM_WIN32(dwError);
+	}
+
+	*lpHandle = hSCM;
+
+	return hr;
+}
+
+HRESULT __stdcall OpenServiceX(MSIHANDLE hInstall, SC_HANDLE hSCManager, LPCWSTR lpServiceName, DWORD dwDesiredAccess, SC_HANDLE* lpHandle)
+{
+	HRESULT hr = S_OK;
+	SC_HANDLE hService = NULL;
+
+	hService = OpenServiceW(hSCManager, lpServiceName, dwDesiredAccess);
+
+	if (hService == NULL)
+	{
+		DWORD dwError = GetLastError();
+		LogGLE(hInstall, L"OpenService failed", dwError);
+		hr = HRESULT_FROM_WIN32(dwError);
+	}
+
+	*lpHandle = hService;
+
+	return hr;
 }
 
 UINT __stdcall SetGatewayStartupType(MSIHANDLE hInstall)
@@ -472,25 +512,13 @@ UINT __stdcall SetGatewayStartupType(MSIHANDLE hInstall)
 		goto LExit;
 	}
 
-	hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-
-	if (hSCM == NULL)
+	if (OpenServiceManagerX(hInstall, SC_MANAGER_ALL_ACCESS, &hSCM) != S_OK)
 	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenSCManager failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
 		goto LExit;
 	}
 
-	hService = OpenServiceW(hSCM, L"DevolutionsGateway", SERVICE_CHANGE_CONFIG);
-
-	if (hService == NULL)
+	if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_CHANGE_CONFIG, &hService) != S_OK)
 	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenService failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
 		goto LExit;
 	}
 
@@ -519,45 +547,27 @@ LExit:
 	return WcaFinalize(er);
 }
 
-UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
+HRESULT __stdcall GetGatewayStartupType(MSIHANDLE hInstall, DWORD* pStartupType)
 {
-	HRESULT hr = S_OK;
-	UINT er = ERROR_SUCCESS;
+	HRESULT hr = E_FAIL;
 	SC_HANDLE hSCM = NULL;
 	SC_HANDLE hService = NULL;
-	LPQUERY_SERVICE_CONFIG lpsc;
+	LPQUERY_SERVICE_CONFIG lpsc = { 0 };
 	DWORD dwBytesNeeded;
 	DWORD cbBufSize = 0;
 	DWORD dwError;
 
-	hr = WcaInitialize(hInstall, "QueryGatewayStartupType");
-	ExitOnFailure(hr, "Failed to initialize");
-
-	WcaLog(LOGMSG_STANDARD, "Initialized.");
-
-	hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
-
-	if (hSCM == NULL)
+	if (OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM) != S_OK)
 	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenSCManager failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
 		goto LExit;
 	}
 
-	hService = OpenServiceW(hSCM, L"DevolutionsGateway", SERVICE_QUERY_CONFIG);
-
-	if (hService == NULL)
+	if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_QUERY_CONFIG, &hService) != S_OK)
 	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenService failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
 		goto LExit;
 	}
 
-	if (!QueryServiceConfig(hService, NULL,	0, &dwBytesNeeded))
+	if (!QueryServiceConfigW(hService, NULL, 0, &dwBytesNeeded))
 	{
 		dwError = GetLastError();
 
@@ -582,17 +592,117 @@ UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
 		}
 	}
 
-	if (!QueryServiceConfig(hService, lpsc, cbBufSize, &dwBytesNeeded))
+	if (!QueryServiceConfigW(hService, lpsc, cbBufSize, &dwBytesNeeded))
 	{
+		dwError = GetLastError();
+		LogGLE(hInstall, L"QueryServiceConfig failed", dwError);
+		hr = HRESULT_FROM_WIN32(dwError);
+
 		LocalFree(lpsc);
 
 		goto LExit;
 	}
 
-	hr = WcaSetIntProperty(L"P.SERVICE_START", lpsc->dwStartType == SERVICE_DISABLED ? SERVICE_DEMAND_START : lpsc->dwStartType);
-	ExitOnFailure(hr, "The expected property was not found.");
+	hr = S_OK;
+	*pStartupType = lpsc->dwStartType;
 
 	LocalFree(lpsc);
+
+LExit:
+	if (hService != NULL)
+	{
+		CloseServiceHandle(hService);
+	}
+
+	if (hSCM != NULL)
+	{
+		CloseServiceHandle(hSCM);
+	}
+
+	return hr;
+}
+
+UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
+{
+	HRESULT hr = S_OK;
+	DWORD dwStartType = 0;
+	UINT er = ERROR_SUCCESS;
+
+	hr = WcaInitialize(hInstall, "QueryGatewayStartupType");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	Log(hInstall, L"Looking for existing Devolutions Gateway service");
+
+	hr = GetGatewayStartupType(hInstall, &dwStartType);
+
+	if (hr == S_OK)
+	{
+		hr = WcaSetIntProperty(L"P.SERVICE_START", dwStartType == SERVICE_DISABLED ? SERVICE_DEMAND_START : dwStartType);
+		ExitOnFailure(hr, "The expected property was not found.");
+	}
+
+LExit:
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+UINT __stdcall StartGatewayIfNeeded(MSIHANDLE hInstall)
+{
+	HRESULT hr = S_OK;
+	DWORD dwStartType = 0;
+	SC_HANDLE hSCM = NULL;
+	SC_HANDLE hService = NULL;
+	UINT er = ERROR_SUCCESS;
+
+	hr = WcaInitialize(hInstall, "StartGatewayIfNeeded");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = GetGatewayStartupType(hInstall, &dwStartType);
+
+	if (hr == S_OK)
+	{
+		if (dwStartType == SERVICE_AUTO_START)
+		{
+			Log(hInstall, L"Trying to start the Devolutions Gateway service");
+
+			if (OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM) != S_OK)
+			{
+				goto LExit;
+			}
+
+			if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_START, &hService) != S_OK)
+			{
+				goto LExit;
+			}
+
+			if (StartServiceW(hService, 0, NULL))
+			{
+				Log(hInstall, L"Successfully asked the Devolutions Gateway service to start");
+			}
+			else
+			{
+				DWORD dwError = GetLastError();
+
+				if (dwError == ERROR_SERVICE_ALREADY_RUNNING)
+				{
+					Log(hInstall, L"Devolutions Gateway service is already running");
+
+					goto LExit;
+				}
+
+				LogGLE(hInstall, L"StartService failed", dwError);
+				hr = HRESULT_FROM_WIN32(dwError);
+			}
+		}
+		else
+		{
+			Log(hInstall, L"Devolutions Gateway service is not SERVICE_AUTO_START, nothing to do");
+		}
+	}
 
 LExit:
 	if (hService != NULL)
@@ -831,7 +941,7 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 
 		for (int i = 0; i < lstrlenW(szCertPass); i++)
 		{
-			szValBuf[i] = L'•';
+			szValBuf[i] = L'â—';
 		}
 
 		szValBuf[lstrlenW(szCertPass)] = L'\0';
