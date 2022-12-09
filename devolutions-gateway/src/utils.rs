@@ -189,14 +189,7 @@ pub fn url_to_socket_addr(url: &Url) -> anyhow::Result<SocketAddr> {
     use std::net::ToSocketAddrs;
 
     let host = url.host_str().context("bad url: host missing")?;
-
-    let port = url
-        .port_or_known_default()
-        .or_else(|| match url.scheme() {
-            "tcp" => Some(8080),
-            _ => None,
-        })
-        .context("bad url: port missing")?;
+    let port = url.port_or_known_default().context("bad url: port missing")?;
 
     Ok((host, port).to_socket_addrs().unwrap().next().unwrap())
 }
