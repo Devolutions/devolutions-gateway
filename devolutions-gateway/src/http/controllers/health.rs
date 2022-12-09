@@ -75,20 +75,29 @@ impl Responder for HealthResponse {
 ))]
 fn get_health(controller: &HealthController, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
     let conf = controller.conf_handle.get_conf();
-    match req.headers().get(http::header::ACCEPT).map(http::HeaderValue::as_bytes) {
-        Some(b"application/json") => Ok(HealthResponse::Identity(Identity {
-            id: conf.id,
-            hostname: conf.hostname.clone(),
-        })),
-        None | Some(b"text/plain") | Some(b"text/*") | Some(b"*/*") => Ok(HealthResponse::HealthyMessage(format!(
-            "Devolutions Gateway \"{}\" is alive and healthy.",
-            conf.hostname
-        ))),
-        Some(header_value) => {
-            debug!(header_value = String::from_utf8_lossy(header_value).into_owned());
-            Err(HttpErrorStatus::bad_request("Unknown first value for Accept header"))
+
+    for hval in req
+        .headers()
+        .get(http::header::ACCEPT)
+        .and_then(|hval| hval.to_str().ok())
+        .into_iter()
+        .flat_map(|hval| hval.split(','))
+    {
+        match hval {
+            "application/json" => {
+                return Ok(HealthResponse::Identity(Identity {
+                    id: conf.id,
+                    hostname: conf.hostname.clone(),
+                }))
+            }
+            _ => {}
         }
     }
+
+    Ok(HealthResponse::HealthyMessage(format!(
+        "Devolutions Gateway \"{}\" is alive and healthy.",
+        conf.hostname
+    )))
 }
 
 // NOTE: legacy controller starting 2021/11/25
