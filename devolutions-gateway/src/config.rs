@@ -633,8 +633,8 @@ pub mod dto {
                 tls_private_key_file: None,
                 listeners: vec![
                     ListenerConf {
-                        internal_url: "tcp://*:8080".try_into().unwrap(),
-                        external_url: "tcp://*:8080".try_into().unwrap(),
+                        internal_url: "tcp://*:8181".try_into().unwrap(),
+                        external_url: "tcp://*:8181".try_into().unwrap(),
                     },
                     ListenerConf {
                         internal_url: "ws://*:7171".try_into().unwrap(),
