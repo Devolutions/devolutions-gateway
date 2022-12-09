@@ -624,7 +624,7 @@ pub mod dto {
             Self {
                 id: Some(Uuid::new_v4()),
                 hostname: None,
-                provisioner_public_key_file: Some("provisioner.pub.key".into()),
+                provisioner_public_key_file: Some("provisioner.pem".into()),
                 provisioner_public_key_data: None,
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,

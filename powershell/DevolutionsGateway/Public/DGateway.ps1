@@ -7,10 +7,10 @@
 $script:DGatewayConfigFileName = 'gateway.json'
 $script:DGatewayCertificateFileName = 'server.crt'
 $script:DGatewayPrivateKeyFileName = 'server.key'
-$script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pub.key'
-$script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.priv.key'
-$script:DGatewayDelegationPublicKeyFileName = 'delegation.pub.key'
-$script:DGatewayDelegationPrivateKeyFileName = 'delegation.priv.key'
+$script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pem'
+$script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.key'
+$script:DGatewayDelegationPublicKeyFileName = 'delegation.pem'
+$script:DGatewayDelegationPrivateKeyFileName = 'delegation.key'
 
 function Get-DGatewayVersion {
     param(
