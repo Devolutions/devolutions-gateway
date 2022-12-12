@@ -4,6 +4,30 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2022.3.3 (2022-12-12)
+
+### Improvements
+
+- _dgw_: set default TCP port to 8181 ([#364](https://github.com/Devolutions/devolutions-gateway/issues/364)) (9df3a0e6d0b675043b1d4fcd46848701d03e27c1) ([DGW-66](https://devolutions.atlassian.net/browse/DGW-66))
+
+- Normalize file extensions ([#367](https://github.com/Devolutions/devolutions-gateway/issues/367)) (5d26d7338fad9bbb5acfb6f267f7ae6a1051ca42) ([DGW-67](https://devolutions.atlassian.net/browse/DGW-67))
+
+  By convention:
+
+  - .pem -> public key
+  - .key -> private key
+  - .crt -> certificate
+
+  Note that this is merely a convention, not a standard, and file openers
+  should be able to select a .key file when choosing a public key (through
+  the drop-down menu typically)
+
+- _installer_: start the Gateway service at install time ([#363](https://github.com/Devolutions/devolutions-gateway/issues/363)) (b07ccd4ed9b9beabeb3fcac803705cc4d74837fe)
+
+### Bug Fixes
+
+- _dgw_: Accept header parsing in health route ([#366](https://github.com/Devolutions/devolutions-gateway/issues/366)) (136cfb040b72ae09a26e9bc470a4767222154cbf) ([DGW-68](https://devolutions.atlassian.net/browse/DGW-68))
+
 ## 2022.3.2 (2022-11-25)
 
 ### Improvements
