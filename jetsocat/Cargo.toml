@@ -1,6 +1,6 @@
 [package]
 name = "jetsocat"
-version = "2022.3.2"
+version = "2022.3.3"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 description = "WebSocket toolkit for jet protocol related operations"
