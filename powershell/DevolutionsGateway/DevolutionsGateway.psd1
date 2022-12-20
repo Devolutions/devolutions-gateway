@@ -22,7 +22,7 @@
     CompanyName = 'Devolutions'
 
     # Copyright statement for this module
-    Copyright = '(c) 2019-2022 Devolutions Inc. All rights reserved.'
+    Copyright = '(c) 2019-2023 Devolutions Inc. All rights reserved.'
 
     # Description of the functionality provided by this module
     Description = 'Devolutions Gateway PowerShell Module'
@@ -108,13 +108,13 @@
             Tags = 'Devolutions', 'Gateway', 'Wayk', 'Bastion', 'WaykBastion', 'Windows', 'macOS', 'Linux', 'RemoteDesktop'
 
             # A URL to the license for this module.
-            LicenseUri = 'https://github.com/Devolutions/DevolutionsGateway-ps/blob/master/LICENSE-MIT'
+            LicenseUri = 'https://github.com/Devolutions/devolutions-gateway/tree/master/powershell/LICENSE-MIT'
 
             # A URL to the main website for this project.
-            ProjectUri = 'https://github.com/Devolutions/DevolutionsGateway-ps'
+            ProjectUri = 'https://github.com/Devolutions/devolutions-gateway/tree/master/powershell/'
 
             # A URL to an icon representing this module.
-            IconUri = 'https://raw.githubusercontent.com/Devolutions/DevolutionsGateway-ps/master/logo.png'
+            IconUri = 'https://raw.githubusercontent.com/Devolutions/devolutions-gateway/master/powershell/logo.png'
 
             # ReleaseNotes of this module
             # ReleaseNotes = ''
