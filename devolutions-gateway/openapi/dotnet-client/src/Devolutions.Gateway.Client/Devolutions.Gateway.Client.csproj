@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo><!-- setting GenerateAssemblyInfo to false causes this bug https://github.com/dotnet/project-system/issues/3934 -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo><!-- setting GenerateAssemblyInfo to false causes this bug https://github.com/dotnet/project-system/issues/3934 -->
     <TargetFrameworks>netstandard2.0;net6.0</TargetFrameworks>
     <AssemblyName>Devolutions.Gateway.Client</AssemblyName>
     <PackageId>Devolutions.Gateway.Client</PackageId>
@@ -12,7 +12,7 @@
     <Description>Client for Devolutions Gateway REST API</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Gateway.Client</RootNamespace>
-    <Version>2022.9.21.0</Version>
+    <Version>2022.12.21.0</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Gateway.Client.xml</DocumentationFile>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
