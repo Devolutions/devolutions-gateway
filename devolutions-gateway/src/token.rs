@@ -159,14 +159,16 @@ pub enum Protocol {
     Ard,
     /// Virtual Network Computing
     Vnc,
-    /// Secure Shell Protocol
+    /// Secure Shell
     Ssh,
-    /// PowerShell over SSH
+    /// PowerShell over SSH transport
     SshPwsh,
     /// SSH File Transfer Protocol
     Sftp,
     /// Secure Copy Protocol
     Scp,
+    /// Telnet
+    Telnet,
     /// PowerShell over WinRM via HTTP transport
     WinrmHttpPwsh,
     /// PowerShell over WinRM via HTTPS transport
@@ -186,10 +188,11 @@ impl Protocol {
             Self::Vnc => 5900,
             Self::Ssh => 22,
             Self::SshPwsh => 22,
-            Self::WinrmHttpPwsh => 5985,
-            Self::WinrmHttpsPwsh => 5986,
             Self::Sftp => 22,
             Self::Scp => 22,
+            Self::Telnet => 23,
+            Self::WinrmHttpPwsh => 5985,
+            Self::WinrmHttpsPwsh => 5986,
             Self::Http => 80,
             Self::Https => 443,
         }
