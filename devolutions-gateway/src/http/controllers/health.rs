@@ -83,14 +83,11 @@ fn get_health(controller: &HealthController, req: Request) -> Result<HealthRespo
         .into_iter()
         .flat_map(|hval| hval.split(','))
     {
-        match hval {
-            "application/json" => {
-                return Ok(HealthResponse::Identity(Identity {
-                    id: conf.id,
-                    hostname: conf.hostname.clone(),
-                }))
-            }
-            _ => {}
+        if hval == "application/json" {
+            return Ok(HealthResponse::Identity(Identity {
+                id: conf.id,
+                hostname: conf.hostname.clone(),
+            }));
         }
     }
 

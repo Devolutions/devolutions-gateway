@@ -264,7 +264,7 @@ impl ConfHandle {
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("Failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, &json).with_context(|| format!("Failed to write file at {conf_file_path}"))?;
+    std::fs::write(&conf_file_path, json).with_context(|| format!("Failed to write file at {conf_file_path}"))?;
     Ok(())
 }
 
