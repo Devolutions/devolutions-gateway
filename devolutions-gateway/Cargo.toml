@@ -19,7 +19,8 @@ transport = { path = "../crates/transport" }
 jet-proto = { path = "../crates/jet-proto" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
 sogar-core = { version = "0.3", git = "https://github.com/Devolutions/sogar", branch = "hyper-update" }
-ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "ca53209c84c55b41" }
+ironrdp = { version = "0.4.1", git = "https://github.com/Devolutions/IronRDP", rev = "aa85fe4869aad3a1e1827" }
+ironrdp-devolutions-gateway = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "898fb8d40a3c84" }
 ceviche = "0.5.2"
 picky-krb = "0.3.1"
 
@@ -36,7 +37,7 @@ nonempty = "0.8.0"
 tap = "1.0.1"
 byteorder = "1.4.3"
 lazy_static = "1.4.0"
-bytes = "1.2.1"
+bytes = "1.3"
 cfg-if = "1.0.0"
 url = { version = "2.2.2", features = ["serde"] }
 tempfile = "3.3.0"

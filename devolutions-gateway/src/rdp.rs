@@ -18,6 +18,7 @@ use crate::transport::x224::NegotiationWithClientTransport;
 use crate::utils::{self, TargetAddr};
 use anyhow::Context;
 use bytes::BytesMut;
+use nonempty::NonEmpty;
 use sspi::internal::credssp;
 use sspi::AuthIdentity;
 use std::io;
@@ -37,7 +38,7 @@ pub const DR_DYN_VC_CHANNEL_NAME: &str = "drdynvc";
 pub struct RdpIdentity {
     pub proxy: AuthIdentity,
     pub target: AuthIdentity,
-    pub targets: Vec<TargetAddr>,
+    pub targets: NonEmpty<TargetAddr>,
 }
 
 impl credssp::CredentialsProxy for RdpIdentity {
@@ -260,7 +261,7 @@ impl RdpClient {
 }
 
 enum RdpRoutingMode {
-    Tcp(Vec<TargetAddr>),
+    Tcp(NonEmpty<TargetAddr>),
     Tls(RdpIdentity),
     TcpRendezvous(Uuid),
 }

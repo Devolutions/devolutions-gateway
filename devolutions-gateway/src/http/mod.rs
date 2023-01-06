@@ -13,10 +13,10 @@ use saphir::response::Builder;
 pub struct HttpErrorStatus {
     pub code: StatusCode,
     pub loc: &'static Location<'static>,
-    pub source: Box<dyn Display + Send + 'static>,
+    pub source: Box<dyn Display + Send + Sync + 'static>,
 }
 
-impl<T: Display + Send + 'static> From<(StatusCode, T)> for HttpErrorStatus {
+impl<T: Display + Send + Sync + 'static> From<(StatusCode, T)> for HttpErrorStatus {
     #[track_caller]
     fn from((code, source): (StatusCode, T)) -> Self {
         Self::new(code, source)
@@ -25,7 +25,7 @@ impl<T: Display + Send + 'static> From<(StatusCode, T)> for HttpErrorStatus {
 
 impl HttpErrorStatus {
     #[track_caller]
-    fn new<T: Display + Send + 'static>(code: StatusCode, source: T) -> Self {
+    fn new<T: Display + Send + Sync + 'static>(code: StatusCode, source: T) -> Self {
         Self {
             code,
             loc: Location::caller(),
@@ -34,32 +34,32 @@ impl HttpErrorStatus {
     }
 
     #[track_caller]
-    fn forbidden<T: Display + Send + 'static>(source: T) -> Self {
+    fn forbidden<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::FORBIDDEN, source)
     }
 
     #[track_caller]
-    fn not_found<T: Display + Send + 'static>(source: T) -> Self {
+    fn not_found<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::NOT_FOUND, source)
     }
 
     #[track_caller]
-    fn unauthorized<T: Display + Send + 'static>(source: T) -> Self {
+    fn unauthorized<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, source)
     }
 
     #[track_caller]
-    fn internal<T: Display + Send + 'static>(source: T) -> Self {
+    fn internal<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, source)
     }
 
     #[track_caller]
-    fn bad_request<T: Display + Send + 'static>(source: T) -> Self {
+    fn bad_request<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::BAD_REQUEST, source)
     }
 
     #[track_caller]
-    fn bad_gateway<T: Display + Send + 'static>(source: T) -> Self {
+    fn bad_gateway<T: Display + Send + Sync + 'static>(source: T) -> Self {
         Self::new(StatusCode::BAD_GATEWAY, source)
     }
 }

@@ -103,9 +103,12 @@ pub async fn tcp_transport_connect_with_url(url: &Url) -> anyhow::Result<transpo
     Ok(transport)
 }
 
-pub async fn successive_try<'a, F, Fut, In, Out>(inputs: &'a [In], func: F) -> anyhow::Result<(Out, &'a In)>
+pub async fn successive_try<'a, F, Fut, In, Out>(
+    inputs: impl IntoIterator<Item = &'a In>,
+    func: F,
+) -> anyhow::Result<(Out, &'a In)>
 where
-    In: Display,
+    In: Display + 'a,
     F: Fn(&'a In) -> Fut + 'a,
     Fut: core::future::Future<Output = anyhow::Result<Out>>,
 {
