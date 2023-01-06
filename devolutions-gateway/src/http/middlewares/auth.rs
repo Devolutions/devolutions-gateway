@@ -108,9 +108,9 @@ async fn auth_middleware(
         .peer_addr()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
 
-    match authenticate(*source_addr, token, &config, &token_cache, &jrl) {
-        Ok(jet_token) => {
-            request.extensions_mut().insert(jet_token);
+    match authenticate(*source_addr, token, &config, &token_cache, &jrl).map_err(HttpErrorStatus::unauthorized) {
+        Ok(token) => {
+            request.extensions_mut().insert(token);
             chain.next(ctx).await
         }
         Err(e) => {
@@ -128,7 +128,7 @@ pub fn authenticate(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
-) -> Result<AccessTokenClaims, HttpErrorStatus> {
+) -> Result<AccessTokenClaims, crate::token::TokenError> {
     if conf.debug.dump_tokens {
         debug!(token, "**DEBUG OPTION**");
     }
@@ -150,7 +150,6 @@ pub fn authenticate(
             .build()
             .validate(token)
     }
-    .map_err(HttpErrorStatus::unauthorized)
 }
 
 #[derive(PartialEq, Eq)]

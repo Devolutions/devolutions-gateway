@@ -19,7 +19,7 @@ impl FilterConfig {
     pub fn new(server_response_protocol: nego::SecurityProtocol, target_credentials: Credentials) -> Self {
         Self {
             server_response_protocol,
-            version: gcc::RdpVersion::V5Plus,
+            version: gcc::RdpVersion::V5_PLUS,
             client_early_capability_flags: ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL,
             server_early_capability_flags: gcc::ServerEarlyCapabilityFlags::empty(),
             encryption_methods: gcc::EncryptionMethod::empty(),

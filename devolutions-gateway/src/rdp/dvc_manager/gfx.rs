@@ -1,6 +1,7 @@
 use super::{CompleteDataResult, DynamicChannelDataHandler};
 use crate::interceptor::PeerSide;
-use ironrdp::dvc::gfx::{zgfx, ServerPdu};
+use ironrdp::dvc::gfx::ServerPdu;
+use ironrdp::graphics::zgfx;
 use ironrdp::PduParsing;
 use std::io;
 

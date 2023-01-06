@@ -72,7 +72,8 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
             .ok_or_else(|| HttpErrorStatus::internal("peer address missing"))?;
 
         let claims =
-            crate::http::middlewares::auth::authenticate(*source_addr, token, &conf, &this.token_cache, &this.jrl)?;
+            crate::http::middlewares::auth::authenticate(*source_addr, token, &conf, &this.token_cache, &this.jrl)
+                .map_err(HttpErrorStatus::unauthorized)?;
 
         if let AccessTokenClaims::Kdc(claims) = claims {
             claims

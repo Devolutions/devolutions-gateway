@@ -250,6 +250,7 @@ struct AssociationClaims<'a> {
     jet_cm: &'a str,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
@@ -282,6 +283,7 @@ struct JmuxClaims<'a> {
     dst_addl: Vec<&'a str>,
     jet_ap: ApplicationProtocol,
     jet_aid: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,

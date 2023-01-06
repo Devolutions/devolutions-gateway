@@ -210,7 +210,7 @@ pub enum ConnectionMode {
     /// Connection should be forwarded to a given destination host
     Fwd {
         /// Forward targets. Should be tried in order.
-        targets: Vec<TargetAddr>,
+        targets: NonEmpty<TargetAddr>,
 
         /// Credentials to use if protocol is wrapped by the Gateway (e.g. RDP TLS)
         creds: Option<CredsClaims>,
@@ -345,8 +345,10 @@ impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
                 let primary_target =
                     TargetAddr::parse(&dst_hst, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
 
-                let mut targets = Vec::with_capacity(dst_alt.len() + 1);
-                targets.push(primary_target);
+                let mut targets = NonEmpty {
+                    head: primary_target,
+                    tail: Vec::with_capacity(dst_alt.len()),
+                };
 
                 for alt in dst_alt {
                     let alt = TargetAddr::parse(&alt, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;

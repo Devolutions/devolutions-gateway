@@ -7,17 +7,16 @@ use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{CurrentJrl, TokenCache};
 use crate::utils::association::remove_jet_association;
+use anyhow::Context as _;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
-use jmux_proxy::JmuxProxy;
 use saphir::error;
 use sha1::Digest as _;
 use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tap::prelude::*;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Notify;
 use tracing::Instrument as _;
-use transport::{ErasedRead, ErasedWrite};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -68,6 +67,19 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/rdp") {
+            info!("{} {}", req.method(), req_uri);
+            handle_rdp(
+                req,
+                client_addr,
+                self.conf.clone(),
+                self.token_cache.clone(),
+                self.jrl.clone(),
+                self.sessions.clone(),
+                self.subscriber_tx.clone(),
+            )
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {:#}", err)))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
@@ -508,18 +520,14 @@ async fn handle_jmux(
     jrl: &CurrentJrl,
     sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
-) -> io::Result<Response<Body>> {
+) -> anyhow::Result<Response<Body>> {
     use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
-    use crate::token::AccessTokenClaims;
-    use futures::future::Either;
 
     let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
-        let authorization_value = authorization_value
-            .to_str()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "bad authorization header value"))?;
+        let authorization_value = authorization_value.to_str().context("bad authorization header value")?; // BAD REQUEST
         match parse_auth_header(authorization_value) {
             Some((AuthHeaderType::Bearer, token)) => token,
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "bad authorization header value")),
+            _ => anyhow::bail!("bad authorization header value"), // BAD REQUEST
         }
     } else if let Some(token) = req.uri().query().and_then(|q| {
         q.split('&')
@@ -528,22 +536,44 @@ async fn handle_jmux(
     }) {
         token
     } else {
-        return Err(io::Error::new(io::ErrorKind::Other, "missing authorization"));
+        anyhow::bail!("missing authorization"); // AUTHORIZATION
     };
 
-    let claims = match crate::http::middlewares::auth::authenticate(client_addr, token, &conf, token_cache, jrl) {
-        Ok(AccessTokenClaims::Jmux(claims)) => claims,
-        Ok(_) => {
-            return Err(io::Error::new(io::ErrorKind::Other, "token not allowed"));
-        }
-        Err(e) => {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("couldn't validate token: {:#}", e.source),
-            ));
-        }
-    };
+    let claims = crate::jmux::authorize(client_addr, token, &conf, token_cache, jrl)?; // FORBIDDEN
 
+    if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
+        if upgrade_val != "websocket" {
+            anyhow::bail!("unexpected upgrade header value: {}", upgrade_val) // BAD REQUEST
+        }
+    }
+
+    let rsp = process_req(&req);
+
+    tokio::spawn(async move {
+        let fut = async {
+            let stream = upgrade_websocket(&mut req).await?;
+            crate::jmux::handle(stream, claims, sessions, subscriber_tx).await
+        }
+        .instrument(info_span!("jmux", client = %client_addr));
+
+        match fut.await {
+            Ok(()) => {}
+            Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "JMUX failure"),
+        }
+    });
+
+    Ok(rsp)
+}
+
+async fn handle_rdp(
+    mut req: Request<Body>,
+    client_addr: SocketAddr,
+    conf: Arc<Conf>,
+    token_cache: Arc<TokenCache>,
+    jrl: Arc<CurrentJrl>,
+    sessions: SessionManagerHandle,
+    subscriber_tx: SubscriberSender,
+) -> io::Result<Response<Body>> {
     if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
         if upgrade_val != "websocket" {
             return Err(io::Error::new(
@@ -556,83 +586,31 @@ async fn handle_jmux(
     let rsp = process_req(&req);
 
     tokio::spawn(async move {
-        use jmux_proxy::{FilteringRule, JmuxConfig};
-        use tokio_tungstenite::tungstenite::protocol::Role;
+        let fut = async {
+            let stream = upgrade_websocket(&mut req).await?;
+            crate::rdp_extension::handle(stream, client_addr, conf, &token_cache, &jrl, sessions, subscriber_tx).await
+        }
+        .instrument(info_span!("rdp", client = %client_addr));
 
-        let upgraded = hyper::upgrade::on(&mut req)
-            .await
-            .map_err(|e| error!("upgrade error: {}", e))?;
-
-        let ws = tokio_tungstenite::WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
-        let ws = transport::WebSocketStream::new(ws);
-        let (reader, writer) = tokio::io::split(ws);
-        let reader = Box::new(reader) as ErasedRead;
-        let writer = Box::new(writer) as ErasedWrite;
-
-        let main_destination_host = claims.hosts.first().clone();
-
-        let config = JmuxConfig {
-            filtering: FilteringRule::Any(
-                claims
-                    .hosts
-                    .into_iter()
-                    .map(|addr| {
-                        if addr.host() == "*" {
-                            FilteringRule::port(addr.port())
-                        } else {
-                            FilteringRule::wildcard_host(addr.host().to_owned()).and(FilteringRule::port(addr.port()))
-                        }
-                    })
-                    .collect(),
-            ),
-        };
-
-        let session_id = claims.jet_aid;
-
-        let info = SessionInfo::new(
-            session_id,
-            claims.jet_ap,
-            ConnectionModeDetails::Fwd {
-                destination_host: main_destination_host,
-            },
-        )
-        .with_ttl(claims.jet_ttl);
-
-        let notify_kill = Arc::new(Notify::new());
-
-        crate::session::add_session_in_progress(&sessions, &subscriber_tx, info, notify_kill.clone())
-            .await
-            .map_err(|e| error!("{e:#?}"))?;
-
-        let proxy_fut = JmuxProxy::new(reader, writer)
-            .with_config(config)
-            .run()
-            .instrument(info_span!("jmux", client=%client_addr));
-
-        let proxy_handle = tokio::spawn(proxy_fut);
-        tokio::pin!(proxy_handle);
-
-        let kill_notified = notify_kill.notified();
-        tokio::pin!(kill_notified);
-
-        let res = match futures::future::select(proxy_handle, kill_notified).await {
-            Either::Left((res, _)) => res
-                .map_err(|e| error!("Failed to wait for proxy task: {e}"))
-                .map(|res| {
-                    let _ = res.map_err(|e| error!("JMUX proxy error: {e}"));
-                }),
-            Either::Right((_, proxy_handle)) => {
-                proxy_handle.abort();
-                Ok(())
-            }
-        };
-
-        crate::session::remove_session_in_progress(&sessions, &subscriber_tx, session_id)
-            .await
-            .map_err(|e| error!("{e:#?}"))?;
-
-        res
+        match fut.await {
+            Ok(()) => {}
+            Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "RDP failure"),
+        }
     });
 
     Ok(rsp)
+}
+
+type WebsocketTransport = transport::WebSocketStream<tokio_tungstenite::WebSocketStream<hyper::upgrade::Upgraded>>;
+
+async fn upgrade_websocket(req: &mut Request<Body>) -> anyhow::Result<WebsocketTransport> {
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    hyper::upgrade::on(req)
+        .await
+        .context("WebSocket upgrade failure")?
+        .pipe(|upgraded| tokio_tungstenite::WebSocketStream::from_raw_socket(upgraded, Role::Server, None))
+        .await
+        .pipe(transport::WebSocketStream::new)
+        .pipe(Ok)
 }
