@@ -160,7 +160,7 @@ class DGatewaySubscriber {
 }
 
 class DGatewayConfig {
-    [Guid] $Id
+    [System.Nullable[Guid]] $Id
     [string] $Hostname
     [string] $FarmName
     [string[]] $FarmMembers
