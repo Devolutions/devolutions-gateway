@@ -5,7 +5,7 @@ A running proxy server is required with specific configurations.
 
 ## No authentication method testing
 
-Setup a proxy server permitting all connections (no authentication required).
+Set up a proxy server permitting all connections (no authentication required).
 Using CCProxy all you need is to open `Account Manager` pop-up and set `Permit Category` to `Permit All`.
 
 Let's assume proxy address for SOCKS is `192.168.122.70:1080`.
@@ -24,7 +24,7 @@ $ cargo run -p proxy-tester -- --mode https --addr 192.168.122.70:808
 
 ## Username/Password authentication method testing
 
-Setup a proxy server permitting only connection with a valid username / password pair.
+Set up a proxy server permitting only connection with a valid username / password pair.
 Using CCProxy, open `Account Manager` pop-up, set `Permit Category` to `Permit Only` and `Auth Type` to `User/Password`.
 You also need to have a user account with a password. Make sure no other restriction are enabled (untick `IP Address/IP Range`, `MAC Address/Hostname`…).
 
