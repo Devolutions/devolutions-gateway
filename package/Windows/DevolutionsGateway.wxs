@@ -140,11 +140,11 @@
       </Custom>
       <Custom Action="CA.QueryGatewayStartupType" Before="RemoveExistingProducts">1</Custom>
       <Custom Action="CA.SetGatewayStartupType" Before="StartServices">1</Custom>
-      <Custom Action="CA.InitConfigAfterFinalize" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "1")</Custom>
-      <Custom Action="CA.ConfigHostname" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
-      <Custom Action="CA.ConfigListeners" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
-      <Custom Action="CA.ConfigCert" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
-      <Custom Action="CA.ConfigPk" Before="StartServices">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.InitConfigAfterFinalize" Before="StartServices">(NOT Installed OR REINSTALL)</Custom>
+      <Custom Action="CA.ConfigHostname" After="CA.InitConfigAfterFinalize">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigListeners" After="CA.ConfigHostname">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigCert" After="CA.ConfigListeners">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigPk" After="CA.ConfigCert">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
       <Custom Action="CA.StartGatewayIfNeeded" After="StartServices">(NOT Uninstalling) AND (NOT P.DGW.NO_START_SERVICE)</Custom>
     </InstallExecuteSequence>
 

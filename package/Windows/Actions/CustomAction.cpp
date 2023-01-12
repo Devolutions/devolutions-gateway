@@ -726,7 +726,7 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 	LPWSTR szAccessUriScheme = NULL;
 	LPWSTR szAccessUriHost = NULL;
 	LPWSTR szAccessUriPort = NULL;
-	static LPCWSTR psCommandFormat = L"Set-DGatewayHostname %ls://%ls:%ls";
+	static LPCWSTR psCommandFormat = L"Set-DGatewayHostname %ls";
 	int psCommandLen = 0;
 	WCHAR* psCommand = NULL;
 
@@ -785,9 +785,9 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 		ExitOnFailure(hr, "The expected property was not found.");
 	}
 
-	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
+	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szAccessUriHost);
 	psCommand = new WCHAR[psCommandLen + 1];
-	_snwprintf(psCommand, psCommandLen, psCommandFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
+	_snwprintf(psCommand, psCommandLen, psCommandFormat, szAccessUriHost);
 	psCommand[psCommandLen] = L'\0';
 
 	hr = WcaSetProperty(L"P.ACCESSURI_CMD", psCommand);
