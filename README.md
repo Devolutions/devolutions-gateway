@@ -12,20 +12,20 @@ Devolutions Gateway is configured using a JSON document.
 The file must be named `gateway.json` and exist under the following path:
 
 - `%ProgramData%\Devolutions\Gateway\` under Windows,
-- `/Library/Application Support/devolutions-gateway/` under MacOS, or
+- `/Library/Application Support/devolutions-gateway/` under macOS, or
 - `/etc/devolutions-gateway/` under Linux.
 
-This path may be overriden using the `DGATEWAY_CONFIG_PATH` environment variable.
+This path may be overridden using the `DGATEWAY_CONFIG_PATH` environment variable.
 
 A default template with minimal options is generated in this location if the file doesn't exist yet.
 
-Currently stable options are:
+Currently, stable options are:
 
 - `Id`: this Gateway's unique ID,
 
 - `Hostname`: this Gateway's hostname (used when inferring external URLs),
 
-- `ProvisionerPublicKeyFile`: path to the provisioner public key (used to verify tokens without any specfic restriction),
+- `ProvisionerPublicKeyFile`: path to the provisioner public key (used to verify tokens without any specific restriction),
 
 - `SubProvisionerPublicKey`: a JSON object describing the sub provisioner public key (may only be used to verify tokens when establishing a session).
     The schema is:
@@ -35,7 +35,7 @@ Currently stable options are:
     * `Format`: the format used for the key data (`Spki` or `Rsa`),
     * `Encoding`: the binary-to-text encoding used for the key data (`Multibase`, `Base64`, `Base64Pad`, `Base64Url`, `Base64UrlPad`),
 
-- `DelegationPrivateKeyFile`: path to the delegation private key (used to decypher sensitive data from tokens),
+- `DelegationPrivateKeyFile`: path to the delegation private key (used to decipher sensitive data from tokens),
 
 - `TlsCertificateFile`: path to the certificate to use for TLS,
 
@@ -175,4 +175,4 @@ Support for required cipher suits was not implemented until Windows 10.
 
 ## Continuous Integration and Delivery
 
-See the dedicated [README](.github/workflows/README.md) in the workflows directory.
+See the dedicated [README](.github/workflows/README.md) in the `workflows` directory.

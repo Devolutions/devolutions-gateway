@@ -2,7 +2,7 @@
 
 Devolutions Gateway and jetsocat are built and released using GitHub workflows.
 
-There are three seperate workflows:
+There are three separate workflows:
 
 ```
 ┌────┐   ┌─────────┐   ┌─────────┐
@@ -26,7 +26,7 @@ It's possible to run the individual workflows and generate a release manually.
 
 - Execute the [CI](#ci) workflow (either manually via the GitHub web UI or `gh`, or by creating or merging a pull request)
 
-:warning: *For releases, the CI workflow should be run from a commit on `master`. This ensures the binaries are built with the proper opimizations*
+:warning: *For releases, the CI workflow should be run from a commit on `master`. This ensures the binaries are built with the proper optimizations*
 - Find the run ID of the [CI](#ci) workflow run containing the artifacts you wish to release. You can use the GitHub web UI, or `gh` (e.g. `gh run list`)
 - Run the [Package](#package) workflow, providing the run ID obtained in the previous step (either using the GitHub web UI, or `gh`. For example:
 
@@ -80,7 +80,7 @@ Re-releasing the same version multiple times is not supported. The "Release" wor
 
 ### JETSOCAT NUGET
 
-A seperate workflow (Release jetsocat nuget package) is provided to generate the nuget package for jetsocat. It will retrieve the jetsocat binaries from the latest GitHub release, wrap them in a nuget package and deploy to Artifactory.
+A separate workflow (Release jetsocat nuget package) is provided to generate the nuget package for jetsocat. It will retrieve the jetsocat binaries from the latest GitHub release, wrap them in a nuget package and deploy to Artifactory.
 ##### Parameters
 
 - `version` The version for the nuget package. Note that this is distinct from the jetsocat binary version.
