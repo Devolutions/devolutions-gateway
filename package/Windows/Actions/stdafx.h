@@ -11,7 +11,7 @@
 // WiX Header Files:
 #include <wcautil.h>
 
-
 // Reference additional headers your program requires here
 #include <commdlg.h>
+#include <wininet.h>
 #include "strutil.h"
