@@ -1,0 +1,97 @@
+# Configuration file for git-cliff
+
+[changelog]
+
+# changelog header
+header = """
+# Changelog
+
+This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
+
+"""
+
+# template for the changelog body
+# https://tera.netlify.app/docs/#introduction
+body = """
+{% if version -%}
+  ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }} ({{ commit_id }})
+{%- else -%}
+  ## [Unreleased]
+{%- endif %}
+
+{% for group, commits in commits | group_by(attribute="group") -%}
+
+### {{ group | upper_first }}
+
+{%- for commit in commits %}
+
+{%- if commit.scope %}
+  {%- set scope = "_" ~ commit.scope ~ "_: " %}
+  {%- set message = commit.message %}
+{%- else %}
+  {%- set scope = "" %}
+  {%- set message = commit.message | upper_first %}
+{%- endif %}
+
+{%- if commit.breaking %}
+  {%- set breaking = "[**breaking**] " %}
+{%- else %}
+  {%- set breaking = "" %}
+{%- endif %}
+
+{%- set short_sha = commit.id | truncate(length=10, end="") %}
+{%- set commit_url = "https://github.com/Devolutions/devolutions-gateway/commit/" ~ commit.id %}
+{%- set commit_link = "[" ~ short_sha ~ "](" ~ commit_url ~ ")" %}
+
+{%- set jira_tickets = commit.footers | filter(attribute="token", value="Issue") | map(attribute="value") %}
+
+- {{scope}}{{breaking}}{{ message }} ({{commit_link}}){% for t in jira_tickets %} ([{{t}}](https://devolutions.atlassian.net/browse/{{t}})){% endfor %} \
+  {% if commit.body %}\n\n  {{ commit.body | replace(from="\n", to="\n  ") }}{% endif %}
+{%- endfor %}
+
+{% endfor -%}
+"""
+
+# remove the leading and trailing whitespace from the template
+trim = false
+# changelog footer
+footer = ""
+
+[git]
+
+# parse the commits based on https://www.conventionalcommits.org
+conventional_commits = true
+# filter out the commits that are not conventional
+filter_unconventional = true
+# regex for preprocessing the commit messages
+commit_preprocessors = [
+  # Replace issue number with the link
+  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/Devolutions/devolutions-gateway/issues/${2}))" },
+  # Replace commit sha1 with the link
+  { pattern = '([a-f0-9]{10})([a-f0-9]{30})', replace = "[${0}](https://github.com/Devolutions/devolutions-gateway/commit/${1}${2})" }
+]
+# regex for parsing and grouping commits
+commit_parsers = [
+    { message = "^chore", skip = true },
+    { message = "^style", skip = true },
+    { message = "^refactor", skip = true },
+
+    { message = "^ci", group = "Continuous Integration" },
+    { message = "^build", group = "Build" },
+
+    { message = "(?i)security", group = "Security" },
+    { body = "(?i)security", group = "Security" },
+
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^doc", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^test", group = "Testing" },
+]
+# filter out the commits that are not matched by commit parsers
+filter_commits = false
+# sort the tags chronologically
+date_order = false
+# sort the commits inside sections by oldest/newest order
+sort_commits = "oldest"
+
