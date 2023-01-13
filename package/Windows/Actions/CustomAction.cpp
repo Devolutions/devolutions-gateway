@@ -726,6 +726,11 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 	LPWSTR szAccessUriScheme = NULL;
 	LPWSTR szAccessUriHost = NULL;
 	LPWSTR szAccessUriPort = NULL;
+	static LPCWSTR uriFormat = L"%ls://%ls:%ls";
+	int uriLen = 0;
+	WCHAR* uri = NULL;
+	DWORD dwHostLen = INTERNET_MAX_HOST_NAME_LENGTH;
+	WCHAR wszHost[INTERNET_MAX_HOST_NAME_LENGTH] = { 0 };
 	static LPCWSTR psCommandFormat = L"Set-DGatewayHostname %ls";
 	int psCommandLen = 0;
 	WCHAR* psCommand = NULL;
@@ -785,9 +790,24 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 		ExitOnFailure(hr, "The expected property was not found.");
 	}
 
-	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szAccessUriHost);
+	uriLen = _snwprintf(NULL, 0, uriFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
+	uri = new WCHAR[uriLen + 1];
+	_snwprintf(uri, uriLen, uriFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
+	uri[uriLen] = L'\0';
+
+	hr = UrlGetPartW(uri, wszHost, &dwHostLen, URL_PART_HOSTNAME, 0);
+
+	delete[] uri;
+
+	if (hr != S_OK)
+	{
+		HandleValidationError(hInstall, Errors::InvalidHost);
+		goto LExit;
+	}
+
+	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, wszHost);
 	psCommand = new WCHAR[psCommandLen + 1];
-	_snwprintf(psCommand, psCommandLen, psCommandFormat, szAccessUriHost);
+	_snwprintf(psCommand, psCommandLen, psCommandFormat, wszHost);
 	psCommand[psCommandLen] = L'\0';
 
 	hr = WcaSetProperty(L"P.ACCESSURI_CMD", psCommand);
