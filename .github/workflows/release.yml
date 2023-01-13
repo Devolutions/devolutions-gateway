@@ -39,9 +39,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ inputs.dispatch }}') {
-            echo '::set-output name=dl-strategy::action'
+            echo "dl-strategy=action" >> $Env:GITHUB_OUTPUT
           } else {
-            echo '::set-output name=dl-strategy::cli'
+            echo "dl-strategy=cli" >> $Env:GITHUB_OUTPUT
           }
 
       ## workflow_dispatch: The run_id is read from the inputs
@@ -51,9 +51,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ github.event.inputs.run }}') {
-            echo '::set-output name=run::${{ github.event.inputs.run }}'
+            echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
           } else {
-            echo '::set-output name=run::${{ github.run_id }}'
+            echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
           }
 
       - name: Download version (action)
@@ -74,7 +74,7 @@ jobs:
         shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
+          echo "version=$Version" >> $Env:GITHUB_OUTPUT
           echo "::notice::Releasing artifacts for version $Version from run ${{ steps.get-run.outputs.run }}"
 
       ## If we already released this version to GitHub, publishing will be skipped
@@ -97,7 +97,7 @@ jobs:
             echo "::warning::GitHub already has a release version ${{ steps.get-version.outputs.version }}; publishing will be skipped"
             $SkipPublishing = 'true'
           }
-          echo "::set-output name=skip-publishing::$SkipPublishing"
+          echo "skip-publishing=$SkipPublishing" >> $Env:GITHUB_OUTPUT
 
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
@@ -156,7 +156,7 @@ jobs:
         shell: pwsh
         run: |
           $PkgDir = Join-Path docker $Env:RUNNER_OS # RUNNER_OS is camelcase
-          echo "::set-output name=package-path::$PkgDir"
+          echo "package-path=$PkgDir" >> $Env:GITHUB_OUTPUT
 
           $SourceFileName = "DevolutionsGateway_$($Env:RUNNER_OS)_${{ needs.preflight.outputs.version }}_${{ matrix.arch }}"
 
@@ -186,7 +186,7 @@ jobs:
           } else {
             docker build -t "$ImageName" .
           }
-          echo "::set-output name=image-name::$ImageName"
+          echo "image-name=$ImageName" >> $Env:GITHUB_OUTPUT
           Get-ChildItem -Recurse
 
       - name: Push container
@@ -385,8 +385,8 @@ jobs:
           $version="${{ needs.preflight.outputs.version }}"
 
           # Note that ".0" is appended here (required by release tooling downstream)
-          Write-Host "::set-output name=version::${version}.0"
-          Write-Host "::set-output name=files-to-upload::${destinationFolder}"
+          echo "version=${version}.0" >> $Env:GITHUB_OUTPUT
+          echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"

@@ -41,9 +41,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ inputs.dispatch }}') {
-            echo '::set-output name=dl-strategy::action'
+            echo "dl-strategy=action" >> $Env:GITHUB_OUTPUT
           } else {
-            echo '::set-output name=dl-strategy::cli'
+            echo "dl-strategy=cli" >> $Env:GITHUB_OUTPUT
           }
 
       ## workflow_dispatch: The run_id is read from the inputs
@@ -53,9 +53,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ github.event.inputs.run }}') {
-            echo '::set-output name=run::${{ github.event.inputs.run }}'
+            echo "run=${{ github.event.inputs.run }}" >> $Env:GITHUB_OUTPUT
           } else {
-            echo '::set-output name=run::${{ github.run_id }}'
+            echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
           }
 
       ## To consistently repackage the CI artifacts, we must use the same commit that produced the artifacts
@@ -91,7 +91,7 @@ jobs:
             $Ref = $($Run.head_sha)
           }
 
-          echo "::set-output name=commit::$Ref"
+          echo "commit=$Ref" >> $Env:GITHUB_OUTPUT
           echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
 
       - name: Checkout ${{ github.repository }}
@@ -100,19 +100,19 @@ jobs:
           ref: ${{ steps.get-commit.outputs.commit }}
 
       - name: Upload version artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: version
           path: VERSION
 
       - name: Upload docker file artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: docker
           path: package/**/Dockerfile
 
       - name: Upload changelog artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: changelog
           path: CHANGELOG.md
@@ -122,7 +122,7 @@ jobs:
         shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
+          echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
   codesign:
     name: Codesign
@@ -317,7 +317,7 @@ jobs:
           }
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.project }}
           path: ${{ runner.temp }}/${{ matrix.project }}
