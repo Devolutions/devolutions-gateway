@@ -38,7 +38,7 @@ jobs:
           if (-Not $Ref) {
             $Ref = '${{ github.sha }}'
           }
-          echo "::set-output name=ref::$Ref"
+          echo "ref=$Ref" >> $Env:GITHUB_OUTPUT
 
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v3
@@ -50,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           $Version = Get-Content VERSION -TotalCount 1
-          echo "::set-output name=version::$Version"
+          echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
       - name: Configure rust toolchain
         id: rust-toolchain
@@ -59,7 +59,7 @@ jobs:
           $Channel = (Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData).channel
           rustup toolchain install $Channel
           rustup component add rustfmt
-          echo "::set-output name=rust-channel::$Channel"
+          echo "rust-channel=$Channel" >> $Env:GITHUB_OUTPUT
 
       - name: Check formatting
         run: |
@@ -79,7 +79,7 @@ jobs:
             $CargoProfile = "production"
           }
 
-          echo "::set-output name=rust-profile::$CargoProfile"
+          echo "rust-profile=$CargoProfile" >> $Env:GITHUB_OUTPUT
 
       - name: Upload version artifact
         uses: actions/upload-artifact@v3
@@ -227,7 +227,7 @@ jobs:
 
           ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
-          echo "::set-output name=staging-path::$StagingPath"
+          echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
@@ -307,15 +307,15 @@ jobs:
             $DGatewayPSModulePath = Join-Path $PSModuleOutputPath DevolutionsGateway
             $DGatewayPackage = Join-Path $TargetOutputPath $PackageFileName
 
-            echo "::set-output name=psmodule-output-path::$PSModuleOutputPath"
-            echo "::set-output name=dgateway-psmodule-output-path::$DGatewayPSModulePath"
-            echo "::set-output name=dgateway-package::$DGatewayPackage"
+            echo "psmodule-output-path=$PSModuleOutputPath" >> $Env:GITHUB_OUTPUT
+            echo "dgateway-psmodule-output-path=$DGatewayPSModulePath" >> $Env:GITHUB_OUTPUT
+            echo "dgateway-package=$DGatewayPackage" >> $Env:GITHUB_OUTPUT
           }
 
           $DGatewayExecutable = Join-Path $TargetOutputPath $ExecutableFileName
-          echo "::set-output name=staging-path::$StagingPath"
-          echo "::set-output name=target-output-path::$TargetOutputPath"
-          echo "::set-output name=dgateway-executable::$DGatewayExecutable"
+          echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
+          echo "target-output-path=$TargetOutputPath" >> $Env:GITHUB_OUTPUT
+          echo "dgateway-executable=$DGatewayExecutable" >> $Env:GITHUB_OUTPUT
 
       - name: Configure rust toolchain
         run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
@@ -423,7 +423,7 @@ jobs:
 
       - name: Get current timestamp
         id: timestamp
-        run: echo "::set-output name=timestamp::$(date +'%Y%m%d%H%M')"
+        run: echo "timestamp=$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
 
       ## Devolutions Toolbox is required for OneDrive uploading
 
@@ -464,9 +464,9 @@ jobs:
           Write-Host "version = $version"
           Write-Host "ref = $ref"
 
-          Write-Host "::set-output name=version::${version}"
-          Write-Host "::set-output name=short-ref::${shortRef}"
-          Write-Host "::set-output name=files-to-upload::${destinationFolder}"
+          echo "version=$version" >> $Env:GITHUB_OUTPUT
+          echo "short-ref=$shortRef" >> $Env:GITHUB_OUTPUT
+          echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
 
