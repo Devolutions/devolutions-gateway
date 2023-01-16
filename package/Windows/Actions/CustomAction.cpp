@@ -961,7 +961,7 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 
 		for (int i = 0; i < lstrlenW(szCertPass); i++)
 		{
-			szValBuf[i] = L'●';
+			szValBuf[i] = L'*';
 		}
 
 		szValBuf[lstrlenW(szCertPass)] = L'\0';
