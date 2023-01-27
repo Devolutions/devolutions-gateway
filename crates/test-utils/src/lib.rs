@@ -14,7 +14,7 @@ impl core::fmt::Debug for Payload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "0x")?;
         for v in self.0.iter().take(15) {
-            write!(f, "{:X?}", v)?;
+            write!(f, "{v:X?}")?;
         }
         write!(f, "..")
     }
@@ -93,7 +93,7 @@ pub async fn ws_connect(port: u16) -> anyhow::Result<Transport> {
     let stream = TcpStream::connect(("127.0.0.1", port)).await?;
     let addr = stream.peer_addr()?;
 
-    let req = format!("ws://127.0.0.1:{}", port).into_client_request()?;
+    let req = format!("ws://127.0.0.1:{port}").into_client_request()?;
     let (ws, ..) = client_async(req, stream)
         .await
         .context("WebSocket handshake failed (connect)")?;

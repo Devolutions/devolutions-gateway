@@ -180,7 +180,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -257,7 +257,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -321,7 +321,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -381,7 +381,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -437,7 +437,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -531,7 +531,7 @@ mod as_of_v2022_2_0_0 {
                 None,
                 &token_cache,
                 &jrl
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -591,7 +591,7 @@ mod as_of_v2022_2_0_0 {
                 None,
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -679,7 +679,7 @@ mod as_of_v2021_2_13_0 {
                 None,
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 
@@ -759,7 +759,7 @@ mod as_of_v2021_2_4 {
                 None,
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 }
@@ -817,7 +817,7 @@ mod as_of_v2021_1_7_0 {
                 None,
                 &token_cache,
                 &jrl,
-            ).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
 }

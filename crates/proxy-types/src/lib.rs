@@ -98,7 +98,7 @@ impl<'a> ToDestAddr for &'a str {
         let host = host.to_owned();
         let port = port
             .parse()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid port value: {}", e)))?;
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid port value: {e}")))?;
 
         Ok(DestAddr::Domain(host, port))
     }

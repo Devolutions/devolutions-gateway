@@ -432,10 +432,7 @@ mod tests {
         let mut dvc_manager = DvcManager::with_allowed_channels(Vec::new());
         match dvc_manager.process(PeerSide::Client, VC_PACKET_WITH_INVALID_TOTAL_DATA_LENGTH.as_ref()) {
             Err(vc::ChannelError::InvalidChannelTotalDataLength) => (),
-            res => panic!(
-                "Expected ChannelError::InvalidChannelTotalDataLength error, got: {:?}",
-                res
-            ),
+            res => panic!("Expected ChannelError::InvalidChannelTotalDataLength error, got: {res:?}"),
         }
     }
 

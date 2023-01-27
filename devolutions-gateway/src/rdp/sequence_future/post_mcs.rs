@@ -229,10 +229,7 @@ fn process_send_data_request_pdu(
         }
         state => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "Got invalid sequence state ({:?}) in the client's RDP Connection Sequence",
-                state
-            ),
+            format!("Got invalid sequence state ({state:?}) in the client's RDP Connection Sequence"),
         )),
     }
 }
@@ -288,10 +285,7 @@ fn process_send_data_indication_pdu(
         }
         state => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "Got invalid sequence state ({:?}) in the server's RDP Connection Sequence",
-                state
-            ),
+            format!("Got invalid sequence state ({state:?}) in the server's RDP Connection Sequence"),
         )),
     }
 }

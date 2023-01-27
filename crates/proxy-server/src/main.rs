@@ -15,10 +15,10 @@ async fn main() -> io::Result<()> {
 
     if args.show_usage {
         let prgm_name = env::args().next().unwrap();
-        println!("Usage: {} {}", prgm_name, USAGE);
+        println!("Usage: {prgm_name} {USAGE}");
         return Ok(());
     } else {
-        println!("{:?}", args);
+        println!("{args:?}");
     }
 
     let conf = Arc::new(Socks5AcceptorConfig {
@@ -30,17 +30,17 @@ async fn main() -> io::Result<()> {
 
     if let Some(port) = args.socks_port {
         let socks_listener = TcpListener::bind(("0.0.0.0", port)).await?;
-        println!("Listener for SOCKS5 streams on port {}", port);
+        println!("Listener for SOCKS5 streams on port {port}");
 
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok((socket, addr)) = socks_listener.accept().await {
-                    println!("Received SOCKS5 request from {:?}", addr);
+                    println!("Received SOCKS5 request from {addr:?}");
                     let conf = Arc::clone(&conf);
                     tokio::spawn(async move {
                         match process_socks5(socket, conf).await {
-                            Ok(()) => println!("Stream from {:?} was processed successfully", addr),
-                            Err(e) => println!("Error: {}", e),
+                            Ok(()) => println!("Stream from {addr:?} was processed successfully"),
+                            Err(e) => println!("Error: {e}"),
                         }
                     });
                 }
@@ -52,16 +52,16 @@ async fn main() -> io::Result<()> {
 
     if let Some(port) = args.https_port {
         let https_listener = TcpListener::bind(("0.0.0.0", port)).await?;
-        println!("Listener for HTTPS tunneling on port {}", port);
+        println!("Listener for HTTPS tunneling on port {port}");
 
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok((socket, addr)) = https_listener.accept().await {
-                    println!("Received HTTPS tunneling request from {:?}", addr);
+                    println!("Received HTTPS tunneling request from {addr:?}");
                     tokio::spawn(async move {
                         match process_https(socket).await {
-                            Ok(()) => println!("Stream from {:?} was processed successfully", addr),
-                            Err(e) => println!("Error: {}", e),
+                            Ok(()) => println!("Stream from {addr:?} was processed successfully"),
+                            Err(e) => println!("Error: {e}"),
                         }
                     });
                 }
@@ -94,16 +94,13 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
         match input {
             ["--https-port", value, rest @ ..] => {
                 args.https_port = value.parse::<u16>().map(Some).map_err(|e| {
-                    io::Error::new(io::ErrorKind::Other, format!("HTTPS proxy port value malformed: {}", e))
+                    io::Error::new(io::ErrorKind::Other, format!("HTTPS proxy port value malformed: {e}"))
                 })?;
                 input = rest;
             }
             ["--socks-port", value, rest @ ..] => {
                 args.socks_port = value.parse::<u16>().map(Some).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("SOCKS5 proxy port value malformed: {}", e),
-                    )
+                    io::Error::new(io::ErrorKind::Other, format!("SOCKS5 proxy port value malformed: {e}"))
                 })?;
                 input = rest;
             }
@@ -113,7 +110,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
             }
             ["--user" | "-u", value, rest @ ..] => {
                 let idx = value.find(',').ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {}", value))
+                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {value}"))
                 })?;
                 let (user, pass) = value.split_at(idx);
                 args.user = Some((user, &pass[1..]));
@@ -126,7 +123,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
             [unexpected_arg, ..] => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("unexpected argument: {}", unexpected_arg),
+                    format!("unexpected argument: {unexpected_arg}"),
                 ))
             }
             [] => break,
@@ -142,7 +139,7 @@ async fn process_socks5(incoming: TcpStream, conf: Arc<Socks5AcceptorConfig>) ->
     if acceptor.is_connect_command() {
         let dest_addr = acceptor.dest_addr();
 
-        println!("Requested proxying to {:?}", dest_addr);
+        println!("Requested proxying to {dest_addr:?}");
 
         let socket_addr = {
             match dest_addr.clone() {
@@ -194,7 +191,7 @@ async fn process_https(incoming: TcpStream) -> io::Result<()> {
 
     let dest_addr = acceptor.dest_addr();
 
-    println!("Requested proxying to {:?}", dest_addr);
+    println!("Requested proxying to {dest_addr:?}");
 
     let socket_addr = {
         match dest_addr.clone() {

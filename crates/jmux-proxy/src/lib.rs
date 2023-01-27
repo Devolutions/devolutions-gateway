@@ -319,7 +319,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
-                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
+                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("Couldn’t find channel with id {id}"))?;
 
                         let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -361,7 +361,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
             Some(internal_msg) = internal_msg_rx.recv() => {
                 match internal_msg {
                     InternalMessage::Eof { id } => {
-                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {}", id))?;
+                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {id}"))?;
                         let channel_span = channel.span.clone();
                         let local_id = channel.local_id;
                         let distant_id = channel.distant_id;

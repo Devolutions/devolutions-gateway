@@ -52,7 +52,7 @@ pub fn decode_preconnection_pdu(buf: &[u8]) -> Result<Option<PreconnectionPdu>, 
         Err(PreconnectionPduError::IoError(e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
         Err(e) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Failed to parse preconnection PDU: {}", e),
+            format!("Failed to parse preconnection PDU: {e}"),
         )),
     }
 }

@@ -26,10 +26,7 @@ pub fn process_license_request(
     let initial_message = InitialServerLicenseMessage::from_buffer(pdu).map_err(|err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "An error occurred during reading Initial Server License Message: {:?}",
-                err
-            ),
+            format!("An error occurred during reading Initial Server License Message: {err:?}"),
         )
     })?;
 
@@ -42,11 +39,11 @@ pub fn process_license_request(
 
             let rand = ring::rand::SystemRandom::new();
             rand.fill(&mut client_random)
-                .map_err(|err| RdpError::IOError(io::Error::new(io::ErrorKind::InvalidData, format!("{}", err))))?;
+                .map_err(|err| RdpError::IOError(io::Error::new(io::ErrorKind::InvalidData, format!("{err}"))))?;
 
             let mut premaster_secret = vec![0u8; PREMASTER_SECRET_SIZE];
             rand.fill(&mut premaster_secret)
-                .map_err(|err| RdpError::IOError(io::Error::new(io::ErrorKind::InvalidData, format!("{}", err))))?;
+                .map_err(|err| RdpError::IOError(io::Error::new(io::ErrorKind::InvalidData, format!("{err}"))))?;
 
             let (new_license_request, encryption_data) = ClientNewLicenseRequest::from_server_license_request(
                 &license_request,
@@ -58,10 +55,7 @@ pub fn process_license_request(
             .map_err(|err| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!(
-                        "Unable to generate Client New License Request from Server License Request: {}",
-                        err
-                    ),
+                    format!("Unable to generate Client New License Request from Server License Request: {err}"),
                 )
             })?;
 
@@ -71,7 +65,7 @@ pub fn process_license_request(
                 .map_err(|err| {
                     io::Error::new(
                         io::ErrorKind::Other,
-                        format!("Received an error during writing Client New License Request: {}", err),
+                        format!("Received an error during writing Client New License Request: {err}"),
                     )
                 })?;
 
@@ -92,7 +86,7 @@ pub fn process_license_request(
             let mut valid_client_buffer = Vec::with_capacity(valid_client.buffer_length());
             valid_client
                 .to_buffer(&mut valid_client_buffer)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{}", err)))?;
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("{err}")))?;
 
             Ok((
                 SequenceState::ServerDemandActive,
@@ -121,7 +115,7 @@ pub fn process_challenge(
             valid_client.to_buffer(&mut valid_client_buffer).map_err(|err| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Received an error during writing Status Valid Client message: {}", err),
+                    format!("Received an error during writing Status Valid Client message: {err}"),
                 )
             })?;
 
@@ -137,10 +131,7 @@ pub fn process_challenge(
         Err(error) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "An error occurred during reading Initial Server License Message: {:?}",
-                    error
-                ),
+                format!("An error occurred during reading Initial Server License Message: {error:?}"),
             ));
         }
         Ok(challenge) => challenge,
@@ -164,7 +155,7 @@ pub fn process_challenge(
     .map_err(|err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Unable to generate Client Platform Challenge Response {}", err),
+            format!("Unable to generate Client Platform Challenge Response {err}"),
         )
     })?;
 
@@ -177,10 +168,7 @@ pub fn process_challenge(
         .map_err(|err| {
             io::Error::new(
                 io::ErrorKind::Other,
-                format!(
-                    "Received an error during writing Client Platform Challenge Response: {}",
-                    err
-                ),
+                format!("Received an error during writing Client Platform Challenge Response: {err}"),
             )
         })?;
 
@@ -208,7 +196,7 @@ pub fn process_upgrade_license(
             valid_client.to_buffer(&mut valid_client_buffer).map_err(|err| {
                 io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Received an error during writing Status Valid Client message: {}", err),
+                    format!("Received an error during writing Status Valid Client message: {err}"),
                 )
             })?;
 
@@ -224,10 +212,7 @@ pub fn process_upgrade_license(
         Err(error) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!(
-                    "An error occurred during reading Initial Server License Message: {:?}",
-                    error
-                ),
+                format!("An error occurred during reading Initial Server License Message: {error:?}"),
             ));
         }
         Ok(challenge) => challenge,
@@ -243,7 +228,7 @@ pub fn process_upgrade_license(
     upgrade_license.verify_server_license(&encryption_data).map_err(|err| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("License verification failed: {:?}", err),
+            format!("License verification failed: {err:?}"),
         )
     })?;
 
@@ -255,7 +240,7 @@ pub fn process_upgrade_license(
     valid_client.to_buffer(&mut valid_client_buffer).map_err(|err| {
         io::Error::new(
             io::ErrorKind::Other,
-            format!("Received an error during writing Status Valid Client message: {}", err),
+            format!("Received an error during writing Status Valid Client message: {err}"),
         )
     })?;
 

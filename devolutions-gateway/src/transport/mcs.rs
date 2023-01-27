@@ -59,7 +59,7 @@ impl Decoder for SendDataContextTransport {
                 }
                 McsPdu::DisconnectProviderUltimatum(reason) => Err(io::Error::new(
                     io::ErrorKind::ConnectionAborted,
-                    format!("Disconnection request has been received: {:?}", reason),
+                    format!("Disconnection request has been received: {reason:?}"),
                 )),
                 _ => panic!("MCS sequence PDUs cannot be received"),
             }

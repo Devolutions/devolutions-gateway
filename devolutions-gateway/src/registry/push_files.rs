@@ -24,7 +24,7 @@ pub async fn do_push(
 
     let command_data = CommandData {
         media_type: get_mime_type_from_file_extension(&file_paths[0]),
-        reference: format!("{}:{}", image_name, tag),
+        reference: format!("{image_name}:{tag}"),
         filepath: file_paths,
     };
 

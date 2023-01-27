@@ -17,7 +17,7 @@ impl Registry {
     pub fn new(config: Arc<Conf>) -> Self {
         let registry_name = config.sogar.registry_name.clone();
         let registry_namespace = config.sogar.registry_image.clone();
-        let registry_path = format!("{}/{}", registry_name, registry_namespace);
+        let registry_path = format!("{registry_name}/{registry_namespace}");
 
         Self {
             config,
@@ -223,7 +223,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     fn test_files_moved_to_registry(mut conf: Conf) {
         let files_dir_name = "dir_with_file1";
         let file_name = "test1.txt";
-        let file_path = format!("{}/{}", files_dir_name, file_name);
+        let file_path = format!("{files_dir_name}/{file_name}");
 
         let path_buf = PathBuf::from("test_registry1/test_image1").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
@@ -236,8 +236,8 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
 
         let registry = Registry::new(Arc::new(conf));
 
-        assert_eq!(path_buf.exists(), true);
-        assert_eq!(path_buf.is_dir(), true);
+        assert!(path_buf.exists());
+        assert!(path_buf.is_dir());
 
         tokio_test::block_on(registry.manage_files(
             String::from("tag"),
@@ -245,16 +245,13 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
             Path::new(files_dir_name),
         ));
 
-        assert_eq!(path_buf.join("tag").exists(), true);
-        assert_eq!(path_buf.join("sha256").exists(), true);
-        assert_eq!(
-            path_buf
-                .join("sha256")
-                .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
-                .exists(),
-            true
-        );
-        assert_eq!(PathBuf::from(file_path.as_str()).exists(), false);
+        assert!(path_buf.join("tag").exists());
+        assert!(path_buf.join("sha256").exists());
+        assert!(path_buf
+            .join("sha256")
+            .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
+            .exists());
+        assert!(!PathBuf::from(file_path.as_str()).exists());
 
         fs::remove_dir_all(Path::new("test_registry1")).unwrap();
         fs::remove_dir_all(Path::new(files_dir_name)).unwrap();
@@ -264,7 +261,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     fn test_files_not_removed(mut conf: Conf) {
         let files_dir_name = "dir_with_file2";
         let file_name = "test2.txt";
-        let file_path = format!("{}/{}", files_dir_name, file_name);
+        let file_path = format!("{files_dir_name}/{file_name}");
 
         let path_buf = PathBuf::from("test_registry2/test_image2").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
@@ -278,8 +275,8 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
 
         let registry = Registry::new(Arc::new(conf));
 
-        assert_eq!(path_buf.exists(), true);
-        assert_eq!(path_buf.is_dir(), true);
+        assert!(path_buf.exists());
+        assert!(path_buf.is_dir());
 
         tokio_test::block_on(registry.manage_files(
             String::from("tag"),
@@ -287,16 +284,13 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
             Path::new(files_dir_name),
         ));
 
-        assert_eq!(path_buf.join("tag").exists(), true);
-        assert_eq!(path_buf.join("sha256").exists(), true);
-        assert_eq!(
-            path_buf
-                .join("sha256")
-                .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
-                .exists(),
-            true
-        );
-        assert_eq!(PathBuf::from(file_path.as_str()).exists(), true);
+        assert!(path_buf.join("tag").exists());
+        assert!(path_buf.join("sha256").exists());
+        assert!(path_buf
+            .join("sha256")
+            .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
+            .exists());
+        assert!(PathBuf::from(file_path.as_str()).exists());
 
         fs::remove_dir_all(Path::new("test_registry2")).unwrap();
         fs::remove_dir_all(Path::new(files_dir_name)).unwrap();
@@ -306,7 +300,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
     fn test_files_removed_after_timeout(mut conf: Conf) {
         let files_dir_name = "dir_with_file3";
         let file_name = "test3.txt";
-        let file_path = format!("{}/{}", files_dir_name, file_name);
+        let file_path = format!("{files_dir_name}/{file_name}");
 
         let path_buf = PathBuf::from("test_registry3/test_image3").join(registry::ARTIFACTS_DIR);
         create_file_and_registry(String::from(files_dir_name), file_path.clone(), path_buf.as_path());
@@ -320,8 +314,8 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
 
         let registry = Registry::new(Arc::new(conf));
 
-        assert_eq!(path_buf.exists(), true);
-        assert_eq!(path_buf.is_dir(), true);
+        assert!(path_buf.exists());
+        assert!(path_buf.is_dir());
 
         tokio_test::block_on(registry.manage_files(
             String::from("tag"),
@@ -329,19 +323,16 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
             Path::new(files_dir_name),
         ));
 
-        assert_eq!(path_buf.join("tag").exists(), true);
-        assert_eq!(path_buf.join("sha256").exists(), true);
-        assert_eq!(
-            path_buf
-                .join("sha256")
-                .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
-                .exists(),
-            true
-        );
-        assert_eq!(PathBuf::from(file_path.as_str()).exists(), true);
+        assert!(path_buf.join("tag").exists());
+        assert!(path_buf.join("sha256").exists());
+        assert!(path_buf
+            .join("sha256")
+            .join("71f98783dc1d803d41c0e7586a636a8cbaac8b6fc739681123a8f674d3d0f544")
+            .exists());
+        assert!(PathBuf::from(file_path.as_str()).exists());
 
         std::thread::sleep(Duration::from_millis(1100));
-        assert_eq!(PathBuf::from(file_path.as_str()).exists(), false);
+        assert!(!PathBuf::from(file_path.as_str()).exists());
 
         fs::remove_dir_all(Path::new("test_registry3")).unwrap();
         fs::remove_dir_all(Path::new(files_dir_name)).unwrap();

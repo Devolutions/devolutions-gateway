@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use anyhow::Context as _;
 use devolutions_gateway::token::{
     new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, TokenError,
@@ -248,10 +250,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
                     let is_revoked = updated_jrl
                         .jrl
                         .iter()
-                        .any(|(key, revoked_values)| match item.claims.get(key) {
-                            Some(token_value) if revoked_values.contains(token_value) => true,
-                            _ => false,
-                        });
+                        .any(|(key, revoked_values)| matches!(item.claims.get(key), Some(token_value) if revoked_values.contains(token_value)));
                     (item, is_revoked)
                 }
             })
@@ -288,7 +287,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
     };
 
     proptest!(ProptestConfig::with_cases(16), |(items in vec(revocable_item(now, &delegation_key_pub, &provisioner_key), 1..5))| {
-        test_impl(items).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        test_impl(items).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
     });
 }
 
@@ -367,7 +366,7 @@ fn token_cache(
     };
 
     proptest!(ProptestConfig::with_cases(64), |(same_ip in any::<bool>(), claims in any_claims(now).no_shrink())| {
-        test_impl(same_ip, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+        test_impl(same_ip, claims).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
     });
 }
 
@@ -477,7 +476,7 @@ fn with_scopes(
     proptest!(
         ProptestConfig::with_cases(64),
         |(scope_dw_id in jet_gw_id(this_gw_id), use_subkey in any::<bool>(), claims in any_claims(now).no_shrink())| {
-            test_impl(scope_dw_id, use_subkey, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            test_impl(scope_dw_id, use_subkey, claims).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         }
     );
 }
@@ -568,7 +567,7 @@ fn with_subkey(
     proptest!(
         ProptestConfig::with_cases(16),
         |(kid in kid(&subkey_metadata.kid), claims in subkey_compatible_claims(now).no_shrink())| {
-            test_impl(kid, claims).map_err(|e| TestCaseError::fail(format!("{:#}", e)))?;
+            test_impl(kid, claims).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         }
     );
 }

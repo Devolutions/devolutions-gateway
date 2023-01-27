@@ -54,7 +54,7 @@ impl PluginRecordingInspector {
             .get_parsing_packets_plugin()
             .context("packet parser plugin missing")?;
 
-        let filename = format!("{}-to-{}", association_id, candidate_id);
+        let filename = format!("{association_id}-to-{candidate_id}");
 
         recorder.set_filename(&filename);
 

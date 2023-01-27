@@ -79,7 +79,7 @@ impl JetAcceptReq {
                 }
             }
         }
-        Err(format!("Invalid accept request: {:?}", request).into())
+        Err(format!("Invalid accept request: {request:?}").into())
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +178,6 @@ impl JetAcceptRsp {
             }
         }
 
-        Err(format!("Invalid accept response: {:?}", response).into())
+        Err(format!("Invalid accept response: {response:?}").into())
     }
 }

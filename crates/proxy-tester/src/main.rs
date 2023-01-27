@@ -13,10 +13,10 @@ fn main() {
 
     if args.show_usage {
         let prgm_name = env::args().next().unwrap();
-        println!("Usage: {} {}", prgm_name, USAGE);
+        println!("Usage: {prgm_name} {USAGE}");
         return;
     } else {
-        println!("{:?}", args);
+        println!("{args:?}");
     }
 
     match args.mode {
@@ -47,10 +47,7 @@ fn main() {
             http::test(args.addr);
         }
         invalid_mode => {
-            eprintln!(
-                "invalid mode provided: {} (possible values: socks, socks4, socks5, http)",
-                invalid_mode
-            );
+            eprintln!("invalid mode provided: {invalid_mode} (possible values: socks, socks4, socks5, http)");
             std::process::exit(1);
         }
     }
@@ -90,7 +87,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
             }
             ["--user" | "-u", value, rest @ ..] => {
                 let idx = value.find(',').ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {}", value))
+                    io::Error::new(io::ErrorKind::Other, format!("malformed username,password: {value}"))
                 })?;
                 let (user, pass) = value.split_at(idx);
                 args.user = Some((user, &pass[1..]));
@@ -103,7 +100,7 @@ fn parse_args<'a>(mut input: &[&'a str]) -> io::Result<Args<'a>> {
             [unexpected_arg, ..] => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("unexpected argument: {}", unexpected_arg),
+                    format!("unexpected argument: {unexpected_arg}"),
                 ))
             }
             [] => break,

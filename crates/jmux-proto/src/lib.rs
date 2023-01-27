@@ -63,7 +63,7 @@ pub struct DestinationUrl {
 impl DestinationUrl {
     pub fn new(scheme: &str, host: &str, port: u16) -> Self {
         Self {
-            inner: SmolStr::new(format!("{}://{}:{}", scheme, host, port)),
+            inner: SmolStr::new(format!("{scheme}://{host}:{port}")),
             scheme: SmolStr::new(scheme),
             host: SmolStr::new(host),
             port,
@@ -157,7 +157,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::PacketOversized { packet_size, max } => {
-                write!(f, "Packet oversized: max is {}, got {}", max, packet_size)
+                write!(f, "Packet oversized: max is {max}, got {packet_size}")
             }
             Error::NotEnoughBytes {
                 name,
@@ -165,14 +165,13 @@ impl fmt::Display for Error {
                 expected,
             } => write!(
                 f,
-                "Not enough bytes provided to decode {}: received {} bytes, expected {} bytes",
-                name, received, expected
+                "Not enough bytes provided to decode {name}: received {received} bytes, expected {expected} bytes"
             ),
             Error::InvalidPacket { name, field, reason } => {
-                write!(f, "Invalid `{}` in {}: {}", field, name, reason)
+                write!(f, "Invalid `{field}` in {name}: {reason}")
             }
             Error::InvalidDestinationUrl { value, reason } => {
-                write!(f, "Invalid destination URL `{}`: {}", value, reason)
+                write!(f, "Invalid destination URL `{value}`: {reason}")
             }
         }
     }

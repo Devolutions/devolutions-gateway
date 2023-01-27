@@ -77,7 +77,7 @@ pub fn exit(res: anyhow::Result<()>) -> ! {
     match res {
         Ok(()) => std::process::exit(0),
         Err(e) => {
-            eprintln!("{:?}", e);
+            eprintln!("{e:?}");
             std::process::exit(1);
         }
     }
@@ -420,7 +420,7 @@ impl JmuxProxyArgs {
             .args
             .iter()
             .skip(1)
-            .map(|arg| parse_listener_mode(arg).with_context(|| format!("Bad <LISTENER>: `{}`", arg)))
+            .map(|arg| parse_listener_mode(arg).with_context(|| format!("Bad <LISTENER>: `{arg}`")))
             .collect::<anyhow::Result<Vec<ListenerMode>>>()?;
 
         Ok(Self {
@@ -567,7 +567,7 @@ fn setup_logger(logging: &Logging) -> LoggerGuard {
 
     panic::set_hook(Box::new(move |panic_info| {
         error!(%panic_info);
-        eprintln!("{}", panic_info);
+        eprintln!("{panic_info}");
     }));
 
     warn_span!("clean_old_log_files", file_name = tracing::field::Empty,).in_scope(|| {
