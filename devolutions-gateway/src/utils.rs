@@ -118,7 +118,7 @@ where
         match func(input).await {
             Ok(o) => return Ok((o, input)),
             Err(e) => {
-                let e = e.context(format!("{} failed", input));
+                let e = e.context(format!("{input} failed"));
                 match error.take() {
                     Some(prev_err) => error = Some(prev_err.context(e)),
                     None => error = Some(e),
@@ -224,7 +224,7 @@ impl fmt::Display for BadTargetAddr {
             BadTargetAddr::HostMissing => write!(f, "host is missing"),
             BadTargetAddr::PortMissing => write!(f, "port is missing"),
             BadTargetAddr::TooLong => write!(f, "address representation is too long"),
-            BadTargetAddr::BadPort { value } => write!(f, "bad port value: {}", value),
+            BadTargetAddr::BadPort { value } => write!(f, "bad port value: {value}"),
         }
     }
 }

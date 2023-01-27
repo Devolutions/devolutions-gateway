@@ -22,7 +22,7 @@ impl JetConnectReq {
             1 => {
                 stream.write_fmt(format_args!("GET / HTTP/1.1\r\n"))?;
                 stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
-                stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
+                stream.write_fmt(format_args!("{JET_HEADER_CONNECTION}: Keep-Alive\r\n"))?;
                 stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_METHOD, "Connect"))?;
                 stream.write_fmt(format_args!(
                     "{}: {}\r\n",
@@ -44,7 +44,7 @@ impl JetConnectReq {
                     &self.candidate.to_string()
                 ))?;
                 stream.write_fmt(format_args!("{}: {}\r\n", JET_HEADER_HOST, &self.host))?;
-                stream.write_fmt(format_args!("{}: Keep-Alive\r\n", JET_HEADER_CONNECTION))?;
+                stream.write_fmt(format_args!("{JET_HEADER_CONNECTION}: Keep-Alive\r\n"))?;
                 stream.write_fmt(format_args!(
                     "{}: {}\r\n",
                     JET_HEADER_VERSION,
@@ -105,7 +105,7 @@ impl JetConnectReq {
                 }
             }
         }
-        Err(format!("Invalid connect request: {:?}", request).into())
+        Err(format!("Invalid connect request: {request:?}").into())
     }
 }
 
@@ -154,6 +154,6 @@ impl JetConnectRsp {
             }
         }
 
-        Err(format!("Invalid connect response: {:?}", response).into())
+        Err(format!("Invalid connect response: {response:?}").into())
     }
 }

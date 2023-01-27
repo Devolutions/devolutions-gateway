@@ -77,7 +77,7 @@ pub fn load_plugins(conf: &Conf) -> anyhow::Result<()> {
         for plugin in plugins {
             manager
                 .load_plugin(plugin)
-                .with_context(|| format!("Failed to load plugin {}", plugin))?;
+                .with_context(|| format!("Failed to load plugin {plugin}"))?;
         }
     }
 

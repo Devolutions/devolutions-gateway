@@ -572,7 +572,7 @@ fn encode_request(buf: &mut BytesMut, dest: &DestAddr) {
     let host = match dest {
         DestAddr::Ip(addr) => addr.to_string(),
         DestAddr::Domain(domain, port) => {
-            format!("{}:{}", domain, port)
+            format!("{domain}:{port}")
         }
     };
 

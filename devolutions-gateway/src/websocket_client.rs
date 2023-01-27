@@ -37,7 +37,7 @@ impl WebsocketService {
             info!("{} {}", req.method(), req_uri);
             handle_jet_accept(req, client_addr, self.associations.clone())
                 .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {:?}", err)))
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {err:?}")))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/connect") {
             info!("{} {}", req.method(), req_uri);
             handle_jet_connect(
@@ -49,11 +49,11 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {:?}", err)))
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {err:?}")))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/test") {
             info!("{} {}", req.method(), req_uri);
             handle_jet_test(req, &self.associations)
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {:?}", err)))
+                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {err:?}")))
         } else if req.method() == Method::GET && (req_uri.starts_with("/jmux") || req_uri.starts_with("/jet/jmux")) {
             info!("{} {}", req.method(), req_uri);
             handle_jmux(
@@ -66,7 +66,7 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {:#}", err)))
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {err:#}")))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/rdp") {
             info!("{} {}", req.method(), req_uri);
             handle_rdp(
@@ -79,13 +79,13 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {:#}", err)))
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {err:#}")))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
                 .map_err(|err| match err {
                     error::SaphirError::Io(err) => err,
-                    err => io::Error::new(io::ErrorKind::Other, format!("{}", err)),
+                    err => io::Error::new(io::ErrorKind::Other, format!("{err}")),
                 })
         }
     }
@@ -578,7 +578,7 @@ async fn handle_rdp(
         if upgrade_val != "websocket" {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("unexpected upgrade header value: {}", upgrade_val),
+                format!("unexpected upgrade header value: {upgrade_val}"),
             ));
         }
     }

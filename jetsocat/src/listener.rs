@@ -17,7 +17,7 @@ pub enum ListenerMode {
 
 #[instrument(skip(api_request_tx))]
 pub async fn tcp_listener_task(api_request_tx: ApiRequestSender, bind_addr: String, destination_url: String) {
-    let destination_url = format!("tcp://{}", destination_url);
+    let destination_url = format!("tcp://{destination_url}");
 
     let processor = |stream, addr| {
         let api_request_tx = api_request_tx.clone();
@@ -284,7 +284,7 @@ where
 
     let listener = TcpListener::bind(&bind_addr)
         .await
-        .with_context(|| format!("Couldn’t bind listener to {}", bind_addr))?;
+        .with_context(|| format!("Couldn’t bind listener to {bind_addr}"))?;
 
     info!("Start listener");
 

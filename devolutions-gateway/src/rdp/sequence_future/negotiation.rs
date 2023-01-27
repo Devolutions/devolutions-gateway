@@ -128,13 +128,13 @@ impl SequenceFutureProperties<TcpStream, NegotiationWithServerTransport, Request
                     }
                     _ => Err(io::Error::new(
                         io::ErrorKind::Other,
-                        format!("Got unsupported security protocol: {:?}", protocol),
+                        format!("Got unsupported security protocol: {protocol:?}"),
                     )),
                 }
             }
             Some(ResponseData::Failure { code }) => Err(io::Error::new(
                 io::ErrorKind::Other,
-                format!("Received negotiation failure from server (code: {:?})", code),
+                format!("Received negotiation failure from server (code: {code:?})"),
             )),
             None => Err(io::Error::new(io::ErrorKind::Other, "Received empty response")),
         }

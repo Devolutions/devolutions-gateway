@@ -34,9 +34,9 @@ impl DynamicChannelDataHandler for Handler {
             self.decompressed_buffer.clear();
             self.decompressor
                 .decompress(compressed_data, &mut self.decompressed_buffer)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decompress ZGFX: {:?}", e)))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decompress ZGFX: {e:?}")))?;
             let gfx_pdu = ServerPdu::from_buffer(self.decompressed_buffer.as_slice())
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decode GFX PDU: {:?}", e)))?;
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to decode GFX PDU: {e:?}")))?;
             debug!("Got GFX PDU: {:?}", gfx_pdu);
 
             Ok(self.decompressed_buffer.to_vec())

@@ -65,9 +65,7 @@ impl HttpBridgeController {
             claims
                 .target_host
                 .to_uri_with_path_and_query(request_target)
-                .map_err(|e| {
-                    HttpErrorStatus::bad_request(format!("Request-Target header has an invalid value: {}", e))
-                })?
+                .map_err(|e| HttpErrorStatus::bad_request(format!("Request-Target header has an invalid value: {e}")))?
         } else {
             return Err(HttpErrorStatus::forbidden("token not allowed"));
         };

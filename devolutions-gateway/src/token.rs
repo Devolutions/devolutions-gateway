@@ -555,8 +555,7 @@ impl<'de> de::Deserialize<'de> for KdcTokenClaims {
             "tcp" | "udp" => { /* supported! */ }
             unsupported_scheme => {
                 return Err(de::Error::custom(format!(
-                    "unsupported protocol for KDC proxy: {}",
-                    unsupported_scheme
+                    "unsupported protocol for KDC proxy: {unsupported_scheme}"
                 )));
             }
         }

@@ -35,7 +35,7 @@ impl Decoder for FastPathTransport {
             }
             Err(FastPathError::IOError(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
             Err(FastPathError::IOError(e)) => Err(e),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}", e))),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, format!("{e}"))),
         }
     }
 }

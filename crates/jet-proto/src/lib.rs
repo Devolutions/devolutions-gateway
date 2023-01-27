@@ -92,7 +92,7 @@ impl JetMessage {
             }
         }
 
-        Err(format!("Invalid message received: Payload={}", payload).into())
+        Err(format!("Invalid message received: Payload={payload}").into())
     }
 
     pub fn read_accept_response<R: Read>(stream: &mut R) -> Result<Self, Error> {
@@ -108,7 +108,7 @@ impl JetMessage {
             return Ok(JetMessage::JetAcceptRsp(JetAcceptRsp::from_response(&rsp)?));
         }
 
-        Err(format!("Invalid message received: Payload={}", payload).into())
+        Err(format!("Invalid message received: Payload={payload}").into())
     }
 
     pub fn read_connect_response<R: Read>(stream: &mut R) -> Result<Self, Error> {
@@ -124,7 +124,7 @@ impl JetMessage {
             return Ok(JetMessage::JetConnectRsp(JetConnectRsp::from_response(&rsp)?));
         }
 
-        Err(format!("Invalid message received: Payload={}", payload).into())
+        Err(format!("Invalid message received: Payload={payload}").into())
     }
 
     pub fn write_to(&self, mut stream: impl io::Write) -> Result<(), Error> {
@@ -156,7 +156,7 @@ impl JetMessage {
     fn read_header<R: Read>(stream: &mut R) -> Result<JetHeader, Error> {
         let signature = stream.read_u32::<LittleEndian>()?;
         if signature != JET_MSG_SIGNATURE {
-            return Err(Error::Str(format!("Invalid JetMessage - Signature = {}.", signature)));
+            return Err(Error::Str(format!("Invalid JetMessage - Signature = {signature}.")));
         }
         let msg_size = stream.read_u16::<BigEndian>()?;
         let _ = stream.read_u8()?;
@@ -176,8 +176,7 @@ impl JetMessage {
 
         let payload = String::from_utf8(payload).map_err(|e| {
             Error::Str(format!(
-                "Invalid JetMessage - Message can't be converted in String: {}",
-                e
+                "Invalid JetMessage - Message can't be converted in String: {e}"
             ))
         })?;
 
@@ -296,8 +295,8 @@ impl std::fmt::Display for Error {
             Error::Forbidden => write!(f, "Forbidden error"),
             Error::NotFound => write!(f, "NotFound error"),
             Error::NotImplemented => write!(f, "NotImplemented error"),
-            Error::Io(e) => write!(f, "{}", e),
-            Error::Str(e) => write!(f, "{}", e),
+            Error::Io(e) => write!(f, "{e}"),
+            Error::Str(e) => write!(f, "{e}"),
         }
     }
 }

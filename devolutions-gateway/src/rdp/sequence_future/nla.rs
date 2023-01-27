@@ -78,7 +78,7 @@ impl Future for NlaWithClientFuture {
                     let client_tls = ready!(Pin::new(accept_tls_future).poll(cx)).map_err(move |e| {
                         io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            format!("Failed to accept the client TLS connection: {}", e),
+                            format!("Failed to accept the client TLS connection: {e}"),
                         )
                     })?;
                     debug!("TLS connection has been established with the client");
@@ -173,7 +173,7 @@ impl Future for NlaWithServerFuture {
                     let server_tls = ready!(Pin::new(connect_tls_future).poll(cx)).map_err(move |e| {
                         io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            format!("Failed to handshake with a server: {}", e),
+                            format!("Failed to handshake with a server: {e}"),
                         )
                     })?;
                     debug!("TLS connection has been established with the server");

@@ -141,15 +141,15 @@ async fn client_side_jmux(socks5_port: u16, jmux_server_port: u16, kind: Transpo
 
     let pipe_mode = match kind {
         TransportKind::Tcp => PipeMode::Tcp {
-            addr: format!("127.0.0.1:{}", jmux_server_port),
+            addr: format!("127.0.0.1:{jmux_server_port}"),
         },
         TransportKind::Ws => PipeMode::WebSocket {
-            url: format!("ws://127.0.0.1:{}", jmux_server_port),
+            url: format!("ws://127.0.0.1:{jmux_server_port}"),
         },
     };
 
     let listener_mode = jetsocat::listener::ListenerMode::Socks5 {
-        bind_addr: format!("127.0.0.1:{}", socks5_port),
+        bind_addr: format!("127.0.0.1:{socks5_port}"),
     };
 
     let cfg = jetsocat::JmuxProxyCfg {
@@ -171,10 +171,10 @@ async fn server_side_jmux(port: u16, kind: TransportKind) -> anyhow::Result<()> 
 
     let pipe_mode = match kind {
         TransportKind::Tcp => PipeMode::TcpListen {
-            bind_addr: format!("127.0.0.1:{}", port),
+            bind_addr: format!("127.0.0.1:{port}"),
         },
         TransportKind::Ws => PipeMode::WebSocketListen {
-            bind_addr: format!("127.0.0.1:{}", port),
+            bind_addr: format!("127.0.0.1:{port}"),
         },
     };
 
@@ -206,9 +206,7 @@ fn socks5_to_jmux() {
     let socks5_port = ports[0];
     let jmux_server_port = ports[1];
     let mut targets = [0u16; NB_TARGETS];
-    for i in 0..NB_TARGETS {
-        targets[i] = ports[i + 2];
-    }
+    targets[..NB_TARGETS].copy_from_slice(&ports[2..(NB_TARGETS + 2)]);
 
     proptest!(ProptestConfig::with_cases(32), |(
         cfgs in prop::collection::vec(client_cfg(), 1..5),

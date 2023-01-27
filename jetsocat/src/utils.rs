@@ -109,7 +109,6 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow:
     })
 }
 
-#[track_caller]
 pub async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
@@ -122,7 +121,7 @@ where
         future.await
     }
 }
-#[track_caller]
+
 pub async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
 where
     Fut: Future<Output = Result<(), E>>,

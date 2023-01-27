@@ -116,6 +116,7 @@ struct SubscriberSessionInfo {
 /// Event type for messages
 #[allow(unused)]
 #[derive(utoipa::ToSchema, Serialize)]
+#[allow(clippy::enum_variant_names)]
 enum SubscriberMessageKind {
     /// A new session started
     #[serde(rename = "session.started")]

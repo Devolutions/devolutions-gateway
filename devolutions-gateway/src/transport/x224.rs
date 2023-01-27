@@ -111,7 +111,7 @@ fn map_negotiation_error(e: NegotiationError) -> io::Error {
     match e {
         NegotiationError::ResponseFailure(e) => io::Error::new(
             io::ErrorKind::Other,
-            format!("Negotiation Response error (code: {:?})", e),
+            format!("Negotiation Response error (code: {e:?})"),
         ),
         NegotiationError::TpktVersionError => {
             io::Error::new(io::ErrorKind::InvalidData, "Negotiation invalid tpkt header version")

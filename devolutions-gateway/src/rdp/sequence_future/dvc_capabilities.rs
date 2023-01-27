@@ -377,5 +377,5 @@ enum DvcCapabilitiesState {
 }
 
 fn map_graphics_pipeline_error(e: gfx::GraphicsPipelineError) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, format!("GFX error: {}", e))
+    io::Error::new(io::ErrorKind::Other, format!("GFX error: {e}"))
 }

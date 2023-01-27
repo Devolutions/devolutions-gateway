@@ -50,7 +50,7 @@ impl JetTestReq {
                 }
             }
         }
-        Err(format!("Invalid test request: {:?}", request).into())
+        Err(format!("Invalid test request: {request:?}").into())
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,14 +79,13 @@ impl JetTestRsp {
         let code = response
             .code
             .ok_or_else(|| "Invalid test response, status code is missing".to_string())?;
-        let status_code =
-            StatusCode::from_u16(code).map_err(|e| format!("Invalid test response status code: {}", e))?;
+        let status_code = StatusCode::from_u16(code).map_err(|e| format!("Invalid test response status code: {e}"))?;
         match response
             .get_header_value(JET_HEADER_VERSION)
             .and_then(|version| version.parse::<u32>().ok())
         {
             Some(version) if version == 2 => Ok(JetTestRsp { status_code, version }),
-            _ => Err(Error::from(format!("Invalid test response: {:?}", response))),
+            _ => Err(Error::from(format!("Invalid test response: {response:?}"))),
         }
     }
 }

@@ -38,7 +38,7 @@ impl JetRendezvousTcpProxy {
 
             let assc = jet_associations
                 .get_mut(&association_id)
-                .with_context(|| format!("There is not {} association_id in JetAssociations map", association_id))?;
+                .with_context(|| format!("There is not {association_id} association_id in JetAssociations map"))?;
 
             let claims = assc.get_token_claims();
 
@@ -53,7 +53,7 @@ impl JetRendezvousTcpProxy {
 
             let candidate = assc
                 .get_first_accepted_tcp_candidate()
-                .with_context(|| format!("There is not any candidates in {} JetAssociations map", association_id))?;
+                .with_context(|| format!("There is not any candidates in {association_id} JetAssociations map"))?;
 
             let (transport, leftover) = candidate
                 .take_transport()
