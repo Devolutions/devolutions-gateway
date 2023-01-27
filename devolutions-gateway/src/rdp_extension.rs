@@ -16,16 +16,6 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio_rustls::rustls::client::ClientConfig as TlsClientConfig;
 
-lazy_static::lazy_static! {
-    static ref TLS_CLIENT_CONFIG: Arc<TlsClientConfig> = TlsClientConfig::builder()
-        .with_safe_defaults()
-        .with_custom_certificate_verifier(std::sync::Arc::new(
-            crate::utils::danger_transport::NoCertificateVerification,
-        ))
-        .with_no_client_auth()
-        .pipe(Arc::new);
-}
-
 #[derive(Debug, Error)]
 enum AuthorizationError {
     #[error("token not allowed")]
@@ -199,9 +189,28 @@ async fn process_cleanpath(
 
     let mut server_transport = {
         // Establish TLS connection with server
+
         let dns_name = "stub_string".try_into().unwrap();
-        let tls_connector = tokio_rustls::TlsConnector::from(TLS_CLIENT_CONFIG.clone());
-        tls_connector
+
+        // TODO: optimize client config creation
+        //
+        // rustls doc says:
+        //
+        // > Making one of these can be expensive, and should be once per process rather than once per connection.
+        //
+        // source: https://docs.rs/rustls/latest/rustls/struct.ClientConfig.html
+        //
+        // In our case, this doesn’t work, so I’m creating a new ClientConfig from scratch each time (slow).
+        // rustls issue: https://github.com/rustls/rustls/issues/1186
+        let tls_client_config = TlsClientConfig::builder()
+            .with_safe_defaults()
+            .with_custom_certificate_verifier(std::sync::Arc::new(
+                crate::utils::danger_transport::NoCertificateVerification,
+            ))
+            .with_no_client_auth()
+            .pipe(Arc::new);
+
+        tokio_rustls::TlsConnector::from(tls_client_config)
             .connect(dns_name, server_transport)
             .await
             .map_err(CleanPathError::TlsHandshake)?
