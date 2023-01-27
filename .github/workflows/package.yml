@@ -237,9 +237,10 @@ jobs:
             } elseif ('${{ matrix.os }}' -Eq 'macos') {
               $SignCmd = $(@(
                 'codesign', 
-                '--timestamp', 
+                '--timestamp',
+                '--options=runtime',
                 '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
-                '-v', 
+                '-v',
                 $_.FullName
               )) -Join ' '
             } else {
