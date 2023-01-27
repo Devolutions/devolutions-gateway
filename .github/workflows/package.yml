@@ -11,6 +11,9 @@ on:
         type: boolean
         required: false
         default: true
+      jetsocat-nuget-version:
+        description: 'Jetsocat nuget package version'
+        required: false
   workflow_call:
     inputs:
       dispatch:
@@ -322,6 +325,56 @@ jobs:
         with:
           name: ${{ matrix.project }}
           path: ${{ runner.temp }}/${{ matrix.project }}
+          if-no-files-found: error
+
+  nuget:
+    name: Nuget
+    runs-on: ubuntu-latest
+    needs: [preflight, codesign]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+
+      - name: Rename artifacts
+        shell: pwsh
+        working-directory: jetsocat/nuget/bin
+        run: |
+          # Backward compatibility with prior nuspec versions
+          Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
+
+          # Remove version number and architecture from binary name
+          Get-ChildItem -File -Recurse | Rename-Item -NewName "jetsocat"
+          cd windows
+          Get-ChildItem -File -Recurse | Rename-Item -NewName "jetsocat.exe"
+
+      - name: Set package metadata
+        shell: pwsh
+        working-directory: jetsocat/nuget
+        run: |
+          $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
+          if ([string]::IsNullOrWhitespace($Version)) {
+            $Version = Get-Date -Format "yyyy.M.d"  
+          }
+
+          $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
+          $Xml = [xml] (Get-Content $Nuspec)
+          Select-Xml -xml $Xml -XPath //package/metadata/version | % { $_.Node.'#text' = "$Version" }
+          Select-Xml -xml $Xml -XPath //package/metadata/description | % { $_.Node.'#text' = "Websocket toolkit for jet protocol related operations" }
+          $Xml.Save($Nuspec)
+
+      - name: Build package
+        shell: pwsh
+        working-directory: jetsocat/nuget
+        run: nuget pack Devolutions.Jetsocat.nuspec -NonInteractive
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: jetsocat-nuget
+          path: jetsocat/nuget/*.nupkg
           if-no-files-found: error
 
   Generate-SBOM:
