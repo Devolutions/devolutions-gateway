@@ -338,6 +338,12 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: jetsocat
+          path: jetsocat/nuget/bin
+
       - name: Rename artifacts
         shell: pwsh
         working-directory: jetsocat/nuget/bin
