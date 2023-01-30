@@ -9,7 +9,7 @@ publish = false
 [features]
 default = ["rustls", "detect-proxy"]
 detect-proxy = ["proxy_cfg"]
-rustls = ["tokio-tungstenite/rustls-tls-webpki-roots"]
+rustls = ["tokio-tungstenite/rustls-tls-native-roots"]
 native-tls = ["tokio-tungstenite/native-tls"]
 
 [dependencies]
