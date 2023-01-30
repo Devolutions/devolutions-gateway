@@ -4237,12 +4237,12 @@ dependencies = [
  "log",
  "native-tls",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-native-tls",
  "tokio-rustls",
  "tungstenite",
  "webpki",
- "webpki-roots",
 ]
 
 [[package]]
