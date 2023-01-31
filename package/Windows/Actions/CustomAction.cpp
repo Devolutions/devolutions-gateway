@@ -348,7 +348,7 @@ UINT __stdcall BrowseForCertificate(MSIHANDLE hInstall)
 	er = BrowseForFile(
 		hInstall, 
 		propertyName, 
-		L"PFX Files (*.pfx, *.p12)\0*.pfx;*.p12\0Certificate Files (*.pem, *.crt)\0*.pem;*.crt\0All Files\0*.*\0\0"
+		L"PFX Files (*.pfx, *.p12)\0*.pfx;*.p12\0Certificate Files (*.pem, *.crt, *.cer)\0*.pem;*.crt;*.cer\0All Files\0*.*\0\0"
 	);
 
 	if (er != ERROR_SUCCESS)
