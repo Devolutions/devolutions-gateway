@@ -13,6 +13,7 @@
     <file src="bin/macos/x64/jetsocat" target="runtimes/osx-x64/native/jetsocat" />
     <file src="bin/macos/arm64/jetsocat" target="runtimes/osx-arm64/native/jetsocat" />
     <file src="bin/macos/universal/jetsocat" target="runtimes/osx-universal/native/jetsocat" />
+    <file src="bin/linux/x64/jetsocat" target="runtimes/linux-x64/native/jetsocat" />
     <file src="Devolutions.Jetsocat.targets" target="build" />
   </files>
 </package>
