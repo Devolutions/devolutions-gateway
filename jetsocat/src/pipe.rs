@@ -1,6 +1,7 @@
 use crate::proxy::ProxyConfig;
 use anyhow::Result;
 use std::any::Any;
+use std::path::PathBuf;
 use transport::{ErasedRead, ErasedWrite};
 use uuid::Uuid;
 
@@ -9,6 +10,12 @@ pub enum PipeMode {
     Stdio,
     ProcessCmd {
         command: String,
+    },
+    WriteFile {
+        path: PathBuf,
+    },
+    ReadFile {
+        path: PathBuf,
     },
     TcpListen {
         bind_addr: String,
@@ -44,8 +51,10 @@ pub struct Pipe {
 }
 
 pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result<Pipe> {
+    use crate::utils::DummyReaderWriter;
     use anyhow::Context as _;
     use std::process::Stdio;
+    use tokio::fs;
     use tokio::process::Command;
 
     match mode {
@@ -86,6 +95,46 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
                 _handle: Some(Box::new(handle)), // we need to store the handle because of kill_on_drop(true)
             })
         }
+        PipeMode::WriteFile { path } => {
+            info!(path = %path.display(), "Opening file");
+
+            let file = fs::OpenOptions::new()
+                .read(false)
+                .write(true)
+                .create(true)
+                .open(&path)
+                .await
+                .with_context(|| format!("Failed to open file at {}", path.display()))?;
+
+            info!(path = %path.display(), "File opened");
+
+            Ok(Pipe {
+                name: "write-file",
+                read: Box::new(DummyReaderWriter),
+                write: Box::new(file),
+                _handle: None,
+            })
+        }
+        PipeMode::ReadFile { path } => {
+            info!(path = %path.display(), "Opening file");
+
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .write(false)
+                .create(false)
+                .open(&path)
+                .await
+                .with_context(|| format!("Failed to open file at {}", path.display()))?;
+
+            info!(path = %path.display(), "File opened");
+
+            Ok(Pipe {
+                name: "read-file",
+                read: Box::new(file),
+                write: Box::new(DummyReaderWriter),
+                _handle: None,
+            })
+        }
         PipeMode::TcpListen { bind_addr } => {
             use tokio::net::TcpListener;
 
@@ -93,11 +142,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             let listener = TcpListener::bind(bind_addr)
                 .await
-                .with_context(|| "Failed to bind TCP listener")?;
-            let (socket, peer_addr) = listener
-                .accept()
-                .await
-                .with_context(|| "TCP listener couldn't accept")?;
+                .context("Failed to bind TCP listener")?;
+            let (socket, peer_addr) = listener.accept().await.context("TCP listener couldn't accept")?;
 
             info!(%peer_addr, "Accepted peer");
 
