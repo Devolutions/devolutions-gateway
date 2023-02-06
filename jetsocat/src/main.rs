@@ -86,6 +86,8 @@ pub fn exit(res: anyhow::Result<()>) -> ! {
 const PIPE_FORMATS: &str = r#"Pipe formats:
     `stdio` or `-`: Standard input output
     `cmd://<COMMAND>`: Spawn a new process with specified command using `cmd /C` on windows or `sh -c` otherwise
+    `write-file://<PATH>`: Open specified file in write mode
+    `read-file://<PATH>`: Open specified file in read mode
     `tcp://<ADDRESS>`: Plain TCP stream
     `tcp-listen://<BINDING ADDRESS>`: TCP listener
     `jet-tcp-connect://<ADDRESS>/<ASSOCIATION ID>/<CANDIDATE ID>`: TCP stream over JET protocol as client
@@ -466,6 +468,12 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
         }),
         "cmd" => Ok(PipeMode::ProcessCmd {
             command: value.to_owned(),
+        }),
+        "write-file" => Ok(PipeMode::WriteFile {
+            path: PathBuf::from(value.to_owned()),
+        }),
+        "read-file" => Ok(PipeMode::ReadFile {
+            path: PathBuf::from(value.to_owned()),
         }),
         "tcp" => Ok(PipeMode::Tcp { addr: value.to_owned() }),
         "jet-tcp-connect" => {
