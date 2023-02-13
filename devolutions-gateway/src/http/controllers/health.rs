@@ -40,6 +40,8 @@ pub struct Identity {
     id: Option<Uuid>,
     /// This Gateway's hostname
     hostname: String,
+    /// Gateway service version
+    version: Option<&'static str>,
 }
 
 enum HealthResponse {
@@ -87,6 +89,7 @@ fn get_health(controller: &HealthController, req: Request) -> Result<HealthRespo
             return Ok(HealthResponse::Identity(Identity {
                 id: conf.id,
                 hostname: conf.hostname.clone(),
+                version: Some(env!("CARGO_PKG_VERSION")),
             }));
         }
     }
