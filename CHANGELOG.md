@@ -4,6 +4,45 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.1.0 (2023-02-14)
+
+### Features
+
+- _dgw_: clean path PDU extension for RDP ([3bc0643818](https://github.com/Devolutions/devolutions-gateway/commit/3bc06438188920983833d6a58088a5598c4fe130)) ([ARC-109](https://devolutions.atlassian.net/browse/ARC-109))
+
+- _installer_: show *.cer when browsing for certificate files ([#383](https://github.com/Devolutions/devolutions-gateway/issues/383)) ([2de4a3880d](https://github.com/Devolutions/devolutions-gateway/commit/2de4a3880dd86660e4d1ddceeb8f2c9baef1669a))
+
+  .cer is another popular extension for certificate files.
+
+- _jetsocat_: file-based pipes ([#385](https://github.com/Devolutions/devolutions-gateway/issues/385)) ([62394d3b48](https://github.com/Devolutions/devolutions-gateway/commit/62394d3b480a5166d81060c82b30dd18c61782ea))
+
+  - `write-file://<PATH>`: write file at the specified location
+  - `read-file://<PATH>`: read wile at the specified location
+
+- _dgw_: add service version to health check JSON response ([d9f5472120](https://github.com/Devolutions/devolutions-gateway/commit/d9f5472120b87bcd8e3e1d356a435b0b1061c2cd))
+
+### Bug Fixes
+
+- _jetsocat_: use rustls-native-certs on macOS and Linux ([#382](https://github.com/Devolutions/devolutions-gateway/issues/382)) ([7305ce42be](https://github.com/Devolutions/devolutions-gateway/commit/7305ce42befcc0be6ce36928ad3533310cf36768))
+
+  Let rustls use the platform’s native certificate store.
+
+### Build
+
+- Update Rust toolchain to 1.67.0 ([f581e9bdc7](https://github.com/Devolutions/devolutions-gateway/commit/f581e9bdc7fa91377603443da48d22939661e470))
+
+### Continuous Integration
+
+- _jetsocat_: enable hardened runtime on macOS ([#378](https://github.com/Devolutions/devolutions-gateway/issues/378)) ([84b5c33b47](https://github.com/Devolutions/devolutions-gateway/commit/84b5c33b47a6599fe7a2aaabb6393175fe66906b))
+
+- _jetsocat_: build the jetsocat nuget in package.yml ([#380](https://github.com/Devolutions/devolutions-gateway/issues/380)) ([2e0d0eef4d](https://github.com/Devolutions/devolutions-gateway/commit/2e0d0eef4dcef4008246878a6b05d63a1a41b64c))
+
+  Build the jetsocat nuget package as part of the packaging workflow (instead of the old standalone workflow, which just took the latest release from GitHub).
+
+  If running the package workflow manually, the version number of the package may be specified; else it defaults to the current date.
+
+- _jetsocat_: add Linux binary to nuget package ([#384](https://github.com/Devolutions/devolutions-gateway/issues/384)) ([8a74ff86ca](https://github.com/Devolutions/devolutions-gateway/commit/8a74ff86cac3c01828a40ce5eceae8119bba3829))
+
 ## 2022.3.4 (2023-01-16)
 
 ### Bug Fixes
