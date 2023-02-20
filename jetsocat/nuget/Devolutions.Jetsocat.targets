@@ -1,4 +1,18 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <CompileDependsOn>
+            $(CompileDependsOn)
+            SetFilePermissionsTarget
+        </CompileDependsOn>
+    </PropertyGroup>
+    <Target Name="SetFilePermissionsTarget">
+        <Exec Command="chmod a+x &quot;$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat&quot;"
+              ConsoleToMsBuild="true" 
+              Condition="$([MSBuild]::IsOSPlatform('OSX'))"/>
+        <Exec Command="chmod a+x &quot;$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/jetsocat&quot;"
+              ConsoleToMsBuild="true"
+              Condition="$([MSBuild]::IsOSPlatform('Linux'))"/>
+    </Target>
     <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
         <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/jetsocat.exe">
             <Link>runtimes\win-x64\native\%(Filename)%(Extension)</Link>
