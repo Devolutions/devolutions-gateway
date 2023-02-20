@@ -1,5 +1,5 @@
 use bytes::{Buf, BytesMut};
-use sspi::internal::credssp::TsRequest;
+use sspi::credssp::TsRequest;
 use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 

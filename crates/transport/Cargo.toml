@@ -8,18 +8,18 @@ publish = false
 [dependencies]
 
 # async
-tokio = "1.20.1"
-tokio-tungstenite = "0.17.2"
+tokio = "1.25.0"
+tokio-tungstenite = "0.18.0"
 tokio-rustls = "0.23.4"
-futures-util = "0.3.21"
+futures-util = "0.3.26"
 
 # error handling
-anyhow = "1.0.61"
+anyhow = "1.0.69"
 
 # Safe pin projection
 pin-project-lite = "0.2.9"
 
 [dev-dependencies]
 test-utils = { path = "../test-utils" }
-tokio = { version = "1.20.1", features = ["rt", "macros"] }
-proptest = "1.0.0"
+tokio = { version = "1.25.0", features = ["rt", "macros"] }
+proptest = "1.1.0"

@@ -12,16 +12,16 @@ publish = false
 jmux-proto = { path = "../jmux-proto" }
 
 # async
-tokio = { version = "1.20.1", features = ["net", "rt", "io-util", "macros"] }
-tokio-util = { version = "0.7.3", features = ["codec"] }
-futures-util = { version = "0.3.21", features = ["sink"] }
+tokio = { version = "1.25.0", features = ["net", "rt", "io-util", "macros"] }
+tokio-util = { version = "0.7.7", features = ["codec"] }
+futures-util = { version = "0.3.26", features = ["sink"] }
 
 # error handling
-anyhow = "1.0.61"
+anyhow = "1.0.69"
 
 # logging
-tracing = "0.1.36"
+tracing = "0.1.37"
 
 # codec implementation
-bytes = "1.2.1"
+bytes = "1.4.0"
 bitvec = "1.0.1"

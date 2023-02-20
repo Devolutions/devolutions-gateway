@@ -19,7 +19,7 @@ use crate::utils::{self, TargetAddr};
 use anyhow::Context;
 use bytes::BytesMut;
 use nonempty::NonEmpty;
-use sspi::internal::credssp;
+use sspi::credssp;
 use sspi::AuthIdentity;
 use std::io;
 use std::net::SocketAddr;

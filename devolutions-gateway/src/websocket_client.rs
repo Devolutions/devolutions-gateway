@@ -449,12 +449,14 @@ fn process_req(req: &Request<Body>) -> Response<Body> {
         Author: Ran Benita<bluetech> (ran234@gmail.com)
     */
 
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
     fn convert_key(input: &[u8]) -> String {
         const WS_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         let mut hasher = sha1::Sha1::new();
         hasher.update(input);
         hasher.update(WS_GUID);
-        base64::encode(hasher.finalize())
+        STANDARD.encode(hasher.finalize())
     }
     fn connection_has(value: &header::HeaderValue, needle: &str) -> bool {
         if let Ok(v) = value.to_str() {
