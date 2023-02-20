@@ -28,7 +28,7 @@ namespace Devolutions.Gateway.Subscriber.Controllers
         /// <summary>
         /// Process a message originating from a Devolutions Gateway instance
         /// </summary>
-        /// <remarks>Process a message originating from a Devolutions Gateway instance </remarks>
+        /// <remarks>Process a message originating from a Devolutions Gateway instance</remarks>
         /// <param name="subscriberMessage">Message</param>
         /// <response code="200">Message received and processed successfully</response>
         /// <response code="400">Bad message</response>

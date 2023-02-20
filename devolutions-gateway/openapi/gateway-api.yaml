@@ -14,8 +14,7 @@ paths:
       tags:
       - Config
       summary: Modifies configuration
-      description: |
-        Modifies configuration
+      description: Modifies configuration
       operationId: PatchConfig
       requestBody:
         description: JSON-encoded configuration patch
@@ -44,7 +43,7 @@ paths:
       tags:
       - Diagnostics
       summary: Retrieves server's clock in order to diagnose clock drifting.
-      description: |
+      description: |-
         Retrieves server's clock in order to diagnose clock drifting.
 
         Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
@@ -62,8 +61,7 @@ paths:
       tags:
       - Diagnostics
       summary: Retrieves configuration.
-      description: |
-        Retrieves configuration.
+      description: Retrieves configuration.
       operationId: GetConfigurationDiagnostic
       responses:
         '200':
@@ -87,8 +85,7 @@ paths:
       tags:
       - Diagnostics
       summary: Retrieves latest logs.
-      description: |
-        Retrieves latest logs.
+      description: Retrieves latest logs.
       operationId: GetLogs
       responses:
         '200':
@@ -114,8 +111,7 @@ paths:
       tags:
       - Health
       summary: Performs a health check
-      description: |
-        Performs a health check
+      description: Performs a health check
       operationId: GetHealth
       responses:
         '200':
@@ -132,8 +128,7 @@ paths:
       tags:
       - Jrl
       summary: Updates JRL (Json Revocation List) using a JRL token
-      description: |
-        Updates JRL (Json Revocation List) using a JRL token
+      description: Updates JRL (Json Revocation List) using a JRL token
       operationId: UpdateJrl
       responses:
         '200':
@@ -154,8 +149,7 @@ paths:
       tags:
       - Jrl
       summary: Retrieves current JRL (Json Revocation List) info
-      description: |
-        Retrieves current JRL (Json Revocation List) info
+      description: Retrieves current JRL (Json Revocation List) info
       operationId: GetJrlInfo
       responses:
         '200':
@@ -181,15 +175,13 @@ paths:
       tags:
       - Sessions
       summary: Terminate forcefully a running session
-      description: |
-        Terminate forcefully a running session
+      description: Terminate forcefully a running session
       operationId: TerminateSession
       parameters:
       - name: id
         in: path
         description: Session / association ID of the session to terminate
         required: true
-        deprecated: false
         schema:
           type: string
           format: uuid
@@ -215,8 +207,7 @@ paths:
       tags:
       - Sessions
       summary: Lists running sessions
-      description: |
-        Lists running sessions
+      description: Lists running sessions
       operationId: GetSessions
       responses:
         '200':
@@ -284,6 +275,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListenerUrls'
+          description: Listeners configured on this instance
         version:
           type: string
           description: Gateway service version
@@ -393,8 +385,7 @@ components:
         time_to_live:
           type: integer
           format: int64
-          description: Maximum session duration in minutes (0 is used for the infinite
-            duration)
+          description: Maximum session duration in minutes (0 is used for the infinite duration)
     SubProvisionerKey:
       type: object
       required:

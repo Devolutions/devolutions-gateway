@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
         /// <param name="id">This Gateway&#39;s unique ID.</param>
-        /// <param name="listeners">listeners (required).</param>
+        /// <param name="listeners">Listeners configured on this instance (required).</param>
         /// <param name="version">Gateway service version (required).</param>
         public ConfigDiagnostic(string hostname = default(string), Guid id = default(Guid), List<ListenerUrls> listeners = default(List<ListenerUrls>), string version = default(string))
         {
@@ -82,8 +82,9 @@ namespace Devolutions.Gateway.Client.Model
         public Guid Id { get; set; }
 
         /// <summary>
-        /// Gets or Sets Listeners
+        /// Listeners configured on this instance
         /// </summary>
+        /// <value>Listeners configured on this instance</value>
         [DataMember(Name = "listeners", IsRequired = true, EmitDefaultValue = false)]
         public List<ListenerUrls> Listeners { get; set; }
 

@@ -31,7 +31,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <remarks>
-        /// Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <remarks>
-        /// Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -52,7 +52,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <remarks>
-        /// Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -63,7 +63,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <remarks>
-        /// Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -82,7 +82,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <remarks>
-        /// Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -94,7 +94,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <remarks>
-        /// Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -105,7 +105,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <remarks>
-        /// Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -117,7 +117,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <remarks>
-        /// Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -245,7 +245,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -257,7 +257,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -312,7 +312,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -325,7 +325,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info 
+        /// Retrieves current JRL (Json Revocation List) info Retrieves current JRL (Json Revocation List) info
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -383,7 +383,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -394,7 +394,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -448,7 +448,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -460,7 +460,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token 
+        /// Updates JRL (Json Revocation List) using a JRL token Updates JRL (Json Revocation List) using a JRL token
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>

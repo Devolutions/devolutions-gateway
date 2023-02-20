@@ -12,7 +12,7 @@ All URIs are relative to *http://localhost*
 
 Modifies configuration
 
-Modifies configuration 
+Modifies configuration
 
 ### Example
 ```csharp

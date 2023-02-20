@@ -31,7 +31,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Modifies configuration
         /// </summary>
         /// <remarks>
-        /// Modifies configuration 
+        /// Modifies configuration
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Modifies configuration
         /// </summary>
         /// <remarks>
-        /// Modifies configuration 
+        /// Modifies configuration
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -63,7 +63,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Modifies configuration
         /// </summary>
         /// <remarks>
-        /// Modifies configuration 
+        /// Modifies configuration
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -76,7 +76,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Modifies configuration
         /// </summary>
         /// <remarks>
-        /// Modifies configuration 
+        /// Modifies configuration
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -205,7 +205,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration Modifies configuration 
+        /// Modifies configuration Modifies configuration
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -217,7 +217,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration Modifies configuration 
+        /// Modifies configuration Modifies configuration
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -280,7 +280,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration Modifies configuration 
+        /// Modifies configuration Modifies configuration
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>
@@ -293,7 +293,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Modifies configuration Modifies configuration 
+        /// Modifies configuration Modifies configuration
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="configPatch">JSON-encoded configuration patch</param>

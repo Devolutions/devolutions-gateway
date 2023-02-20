@@ -91,7 +91,7 @@ export class DiagnosticsService {
 
     /**
      * Retrieves server\&#39;s clock in order to diagnose clock drifting.
-     * Retrieves server\&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+     * Retrieves server\&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
@@ -145,7 +145,7 @@ export class DiagnosticsService {
 
     /**
      * Retrieves configuration.
-     * Retrieves configuration. 
+     * Retrieves configuration.
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
@@ -206,7 +206,7 @@ export class DiagnosticsService {
 
     /**
      * Retrieves latest logs.
-     * Retrieves latest logs. 
+     * Retrieves latest logs.
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */

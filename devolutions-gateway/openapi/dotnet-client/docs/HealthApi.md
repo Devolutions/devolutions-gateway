@@ -12,7 +12,7 @@ All URIs are relative to *http://localhost*
 
 Performs a health check
 
-Performs a health check 
+Performs a health check
 
 ### Example
 ```csharp

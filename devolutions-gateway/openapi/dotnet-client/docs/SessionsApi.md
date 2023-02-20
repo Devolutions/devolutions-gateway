@@ -13,7 +13,7 @@ All URIs are relative to *http://localhost*
 
 Lists running sessions
 
-Lists running sessions 
+Lists running sessions
 
 ### Example
 ```csharp
@@ -106,7 +106,7 @@ This endpoint does not need any parameter.
 
 Terminate forcefully a running session
 
-Terminate forcefully a running session 
+Terminate forcefully a running session
 
 ### Example
 ```csharp

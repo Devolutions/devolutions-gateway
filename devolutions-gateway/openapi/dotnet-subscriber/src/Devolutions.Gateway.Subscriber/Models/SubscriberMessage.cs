@@ -40,8 +40,9 @@ namespace Devolutions.Gateway.Subscriber.Models
         public SubscriberSessionInfo Session { get; set; }
 
         /// <summary>
-        /// Gets or Sets SessionList
+        /// Session list associated to this event
         /// </summary>
+        /// <value>Session list associated to this event</value>
         [DataMember(Name="session_list", EmitDefaultValue=false)]
         public List<SubscriberSessionInfo> SessionList { get; set; }
 

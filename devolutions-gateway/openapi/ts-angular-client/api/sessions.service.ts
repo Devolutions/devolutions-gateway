@@ -89,7 +89,7 @@ export class SessionsService {
 
     /**
      * Lists running sessions
-     * Lists running sessions 
+     * Lists running sessions
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
@@ -150,7 +150,7 @@ export class SessionsService {
 
     /**
      * Terminate forcefully a running session
-     * Terminate forcefully a running session 
+     * Terminate forcefully a running session
      * @param id Session / association ID of the session to terminate
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.

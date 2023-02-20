@@ -31,7 +31,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves server&#39;s clock in order to diagnose clock drifting.
         /// </summary>
         /// <remarks>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves server&#39;s clock in order to diagnose clock drifting.
         /// </summary>
         /// <remarks>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -52,7 +52,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves configuration.
         /// </summary>
         /// <remarks>
-        /// Retrieves configuration. 
+        /// Retrieves configuration.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -63,7 +63,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves configuration.
         /// </summary>
         /// <remarks>
-        /// Retrieves configuration. 
+        /// Retrieves configuration.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -73,7 +73,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves latest logs.
         /// </summary>
         /// <remarks>
-        /// Retrieves latest logs. 
+        /// Retrieves latest logs.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -84,7 +84,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves latest logs.
         /// </summary>
         /// <remarks>
-        /// Retrieves latest logs. 
+        /// Retrieves latest logs.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -103,7 +103,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves server&#39;s clock in order to diagnose clock drifting.
         /// </summary>
         /// <remarks>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -115,7 +115,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves server&#39;s clock in order to diagnose clock drifting.
         /// </summary>
         /// <remarks>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -126,7 +126,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves configuration.
         /// </summary>
         /// <remarks>
-        /// Retrieves configuration. 
+        /// Retrieves configuration.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -138,7 +138,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves configuration.
         /// </summary>
         /// <remarks>
-        /// Retrieves configuration. 
+        /// Retrieves configuration.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -149,7 +149,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves latest logs.
         /// </summary>
         /// <remarks>
-        /// Retrieves latest logs. 
+        /// Retrieves latest logs.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -161,7 +161,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Retrieves latest logs.
         /// </summary>
         /// <remarks>
-        /// Retrieves latest logs. 
+        /// Retrieves latest logs.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -289,7 +289,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -301,7 +301,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -350,7 +350,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -363,7 +363,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;. 
+        /// Retrieves server&#39;s clock in order to diagnose clock drifting. Retrieves server&#39;s clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as &#x60;nbf&#x60; and &#x60;exp&#x60;.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -415,7 +415,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves configuration. Retrieves configuration. 
+        /// Retrieves configuration. Retrieves configuration.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -427,7 +427,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves configuration. Retrieves configuration. 
+        /// Retrieves configuration. Retrieves configuration.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -482,7 +482,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves configuration. Retrieves configuration. 
+        /// Retrieves configuration. Retrieves configuration.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -495,7 +495,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves configuration. Retrieves configuration. 
+        /// Retrieves configuration. Retrieves configuration.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -553,7 +553,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves latest logs. Retrieves latest logs. 
+        /// Retrieves latest logs. Retrieves latest logs.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -565,7 +565,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves latest logs. Retrieves latest logs. 
+        /// Retrieves latest logs. Retrieves latest logs.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -620,7 +620,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves latest logs. Retrieves latest logs. 
+        /// Retrieves latest logs. Retrieves latest logs.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -633,7 +633,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Retrieves latest logs. Retrieves latest logs. 
+        /// Retrieves latest logs. Retrieves latest logs.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>

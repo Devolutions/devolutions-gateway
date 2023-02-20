@@ -89,7 +89,7 @@ export class JrlService {
 
     /**
      * Retrieves current JRL (Json Revocation List) info
-     * Retrieves current JRL (Json Revocation List) info 
+     * Retrieves current JRL (Json Revocation List) info
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */
@@ -150,7 +150,7 @@ export class JrlService {
 
     /**
      * Updates JRL (Json Revocation List) using a JRL token
-     * Updates JRL (Json Revocation List) using a JRL token 
+     * Updates JRL (Json Revocation List) using a JRL token
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */

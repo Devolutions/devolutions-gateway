@@ -13,7 +13,7 @@ All URIs are relative to *http://localhost*
 
 Retrieves current JRL (Json Revocation List) info
 
-Retrieves current JRL (Json Revocation List) info 
+Retrieves current JRL (Json Revocation List) info
 
 ### Example
 ```csharp
@@ -106,7 +106,7 @@ This endpoint does not need any parameter.
 
 Updates JRL (Json Revocation List) using a JRL token
 
-Updates JRL (Json Revocation List) using a JRL token 
+Updates JRL (Json Revocation List) using a JRL token
 
 ### Example
 ```csharp
