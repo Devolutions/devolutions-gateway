@@ -31,7 +31,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Lists running sessions
         /// </summary>
         /// <remarks>
-        /// Lists running sessions 
+        /// Lists running sessions
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Lists running sessions
         /// </summary>
         /// <remarks>
-        /// Lists running sessions 
+        /// Lists running sessions
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -52,7 +52,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Terminate forcefully a running session
         /// </summary>
         /// <remarks>
-        /// Terminate forcefully a running session 
+        /// Terminate forcefully a running session
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -64,7 +64,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Terminate forcefully a running session
         /// </summary>
         /// <remarks>
-        /// Terminate forcefully a running session 
+        /// Terminate forcefully a running session
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -84,7 +84,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Lists running sessions
         /// </summary>
         /// <remarks>
-        /// Lists running sessions 
+        /// Lists running sessions
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -96,7 +96,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Lists running sessions
         /// </summary>
         /// <remarks>
-        /// Lists running sessions 
+        /// Lists running sessions
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -107,7 +107,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Terminate forcefully a running session
         /// </summary>
         /// <remarks>
-        /// Terminate forcefully a running session 
+        /// Terminate forcefully a running session
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -120,7 +120,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Terminate forcefully a running session
         /// </summary>
         /// <remarks>
-        /// Terminate forcefully a running session 
+        /// Terminate forcefully a running session
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -249,7 +249,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists running sessions Lists running sessions 
+        /// Lists running sessions Lists running sessions
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -261,7 +261,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists running sessions Lists running sessions 
+        /// Lists running sessions Lists running sessions
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -316,7 +316,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists running sessions Lists running sessions 
+        /// Lists running sessions Lists running sessions
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -329,7 +329,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Lists running sessions Lists running sessions 
+        /// Lists running sessions Lists running sessions
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -387,7 +387,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Terminate forcefully a running session Terminate forcefully a running session 
+        /// Terminate forcefully a running session Terminate forcefully a running session
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -399,7 +399,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Terminate forcefully a running session Terminate forcefully a running session 
+        /// Terminate forcefully a running session Terminate forcefully a running session
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -455,7 +455,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Terminate forcefully a running session Terminate forcefully a running session 
+        /// Terminate forcefully a running session Terminate forcefully a running session
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>
@@ -468,7 +468,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Terminate forcefully a running session Terminate forcefully a running session 
+        /// Terminate forcefully a running session Terminate forcefully a running session
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="id">Session / association ID of the session to terminate</param>

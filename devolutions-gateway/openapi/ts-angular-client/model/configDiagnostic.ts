@@ -24,6 +24,9 @@ export interface ConfigDiagnostic {
      * This Gateway\'s unique ID
      */
     id?: string;
+    /**
+     * Listeners configured on this instance
+     */
     listeners: Array<ListenerUrls>;
     /**
      * Gateway service version

@@ -1,8 +1,7 @@
 openapi: 3.0.3
 info:
   title: devolutions-gateway-subscriber
-  description: API a service must implement in order to receive Devolutions Gateway
-    notifications
+  description: API a service must implement in order to receive Devolutions Gateway notifications
   contact:
     name: Devolutions Inc.
     email: infos@devolutions.net
@@ -15,8 +14,7 @@ paths:
       tags:
       - Subscriber
       summary: Process a message originating from a Devolutions Gateway instance
-      description: |
-        Process a message originating from a Devolutions Gateway instance
+      description: Process a message originating from a Devolutions Gateway instance
       operationId: PostMessage
       requestBody:
         description: Message
@@ -56,6 +54,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubscriberSessionInfo'
+          description: Session list associated to this event
         timestamp:
           type: string
           format: date-time

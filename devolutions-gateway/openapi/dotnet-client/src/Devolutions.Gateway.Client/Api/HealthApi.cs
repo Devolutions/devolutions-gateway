@@ -31,7 +31,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Performs a health check
         /// </summary>
         /// <remarks>
-        /// Performs a health check 
+        /// Performs a health check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -42,7 +42,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Performs a health check
         /// </summary>
         /// <remarks>
-        /// Performs a health check 
+        /// Performs a health check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -61,7 +61,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Performs a health check
         /// </summary>
         /// <remarks>
-        /// Performs a health check 
+        /// Performs a health check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -73,7 +73,7 @@ namespace Devolutions.Gateway.Client.Api
         /// Performs a health check
         /// </summary>
         /// <remarks>
-        /// Performs a health check 
+        /// Performs a health check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -201,7 +201,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check 
+        /// Performs a health check Performs a health check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -213,7 +213,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check 
+        /// Performs a health check Performs a health check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -262,7 +262,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check 
+        /// Performs a health check Performs a health check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -275,7 +275,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check 
+        /// Performs a health check Performs a health check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>

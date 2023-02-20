@@ -14,7 +14,7 @@ All URIs are relative to *http://localhost*
 
 Retrieves server's clock in order to diagnose clock drifting.
 
-Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as `nbf` and `exp`. 
+Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
 
 ### Example
 ```csharp
@@ -100,7 +100,7 @@ No authorization required
 
 Retrieves configuration.
 
-Retrieves configuration. 
+Retrieves configuration.
 
 ### Example
 ```csharp
@@ -192,7 +192,7 @@ This endpoint does not need any parameter.
 
 Retrieves latest logs.
 
-Retrieves latest logs. 
+Retrieves latest logs.
 
 ### Example
 ```csharp
