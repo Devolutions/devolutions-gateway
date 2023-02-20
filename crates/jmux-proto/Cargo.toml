@@ -6,9 +6,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
-bytes = "1.2.1"
-smol_str = "0.1.23"
+bytes = "1.4.0"
+smol_str = "0.1.24"
 
 [dev-dependencies]
-proptest = "1.0.0"
+proptest = "1.1.0"
 jmux-generators = { path = "../jmux-generators" }

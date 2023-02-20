@@ -5,7 +5,7 @@ use packet::builder::Builder;
 use packet::ether::{Builder as BuildEthernet, Protocol};
 use packet::ip::v6::Builder as BuildV6;
 use packet::tcp::flag::Flags;
-use pcap_file::PcapWriter;
+use pcap_file::pcap::{PcapPacket, PcapWriter};
 use std::fs::File;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -142,12 +142,9 @@ async fn writer_task(
                     .duration_since(std::time::UNIX_EPOCH)
                     .expect("Time went backwards");
 
-                if let Err(e) = pcap_writer.write(
-                    since_epoch.as_secs() as u32,
-                    since_epoch.subsec_micros(),
-                    &tcpip_packet,
-                    tcpip_packet.len() as u32,
-                ) {
+                let packet = PcapPacket::new(since_epoch, tcpip_packet.len() as u32, &tcpip_packet);
+
+                if let Err(e) = pcap_writer.write_packet(&packet) {
                     error!("Error writing pcap file: {}", e);
                 }
 

@@ -7,7 +7,7 @@ use crate::utils;
 use bytes::{Buf, BytesMut};
 use futures::{ready, SinkExt, StreamExt};
 use ironrdp::nego;
-use sspi::internal::credssp::{
+use sspi::credssp::{
     self, CredSspClient, CredSspMode, CredSspServer, EarlyUserAuthResult, TsRequest, EARLY_USER_AUTH_RESULT_PDU_SIZE,
 };
 use sspi::AuthIdentity;
@@ -250,7 +250,7 @@ pub struct CredSspWithClientFuture {
 
 impl CredSspWithClientFuture {
     pub fn new(tls_proxy_pubkey: Vec<u8>, identity: RdpIdentity) -> io::Result<Self> {
-        let cred_ssp_server = CredSspServer::new(tls_proxy_pubkey, identity.clone())?;
+        let cred_ssp_server = CredSspServer::new(tls_proxy_pubkey, identity.clone(), credssp::ClientMode::Ntlm)?;
 
         Ok(Self {
             cred_ssp_server,
@@ -351,7 +351,13 @@ impl CredSspWithServerFuture {
         } else {
             CredSspMode::WithCredentials
         };
-        let cred_ssp_client = CredSspClient::new(public_key, target_credentials, cred_ssp_mode)?;
+        let cred_ssp_client = CredSspClient::new(
+            public_key,
+            target_credentials,
+            cred_ssp_mode,
+            credssp::ClientMode::Ntlm,
+            "unknown".to_owned(),
+        )?;
 
         Ok(Self {
             cred_ssp_client,
