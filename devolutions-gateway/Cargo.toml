@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-gateway"
-version = "2023.1.0"
+version = "2023.1.1"
 edition = "2021"
 readme = "README.md"
 license = "MIT/Apache-2.0"
