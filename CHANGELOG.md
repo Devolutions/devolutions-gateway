@@ -4,6 +4,21 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.1.1 (2023-02-22)
+
+### Improvements
+
+- _dgw_: better TLS leaf certificate public key extracting ([#390](https://github.com/Devolutions/devolutions-gateway/pull/390)) ([a4dec08e23](https://github.com/Devolutions/devolutions-gateway/commit/a4dec08e23354a5f2bff2a31c719d8084a88da82)) 
+
+  Use `x509-cert` crate to extract the public key from the leaf
+  TLS certificate. `x509-cert` supports more certificates.
+
+### Build
+
+- Update dependencies ([ef1e889bac](https://github.com/Devolutions/devolutions-gateway/commit/ef1e889bac8b1e19db0e619f9c390b32d48f3afe)) 
+
+- _jetsocat_: set execute permission in binary ([#388](https://github.com/Devolutions/devolutions-gateway/issues/388)) ([e08fd2300c](https://github.com/Devolutions/devolutions-gateway/commit/e08fd2300c7fddf9c1648847b7a26b36cc23f688)) 
+
 ## 2023.1.0 (2023-02-14)
 
 ### Features
