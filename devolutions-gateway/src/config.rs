@@ -58,12 +58,17 @@ impl fmt::Debug for Tls {
 
 impl Tls {
     fn init(certificates: Vec<rustls::Certificate>, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
+        use x509_cert::der::{Decode as _, Encode as _};
+
         let leaf_certificate = certificates.last().context("TLS leaf certificate is missing")?.clone();
 
-        let leaf_public_key = {
-            let cert = picky::x509::Cert::from_der(&leaf_certificate.0).context("Failed to parse TLS certificate")?;
-            TlsPublicKey(cert.public_key().to_der().unwrap())
-        };
+        let leaf_public_key = x509_cert::Certificate::from_der(&leaf_certificate.0)
+            .context("Failed to parse leaf TLS certificate")?
+            .tbs_certificate
+            .subject_public_key_info
+            .to_vec()
+            .context("Failed to retrieve DER encoding of the leaf TLS certificate public key")?
+            .pipe(TlsPublicKey);
 
         let rustls_config =
             crate::tls_sanity::build_rustls_config(certificates, private_key).context("Failed build TLS config")?;
