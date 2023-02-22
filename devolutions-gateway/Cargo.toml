@@ -56,6 +56,7 @@ backoff = "0.4.0"
 zeroize = { version = "1.5.7", features = ["derive"] }
 rust-argon2 = "1.0.0"
 picky = { version = "7.0.0-rc.4", default-features = false, features = ["jose", "x509"] }
+x509-cert = { version = "0.1.1", features = ["std"] }
 sspi = "0.6.0"
 # evaluate use of ring in our codebase
 ring = "0.16.20"
