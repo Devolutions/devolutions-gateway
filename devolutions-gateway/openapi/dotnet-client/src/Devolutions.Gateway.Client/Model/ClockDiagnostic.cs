@@ -52,14 +52,14 @@ namespace Devolutions.Gateway.Client.Model
         /// Current time in milliseconds
         /// </summary>
         /// <value>Current time in milliseconds</value>
-        [DataMember(Name = "timestamp_millis", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "timestamp_millis", IsRequired = true, EmitDefaultValue = true)]
         public long TimestampMillis { get; set; }
 
         /// <summary>
         /// Current time in seconds
         /// </summary>
         /// <value>Current time in seconds</value>
-        [DataMember(Name = "timestamp_secs", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "timestamp_secs", IsRequired = true, EmitDefaultValue = true)]
         public long TimestampSecs { get; set; }
 
         /// <summary>

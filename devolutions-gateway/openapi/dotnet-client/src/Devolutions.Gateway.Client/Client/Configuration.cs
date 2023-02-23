@@ -18,6 +18,7 @@ using System.Net;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Net.Http;
 
 namespace Devolutions.Gateway.Client.Client
 {
@@ -32,7 +33,7 @@ namespace Devolutions.Gateway.Client.Client
         /// Version of the package.
         /// </summary>
         /// <value>Version of the package.</value>
-        public const string Version = "2022.12.21.0";
+        public const string Version = "2023.2.22.0-rc";
 
         /// <summary>
         /// Identifier for ISO 8601 DateTime Format
@@ -114,7 +115,7 @@ namespace Devolutions.Gateway.Client.Client
         public Configuration()
         {
             Proxy = null;
-            UserAgent = "OpenAPI-Generator/2022.12.21.0/csharp";
+            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2023.2.22.0-rc/csharp");
             BasePath = "http://localhost";
             DefaultHeaders = new ConcurrentDictionary<string, string>();
             ApiKey = new ConcurrentDictionary<string, string>();
@@ -522,7 +523,7 @@ namespace Devolutions.Gateway.Client.Client
             report += "    OS: " + System.Environment.OSVersion + "\n";
             report += "    .NET Framework Version: " + System.Environment.Version  + "\n";
             report += "    Version of the API: 2023.1.1\n";
-            report += "    SDK Package Version: 2022.12.21.0\n";
+            report += "    SDK Package Version: 2023.2.22.0-rc\n";
 
             return report;
         }

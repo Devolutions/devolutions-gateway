@@ -71,7 +71,7 @@ namespace Devolutions.Gateway.Client.Model
         /// This Gateway&#39;s hostname
         /// </summary>
         /// <value>This Gateway&#39;s hostname</value>
-        [DataMember(Name = "hostname", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "hostname", IsRequired = true, EmitDefaultValue = true)]
         public string Hostname { get; set; }
 
         /// <summary>
@@ -85,14 +85,14 @@ namespace Devolutions.Gateway.Client.Model
         /// Listeners configured on this instance
         /// </summary>
         /// <value>Listeners configured on this instance</value>
-        [DataMember(Name = "listeners", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "listeners", IsRequired = true, EmitDefaultValue = true)]
         public List<ListenerUrls> Listeners { get; set; }
 
         /// <summary>
         /// Gateway service version
         /// </summary>
         /// <value>Gateway service version</value>
-        [DataMember(Name = "version", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "version", IsRequired = true, EmitDefaultValue = true)]
         public string _Version { get; set; }
 
         /// <summary>

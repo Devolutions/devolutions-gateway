@@ -20,7 +20,7 @@
 | {{#required}}X{{/required}}
 | {{dataType}} {{#isContainer}} of <<{{complexType}}>>{{/isContainer}}
 | {{{description}}}
-| {{{dataFormat}}}
+| {{{dataFormat}}} {{#isEnum}}_Enum:_ {{#_enum}}{{this}}, {{/_enum}}{{/isEnum}}
 
 {{/vars}}
 |===

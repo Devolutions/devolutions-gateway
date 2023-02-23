@@ -39,11 +39,15 @@ export class DiagnosticsService {
     public configuration = new Configuration();
     public encoder: HttpParameterCodec;
 
-    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string, @Optional() configuration: Configuration) {
+    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string|string[], @Optional() configuration: Configuration) {
         if (configuration) {
             this.configuration = configuration;
         }
         if (typeof this.configuration.basePath !== 'string') {
+            if (Array.isArray(basePath) && basePath.length > 0) {
+                basePath = basePath[0];
+            }
+
             if (typeof basePath !== 'string') {
                 basePath = this.basePath;
             }
@@ -131,7 +135,8 @@ export class DiagnosticsService {
             }
         }
 
-        return this.httpClient.get<ClockDiagnostic>(`${this.configuration.basePath}/jet/diagnostics/clock`,
+        let localVarPath = `/jet/diagnostics/clock`;
+        return this.httpClient.request<ClockDiagnostic>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
@@ -192,7 +197,8 @@ export class DiagnosticsService {
             }
         }
 
-        return this.httpClient.get<ConfigDiagnostic>(`${this.configuration.basePath}/jet/diagnostics/configuration`,
+        let localVarPath = `/jet/diagnostics/configuration`;
+        return this.httpClient.request<ConfigDiagnostic>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
@@ -253,7 +259,8 @@ export class DiagnosticsService {
             }
         }
 
-        return this.httpClient.get<string>(`${this.configuration.basePath}/jet/diagnostics/logs`,
+        let localVarPath = `/jet/diagnostics/logs`;
+        return this.httpClient.request<string>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,

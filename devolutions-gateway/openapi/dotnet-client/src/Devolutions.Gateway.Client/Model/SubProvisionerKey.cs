@@ -78,14 +78,14 @@ namespace Devolutions.Gateway.Client.Model
         /// The key ID for this subkey
         /// </summary>
         /// <value>The key ID for this subkey</value>
-        [DataMember(Name = "Id", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "Id", IsRequired = true, EmitDefaultValue = true)]
         public string Id { get; set; }
 
         /// <summary>
         /// The binary-to-text-encoded key data
         /// </summary>
         /// <value>The binary-to-text-encoded key data</value>
-        [DataMember(Name = "Value", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "Value", IsRequired = true, EmitDefaultValue = true)]
         public string Value { get; set; }
 
         /// <summary>

@@ -46,4 +46,7 @@ export interface SessionInfo {
      */
     time_to_live?: number;
 }
+export namespace SessionInfo {
+}
+
 

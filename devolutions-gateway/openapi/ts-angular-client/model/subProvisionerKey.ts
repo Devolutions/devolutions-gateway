@@ -25,4 +25,7 @@ export interface SubProvisionerKey {
      */
     Value: string;
 }
+export namespace SubProvisionerKey {
+}
+
 

@@ -62,14 +62,14 @@ namespace Devolutions.Gateway.Client.Model
         /// Bearer token to use when making HTTP requests
         /// </summary>
         /// <value>Bearer token to use when making HTTP requests</value>
-        [DataMember(Name = "Token", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "Token", IsRequired = true, EmitDefaultValue = true)]
         public string Token { get; set; }
 
         /// <summary>
         /// HTTP URL where notification messages are to be sent
         /// </summary>
         /// <value>HTTP URL where notification messages are to be sent</value>
-        [DataMember(Name = "Url", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "Url", IsRequired = true, EmitDefaultValue = true)]
         public string Url { get; set; }
 
         /// <summary>
