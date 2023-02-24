@@ -37,11 +37,15 @@ export class SessionsService {
     public configuration = new Configuration();
     public encoder: HttpParameterCodec;
 
-    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string, @Optional() configuration: Configuration) {
+    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string|string[], @Optional() configuration: Configuration) {
         if (configuration) {
             this.configuration = configuration;
         }
         if (typeof this.configuration.basePath !== 'string') {
+            if (Array.isArray(basePath) && basePath.length > 0) {
+                basePath = basePath[0];
+            }
+
             if (typeof basePath !== 'string') {
                 basePath = this.basePath;
             }
@@ -136,7 +140,8 @@ export class SessionsService {
             }
         }
 
-        return this.httpClient.get<Array<SessionInfo>>(`${this.configuration.basePath}/jet/sessions`,
+        let localVarPath = `/jet/sessions`;
+        return this.httpClient.request<Array<SessionInfo>>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
@@ -200,8 +205,8 @@ export class SessionsService {
             }
         }
 
-        return this.httpClient.post<any>(`${this.configuration.basePath}/jet/session/${encodeURIComponent(String(id))}/terminate`,
-            null,
+        let localVarPath = `/jet/session/${this.configuration.encodeParam({name: "id", value: id, in: "path", style: "simple", explode: false, dataType: "string", dataFormat: "uuid"})}/terminate`;
+        return this.httpClient.request<any>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,

@@ -59,7 +59,7 @@ namespace Devolutions.Gateway.Client.Model
         /// This Gateway&#39;s hostname
         /// </summary>
         /// <value>This Gateway&#39;s hostname</value>
-        [DataMember(Name = "hostname", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "hostname", IsRequired = true, EmitDefaultValue = true)]
         public string Hostname { get; set; }
 
         /// <summary>

@@ -4,7 +4,9 @@ $ErrorActionPreference = "Stop"
 
 Push-Location -Path $PSScriptRoot
 
-../../tools/generate-openapi/generate.ps1
-./generate_clients.ps1
-
-Pop-Location
+try {
+	../../tools/generate-openapi/generate.ps1
+	./generate_clients.ps1
+} finally {
+	Pop-Location
+}

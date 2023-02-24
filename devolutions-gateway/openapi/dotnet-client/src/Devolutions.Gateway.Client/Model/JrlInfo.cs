@@ -52,14 +52,14 @@ namespace Devolutions.Gateway.Client.Model
         /// JWT \&quot;Issued At\&quot; claim of JRL
         /// </summary>
         /// <value>JWT \&quot;Issued At\&quot; claim of JRL</value>
-        [DataMember(Name = "iat", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "iat", IsRequired = true, EmitDefaultValue = true)]
         public long Iat { get; set; }
 
         /// <summary>
         /// Unique ID for current JRL
         /// </summary>
         /// <value>Unique ID for current JRL</value>
-        [DataMember(Name = "jti", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "jti", IsRequired = true, EmitDefaultValue = true)]
         public Guid Jti { get; set; }
 
         /// <summary>

@@ -36,7 +36,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Gets or Sets ConnectionMode
         /// </summary>
-        [DataMember(Name = "connection_mode", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "connection_mode", IsRequired = true, EmitDefaultValue = true)]
         public ConnectionMode ConnectionMode { get; set; }
         /// <summary>
         /// Initializes a new instance of the <see cref="SessionInfo" /> class.
@@ -75,14 +75,14 @@ namespace Devolutions.Gateway.Client.Model
         /// Protocol used during this session
         /// </summary>
         /// <value>Protocol used during this session</value>
-        [DataMember(Name = "application_protocol", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "application_protocol", IsRequired = true, EmitDefaultValue = true)]
         public string ApplicationProtocol { get; set; }
 
         /// <summary>
         /// Unique ID for this session
         /// </summary>
         /// <value>Unique ID for this session</value>
-        [DataMember(Name = "association_id", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "association_id", IsRequired = true, EmitDefaultValue = true)]
         public Guid AssociationId { get; set; }
 
         /// <summary>
@@ -110,7 +110,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Date this session was started
         /// </summary>
         /// <value>Date this session was started</value>
-        [DataMember(Name = "start_timestamp", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "start_timestamp", IsRequired = true, EmitDefaultValue = true)]
         public DateTime StartTimestamp { get; set; }
 
         /// <summary>

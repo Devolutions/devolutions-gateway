@@ -62,14 +62,14 @@ namespace Devolutions.Gateway.Client.Model
         /// URL to use from external networks
         /// </summary>
         /// <value>URL to use from external networks</value>
-        [DataMember(Name = "external_url", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "external_url", IsRequired = true, EmitDefaultValue = true)]
         public string ExternalUrl { get; set; }
 
         /// <summary>
         /// URL to use on local network
         /// </summary>
         /// <value>URL to use on local network</value>
-        [DataMember(Name = "internal_url", IsRequired = true, EmitDefaultValue = false)]
+        [DataMember(Name = "internal_url", IsRequired = true, EmitDefaultValue = true)]
         public string InternalUrl { get; set; }
 
         /// <summary>

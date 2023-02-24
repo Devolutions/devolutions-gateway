@@ -35,7 +35,6 @@ Protocol-aware fine-grained relay server
 == Endpoints
 
 
-
 [.Config]
 === Config
 
@@ -136,7 +135,6 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
-
 
 
 [.Diagnostics]
@@ -352,7 +350,6 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
-
 [.Health]
 === Health
 
@@ -413,7 +410,6 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
-
 
 
 [.Jrl]
@@ -576,7 +572,6 @@ ifdef::internal-generation[]
 
 
 endif::internal-generation[]
-
 
 
 [.Sessions]
@@ -810,13 +805,13 @@ endif::internal-generation[]
 | X
 | Long 
 | Current time in milliseconds
-| int64
+| int64 
 
 | timestamp_secs
 | X
 | Long 
 | Current time in seconds
-| int64
+| int64 
 
 |===
 
@@ -836,25 +831,25 @@ Service configuration diagnostic
 | X
 | String 
 | This Gateway's hostname
-| 
+|  
 
 | id
 | 
 | UUID 
 | This Gateway's unique ID
-| uuid
+| uuid 
 
 | listeners
 | X
 | List  of <<ListenerUrls>>
 | Listeners configured on this instance
-| 
+|  
 
 | version
 | X
 | String 
 | Gateway service version
-| 
+|  
 
 |===
 
@@ -874,19 +869,19 @@ Service configuration diagnostic
 | 
 | UUID 
 | This Gateway's unique ID
-| uuid
+| uuid 
 
 | SubProvisionerPublicKey
 | 
 | SubProvisionerKey 
 | 
-| 
+|  
 
 | Subscriber
 | 
 | Subscriber 
 | 
-| 
+|  
 
 |===
 
@@ -944,19 +939,19 @@ Service configuration diagnostic
 | X
 | String 
 | This Gateway's hostname
-| 
+|  
 
 | id
 | 
 | UUID 
 | This Gateway's unique ID
-| uuid
+| uuid 
 
 | version
 | 
 | String 
 | Gateway service version
-| 
+|  
 
 |===
 
@@ -976,13 +971,13 @@ Service configuration diagnostic
 | X
 | Long 
 | JWT \"Issued At\" claim of JRL
-| int64
+| int64 
 
 | jti
 | X
 | UUID 
 | Unique ID for current JRL
-| uuid
+| uuid 
 
 |===
 
@@ -1002,13 +997,13 @@ Service configuration diagnostic
 | X
 | String 
 | URL to use from external networks
-| 
+|  
 
 | internal_url
 | X
 | String 
 | URL to use on local network
-| 
+|  
 
 |===
 
@@ -1044,49 +1039,49 @@ Information about an ongoing Gateway session
 | X
 | String 
 | Protocol used during this session
-| 
+|  
 
 | association_id
 | X
 | UUID 
 | Unique ID for this session
-| uuid
+| uuid 
 
 | connection_mode
 | X
 | ConnectionMode 
 | 
-| 
+|  
 
 | destination_host
 | 
 | String 
 | Destination Host
-| 
+|  
 
 | filtering_policy
 | X
 | Boolean 
 | Filtering Policy
-| 
+|  
 
 | recording_policy
 | X
 | Boolean 
 | Recording Policy
-| 
+|  
 
 | start_timestamp
 | X
 | Date 
 | Date this session was started
-| date-time
+| date-time 
 
 | time_to_live
 | 
 | Long 
 | Maximum session duration in minutes (0 is used for the infinite duration)
-| int64
+| int64 
 
 |===
 
@@ -1106,25 +1101,25 @@ Information about an ongoing Gateway session
 | 
 | DataEncoding 
 | 
-| 
+|  
 
 | Format
 | 
 | PubKeyFormat 
 | 
-| 
+|  
 
 | Id
 | X
 | String 
 | The key ID for this subkey
-| 
+|  
 
 | Value
 | X
 | String 
 | The binary-to-text-encoded key data
-| 
+|  
 
 |===
 
@@ -1144,13 +1139,13 @@ Subscriber configuration
 | X
 | String 
 | Bearer token to use when making HTTP requests
-| 
+|  
 
 | Url
 | X
 | String 
 | HTTP URL where notification messages are to be sent
-| 
+|  
 
 |===
 

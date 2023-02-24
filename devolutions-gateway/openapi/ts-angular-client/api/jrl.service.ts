@@ -37,11 +37,15 @@ export class JrlService {
     public configuration = new Configuration();
     public encoder: HttpParameterCodec;
 
-    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string, @Optional() configuration: Configuration) {
+    constructor(protected httpClient: HttpClient, @Optional()@Inject(BASE_PATH) basePath: string|string[], @Optional() configuration: Configuration) {
         if (configuration) {
             this.configuration = configuration;
         }
         if (typeof this.configuration.basePath !== 'string') {
+            if (Array.isArray(basePath) && basePath.length > 0) {
+                basePath = basePath[0];
+            }
+
             if (typeof basePath !== 'string') {
                 basePath = this.basePath;
             }
@@ -136,7 +140,8 @@ export class JrlService {
             }
         }
 
-        return this.httpClient.get<JrlInfo>(`${this.configuration.basePath}/jet/jrl/info`,
+        let localVarPath = `/jet/jrl/info`;
+        return this.httpClient.request<JrlInfo>('get', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
@@ -196,8 +201,8 @@ export class JrlService {
             }
         }
 
-        return this.httpClient.post<any>(`${this.configuration.basePath}/jet/jrl`,
-            null,
+        let localVarPath = `/jet/jrl`;
+        return this.httpClient.request<any>('post', `${this.configuration.basePath}${localVarPath}`,
             {
                 context: localVarHttpContext,
                 responseType: <any>responseType_,
