@@ -510,3 +510,25 @@ jobs:
           run: |
             Set-PSDebug -Trace 1
             dotnet test utils/dotnet/GatewayUtils.sln
+
+  powershell-tests:
+      name: PowerShell module tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v3
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Install Pester module
+          id: prepare
+          shell: pwsh
+          run: Install-Module Pester -Force
+
+        - name: Pester
+          shell: pwsh
+          run: |
+            Set-PSDebug -Trace 1
+            ./powershell/run-tests.ps1
