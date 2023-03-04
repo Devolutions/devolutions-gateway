@@ -714,9 +714,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.2"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e54ea8bc3fb1ee042f5aace6e3c6e025d3874866da222930f70ce62aceba0bfa"
+checksum = "cf2b3e8478797446514c91ef04bafcb59faba183e621ad488df88983cc14128c"
 dependencies = [
  "cfg-if 1.0.0",
  "crossbeam-utils",
@@ -4641,11 +4641,11 @@ dependencies = [
 
 [[package]]
 name = "tracing-appender"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d48f71a791638519505cefafe162606f706c25592e4bde4d97600c0195312e"
+version = "0.2.999"
+source = "git+https://github.com/CBenoit/tracing?rev=454313f66da3a662#454313f66da3a66261955924bc283af147758550"
 dependencies = [
  "crossbeam-channel",
+ "thiserror",
  "time 0.3.19",
  "tracing-subscriber",
 ]

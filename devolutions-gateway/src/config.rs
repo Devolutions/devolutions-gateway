@@ -152,7 +152,7 @@ impl Conf {
         let log_file = conf_file
             .log_file
             .clone()
-            .unwrap_or_else(|| Utf8PathBuf::from("gateway.log"))
+            .unwrap_or_else(|| Utf8PathBuf::from("gateway"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
         let jrl_file = conf_file
