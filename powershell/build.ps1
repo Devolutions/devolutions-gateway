@@ -21,7 +21,7 @@ $Env:NUGET_CERT_REVOCATION_MODE='offline'
 
 & dotnet restore "$PSScriptRoot\$ModuleName\src" 2>&1>$null
 
-& dotnet publish "$PSScriptRoot\$ModuleName\src" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
+& dotnet publish "$PSScriptRoot\$ModuleName\src\$ModuleName.csproj" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
 
 Copy-Item "$PSScriptRoot\$ModuleName\bin" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
 
