@@ -14,3 +14,6 @@ default-members = [
 [profile.production]
 inherits = "release"
 lto = true
+
+[patch.crates-io]
+tracing-appender = { git = "https://github.com/CBenoit/tracing", rev = "454313f66da3a662" }

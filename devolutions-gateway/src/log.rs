@@ -7,9 +7,13 @@ use tokio::fs;
 use tokio::time::{sleep, Duration};
 use tracing::metadata::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling;
 use tracing_subscriber::filter::Directive;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
+
+const MAX_BYTES_PER_LOG_FILE: u64 = 3_000_000; // 3 MB
+const MAX_LOG_FILES: usize = 10;
 
 pub struct LoggerGuard {
     _file_guard: WorkerGuard,
@@ -26,7 +30,7 @@ impl<'a> LogPathCfg<'a> {
         if path.is_dir() {
             Ok(Self {
                 folder: path,
-                prefix: "gateway.log",
+                prefix: "gateway",
             })
         } else {
             Ok(Self {
@@ -38,15 +42,16 @@ impl<'a> LogPathCfg<'a> {
 }
 
 pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Result<LoggerGuard> {
-    let (file_layer, file_guard) = {
-        let cfg = LogPathCfg::from_path(path)?;
-
-        let file_appender = tracing_appender::rolling::daily(cfg.folder, cfg.prefix);
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
-
-        (file_layer, guard)
-    };
+    let log_cfg = LogPathCfg::from_path(path)?;
+    let file_appender = rolling::Builder::new()
+        .rotation(rolling::Rotation::max_bytes(MAX_BYTES_PER_LOG_FILE))
+        .filename_prefix(log_cfg.prefix)
+        .filename_suffix("log")
+        .max_log_files(MAX_LOG_FILES)
+        .build(log_cfg.folder)
+        .context("Couldn’t create file appender")?;
+    let (file_non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 
     let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(std::io::stdout());
     let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
@@ -83,7 +88,7 @@ pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Resul
 #[instrument]
 pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24); // once per day
-    const MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 10); // 10 days
+    const MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 90); // 90 days
 
     debug!("Task started");
 
@@ -94,7 +99,7 @@ pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
             Ok(mut read_dir) => {
                 while let Ok(Some(entry)) = read_dir.next_entry().await {
                     match entry.file_name().to_str() {
-                        Some(file_name) if file_name.starts_with(cfg.prefix) => {
+                        Some(file_name) if file_name.starts_with(cfg.prefix) && file_name.contains("log") => {
                             debug!(file_name, "Found a log file");
                             match entry
                                 .metadata()
@@ -143,7 +148,7 @@ pub async fn find_latest_log_file(prefix: &Utf8Path) -> anyhow::Result<std::path
 
     while let Ok(Some(entry)) = read_dir.next_entry().await {
         match entry.file_name().to_str() {
-            Some(file_name) if file_name.starts_with(cfg.prefix) => {
+            Some(file_name) if file_name.starts_with(cfg.prefix) && file_name.contains("log") => {
                 debug!(file_name, "Found a log file");
                 match entry.metadata().await.and_then(|metadata| metadata.modified()) {
                     Ok(modified) if modified > most_recent_time => {

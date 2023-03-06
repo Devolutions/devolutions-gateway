@@ -25,6 +25,13 @@ impl LogMiddleware {
             uri
         };
 
+        let span = if uri.len() > 512 {
+            // Truncate long URI to keep log readable and prevent fast growing log file
+            info_span!("request", request_id = %operation_id, %method, uri = %&uri[..512])
+        } else {
+            info_span!("request", request_id = %operation_id, %method, %uri)
+        };
+
         async move {
             let start_time = Instant::now();
 
@@ -42,7 +49,7 @@ impl LogMiddleware {
 
             Ok(ctx)
         }
-        .instrument(info_span!("request", request_id = %operation_id, %method, %uri))
+        .instrument(span)
         .await
     }
 }
