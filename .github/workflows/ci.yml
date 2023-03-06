@@ -527,8 +527,12 @@ jobs:
           shell: pwsh
           run: Install-Module Pester -Force
 
+        - name: Build module
+          shell: pwsh
+          run: |
+            ./powershell/build.ps1
+
         - name: Pester
           shell: pwsh
           run: |
-            Set-PSDebug -Trace 1
             ./powershell/run-tests.ps1
