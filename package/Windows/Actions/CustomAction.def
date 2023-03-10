@@ -12,3 +12,8 @@ EXPORTS
     ValidateListeners
     ValidateCertificate
     ValidatePublicKey
+    ConfigureAccessUri
+    ConfigureListeners
+    ConfigureCert
+    ConfigurePublicKey
+    RollbackConfig

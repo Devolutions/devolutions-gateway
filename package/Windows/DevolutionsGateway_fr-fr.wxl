@@ -144,7 +144,7 @@
   <String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Résumé</String>
   <String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
   <String Id="SummaryDlgAccessUriLabel">URI d'accès: [P.ACCESSURI_SCHEME]://[P.ACCESSURI_HOST]:[P.ACCESSURI_PORT]</String>
-  <String Id="SummaryDlgHTTPLabel">ÉCouteur HTTP: [P.HTTPURI_SCHEME]://*:[P.HTTPURI_PORT]</String>
+  <String Id="SummaryDlgHTTPLabel">Écouteur HTTP: [P.HTTPURI_SCHEME]://*:[P.HTTPURI_PORT]</String>
   <String Id="SummaryDlgTCPLabel">Écouteur TCP: [P.TCPURI_SCHEME]://*:[P.TCPURI_PORT]</String>
   <String Id="SummaryDlgListenersLabel">Écouteurs Devolutions Gateway</String>
   <String Id="SummaryDlgKeyPairLabel">Configuration de paire de clés Devolutions Gateway</String>
@@ -157,6 +157,11 @@
   <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
   <String Id="WelcomeDlgTitle" Overridable="yes">{\WixUI_Font_Bigger}Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
 
+  <String Id="Error29989">Failed to configure the provisioner public key.&#xa;&#xa; Error details: [2]</String>
+  <String Id="Error29990">Failed to configure the certificate.&#xa;&#xa; Error details: [2]</String>
+  <String Id="Error29991">Failed to configure the listeners.&#xa;&#xa; Error details: [2]</String>
+  <String Id="Error29992">Failed to configure the access URI.&#xa;&#xa; Error details: [2]</String>
+  <String Id="Error29993">Failed to execute a configuration command.&#xa;&#xa; Error details: [2]</String>
   <String Id="Error29994">Échec de lecture de la configuration existante du service</String> 
   <String Id="Error29995">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
   <String Id="Error29996">Le chemin de fichier spécifié est invalide ou inaccessible</String>

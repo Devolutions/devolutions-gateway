@@ -15,3 +15,5 @@
 #include <commdlg.h>
 #include <wininet.h>
 #include "strutil.h"
+#include "shlobj.h"
+#include "pathcch.h"
