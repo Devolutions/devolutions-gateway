@@ -4,6 +4,35 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.1.2 (2023-03-13)
+
+### Improvements
+
+- _dgw_: size-based log rotation ([#393](https://github.com/Devolutions/devolutions-gateway/issues/393)) ([e3acafcfcd](https://github.com/Devolutions/devolutions-gateway/commit/e3acafcfcd323af09b3b596c7d3cf1785db5d6d5)) ([DGW-34](https://devolutions.atlassian.net/browse/DGW-34)) 
+
+  Set a maximum size of 3 MB for each file and a maximum of 10 log files.
+  With this change, Devolutions Gateway should never consume more than 30 MB for its logs.
+
+- _pwsh_: sort certification chain from leaf to root ([#394](https://github.com/Devolutions/devolutions-gateway/issues/394)) ([f7ff93c6df](https://github.com/Devolutions/devolutions-gateway/commit/f7ff93c6dfeccf34792eab5e5af3db0dce70330b)) ([DGW-80](https://devolutions.atlassian.net/browse/DGW-80)) 
+
+- _installer_: improved error handling in Windows installer ([#397](https://github.com/Devolutions/devolutions-gateway/issues/397)) ([2766e5fffe](https://github.com/Devolutions/devolutions-gateway/commit/2766e5fffedc6ddf200faedfd90422352c045b8e)) ([DGW-78](https://devolutions.atlassian.net/browse/DGW-78))
+
+  PowerShell configuration commands are now executed as custom actions instead of WixSilentExec.
+  Errors are tracked and, if the installer is running with UI, an appropriate error message is shown to the user.
+
+  PowerShell command output is redirected to a temporary file; in the case of an error we provide the user the path to that file.
+  A general command execution error will display a string error value. 
+
+  Custom actions are refactored slightly for consistency and readability:
+  
+  - Internal functions now only return `void`, `BOOL`, or `HRESULT` where possible. Errors are always handled as `HRESULT` and other results (e.g. Win32 error codes, `LSTATUS`, null references) are converted to `HRESULT` and handled with the different WiX macros (e.g. `ExitOnWin32Error`).
+  - Consolidate on `WixGetProperty` instead of `MsiGetProperty` and be careful to release the resulting strings (`ReleaseStr`)
+  - Consolidate on `nullptr` instead of `NULL`
+
+- _installer_: rollback on error in Windows installer ([#397](https://github.com/Devolutions/devolutions-gateway/issues/397)) ([2766e5fffe](https://github.com/Devolutions/devolutions-gateway/commit/2766e5fffedc6ddf200faedfd90422352c045b8e)) ([DGW-76](https://devolutions.atlassian.net/browse/DGW-76))
+
+  For first time installs, if the installation fails, files that may have been created by the configuration process are cleaned up.
+
 ## 2023.1.1 (2023-02-22)
 
 ### Improvements
