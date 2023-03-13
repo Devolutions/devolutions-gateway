@@ -34,6 +34,11 @@ Patch dialog sequence:
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Fragment>
         <UI Id="WixUI_CustomInstallDir">
+            <Error Id="29989">!(loc.Error29989)</Error>
+            <Error Id="29990">!(loc.Error29990)</Error>
+            <Error Id="29991">!(loc.Error29991)</Error>        
+            <Error Id="29992">!(loc.Error29992)</Error>
+            <Error Id="29993">!(loc.Error29993)</Error>
             <Error Id="29994">!(loc.Error29994)</Error>
             <Error Id="29995">!(loc.Error29995)</Error>
             <Error Id="29996">!(loc.Error29996)</Error>

@@ -4,6 +4,11 @@
 enum Errors
 {
 	NoError = 0,
+	CommandExecPublicKeyFailure = 29989,
+	CommandExecCertificateFailure = 29990,
+	CommandExecListenersFailure = 29991,
+	CommandExecAccessUriFailure = 29992,
+	CommandExecFailure = 29993,
 	ServiceQueryFailure = 29994,
 	InvalidCertificate = 29995,
 	FileNotFound = 29996,
@@ -15,107 +20,173 @@ enum Errors
 
 constexpr auto DG_SERVICE_NAME = L"DevolutionsGateway";
 
+DWORD __stdcall Win32FromHResult(HRESULT hr)
+{
+	if ((hr & 0xFFFF0000) == MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, 0))
+	{
+		return HRESULT_CODE(hr);
+	}
+
+	if (hr == S_OK)
+	{
+		return ERROR_SUCCESS;
+	}
+
+	// Not a Win32 HRESULT so return a generic error code.
+	return ERROR_CAN_NOT_COMPLETE;
+}
+
+BOOL FormatWin32ErrorMessage(DWORD dwErrorCode, LPWSTR pBuffer, DWORD cchBufferLength)
+{
+	if (cchBufferLength == 0)
+	{
+		return FALSE;
+	}
+
+	DWORD cchMsg = FormatMessageW(
+		FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, 
+		nullptr, 
+		dwErrorCode, 
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), 
+		pBuffer, 
+		cchBufferLength, 
+		nullptr);
+
+	return (cchMsg > 0);
+}
+
 /// <summary>
 /// Write a message to the installer log
 /// </summary>
-UINT __stdcall Log(MSIHANDLE hInstall, LPCWSTR message)
+void __stdcall Log(MSIHANDLE hInstall, LPCWSTR message)
 {
 	PMSIHANDLE hRecord = MsiCreateRecord(1);
 	MsiRecordSetStringW(hRecord, 0, L"DevolutionsGateway.Installer.Actions: [1]");
 	MsiRecordSetStringW(hRecord, 1, message);
 	MsiProcessMessage(hInstall, INSTALLMESSAGE_INFO, hRecord);
-	return ERROR_SUCCESS; 
 }
 
 /// <summary>
 /// Write a message to the installer log including the error code |le|
 /// </summary>
-UINT __stdcall LogGLE(MSIHANDLE hInstall, LPCWSTR message, int le)
+void __stdcall LogGLE(MSIHANDLE hInstall, LPCWSTR message, DWORD lastError)
 {
-	WCHAR formatMessage[260] = { 0 };
+	static LPCWSTR format = L"%ls (%lu)";
+	WCHAR* formatMessage = nullptr;
+	size_t formatMessageLen = 0;
 
-	if (swprintf_s(formatMessage, 260, L"%ls (%lu)", message, GetLastError()) == -1)
-	{
-		Log(hInstall, L"Failed to format GLE");
-		return Log(hInstall, message);
-	}
-	else
-	{
-		return Log(hInstall, formatMessage);
-	}
+	formatMessageLen = _snwprintf(nullptr, 0, format, message, lastError);
+	formatMessage = new WCHAR[formatMessageLen + 1];
+	_snwprintf(formatMessage, formatMessageLen, format, message, lastError);
+	formatMessage[formatMessageLen] = L'\0';
+
+	Log(hInstall, formatMessage);
+
+	delete[] formatMessage;
 }
 
 /// <summary>
 /// Write a message to the installer log, including the result of GetLastError
 /// </summary>
-UINT __stdcall LogGLE(MSIHANDLE hInstall, LPCWSTR message)
+void __stdcall LogGLE(MSIHANDLE hInstall, LPCWSTR message)
 {
-	int le = GetLastError();
-
-	return LogGLE(hInstall, message, le);
+	LogGLE(hInstall, message, GetLastError());
 }
 
-void __stdcall ShowErrorMessage(MSIHANDLE hInstall, int error)
+/// <summary>
+/// Looks up the localized error message for |error| from the Error table
+/// </summary>
+/// <remarks>
+/// Note this will not work from within a deferred custom action
+/// </remarks>
+HRESULT __stdcall GetLocalizedErrorMessage(MSIHANDLE hInstall, int error, LPWSTR* pErrMsg, PDWORD pdwErrMsgLen)
 {
-	PMSIHANDLE hRecord = MsiCreateRecord(1);
-	MsiRecordSetInteger(hRecord, 1, error);
-	MsiProcessMessage(hInstall, INSTALLMESSAGE_WARNING, hRecord);
+	HRESULT hr = S_OK;
+	UINT er = ERROR_SUCCESS;
+	WCHAR szQuery[255] = { 0 };
+	PMSIHANDLE hDatabase;
+	PMSIHANDLE hView = NULL;
+	PMSIHANDLE hRecord = NULL;
+	DWORD dwErrMsgLen = 0;
+	LPWSTR errMsg = nullptr;
+
+	swprintf_s(szQuery, _countof(szQuery), L"SELECT `Message` FROM `Error` WHERE `Error` = %d", error);
+
+	hDatabase = MsiGetActiveDatabase(hInstall);
+	ExitOnNull(hDatabase, hr, E_OUTOFMEMORY, "MsiGetActiveDatabase");
+
+	hr = MsiDatabaseOpenViewW(hDatabase, szQuery, &hView);
+	ExitOnFailure(hr, "MsiDatabaseOpenView");
+
+	er = MsiViewExecute(hView, hRecord);
+	ExitOnWin32Error(er, hr, "MsiViewExecute");
+
+	er = MsiViewFetch(hView, &hRecord);
+	ExitOnWin32Error(er, hr, "MsiViewExecute");
+
+	// MsiRecordGetString offsets begin at 1 (obviously written by a VB developer)
+	er = MsiRecordGetStringW(hRecord, 1, L"", &dwErrMsgLen);
+
+	if (er == ERROR_MORE_DATA)
+	{
+		++dwErrMsgLen;
+
+		errMsg = (LPWSTR) calloc(dwErrMsgLen, sizeof(WCHAR));
+		ExitOnNull(errMsg, hr, E_OUTOFMEMORY, "calloc");
+
+		er = MsiRecordGetStringW(hRecord, 1, errMsg, &dwErrMsgLen);
+		ExitOnWin32Error(er, hr, "MsiRecordGetString");
+	}
+	else
+	{
+		ExitOnWin32Error(er, hr, "MsiRecordGetString");
+	}
+
+LExit:
+	if (SUCCEEDED(hr))
+	{
+		*pErrMsg = errMsg;
+		*pdwErrMsgLen = dwErrMsgLen;
+	}
+	else
+	{
+		free(errMsg);
+	}
+
+	return hr;
 }
 
 /// <summary>
 /// Lookup the localized error message for the code |error| and copy it to the P.ERROR property
 /// </summary>
-UINT __stdcall HandleValidationError(MSIHANDLE hInstall, int error)
+HRESULT __stdcall HandleValidationError(MSIHANDLE hInstall, int error)
 {
-	UINT hr = S_OK;
+	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
-	PMSIHANDLE hDatabase;
-	PMSIHANDLE hView = NULL;
-	PMSIHANDLE hRecord = NULL;
-	WCHAR szQuery[255] = { 0 };
 	DWORD dwErrorMessageLen = 0;
-	LPWSTR errMessage = NULL;
+	LPWSTR errMessage = nullptr;
 
 	// Write the error to the log file
 	PMSIHANDLE hLogRecord = MsiCreateRecord(1);
 	MsiRecordSetInteger(hLogRecord, 1, error);
 	MsiProcessMessage(hInstall, INSTALLMESSAGE_INFO, hLogRecord);
+	//
 
-	swprintf_s(szQuery, _countof(szQuery), L"SELECT `Message` FROM `Error` WHERE `Error` = %d", error);
+	hr = GetLocalizedErrorMessage(hInstall, error, &errMessage, &dwErrorMessageLen);
+	ExitOnFailure(hr, "GetLocalizedErrorMessage");
 
-	hDatabase = MsiGetActiveDatabase(hInstall);
-	hr = MsiDatabaseOpenViewW(hDatabase, szQuery, &hView);
-	ExitOnFailure(hr, "MsiDatabaseOpenView");
-
-	hr = MsiViewExecute(hView, hRecord);
-	ExitOnFailure(hr, "MsiViewExecute");
-
-	hr = MsiViewFetch(hView, &hRecord);
-	ExitOnFailure(hr, "MsiViewExecute");
-
-	// MsiRecordGetString offsets begin at 1 (obviously written by a VB developer)
-	hr = MsiRecordGetString(hRecord, 1, L"", &dwErrorMessageLen);
-
-	if (hr == ERROR_MORE_DATA)
-	{
-		++dwErrorMessageLen;
-
-		errMessage = new WCHAR[dwErrorMessageLen];
-		MsiRecordGetString(hRecord, 1, errMessage, &dwErrorMessageLen);
-
-		MsiSetPropertyW(hInstall, L"P.ERROR", errMessage);
-
-		delete[] errMessage;
-	}
+	er = MsiSetPropertyW(hInstall, L"P.ERROR", errMessage);
+	ExitOnWin32Error(er, hr, "MsiSetProperty");
 
 LExit:
-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
-	return er;
+	free(errMessage);
+
+	return hr;
 }
 
-UINT __stdcall IsValidPort(LPWSTR port, int* value)
+BOOL __stdcall IsValidPort(LPWSTR port, int* value)
 {
-	UINT status = -1;
+	BOOL result = FALSE;
 
 	for (int i = 0; i < lstrlenW(port); i++)
 	{
@@ -132,36 +203,36 @@ UINT __stdcall IsValidPort(LPWSTR port, int* value)
 		goto LExit;
 	}
 
-	if (value != NULL)
+	if (value != nullptr)
 	{
 		*value = portValue;
 	}
 
-	status = ERROR_SUCCESS;
+	result = TRUE;
 
 LExit:
-	return status;
+	return result;
 }
 
-UINT __stdcall IsValidPort(LPWSTR port)
+BOOL __stdcall IsValidPort(LPWSTR port)
 {
-	return IsValidPort(port, NULL);
+	return IsValidPort(port, nullptr);
 }
 
-UINT __stdcall IsValidOption(LPWSTR option, const WCHAR** validOptions, int len)
+BOOL __stdcall IsValidOption(LPWSTR option, const WCHAR** validOptions, int len)
 {
-	UINT status = -1;
+	BOOL result = FALSE;
 
 	for (int i = 0; i < len; i++)
 	{
 		if (StrCmpIW(option, validOptions[i]) == 0)
 		{
-			status = ERROR_SUCCESS;
+			result = TRUE;
 			break;
 		}
 	}
 
-	return status;
+	return result;
 }
 
 UINT __stdcall FormatHttpUrl(LPCWSTR scheme, int port, WCHAR* buffer, size_t bufferLen)
@@ -169,7 +240,7 @@ UINT __stdcall FormatHttpUrl(LPCWSTR scheme, int port, WCHAR* buffer, size_t buf
 	static LPCWSTR urlFormat = L"%ls://*%ls";
 	static LPCWSTR portFormat = L":%d";
 	int suffixLen = 0;
-	WCHAR* suffix = NULL;
+	WCHAR* suffix = nullptr;
 
 	if ((StrCmpIW(scheme, L"http") == 0 && port != 80) ||
 	    (StrCmpIW(scheme, L"https") == 0 && port != 443))
@@ -183,9 +254,10 @@ UINT __stdcall FormatHttpUrl(LPCWSTR scheme, int port, WCHAR* buffer, size_t buf
 	return _snwprintf(buffer, bufferLen, urlFormat, scheme, suffix ? suffix : L"");
 }
 
-UINT __stdcall GetPowerShellVersion(USHORT* pMajor, USHORT* pMinor, USHORT* pRevision, USHORT* pPatch)
+HRESULT __stdcall GetPowerShellVersion(USHORT* pMajor, USHORT* pMinor, USHORT* pRevision, USHORT* pPatch)
 {
-	UINT status = -1;
+	HRESULT hr = S_OK;
+	UINT er = ERROR_SUCCESS;
 	HKEY hKey = nullptr;
 	DWORD dwType;
 	DWORD dwInstall = 0;
@@ -194,29 +266,36 @@ UINT __stdcall GetPowerShellVersion(USHORT* pMajor, USHORT* pMinor, USHORT* pRev
 
 	char szVersion[512] = { 0 };
 
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\PowerShell\\3", 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-		goto exit;
+	er = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PowerShell\\3", 0, KEY_READ, &hKey);
+	ExitOnWin32Error(er, hr, "RegOpenKeyEx");
 
 	cbData = sizeof(DWORD);
 
-	if (RegQueryValueExA(hKey, "Install", nullptr, &dwType, (LPBYTE)&dwInstall, &cbData) != ERROR_SUCCESS)
-		goto exit;
+	er = RegQueryValueExW(hKey, L"Install", nullptr, &dwType, (LPBYTE) &dwInstall, &cbData);
+	ExitOnWin32Error(er, hr, "RegQueryValueEx");
 
 	if (dwInstall != 1)
-		goto exit;
+	{
+		hr = REGDB_E_INVALIDVALUE;
+		ExitOnFailure(hr, "RegQueryValueEx");
+	}
 
 	RegCloseKey(hKey);
 	hKey = nullptr;
 
-	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\PowerShell\\3\\PowerShellEngine", 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-		goto exit;
+	er = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\Microsoft\\PowerShell\\3\\PowerShellEngine", 0, KEY_READ, &hKey);
+	ExitOnWin32Error(er, hr, "RegOpenKeyEx");
 
 	cbData = sizeof(szVersion);
 
-	if (RegQueryValueExA(hKey, "PowerShellVersion", nullptr, &dwType, (LPBYTE)szVersion, &cbData) != ERROR_SUCCESS)
-		goto exit;
+	er = RegQueryValueExA(hKey, "PowerShellVersion", nullptr, &dwType, (LPBYTE) szVersion, &cbData);
+	ExitOnWin32Error(er, hr, "RegQueryValueEx");
 
-	if (sscanf(szVersion, "%hu.%hu.%hu.%hu", &major, &minor, &revision, &patch) == 4)
+	if (sscanf(szVersion, "%hu.%hu.%hu.%hu", &major, &minor, &revision, &patch) != 4)
+	{
+		hr = REGDB_E_INVALIDVALUE;
+	}
+	else
 	{
 		if (pMajor)
 			*pMajor = major;
@@ -229,15 +308,13 @@ UINT __stdcall GetPowerShellVersion(USHORT* pMajor, USHORT* pMinor, USHORT* pRev
 
 		if (pPatch)
 			*pPatch = patch;
-
-		status = 1;
 	}
 
-exit:
+LExit:
 	if (hKey)
 		RegCloseKey(hKey);
 
-	return status;
+	return hr;
 }
 
 UINT __stdcall CheckPowerShellVersion(MSIHANDLE hInstall)
@@ -252,16 +329,15 @@ UINT __stdcall CheckPowerShellVersion(MSIHANDLE hInstall)
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
 	hr = WcaSetIntProperty(L"P.HASPWSH", 1);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetIntProperty");
 
-	if (GetPowerShellVersion(&major, &minor, &rev, &patch) != 1)
-	{
-		goto LExit;
-	}
+	hr = GetPowerShellVersion(&major, &minor, &rev, &patch);
+	ExitOnFailure(hr, "GetPowerShellVersion");
 
 	if (major >= 5 && minor >= 1)
 	{
 		hr = WcaSetIntProperty(L"P.HASPWSH", 0);
+		ExitOnFailure(hr, "WcaSetIntProperty");
 	}
 
 LExit:
@@ -286,18 +362,140 @@ BOOL __stdcall FileExists(LPCWSTR filePath)
 	return TRUE;
 }
 
-UINT __stdcall BrowseForFile(MSIHANDLE hInstall, LPCWSTR propertyName, LPCWSTR fileFilter)
+/// <summary>
+/// Creates a temporary file with inheritable write access. Returns |nullptr| on failure,
+/// otherwise a |HANDLE| that must be closed
+/// </summary>
+HANDLE __stdcall CreateSharedTempFile(LPWSTR* pFilePath)
 {
 	HRESULT hr = S_OK;
-	UINT er = ERROR_SUCCESS;
+	SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+	WCHAR szTempFileName[MAX_PATH];
+	WCHAR lpTempPathBuffer[MAX_PATH];
+	DWORD dwRetVal = 0;
+	HANDLE hTempFile = nullptr;
+	int filePathLen = 0;
+
+	dwRetVal = GetTempPathW(MAX_PATH, lpTempPathBuffer);
+
+	if (dwRetVal < 1 || dwRetVal > MAX_PATH)
+	{
+		ExitWithLastError(hr, "GetTempPath");
+	}
+
+	if (GetTempFileNameW(lpTempPathBuffer, L"DGW", 0, szTempFileName) == 0)
+	{
+		ExitWithLastError(hr, "GetTempFileName");
+	}
+
+	hTempFile = CreateFileW(szTempFileName, GENERIC_WRITE, FILE_SHARE_WRITE, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+	if (hTempFile == INVALID_HANDLE_VALUE)
+	{
+		hTempFile = nullptr;
+		ExitWithLastError(hr, "CreateFile");
+	}
+
+	filePathLen = lstrlenW(szTempFileName);
+	*pFilePath = (LPWSTR) calloc((size_t) filePathLen + 1, sizeof(WCHAR));
+	ExitOnNull(*pFilePath, hr, E_OUTOFMEMORY, "calloc");
+
+	CopyMemory(*pFilePath, szTempFileName, filePathLen * sizeof(WCHAR));
+
+LExit:
+	if (FAILED(hr))
+	{
+		ReleaseHandle(hTempFile);
+		free(*pFilePath);
+		*pFilePath = nullptr;
+	}
+
+	return hTempFile;
+}
+
+HRESULT __stdcall ExecuteCommand(MSIHANDLE hInstall, LPCWSTR command, LPDWORD dwExitCode, LPWSTR* pOutputPath)
+{
+	HRESULT hr = S_OK;
+	int lpCommandLen = 0;
+	WCHAR* lpCommand = nullptr;
+	STARTUPINFOW si = { 0 };
+	PROCESS_INFORMATION pi = { 0 };
+	SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+	DWORD exitCode = 1;
+	HANDLE hTempFile = nullptr;
+	
+	// CreateProcessW can modify the contents of the lpCommand parameter
+	lpCommandLen = lstrlenW(command);
+	lpCommand = (LPWSTR) calloc((size_t)lpCommandLen, sizeof(WCHAR));
+	ExitOnNull(lpCommand, hr, E_OUTOFMEMORY, "calloc");
+	CopyMemory(lpCommand, command, lpCommandLen * sizeof(WCHAR));
+
+	si.cb = sizeof(STARTUPINFOW);
+
+	// Create a temp file and redirect output
+	hTempFile = CreateSharedTempFile(pOutputPath);
+
+	if (hTempFile != nullptr)
+	{
+		si.dwFlags = STARTF_USESTDHANDLES;
+		si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		si.hStdOutput = hTempFile;
+		si.hStdError = hTempFile;
+	}
+
+	if (!CreateProcessW(nullptr, lpCommand, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+	{
+		ExitWithLastError(hr, "CreateProcess");
+	}
+
+	// Give the process reasonable time to finish, don't hang the installer
+	if (WaitForSingleObject(pi.hProcess, 30 * 1000) == WAIT_TIMEOUT)
+	{
+		Log(hInstall, L"Timeout waiting for subprocess");
+
+		if (!TerminateProcess(pi.hProcess, exitCode))
+		{
+			ExitWithLastError(hr, "TerminateProcess failed");
+		}
+	}
+
+	if (!GetExitCodeProcess(pi.hProcess, &exitCode))
+	{
+		ExitWithLastError(hr, "GetExitCodeProcess failed");
+	}
+
+	if (exitCode != 0)
+	{
+		Log(hInstall, L"Subprocess returned non-zero exit code.");
+	}
+
+LExit:
+	if (hr == S_OK)
+	{
+		*dwExitCode = exitCode;
+	}
+
+	free(lpCommand);
+	lpCommand = nullptr;
+
+	ReleaseHandle(hTempFile);
+	ReleaseHandle(pi.hProcess);
+	ReleaseHandle(pi.hThread);
+
+	return hr;
+}
+
+HRESULT __stdcall BrowseForFile(MSIHANDLE hInstall, LPCWSTR propertyName, LPCWSTR fileFilter)
+{
+	HRESULT hr = S_OK;
 	HANDLE hExistingFile;
 	WIN32_FIND_DATA fdExistingFileData = { 0 };
 	OPENFILENAMEW ofn = { 0 };
-	LPWSTR szSourceFileName = NULL;
+	LPWSTR szSourceFileName = nullptr;
 	WCHAR szFoundFileName[MAX_PATH] = { 0 };
 
 	hr = WcaGetProperty(propertyName, &szSourceFileName);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	hExistingFile = FindFirstFileW(szSourceFileName, &fdExistingFileData);
 
@@ -315,7 +513,7 @@ UINT __stdcall BrowseForFile(MSIHANDLE hInstall, LPCWSTR propertyName, LPCWSTR f
 	ofn.hwndOwner = GetActiveWindow(); // can also use NULL, although the dialog won't be modal in that case
 	ofn.lpstrFile = szFoundFileName;
 	ofn.nMaxFile = sizeof(szFoundFileName);
-	ofn.lpstrInitialDir = NULL;
+	ofn.lpstrInitialDir = nullptr;
 	ofn.lpstrFilter = fileFilter;
 	ofn.nFilterIndex = 1;
 	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
@@ -323,13 +521,13 @@ UINT __stdcall BrowseForFile(MSIHANDLE hInstall, LPCWSTR propertyName, LPCWSTR f
 	if (GetOpenFileNameW(&ofn))
 	{
 		hr = WcaSetProperty(propertyName, ofn.lpstrFile);
-		ExitOnFailure(hr, "The expected property was not found.");
+		ExitOnFailure(hr, "WcaSetProperty");
 	}
 
 LExit:
 	ReleaseStr(szSourceFileName);
-	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
-	return er;
+
+	return hr;
 }
 
 UINT __stdcall BrowseForCertificate(MSIHANDLE hInstall)
@@ -337,7 +535,7 @@ UINT __stdcall BrowseForCertificate(MSIHANDLE hInstall)
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
 	LPCWSTR propertyName = L"P.CERT_FILE";
-	LPWSTR szSourceFileName = NULL;
+	LPWSTR szSourceFileName = nullptr;
 	static const WCHAR* PFX_EXTS[] = { (L"pfx"), (L"p12") };
 
 	hr = WcaInitialize(hInstall, "BrowseForCertificate");
@@ -345,35 +543,33 @@ UINT __stdcall BrowseForCertificate(MSIHANDLE hInstall)
 
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
-	er = BrowseForFile(
+	hr = BrowseForFile(
 		hInstall, 
 		propertyName, 
 		L"PFX Files (*.pfx, *.p12)\0*.pfx;*.p12\0Certificate Files (*.pem, *.crt, *.cer)\0*.pem;*.crt;*.cer\0All Files\0*.*\0\0"
 	);
-
-	if (er != ERROR_SUCCESS)
-	{
-		hr = HRESULT_FROM_WIN32(er);
-		goto LExit;
-	}
+	ExitOnFailure(hr, "BrowseForFile");
 
 	hr = WcaGetProperty(propertyName, &szSourceFileName);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	// We expect the file to have an extension, because of the filter
 	WCHAR* pExt = PathFindExtensionW(szSourceFileName);
 	pExt++;
 
 	hr = WcaSetIntProperty(L"P.CERT_NEED_PASS", 1);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetIntProperty");
 
-	if (IsValidOption(pExt, PFX_EXTS, ARRAYSIZE(PFX_EXTS)) == ERROR_SUCCESS)
+	if (IsValidOption(pExt, PFX_EXTS, ARRAYSIZE(PFX_EXTS)))
 	{
 		// Tell the .msi we need a password
 		hr = WcaSetIntProperty(L"P.CERT_NEED_PASS", 0);
+		ExitOnFailure(hr, "WcaSetIntProperty");
 	}
 
 LExit:
+	ReleaseStr(szSourceFileName);
+
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
 }
@@ -388,13 +584,8 @@ UINT __stdcall BrowseForPrivateKey(MSIHANDLE hInstall)
 
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
-	er = BrowseForFile(hInstall, L"P.CERT_PK_FILE", L"Private Key Files (*.key)\0*.key\0All Files\0*.*\0\0");
-
-	if (er != ERROR_SUCCESS)
-	{
-		hr = HRESULT_FROM_WIN32(er);
-		goto LExit;
-	}
+	hr = BrowseForFile(hInstall, L"P.CERT_PK_FILE", L"Private Key Files (*.key)\0*.key\0All Files\0*.*\0\0");
+	ExitOnFailure(hr, "BrowseForFile");
 
 LExit:
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
@@ -411,17 +602,12 @@ UINT __stdcall BrowseForPublicKey(MSIHANDLE hInstall)
 
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
-	er = BrowseForFile(
+	hr = BrowseForFile(
 		hInstall, 
 		L"P.PUBLIC_KEY_FILE", 
 		L"Public Key Files (*.pem)\0*.pem\0Private Key Files (*.key)\0*.key\0All Files\0*.*\0\0"
 	);
-
-	if (er != ERROR_SUCCESS)
-	{
-		hr = HRESULT_FROM_WIN32(er);
-		goto LExit;
-	}
+	ExitOnFailure(hr, "BrowseForFile");
 
 LExit:
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
@@ -431,17 +617,12 @@ LExit:
 HRESULT __stdcall OpenServiceManagerX(MSIHANDLE hInstall, DWORD dwDesiredAccess, SC_HANDLE* lpHandle)
 {
 	HRESULT hr = S_OK;
-	SC_HANDLE hSCM = NULL;
+	SC_HANDLE hSCM = nullptr;
 
-	hSCM = OpenSCManagerW(NULL, NULL, dwDesiredAccess);
+	hSCM = OpenSCManagerW(nullptr, nullptr, dwDesiredAccess);
+	ExitOnNullWithLastError(hSCM, hr, "OpenSCManager");
 
-	if (hSCM == NULL)
-	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenSCManager failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-	}
-
+LExit:
 	*lpHandle = hSCM;
 
 	return hr;
@@ -450,17 +631,12 @@ HRESULT __stdcall OpenServiceManagerX(MSIHANDLE hInstall, DWORD dwDesiredAccess,
 HRESULT __stdcall OpenServiceX(MSIHANDLE hInstall, SC_HANDLE hSCManager, LPCWSTR lpServiceName, DWORD dwDesiredAccess, SC_HANDLE* lpHandle)
 {
 	HRESULT hr = S_OK;
-	SC_HANDLE hService = NULL;
+	SC_HANDLE hService = nullptr;
 
 	hService = OpenServiceW(hSCManager, lpServiceName, dwDesiredAccess);
+	ExitOnNullWithLastError(hService, hr, "OpenService");
 
-	if (hService == NULL)
-	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"OpenService failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-	}
-
+LExit:
 	*lpHandle = hService;
 
 	return hr;
@@ -471,77 +647,47 @@ UINT __stdcall SetGatewayStartupType(MSIHANDLE hInstall)
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
 	int serviceStart = SERVICE_DEMAND_START;
-	SC_HANDLE hSCM = NULL;
-	SC_HANDLE hService = NULL;
+	SC_HANDLE hSCM = nullptr;
+	SC_HANDLE hService = nullptr;
 	DWORD dwValBuf = 0;
-	LPWSTR szValBuf = NULL;
+	LPWSTR szValBuf = nullptr;
 
 	hr = WcaInitialize(hInstall, "SetGatewayStartupType");
 	ExitOnFailure(hr, "Failed to initialize");
 
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
-	er = MsiGetPropertyW(hInstall, L"CustomActionData", L"", &dwValBuf);
+	hr = WcaGetProperty(L"CustomActionData", &szValBuf);
+	ExitOnFailure(hr, "WcaGetProperty");
 
-	if (er == ERROR_MORE_DATA)
-	{
-		++dwValBuf; // Null-terminator
-		szValBuf = new WCHAR[dwValBuf];
-		er = MsiGetPropertyW(hInstall, L"CustomActionData", szValBuf, &dwValBuf);
+	serviceStart = _wtoi(szValBuf);
 
-		if (er == ERROR_SUCCESS)
-		{
-			serviceStart = _wtoi(szValBuf);
-		}
+	ReleaseStr(szValBuf);
 
-		delete[] szValBuf;
+	hr = OpenServiceManagerX(hInstall, SC_MANAGER_ALL_ACCESS, &hSCM);
+	ExitOnFailure(hr, "OpenServiceManager");
 
-		if (er != ERROR_SUCCESS)
-		{
-			hr = HRESULT_FROM_WIN32(er);
-			Log(hInstall, L"SetGatewayStartupType failed to retrieve CustomActionData");
-
-			goto LExit;
-		}
-	}
-	else
-	{
-		hr = HRESULT_FROM_WIN32(er);
-		Log(hInstall, L"SetGatewayStartupType failed to retrieve CustomActionData");
-
-		goto LExit;
-	}
-
-	if (OpenServiceManagerX(hInstall, SC_MANAGER_ALL_ACCESS, &hSCM) != S_OK)
-	{
-		goto LExit;
-	}
-
-	if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_CHANGE_CONFIG, &hService) != S_OK)
-	{
-		goto LExit;
-	}
+	hr = OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_CHANGE_CONFIG, &hService);
+	ExitOnFailure(hr, "OpenService");
 
 	if (!ChangeServiceConfigW(hService, SERVICE_NO_CHANGE, serviceStart, SERVICE_NO_CHANGE,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL))
+		nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr))
 	{
-		DWORD dwError = GetLastError();
-		LogGLE(hInstall, L"ChangeServiceConfig failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
-		goto LExit;
+		ExitWithLastError(hr, "ChangeServiceConfig");
 	}
 
 LExit:
-	if (hService != NULL)
+	if (hService != nullptr)
 	{
 		CloseServiceHandle(hService);
 	}
 
-	if (hSCM != NULL)
+	if (hSCM != nullptr)
 	{
 		CloseServiceHandle(hSCM);
 	}
+
+	ReleaseStr(szValBuf);
 
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
@@ -549,25 +695,21 @@ LExit:
 
 HRESULT __stdcall GetGatewayStartupType(MSIHANDLE hInstall, DWORD* pStartupType)
 {
-	HRESULT hr = E_FAIL;
-	SC_HANDLE hSCM = NULL;
-	SC_HANDLE hService = NULL;
-	LPQUERY_SERVICE_CONFIG lpsc = { 0 };
+	HRESULT hr = S_OK;
+	SC_HANDLE hSCM = nullptr;
+	SC_HANDLE hService = nullptr;
+	LPQUERY_SERVICE_CONFIG lpsc = nullptr;
 	DWORD dwBytesNeeded;
 	DWORD cbBufSize = 0;
 	DWORD dwError;
 
-	if (OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM) != S_OK)
-	{
-		goto LExit;
-	}
+	hr = OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM);
+	ExitOnFailure(hr, "OpenServiceManager");
 
-	if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_QUERY_CONFIG, &hService) != S_OK)
-	{
-		goto LExit;
-	}
+	hr = OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_QUERY_CONFIG, &hService);
+	ExitOnFailure(hr, "OpenService");
 
-	if (!QueryServiceConfigW(hService, NULL, 0, &dwBytesNeeded))
+	if (!QueryServiceConfigW(hService, nullptr, 0, &dwBytesNeeded))
 	{
 		dwError = GetLastError();
 
@@ -575,46 +717,35 @@ HRESULT __stdcall GetGatewayStartupType(MSIHANDLE hInstall, DWORD* pStartupType)
 		{
 			cbBufSize = dwBytesNeeded;
 			lpsc = (LPQUERY_SERVICE_CONFIG) LocalAlloc(LMEM_FIXED, cbBufSize);
-
-			if (lpsc == NULL)
-			{
-				Log(hInstall, L"LocalAlloc failure");
-
-				goto LExit;
-			}
+			ExitOnNull(lpsc, hr, E_OUTOFMEMORY, "LocalAlloc");
 		}
 		else
 		{
-			LogGLE(hInstall, L"QueryServiceConfig failed", dwError);
-			hr = HRESULT_FROM_WIN32(dwError);
-
-			goto LExit;
+			ExitOnLastError(hr, "QueryServiceConfig");
 		}
 	}
 
 	if (!QueryServiceConfigW(hService, lpsc, cbBufSize, &dwBytesNeeded))
 	{
-		dwError = GetLastError();
-		LogGLE(hInstall, L"QueryServiceConfig failed", dwError);
-		hr = HRESULT_FROM_WIN32(dwError);
-
-		LocalFree(lpsc);
-
-		goto LExit;
+		ExitOnLastError(hr, "QueryServiceConfig");
 	}
 
-	hr = S_OK;
+	ExitOnNull(lpsc, hr, E_OUTOFMEMORY, "QueryServiceConfig");
+
 	*pStartupType = lpsc->dwStartType;
 
-	LocalFree(lpsc);
-
 LExit:
-	if (hService != NULL)
+	if (lpsc != nullptr)
+	{
+		LocalFree(lpsc);
+	}
+
+	if (hService != nullptr)
 	{
 		CloseServiceHandle(hService);
 	}
 
-	if (hSCM != NULL)
+	if (hSCM != nullptr)
 	{
 		CloseServiceHandle(hSCM);
 	}
@@ -625,8 +756,8 @@ LExit:
 UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
-	DWORD dwStartType = 0;
 	UINT er = ERROR_SUCCESS;
+	DWORD dwStartType = 0;
 
 	hr = WcaInitialize(hInstall, "QueryGatewayStartupType");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -636,12 +767,10 @@ UINT __stdcall QueryGatewayStartupType(MSIHANDLE hInstall)
 	Log(hInstall, L"Looking for existing Devolutions Gateway service");
 
 	hr = GetGatewayStartupType(hInstall, &dwStartType);
+	ExitOnFailure(hr, "GetGatewayStartupType");
 
-	if (hr == S_OK)
-	{
-		hr = WcaSetIntProperty(L"P.SERVICE_START", dwStartType == SERVICE_DISABLED ? SERVICE_DEMAND_START : dwStartType);
-		ExitOnFailure(hr, "The expected property was not found.");
-	}
+	hr = WcaSetIntProperty(L"P.SERVICE_START", dwStartType == SERVICE_DISABLED ? SERVICE_DEMAND_START : dwStartType);
+	ExitOnFailure(hr, "WcaSetIntProperty");
 
 LExit:
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
@@ -651,10 +780,10 @@ LExit:
 UINT __stdcall StartGatewayIfNeeded(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
-	DWORD dwStartType = 0;
-	SC_HANDLE hSCM = NULL;
-	SC_HANDLE hService = NULL;
 	UINT er = ERROR_SUCCESS;
+	DWORD dwStartType = 0;
+	SC_HANDLE hSCM = nullptr;
+	SC_HANDLE hService = nullptr;
 
 	hr = WcaInitialize(hInstall, "StartGatewayIfNeeded");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -663,23 +792,19 @@ UINT __stdcall StartGatewayIfNeeded(MSIHANDLE hInstall)
 
 	hr = GetGatewayStartupType(hInstall, &dwStartType);
 
-	if (hr == S_OK)
+	if (SUCCEEDED(hr) && dwStartType == SERVICE_AUTO_START)
 	{
 		if (dwStartType == SERVICE_AUTO_START)
 		{
 			Log(hInstall, L"Trying to start the Devolutions Gateway service");
 
-			if (OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM) != S_OK)
-			{
-				goto LExit;
-			}
+			hr = OpenServiceManagerX(hInstall, SC_MANAGER_CONNECT, &hSCM);
+			ExitOnFailure(hr, "OpenServiceManager");
 
-			if (OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_START, &hService) != S_OK)
-			{
-				goto LExit;
-			}
+			hr = OpenServiceX(hInstall, hSCM, DG_SERVICE_NAME, SERVICE_START, &hService);
+			ExitOnFailure(hr, "OpenService");
 
-			if (StartServiceW(hService, 0, NULL))
+			if (StartServiceW(hService, 0, nullptr))
 			{
 				Log(hInstall, L"Successfully asked the Devolutions Gateway service to start");
 			}
@@ -687,15 +812,12 @@ UINT __stdcall StartGatewayIfNeeded(MSIHANDLE hInstall)
 			{
 				DWORD dwError = GetLastError();
 
-				if (dwError == ERROR_SERVICE_ALREADY_RUNNING)
+				if (dwError != ERROR_SERVICE_ALREADY_RUNNING)
 				{
-					Log(hInstall, L"Devolutions Gateway service is already running");
-
-					goto LExit;
+					ExitOnLastError(hr, "StartService");
 				}
 
-				LogGLE(hInstall, L"StartService failed", dwError);
-				hr = HRESULT_FROM_WIN32(dwError);
+				Log(hInstall, L"Devolutions Gateway service is already running");
 			}
 		}
 		else
@@ -705,12 +827,12 @@ UINT __stdcall StartGatewayIfNeeded(MSIHANDLE hInstall)
 	}
 
 LExit:
-	if (hService != NULL)
+	if (hService != nullptr)
 	{
 		CloseServiceHandle(hService);
 	}
 
-	if (hSCM != NULL)
+	if (hSCM != nullptr)
 	{
 		CloseServiceHandle(hSCM);
 	}
@@ -723,17 +845,17 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
-	LPWSTR szAccessUriScheme = NULL;
-	LPWSTR szAccessUriHost = NULL;
-	LPWSTR szAccessUriPort = NULL;
+	LPWSTR szAccessUriScheme = nullptr;
+	LPWSTR szAccessUriHost = nullptr;
+	LPWSTR szAccessUriPort = nullptr;
 	static LPCWSTR uriFormat = L"%ls://%ls:%ls";
 	int uriLen = 0;
-	WCHAR* uri = NULL;
+	WCHAR* uri = nullptr;
 	DWORD dwHostLen = INTERNET_MAX_HOST_NAME_LENGTH;
 	WCHAR wszHost[INTERNET_MAX_HOST_NAME_LENGTH] = { 0 };
 	static LPCWSTR psCommandFormat = L"Set-DGatewayHostname %ls";
 	int psCommandLen = 0;
-	WCHAR* psCommand = NULL;
+	WCHAR* psCommand = nullptr;
 
 	hr = WcaInitialize(hInstall, "ValidateAccessUri");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -741,10 +863,10 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
 	hr = WcaSetProperty(L"P.ERROR", L"");
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 	hr = WcaGetProperty(L"P.ACCESSURI_SCHEME", &szAccessUriScheme);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szAccessUriScheme || lstrlen(szAccessUriScheme) < 1)
 	{
@@ -754,14 +876,14 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 
 	static const WCHAR* VALID_SCHEMES[] = { (L"http"), (L"https") };
 
-	if (IsValidOption(szAccessUriScheme, VALID_SCHEMES, ARRAYSIZE(VALID_SCHEMES)) != ERROR_SUCCESS)
+	if (!IsValidOption(szAccessUriScheme, VALID_SCHEMES, ARRAYSIZE(VALID_SCHEMES)))
 	{
 		HandleValidationError(hInstall, Errors::InvalidScheme);
 		goto LExit;
 	}
 
 	hr = WcaGetProperty(L"P.ACCESSURI_HOST", &szAccessUriHost);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szAccessUriHost || lstrlen(szAccessUriHost) < 1)
 	{
@@ -770,7 +892,7 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 	}
 
 	hr = WcaGetProperty(L"P.ACCESSURI_PORT", &szAccessUriPort);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szAccessUriPort || lstrlen(szAccessUriPort) < 1)
 	{
@@ -778,7 +900,7 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 		goto LExit;
 	}
 
-	if (IsValidPort(szAccessUriPort) != ERROR_SUCCESS)
+	if (!IsValidPort(szAccessUriPort))
 	{
 		HandleValidationError(hInstall, Errors::InvalidPort);
 		goto LExit;
@@ -787,10 +909,10 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 	if (lstrcmpi(szAccessUriScheme, L"http") == 0)
 	{
 		hr = WcaSetProperty(L"P.HTTPURI_SCHEME", L"http");
-		ExitOnFailure(hr, "The expected property was not found.");
+		ExitOnFailure(hr, "WcaSetProperty");
 	}
 
-	uriLen = _snwprintf(NULL, 0, uriFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
+	uriLen = _snwprintf(nullptr, 0, uriFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
 	uri = new WCHAR[uriLen + 1];
 	_snwprintf(uri, uriLen, uriFormat, szAccessUriScheme, szAccessUriHost, szAccessUriPort);
 	uri[uriLen] = L'\0';
@@ -799,22 +921,26 @@ UINT __stdcall ValidateAccessUri(MSIHANDLE hInstall)
 
 	delete[] uri;
 
-	if (hr != S_OK)
+	if (FAILED(hr))
 	{
 		HandleValidationError(hInstall, Errors::InvalidHost);
 		goto LExit;
 	}
 
-	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, wszHost);
+	psCommandLen = _snwprintf(nullptr, 0, psCommandFormat, wszHost);
 	psCommand = new WCHAR[psCommandLen + 1];
 	_snwprintf(psCommand, psCommandLen, psCommandFormat, wszHost);
 	psCommand[psCommandLen] = L'\0';
 
 	hr = WcaSetProperty(L"P.ACCESSURI_CMD", psCommand);
 	delete[] psCommand;
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 LExit:
+	ReleaseStr(szAccessUriScheme);
+	ReleaseStr(szAccessUriHost);
+	ReleaseStr(szAccessUriPort);
+
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
 }
@@ -823,19 +949,19 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
-	LPWSTR szHttpUriScheme = NULL;
-	LPWSTR szHttpUriPort = NULL;
-	LPWSTR szTcpUriPort = NULL;
-	LPWSTR szAccessUriScheme = NULL;
+	LPWSTR szHttpUriScheme = nullptr;
+	LPWSTR szHttpUriPort = nullptr;
+	LPWSTR szTcpUriPort = nullptr;
+	LPWSTR szAccessUriScheme = nullptr;
 	int httpUriPort = 0;
 	int accessUriPort = 0;
 	int externalUrlLen = 0;
-	WCHAR* externalUrl = NULL;
+	WCHAR* externalUrl = nullptr;
 	int internalUrlLen = 0;
-	WCHAR* internalUrl = NULL;
+	WCHAR* internalUrl = nullptr;
 	static LPCWSTR psCommandFormat = L"$httpListener = New-DGatewayListener \"%ls\" \"%ls\"; $tcpListener = New-DGatewayListener \"tcp://*:%ls\" \"tcp://*:%ls\"; $listeners = $httpListener, $tcpListener; Set-DGatewayListeners $listeners";
 	int psCommandLen = 0;
-	WCHAR* psCommand = NULL;
+	WCHAR* psCommand = nullptr;
 
 	hr = WcaInitialize(hInstall, "ValidateListeners");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -843,10 +969,10 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
 	hr = WcaSetProperty(L"P.ERROR", L"");
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 	hr = WcaGetProperty(L"P.HTTPURI_SCHEME", &szHttpUriScheme);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szHttpUriScheme || lstrlen(szHttpUriScheme) < 1)
 	{
@@ -856,14 +982,14 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 
 	static const WCHAR* VALID_SCHEMES[] = { (L"http"), (L"https") };
 
-	if (IsValidOption(szHttpUriScheme, VALID_SCHEMES, ARRAYSIZE(VALID_SCHEMES)) != ERROR_SUCCESS)
+	if (!IsValidOption(szHttpUriScheme, VALID_SCHEMES, ARRAYSIZE(VALID_SCHEMES)))
 	{
 		HandleValidationError(hInstall, Errors::InvalidScheme);
 		goto LExit;
 	}
 
 	hr = WcaGetProperty(L"P.HTTPURI_PORT", &szHttpUriPort);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szHttpUriPort || lstrlen(szHttpUriPort) < 1)
 	{
@@ -871,14 +997,14 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 		goto LExit;
 	}
 
-	if (IsValidPort(szHttpUriPort, &httpUriPort) != ERROR_SUCCESS)
+	if (!IsValidPort(szHttpUriPort, &httpUriPort))
 	{
 		HandleValidationError(hInstall, Errors::InvalidPort);
 		goto LExit;
 	}
 
 	hr = WcaGetProperty(L"P.TCPURI_PORT", &szTcpUriPort);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szTcpUriPort || lstrlen(szTcpUriPort) < 1)
 	{
@@ -886,7 +1012,7 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 		goto LExit;
 	}
 
-	if (IsValidPort(szTcpUriPort) != ERROR_SUCCESS)
+	if (!IsValidPort(szTcpUriPort))
 	{
 		HandleValidationError(hInstall, Errors::InvalidPort);
 		goto LExit;
@@ -908,7 +1034,7 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 	externalUrl[externalUrlLen] = L'\0';
 
 	// Format the command
-	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, internalUrl, externalUrl, szTcpUriPort, szTcpUriPort);
+	psCommandLen = _snwprintf(nullptr, 0, psCommandFormat, internalUrl, externalUrl, szTcpUriPort, szTcpUriPort);
 	psCommand = new WCHAR[psCommandLen + 1];
 	_snwprintf(psCommand, psCommandLen, psCommandFormat, internalUrl, externalUrl, szTcpUriPort, szTcpUriPort);
 	psCommand[psCommandLen] = L'\0';
@@ -918,9 +1044,14 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 
 	hr = WcaSetProperty(L"P.LISTENER_CMD", psCommand);
 	delete[] psCommand;
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 LExit:
+	ReleaseStr(szHttpUriScheme);
+	ReleaseStr(szHttpUriPort);
+	ReleaseStr(szTcpUriPort);
+	ReleaseStr(szAccessUriScheme);
+
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
 }
@@ -929,11 +1060,11 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
-	LPWSTR szCertFile = NULL;
-	LPWSTR szCertPass = NULL;
-	LPWSTR szPkFile = NULL;
+	LPWSTR szCertFile = nullptr;
+	LPWSTR szCertPass = nullptr;
+	LPWSTR szPkFile = nullptr;
 	int psCommandLen = 0;
-	WCHAR* psCommand = NULL;
+	WCHAR* psCommand = nullptr;
 
 	hr = WcaInitialize(hInstall, "ValidateCertificate");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -941,10 +1072,10 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
 	hr = WcaSetProperty(L"P.ERROR", L"");
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 	hr = WcaGetProperty(L"P.CERT_FILE", &szCertFile);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szCertFile || lstrlen(szCertFile) < 1)
 	{
@@ -953,7 +1084,7 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 	}
 
 	hr = WcaGetProperty(L"P.CERT_PASS", &szCertPass);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (szCertPass && lstrlen(szCertPass) > 0)
 	{
@@ -969,10 +1100,12 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 		hr = WcaSetProperty(L"P.CERT_PASS_MASKED", szValBuf);
 
 		delete[] szValBuf;
+
+		ExitOnFailure(hr, "WcaSetProperty");
 	}
 
 	hr = WcaGetProperty(L"P.CERT_PK_FILE", &szPkFile);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if ((!szCertPass || lstrlen(szCertPass) < 1) && (!szPkFile || lstrlen(szPkFile) < 1))
 	{
@@ -982,19 +1115,19 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 
 	int needPass = 0;
 	hr = WcaGetIntProperty(L"P.CERT_NEED_PASS", &needPass);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetIntProperty");
 
 	if (needPass == 0)
 	{
 		static LPCWSTR psCommandFormat = L"Import-DGatewayCertificate -CertificateFile '%ls' -Password '%ls'";
-		psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szCertFile, szCertPass);
+		psCommandLen = _snwprintf(nullptr, 0, psCommandFormat, szCertFile, szCertPass);
 		psCommand = new WCHAR[psCommandLen + 1];
 		_snwprintf(psCommand, psCommandLen, psCommandFormat, szCertFile, szCertPass);
 	}
 	else
 	{
 		static LPCWSTR psCommandFormat = L"Import-DGatewayCertificate -CertificateFile '%ls' -PrivateKeyFile '%ls'";
-		psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szCertFile, szPkFile);
+		psCommandLen = _snwprintf(nullptr, 0, psCommandFormat, szCertFile, szPkFile);
 		psCommand = new WCHAR[psCommandLen + 1];
 		_snwprintf(psCommand, psCommandLen, psCommandFormat, szCertFile, szPkFile);
 	}
@@ -1003,9 +1136,13 @@ UINT __stdcall ValidateCertificate(MSIHANDLE hInstall)
 
 	hr = WcaSetProperty(L"P.CERT_CMD", psCommand);
 	delete[] psCommand;
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 LExit:
+	ReleaseStr(szCertFile);
+	ReleaseStr(szCertPass);
+	ReleaseStr(szPkFile);
+
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
 	return WcaFinalize(er);
 }
@@ -1014,10 +1151,10 @@ UINT __stdcall ValidatePublicKey(MSIHANDLE hInstall)
 {
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
-	LPWSTR szPkFile = NULL;
-	static LPCWSTR psCommandFormat = L"Import-DGatewayProvisionerKey -PublicKeyFile '%ls'";
+	LPWSTR szPkFile = nullptr;
+	static LPCWSTR psCommandFormat = L"Import-DGatewayProvisionerKey -PublicKeyFile \"%ls\"";
 	int psCommandLen = 0;
-	WCHAR* psCommand = NULL;
+	WCHAR* psCommand = nullptr;
 
 	hr = WcaInitialize(hInstall, "ValidatePublicKey");
 	ExitOnFailure(hr, "Failed to initialize");
@@ -1025,10 +1162,10 @@ UINT __stdcall ValidatePublicKey(MSIHANDLE hInstall)
 	WcaLog(LOGMSG_STANDARD, "Initialized.");
 
 	hr = WcaSetProperty(L"P.ERROR", L"");
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
 	hr = WcaGetProperty(L"P.PUBLIC_KEY_FILE", &szPkFile);
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaGetProperty");
 
 	if (!szPkFile || lstrlen(szPkFile) < 1)
 	{
@@ -1043,16 +1180,198 @@ UINT __stdcall ValidatePublicKey(MSIHANDLE hInstall)
 	}
 
 	hr = WcaSetProperty(L"P.PUBLIC_KEY_CONFIG_VALID", L"0");
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
 
-	psCommandLen = _snwprintf(NULL, 0, psCommandFormat, szPkFile);
+	psCommandLen = _snwprintf(nullptr, 0, psCommandFormat, szPkFile);
 	psCommand = new WCHAR[psCommandLen + 1];
 	_snwprintf(psCommand, psCommandLen, psCommandFormat, szPkFile);
 	psCommand[psCommandLen] = L'\0';
 
 	hr = WcaSetProperty(L"P.PK_CMD", psCommand);
 	delete[] psCommand;
-	ExitOnFailure(hr, "The expected property was not found.");
+	ExitOnFailure(hr, "WcaSetProperty");
+
+LExit:
+	ReleaseStr(szPkFile);
+
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+HRESULT __stdcall Configure(MSIHANDLE hInstall, LPCWSTR propCommand, int errorCode)
+{
+	HRESULT hr = S_OK;
+	DWORD dwExitCode = 0;
+	LPWSTR szPowerShellCmd = nullptr;
+	LPWSTR szOutputPath = nullptr;
+	LPWSTR szErrMsg = nullptr;
+	DWORD dwErrMsgLen = 0;
+	LPWSTR szFormattedErrMsg = nullptr;
+
+	hr = WcaGetProperty(propCommand, &szPowerShellCmd);
+	ExitOnFailure(hr, "WcaGetProperty");
+
+	hr = ExecuteCommand(hInstall, szPowerShellCmd, &dwExitCode, &szOutputPath);
+	ExitOnFailure(hr, "Failed to execute PowerShell command.");
+
+LExit:
+	if (SUCCEEDED(hr) && dwExitCode != 0)
+	{
+		LPCWSTR defaultErrMsg = L"N/A";
+
+		if (szOutputPath == nullptr)
+		{
+			szOutputPath = (LPWSTR) calloc((size_t) lstrlenW(defaultErrMsg) + 1, sizeof(WCHAR));
+			ExitOnNull(szOutputPath, hr, E_OUTOFMEMORY, "calloc");
+			CopyMemory(szOutputPath, defaultErrMsg, lstrlenW(defaultErrMsg) * sizeof(WCHAR));
+		}
+
+		PMSIHANDLE hRecord = MsiCreateRecord(2);
+		MsiRecordSetInteger(hRecord, 1, errorCode);
+		MsiRecordSetStringW(hRecord, 2, szOutputPath);
+		MsiProcessMessage(hInstall, INSTALLMESSAGE(INSTALLMESSAGE_ERROR + MB_OK), hRecord);
+	}
+	else if (FAILED(hr))
+	{
+		DWORD dwErr = Win32FromHResult(hr);
+		LPWSTR szErrMsg = new WCHAR[256]();
+		FormatWin32ErrorMessage(dwErr, szErrMsg, 256);
+
+		PMSIHANDLE hRecord = MsiCreateRecord(2);
+		MsiRecordSetInteger(hRecord, 1, CommandExecFailure);
+		MsiRecordSetStringW(hRecord, 2, szErrMsg);
+		MsiProcessMessage(hInstall, INSTALLMESSAGE(INSTALLMESSAGE_ERROR + MB_OK), hRecord);
+
+		delete[] szErrMsg;
+	}
+
+	ReleaseStr(szPowerShellCmd);
+
+	if (szOutputPath != nullptr)
+	{
+		MoveFileExW(szOutputPath, nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+	}
+
+	free(szOutputPath);
+
+	if (dwExitCode != 0)
+	{
+		hr = E_FAIL;
+	}
+
+	return hr;
+}
+
+UINT __stdcall ConfigureAccessUri(MSIHANDLE hInstall)
+{
+	UINT er = ERROR_SUCCESS;
+	HRESULT hr = S_OK;
+
+	hr = WcaInitialize(hInstall, "ConfigureAccessUri");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = Configure(hInstall, L"CustomActionData", CommandExecAccessUriFailure);
+
+LExit:
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+UINT __stdcall ConfigureListeners(MSIHANDLE hInstall)
+{
+	UINT er = ERROR_SUCCESS;
+	HRESULT hr = S_OK;
+
+	hr = WcaInitialize(hInstall, "ConfigureListeners");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = Configure(hInstall, L"CustomActionData", CommandExecListenersFailure);
+
+LExit:
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+UINT __stdcall ConfigureCert(MSIHANDLE hInstall)
+{
+	UINT er = ERROR_SUCCESS;
+	HRESULT hr = S_OK;
+
+	hr = WcaInitialize(hInstall, "ConfigureCert");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = Configure(hInstall, L"CustomActionData", CommandExecCertificateFailure);
+
+LExit:
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+UINT __stdcall ConfigurePublicKey(MSIHANDLE hInstall)
+{
+	UINT er = ERROR_SUCCESS;
+	HRESULT hr = S_OK;
+
+	hr = WcaInitialize(hInstall, "ConfigurePublicKey");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = Configure(hInstall, L"CustomActionData", CommandExecPublicKeyFailure);
+
+LExit:
+	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;
+	return WcaFinalize(er);
+}
+
+UINT __stdcall RollbackConfig(MSIHANDLE hInstall)
+{
+	UINT er = ERROR_SUCCESS;
+	HRESULT hr = S_OK;
+	WCHAR szProgramDataPath[MAX_PATH] = { 0 };
+	WCHAR szFilePath[MAX_PATH] = { 0 };
+	static const WCHAR* FILES[] = { (L"gateway.json"), (L"server.crt"), (L"server.key"), (L"provisioner.pem")};
+
+	hr = WcaInitialize(hInstall, "RollbackConfig");
+	ExitOnFailure(hr, "Failed to initialize");
+
+	WcaLog(LOGMSG_STANDARD, "Initialized.");
+
+	hr = SHGetFolderPathW(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, szProgramDataPath);
+	ExitOnFailure(hr, "SHGetFolderPath");
+
+	hr = PathCchAppend(szProgramDataPath, MAX_PATH, L"Devolutions");
+	ExitOnFailure(hr, "PathCchAppend");
+
+	hr = PathCchAppend(szProgramDataPath, MAX_PATH, L"Gateway");
+	ExitOnFailure(hr, "PathCchAppend");
+
+	for (int i = 0; i < ARRAYSIZE(FILES); i++)
+	{
+		ZeroMemory(szFilePath, MAX_PATH * sizeof(WCHAR));
+		CopyMemory(szFilePath, szProgramDataPath, lstrlenW(szProgramDataPath) * sizeof(WCHAR));
+
+		hr = PathCchAppend(szFilePath, MAX_PATH, FILES[i]);
+
+		if (!SUCCEEDED(hr))
+		{
+			Log(hInstall, L"PathCchAppend failed");
+			continue;
+		}
+
+		if (!DeleteFileW(szFilePath) && GetLastError() != ERROR_FILE_NOT_FOUND)
+		{
+			LogGLE(hInstall, L"DeleteFile");
+		}
+	}
+
+	hr = S_OK;
 
 LExit:
 	er = SUCCEEDED(hr) ? ERROR_SUCCESS : ERROR_INSTALL_FAILURE;

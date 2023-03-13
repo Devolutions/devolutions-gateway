@@ -100,51 +100,61 @@
                  Before="CA.SetProgramDataPermissions" />
     <SetProperty Id="CA.InitConfigAfterFinalize" Value="&quot;[INSTALLDIR]\DevolutionsGateway.exe&quot; --config-init-only" Sequence="execute" Before="CA.InitConfigAfterFinalize" />
     <SetProperty Id="CA.SetGatewayStartupType" Value="[P.SERVICE_START]" Sequence="execute" Before="CA.SetGatewayStartupType" />
-    <SetProperty Id="CA.ConfigHostname" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.ACCESSURI_CMD]"' Sequence="execute" Before="CA.ConfigHostname" />
+    <SetProperty Id="CA.ConfigAccessUri" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.ACCESSURI_CMD]"' Sequence="execute" Before="CA.ConfigAccessUri" />
     <SetProperty Id="CA.ConfigListeners" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.LISTENER_CMD]"' Sequence="execute" Before="CA.ConfigListeners" />
     <SetProperty Id="CA.ConfigCert" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.CERT_CMD]"' Sequence="execute" Before="CA.ConfigCert" />
-    <SetProperty Id="CA.ConfigPk" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.PK_CMD]"' Sequence="execute" Before="CA.ConfigPk" />
+    <SetProperty Id="CA.ConfigPublicKey" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.PK_CMD]"' Sequence="execute" Before="CA.ConfigPublicKey" />
 
     <!-- Reinstall the DGatewayService feature on maintenance installations 
             This forces the service to be stopped and started, 
             re-reading any configuration updated by the installer -->
     <CustomAction Id="CA.SetREINSTALL" Property="REINSTALL" Value="F.DGatewayService" />
     <CustomAction Id="CA.SetARPINSTALLLOCATION" Property="ARPINSTALLLOCATION" Value="[INSTALLDIR]" />
+    
     <CustomAction Id="CA.InitConfigAfterFinalize" BinaryKey="WixCA" DllEntry="WixQuietExec"  Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="CA.SetProgramDataPermissions" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore"/>
     <CustomAction Id="CA.CheckPowerShellVersion" BinaryKey="B.HELPER" DllEntry="CheckPowerShellVersion" Execute="immediate" Return="ignore" />
+    
+    <!-- Validation actions: validate the input and generate the final PowerShell command -->
     <CustomAction Id="CA.ValidateAccessUri" BinaryKey="B.HELPER" DllEntry="ValidateAccessUri" Execute="immediate" Return="check" />
     <CustomAction Id="CA.ValidateListeners" BinaryKey="B.HELPER" DllEntry="ValidateListeners" Execute="immediate" Return="check" />
     <CustomAction Id="CA.ValidateCertificate" BinaryKey="B.HELPER" DllEntry="ValidateCertificate" Execute="immediate" Return="check" />
     <CustomAction Id="CA.ValidatePublicKey" BinaryKey="B.HELPER" DllEntry="ValidatePublicKey" Execute="immediate" Return="check" />
     <CustomAction Id="CA.GenerateSummary" BinaryKey="B.HELPER" DllEntry="GenerateSummary" Execute="immediate" Return="check" />
+    
     <CustomAction Id="CA.BrowseForCertificate" BinaryKey="B.HELPER" DllEntry="BrowseForCertificate" Execute="immediate" Return="check" />
     <CustomAction Id="CA.BrowseForPrivateKey" BinaryKey="B.HELPER" DllEntry="BrowseForPrivateKey" Execute="immediate" Return="check" />
     <CustomAction Id="CA.BrowseForPublicKey" BinaryKey="B.HELPER" DllEntry="BrowseForPublicKey" Execute="immediate" Return="ignore" />
+    
     <CustomAction Id="CA.QueryGatewayStartupType" BinaryKey="B.HELPER" DllEntry="QueryGatewayStartupType" Execute="immediate" Return="ignore" />
     <CustomAction Id="CA.SetGatewayStartupType" BinaryKey="B.HELPER" DllEntry="SetGatewayStartupType" Execute="deferred" Impersonate="no" Return="ignore" />
     <CustomAction Id="CA.StartGatewayIfNeeded" BinaryKey="B.HELPER" DllEntry="StartGatewayIfNeeded" Execute="deferred" Impersonate="no" Return="ignore" />
-    <CustomAction Id="CA.ConfigHostname" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check"/>
-    <CustomAction Id="CA.ConfigListeners" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check"/>
-    <CustomAction Id="CA.ConfigCert" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
-    <CustomAction Id="CA.ConfigPk" BinaryKey="WixCA" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check"/>
+    
+    <!-- Config actions: execute the PowerShell command -->
+    <CustomAction Id="CA.ConfigAccessUri" BinaryKey="B.HELPER" DllEntry="ConfigureAccessUri" Execute="deferred" Impersonate="no" Return="check"/>
+    <CustomAction Id="CA.ConfigListeners" BinaryKey="B.HELPER" DllEntry="ConfigureListeners" Execute="deferred" Impersonate="no" Return="check"/>
+    <!-- NOTE HideTarget="yes" to prevent CustomActionData leaking into logs -->
+    <CustomAction Id="CA.ConfigCert" BinaryKey="B.HELPER" DllEntry="ConfigureCert" Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+    <CustomAction Id="CA.ConfigPublicKey" BinaryKey="B.HELPER" DllEntry="ConfigurePublicKey" Execute="deferred" Impersonate="no" Return="check"/>
+
+    <!-- Rollback files generated during first installation -->
+    <CustomAction Id="CA.RollbackConfig" BinaryKey="B.HELPER" DllEntry="RollbackConfig" Execute="rollback" Impersonate="no" Return="ignore" />
 
     <InstallUISequence>
-      <Custom Action='CA.CheckPowerShellVersion' After='LaunchConditions'/> 
+      <Custom Action='CA.CheckPowerShellVersion' After='LaunchConditions' /> 
     </InstallUISequence>
     <InstallExecuteSequence>
       <Custom Action='CA.SetProgramDataPermissions' After='CreateFolders'/>
       <Custom Action="CA.SetARPINSTALLLOCATION" After="InstallValidate"/>
-      <Custom Action="CA.SetREINSTALL" Before="CostInitialize">
-        Maintenance AND NOT REINSTALL
-      </Custom>
+      <Custom Action="CA.SetREINSTALL" Before="CostInitialize">Maintenance AND NOT REINSTALL</Custom>
       <Custom Action="CA.QueryGatewayStartupType" Before="RemoveExistingProducts">1</Custom>
       <Custom Action="CA.SetGatewayStartupType" Before="StartServices">1</Custom>
+      <Custom Action="CA.RollbackConfig" Before="CA.InitConfigAfterFinalize">(NOT Installed OR REINSTALL)</Custom>
       <Custom Action="CA.InitConfigAfterFinalize" Before="StartServices">(NOT Installed OR REINSTALL)</Custom>
-      <Custom Action="CA.ConfigHostname" After="CA.InitConfigAfterFinalize">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
-      <Custom Action="CA.ConfigListeners" After="CA.ConfigHostname">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigAccessUri" After="CA.InitConfigAfterFinalize">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigListeners" After="CA.ConfigAccessUri">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
       <Custom Action="CA.ConfigCert" After="CA.ConfigListeners">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
-      <Custom Action="CA.ConfigPk" After="CA.ConfigCert">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
+      <Custom Action="CA.ConfigPublicKey" After="CA.ConfigCert">(NOT Installed OR REINSTALL) AND (P.CONFIGURE = "0")</Custom>
       <Custom Action="CA.StartGatewayIfNeeded" After="StartServices">(NOT Uninstalling) AND (NOT P.DGW.NO_START_SERVICE)</Custom>
     </InstallExecuteSequence>
 
