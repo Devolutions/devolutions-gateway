@@ -27,11 +27,11 @@ pub mod registry;
 pub mod service;
 pub mod session;
 pub mod subscriber;
-pub mod tcp;
 pub mod token;
 pub mod transport;
 pub mod utils;
 pub mod websocket_client;
+pub mod websocket_forward;
 
 pub mod tls_sanity {
     use anyhow::Context as _;
