@@ -190,7 +190,10 @@ async fn process_cleanpath(
     let mut server_transport = {
         // Establish TLS connection with server
 
-        let dns_name = "stub_string".try_into().unwrap();
+        let dns_name = destination
+            .host()
+            .try_into()
+            .context("Invalid DNS name in selected target")?;
 
         // TODO: optimize client config creation
         //

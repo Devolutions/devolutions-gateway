@@ -88,7 +88,10 @@ where
 
             // Establish TLS connection with server
 
-            let dns_name = "www.york.ac.uk".try_into().unwrap();
+            let dns_name = selected_target
+                .host()
+                .try_into()
+                .context("Invalid DNS name in selected target")?;
 
             // TODO: optimize client config creation
             //
