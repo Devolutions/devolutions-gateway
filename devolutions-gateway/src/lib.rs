@@ -27,6 +27,7 @@ pub mod registry;
 pub mod service;
 pub mod session;
 pub mod subscriber;
+pub mod tcp;
 pub mod token;
 pub mod transport;
 pub mod utils;
