@@ -80,6 +80,19 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {err:#}")))
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/tcp") {
+            info!("{} {}", req.method(), req_uri);
+            handle_tcp(
+                req,
+                client_addr,
+                self.conf.clone(),
+                &self.token_cache,
+                &self.jrl,
+                self.sessions.clone(),
+                self.subscriber_tx.clone(),
+            )
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TCP error - {err:#}")))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
@@ -597,6 +610,59 @@ async fn handle_rdp(
         match fut.await {
             Ok(()) => {}
             Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "RDP failure"),
+        }
+    });
+
+    Ok(rsp)
+}
+
+async fn handle_tcp(
+    mut req: Request<Body>,
+    client_addr: SocketAddr,
+    conf: Arc<Conf>,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
+    sessions: SessionManagerHandle,
+    subscriber_tx: SubscriberSender,
+) -> anyhow::Result<Response<Body>> {
+    use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
+
+    let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
+        let authorization_value = authorization_value.to_str().context("bad authorization header value")?; // BAD REQUEST
+        match parse_auth_header(authorization_value) {
+            Some((AuthHeaderType::Bearer, token)) => token,
+            _ => anyhow::bail!("bad authorization header value"), // BAD REQUEST
+        }
+    } else if let Some(token) = req.uri().query().and_then(|q| {
+        q.split('&')
+            .filter_map(|segment| segment.split_once('='))
+            .find_map(|(key, val)| key.eq("token").then_some(val))
+    }) {
+        token
+    } else {
+        anyhow::bail!("missing authorization"); // AUTHORIZATION
+    };
+
+    let claims = crate::tcp::authorize(client_addr, token, &conf, token_cache, jrl)?; // FORBIDDEN
+
+    if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
+        if upgrade_val != "websocket" {
+            anyhow::bail!("unexpected upgrade header value: {}", upgrade_val) // BAD REQUEST
+        }
+    }
+
+    let rsp = process_req(&req);
+
+    tokio::spawn(async move {
+        let fut = async {
+            let stream = upgrade_websocket(&mut req).await?;
+            crate::tcp::handle(stream, client_addr, conf, claims, sessions, subscriber_tx).await
+        }
+        .instrument(info_span!("tcp", client = %client_addr));
+
+        match fut.await {
+            Ok(()) => {}
+            Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "WebSocket-TCP failure"),
         }
     });
 
