@@ -145,11 +145,11 @@
   <String Id="WelcomeDlgTitle" Overridable="yes">{\WixUI_Font_Bigger}Welcome to the [ProductName] 20[ProductVersion] Setup Wizard</String>
   <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Please read the [ProductName] License Agreement</String>
 
-  <String Id="Error29989">Failed to configure the provisioner public key.&#xa;&#xa; Error details: [2]</String>
-  <String Id="Error29990">Failed to configure the certificate.&#xa;&#xa; Error details: [2]</String>
-  <String Id="Error29991">Failed to configure the listeners.&#xa;&#xa; Error details: [2]</String>
-  <String Id="Error29992">Failed to configure the access URI.&#xa;&#xa; Error details: [2]</String>
-  <String Id="Error29993">Failed to execute a configuration command.&#xa;&#xa; Error details: [2]</String>
+  <String Id="Error29989">Failed to configure the provisioner public key.&#xa;&#xa;Details: [2]</String>
+  <String Id="Error29990">Failed to configure the certificate.&#xa;&#xa;Details: [2]</String>
+  <String Id="Error29991">Failed to configure the listeners.&#xa;&#xa;Details: [2]</String>
+  <String Id="Error29992">Failed to configure the access URI.&#xa;&#xa;Details: [2]</String>
+  <String Id="Error29993">Failed to execute a configuration command.&#xa;&#xa;Details: [2]</String>
   <String Id="Error29994">Failed to query existing service configuration</String> 
   <String Id="Error29995">You must provide a valid certificate file and either a password or private key file</String>
   <String Id="Error29996">The specified file was invalid or not accessible</String>
