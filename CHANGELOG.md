@@ -4,6 +4,18 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.1.3 (2023-03-16)
+
+### Bug Fixes
+
+- _installer_: fix command execution and add validation ([#401](https://github.com/Devolutions/devolutions-gateway/issues/401)) ([456f802962](https://github.com/Devolutions/devolutions-gateway/commit/456f802962a6ce1279e45f2e119eb1fa335edf40)) ([DGW-84](https://devolutions.atlassian.net/browse/DGW-84))
+
+### Features
+
+- _dgw_: WebSocket-TCP endpoint (/jet/tcp) ([#399](https://github.com/Devolutions/devolutions-gateway/issues/399)) ([265f0dbe3f](https://github.com/Devolutions/devolutions-gateway/commit/265f0dbe3f20132a214d68c790aecd525a3828f2)) ([DGW-82](https://devolutions.atlassian.net/browse/DGW-82)) 
+
+- _dgw_: WebSocket-TLS endpoint (/jet/tls) ([#400](https://github.com/Devolutions/devolutions-gateway/issues/400)) ([46368f6d43](https://github.com/Devolutions/devolutions-gateway/commit/46368f6d43bd83177a8f983229e6a17eb6684c53)) ([DGW-83](https://devolutions.atlassian.net/browse/DGW-83)) 
+
 ## 2023.1.2 (2023-03-13)
 
 ### Improvements
