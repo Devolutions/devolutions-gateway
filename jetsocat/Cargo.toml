@@ -3,7 +3,7 @@ name = "jetsocat"
 version = "2023.1.3"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
-description = "WebSocket toolkit for jet protocol related operations"
+description = "(Web)Socket toolkit for jet protocol related operations"
 publish = false
 
 [features]
