@@ -100,10 +100,10 @@
                  Before="CA.SetProgramDataPermissions" />
     <SetProperty Id="CA.InitConfigAfterFinalize" Value="&quot;[INSTALLDIR]\DevolutionsGateway.exe&quot; --config-init-only" Sequence="execute" Before="CA.InitConfigAfterFinalize" />
     <SetProperty Id="CA.SetGatewayStartupType" Value="[P.SERVICE_START]" Sequence="execute" Before="CA.SetGatewayStartupType" />
-    <SetProperty Id="CA.ConfigAccessUri" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.ACCESSURI_CMD]"' Sequence="execute" Before="CA.ConfigAccessUri" />
-    <SetProperty Id="CA.ConfigListeners" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.LISTENER_CMD]"' Sequence="execute" Before="CA.ConfigListeners" />
-    <SetProperty Id="CA.ConfigCert" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.CERT_CMD]"' Sequence="execute" Before="CA.ConfigCert" />
-    <SetProperty Id="CA.ConfigPublicKey" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command "&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.PK_CMD]"' Sequence="execute" Before="CA.ConfigPublicKey" />
+    <SetProperty Id="CA.ConfigAccessUri" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command &quot;&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.ACCESSURI_CMD]&quot;' Sequence="execute" Before="CA.ConfigAccessUri" />
+    <SetProperty Id="CA.ConfigListeners" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command &quot;&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.LISTENER_CMD]&quot;' Sequence="execute" Before="CA.ConfigListeners" />
+    <SetProperty Id="CA.ConfigCert" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command &quot;&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.CERT_CMD]&quot;' Sequence="execute" Before="CA.ConfigCert" />
+    <SetProperty Id="CA.ConfigPublicKey" Value='&quot;[P.POWERSHELLEXE]&quot; -ep Bypass -Command &quot;&amp; Import-Module &apos;[INSTALLDIR]PowerShell\Modules\DevolutionsGateway&apos;; [P.PK_CMD]&quot;' Sequence="execute" Before="CA.ConfigPublicKey" />
 
     <!-- Reinstall the DGatewayService feature on maintenance installations 
             This forces the service to be stopped and started, 

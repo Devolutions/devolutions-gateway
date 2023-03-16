@@ -426,7 +426,7 @@ HRESULT __stdcall ExecuteCommand(MSIHANDLE hInstall, LPCWSTR command, LPDWORD dw
 	
 	// CreateProcessW can modify the contents of the lpCommand parameter
 	lpCommandLen = lstrlenW(command);
-	lpCommand = (LPWSTR) calloc((size_t)lpCommandLen, sizeof(WCHAR));
+	lpCommand = (LPWSTR) calloc((size_t)lpCommandLen + 1, sizeof(WCHAR));
 	ExitOnNull(lpCommand, hr, E_OUTOFMEMORY, "calloc");
 	CopyMemory(lpCommand, command, lpCommandLen * sizeof(WCHAR));
 
@@ -959,7 +959,7 @@ UINT __stdcall ValidateListeners(MSIHANDLE hInstall)
 	WCHAR* externalUrl = nullptr;
 	int internalUrlLen = 0;
 	WCHAR* internalUrl = nullptr;
-	static LPCWSTR psCommandFormat = L"$httpListener = New-DGatewayListener \"%ls\" \"%ls\"; $tcpListener = New-DGatewayListener \"tcp://*:%ls\" \"tcp://*:%ls\"; $listeners = $httpListener, $tcpListener; Set-DGatewayListeners $listeners";
+	static LPCWSTR psCommandFormat = L"$httpListener = New-DGatewayListener '%ls' '%ls'; $tcpListener = New-DGatewayListener 'tcp://*:%ls' 'tcp://*:%ls'; $listeners = $httpListener, $tcpListener; Set-DGatewayListeners $listeners";
 	int psCommandLen = 0;
 	WCHAR* psCommand = nullptr;
 
@@ -1152,7 +1152,7 @@ UINT __stdcall ValidatePublicKey(MSIHANDLE hInstall)
 	HRESULT hr = S_OK;
 	UINT er = ERROR_SUCCESS;
 	LPWSTR szPkFile = nullptr;
-	static LPCWSTR psCommandFormat = L"Import-DGatewayProvisionerKey -PublicKeyFile \"%ls\"";
+	static LPCWSTR psCommandFormat = L"Import-DGatewayProvisionerKey -PublicKeyFile '%ls'";
 	int psCommandLen = 0;
 	WCHAR* psCommand = nullptr;
 

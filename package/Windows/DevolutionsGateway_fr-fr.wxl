@@ -157,11 +157,11 @@
   <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
   <String Id="WelcomeDlgTitle" Overridable="yes">{\WixUI_Font_Bigger}Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
 
-  <String Id="Error29989">Échec de la configuration de la clé publique du fournisseur.&#xa;&#xa; Détails: [2]</String>
-  <String Id="Error29990">Échec de la configuration du certificat.&#xa;&#xa; Détails: [2]</String>
-  <String Id="Error29991">Échec de la configuration des écouteurs.&#xa;&#xa; Détails: [2]</String>
-  <String Id="Error29992">Échec de la configuration des URI d'accès.&#xa;&#xa; Détails: [2]</String>
-  <String Id="Error29993">L'exécution d'une commande de configuration a échoué.&#xa;&#xa; Détails: [2]</String>
+  <String Id="Error29989">Échec de la configuration de la clé publique du fournisseur.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29990">Échec de la configuration du certificat.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29991">Échec de la configuration des écouteurs.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29992">Échec de la configuration des URI d'accès.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29993">L'exécution d'une commande de configuration a échoué.&#xa;&#xa;Détails: [2]</String>
   <String Id="Error29994">Échec de lecture de la configuration existante du service</String> 
   <String Id="Error29995">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
   <String Id="Error29996">Le chemin de fichier spécifié est invalide ou inaccessible</String>

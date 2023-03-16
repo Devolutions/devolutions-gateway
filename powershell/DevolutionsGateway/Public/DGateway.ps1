@@ -607,7 +607,16 @@ function Import-DGatewayProvisionerKey {
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
 
     if ($PublicKeyFile) {
+        if (-Not (Test-Path -Path $PublicKeyFile)) {
+            throw "$PublicKeyFile doesn't exist"
+        }
+
         $PublicKeyData = Get-Content -Path $PublicKeyFile -Encoding UTF8
+
+        if (!$PublicKeyData) {
+            throw "$PublicKeyFile appears to be empty"          
+        }
+
         $OutputFile = Join-Path $ConfigPath $DGatewayProvisionerPublicKeyFileName
         $Config.ProvisionerPublicKeyFile = $DGatewayProvisionerPublicKeyFileName
         New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
@@ -615,7 +624,16 @@ function Import-DGatewayProvisionerKey {
     }
 
     if ($PrivateKeyFile) {
+        if (-Not (Test-Path -Path $PrivateKeyFile)) {
+            throw "$PrivateKeyFile doesn't exist"
+        }
+
         $PrivateKeyData = Get-Content -Path $PrivateKeyFile -Encoding UTF8
+
+        if (!$PrivateKeyData) {
+            throw "$PrivateKeyFile appears to be empty"          
+        }
+
         $OutputFile = Join-Path $ConfigPath $DGatewayProvisionerPrivateKeyFileName
         $Config.ProvisionerPrivateKeyFile = $DGatewayProvisionerPrivateKeyFileName
         New-Item -Path $ConfigPath -ItemType 'Directory' -Force | Out-Null
