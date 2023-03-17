@@ -1,4 +1,4 @@
-//! [Specification document](https://github.com/awakecoding/qmux/blob/protocol-update/SPEC.md)
+//! [Specification document](https://github.com/Devolutions/devolutions-gateway/blob/master/crates/jmux-proto/spec/JMUX_Spec.md)
 
 use bytes::{Buf as _, BufMut as _, Bytes, BytesMut};
 use core::fmt;
