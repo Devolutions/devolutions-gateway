@@ -718,9 +718,9 @@ function New-DGatewayToken {
     param(
         [string] $ConfigPath,
 
-        [ValidateSet('ASSOCIATION', 'SCOPE', 'BRIDGE', 'JMUX')]
+        [ValidateSet('ASSOCIATION', 'SCOPE', 'BRIDGE', 'JMUX', 'JREC')]
         [Parameter(Mandatory = $true)]
-        [string] $Type, #type
+        [string] $Type, # token type
 
         # public common claims
         [DateTime] $ExpirationTime, # exp
@@ -735,10 +735,14 @@ function New-DGatewayToken {
         [string] $ConnectionMode, # jet_cm
         [string] $DestinationHost, # dst_hst
 
-        #private scope claims
+        # private jrec claims
+        [ValidateSet('webm', 'trp')]
+        [string] $RecordingFileType, # jet_rft
+
+        # private scope claims
         [string] $Scope, # scope
 
-        #private bridge claims
+        # private bridge claims
         [string] $Target, # target
 
         # signature parameters
@@ -832,7 +836,7 @@ function New-DGatewayToken {
 
     if ($Type -eq 'JMUX') {
         if (-Not $DestinationHost) {
-            throw "-DestinationHost is required"
+            throw "DestinationHost is required"
         }
 
         if ($ApplicationProtocol) {
@@ -846,6 +850,28 @@ function New-DGatewayToken {
         $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
 
         $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+    }
+
+    if ($Type -eq 'JREC') {
+        if (-Not $RecordingFileType) {
+            throw "RecordingFileType is required"
+        }
+
+        if ($ApplicationProtocol) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
+        }
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_rft' -Value $RecordingFileType.ToLower()
+        
+        if (-Not $AssociationId) {
+            $AssociationId = New-Guid
+        }
+
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_aid' -Value $AssociationId
+
+        if ($DestinationHost) {
+            $Payload | Add-Member -MemberType NoteProperty -Name 'dst_hst' -Value $DestinationHost
+        }
     }
 
     if (($Type -eq 'SCOPE') -and ($Scope)) {

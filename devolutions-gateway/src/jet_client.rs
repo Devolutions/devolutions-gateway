@@ -141,7 +141,7 @@ async fn handle_build_proxy(
                 let init_result = PluginRecordingInspector::init(
                     association_id,
                     response.candidate_id,
-                    conf.recording_path.as_ref().map(|path| path.as_str()),
+                    Some(conf.recording_path.as_str()),
                 )?;
                 recording_dir = init_result.recording_dir;
                 file_pattern = Some(init_result.filename_pattern);

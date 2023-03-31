@@ -106,6 +106,19 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TLS error - {err:#}")))
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/jrec") {
+            info!("{} {}", req.method(), req_uri);
+            handle_jrec(
+                req,
+                client_addr,
+                self.conf.clone(),
+                &self.token_cache,
+                &self.jrl,
+                self.sessions.clone(),
+                self.subscriber_tx.clone(),
+            )
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JREC error - {err:#}")))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
@@ -358,7 +371,7 @@ async fn handle_jet_connect_impl(
                             let init_result = PluginRecordingInspector::init(
                                 association_id,
                                 candidate_id,
-                                conf.recording_path.as_ref().map(|path| path.as_str()),
+                                Some(conf.recording_path.as_str()),
                             )
                             .map_err(|e| error!("Couldn't initialize PluginRecordingInspector: {}", e))?;
 
@@ -749,6 +762,65 @@ async fn handle_tls(
         match fut.await {
             Ok(()) => {}
             Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "WebSocket-TLS failure"),
+        }
+    });
+
+    Ok(rsp)
+}
+
+async fn handle_jrec(
+    mut req: Request<Body>,
+    client_addr: SocketAddr,
+    conf: Arc<Conf>,
+    token_cache: &TokenCache,
+    jrl: &CurrentJrl,
+    _sessions: SessionManagerHandle,
+    _subscriber_tx: SubscriberSender,
+) -> anyhow::Result<Response<Body>> {
+    use crate::http::middlewares::auth::{parse_auth_header, AuthHeaderType};
+
+    let token = if let Some(authorization_value) = req.headers().get(header::AUTHORIZATION) {
+        let authorization_value = authorization_value.to_str().context("bad authorization header value")?; // BAD REQUEST
+        match parse_auth_header(authorization_value) {
+            Some((AuthHeaderType::Bearer, token)) => token,
+            _ => anyhow::bail!("bad authorization header value"), // BAD REQUEST
+        }
+    } else if let Some(token) = req.uri().query().and_then(|q| {
+        q.split('&')
+            .filter_map(|segment| segment.split_once('='))
+            .find_map(|(key, val)| key.eq("token").then_some(val))
+    }) {
+        token
+    } else {
+        anyhow::bail!("missing authorization"); // AUTHORIZATION
+    };
+
+    let claims = crate::jrec::authorize(client_addr, token, &conf, token_cache, jrl)?; // FORBIDDEN
+
+    if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
+        if upgrade_val != "websocket" {
+            anyhow::bail!("unexpected upgrade header value: {}", upgrade_val) // BAD REQUEST
+        }
+    }
+
+    let rsp = process_req(&req);
+
+    tokio::spawn(async move {
+        let fut = async {
+            let stream = upgrade_websocket(&mut req).await?;
+            crate::jrec::PlainForward::builder()
+                .client_stream(stream)
+                .conf(conf)
+                .claims(claims)
+                .build()
+                .run()
+                .await
+        }
+        .instrument(info_span!("rec", client = %client_addr));
+
+        match fut.await {
+            Ok(()) => {}
+            Err(error) => error!(client = %client_addr, error = format!("{error:#}"), "WebSocket-JREC failure"),
         }
     });
 
