@@ -212,7 +212,7 @@ IBaZdgBhPfHxF8KfTHvSzcUzWZojuR+ynaFL9AJK+8RiXnB4CJwIDAQAB
             sub_provisioner_public_key: None,
             delegation_private_key: None,
             plugins: None,
-            recording_path: None,
+            recording_path: String::new().into(),
             sogar: Default::default(),
             jrl_file: String::new().into(),
             debug: Default::default(),

@@ -16,6 +16,7 @@ pub mod jet;
 pub mod jet_client;
 pub mod jet_rendezvous_tcp_proxy;
 pub mod jmux;
+pub mod jrec;
 pub mod listener;
 pub mod log;
 pub mod plugin_manager;

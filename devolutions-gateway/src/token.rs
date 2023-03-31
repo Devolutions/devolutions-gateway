@@ -36,6 +36,7 @@ pub enum ContentType {
     Scope,
     Bridge,
     Jmux,
+    Jrec,
     Kdc,
     Jrl,
 }
@@ -49,6 +50,7 @@ impl FromStr for ContentType {
             "SCOPE" => Ok(ContentType::Scope),
             "BRIDGE" => Ok(ContentType::Bridge),
             "JMUX" => Ok(ContentType::Jmux),
+            "JREC" => Ok(ContentType::Jrec),
             "KDC" => Ok(ContentType::Kdc),
             "JRL" => Ok(ContentType::Jrl),
             unexpected => Err(BadContentType {
@@ -65,6 +67,7 @@ impl fmt::Display for ContentType {
             ContentType::Scope => write!(f, "SCOPE"),
             ContentType::Bridge => write!(f, "BRIDGE"),
             ContentType::Jmux => write!(f, "JMUX"),
+            ContentType::Jrec => write!(f, "JREC"),
             ContentType::Kdc => write!(f, "KDC"),
             ContentType::Jrl => write!(f, "JRL"),
         }
@@ -94,6 +97,7 @@ pub enum AccessTokenClaims {
     Scope(ScopeTokenClaims),
     Bridge(BridgeTokenClaims),
     Jmux(JmuxTokenClaims),
+    Jrec(JrecTokenClaims),
     Kdc(KdcTokenClaims),
     Jrl(JrlTokenClaims),
 }
@@ -105,6 +109,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Scope(_) => false,
             AccessTokenClaims::Bridge(_) => false,
             AccessTokenClaims::Jmux(_) => false,
+            AccessTokenClaims::Jrec(_) => false,
             AccessTokenClaims::Kdc(_) => false,
             AccessTokenClaims::Jrl(_) => false,
         }
@@ -195,6 +200,26 @@ impl Protocol {
             Self::WinrmHttpsPwsh => 5986,
             Self::Http => 80,
             Self::Https => 443,
+        }
+    }
+}
+
+// ----- recording file types ----- //
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingFileType {
+    /// WebM/VP8 video file
+    WebM,
+    /// Terminal Playback
+    TRP,
+}
+
+impl From<RecordingFileType> for &'static str {
+    fn from(val: RecordingFileType) -> Self {
+        match val {
+            RecordingFileType::WebM => "webm",
+            RecordingFileType::TRP => "trp",
         }
     }
 }
@@ -511,6 +536,50 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
     }
 }
 
+// ----- jrec claims ----- //
+
+#[derive(Clone)]
+pub struct JrecTokenClaims {
+    /// Association ID (= Session ID)
+    pub jet_aid: Uuid,
+
+    // Recording file type
+    pub jet_rft: RecordingFileType,
+
+    // JWT expiration time claim.
+    // We need this to build our token invalidation cache.
+    // This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
+    exp: i64,
+
+    // Unique ID for this token
+    jti: Uuid,
+}
+
+impl<'de> de::Deserialize<'de> for JrecTokenClaims {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct ClaimsHelper {
+            #[serde(default = "Uuid::new_v4")]
+            jet_aid: Uuid,
+            jet_rft: RecordingFileType,
+            exp: i64,
+            jti: Uuid,
+        }
+
+        let claims = ClaimsHelper::deserialize(deserializer)?;
+
+        Ok(Self {
+            jet_aid: claims.jet_aid,
+            jet_rft: claims.jet_rft,
+            exp: claims.exp,
+            jti: claims.jti,
+        })
+    }
+}
+
 // ----- KDC claims ----- //
 
 #[derive(Clone)]
@@ -816,6 +885,7 @@ fn validate_token_impl(
             | ContentType::Scope
             | ContentType::Bridge
             | ContentType::Jmux
+            | ContentType::Jrec
             | ContentType::Kdc => jwt.validate::<Value>(&strict_validator)?.state.claims,
             ContentType::Jrl => {
                 // NOTE: JRL tokens are not expected to expire.
@@ -895,6 +965,7 @@ fn validate_token_impl(
         ContentType::Scope => serde_json::from_value(claims).map(AccessTokenClaims::Scope),
         ContentType::Bridge => serde_json::from_value(claims).map(AccessTokenClaims::Bridge),
         ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
+        ContentType::Jrec => serde_json::from_value(claims).map(AccessTokenClaims::Jrec),
         ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
     }
@@ -955,7 +1026,8 @@ fn validate_token_impl(
         | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::Jrec(JrecTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 warn!("A replay attack may have been attempted.");
                 return Err(TokenError::UnexpectedReplay {
@@ -1055,6 +1127,7 @@ pub mod unsafe_debug {
             ContentType::Scope => serde_json::from_value(claims).map(AccessTokenClaims::Scope),
             ContentType::Bridge => serde_json::from_value(claims).map(AccessTokenClaims::Bridge),
             ContentType::Jmux => serde_json::from_value(claims).map(AccessTokenClaims::Jmux),
+            ContentType::Jrec => serde_json::from_value(claims).map(AccessTokenClaims::Jrec),
             ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
         }

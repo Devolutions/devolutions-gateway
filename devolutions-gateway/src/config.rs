@@ -97,7 +97,7 @@ pub struct Conf {
     pub sub_provisioner_public_key: Option<Subkey>,
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<Utf8PathBuf>>,
-    pub recording_path: Option<Utf8PathBuf>,
+    pub recording_path: Utf8PathBuf,
     pub sogar: dto::SogarConf,
     pub jrl_file: Utf8PathBuf,
     pub debug: dto::DebugConf,
@@ -161,6 +161,12 @@ impl Conf {
             .unwrap_or_else(|| Utf8PathBuf::from("jrl.json"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
+        let recording_path = conf_file
+            .recording_path
+            .clone()
+            .unwrap_or_else(|| Utf8PathBuf::from("recordings"))
+            .pipe_ref(|path| normalize_data_path(path, &data_dir));
+
         let provisioner_public_key = read_pub_key(
             conf_file.provisioner_public_key_file.as_deref(),
             conf_file.provisioner_public_key_data.as_ref(),
@@ -197,7 +203,7 @@ impl Conf {
             sub_provisioner_public_key,
             delegation_private_key,
             plugins: conf_file.plugins.clone(),
-            recording_path: conf_file.recording_path.clone(),
+            recording_path: recording_path,
             sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
             debug: conf_file.debug.clone().unwrap_or_default(),
