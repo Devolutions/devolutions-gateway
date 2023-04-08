@@ -215,9 +215,9 @@ pub enum RecordingFileType {
     TRP,
 }
 
-impl From<RecordingFileType> for &'static str {
-    fn from(val: RecordingFileType) -> Self {
-        match val {
+impl RecordingFileType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
         }
@@ -538,7 +538,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
 
 // ----- jrec claims ----- //
 
-#[derive(Clone)]
+#[derive(Deserialize, Clone)]
 pub struct JrecTokenClaims {
     /// Association ID (= Session ID)
     pub jet_aid: Uuid,
@@ -553,31 +553,6 @@ pub struct JrecTokenClaims {
 
     // Unique ID for this token
     jti: Uuid,
-}
-
-impl<'de> de::Deserialize<'de> for JrecTokenClaims {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct ClaimsHelper {
-            #[serde(default = "Uuid::new_v4")]
-            jet_aid: Uuid,
-            jet_rft: RecordingFileType,
-            exp: i64,
-            jti: Uuid,
-        }
-
-        let claims = ClaimsHelper::deserialize(deserializer)?;
-
-        Ok(Self {
-            jet_aid: claims.jet_aid,
-            jet_rft: claims.jet_rft,
-            exp: claims.exp,
-            jti: claims.jti,
-        })
-    }
 }
 
 // ----- KDC claims ----- //

@@ -37,11 +37,7 @@ pub struct InitResult {
 }
 
 impl PluginRecordingInspector {
-    pub fn init(
-        association_id: Uuid,
-        candidate_id: Uuid,
-        recording_directory: Option<&str>,
-    ) -> anyhow::Result<InitResult> {
+    pub fn init(association_id: Uuid, candidate_id: Uuid, recording_directory: &str) -> anyhow::Result<InitResult> {
         debug!("Initialize Plugin Recording Interceptor");
 
         let recorder = PLUGIN_MANAGER
@@ -58,9 +54,7 @@ impl PluginRecordingInspector {
 
         recorder.set_filename(&filename);
 
-        if let Some(directory) = recording_directory {
-            recorder.set_directory(directory);
-        }
+        recorder.set_directory(recording_directory);
 
         let (sender, receiver) = mpsc::unbounded_channel();
 

@@ -203,7 +203,7 @@ impl Conf {
             sub_provisioner_public_key,
             delegation_private_key,
             plugins: conf_file.plugins.clone(),
-            recording_path: recording_path,
+            recording_path,
             sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
             debug: conf_file.debug.clone().unwrap_or_default(),
