@@ -371,7 +371,7 @@ async fn handle_jet_connect_impl(
                             let init_result = PluginRecordingInspector::init(
                                 association_id,
                                 candidate_id,
-                                Some(conf.recording_path.as_str()),
+                                conf.recording_path.as_str(),
                             )
                             .map_err(|e| error!("Couldn't initialize PluginRecordingInspector: {}", e))?;
 

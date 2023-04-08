@@ -63,27 +63,28 @@ where
                 .with_context(|| format!("Failed to create recording path: {}", recording_path))?;
         }
 
-        let file_ext: &str = claims.jet_rft.into();
-        let filename = format!("{}.{}", claims.jet_aid, file_ext);
+        let session_id = claims.jet_aid;
+        let file_ext = claims.jet_rft.as_str();
+        let filename = format!("{session_id}.{file_ext}");
+
         let path = recording_path.join(filename);
 
-        info!(%path, "Opening file");
+        debug!(%path, "Opening file");
 
-        let file = fs::OpenOptions::new()
+        let mut file = fs::OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)
             .open(&path)
             .await
-            .with_context(|| format!("Failed to open file at {}", path))?;
+            .with_context(|| format!("Failed to open file at {}", path))
+            .map(BufWriter::new)?;
 
-        info!(%path, "File opened");
+        debug!(%path, "File opened");
 
-        let mut file_writer = BufWriter::new(file);
-
-        io::copy(&mut client_stream, &mut file_writer)
+        io::copy(&mut client_stream, &mut file)
             .await
-            .context("JREC WebSocket to file proxying")?;
+            .context("JREC streaming to file")?;
 
         Ok(())
     }
