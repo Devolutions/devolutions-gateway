@@ -7,6 +7,7 @@ use uuid::Uuid;
 #[openapi(
     paths(
         crate::http::controllers::health::get_health,
+        crate::http::controllers::heartbeat::get_heartbeat,
         crate::http::controllers::sessions::get_sessions,
         crate::http::controllers::session::terminate_session,
         crate::http::controllers::diagnostics::get_logs,
@@ -18,6 +19,7 @@ use uuid::Uuid;
     ),
     components(schemas(
         crate::http::controllers::health::Identity,
+        crate::http::controllers::heartbeat::Heartbeat,
         SessionInfo,
         ConnectionMode,
         crate::listener::ListenerUrls,

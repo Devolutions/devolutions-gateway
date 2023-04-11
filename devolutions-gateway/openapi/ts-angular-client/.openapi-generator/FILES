@@ -5,6 +5,7 @@ api/api.ts
 api/config.service.ts
 api/diagnostics.service.ts
 api/health.service.ts
+api/heartbeat.service.ts
 api/jrl.service.ts
 api/sessions.service.ts
 configuration.ts
@@ -16,6 +17,7 @@ model/configDiagnostic.ts
 model/configPatch.ts
 model/connectionMode.ts
 model/dataEncoding.ts
+model/heartbeat.ts
 model/identity.ts
 model/jrlInfo.ts
 model/listenerUrls.ts

@@ -142,6 +142,9 @@ pub enum SessionManagerMessage {
     GetRunning {
         channel: oneshot::Sender<RunningSessions>,
     },
+    GetCount {
+        channel: oneshot::Sender<usize>,
+    },
 }
 
 impl fmt::Debug for SessionManagerMessage {
@@ -157,6 +160,7 @@ impl fmt::Debug for SessionManagerMessage {
                 f.debug_struct("Kill").field("id", id).finish_non_exhaustive()
             }
             SessionManagerMessage::GetRunning { channel: _ } => f.debug_struct("GetRunning").finish_non_exhaustive(),
+            SessionManagerMessage::GetCount { channel: _ } => f.debug_struct("GetCount").finish_non_exhaustive(),
         }
     }
 }
@@ -201,6 +205,16 @@ impl SessionManagerHandle {
             .ok()
             .context("Couldn't send GetRunning message")?;
         rx.await.context("Couldn't receive running session list")
+    }
+
+    pub async fn get_running_session_count(&self) -> anyhow::Result<usize> {
+        let (tx, rx) = oneshot::channel();
+        self.0
+            .send(SessionManagerMessage::GetCount { channel: tx })
+            .await
+            .ok()
+            .context("Couldn't send GetRunning message")?;
+        rx.await.context("Couldn't receive running session count")
     }
 }
 
@@ -344,6 +358,9 @@ pub async fn session_manager_task(mut manager: SessionManagerTask) -> anyhow::Re
                     }
                     SessionManagerMessage::GetRunning { channel } => {
                         let _ = channel.send(manager.all_running.clone());
+                    }
+                    SessionManagerMessage::GetCount { channel } => {
+                        let _ = channel.send(manager.all_running.len());
                     }
                 }
             }

@@ -27,32 +27,39 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Identity
+    /// Heartbeat
     /// </summary>
-    [DataContract(Name = "Identity")]
-    public partial class Identity : IEquatable<Identity>, IValidatableObject
+    [DataContract(Name = "Heartbeat")]
+    public partial class Heartbeat : IEquatable<Heartbeat>, IValidatableObject
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="Identity" /> class.
+        /// Initializes a new instance of the <see cref="Heartbeat" /> class.
         /// </summary>
         [JsonConstructorAttribute]
-        protected Identity() { }
+        protected Heartbeat() { }
         /// <summary>
-        /// Initializes a new instance of the <see cref="Identity" /> class.
+        /// Initializes a new instance of the <see cref="Heartbeat" /> class.
         /// </summary>
         /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
         /// <param name="id">This Gateway&#39;s unique ID.</param>
-        /// <param name="version">Gateway service version.</param>
-        public Identity(string hostname = default(string), Guid id = default(Guid), string version = default(string))
+        /// <param name="runningSessionCount">Number of running sessions (required).</param>
+        /// <param name="version">Gateway service version (required).</param>
+        public Heartbeat(string hostname = default(string), Guid id = default(Guid), int runningSessionCount = default(int), string version = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)
             {
-                throw new ArgumentNullException("hostname is a required property for Identity and cannot be null");
+                throw new ArgumentNullException("hostname is a required property for Heartbeat and cannot be null");
             }
             this.Hostname = hostname;
-            this.Id = id;
+            this.RunningSessionCount = runningSessionCount;
+            // to ensure "version" is required (not null)
+            if (version == null)
+            {
+                throw new ArgumentNullException("version is a required property for Heartbeat and cannot be null");
+            }
             this._Version = version;
+            this.Id = id;
         }
 
         /// <summary>
@@ -70,10 +77,17 @@ namespace Devolutions.Gateway.Client.Model
         public Guid Id { get; set; }
 
         /// <summary>
+        /// Number of running sessions
+        /// </summary>
+        /// <value>Number of running sessions</value>
+        [DataMember(Name = "running_session_count", IsRequired = true, EmitDefaultValue = true)]
+        public int RunningSessionCount { get; set; }
+
+        /// <summary>
         /// Gateway service version
         /// </summary>
         /// <value>Gateway service version</value>
-        [DataMember(Name = "version", EmitDefaultValue = false)]
+        [DataMember(Name = "version", IsRequired = true, EmitDefaultValue = true)]
         public string _Version { get; set; }
 
         /// <summary>
@@ -83,9 +97,10 @@ namespace Devolutions.Gateway.Client.Model
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("class Identity {\n");
+            sb.Append("class Heartbeat {\n");
             sb.Append("  Hostname: ").Append(Hostname).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
+            sb.Append("  RunningSessionCount: ").Append(RunningSessionCount).Append("\n");
             sb.Append("  _Version: ").Append(_Version).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
@@ -107,15 +122,15 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Boolean</returns>
         public override bool Equals(object input)
         {
-            return this.Equals(input as Identity);
+            return this.Equals(input as Heartbeat);
         }
 
         /// <summary>
-        /// Returns true if Identity instances are equal
+        /// Returns true if Heartbeat instances are equal
         /// </summary>
-        /// <param name="input">Instance of Identity to be compared</param>
+        /// <param name="input">Instance of Heartbeat to be compared</param>
         /// <returns>Boolean</returns>
-        public bool Equals(Identity input)
+        public bool Equals(Heartbeat input)
         {
             if (input == null)
             {
@@ -131,6 +146,10 @@ namespace Devolutions.Gateway.Client.Model
                     this.Id == input.Id ||
                     (this.Id != null &&
                     this.Id.Equals(input.Id))
+                ) && 
+                (
+                    this.RunningSessionCount == input.RunningSessionCount ||
+                    this.RunningSessionCount.Equals(input.RunningSessionCount)
                 ) && 
                 (
                     this._Version == input._Version ||
@@ -156,6 +175,7 @@ namespace Devolutions.Gateway.Client.Model
                 {
                     hashCode = (hashCode * 59) + this.Id.GetHashCode();
                 }
+                hashCode = (hashCode * 59) + this.RunningSessionCount.GetHashCode();
                 if (this._Version != null)
                 {
                     hashCode = (hashCode * 59) + this._Version.GetHashCode();

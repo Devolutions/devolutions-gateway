@@ -92,9 +92,10 @@ impl JmuxConfig {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub enum FilteringRule {
     /// Always denied.
+    #[default]
     Deny,
     /// Always allowed.
     Allow,
@@ -115,12 +116,6 @@ pub enum FilteringRule {
     /// Rule matching multiple sub-domains, as in wildcard certificates.
     /// e.g.: `*.example.com`, `*.*.devolutions.net`
     WildcardHost(String),
-}
-
-impl Default for FilteringRule {
-    fn default() -> Self {
-        FilteringRule::Deny
-    }
 }
 
 impl FilteringRule {

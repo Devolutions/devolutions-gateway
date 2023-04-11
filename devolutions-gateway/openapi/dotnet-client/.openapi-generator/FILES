@@ -10,6 +10,8 @@ docs/ConnectionMode.md
 docs/DataEncoding.md
 docs/DiagnosticsApi.md
 docs/HealthApi.md
+docs/Heartbeat.md
+docs/HeartbeatApi.md
 docs/Identity.md
 docs/JrlApi.md
 docs/JrlInfo.md
@@ -22,6 +24,7 @@ docs/Subscriber.md
 src/Devolutions.Gateway.Client/Api/ConfigApi.cs
 src/Devolutions.Gateway.Client/Api/DiagnosticsApi.cs
 src/Devolutions.Gateway.Client/Api/HealthApi.cs
+src/Devolutions.Gateway.Client/Api/HeartbeatApi.cs
 src/Devolutions.Gateway.Client/Api/JrlApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
 src/Devolutions.Gateway.Client/Client/ApiClient.cs
@@ -48,6 +51,7 @@ src/Devolutions.Gateway.Client/Model/ConfigDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigPatch.cs
 src/Devolutions.Gateway.Client/Model/ConnectionMode.cs
 src/Devolutions.Gateway.Client/Model/DataEncoding.cs
+src/Devolutions.Gateway.Client/Model/Heartbeat.cs
 src/Devolutions.Gateway.Client/Model/Identity.cs
 src/Devolutions.Gateway.Client/Model/JrlInfo.cs
 src/Devolutions.Gateway.Client/Model/ListenerUrls.cs

@@ -3,6 +3,7 @@ use crate::http::controllers::association::AssociationController;
 use crate::http::controllers::config::ConfigController;
 use crate::http::controllers::diagnostics::DiagnosticsController;
 use crate::http::controllers::health::HealthController;
+use crate::http::controllers::heartbeat::HeartbeatController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
 use crate::http::controllers::jrl::JrlController;
 use crate::http::controllers::kdc_proxy::KdcProxyController;
@@ -55,6 +56,10 @@ pub fn configure_http_server(
 
             let (diagnostics, legacy_diagnostics) = DiagnosticsController::new(conf_handle.clone());
             let (health, legacy_health) = HealthController::new(conf_handle.clone());
+            let heartbeat = HeartbeatController {
+                conf_handle: conf_handle.clone(),
+                sessions: sessions.clone(),
+            };
             let http_bridge = HttpBridgeController::new();
             let jet = AssociationController::new(conf_handle.clone(), associations.clone());
             let kdc_proxy = KdcProxyController {
@@ -86,6 +91,7 @@ pub fn configure_http_server(
             router
                 .controller(diagnostics)
                 .controller(health)
+                .controller(heartbeat)
                 .controller(http_bridge)
                 .controller(jet)
                 .controller(session_controller)

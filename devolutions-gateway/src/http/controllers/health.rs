@@ -28,7 +28,7 @@ impl HealthController {
 #[controller(name = "jet/health")]
 impl HealthController {
     #[get("/")]
-    async fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
+    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
         get_health(self, req)
     }
 }
@@ -41,6 +41,7 @@ pub struct Identity {
     /// This Gateway's hostname
     hostname: String,
     /// Gateway service version
+    #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<&'static str>,
 }
 
@@ -109,7 +110,7 @@ pub struct LegacyHealthController {
 #[controller(name = "health")]
 impl LegacyHealthController {
     #[get("/")]
-    async fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
+    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
         get_health(&self.inner, req)
     }
 }

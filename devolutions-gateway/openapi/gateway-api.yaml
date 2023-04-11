@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2023.1.1
+  version: 2023.1.3
 paths:
   /jet/config:
     patch:
@@ -123,6 +123,30 @@ paths:
         '400':
           description: Invalid Accept header
       deprecated: false
+  /jet/heartbeat:
+    get:
+      tags:
+      - Heartbeat
+      summary: Performs a heartbeat check
+      description: Performs a heartbeat check
+      operationId: GetHeartbeat
+      responses:
+        '200':
+          description: Heartbeat for this Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Heartbeat'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.heartbeat.read
   /jet/jrl:
     post:
       tags:
@@ -242,6 +266,7 @@ components:
       - gateway.diagnostics.read
       - gateway.jrl.read
       - gateway.config.write
+      - gateway.heartbeat.read
     ClockDiagnostic:
       type: object
       required:
@@ -303,6 +328,26 @@ components:
       - Base64Pad
       - Base64Url
       - Base64UrlPad
+    Heartbeat:
+      type: object
+      required:
+      - hostname
+      - version
+      - running_session_count
+      properties:
+        hostname:
+          type: string
+          description: This Gateway's hostname
+        id:
+          type: string
+          format: uuid
+          description: This Gateway's unique ID
+        running_session_count:
+          type: integer
+          description: Number of running sessions
+        version:
+          type: string
+          description: Gateway service version
     Identity:
       type: object
       required:
