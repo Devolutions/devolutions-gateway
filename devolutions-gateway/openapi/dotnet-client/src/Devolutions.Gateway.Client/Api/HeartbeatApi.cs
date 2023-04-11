@@ -28,10 +28,10 @@ namespace Devolutions.Gateway.Client.Api
     {
         #region Synchronous Operations
         /// <summary>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </summary>
         /// <remarks>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -39,10 +39,10 @@ namespace Devolutions.Gateway.Client.Api
         Heartbeat GetHeartbeat(int operationIndex = 0);
 
         /// <summary>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </summary>
         /// <remarks>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -58,10 +58,10 @@ namespace Devolutions.Gateway.Client.Api
     {
         #region Asynchronous Operations
         /// <summary>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </summary>
         /// <remarks>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -70,10 +70,10 @@ namespace Devolutions.Gateway.Client.Api
         System.Threading.Tasks.Task<Heartbeat> GetHeartbeatAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </summary>
         /// <remarks>
-        /// Performs a health check
+        /// Performs a heartbeat check
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -201,7 +201,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check
+        /// Performs a heartbeat check Performs a heartbeat check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -213,7 +213,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check
+        /// Performs a heartbeat check Performs a heartbeat check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -268,7 +268,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check
+        /// Performs a heartbeat check Performs a heartbeat check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
@@ -281,7 +281,7 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Performs a health check Performs a health check
+        /// Performs a heartbeat check Performs a heartbeat check
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>

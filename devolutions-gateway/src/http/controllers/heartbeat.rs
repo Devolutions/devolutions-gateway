@@ -38,7 +38,7 @@ pub struct Heartbeat {
     running_session_count: usize,
 }
 
-/// Performs a health check
+/// Performs a heartbeat check
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetHeartbeat",

@@ -92,8 +92,8 @@ export class HeartbeatService {
     }
 
     /**
-     * Performs a health check
-     * Performs a health check
+     * Performs a heartbeat check
+     * Performs a heartbeat check
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */

@@ -421,11 +421,11 @@ endif::internal-generation[]
 
 `GET /jet/heartbeat`
 
-Performs a health check
+Performs a heartbeat check
 
 ===== Description
 
-Performs a health check
+Performs a heartbeat check
 
 
 // markup not found, no include::{specDir}jet/heartbeat/GET/spec.adoc[opts=optional]

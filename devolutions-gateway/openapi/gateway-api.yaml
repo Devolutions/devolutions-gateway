@@ -127,8 +127,8 @@ paths:
     get:
       tags:
       - Heartbeat
-      summary: Performs a health check
-      description: Performs a health check
+      summary: Performs a heartbeat check
+      description: Performs a heartbeat check
       operationId: GetHeartbeat
       responses:
         '200':

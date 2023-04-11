@@ -4,15 +4,15 @@ All URIs are relative to *http://localhost*
 
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
-| [**GetHeartbeat**](HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a health check |
+| [**GetHeartbeat**](HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check |
 
 <a name="getheartbeat"></a>
 # **GetHeartbeat**
 > Heartbeat GetHeartbeat ()
 
-Performs a health check
+Performs a heartbeat check
 
-Performs a health check
+Performs a heartbeat check
 
 ### Example
 ```csharp
@@ -37,7 +37,7 @@ namespace Example
 
             try
             {
-                // Performs a health check
+                // Performs a heartbeat check
                 Heartbeat result = apiInstance.GetHeartbeat();
                 Debug.WriteLine(result);
             }
@@ -58,7 +58,7 @@ This returns an ApiResponse object which contains the response data, status code
 ```csharp
 try
 {
-    // Performs a health check
+    // Performs a heartbeat check
     ApiResponse<Heartbeat> response = apiInstance.GetHeartbeatWithHttpInfo();
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
