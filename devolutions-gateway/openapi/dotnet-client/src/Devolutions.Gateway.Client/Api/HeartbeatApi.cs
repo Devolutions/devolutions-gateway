@@ -24,7 +24,7 @@ namespace Devolutions.Gateway.Client.Api
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IHealthApiSync : IApiAccessor
+    public interface IHeartbeatApiSync : IApiAccessor
     {
         #region Synchronous Operations
         /// <summary>
@@ -35,8 +35,8 @@ namespace Devolutions.Gateway.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>Identity</returns>
-        Identity GetHealth(int operationIndex = 0);
+        /// <returns>Heartbeat</returns>
+        Heartbeat GetHeartbeat(int operationIndex = 0);
 
         /// <summary>
         /// Performs a health check
@@ -46,15 +46,15 @@ namespace Devolutions.Gateway.Client.Api
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>ApiResponse of Identity</returns>
-        ApiResponse<Identity> GetHealthWithHttpInfo(int operationIndex = 0);
+        /// <returns>ApiResponse of Heartbeat</returns>
+        ApiResponse<Heartbeat> GetHeartbeatWithHttpInfo(int operationIndex = 0);
         #endregion Synchronous Operations
     }
 
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IHealthApiAsync : IApiAccessor
+    public interface IHeartbeatApiAsync : IApiAccessor
     {
         #region Asynchronous Operations
         /// <summary>
@@ -66,8 +66,8 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of Identity</returns>
-        System.Threading.Tasks.Task<Identity> GetHealthAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of Heartbeat</returns>
+        System.Threading.Tasks.Task<Heartbeat> GetHeartbeatAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
 
         /// <summary>
         /// Performs a health check
@@ -78,15 +78,15 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (Identity)</returns>
-        System.Threading.Tasks.Task<ApiResponse<Identity>> GetHealthWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
+        /// <returns>Task of ApiResponse (Heartbeat)</returns>
+        System.Threading.Tasks.Task<ApiResponse<Heartbeat>> GetHeartbeatWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public interface IHealthApi : IHealthApiSync, IHealthApiAsync
+    public interface IHeartbeatApi : IHeartbeatApiSync, IHeartbeatApiAsync
     {
 
     }
@@ -94,23 +94,23 @@ namespace Devolutions.Gateway.Client.Api
     /// <summary>
     /// Represents a collection of functions to interact with the API endpoints
     /// </summary>
-    public partial class HealthApi : IHealthApi
+    public partial class HeartbeatApi : IHeartbeatApi
     {
         private Devolutions.Gateway.Client.Client.ExceptionFactory _exceptionFactory = (name, response) => null;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HealthApi"/> class.
+        /// Initializes a new instance of the <see cref="HeartbeatApi"/> class.
         /// </summary>
         /// <returns></returns>
-        public HealthApi() : this((string)null)
+        public HeartbeatApi() : this((string)null)
         {
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HealthApi"/> class.
+        /// Initializes a new instance of the <see cref="HeartbeatApi"/> class.
         /// </summary>
         /// <returns></returns>
-        public HealthApi(string basePath)
+        public HeartbeatApi(string basePath)
         {
             this.Configuration = Devolutions.Gateway.Client.Client.Configuration.MergeConfigurations(
                 Devolutions.Gateway.Client.Client.GlobalConfiguration.Instance,
@@ -122,12 +122,12 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HealthApi"/> class
+        /// Initializes a new instance of the <see cref="HeartbeatApi"/> class
         /// using Configuration object
         /// </summary>
         /// <param name="configuration">An instance of Configuration</param>
         /// <returns></returns>
-        public HealthApi(Devolutions.Gateway.Client.Client.Configuration configuration)
+        public HeartbeatApi(Devolutions.Gateway.Client.Client.Configuration configuration)
         {
             if (configuration == null) throw new ArgumentNullException("configuration");
 
@@ -141,13 +141,13 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="HealthApi"/> class
+        /// Initializes a new instance of the <see cref="HeartbeatApi"/> class
         /// using a Configuration object and client instance.
         /// </summary>
         /// <param name="client">The client interface for synchronous API access.</param>
         /// <param name="asyncClient">The client interface for asynchronous API access.</param>
         /// <param name="configuration">The configuration object.</param>
-        public HealthApi(Devolutions.Gateway.Client.Client.ISynchronousClient client, Devolutions.Gateway.Client.Client.IAsynchronousClient asyncClient, Devolutions.Gateway.Client.Client.IReadableConfiguration configuration)
+        public HeartbeatApi(Devolutions.Gateway.Client.Client.ISynchronousClient client, Devolutions.Gateway.Client.Client.IAsynchronousClient asyncClient, Devolutions.Gateway.Client.Client.IReadableConfiguration configuration)
         {
             if (client == null) throw new ArgumentNullException("client");
             if (asyncClient == null) throw new ArgumentNullException("asyncClient");
@@ -205,10 +205,10 @@ namespace Devolutions.Gateway.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>Identity</returns>
-        public Identity GetHealth(int operationIndex = 0)
+        /// <returns>Heartbeat</returns>
+        public Heartbeat GetHeartbeat(int operationIndex = 0)
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<Identity> localVarResponse = GetHealthWithHttpInfo();
+            Devolutions.Gateway.Client.Client.ApiResponse<Heartbeat> localVarResponse = GetHeartbeatWithHttpInfo();
             return localVarResponse.Data;
         }
 
@@ -217,8 +217,8 @@ namespace Devolutions.Gateway.Client.Api
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
-        /// <returns>ApiResponse of Identity</returns>
-        public Devolutions.Gateway.Client.Client.ApiResponse<Identity> GetHealthWithHttpInfo(int operationIndex = 0)
+        /// <returns>ApiResponse of Heartbeat</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<Heartbeat> GetHeartbeatWithHttpInfo(int operationIndex = 0)
         {
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
 
@@ -243,15 +243,21 @@ namespace Devolutions.Gateway.Client.Api
             }
 
 
-            localVarRequestOptions.Operation = "HealthApi.GetHealth";
+            localVarRequestOptions.Operation = "HeartbeatApi.GetHeartbeat";
             localVarRequestOptions.OperationIndex = operationIndex;
 
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
 
             // make the HTTP request
-            var localVarResponse = this.Client.Get<Identity>("/jet/health", localVarRequestOptions, this.Configuration);
+            var localVarResponse = this.Client.Get<Heartbeat>("/jet/heartbeat", localVarRequestOptions, this.Configuration);
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("GetHealth", localVarResponse);
+                Exception _exception = this.ExceptionFactory("GetHeartbeat", localVarResponse);
                 if (_exception != null)
                 {
                     throw _exception;
@@ -267,10 +273,10 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of Identity</returns>
-        public async System.Threading.Tasks.Task<Identity> GetHealthAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of Heartbeat</returns>
+        public async System.Threading.Tasks.Task<Heartbeat> GetHeartbeatAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
-            Devolutions.Gateway.Client.Client.ApiResponse<Identity> localVarResponse = await GetHealthWithHttpInfoAsync(operationIndex, cancellationToken).ConfigureAwait(false);
+            Devolutions.Gateway.Client.Client.ApiResponse<Heartbeat> localVarResponse = await GetHeartbeatWithHttpInfoAsync(operationIndex, cancellationToken).ConfigureAwait(false);
             return localVarResponse.Data;
         }
 
@@ -280,8 +286,8 @@ namespace Devolutions.Gateway.Client.Api
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
         /// <param name="operationIndex">Index associated with the operation.</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
-        /// <returns>Task of ApiResponse (Identity)</returns>
-        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Identity>> GetHealthWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+        /// <returns>Task of ApiResponse (Heartbeat)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<Heartbeat>> GetHeartbeatWithHttpInfoAsync(int operationIndex = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
         {
 
             Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
@@ -307,16 +313,22 @@ namespace Devolutions.Gateway.Client.Api
             }
 
 
-            localVarRequestOptions.Operation = "HealthApi.GetHealth";
+            localVarRequestOptions.Operation = "HeartbeatApi.GetHeartbeat";
             localVarRequestOptions.OperationIndex = operationIndex;
 
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
 
             // make the HTTP request
-            var localVarResponse = await this.AsynchronousClient.GetAsync<Identity>("/jet/health", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+            var localVarResponse = await this.AsynchronousClient.GetAsync<Heartbeat>("/jet/heartbeat", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
 
             if (this.ExceptionFactory != null)
             {
-                Exception _exception = this.ExceptionFactory("GetHealth", localVarResponse);
+                Exception _exception = this.ExceptionFactory("GetHeartbeat", localVarResponse);
                 if (_exception != null)
                 {
                     throw _exception;

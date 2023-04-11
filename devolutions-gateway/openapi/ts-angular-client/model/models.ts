@@ -4,6 +4,7 @@ export * from './configDiagnostic';
 export * from './configPatch';
 export * from './connectionMode';
 export * from './dataEncoding';
+export * from './heartbeat';
 export * from './identity';
 export * from './jrlInfo';
 export * from './listenerUrls';

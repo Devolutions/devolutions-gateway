@@ -60,7 +60,7 @@ where
         if !recording_path.exists() {
             fs::create_dir_all(recording_path)
                 .await
-                .with_context(|| format!("Failed to create recording path: {}", recording_path))?;
+                .with_context(|| format!("Failed to create recording path: {recording_path}"))?;
         }
 
         let session_id = claims.jet_aid;
@@ -77,7 +77,7 @@ where
             .create(true)
             .open(&path)
             .await
-            .with_context(|| format!("Failed to open file at {}", path))
+            .with_context(|| format!("Failed to open file at {path}"))
             .map(BufWriter::new)?;
 
         debug!(%path, "File opened");

@@ -1,5 +1,5 @@
 use crate::http::HttpErrorStatus;
-use crate::token::{AccessScope, AccessTokenClaims, ScopeTokenClaims};
+use crate::token::{AccessScope, AccessTokenClaims};
 use saphir::prelude::*;
 
 #[derive(Deserialize)]
@@ -29,18 +29,11 @@ impl AccessGuard {
 
         let allowed = match (&self.token_type, claims) {
             (TokenType::Association, AccessTokenClaims::Association(_)) => true,
-            (TokenType::Scope(scope_needed), AccessTokenClaims::Scope(scope_from_request))
-                if scope_from_request.scope == *scope_needed =>
+            (TokenType::Scope(scope_needed), AccessTokenClaims::Scope(claims))
+                if claims.scope == *scope_needed || claims.scope == AccessScope::Wildcard =>
             {
                 true
             }
-            (
-                TokenType::Scope(_),
-                AccessTokenClaims::Scope(ScopeTokenClaims {
-                    scope: AccessScope::Wildcard,
-                    ..
-                }),
-            ) => true,
             (TokenType::Bridge, AccessTokenClaims::Bridge(_)) => true,
             (TokenType::Kdc, AccessTokenClaims::Kdc(_)) => true,
             (TokenType::Jrl, AccessTokenClaims::Jrl(_)) => true,

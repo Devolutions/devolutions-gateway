@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2023.1.1
+2023.1.3
 :toc: left
 :numbered:
 :toclevels: 3
@@ -412,6 +412,85 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Heartbeat]
+=== Heartbeat
+
+
+[.getHeartbeat]
+==== getHeartbeat
+
+`GET /jet/heartbeat`
+
+Performs a health check
+
+===== Description
+
+Performs a health check
+
+
+// markup not found, no include::{specDir}jet/heartbeat/GET/spec.adoc[opts=optional]
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+<<Heartbeat>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Heartbeat for this Gateway
+|  <<Heartbeat>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/heartbeat/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Jrl]
 === Jrl
 
@@ -788,6 +867,8 @@ endif::internal-generation[]
 | `"gateway.jrl.read"`
 
 | `"gateway.config.write"`
+
+| `"gateway.heartbeat.read"`
 |===
 
 
@@ -923,6 +1004,44 @@ Service configuration diagnostic
 
 | `"Base64UrlPad"`
 |===
+
+
+[#Heartbeat]
+=== _Heartbeat_ 
+
+
+
+[.fields-Heartbeat]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| hostname
+| X
+| String 
+| This Gateway's hostname
+|  
+
+| id
+| 
+| UUID 
+| This Gateway's unique ID
+| uuid 
+
+| running_session_count
+| X
+| Integer 
+| Number of running sessions
+|  
+
+| version
+| X
+| String 
+| Gateway service version
+|  
+
+|===
+
 
 
 [#Identity]

@@ -418,6 +418,8 @@ pub enum AccessScope {
     JrlRead,
     #[serde(rename = "gateway.config.write")]
     ConfigWrite,
+    #[serde(rename = "gateway.heartbeat.read")]
+    HeartbeatRead,
 }
 
 #[derive(Clone, Deserialize)]

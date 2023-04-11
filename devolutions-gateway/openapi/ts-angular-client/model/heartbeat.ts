@@ -11,14 +11,22 @@
  */
 
 
-export interface ClockDiagnostic { 
+export interface Heartbeat { 
     /**
-     * Current time in milliseconds
+     * This Gateway\'s hostname
      */
-    timestamp_millis: number;
+    hostname: string;
     /**
-     * Current time in seconds
+     * This Gateway\'s unique ID
      */
-    timestamp_secs: number;
+    id?: string;
+    /**
+     * Number of running sessions
+     */
+    running_session_count: number;
+    /**
+     * Gateway service version
+     */
+    version: string;
 }
 
