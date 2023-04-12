@@ -80,9 +80,9 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {err:#}")))
-        } else if req.method() == Method::GET && req_uri.starts_with("/jet/tcp") {
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/fwd/tcp") {
             info!("{} {}", req.method(), req_uri);
-            handle_tcp(
+            handle_fwd_tcp(
                 req,
                 client_addr,
                 self.conf.clone(),
@@ -93,9 +93,9 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TCP error - {err:#}")))
-        } else if req.method() == Method::GET && req_uri.starts_with("/jet/tls") {
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/fwd/tls") {
             info!("{} {}", req.method(), req_uri);
-            handle_tls(
+            handle_fwd_tls(
                 req,
                 client_addr,
                 self.conf.clone(),
@@ -643,7 +643,7 @@ async fn handle_rdp(
     Ok(rsp)
 }
 
-async fn handle_tcp(
+async fn handle_fwd_tcp(
     mut req: Request<Body>,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
@@ -705,7 +705,7 @@ async fn handle_tcp(
     Ok(rsp)
 }
 
-async fn handle_tls(
+async fn handle_fwd_tls(
     mut req: Request<Body>,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
@@ -753,6 +753,7 @@ async fn handle_tls(
                 .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
                 .with_tls(true)
+                .scheme("tls")
                 .build()
                 .run()
                 .await

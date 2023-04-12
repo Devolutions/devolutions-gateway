@@ -42,7 +42,7 @@ pub fn authorize(
 }
 
 #[derive(TypedBuilder)]
-pub struct PlainForward<S> {
+pub struct PlainForward<'a, S> {
     conf: Arc<Conf>,
     claims: AssociationTokenClaims,
     client_stream: S,
@@ -51,9 +51,11 @@ pub struct PlainForward<S> {
     subscriber_tx: SubscriberSender,
     #[builder(default = false)]
     with_tls: bool,
+    #[builder(default = "tcp")]
+    scheme: &'a str,
 }
 
-impl<S> PlainForward<S>
+impl<S> PlainForward<'_, S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -67,6 +69,7 @@ where
             sessions,
             subscriber_tx,
             with_tls,
+            scheme,
         } = self;
 
         if claims.jet_rec {
@@ -77,11 +80,15 @@ where
             anyhow::bail!("invalid connection mode")
         };
 
-        trace!("Connecting to target");
+        if let Some(bad_target) = targets.iter().find(|target| target.scheme() != scheme) {
+            anyhow::bail!("invalid scheme for target {bad_target}");
+        }
+
+        trace!("Select and connect to target");
 
         let (server_transport, selected_target) = utils::successive_try(&targets, utils::tcp_transport_connect).await?;
 
-        trace!("Connected");
+        trace!(%selected_target, "Connected");
 
         if with_tls {
             trace!("Establishing TLS connection with server");
@@ -124,7 +131,7 @@ where
             trace!("TLS connection established with success");
 
             info!(
-                "Starting WebSocket-TLS forwarding with application protocol {:?}",
+                "Starting WebSocket-TLS forwarding with application protocol {}",
                 claims.jet_ap
             );
 
@@ -154,7 +161,7 @@ where
                 .context("Encountered a failure during plain tls traffic proxying")
         } else {
             info!(
-                "Starting WebSocket-TCP forwarding with application protocol {:?}",
+                "Starting WebSocket-TCP forwarding with application protocol {}",
                 claims.jet_ap
             );
 
