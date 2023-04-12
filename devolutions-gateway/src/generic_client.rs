@@ -74,7 +74,7 @@ impl GenericClient {
                 match connection_mode {
                     ConnectionMode::Rdv => {
                         info!(
-                            "Starting TCP rendezvous redirection for application protocol {:?}",
+                            "Starting TCP rendezvous redirection for application protocol {}",
                             application_protocol
                         );
                         crate::jet_rendezvous_tcp_proxy::JetRendezvousTcpProxy::builder()
@@ -90,7 +90,7 @@ impl GenericClient {
                     }
                     ConnectionMode::Fwd { targets, creds: None } => {
                         info!(
-                            "Starting plain TCP forward redirection for application protocol {:?}",
+                            "Starting plain TCP forward redirection for application protocol {}",
                             application_protocol
                         );
 

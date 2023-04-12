@@ -126,9 +126,10 @@ async fn process_cleanpath(
     use tokio::io::AsyncReadExt as _;
     use tokio_util::codec::Decoder as _;
 
-    let Some(token) = cleanpath_pdu.proxy_auth.as_deref() else {
-        return Err(CleanPathError::Authorization(AuthorizationError::Unauthorized));
-    };
+    let token = cleanpath_pdu
+        .proxy_auth
+        .as_deref()
+        .ok_or(CleanPathError::Authorization(AuthorizationError::Unauthorized))?;
 
     trace!("Authorizing session");
 
