@@ -224,6 +224,36 @@ impl RecordingFileType {
     }
 }
 
+impl TryFrom<&str> for RecordingFileType {
+    type Error = ();
+    fn try_from(val: &str) -> Result<Self, Self::Error> {
+        let ival = val.to_lowercase();
+        match ival.as_str() {
+            "webm" => Ok(RecordingFileType::WebM),
+            "trp" => Ok(RecordingFileType::TRP),
+            _ => Err(()),
+        }
+    }
+}
+
+// ----- recording operations ----- //
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingOperation {
+    Push,
+    Pull,
+}
+
+impl RecordingOperation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            RecordingOperation::Push => "push",
+            RecordingOperation::Pull => "pull",
+        }
+    }
+}
+
 // ----- association claims ----- //
 
 #[derive(Clone)]
@@ -545,8 +575,8 @@ pub struct JrecTokenClaims {
     /// Association ID (= Session ID)
     pub jet_aid: Uuid,
 
-    // Recording file type
-    pub jet_rft: RecordingFileType,
+    // Recording operation
+    pub jet_rop: RecordingOperation,
 
     // JWT expiration time claim.
     // We need this to build our token invalidation cache.

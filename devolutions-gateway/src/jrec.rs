@@ -2,10 +2,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::config::Conf;
-use crate::token::{CurrentJrl, JrecTokenClaims, TokenCache, TokenError};
+use crate::token::{CurrentJrl, JrecTokenClaims, TokenCache, TokenError, RecordingOperation};
 
 use anyhow::Context as _;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::{Utf8Path};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, BufWriter};
@@ -33,14 +33,18 @@ pub fn authorize(
     if let AccessTokenClaims::Jrec(claims) =
         crate::http::middlewares::auth::authenticate(client_addr, token, conf, token_cache, jrl)?
     {
-        Ok(claims)
+        if claims.jet_rop != RecordingOperation::Push {
+            Err(AuthorizationError::Forbidden)
+        } else {
+            Ok(claims)
+        }
     } else {
         Err(AuthorizationError::Forbidden)
     }
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "camelCase")]
 struct JrecManifest {
     session_id: Uuid,
     file_type: String,
@@ -61,6 +65,7 @@ pub struct PlainForward<S> {
     conf: Arc<Conf>,
     claims: JrecTokenClaims,
     client_stream: S,
+    file_type: String,
 }
 
 impl<S> PlainForward<S>
@@ -73,6 +78,7 @@ where
             conf,
             claims,
             mut client_stream,
+            file_type,
         } = self;
 
         let session_id = claims.jet_aid;
@@ -88,19 +94,18 @@ where
         }
 
         let start_time = chrono::Utc::now().timestamp();
-        let file_type = claims.jet_rft.as_str();
 
         let mut manifest = JrecManifest {
             session_id: session_id.clone(),
-            file_type: file_type.to_string(),
+            file_type: file_type.to_owned(),
             start_time: start_time,
             duration: 0,
         };
 
-        let manifest_file = recording_path.join("session.json");
+        let manifest_file = recording_path.join("recording.json");
         manifest.save_to_file(&manifest_file)?;
 
-        let filename = format!("session.{0}", file_type);
+        let filename = format!("recording.{0}", &file_type);
         let path = recording_path.join(filename);
 
         debug!(%path, "Opening file");

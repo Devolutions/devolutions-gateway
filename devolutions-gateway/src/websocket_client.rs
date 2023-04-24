@@ -5,7 +5,7 @@ use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
-use crate::token::{CurrentJrl, TokenCache};
+use crate::token::{CurrentJrl, TokenCache, RecordingFileType};
 use crate::utils::association::remove_jet_association;
 use anyhow::Context as _;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
@@ -106,9 +106,9 @@ impl WebsocketService {
             )
             .await
             .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TLS error - {err:#}")))
-        } else if req.method() == Method::GET && req_uri.starts_with("/jet/jrec") {
+        } else if req.method() == Method::GET && req_uri.starts_with("/jet/jrec/push") {
             info!("{} {}", req.method(), req_uri);
-            handle_jrec(
+            handle_jrec_push(
                 req,
                 client_addr,
                 self.conf.clone(),
@@ -769,7 +769,7 @@ async fn handle_fwd_tls(
     Ok(rsp)
 }
 
-async fn handle_jrec(
+async fn handle_jrec_push(
     mut req: Request<Body>,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
@@ -796,6 +796,18 @@ async fn handle_jrec(
         anyhow::bail!("missing authorization"); // AUTHORIZATION
     };
 
+    let Some(file_type) = req.uri().query().and_then(|q| {
+        q.split('&')
+            .filter_map(|segment| segment.split_once('='))
+            .find_map(|(key, val)| key.eq("fileType").then_some(val.to_owned()))
+    }) else {
+        anyhow::bail!("missing recording file type");
+    };
+
+    if RecordingFileType::try_from(file_type.as_str()).is_err() {
+        anyhow::bail!(format!("unexpected recording file type: {0}", file_type.as_str()));
+    }
+
     let claims = crate::jrec::authorize(client_addr, token, &conf, token_cache, jrl)?; // FORBIDDEN
 
     if let Some(upgrade_val) = req.headers().get("upgrade").and_then(|v| v.to_str().ok()) {
@@ -813,6 +825,7 @@ async fn handle_jrec(
                 .client_stream(stream)
                 .conf(conf)
                 .claims(claims)
+                .file_type(file_type)
                 .build()
                 .run()
                 .await
