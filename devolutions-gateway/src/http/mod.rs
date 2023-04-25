@@ -13,7 +13,7 @@ use saphir::response::Builder;
 pub struct HttpErrorStatus {
     pub code: StatusCode,
     pub loc: &'static Location<'static>,
-    pub source: Box<dyn Display + Send + Sync + 'static>,
+    pub source: Box<dyn Display + Send + Sync + 'static>, // TODO: use anyhow::Error
 }
 
 impl<T: Display + Send + Sync + 'static> From<(StatusCode, T)> for HttpErrorStatus {

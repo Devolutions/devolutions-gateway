@@ -5,7 +5,7 @@ use crate::jet_client::JetAssociationsMap;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
-use crate::token::{CurrentJrl, TokenCache, RecordingFileType};
+use crate::token::{CurrentJrl, RecordingFileType, TokenCache};
 use crate::utils::association::remove_jet_association;
 use anyhow::Context as _;
 use hyper::{header, http, Body, Method, Request, Response, StatusCode, Version};
@@ -825,7 +825,7 @@ async fn handle_jrec_push(
                 .client_stream(stream)
                 .conf(conf)
                 .claims(claims)
-                .file_type(file_type)
+                .file_type(&file_type)
                 .build()
                 .run()
                 .await
