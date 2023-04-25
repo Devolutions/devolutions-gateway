@@ -1,0 +1,16 @@
+[package]
+name = "webpki-check"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+
+[workspace]
+members = ["."]
+
+[dependencies]
+pem = "2.0.1"
+
+# Same dependency as tokio-tungstenite 0.18.0
+# https://crates.io/crates/tokio-tungstenite/0.18.0/dependencies
+webpki = "0.22.0"
