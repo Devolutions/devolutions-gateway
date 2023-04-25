@@ -7,27 +7,15 @@ fn main() -> Result<(), ExitCode> {
         return Err(ExitCode::FAILURE);
     };
 
-    let subject_name = match webpki::SubjectNameRef::try_from_ascii_str(&subject_name) {
-        Ok(name) => name,
-        Err(e) => {
-            println!("Error: invalid subject name. {e:?}");
-            return Err(ExitCode::FAILURE);
-        }
-    };
+    let subject_name = webpki::DnsNameRef::try_from_ascii_str(&subject_name).ctx("invalid subject name")?;
 
-    println!("Read file at {cert_path}");
+    println!("=> Read file at {cert_path}");
 
-    let cert_val = match std::fs::read(cert_path) {
-        Ok(contents) => contents,
-        Err(e) => {
-            println!("Error: couldn’t read file. {e}");
-            return Err(ExitCode::FAILURE);
-        }
-    };
+    let cert_val = std::fs::read(cert_path).ctx("couldn’t read file")?;
 
     let cert_der = match pem::parse(&cert_val) {
         Ok(cert_pem) => {
-            println!("Detected PEM format");
+            println!("=> Detected PEM format");
 
             let pem_tag = cert_pem.tag();
 
@@ -38,31 +26,42 @@ fn main() -> Result<(), ExitCode> {
             cert_pem.into_contents()
         }
         Err(pem::PemError::NotUtf8(_)) => {
-            println!("Read as raw DER");
+            println!("=> Read as raw DER");
             cert_val
         }
         Err(e) => {
-            println!("Failed to read as PEM: {e}");
+            println!("Error: failed to read as PEM: {e}");
             return Err(ExitCode::FAILURE);
         }
     };
 
-    let end_entity_cert = match webpki::EndEntityCert::try_from(cert_der.as_slice()) {
-        Ok(cert) => cert,
-        Err(e) => {
-            println!("Error: {e}");
-            return Err(ExitCode::FAILURE);
-        }
-    };
+    println!("=> Decode end entity certificate");
 
-    match end_entity_cert.verify_is_valid_for_subject_name(subject_name) {
-        Ok(()) => {
-            println!("=> Ok");
-            Ok(())
-        }
-        Err(e) => {
-            println!("Error: {e}");
-            Err(ExitCode::FAILURE)
-        }
+    let end_entity_cert = webpki::EndEntityCert::try_from(cert_der.as_slice()).ctx("end entity cert decoding")?;
+
+    println!("=> Verify validity for DNS name");
+
+    end_entity_cert
+        .verify_is_valid_for_dns_name(subject_name)
+        .ctx("verify is valid for DNS name")?;
+
+    println!("=> Ok");
+
+    Ok(())
+}
+
+trait ResultExt<T> {
+    fn ctx(self, note: &'static str) -> Result<T, ExitCode>;
+}
+
+impl<T, E> ResultExt<T> for Result<T, E>
+where
+    E: core::fmt::Display,
+{
+    fn ctx(self, note: &'static str) -> Result<T, ExitCode> {
+        self.map_err(|e| {
+            println!("Error: {note}. {e}");
+            ExitCode::FAILURE
+        })
     }
 }

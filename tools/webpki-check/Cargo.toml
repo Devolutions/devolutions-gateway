@@ -10,4 +10,7 @@ members = ["."]
 
 [dependencies]
 pem = "2.0.1"
-webpki = { package = "rustls-webpki", version = "0.100.1" }
+
+# Same dependency as tokio-tungstenite 0.18.0
+# https://crates.io/crates/tokio-tungstenite/0.18.0/dependencies
+webpki = "0.22.0"
