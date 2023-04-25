@@ -736,8 +736,8 @@ function New-DGatewayToken {
         [string] $DestinationHost, # dst_hst
 
         # private jrec claims
-        [ValidateSet('webm', 'trp')]
-        [string] $RecordingFileType, # jet_rft
+        [ValidateSet('push', 'pull')]
+        [string] $RecordingOperation = 'push', # jet_rop
 
         # private scope claims
         [string] $Scope, # scope
@@ -853,15 +853,15 @@ function New-DGatewayToken {
     }
 
     if ($Type -eq 'JREC') {
-        if (-Not $RecordingFileType) {
-            throw "RecordingFileType is required"
+        if (-Not $RecordingOperation) {
+            throw "RecordingOperation is required"
         }
 
         if ($ApplicationProtocol) {
             $Payload | Add-Member -MemberType NoteProperty -Name 'jet_ap' -Value $ApplicationProtocol
         }
 
-        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_rft' -Value $RecordingFileType.ToLower()
+        $Payload | Add-Member -MemberType NoteProperty -Name 'jet_rop' -Value $RecordingOperation.ToLower()
         
         if (-Not $AssociationId) {
             $AssociationId = New-Guid

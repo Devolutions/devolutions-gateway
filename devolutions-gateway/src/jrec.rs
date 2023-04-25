@@ -2,11 +2,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use crate::config::Conf;
-use crate::token::{CurrentJrl, JrecTokenClaims, TokenCache, TokenError};
+use crate::token::{CurrentJrl, JrecTokenClaims, RecordingOperation, TokenCache, TokenError};
 
 use anyhow::Context as _;
-use camino::{Utf8Path, Utf8PathBuf};
-use serde::{Deserialize, Serialize};
+use camino::Utf8Path;
+use serde::Serialize;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, BufWriter};
 use tokio::{fs, io};
@@ -33,22 +33,26 @@ pub fn authorize(
     if let AccessTokenClaims::Jrec(claims) =
         crate::http::middlewares::auth::authenticate(client_addr, token, conf, token_cache, jrl)?
     {
-        Ok(claims)
+        if claims.jet_rop != RecordingOperation::Push {
+            Err(AuthorizationError::Forbidden)
+        } else {
+            Ok(claims)
+        }
     } else {
         Err(AuthorizationError::Forbidden)
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct JrecManifest {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JrecManifest<'a> {
     session_id: Uuid,
-    file_type: String,
+    file_type: &'a str,
     start_time: i64,
     duration: i64,
 }
 
-impl JrecManifest {
+impl JrecManifest<'_> {
     pub fn save_to_file(&self, path: &Utf8Path) -> anyhow::Result<()> {
         let json = serde_json::to_string_pretty(&self)?;
         std::fs::write(path, json)?;
@@ -57,13 +61,14 @@ impl JrecManifest {
 }
 
 #[derive(TypedBuilder)]
-pub struct PlainForward<S> {
+pub struct PlainForward<'a, S> {
     conf: Arc<Conf>,
     claims: JrecTokenClaims,
     client_stream: S,
+    file_type: &'a str,
 }
 
-impl<S> PlainForward<S>
+impl<S> PlainForward<'_, S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -73,45 +78,48 @@ where
             conf,
             claims,
             mut client_stream,
+            file_type,
         } = self;
 
         let session_id = claims.jet_aid;
-        let session_id_str = session_id.hyphenated().to_string();
 
-        let mut recording_path = conf.recording_path.clone();
-        recording_path.push(session_id_str.as_str());
+        let recording_path = conf.recording_path.join(session_id.to_string());
 
-        if !recording_path.exists() {
+        if recording_path.exists() {
+            debug!(path = %recording_path, "Recording directory already exists");
+        } else {
+            trace!(path = %recording_path, "Create recording directory");
             fs::create_dir_all(&recording_path)
                 .await
                 .with_context(|| format!("Failed to create recording path: {recording_path}"))?;
         }
 
+        // TODO: try to retrieve this information from the currently running session if applicable.
         let start_time = chrono::Utc::now().timestamp();
-        let file_type = claims.jet_rft.as_str();
 
         let mut manifest = JrecManifest {
-            session_id: session_id.clone(),
-            file_type: file_type.to_string(),
-            start_time: start_time,
+            session_id,
+            file_type,
+            start_time,
             duration: 0,
         };
 
-        let manifest_file = recording_path.join("session.json");
+        let path_base = recording_path.join("recording");
+
+        let manifest_file = path_base.with_extension("json");
         manifest.save_to_file(&manifest_file)?;
 
-        let filename = format!("session.{0}", file_type);
-        let path = recording_path.join(filename);
+        let recording_file = path_base.with_extension(file_type);
 
-        debug!(%path, "Opening file");
+        debug!(path = %recording_file, "Opening file");
 
         let mut file = fs::OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)
-            .open(&path)
+            .open(&recording_file)
             .await
-            .with_context(|| format!("Failed to open file at {path}"))
+            .with_context(|| format!("Failed to open file at {recording_file}"))
             .map(BufWriter::new)?;
 
         io::copy(&mut client_stream, &mut file)

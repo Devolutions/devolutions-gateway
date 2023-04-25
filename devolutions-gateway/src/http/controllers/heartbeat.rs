@@ -1,6 +1,5 @@
 use crate::config::ConfHandle;
-use crate::http::guards::access::AccessGuard;
-use crate::http::guards::access::TokenType;
+use crate::http::guards::access::{AccessGuard, TokenType};
 use crate::http::HttpErrorStatus;
 use crate::session::SessionManagerHandle;
 use crate::token::AccessScope;
