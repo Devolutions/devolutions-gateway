@@ -1,0 +1,13 @@
+[package]
+name = "webpki-check"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+
+[workspace]
+members = ["."]
+
+[dependencies]
+pem = "2.0.1"
+webpki = { package = "rustls-webpki", version = "0.100.1" }
