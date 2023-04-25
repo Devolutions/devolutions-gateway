@@ -804,6 +804,8 @@ async fn handle_jrec_push(
         anyhow::bail!("missing recording file type");
     };
 
+    let session_id = get_uuid_in_path(req.uri().path(), 3).context("session ID is missing from request path")?; // BAD REQUEST
+
     if RecordingFileType::try_from(file_type.as_str()).is_err() {
         anyhow::bail!(format!("unexpected recording file type: {0}", file_type.as_str()));
     }
@@ -821,11 +823,12 @@ async fn handle_jrec_push(
     tokio::spawn(async move {
         let fut = async {
             let stream = upgrade_websocket(&mut req).await?;
-            crate::jrec::PlainForward::builder()
+            crate::jrec::ClientPush::builder()
                 .client_stream(stream)
                 .conf(conf)
                 .claims(claims)
                 .file_type(&file_type)
+                .session_id(session_id)
                 .build()
                 .run()
                 .await
