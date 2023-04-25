@@ -61,14 +61,15 @@ impl JrecManifest<'_> {
 }
 
 #[derive(TypedBuilder)]
-pub struct PlainForward<'a, S> {
+pub struct ClientPush<'a, S> {
     conf: Arc<Conf>,
     claims: JrecTokenClaims,
     client_stream: S,
     file_type: &'a str,
+    session_id: Uuid,
 }
 
-impl<S> PlainForward<'_, S>
+impl<S> ClientPush<'_, S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -79,9 +80,12 @@ where
             claims,
             mut client_stream,
             file_type,
+            session_id,
         } = self;
 
-        let session_id = claims.jet_aid;
+        if session_id != claims.jet_aid {
+            anyhow::bail!("inconsistent session ID (ID in token: {})", claims.jet_aid);
+        }
 
         let recording_path = conf.recording_path.join(session_id.to_string());
 
