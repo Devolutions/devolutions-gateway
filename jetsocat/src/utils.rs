@@ -92,8 +92,17 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow:
     use tokio_tungstenite::client_async_tls;
 
     let req = addr.into_client_request()?;
+
     let domain = req.uri().host().context("no host name in the url")?;
-    let port = req.uri().port_u16().context("no port in the url")?;
+    let port = match req.uri().port_u16() {
+        Some(port) => port,
+        None => match req.uri().scheme_str() {
+            Some("http" | "ws") => 80,
+            Some("https" | "wss") => 443,
+            _ => anyhow::bail!("no port in the url and unknown scheme"),
+        },
+    };
+
     let req_addr = (domain, port);
 
     impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<WebSocketConnectOutput>, |stream| {
