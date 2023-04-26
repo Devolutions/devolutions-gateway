@@ -1,6 +1,6 @@
 use crate::config::{Conf, ConfHandle};
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::listener::ListenerUrls;
 use crate::token::AccessScope;
 use saphir::prelude::*;
@@ -72,7 +72,7 @@ impl DiagnosticsController {
 impl DiagnosticsController {
     #[get("/logs")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
-    async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
+    async fn get_logs(&self) -> Result<File, HttpError> {
         get_logs(self).await
     }
 
@@ -107,20 +107,20 @@ impl DiagnosticsController {
     ),
     security(("scope_token" = ["gateway.diagnostics.read"])),
 ))]
-async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpErrorStatus> {
+async fn get_logs(controller: &DiagnosticsController) -> Result<File, HttpError> {
     let conf = controller.conf_handle.get_conf();
 
     let latest_log_file_path = crate::log::find_latest_log_file(conf.log_file.as_path())
         .await
-        .map_err(|e| HttpErrorStatus::internal(format!("latest log file not found: {e:#}")))?;
+        .map_err(HttpError::internal().with_msg("latest log file not found").err())?;
 
     let latest_log_file_path = latest_log_file_path
         .to_str()
-        .ok_or_else(|| HttpErrorStatus::internal("invalid file path"))?;
+        .ok_or_else(|| HttpError::internal().msg("invalid file path"))?;
 
     File::open(latest_log_file_path)
         .await
-        .map_err(HttpErrorStatus::internal)
+        .map_err(HttpError::internal().err())
 }
 
 /// Retrieves configuration.
@@ -167,7 +167,7 @@ pub struct LegacyDiagnosticsController {
 impl LegacyDiagnosticsController {
     #[get("/logs")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::DiagnosticsRead)"#)]
-    async fn get_logs(&self) -> Result<File, HttpErrorStatus> {
+    async fn get_logs(&self) -> Result<File, HttpError> {
         get_logs(&self.inner).await
     }
 

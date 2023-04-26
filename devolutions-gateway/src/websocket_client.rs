@@ -30,14 +30,14 @@ pub struct WebsocketService {
 }
 
 impl WebsocketService {
-    pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> Result<Response<Body>, io::Error> {
+    pub async fn handle(&mut self, req: Request<Body>, client_addr: SocketAddr) -> io::Result<Response<Body>> {
         let req_uri = req.uri().path();
 
         if req.method() == Method::GET && req_uri.starts_with("/jet/accept") {
             info!("{} {}", req.method(), req_uri);
             handle_jet_accept(req, client_addr, self.associations.clone())
                 .await
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET accept error - {err:?}")))
+                .map_err(|e| io::Error::new(ErrorKind::Other, format!("{e:?}")))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/connect") {
             info!("{} {}", req.method(), req_uri);
             handle_jet_connect(
@@ -49,11 +49,10 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET connect error - {err:?}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("{e:?}")))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/test") {
             info!("{} {}", req.method(), req_uri);
-            handle_jet_test(req, &self.associations)
-                .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JET test error - {err:?}")))
+            handle_jet_test(req, &self.associations).map_err(|e| io::Error::new(ErrorKind::Other, format!("{e:?}")))
         } else if req.method() == Method::GET && (req_uri.starts_with("/jmux") || req_uri.starts_with("/jet/jmux")) {
             info!("{} {}", req.method(), req_uri);
             handle_jmux(
@@ -66,7 +65,7 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JMUX error - {err:#}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/rdp") {
             info!("{} {}", req.method(), req_uri);
             handle_rdp(
@@ -79,7 +78,7 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle RDP error - {err:#}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/fwd/tcp") {
             info!("{} {}", req.method(), req_uri);
             handle_fwd_tcp(
@@ -92,7 +91,7 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TCP error - {err:#}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/fwd/tls") {
             info!("{} {}", req.method(), req_uri);
             handle_fwd_tls(
@@ -105,7 +104,7 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle TLS error - {err:#}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
         } else if req.method() == Method::GET && req_uri.starts_with("/jet/jrec/push") {
             info!("{} {}", req.method(), req_uri);
             handle_jrec_push(
@@ -118,13 +117,13 @@ impl WebsocketService {
                 self.subscriber_tx.clone(),
             )
             .await
-            .map_err(|err| io::Error::new(ErrorKind::Other, format!("Handle JREC error - {err:#}")))
+            .map_err(|e| io::Error::new(ErrorKind::Other, e))
         } else {
             saphir::server::inject_raw_with_peer_addr(req, Some(client_addr))
                 .await
-                .map_err(|err| match err {
-                    error::SaphirError::Io(err) => err,
-                    err => io::Error::new(io::ErrorKind::Other, format!("{err}")),
+                .map_err(|e| match e {
+                    error::SaphirError::Io(e) => e,
+                    _ => io::Error::new(io::ErrorKind::Other, e),
                 })
         }
     }

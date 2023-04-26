@@ -1,5 +1,5 @@
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::session::{KillResult, SessionManagerHandle};
 use crate::token::AccessScope;
 use saphir::controller::Controller;
@@ -15,7 +15,7 @@ pub struct SessionController {
 impl SessionController {
     #[post("/{id}/terminate")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::SessionTerminate)"#)]
-    async fn terminate_session(&self, id: Uuid) -> Result<(), HttpErrorStatus> {
+    async fn terminate_session(&self, id: Uuid) -> Result<(), HttpError> {
         terminate_session(&self.sessions, id).await
     }
 }
@@ -39,16 +39,13 @@ impl SessionController {
     ),
     security(("scope_token" = ["gateway.session.terminate"])),
 ))]
-pub(crate) async fn terminate_session(
-    sessions: &SessionManagerHandle,
-    session_id: Uuid,
-) -> Result<(), HttpErrorStatus> {
+pub(crate) async fn terminate_session(sessions: &SessionManagerHandle, session_id: Uuid) -> Result<(), HttpError> {
     match sessions
         .kill_session(session_id)
         .await
-        .map_err(HttpErrorStatus::internal)?
+        .map_err(HttpError::internal().err())?
     {
         KillResult::Success => Ok(()),
-        KillResult::NotFound => Err(HttpErrorStatus::not_found("session not found")),
+        KillResult::NotFound => Err(HttpError::not_found().msg("session not found")),
     }
 }

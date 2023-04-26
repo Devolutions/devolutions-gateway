@@ -1,4 +1,4 @@
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::{AccessScope, AccessTokenClaims};
 use saphir::prelude::*;
 
@@ -21,11 +21,11 @@ impl AccessGuard {
         AccessGuard { token_type }
     }
 
-    async fn validate(&self, req: Request) -> Result<Request, HttpErrorStatus> {
+    async fn validate(&self, req: Request) -> Result<Request, HttpError> {
         let claims = req
             .extensions()
             .get::<AccessTokenClaims>()
-            .ok_or_else(|| HttpErrorStatus::unauthorized("identity missing (no token provided)"))?;
+            .ok_or_else(|| HttpError::unauthorized().msg("identity missing (no token provided)"))?;
 
         let allowed = match (&self.token_type, claims) {
             (TokenType::Association, AccessTokenClaims::Association(_)) => true,
@@ -43,7 +43,7 @@ impl AccessGuard {
         if allowed {
             Ok(req)
         } else {
-            Err(HttpErrorStatus::forbidden("token not allowed"))
+            Err(HttpError::forbidden().msg("token not allowed"))
         }
     }
 }

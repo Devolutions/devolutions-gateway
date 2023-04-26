@@ -1,5 +1,5 @@
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::session::{SessionInfo, SessionManagerHandle};
 use crate::token::AccessScope;
 use saphir::controller::Controller;
@@ -15,7 +15,7 @@ pub struct SessionsController {
 impl SessionsController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::SessionsRead)"#)]
-    async fn get_sessions(&self) -> Result<Json<Vec<SessionInfo>>, HttpErrorStatus> {
+    async fn get_sessions(&self) -> Result<Json<Vec<SessionInfo>>, HttpError> {
         get_sessions(&self.sessions).await
     }
 }
@@ -35,11 +35,11 @@ impl SessionsController {
     ),
     security(("scope_token" = ["gateway.sessions.read"])),
 ))]
-pub(crate) async fn get_sessions(sessions: &SessionManagerHandle) -> Result<Json<Vec<SessionInfo>>, HttpErrorStatus> {
+pub(crate) async fn get_sessions(sessions: &SessionManagerHandle) -> Result<Json<Vec<SessionInfo>>, HttpError> {
     let sessions_in_progress: Vec<SessionInfo> = sessions
         .get_running_sessions()
         .await
-        .map_err(HttpErrorStatus::internal)?
+        .map_err(HttpError::internal().err())?
         .into_values()
         .collect();
 
@@ -56,7 +56,7 @@ pub struct LegacySessionsController {
 impl LegacySessionsController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::SessionsRead)"#)]
-    async fn get_sessions(&self) -> Result<Json<Vec<SessionInfo>>, HttpErrorStatus> {
+    async fn get_sessions(&self) -> Result<Json<Vec<SessionInfo>>, HttpError> {
         get_sessions(&self.sessions).await
     }
 }

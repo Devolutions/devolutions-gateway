@@ -1,7 +1,7 @@
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::AccessScope;
 use saphir::controller::Controller;
 use saphir::http::Method;
@@ -24,7 +24,7 @@ impl ConfigController {
 impl ConfigController {
     #[patch("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::ConfigWrite)"#)]
-    async fn patch_config(&self, req: Request) -> Result<(), HttpErrorStatus> {
+    async fn patch_config(&self, req: Request) -> Result<(), HttpError> {
         patch_config(&self.conf_handle, req).await
     }
 }
@@ -76,28 +76,26 @@ const KEY_ALLOWLIST: &[&str] = &["Id", "SubProvisionerPublicKey", "Subscriber"];
     ),
     security(("scope_token" = ["gateway.config.write"])),
 ))]
-async fn patch_config(conf_handle: &ConfHandle, req: Request) -> Result<(), HttpErrorStatus> {
+async fn patch_config(conf_handle: &ConfHandle, req: Request) -> Result<(), HttpError> {
     let req = req
         .load_body()
         .await
-        .map_err(|e| HttpErrorStatus::bad_request(format!("Failed to read request body: {e}")))?;
+        .map_err(HttpError::bad_request().with_msg("failed to read request body").err())?;
     let body = req.body();
 
     let patch: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_slice(body).map_err(|e| HttpErrorStatus::bad_request(format!("invalid JSON payload: {e}")))?;
+        serde_json::from_slice(body).map_err(HttpError::bad_request().with_msg("invalid JSON payload").err())?;
 
     trace!(?patch, "received JSON config patch");
 
     if !patch.iter().all(|(key, _)| KEY_ALLOWLIST.contains(&key.as_str())) {
-        return Err(HttpErrorStatus::bad_request(
-            "patch request contains a key that is not allowed",
-        ));
+        return Err(HttpError::bad_request().msg("patch request contains a key that is not allowed"));
     }
 
     let mut new_conf = conf_handle
         .get_conf_file()
         .pipe_deref(serde_json::to_value)
-        .map_err(HttpErrorStatus::internal)?
+        .map_err(HttpError::internal().err())?
         .pipe(|val| {
             // ConfFile struct is a JSON object
             if let serde_json::Value::Object(obj) = val {
@@ -111,12 +109,17 @@ async fn patch_config(conf_handle: &ConfHandle, req: Request) -> Result<(), Http
         new_conf.insert(key, val);
     }
 
-    let new_conf_file = serde_json::from_value(serde_json::Value::Object(new_conf))
-        .map_err(|e| HttpErrorStatus::bad_request(format!("patch produced invalid configuration: {e}")))?;
+    let new_conf_file = serde_json::from_value(serde_json::Value::Object(new_conf)).map_err(
+        HttpError::bad_request()
+            .with_msg("patch produced invalid configuration")
+            .err(),
+    )?;
 
-    conf_handle
-        .save_new_conf_file(new_conf_file)
-        .map_err(|e| HttpErrorStatus::internal(format!("failed to save configuration file: {e:#}")))?;
+    conf_handle.save_new_conf_file(new_conf_file).map_err(
+        HttpError::internal()
+            .with_msg("failed to save configuration file")
+            .err(),
+    )?;
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::AccessTokenClaims;
 use saphir::macros::controller;
 use saphir::request::Request;
@@ -30,19 +30,19 @@ impl HttpBridgeController {
     #[patch("/message")]
     #[delete("/message")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Bridge"#)]
-    async fn message(&self, mut req: Request) -> Result<Builder, HttpErrorStatus> {
+    async fn message(&self, mut req: Request) -> Result<Builder, HttpError> {
         use core::convert::TryFrom;
 
         let claims = req
             .extensions_mut()
             .remove::<AccessTokenClaims>()
-            .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
+            .ok_or_else(|| HttpError::unauthorized().msg("identity is missing (token)"))?;
 
         // FIXME: when updating reqwest 0.10 → 0.11 and hyper 0.13 → 0.14:
         // Use https://docs.rs/reqwest/0.11.4/reqwest/struct.Body.html#impl-From%3CBody%3E
         // to get a streaming reqwest Request instead of loading the whole body in memory.
         // FIXME: consider using hyper directly
-        let req = req.load_body().await.map_err(HttpErrorStatus::internal)?;
+        let req = req.load_body().await.map_err(HttpError::internal().err())?;
         let req: saphir::request::Request<reqwest::Body> = req.map(reqwest::Body::from);
         let mut req: http::Request<reqwest::Body> = http::Request::from(req);
 
@@ -52,9 +52,9 @@ impl HttpBridgeController {
             let request_target = req
                 .headers()
                 .get("Request-Target")
-                .ok_or_else(|| HttpErrorStatus::bad_request("Request-Target header is missing"))?
+                .ok_or_else(|| HttpError::bad_request().msg("Request-Target header is missing"))?
                 .to_str()
-                .map_err(|_| HttpErrorStatus::bad_request("Request-Target header has an invalid value"))?;
+                .map_err(|_| HttpError::bad_request().msg("Request-Target header has an invalid value"))?;
             // <TARGET>
             let request_target = request_target
                 .split(' ')
@@ -62,19 +62,20 @@ impl HttpBridgeController {
                 .next()
                 .expect("Split always returns at least one element");
 
-            claims
-                .target_host
-                .to_uri_with_path_and_query(request_target)
-                .map_err(|e| HttpErrorStatus::bad_request(format!("Request-Target header has an invalid value: {e}")))?
+            claims.target_host.to_uri_with_path_and_query(request_target).map_err(
+                HttpError::bad_request()
+                    .with_msg("Request-Target header has an invalid value")
+                    .err(),
+            )?
         } else {
-            return Err(HttpErrorStatus::forbidden("token not allowed"));
+            return Err(HttpError::forbidden().msg("token not allowed"));
         };
         *req.uri_mut() = uri;
 
         // Forward
         debug!("Forward HTTP request to {}", req.uri());
-        let req = reqwest::Request::try_from(req).map_err(HttpErrorStatus::internal)?;
-        let mut rsp = self.client.execute(req).await.map_err(HttpErrorStatus::bad_gateway)?;
+        let req = reqwest::Request::try_from(req).map_err(HttpError::internal().err())?;
+        let mut rsp = self.client.execute(req).await.map_err(HttpError::bad_gateway().err())?;
 
         // === Create HTTP response using target response === //
 
