@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::Conf;
 use crate::token::{CurrentJrl, JrecTokenClaims, RecordingOperation, TokenCache, TokenError};
 
 use anyhow::Context as _;
-use camino::Utf8Path;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, BufWriter};
@@ -43,17 +43,31 @@ pub fn authorize(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecManifest<'a> {
-    session_id: Uuid,
-    file_type: &'a str,
+struct JrecFile {
+    file_name: String,
     start_time: i64,
     duration: i64,
 }
 
-impl JrecManifest<'_> {
-    pub fn save_to_file(&self, path: &Utf8Path) -> anyhow::Result<()> {
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JrecManifest {
+    session_id: Uuid,
+    start_time: i64,
+    duration: i64,
+    files: Vec<JrecFile>,
+}
+
+impl JrecManifest {
+    fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let json = std::fs::read(path)?;
+        let manifest = serde_json::from_slice(&json)?;
+        Ok(manifest)
+    }
+
+    fn save_to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
         let json = serde_json::to_string_pretty(&self)?;
         std::fs::write(path, json)?;
         Ok(())
@@ -68,6 +82,8 @@ pub struct ClientPush<'a, S> {
     file_type: &'a str,
     session_id: Uuid,
 }
+
+// FIXME: at some point, we should track ongoing recordings and make sure there is no data race to write the manifest file
 
 impl<S> ClientPush<'_, S>
 where
@@ -88,33 +104,63 @@ where
         }
 
         let recording_path = conf.recording_path.join(session_id.to_string());
+        let manifest_file = recording_path.join("recording.json");
 
-        if recording_path.exists() {
+        let (file_idx, mut manifest) = if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
-            todo!("continue previous recording") // TODO
+
+            let mut existing_manifest =
+                JrecManifest::read_from_file(&manifest_file).context("read manifest from disk")?;
+            let next_file_idx = existing_manifest.files.len();
+
+            let start_time = chrono::Utc::now().timestamp();
+
+            existing_manifest.files.push(JrecFile {
+                start_time,
+                duration: 0,
+                file_name: format!("recording-{next_file_idx}.{file_type}"),
+            });
+
+            existing_manifest
+                .save_to_file(&manifest_file)
+                .context("override existing manifest")?;
+
+            (next_file_idx, existing_manifest)
         } else {
-            trace!(path = %recording_path, "Create recording directory");
+            debug!(path = %recording_path, "Create recording directory");
+
             fs::create_dir_all(&recording_path)
                 .await
                 .with_context(|| format!("Failed to create recording path: {recording_path}"))?;
-        }
 
-        // TODO: try to retrieve this information from the currently running session if applicable.
-        let start_time = chrono::Utc::now().timestamp();
+            let start_time = chrono::Utc::now().timestamp();
 
-        let mut manifest = JrecManifest {
-            session_id,
-            file_type,
-            start_time,
-            duration: 0,
+            let first_file = JrecFile {
+                start_time,
+                duration: 0,
+                file_name: format!("recording-0.{file_type}"),
+            };
+
+            let initial_manifest = JrecManifest {
+                session_id,
+                start_time,
+                duration: 0,
+                files: vec![first_file],
+            };
+
+            initial_manifest
+                .save_to_file(&manifest_file)
+                .context("write initial manifest to disk")?;
+
+            (0, initial_manifest)
         };
 
-        let path_base = recording_path.join("recording");
+        let current_file = manifest
+            .files
+            .get_mut(file_idx)
+            .context("this is a bug: invalid file index")?;
 
-        let manifest_file = path_base.with_extension("json");
-        manifest.save_to_file(&manifest_file)?;
-
-        let recording_file = path_base.with_extension(file_type);
+        let recording_file = recording_path.join(&current_file.file_name);
 
         debug!(path = %recording_file, "Opening file");
 
@@ -132,8 +178,15 @@ where
             .context("JREC streaming to file")?;
 
         let end_time = chrono::Utc::now().timestamp();
-        manifest.duration = end_time - start_time;
-        manifest.save_to_file(&manifest_file)?;
+
+        current_file.duration = end_time - current_file.start_time;
+        manifest.duration = end_time - manifest.start_time;
+
+        debug!(path = %manifest_file, "write updated manifest to disk");
+
+        manifest
+            .save_to_file(&manifest_file)
+            .context("write updated manifest to disk")?;
 
         Ok(())
     }
