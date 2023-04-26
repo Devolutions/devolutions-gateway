@@ -9,6 +9,7 @@ pub enum TokenType {
     Association,
     Kdc,
     Jrl,
+    Jrec,
 }
 
 pub struct AccessGuard {
@@ -37,6 +38,7 @@ impl AccessGuard {
             (TokenType::Bridge, AccessTokenClaims::Bridge(_)) => true,
             (TokenType::Kdc, AccessTokenClaims::Kdc(_)) => true,
             (TokenType::Jrl, AccessTokenClaims::Jrl(_)) => true,
+            (TokenType::Jrec, AccessTokenClaims::Jrec(_)) => true,
             _ => false,
         };
 

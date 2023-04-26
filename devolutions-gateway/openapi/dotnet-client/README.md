@@ -109,6 +109,8 @@ Class | Method | HTTP request | Description
 *DiagnosticsApi* | [**GetLogs**](docs/DiagnosticsApi.md#getlogs) | **GET** /jet/diagnostics/logs | Retrieves latest logs.
 *HealthApi* | [**GetHealth**](docs/HealthApi.md#gethealth) | **GET** /jet/health | Performs a health check
 *HeartbeatApi* | [**GetHeartbeat**](docs/HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check
+*JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
+*JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *SessionsApi* | [**GetSessions**](docs/SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions

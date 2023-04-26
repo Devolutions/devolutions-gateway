@@ -491,6 +491,186 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Jrec]
+=== Jrec
+
+
+[.listRecordings]
+==== listRecordings
+
+`GET /jet/jrec/list`
+
+Lists all recordings stored on this instance
+
+===== Description
+
+Lists all recordings stored on this instance
+
+
+// markup not found, no include::{specDir}jet/jrec/list/GET/spec.adoc[opts=optional]
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+
+===== Return Type
+
+
+<<List>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| List of recordings on this Gateway instance
+| List[<<UUID>>] 
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/list/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.pullRecordingFile]
+==== pullRecordingFile
+
+`GET /jet/jrec/pull/{id}/{filename}`
+
+Retrieves a recording file for a given session
+
+===== Description
+
+Retrieves a recording file for a given session
+
+
+// markup not found, no include::{specDir}jet/jrec/pull/\{id\}/\{filename\}/GET/spec.adoc[opts=optional]
+
+
+===== Security
+
+-
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| id
+| Recorded session ID 
+| X
+| null
+| 
+
+| filename
+| Name of recording file to retrieve 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+
+<<File>>
+
+
+===== Content Type
+
+* application/octet-stream
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Recording file
+|  <<File>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| File not found
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/pull/\{id\}/\{filename\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Jrl]
 === Jrl
 
@@ -869,6 +1049,8 @@ endif::internal-generation[]
 | `"gateway.config.write"`
 
 | `"gateway.heartbeat.read"`
+
+| `"gateway.recordings.read"`
 |===
 
 

@@ -6,6 +6,7 @@ import { ConfigService } from './api/config.service';
 import { DiagnosticsService } from './api/diagnostics.service';
 import { HealthService } from './api/health.service';
 import { HeartbeatService } from './api/heartbeat.service';
+import { JrecService } from './api/jrec.service';
 import { JrlService } from './api/jrl.service';
 import { SessionsService } from './api/sessions.service';
 

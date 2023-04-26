@@ -91,6 +91,7 @@ where
 
         if recording_path.exists() {
             debug!(path = %recording_path, "Recording directory already exists");
+            todo!("continue previous recording") // TODO
         } else {
             trace!(path = %recording_path, "Create recording directory");
             fs::create_dir_all(&recording_path)

@@ -116,6 +116,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("JMUX", serde_json::to_value(&claims)?)
         }
+        SubCommand::Jrec { jet_rop, jet_aid } => {
+            let claims = JrecClaims {
+                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_rop,
+                exp,
+                nbf,
+                jti,
+            };
+            ("JREC", serde_json::to_value(&claims)?)
+        }
         SubCommand::Kdc { krb_realm, krb_kdc } => {
             let claims = KdcClaims {
                 exp,
@@ -228,6 +238,12 @@ enum SubCommand {
         #[clap(long)]
         jet_ttl: Option<u64>,
     },
+    Jrec {
+        #[clap(long)]
+        jet_rop: RecordingOperation,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
+    },
     Kdc {
         #[clap(long)]
         krb_realm: String,
@@ -293,6 +309,15 @@ struct JmuxClaims<'a> {
 }
 
 #[derive(Clone, Serialize)]
+struct JrecClaims {
+    jet_aid: Uuid,
+    jet_rop: RecordingOperation,
+    exp: i64,
+    nbf: i64,
+    jti: Uuid,
+}
+
+#[derive(Clone, Serialize)]
 struct KdcClaims<'a> {
     krb_realm: &'a str,
     krb_kdc: &'a str,
@@ -343,12 +368,26 @@ pub enum ApplicationProtocol {
     Unknown,
 }
 
-impl std::str::FromStr for ApplicationProtocol {
-    type Err = serde_json::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Not the most elegant / performant solution, but it's DRY and good enough for a small tool like this one
-        let json_s = format!("\"{s}\"");
-        serde_json::from_str(&json_s)
-    }
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingOperation {
+    Push,
+    Pull,
 }
+
+macro_rules! impl_from_str {
+    ($ty:ty) => {
+        impl std::str::FromStr for $ty {
+            type Err = serde_json::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                // Not the most elegant / performant solution, but it's DRY and good enough for a small tool like this one
+                let json_s = format!("\"{s}\"");
+                serde_json::from_str(&json_s)
+            }
+        }
+    };
+}
+
+impl_from_str!(ApplicationProtocol);
+impl_from_str!(RecordingOperation);

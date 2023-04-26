@@ -16,6 +16,8 @@ use uuid::Uuid;
         crate::http::controllers::config::patch_config,
         crate::http::controllers::jrl::update_jrl,
         crate::http::controllers::jrl::get_jrl_info,
+        crate::http::controllers::jrec::list_recordings,
+        crate::http::controllers::jrec::pull_recording_file,
     ),
     components(schemas(
         crate::http::controllers::health::Identity,

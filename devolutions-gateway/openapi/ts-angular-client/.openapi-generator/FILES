@@ -6,6 +6,7 @@ api/config.service.ts
 api/diagnostics.service.ts
 api/health.service.ts
 api/heartbeat.service.ts
+api/jrec.service.ts
 api/jrl.service.ts
 api/sessions.service.ts
 configuration.ts

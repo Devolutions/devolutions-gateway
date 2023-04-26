@@ -13,6 +13,7 @@ docs/HealthApi.md
 docs/Heartbeat.md
 docs/HeartbeatApi.md
 docs/Identity.md
+docs/JrecApi.md
 docs/JrlApi.md
 docs/JrlInfo.md
 docs/ListenerUrls.md
@@ -25,6 +26,7 @@ src/Devolutions.Gateway.Client/Api/ConfigApi.cs
 src/Devolutions.Gateway.Client/Api/DiagnosticsApi.cs
 src/Devolutions.Gateway.Client/Api/HealthApi.cs
 src/Devolutions.Gateway.Client/Api/HeartbeatApi.cs
+src/Devolutions.Gateway.Client/Api/JrecApi.cs
 src/Devolutions.Gateway.Client/Api/JrlApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
 src/Devolutions.Gateway.Client/Client/ApiClient.cs
