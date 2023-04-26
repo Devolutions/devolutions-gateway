@@ -38,6 +38,8 @@ impl GatewayService {
         let logger_guard =
             log::init(&conf.log_file, conf.log_directive.as_deref()).context("failed to setup logger")?;
 
+        info!(version = env!("CARGO_PKG_VERSION"));
+
         let conf_file = conf_handle.get_conf_file();
         trace!(?conf_file);
 
