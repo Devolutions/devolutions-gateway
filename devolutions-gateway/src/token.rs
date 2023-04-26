@@ -1035,8 +1035,7 @@ fn validate_token_impl(
         | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. })
-        | AccessTokenClaims::Jrec(JrecTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
+        | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 warn!("A replay attack may have been attempted.");
                 return Err(TokenError::UnexpectedReplay {
@@ -1051,6 +1050,25 @@ fn validate_token_impl(
                 });
             }
         },
+
+        // JREC push token may be re-used as long as recording is considered as ongoing
+        AccessTokenClaims::Jrec(JrecTokenClaims {
+            jet_rop: RecordingOperation::Push,
+            exp,
+            jti,
+            ..
+        }) => {
+            let _ = exp;
+            let _ = jti;
+            // TODO: check IP is the same
+            // TODO: check if recording is ongoing
+        }
+
+        // JREC pull tokens can be re-used until they are expired
+        AccessTokenClaims::Jrec(JrecTokenClaims {
+            jet_rop: RecordingOperation::Pull,
+            ..
+        }) => {}
 
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}

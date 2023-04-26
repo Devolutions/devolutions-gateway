@@ -147,6 +147,74 @@ paths:
       security:
       - scope_token:
         - gateway.heartbeat.read
+  /jet/jrec/list:
+    get:
+      tags:
+      - Jrec
+      summary: Lists all recordings stored on this instance
+      description: Lists all recordings stored on this instance
+      operationId: ListRecordings
+      responses:
+        '200':
+          description: List of recordings on this Gateway instance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      deprecated: false
+      security:
+      - scope_token:
+        - gateway.recordings.read
+  /jet/jrec/pull/{id}/{filename}:
+    get:
+      tags:
+      - Jrec
+      summary: Retrieves a recording file for a given session
+      description: Retrieves a recording file for a given session
+      operationId: PullRecordingFile
+      parameters:
+      - name: id
+        in: path
+        description: Recorded session ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: filename
+        in: path
+        description: Name of recording file to retrieve
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Recording file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: File not found
+      deprecated: false
+      security:
+      - jrec_token:
+        - pull
   /jet/jrl:
     post:
       tags:
@@ -267,6 +335,7 @@ components:
       - gateway.jrl.read
       - gateway.config.write
       - gateway.heartbeat.read
+      - gateway.recordings.read
     ClockDiagnostic:
       type: object
       required:

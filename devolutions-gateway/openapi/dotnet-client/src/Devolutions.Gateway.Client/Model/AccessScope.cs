@@ -78,7 +78,13 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum GatewayHeartbeatRead for value: gateway.heartbeat.read
         /// </summary>
         [EnumMember(Value = "gateway.heartbeat.read")]
-        GatewayHeartbeatRead = 8
+        GatewayHeartbeatRead = 8,
+
+        /// <summary>
+        /// Enum GatewayRecordingsRead for value: gateway.recordings.read
+        /// </summary>
+        [EnumMember(Value = "gateway.recordings.read")]
+        GatewayRecordingsRead = 9
 
     }
 
@@ -107,6 +113,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "gateway.config.write";
                 case AccessScope.GatewayHeartbeatRead:
                     return "gateway.heartbeat.read";
+                case AccessScope.GatewayRecordingsRead:
+                    return "gateway.recordings.read";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }
