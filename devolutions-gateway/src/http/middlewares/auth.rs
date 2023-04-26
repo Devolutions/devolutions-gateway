@@ -1,5 +1,5 @@
 use crate::config::{Conf, ConfHandle};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 use futures::future::{BoxFuture, FutureExt};
 use saphir::error::SaphirError;
@@ -108,7 +108,7 @@ async fn auth_middleware(
         .peer_addr()
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "peer address missing"))?;
 
-    match authenticate(*source_addr, token, &config, &token_cache, &jrl).map_err(HttpErrorStatus::unauthorized) {
+    match authenticate(*source_addr, token, &config, &token_cache, &jrl).map_err(HttpError::unauthorized().err()) {
         Ok(token) => {
             request.extensions_mut().insert(token);
             chain.next(ctx).await

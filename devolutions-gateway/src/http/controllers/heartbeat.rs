@@ -1,6 +1,6 @@
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::session::SessionManagerHandle;
 use crate::token::AccessScope;
 use saphir::body::json::Json;
@@ -19,7 +19,7 @@ pub struct HeartbeatController {
 impl HeartbeatController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::HeartbeatRead)"#)]
-    async fn get_heartbeat(&self) -> Result<Json<Heartbeat>, HttpErrorStatus> {
+    async fn get_heartbeat(&self) -> Result<Json<Heartbeat>, HttpError> {
         get_heartbeat(&self.conf_handle, &self.sessions).await
     }
 }
@@ -54,13 +54,13 @@ pub struct Heartbeat {
 pub(crate) async fn get_heartbeat(
     conf_handle: &ConfHandle,
     sessions: &SessionManagerHandle,
-) -> Result<Json<Heartbeat>, HttpErrorStatus> {
+) -> Result<Json<Heartbeat>, HttpError> {
     let conf = conf_handle.get_conf();
 
     let running_session_count = sessions
         .get_running_session_count()
         .await
-        .map_err(HttpErrorStatus::internal)?;
+        .map_err(HttpError::internal().err())?;
 
     Ok(Json(Heartbeat {
         id: conf.id,

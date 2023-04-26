@@ -359,12 +359,7 @@ where
 
     let service = service_fn(move |req| {
         let mut ws_serve = websocket_service.clone();
-        async move {
-            ws_serve.handle(req, remote_addr).await.map_err(|e| {
-                debug!("WebSocket HTTP server error: {}", e);
-                e
-            })
-        }
+        async move { ws_serve.handle(req, remote_addr).await }
     });
 
     hyper::server::conn::Http::new()

@@ -1,5 +1,5 @@
 use crate::config::ConfHandle;
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use saphir::body::Json;
 use saphir::controller::Controller;
 use saphir::http::Method;
@@ -28,7 +28,7 @@ impl HealthController {
 #[controller(name = "jet/health")]
 impl HealthController {
     #[get("/")]
-    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
+    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpError> {
         get_health(self, req)
     }
 }
@@ -76,7 +76,7 @@ impl Responder for HealthResponse {
         (status = 400, description = "Invalid Accept header"),
     ),
 ))]
-fn get_health(controller: &HealthController, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
+fn get_health(controller: &HealthController, req: Request) -> Result<HealthResponse, HttpError> {
     let conf = controller.conf_handle.get_conf();
 
     for hval in req
@@ -110,7 +110,7 @@ pub struct LegacyHealthController {
 #[controller(name = "health")]
 impl LegacyHealthController {
     #[get("/")]
-    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpErrorStatus> {
+    fn get_health(&self, req: Request) -> Result<HealthResponse, HttpError> {
         get_health(&self.inner, req)
     }
 }

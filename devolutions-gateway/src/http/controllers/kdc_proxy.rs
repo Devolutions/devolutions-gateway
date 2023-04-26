@@ -1,5 +1,5 @@
 use crate::config::ConfHandle;
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache};
 use crate::utils::resolve_target_to_socket_addr;
 use picky_krb::messages::KdcProxyMessage;
@@ -11,8 +11,6 @@ use saphir::response::Builder;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
-
-const ERROR_BAD_FORMAT: &str = "\x0b";
 
 pub struct KdcProxyController {
     pub conf_handle: ConfHandle,
@@ -35,7 +33,7 @@ impl KdcProxyController {
 #[controller(name = "KdcProxy")]
 impl KdcProxyController {
     #[post("/{kdc_token}")]
-    async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
+    async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpError> {
         proxy_kdc_message_stub(self, req).await
     }
 }
@@ -48,12 +46,12 @@ pub struct DuplicatedKdcProxyController {
 #[controller(name = "jet/KdcProxy")]
 impl DuplicatedKdcProxyController {
     #[post("/{kdc_token}")]
-    async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpErrorStatus> {
+    async fn proxy_kdc_message(&self, req: Request) -> Result<Builder, HttpError> {
         proxy_kdc_message_stub(&self.inner, req).await
     }
 }
 
-async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Result<Builder, HttpErrorStatus> {
+async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Result<Builder, HttpError> {
     use focaccia::unicode_full_case_eq;
 
     let conf = this.conf_handle.get_conf();
@@ -64,31 +62,27 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
         let token = req
             .captures()
             .get("kdc_token")
-            .ok_or_else(|| HttpErrorStatus::unauthorized("KDC token is missing"))?
+            .ok_or_else(|| HttpError::unauthorized().msg("KDC token is missing"))?
             .as_str();
 
         let source_addr = req
             .peer_addr()
-            .ok_or_else(|| HttpErrorStatus::internal("peer address missing"))?;
+            .ok_or_else(|| HttpError::internal().msg("peer address missing"))?;
 
         let claims =
             crate::http::middlewares::auth::authenticate(*source_addr, token, &conf, &this.token_cache, &this.jrl)
-                .map_err(HttpErrorStatus::unauthorized)?;
+                .map_err(HttpError::unauthorized().err())?;
 
         if let AccessTokenClaims::Kdc(claims) = claims {
             claims
         } else {
-            return Err(HttpErrorStatus::forbidden("token not allowed"));
+            return Err(HttpError::forbidden().msg("token not allowed"));
         }
     };
 
-    let kdc_proxy_message = KdcProxyMessage::from_raw(
-        req.load_body()
-            .await
-            .map_err(|_| HttpErrorStatus::bad_request(ERROR_BAD_FORMAT))?
-            .body(),
-    )
-    .map_err(|_| HttpErrorStatus::bad_request(ERROR_BAD_FORMAT))?;
+    let kdc_proxy_message =
+        KdcProxyMessage::from_raw(req.load_body().await.map_err(HttpError::bad_request().err())?.body())
+            .map_err(HttpError::bad_request().err())?;
 
     trace!(?kdc_proxy_message, "Received KDC message");
 
@@ -101,7 +95,7 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
     let realm = if let Some(realm) = &kdc_proxy_message.target_domain.0 {
         realm.0.to_string()
     } else {
-        return Err(HttpErrorStatus::bad_request(ERROR_BAD_FORMAT));
+        return Err(HttpError::bad_request().msg("realm is missing from KDC request"));
     };
 
     debug!("Request is for realm (target_domain): {realm}");
@@ -110,7 +104,7 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
         if conf.debug.disable_token_validation {
             warn!("**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token");
         } else {
-            return Err(HttpErrorStatus::bad_request("Requested domain is not supported"));
+            return Err(HttpError::bad_request().msg("Requested domain is not supported"));
         }
     }
 
@@ -123,47 +117,46 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
 
     let protocol = kdc_addr.scheme();
 
-    let kdc_addr = resolve_target_to_socket_addr(kdc_addr).await.map_err(|e| {
-        error!("Unable to locate KDC server: {:#}", e);
-        HttpErrorStatus::internal("Unable to locate KDC server")
-    })?;
+    let kdc_addr = resolve_target_to_socket_addr(kdc_addr)
+        .await
+        .map_err(HttpError::internal().with_msg("unable to locate KDC server").err())?;
 
     trace!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
 
     let kdc_reply_message = if protocol == "tcp" {
-        let mut connection = TcpStream::connect(kdc_addr).await.map_err(|e| {
-            error!("{:?}", e);
-            HttpErrorStatus::internal("Unable to connect to KDC server")
-        })?;
+        let mut connection = TcpStream::connect(kdc_addr)
+            .await
+            .map_err(HttpError::internal().with_msg("unable to connect to KDC server").err())?;
 
         trace!("Connected! Forwarding KDC message...");
 
         connection
             .write_all(&kdc_proxy_message.kerb_message.0 .0)
             .await
-            .map_err(|e| {
-                error!("{:?}", e);
-                HttpErrorStatus::internal("Unable to send the message to the KDC server")
-            })?;
+            .map_err(
+                HttpError::internal()
+                    .with_msg("unable to send the message to the KDC server")
+                    .err(),
+            )?;
 
         trace!("Reading KDC reply...");
 
-        read_kdc_reply_message(&mut connection).await.map_err(|e| {
-            error!("{:?}", e);
-            HttpErrorStatus::internal("Unable to read KDC reply message")
-        })?
+        read_kdc_reply_message(&mut connection)
+            .await
+            .map_err(HttpError::internal().with_msg("unable to read KDC reply message").err())?
     } else {
         // we assume that ticket length is not greater than 2048
         let mut buff = [0; 2048];
 
-        let port = portpicker::pick_unused_port().ok_or_else(|| HttpErrorStatus::internal("No free ports"))?;
+        let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("No free ports"))?;
 
         trace!("Binding UDP listener to 127.0.0.1:{port}...");
 
-        let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await.map_err(|e| {
-            error!("{:?}", e);
-            HttpErrorStatus::internal("Unable to send the message to the KDC server")
-        })?;
+        let udp_socket = UdpSocket::bind(("127.0.0.1", port)).await.map_err(
+            HttpError::internal()
+                .with_msg("unable to send the message to the KDC server")
+                .err(),
+        )?;
 
         trace!("Binded! Forwarding KDC message...");
 
@@ -171,17 +164,19 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
         udp_socket
             .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr)
             .await
-            .map_err(|e| {
-                error!("{:?}", e);
-                HttpErrorStatus::internal("Unable to send the message to the KDC server")
-            })?;
+            .map_err(
+                HttpError::internal()
+                    .with_msg("unable to send the message to the KDC server")
+                    .err(),
+            )?;
 
         trace!("Reading KDC reply...");
 
-        let n = udp_socket.recv(&mut buff).await.map_err(|e| {
-            error!("{:?}", e);
-            HttpErrorStatus::internal("Unable to read reply from the KDC server")
-        })?;
+        let n = udp_socket.recv(&mut buff).await.map_err(
+            HttpError::internal()
+                .with_msg("unable to read reply from the KDC server")
+                .err(),
+        )?;
 
         let mut reply_buf = Vec::new();
         reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
@@ -189,10 +184,8 @@ async fn proxy_kdc_message_stub(this: &KdcProxyController, req: Request) -> Resu
         reply_buf
     };
 
-    let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message).map_err(|e| {
-        error!("{:?}", e);
-        HttpErrorStatus::internal("Cannot create kdc proxy massage")
-    })?;
+    let kdc_reply_message = KdcProxyMessage::from_raw_kerb_message(&kdc_reply_message)
+        .map_err(HttpError::internal().with_msg("couldn’t create KDC proxy reply").err())?;
 
     trace!(?kdc_reply_message, "Sending back KDC reply");
 

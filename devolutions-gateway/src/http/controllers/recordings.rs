@@ -1,6 +1,6 @@
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::AccessScope;
 use saphir::body::json::Json;
 use saphir::controller::Controller;
@@ -19,7 +19,7 @@ pub struct RecordingsController {
 impl RecordingsController {
     #[get("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Scope(AccessScope::RecordingsRead)"#)]
-    async fn get_recordings(&self) -> Result<Json<Vec<String>>, HttpErrorStatus> {
+    async fn get_recordings(&self) -> Result<Json<Vec<String>>, HttpError> {
         get_recordings(&self.conf_handle).await
     }
 }
@@ -54,7 +54,7 @@ fn list_uuid_dirs(dir_path: &Path) -> Vec<String> {
     ),
     security(("scope_token" = ["gateway.recordings.read"])),
 ))]
-pub(crate) async fn get_recordings(conf_handle: &ConfHandle) -> Result<Json<Vec<String>>, HttpErrorStatus> {
+pub(crate) async fn get_recordings(conf_handle: &ConfHandle) -> Result<Json<Vec<String>>, HttpError> {
     let conf = conf_handle.get_conf();
     let recording_path = conf.recording_path.to_owned();
     let dirs = list_uuid_dirs(recording_path.as_std_path());

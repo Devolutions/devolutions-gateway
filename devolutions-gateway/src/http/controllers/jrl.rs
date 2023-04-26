@@ -1,6 +1,6 @@
 use crate::config::ConfHandle;
 use crate::http::guards::access::{AccessGuard, TokenType};
-use crate::http::HttpErrorStatus;
+use crate::http::HttpError;
 use crate::token::{AccessScope, AccessTokenClaims, CurrentJrl};
 use saphir::prelude::*;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ impl JrlController {
 impl JrlController {
     #[post("/")]
     #[guard(AccessGuard, init_expr = r#"TokenType::Jrl"#)]
-    async fn update_jrl(&self, req: Request) -> Result<(), HttpErrorStatus> {
+    async fn update_jrl(&self, req: Request) -> Result<(), HttpError> {
         update_jrl(&self.conf_handle, &self.revocation_list, req).await
     }
 
@@ -52,21 +52,17 @@ impl JrlController {
     ),
     security(("jrl_token" = [])),
 ))]
-async fn update_jrl(
-    conf_handle: &ConfHandle,
-    revocation_list: &CurrentJrl,
-    mut req: Request,
-) -> Result<(), HttpErrorStatus> {
+async fn update_jrl(conf_handle: &ConfHandle, revocation_list: &CurrentJrl, mut req: Request) -> Result<(), HttpError> {
     let claims = req
         .extensions_mut()
         .remove::<AccessTokenClaims>()
-        .ok_or_else(|| HttpErrorStatus::unauthorized("identity is missing (token)"))?;
+        .ok_or_else(|| HttpError::unauthorized().msg("identity is missing (token)"))?;
 
     if let AccessTokenClaims::Jrl(claims) = claims {
         let conf = conf_handle.get_conf();
 
-        let jrl_json =
-            serde_json::to_string_pretty(&claims).map_err(|_| HttpErrorStatus::internal("failed to serialize JRL"))?;
+        let jrl_json = serde_json::to_string_pretty(&claims)
+            .map_err(HttpError::internal().with_msg("failed to serialize JRL").err())?;
 
         let jrl_file = conf.jrl_file.as_path();
 
@@ -78,14 +74,14 @@ async fn update_jrl(
             .create(true)
             .open(jrl_file)
             .await
-            .map_err(HttpErrorStatus::internal)?
+            .map_err(HttpError::internal().err())?
             .pipe(BufWriter::new);
 
         file.write_all(jrl_json.as_bytes())
             .await
-            .map_err(HttpErrorStatus::internal)?;
+            .map_err(HttpError::internal().err())?;
 
-        file.flush().await.map_err(HttpErrorStatus::internal)?;
+        file.flush().await.map_err(HttpError::internal().err())?;
 
         *revocation_list.lock() = claims;
 
@@ -93,7 +89,7 @@ async fn update_jrl(
 
         Ok(())
     } else {
-        Err(HttpErrorStatus::forbidden("token not allowed"))
+        Err(HttpError::forbidden().msg("token not allowed"))
     }
 }
 

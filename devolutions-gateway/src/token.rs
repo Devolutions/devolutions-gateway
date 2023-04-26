@@ -724,55 +724,55 @@ fn is_encrypted(token: &str) -> bool {
 
 #[derive(Error, Debug)]
 pub enum TokenError {
-    #[error("Delegation key is missing")]
+    #[error("delegation key is missing")]
     MissingDelegationKey,
-    #[error("Invalid JWE token")]
+    #[error("invalid JWE token")]
     Jwe {
         #[from]
         source: picky::jose::jwe::JweError,
     },
-    #[error("Invalid JWE token payload")]
+    #[error("invalid JWE token payload")]
     JwePayload { source: std::str::Utf8Error },
-    #[error("Invalid JWS token")]
+    #[error("invalid JWS token")]
     Jws {
         #[from]
         source: picky::jose::jws::JwsError,
     },
-    #[error("Failed to verify token signature using {key}")]
+    #[error("failed to verify token signature using {key}")]
     SignatureVerification {
         source: picky::jose::jws::JwsError,
         key: &'static str,
     },
-    #[error("Key ID (kid) {provided_kid} in token is referring to an unknown subkey")]
+    #[error("key ID (kid) {provided_kid} in token is referring to an unknown subkey")]
     UnknownSubkey { provided_kid: String },
-    #[error("Invalid content type for token")]
+    #[error("invalid content type for token")]
     BadContentType {
         #[from]
         source: BadContentType,
     },
-    #[error("Invalid JWT")]
+    #[error("invalid JWT")]
     Jwt {
         #[from]
         source: picky::jose::jwt::JwtError,
     },
-    #[error("Subkey can't be used to sign a {content_type:?} token")]
+    #[error("subkey can't be used to sign a {content_type:?} token")]
     ContentTypeNotAllowedForSubkey { content_type: ContentType },
-    #[error("Invalid `nbf` and `exp` claims for subkey-signed token")]
+    #[error("invalid `nbf` and `exp` claims for subkey-signed token")]
     InvalidValidityForSubkey,
-    #[error("Claim `{name}` is malformed")]
+    #[error("claim `{name}` is malformed")]
     MalformedClaim { name: &'static str, source: anyhow::Error },
-    #[error("Gateway ID scope mismatch")]
+    #[error("gateway ID scope mismatch")]
     GatewayIdScopeMismatch,
-    #[error("A revoked value is contained")]
+    #[error("a revoked value is contained")]
     Revoked,
-    #[error("Invalid claims for {content_type:?} token")]
+    #[error("invalid claims for {content_type:?} token")]
     InvalidClaimScheme {
         content_type: ContentType,
         source: serde_json::Error,
     },
-    #[error("Payload contains secrets that were not encrypted inside a JWE token")]
+    #[error("payload contains secrets that were not encrypted inside a JWE token")]
     PlaintextSecrets,
-    #[error("Previously used token unexpectedly reused ({reason})")]
+    #[error("previously used token unexpectedly reused ({reason})")]
     UnexpectedReplay { reason: &'static str },
     #[error("JSON Revocation List")]
     OldJrl,
