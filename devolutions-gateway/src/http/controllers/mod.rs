@@ -6,6 +6,7 @@ pub mod heartbeat;
 pub mod http_bridge;
 pub mod jrl;
 pub mod kdc_proxy;
+pub mod recordings;
 pub mod session;
 pub mod sessions;
 pub mod sogar_token;

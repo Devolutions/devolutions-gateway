@@ -7,6 +7,7 @@ use crate::http::controllers::heartbeat::HeartbeatController;
 use crate::http::controllers::http_bridge::HttpBridgeController;
 use crate::http::controllers::jrl::JrlController;
 use crate::http::controllers::kdc_proxy::KdcProxyController;
+use crate::http::controllers::recordings::RecordingsController;
 use crate::http::controllers::session::SessionController;
 use crate::http::controllers::sessions::{LegacySessionsController, SessionsController};
 use crate::http::middlewares::auth::AuthMiddleware;
@@ -80,6 +81,10 @@ pub fn configure_http_server(
             };
             let legacy_sessions_controller = LegacySessionsController { sessions };
 
+            let recordings_controller = RecordingsController {
+                conf_handle: conf_handle.clone(),
+            };
+
             // sogar stuff
             // NOTE: disabled for now
             // let conf = conf_handle.get_conf();
@@ -96,6 +101,7 @@ pub fn configure_http_server(
                 .controller(jet)
                 .controller(session_controller)
                 .controller(sessions_controller)
+                .controller(recordings_controller)
                 // .controller(sogar)
                 // .controller(sogar_token)
                 .controller(legacy_health)
