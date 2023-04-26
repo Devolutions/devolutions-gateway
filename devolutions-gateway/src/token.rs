@@ -1051,7 +1051,7 @@ fn validate_token_impl(
             }
         },
 
-        // JREC push token may be re-used as long as recording is considered as ongoing
+        // JREC push tokens may be re-used as long as recording is considered as ongoing
         AccessTokenClaims::Jrec(JrecTokenClaims {
             jet_rop: RecordingOperation::Push,
             exp,
