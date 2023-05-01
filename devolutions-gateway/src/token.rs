@@ -1,4 +1,3 @@
-use crate::utils::TargetAddr;
 use core::fmt;
 use nonempty::NonEmpty;
 use parking_lot::Mutex;
@@ -14,6 +13,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroize;
+
+use crate::target_addr::TargetAddr;
 
 pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 
@@ -224,15 +225,9 @@ impl RecordingFileType {
     }
 }
 
-impl TryFrom<&str> for RecordingFileType {
-    type Error = ();
-    fn try_from(val: &str) -> Result<Self, Self::Error> {
-        let ival = val.to_lowercase();
-        match ival.as_str() {
-            "webm" => Ok(RecordingFileType::WebM),
-            "trp" => Ok(RecordingFileType::TRP),
-            _ => Err(()),
-        }
+impl fmt::Display for RecordingFileType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
@@ -507,7 +502,7 @@ impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
     where
         D: serde::Deserializer<'de>,
     {
-        use crate::utils::BadTargetAddr;
+        use crate::target_addr::BadTargetAddr;
 
         #[derive(Deserialize)]
         struct ClaimsHelper {
@@ -1107,7 +1102,7 @@ pub mod unsafe_debug {
         use picky::jose::jwt::JwtSig;
         use serde_json::Value;
 
-        warn!("**DEBUG OPTION** using dangerous token validation for testing purposes. Make sure this is not happening in production!");
+        warn!("**DEBUG OPTION** Using dangerous token validation for testing purposes. Make sure this is not happening in production!");
 
         // === Decoding JWT === //
 

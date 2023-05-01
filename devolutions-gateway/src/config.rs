@@ -1,6 +1,6 @@
 use crate::listener::ListenerUrls;
+use crate::target_addr::TargetAddr;
 use crate::token::Subkey;
-use crate::utils::TargetAddr;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use cfg_if::cfg_if;
@@ -493,8 +493,8 @@ fn read_priv_key(
 fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -> anyhow::Result<Vec<ListenerUrls>> {
     fn map_scheme(url: &mut Url) {
         match url.scheme() {
-            "http" => url.set_scheme("ws").unwrap(),
-            "https" => url.set_scheme("wss").unwrap(),
+            "ws" => url.set_scheme("http").unwrap(),
+            "wss" => url.set_scheme("https").unwrap(),
             _ => (),
         }
     }
@@ -648,8 +648,8 @@ pub mod dto {
                         external_url: "tcp://*:8181".try_into().unwrap(),
                     },
                     ListenerConf {
-                        internal_url: "ws://*:7171".try_into().unwrap(),
-                        external_url: "wss://*:7171".try_into().unwrap(),
+                        internal_url: "http://*:7171".try_into().unwrap(),
+                        external_url: "https://*:7171".try_into().unwrap(),
                     },
                 ],
                 subscriber: None,

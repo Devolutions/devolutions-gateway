@@ -1,10 +1,12 @@
 use anyhow::Context as _;
+use futures_util::{Sink, Stream};
 use proptest::collection::size_range;
 use proptest::prelude::*;
 use std::collections::HashSet;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-use transport::{Transport, WebSocketStream};
+use tokio_tungstenite::tungstenite;
+use transport::ErasedReadWrite;
 
 /// For sane Debug display
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
@@ -58,14 +60,14 @@ pub fn transport_kind() -> impl Strategy<Value = TransportKind> {
 }
 
 impl TransportKind {
-    pub async fn connect(self, port: u16) -> anyhow::Result<Transport> {
+    pub async fn connect(self, port: u16) -> anyhow::Result<ErasedReadWrite> {
         match self {
             TransportKind::Ws => ws_connect(port).await,
             TransportKind::Tcp => tcp_connect(port).await,
         }
     }
 
-    pub async fn accept(self, port: u16) -> anyhow::Result<Transport> {
+    pub async fn accept(self, port: u16) -> anyhow::Result<ErasedReadWrite> {
         match self {
             TransportKind::Ws => ws_accept(port).await,
             TransportKind::Tcp => tcp_accept(port).await,
@@ -73,45 +75,41 @@ impl TransportKind {
     }
 }
 
-pub async fn ws_accept(port: u16) -> anyhow::Result<Transport> {
+pub async fn ws_accept(port: u16) -> anyhow::Result<ErasedReadWrite> {
     use tokio_tungstenite::accept_async;
 
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    let (stream, addr) = listener.accept().await?;
+    let (stream, _addr) = listener.accept().await?;
     let ws = accept_async(stream)
         .await
         .context("WebSocket handshake failed (accept)")?;
-    let ws = WebSocketStream::new(ws);
 
-    Ok(Transport::new(ws, addr))
+    Ok(Box::new(websocket_compat(ws)))
 }
 
-pub async fn ws_connect(port: u16) -> anyhow::Result<Transport> {
+pub async fn ws_connect(port: u16) -> anyhow::Result<ErasedReadWrite> {
     use tokio_tungstenite::client_async;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
     let stream = TcpStream::connect(("127.0.0.1", port)).await?;
-    let addr = stream.peer_addr()?;
 
     let req = format!("ws://127.0.0.1:{port}").into_client_request()?;
     let (ws, ..) = client_async(req, stream)
         .await
         .context("WebSocket handshake failed (connect)")?;
-    let ws = WebSocketStream::new(ws);
 
-    Ok(Transport::new(ws, addr))
+    Ok(Box::new(websocket_compat(ws)))
 }
 
-pub async fn tcp_accept(port: u16) -> anyhow::Result<Transport> {
+pub async fn tcp_accept(port: u16) -> anyhow::Result<ErasedReadWrite> {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
-    let (stream, addr) = listener.accept().await?;
-    Ok(Transport::new(stream, addr))
+    let (stream, _addr) = listener.accept().await?;
+    Ok(Box::new(stream))
 }
 
-pub async fn tcp_connect(port: u16) -> anyhow::Result<Transport> {
+pub async fn tcp_connect(port: u16) -> anyhow::Result<ErasedReadWrite> {
     let stream = TcpStream::connect(("127.0.0.1", port)).await?;
-    let addr = stream.peer_addr()?;
-    Ok(Transport::new(stream, addr))
+    Ok(Box::new(stream))
 }
 
 pub async fn write_payload<W: AsyncWrite + Unpin>(writer: &mut W, payload: &[u8]) -> anyhow::Result<()> {
@@ -183,4 +181,60 @@ pub fn find_unused_ports(number: usize) -> Vec<u16> {
     }
 
     ports.into_iter().collect()
+}
+
+pub fn websocket_compat_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
+where
+    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin + Send + 'static,
+{
+    use futures_util::StreamExt as _;
+
+    let compat = stream.map(|item| {
+        item.map(|msg| match msg {
+            tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
+            tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
+            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
+            tungstenite::Message::Close(_) => transport::WsMessage::Close,
+            tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+        })
+    });
+
+    transport::WsStream::new(compat)
+}
+
+pub fn websocket_compat_write<S>(sink: S) -> impl AsyncWrite + Unpin + Send + 'static
+where
+    S: Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin + Send + 'static,
+{
+    use futures_util::SinkExt as _;
+
+    let compat =
+        sink.with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+
+    transport::WsStream::new(compat)
+}
+
+pub fn websocket_compat<S>(ws: S) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static
+where
+    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>>
+        + Sink<tungstenite::Message, Error = tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+{
+    use futures_util::{SinkExt as _, StreamExt as _};
+
+    let compat = ws
+        .map(|item| {
+            item.map(|msg| match msg {
+                tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
+                tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
+                tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
+                tungstenite::Message::Close(_) => transport::WsMessage::Close,
+                tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+            })
+        })
+        .with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+
+    transport::WsStream::new(compat)
 }

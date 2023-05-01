@@ -1,12 +1,18 @@
+#[macro_use]
+extern crate tracing;
+
+mod service;
+
 use anyhow::Context;
 use ceviche::controller::{dispatch, Controller, ControllerInterface};
 use ceviche::{Service, ServiceEvent};
 use cfg_if::cfg_if;
 use devolutions_gateway::config::ConfHandle;
-use devolutions_gateway::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 use std::sync::mpsc;
 use tap::prelude::*;
 use tracing::info;
+
+use crate::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
 enum CliAction {
     ShowHelp,
@@ -129,7 +135,7 @@ fn gateway_service_main(
     let conf_handle = ConfHandle::init().expect("unable to initialize configuration");
     let mut service = GatewayService::load(conf_handle).expect("unable to load service");
 
-    info!("{} service started", service.get_service_name());
+    info!("{} service started", SERVICE_NAME);
     info!("args: {:?}", args);
 
     service
@@ -148,7 +154,7 @@ fn gateway_service_main(
         }
     }
 
-    info!("{} service stopping", service.get_service_name());
+    info!("{} service stopping", SERVICE_NAME);
 
     0
 }

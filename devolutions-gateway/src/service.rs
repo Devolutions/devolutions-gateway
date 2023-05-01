@@ -1,14 +1,12 @@
-use crate::config::{Conf, ConfHandle};
-use crate::http::http_server::configure_http_server;
-use crate::jet_client::JetAssociationsMap;
-use crate::listener::GatewayListener;
-use crate::log::{self, LoggerGuard};
-use crate::session::{session_manager_channel, SessionManagerTask};
-use crate::subscriber::subscriber_channel;
-use crate::token::{CurrentJrl, JrlTokenClaims};
-use anyhow::Context;
+use anyhow::Context as _;
+use devolutions_gateway::config::{Conf, ConfHandle};
+use devolutions_gateway::listener::GatewayListener;
+use devolutions_gateway::log::{self, LoggerGuard};
+use devolutions_gateway::session::{session_manager_channel, SessionManagerTask};
+use devolutions_gateway::subscriber::subscriber_channel;
+use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
+use devolutions_gateway::DgwState;
 use parking_lot::Mutex;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -43,7 +41,7 @@ impl GatewayService {
         let conf_file = conf_handle.get_conf_file();
         trace!(?conf_file);
 
-        crate::plugin_manager::load_plugins(&conf).context("failed to load plugins")?;
+        devolutions_gateway::plugin_manager::load_plugins(&conf).context("failed to load plugins")?;
 
         if !conf.debug.is_default() {
             warn!(
@@ -52,7 +50,7 @@ impl GatewayService {
             );
         }
 
-        if let Err(e) = crate::tls_sanity::check_default_configuration() {
+        if let Err(e) = devolutions_gateway::tls_sanity::check_default_configuration() {
             warn!("Anomality detected with TLS configuration: {e:#}");
         }
 
@@ -61,18 +59,6 @@ impl GatewayService {
             state: GatewayState::Stopped,
             _logger_guard: logger_guard,
         })
-    }
-
-    pub fn get_service_name(&self) -> &str {
-        SERVICE_NAME
-    }
-
-    pub fn get_display_name(&self) -> &str {
-        DISPLAY_NAME
-    }
-
-    pub fn get_description(&self) -> &str {
-        DESCRIPTION
     }
 
     pub fn start(&mut self) -> anyhow::Result<()> {
@@ -124,39 +110,27 @@ type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Se
 fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
     let conf = conf_handle.get_conf();
 
-    let associations: Arc<JetAssociationsMap> = Arc::new(Mutex::new(HashMap::new()));
-    let token_cache = crate::token::new_token_cache().pipe(Arc::new);
+    let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
     let jrl = load_jrl_from_disk(&conf)?;
     let (session_manager_handle, session_manager_rx) = session_manager_channel();
+    let (subscriber_tx, subscriber_rx) = subscriber_channel();
 
-    // Configure http server
-    configure_http_server(
-        conf_handle.clone(),
-        associations.clone(),
-        token_cache.clone(),
-        jrl.clone(),
-        session_manager_handle.clone(),
-    )
-    .context("failed to configure http server")?;
+    let state = DgwState {
+        conf_handle: conf_handle.clone(),
+        token_cache: token_cache.clone(),
+        jrl,
+        sessions: session_manager_handle.clone(),
+        subscriber_tx: subscriber_tx.clone(),
+    };
 
     let mut futures: VecOfFuturesType = Vec::with_capacity(conf.listeners.len());
-
-    let (subscriber_tx, subscriber_rx) = subscriber_channel();
 
     let listeners = conf
         .listeners
         .iter()
         .map(|listener| {
-            GatewayListener::init_and_bind(
-                listener.internal_url.clone(),
-                conf_handle.clone(),
-                associations.clone(),
-                token_cache.clone(),
-                jrl.clone(),
-                session_manager_handle.clone(),
-                subscriber_tx.clone(),
-            )
-            .with_context(|| format!("Failed to initialize {}", listener.internal_url))
+            GatewayListener::init_and_bind(listener.internal_url.clone(), state.clone())
+                .with_context(|| format!("Failed to initialize {}", listener.internal_url))
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
         .context("Failed to bind a listener")?;
@@ -166,25 +140,27 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
     }
 
     futures.push(Box::pin(async {
-        crate::token::cleanup_task(token_cache).await;
+        devolutions_gateway::token::cleanup_task(token_cache).await;
         Ok(())
     }));
 
     {
         let log_path = conf.log_file.clone();
-        futures.push(Box::pin(async move { crate::log::log_deleter_task(&log_path).await }));
+        futures.push(Box::pin(async move {
+            devolutions_gateway::log::log_deleter_task(&log_path).await
+        }));
     }
 
     futures.push(Box::pin(async move {
-        crate::subscriber::subscriber_polling_task(session_manager_handle, subscriber_tx).await
+        devolutions_gateway::subscriber::subscriber_polling_task(session_manager_handle, subscriber_tx).await
     }));
 
     futures.push(Box::pin(async move {
-        crate::subscriber::subscriber_task(conf_handle.clone(), subscriber_rx).await
+        devolutions_gateway::subscriber::subscriber_task(conf_handle, subscriber_rx).await
     }));
 
     futures.push(Box::pin(async move {
-        crate::session::session_manager_task(SessionManagerTask::new(session_manager_rx)).await
+        devolutions_gateway::session::session_manager_task(SessionManagerTask::new(session_manager_rx)).await
     }));
 
     Ok(futures)

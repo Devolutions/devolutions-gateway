@@ -4,6 +4,7 @@ use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
 use crate::session::{SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
+use anyhow::Context as _;
 use camino::Utf8PathBuf;
 use futures::future::Either;
 use std::net::SocketAddr;
@@ -123,6 +124,6 @@ where
 
         crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
 
-        res
+        res.context("forward")
     }
 }

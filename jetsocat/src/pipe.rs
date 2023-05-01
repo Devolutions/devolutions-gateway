@@ -1,5 +1,5 @@
 use crate::proxy::ProxyConfig;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use std::any::Any;
 use std::path::PathBuf;
 use transport::{ErasedRead, ErasedWrite};
@@ -266,10 +266,10 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             })
         }
         PipeMode::WebSocketListen { bind_addr } => {
+            use crate::utils::{websocket_read, websocket_write};
             use futures_util::StreamExt as _;
             use tokio::net::TcpListener;
             use tokio_tungstenite::accept_async;
-            use transport::WebSocketStream;
 
             info!(%bind_addr, "Listening for WebSocket");
 
@@ -290,8 +290,8 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             // By splitting that way, critical section (protected by lock) is smaller
             let (sink, stream) = ws.split();
 
-            let read = Box::new(WebSocketStream::new(stream));
-            let write = Box::new(WebSocketStream::new(sink));
+            let read = Box::new(websocket_read(stream));
+            let write = Box::new(websocket_write(sink));
 
             Ok(Pipe {
                 name: "websocket-listener",
@@ -314,8 +314,8 @@ pub async fn pipe(mut a: Pipe, mut b: Pipe) -> Result<()> {
     info!(%a.name, %b.name, "Start piping");
 
     let result = tokio::select! {
-        result = a_to_b => result,
-        result = b_to_a => result,
+        result = a_to_b => result.context("a to b forward"),
+        result = b_to_a => result.context("b to a forward"),
     }
     .map(|_| ());
 

@@ -11,9 +11,15 @@ default-members = [
     "jetsocat",
 ]
 
+# TODO: clean and fix compilation of the sogar component
+exclude = [
+    "crates/sogar-registry"
+]
+
 [profile.production]
 inherits = "release"
 lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing", rev = "454313f66da3a662" }
+tokio-tungstenite = { git = "https://github.com/CBenoit/tokio-tungstenite", rev = "2c3c6419fcb5c3113" }

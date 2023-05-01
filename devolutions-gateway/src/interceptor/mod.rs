@@ -1,8 +1,8 @@
-use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::BytesMut;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::{io, task};
+use tap::prelude::*;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod pcap;
@@ -114,17 +114,12 @@ pub struct WaykDissector;
 
 impl Dissector for WaykDissector {
     fn dissect_one(&mut self, _: PeerSide, bytes: &mut BytesMut) -> Option<BytesMut> {
-        let msg_size = {
-            let mut cursor = std::io::Cursor::new(&bytes);
-            if let Ok(header) = cursor.read_u32::<LittleEndian>() {
-                if header & 0x8000_0000 != 0 {
-                    (header & 0x0000_FFFF) as usize + 4
-                } else {
-                    (header & 0x07FF_FFFF) as usize + 6
-                }
-            } else {
-                return None;
-            }
+        let header = <[u8; 4]>::try_from(bytes.get(..4)?).ok()?.pipe(u32::from_le_bytes);
+
+        let msg_size = if header & 0x8000_0000 != 0 {
+            usize::try_from(header & 0x0000_FFFF).unwrap() + 4
+        } else {
+            usize::try_from(header & 0x07FF_FFFF).unwrap() + 6
         };
 
         if bytes.len() >= msg_size {

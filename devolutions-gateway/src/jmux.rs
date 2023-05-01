@@ -1,44 +1,15 @@
-use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::config::Conf;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
-use crate::token::{CurrentJrl, JmuxTokenClaims, TokenCache, TokenError};
+use crate::token::JmuxTokenClaims;
 
 use anyhow::Context as _;
 use jmux_proxy::JmuxProxy;
 use tap::prelude::*;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
 use transport::{ErasedRead, ErasedWrite};
-
-#[derive(Debug, Error)]
-pub enum AuthorizationError {
-    #[error("token not allowed")]
-    Forbidden,
-    #[error("bad token")]
-    BadToken(#[from] TokenError),
-}
-
-pub fn authorize(
-    client_addr: SocketAddr,
-    token: &str,
-    conf: &Conf,
-    token_cache: &TokenCache,
-    jrl: &CurrentJrl,
-) -> Result<JmuxTokenClaims, AuthorizationError> {
-    use crate::token::AccessTokenClaims;
-
-    if let AccessTokenClaims::Jmux(claims) =
-        crate::http::middlewares::auth::authenticate(client_addr, token, conf, token_cache, jrl)?
-    {
-        Ok(claims)
-    } else {
-        Err(AuthorizationError::Forbidden)
-    }
-}
 
 pub async fn handle(
     stream: impl AsyncRead + AsyncWrite + Send + 'static,

@@ -6,20 +6,14 @@ edition = "2021"
 publish = false
 
 [dependencies]
-
-# async
-tokio = "1.25.0"
-tokio-tungstenite = "0.18.0"
-tokio-rustls = "0.23.4"
-futures-util = "0.3.26"
-
-# error handling
-anyhow = "1.0.69"
-
-# Safe pin projection
+tokio = { version = "1.28.0", features = ["io-util"] }
+futures-core = "0.3.28"
+futures-sink = "0.3.28"
 pin-project-lite = "0.2.9"
 
 [dev-dependencies]
+futures-util = "0.3.26"
 test-utils = { path = "../test-utils" }
 tokio = { version = "1.25.0", features = ["rt", "macros"] }
 proptest = "1.1.0"
+anyhow = "1.0.69"
