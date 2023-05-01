@@ -1,13 +1,15 @@
 use crate::proxy::{ProxyConfig, ProxyType};
 use anyhow::{anyhow, Context as _};
 use core::time::Duration;
-use futures_util::{future, Future};
+use futures_util::{future, Future, Sink, Stream};
 use proxy_types::{DestAddr, ToDestAddr};
 use std::net::SocketAddr;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
-use transport::{ErasedRead, ErasedWrite, WebSocketStream};
+use transport::{ErasedRead, ErasedWrite};
 
 async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
     match dest_addr {
@@ -111,8 +113,8 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow:
                 .await
                 .context("WebSocket handshake failed")?;
             let (sink, stream) = ws.split();
-            let read = Box::new(WebSocketStream::new(stream)) as ErasedRead;
-            let write = Box::new(WebSocketStream::new(sink)) as ErasedWrite;
+            let read = Box::new(websocket_read(stream)) as ErasedRead;
+            let write = Box::new(websocket_write(sink)) as ErasedWrite;
             Ok((read, write, rsp))
         }
     })
@@ -147,6 +149,37 @@ where
     } else {
         future.await
     }
+}
+
+pub fn websocket_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
+where
+    S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin + Send + 'static,
+{
+    use futures_util::StreamExt as _;
+
+    let compat = stream.map(|item| {
+        item.map(|msg| match msg {
+            tungstenite::Message::Text(s) => transport::WsMessage::Payload(s.into_bytes()),
+            tungstenite::Message::Binary(data) => transport::WsMessage::Payload(data),
+            tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_) => transport::WsMessage::Ignored,
+            tungstenite::Message::Close(_) => transport::WsMessage::Close,
+            tungstenite::Message::Frame(_) => unreachable!("raw frames are never returned when reading"),
+        })
+    });
+
+    transport::WsStream::new(compat)
+}
+
+pub fn websocket_write<S>(sink: S) -> impl AsyncWrite + Unpin + Send + 'static
+where
+    S: Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin + Send + 'static,
+{
+    use futures_util::SinkExt as _;
+
+    let compat =
+        sink.with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+
+    transport::WsStream::new(compat)
 }
 
 pub(crate) struct DummyReaderWriter;

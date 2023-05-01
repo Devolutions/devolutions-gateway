@@ -1,22 +1,28 @@
-use anyhow::Result;
-use futures_util::{ready, Sink, Stream};
-use pin_project_lite::pin_project;
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
+use futures_core::{ready, Stream};
+use futures_sink::Sink;
+use pin_project_lite::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::tungstenite::{Error as TungsteniteError, Message as TungsteniteMessage};
+
+pub enum WsMessage {
+    Payload(Vec<u8>),
+    Ignored,
+    Close,
+}
 
 pin_project! {
     /// Wraps a stream of WebSocket messages and provides `AsyncRead` and `AsyncWrite`.
-    pub struct WebSocketStream<S> {
+    pub struct WsStream<S> {
         #[pin]
         pub inner: S,
         read_buf: Option<Vec<u8>>,
     }
 }
 
-impl<S> WebSocketStream<S> {
+impl<S> WsStream<S> {
     pub fn new(stream: S) -> Self {
         Self {
             inner: stream,
@@ -33,9 +39,10 @@ impl<S> WebSocketStream<S> {
     }
 }
 
-impl<S> AsyncRead for WebSocketStream<S>
+impl<S, E> AsyncRead for WsStream<S>
 where
-    S: Stream<Item = Result<TungsteniteMessage, TungsteniteError>>,
+    S: Stream<Item = Result<WsMessage, E>>,
+    E: std::error::Error + Send + Sync + 'static,
 {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> Poll<io::Result<()>> {
         let mut this = self.project();
@@ -46,22 +53,12 @@ where
             loop {
                 match ready!(this.inner.as_mut().poll_next(cx)) {
                     Some(Ok(m)) => match m {
-                        TungsteniteMessage::Text(s) => {
-                            break s.into_bytes();
-                        }
-                        TungsteniteMessage::Binary(data) => {
+                        WsMessage::Payload(data) => {
                             break data;
                         }
-
-                        // discard ping and pong messages (not part of actual payload)
-                        TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_) => {}
-
-                        // end reading on Close message
-                        TungsteniteMessage::Close(_) => return Poll::Ready(Ok(())),
-
-                        TungsteniteMessage::Frame(_) => unreachable!("raw frames are never returned when reading"),
+                        WsMessage::Ignored => {}
+                        WsMessage::Close => return Poll::Ready(Ok(())),
                     },
-                    Some(Err(TungsteniteError::Io(e))) => return Poll::Ready(Err(e)),
                     Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                     None => return Poll::Ready(Ok(())),
                 }
@@ -70,7 +67,7 @@ where
 
         let bytes_to_copy = std::cmp::min(buf.remaining(), data.len());
 
-        // TODO: can we can better performance with `unfilled_mut` and a bit of unsafe code?
+        // TODO: can we get better performance with `unfilled_mut` and a bit of unsafe code?
         let dest = buf.initialize_unfilled_to(bytes_to_copy);
         dest.copy_from_slice(&data[..bytes_to_copy]);
         buf.advance(bytes_to_copy);
@@ -84,19 +81,16 @@ where
     }
 }
 
-impl<S> AsyncWrite for WebSocketStream<S>
+impl<S, E> AsyncWrite for WsStream<S>
 where
-    S: Sink<TungsteniteMessage, Error = TungsteniteError>,
+    S: Sink<Vec<u8>, Error = E>,
+    E: std::error::Error + Send + Sync + 'static,
 {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         macro_rules! try_in_poll {
             ($expr:expr) => {{
                 match $expr {
                     Ok(o) => o,
-                    // When using `AsyncWriteExt::write_all`, `io::ErrorKind::WriteZero` will be raised.
-                    // In this case it means "attempted to write on a closed socket".
-                    Err(TungsteniteError::ConnectionClosed) => return Poll::Ready(Ok(0)),
-                    Err(TungsteniteError::Io(e)) => return Poll::Ready(Err(e)),
                     Err(e) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
                 }
             }};
@@ -111,7 +105,7 @@ where
         try_in_poll!(ready!(this.inner.as_mut().poll_ready(cx)));
 
         // actually submit new item
-        try_in_poll!(this.inner.start_send(TungsteniteMessage::Binary(buf.to_vec())));
+        try_in_poll!(this.inner.start_send(buf.to_vec()));
         // ^ if no error occurred, message is accepted and queued when calling `start_send`
         // (that is: `to_vec` is called only once)
 
@@ -120,20 +114,18 @@ where
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let res = ready!(self.project().inner.poll_flush(cx));
-        Poll::Ready(tungstenite_to_io_result(res))
+        Poll::Ready(to_io_result(res))
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let res = ready!(self.project().inner.poll_close(cx));
-        Poll::Ready(tungstenite_to_io_result(res))
+        Poll::Ready(to_io_result(res))
     }
 }
 
-fn tungstenite_to_io_result(res: Result<(), TungsteniteError>) -> io::Result<()> {
+fn to_io_result<E: std::error::Error + Send + Sync + 'static>(res: Result<(), E>) -> io::Result<()> {
     match res {
         Ok(()) => Ok(()),
-        Err(TungsteniteError::ConnectionClosed) => Ok(()),
-        Err(TungsteniteError::Io(e)) => Err(e),
         Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
     }
 }

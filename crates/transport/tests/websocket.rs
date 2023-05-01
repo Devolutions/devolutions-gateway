@@ -7,20 +7,20 @@ use test_utils::{
 use tokio::io::AsyncWriteExt;
 
 async fn round_trip_client(payload: &[u8], port: u16) -> anyhow::Result<()> {
-    let (mut reader, mut writer) = ws_connect(port).await.context("Connect")?.into_erased_split();
-    let write_fut = write_payload(&mut writer, payload).map(|res| res.context("Write payload"));
-    let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("Assert payload"));
+    let (mut reader, mut writer) = tokio::io::split(ws_connect(port).await.context("connect")?);
+    let write_fut = write_payload(&mut writer, payload).map(|res| res.context("write payload"));
+    let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("assert payload"));
     tokio::try_join!(write_fut, read_fut)?;
-    writer.shutdown().await.context("Shutdown operation")?;
+    writer.shutdown().await.context("shutdown operation")?;
     Ok(())
 }
 
 async fn round_trip_server(payload: &[u8], port: u16) -> anyhow::Result<()> {
-    let (mut reader, mut writer) = ws_accept(port).await.context("Accept")?.into_erased_split();
-    let write_fut = write_payload(&mut writer, payload).map(|res| res.context("Write payload"));
-    let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("Assert payload"));
+    let (mut reader, mut writer) = tokio::io::split(ws_accept(port).await.context("accept")?);
+    let write_fut = write_payload(&mut writer, payload).map(|res| res.context("write payload"));
+    let read_fut = read_assert_payload(&mut reader, payload).map(|res| res.context("assert payload"));
     tokio::try_join!(write_fut, read_fut)?;
-    writer.shutdown().await.context("Shutdown operation")?;
+    writer.shutdown().await.context("shutdown operation")?;
     Ok(())
 }
 

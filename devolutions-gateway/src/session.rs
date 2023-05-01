@@ -1,6 +1,6 @@
 use crate::subscriber;
+use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, SessionTtl};
-use crate::utils::TargetAddr;
 use anyhow::Context as _;
 use chrono::{DateTime, Utc};
 use core::fmt;

@@ -6,11 +6,11 @@ use crate::config::Conf;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
+use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
-use crate::utils::TargetAddr;
 
 use anyhow::Context as _;
-use ironrdp_devolutions_gateway::RDCleanPathPdu;
+use ironrdp_rdcleanpath::RDCleanPathPdu;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
@@ -27,7 +27,7 @@ enum AuthorizationError {
 }
 
 fn authorize(
-    client_addr: SocketAddr,
+    source_addr: SocketAddr,
     token: &str,
     conf: &Conf,
     token_cache: &TokenCache,
@@ -36,7 +36,7 @@ fn authorize(
     use crate::token::AccessTokenClaims;
 
     if let AccessTokenClaims::Association(claims) =
-        crate::http::middlewares::auth::authenticate(client_addr, token, conf, token_cache, jrl)?
+        crate::middleware::auth::authenticate(source_addr, token, conf, token_cache, jrl)?
     {
         Ok(claims)
     } else {
@@ -58,38 +58,38 @@ async fn send_clean_path_response(
     Ok(())
 }
 
-async fn read_cleanpath_pdu(stream: &mut (dyn AsyncRead + Unpin + Send)) -> io::Result<RDCleanPathPdu> {
+async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Result<RDCleanPathPdu> {
     let mut buf = bytes::BytesMut::new();
 
     // TODO: check if there is code to be reused from ironrdp code base for that
-    let cleanpath_pdu = loop {
-        if let Some(pdu) = RDCleanPathPdu::decode(&mut buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?
-        {
-            break pdu;
+    loop {
+        if let ironrdp_rdcleanpath::DetectionResult::Detected { total_length, .. } = RDCleanPathPdu::detect(&buf) {
+            match buf.len().cmp(&total_length) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => break,
+                std::cmp::Ordering::Greater => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "no leftover is expected when reading cleanpath PDU",
+                    ));
+                }
+            }
         }
 
-        let mut read_bytes = [0u8; 1024];
-        let len = stream.read(&mut read_bytes[..]).await?;
-        buf.extend_from_slice(&read_bytes[..len]);
+        let n = stream.read_buf(&mut buf).await?;
 
-        if len == 0 {
+        if n == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "EOF when reading RDCleanPathPdu",
             ));
         }
-    };
-
-    // Sanity check: make sure there is no leftover
-    if !buf.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "no leftover is expected after reading cleanpath PDU",
-        ));
     }
 
-    Ok(cleanpath_pdu)
+    let rdcleanpath = RDCleanPathPdu::from_der(&buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?;
+
+    Ok(rdcleanpath)
 }
 
 #[derive(Debug, Error)]
@@ -123,8 +123,6 @@ async fn process_cleanpath(
     jrl: &CurrentJrl,
 ) -> Result<CleanPathResult, CleanPathError> {
     use crate::utils;
-    use tokio::io::AsyncReadExt as _;
-    use tokio_util::codec::Decoder as _;
 
     let token = cleanpath_pdu
         .proxy_auth
@@ -143,13 +141,13 @@ async fn process_cleanpath(
 
     trace!("Connecting to destination server");
 
-    let (mut server_transport, destination) = utils::successive_try(targets, utils::tcp_stream_connect)
+    let ((mut server_stream, server_addr), destination) = utils::successive_try(targets, utils::tcp_connect)
         .await
         .context("couldn’t connect to RDP server")?;
 
     // Send preconnection blob if applicable
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
-        server_transport.write_all(pcb.as_bytes()).await?;
+        server_stream.write_all(pcb.as_bytes()).await?;
     }
 
     // Send X224 connection request
@@ -157,34 +155,36 @@ async fn process_cleanpath(
         .x224_connection_pdu
         .context("request is missing X224 connection PDU")
         .map_err(CleanPathError::BadRequest)?;
-    server_transport.write_all(x224_req.as_bytes()).await?;
+    server_stream.write_all(x224_req.as_bytes()).await?;
 
     // Receive server X224 connection response
-    let mut buf = bytes::BytesMut::new();
-    let mut decoder = crate::transport::x224::NegotiationWithServerTransport;
 
     trace!("Receiving X224 response");
 
+    let mut x224_rsp_buf = bytes::BytesMut::with_capacity(512);
+
     // TODO: check if there is code to be reused from ironrdp code base for that
-    let x224_rsp = loop {
-        let len = server_transport.read_buf(&mut buf).await?;
-
-        if len == 0 {
-            if let Some(frame) = decoder.decode_eof(&mut buf)? {
-                break frame;
+    loop {
+        if let Some(info) = ironrdp_pdu::find_size(&x224_rsp_buf).context("invalid X224 response")? {
+            match x224_rsp_buf.len().cmp(&info.length) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => break,
+                std::cmp::Ordering::Greater => {
+                    return anyhow::Error::msg("received too much")
+                        .pipe(CleanPathError::BadRequest)
+                        .pipe(Err);
+                }
             }
-        } else if let Some(frame) = decoder.decode(&mut buf)? {
-            break frame;
         }
-    };
 
-    let mut x224_rsp_buf = Vec::new();
-    ironrdp::PduParsing::to_buffer(&x224_rsp, &mut x224_rsp_buf)
-        .context("failed to reencode x224 response from server")?;
+        let n = server_stream.read_buf(&mut x224_rsp_buf).await?;
 
-    let server_addr = server_transport
-        .peer_addr()
-        .context("couldn’t get server peer address")?;
+        if n == 0 {
+            return anyhow::Error::msg("EOF when reading RDCleanPathPdu")
+                .pipe(CleanPathError::BadRequest)
+                .pipe(Err);
+        }
+    }
 
     trace!("Establishing TLS connection with server");
 
@@ -215,7 +215,7 @@ async fn process_cleanpath(
             .pipe(Arc::new);
 
         tokio_rustls::TlsConnector::from(tls_client_config)
-            .connect(dns_name, server_transport)
+            .connect(dns_name, server_stream)
             .await
             .map_err(CleanPathError::TlsHandshake)?
     };
@@ -228,11 +228,10 @@ async fn process_cleanpath(
         claims,
         server_addr,
         server_transport,
-        x224_rsp: x224_rsp_buf,
+        x224_rsp: x224_rsp_buf.to_vec(),
     })
 }
 
-#[instrument(skip_all)]
 pub async fn handle(
     mut stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,

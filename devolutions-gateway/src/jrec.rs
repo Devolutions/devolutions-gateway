@@ -1,47 +1,15 @@
-use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::Conf;
-use crate::token::{CurrentJrl, JrecTokenClaims, RecordingOperation, TokenCache, TokenError};
+use crate::token::{JrecTokenClaims, RecordingFileType};
 
 use anyhow::Context as _;
 use serde::Serialize;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, BufWriter};
 use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
-
-#[derive(Debug, Error)]
-pub enum AuthorizationError {
-    #[error("token not allowed")]
-    Forbidden,
-    #[error("bad token")]
-    BadToken(#[from] TokenError),
-}
-
-pub fn authorize(
-    client_addr: SocketAddr,
-    token: &str,
-    conf: &Conf,
-    token_cache: &TokenCache,
-    jrl: &CurrentJrl,
-) -> Result<JrecTokenClaims, AuthorizationError> {
-    use crate::token::AccessTokenClaims;
-
-    if let AccessTokenClaims::Jrec(claims) =
-        crate::http::middlewares::auth::authenticate(client_addr, token, conf, token_cache, jrl)?
-    {
-        if claims.jet_rop != RecordingOperation::Push {
-            Err(AuthorizationError::Forbidden)
-        } else {
-            Ok(claims)
-        }
-    } else {
-        Err(AuthorizationError::Forbidden)
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,21 +43,20 @@ impl JrecManifest {
 }
 
 #[derive(TypedBuilder)]
-pub struct ClientPush<'a, S> {
+pub struct ClientPush<S> {
     conf: Arc<Conf>,
     claims: JrecTokenClaims,
     client_stream: S,
-    file_type: &'a str,
+    file_type: RecordingFileType,
     session_id: Uuid,
 }
 
 // FIXME: at some point, we should track ongoing recordings and make sure there is no data race to write the manifest file
 
-impl<S> ClientPush<'_, S>
+impl<S> ClientPush<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    #[instrument(skip_all)]
     pub async fn run(self) -> anyhow::Result<()> {
         let Self {
             conf,
@@ -131,7 +98,7 @@ where
 
             fs::create_dir_all(&recording_path)
                 .await
-                .with_context(|| format!("Failed to create recording path: {recording_path}"))?;
+                .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
             let start_time = chrono::Utc::now().timestamp();
 
@@ -170,7 +137,7 @@ where
             .create(true)
             .open(&recording_file)
             .await
-            .with_context(|| format!("Failed to open file at {recording_file}"))
+            .with_context(|| format!("failed to open file at {recording_file}"))
             .map(BufWriter::new)?;
 
         io::copy(&mut client_stream, &mut file)
@@ -182,7 +149,7 @@ where
         current_file.duration = end_time - current_file.start_time;
         manifest.duration = end_time - manifest.start_time;
 
-        debug!(path = %manifest_file, "write updated manifest to disk");
+        debug!(path = %manifest_file, "Write updated manifest to disk");
 
         manifest
             .save_to_file(&manifest_file)

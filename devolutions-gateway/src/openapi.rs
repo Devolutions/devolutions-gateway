@@ -6,33 +6,33 @@ use uuid::Uuid;
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::http::controllers::health::get_health,
-        crate::http::controllers::heartbeat::get_heartbeat,
-        crate::http::controllers::sessions::get_sessions,
-        crate::http::controllers::session::terminate_session,
-        crate::http::controllers::diagnostics::get_logs,
-        crate::http::controllers::diagnostics::get_configuration,
-        crate::http::controllers::diagnostics::get_clock,
-        crate::http::controllers::config::patch_config,
-        crate::http::controllers::jrl::update_jrl,
-        crate::http::controllers::jrl::get_jrl_info,
-        crate::http::controllers::jrec::list_recordings,
-        crate::http::controllers::jrec::pull_recording_file,
+        crate::api::health::get_health,
+        crate::api::heartbeat::get_heartbeat,
+        crate::api::sessions::get_sessions,
+        crate::api::session::terminate_session,
+        crate::api::diagnostics::get_logs,
+        crate::api::diagnostics::get_configuration,
+        crate::api::diagnostics::get_clock,
+        crate::api::config::patch_config,
+        crate::api::jrl::update_jrl,
+        crate::api::jrl::get_jrl_info,
+        crate::api::jrec::list_recordings,
+        crate::api::jrec::pull_recording_file,
     ),
     components(schemas(
-        crate::http::controllers::health::Identity,
-        crate::http::controllers::heartbeat::Heartbeat,
+        crate::api::health::Identity,
+        crate::api::heartbeat::Heartbeat,
         SessionInfo,
         ConnectionMode,
         crate::listener::ListenerUrls,
         crate::config::dto::DataEncoding,
         crate::config::dto::PubKeyFormat,
         crate::config::dto::Subscriber,
-        crate::http::controllers::diagnostics::ConfigDiagnostic,
-        crate::http::controllers::diagnostics::ClockDiagnostic,
-        crate::http::controllers::config::SubProvisionerKey,
-        crate::http::controllers::config::ConfigPatch,
-        crate::http::controllers::jrl::JrlInfo,
+        crate::api::diagnostics::ConfigDiagnostic,
+        crate::api::diagnostics::ClockDiagnostic,
+        crate::api::config::SubProvisionerKey,
+        crate::api::config::ConfigPatch,
+        crate::api::jrl::JrlInfo,
         crate::token::AccessScope,
     )),
     modifiers(&SecurityAddon),
@@ -97,6 +97,19 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some("Contains the JRL to apply if newer".to_owned()))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "jrec_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "Token allowing recording retrieval for a specific session ID".to_owned(),
+                    ))
                     .build(),
             ),
         );
