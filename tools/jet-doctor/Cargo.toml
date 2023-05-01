@@ -1,6 +1,6 @@
 [package]
-name = "webpki-check"
-version = "0.0.0"
+name = "jet-doctor"
+version = "0.1.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
@@ -9,8 +9,18 @@ publish = false
 members = ["."]
 
 [dependencies]
+anyhow = "1.0.71"
+onlyargs = "0.1.2"
+onlyargs_derive = "0.1.2"
 pem = "2.0.1"
+shadow-rs = "0.21.0"
+openssl-probe = "0.1.5"
 
 # Same dependency as tokio-tungstenite 0.18.0
 # https://crates.io/crates/tokio-tungstenite/0.18.0/dependencies
 webpki = "0.22.0"
+rustls = "0.20.0"
+rustls-native-certs = "0.6.1"
+
+[build-dependencies]
+shadow-rs = "0.21.0"
