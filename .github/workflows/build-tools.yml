@@ -1,0 +1,229 @@
+name: Build Tools
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build ${{ matrix.tool }} [${{ matrix.platform }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        arch: [ x86_64, aarch64 ]
+        platform: [ pc-windows-msvc, unknown-linux-gnu, apple-darwin ]
+        tool: [ jet-doctor, tokengen ]
+        include:
+          - platform: pc-windows-msvc
+            runner: windows-2022
+          - platform: unknown-linux-gnu
+            runner: ubuntu-20.04
+          - platform: apple-darwin
+            runner: macos-12
+        exclude:
+          - platform: pc-windows-msvc
+            arch: aarch64
+          - platform: unknown-linux-gnu
+            arch: aarch64
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v3
+
+      - name: Configure runner
+        run: rustup target add ${{ matrix.arch }}-${{ matrix.platform }}
+
+      - name: Build ${{ matrix.tool }}
+        shell: pwsh
+        working-directory: tools/${{ matrix.tool }}
+        run: cargo build --target ${{ matrix.arch }}-${{ matrix.platform }} --release
+
+      - name: Get output path
+        id: get-binary-path
+        shell: pwsh
+        run: |
+          $Path = 'tools/${{ matrix.tool }}/target/${{ matrix.arch }}-${{ matrix.platform }}/release/${{ matrix.tool }}'
+          if ('${{ matrix.platform}}' -Eq 'pc-windows-msvc') {
+            $Path += ".exe"
+          }
+          echo "binary-path=$Path" >> $Env:GITHUB_OUTPUT
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
+          path: ${{ steps.get-binary-path.outputs.binary-path }}
+
+  lipo:
+    name: build universal ${{ matrix.tool }}
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      matrix:
+        tool: [ jet-doctor, tokengen ]
+
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+
+      - name: Configure runner
+        run: |
+          wget -q https://github.com/awakecoding/llvm-prebuilt/releases/download/v2021.2.4/cctools-x86_64-ubuntu-20.04.tar.xz
+          tar -xf cctools-x86_64-ubuntu-20.04.tar.xz -C /tmp
+          sudo mv /tmp/cctools-x86_64-ubuntu-20.04/bin/lipo /usr/local/bin
+          rm -r cctools-x86_64-ubuntu-20.04.tar.xz
+
+      - name: Lipo
+        shell: pwsh
+        run: |
+          $OutputPath = '${{ matrix.tool }}-universal-apple-darwin'
+          New-Item -ItemType Directory -Path $OutputPath | Out-Null
+          $Binaries = Get-ChildItem -Recurse -Path "*-apple-darwin" -Filter '${{ matrix.tool }}' | Foreach-Object { $_.FullName } | Select -Unique
+          $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath '${{ matrix.tool }}')) + $Binaries) -Join ' '
+          Write-Host $LipoCmd
+          Invoke-Expression $LipoCmd
+  
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.tool }}-universal-apple-darwin
+          path: ${{ matrix.tool }}-universal-apple-darwin/${{ matrix.tool }}
+
+  sign:
+    name: sign ${{ matrix.tool }} [${{ matrix.platform }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    needs: [ build, lipo ]
+    environment: build-and-publish
+    strategy:
+      matrix:
+        arch: [ x86_64, aarch64, universal ]
+        platform: [ pc-windows-msvc, apple-darwin ]
+        tool: [ jet-doctor, tokengen ]
+        include:
+          - platform: pc-windows-msvc
+            runner: windows-2022
+          - platform: apple-darwin
+            runner: macos-12
+        exclude:
+          - platform: pc-windows-msvc
+            arch: aarch64
+          - platform: pc-windows-msvc
+            arch: universal
+
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v3
+
+      - name: Get binary path
+        id: get-binary-path
+        shell: pwsh
+        run: |
+          $Path = '${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}/${{ matrix.tool }}'
+          if ('${{ matrix.platform}}' -Eq 'pc-windows-msvc') {
+            $Path += ".exe"
+          }
+          echo "binary-path=$Path" >> $Env:GITHUB_OUTPUT
+          
+      - name: Configure certificates
+        if: matrix.platform == 'pc-windows-msvc'
+        env:
+          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: |
+          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
+          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
+          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
+          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+
+      - name: Configure certificates
+        if: matrix.platform == 'apple-darwin'
+        env:
+          DEVELOPER_ID_CERTIFICATE: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_APP_DEV_ID_APP_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=Price2011
+
+          DEVELOPER_ID_CERTIFICATE_PATH=$RUNNER_TEMP/dev_id_cert.p12
+          echo -n "$DEVELOPER_ID_CERTIFICATE" | base64 --decode --output $DEVELOPER_ID_CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+  
+      - name: Configure runner
+        if: matrix.platform == 'pc-windows-msvc'
+        run: echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+  
+      - name: Sign executables
+        shell: pwsh
+        run: |
+          if ('${{ matrix.platform }}' -Eq 'pc-windows-msvc') {
+            $SignCmd = $(@(
+              'signtool', 
+              'sign', 
+              '/fd', 'SHA256', 
+              '/v', 
+              '/n', 'Devolutions', 
+              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
+              '/td', 'sha256',
+              '${{ steps.get-binary-path.outputs.binary-path }}'
+            )) -Join ' '
+          } elseif ('${{ matrix.platform }}' -Eq 'apple-darwin') {
+            $SignCmd = $(@(
+              'codesign', 
+              '--timestamp',
+              '--force',
+              '--options=runtime',
+              '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
+              '-v',
+              '${{ steps.get-binary-path.outputs.binary-path }}'
+            )) -Join ' '
+          }
+
+          Write-Host $SignCmd
+          Invoke-Expression $SignCmd
+
+      - name: Verification
+        shell: pwsh
+        run: |
+          if ('${{ matrix.platform }}' -Eq 'pc-windows-msvc') {
+            signtool verify /pa '${{ steps.get-binary-path.outputs.binary-path }}'
+          } elseif ('${{ matrix.platform }}' -Eq 'apple-darwin') {
+            codesign -dvvv '${{ steps.get-binary-path.outputs.binary-path }}'
+          }
+
+          if ($LastExitCode -Ne 0) {
+            echo "::error::failed to verify the signature of ${{ steps.get-binary-path.outputs.binary-path }}" 
+            exit 1
+          }
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
+          path: ${{ steps.get-binary-path.outputs.binary-path }}
+
+      - name: Create universal package
+        if: matrix.platform == 'apple-darwin' && matrix.arch == 'universal'
+        env:
+          APPLE_BOT_PASSWORD: ${{ secrets.APPLE_BOT_PASSWORD }}
+          APPLE_BOT_ID: bot@devolutions.net
+          APPLE_BOT_TEAM_ID: N592S9ASDB
+        run: |
+          chmod +x '${{ steps.get-binary-path.outputs.binary-path }}'
+          hdiutil create -size 100m -fs HFS+ -volname ${{ matrix.tool }} -srcfolder ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }} ${{ matrix.tool }}.dmg
+          codesign -s "Developer ID Application: Devolutions inc. (N592S9ASDB)" ${{ matrix.tool }}.dmg
+          xcrun notarytool store-credentials "notarytool-profile" --apple-id "$APPLE_BOT_ID" --team-id "$APPLE_BOT_TEAM_ID" --password "$APPLE_BOT_PASSWORD"
+          xcrun notarytool submit "${{ matrix.tool }}.dmg" --keychain-profile "notarytool-profile" --wait
+          xcrun stapler staple ${{ matrix.tool }}.dmg
+          xcrun stapler validate -v ${{ matrix.tool }}.dmg
+          spctl -a -t open --context context:primary-signature -v ${{ matrix.tool }}.dmg
+
+      - name: Upload package
+        if: matrix.platform == 'apple-darwin' && matrix.arch == 'universal'
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
+          path: ${{ matrix.tool }}.dmg
