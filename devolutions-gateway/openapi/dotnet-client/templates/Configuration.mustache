@@ -12,6 +12,7 @@ using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Net.Http;
+using System.Net.Security;
 {{#useRestSharp}}
 {{#hasOAuthMethods}}using {{packageName}}.Client.Auth;
 {{/hasOAuthMethods}}
@@ -117,6 +118,12 @@ namespace {{packageName}}.Client
         /// </summary>
         private HttpSigningConfiguration _HttpSigningConfiguration = null;
         {{/hasHttpSignatureMethods}}
+
+        /// <summary>
+        /// Callback function for handling the validation of remote certificates. Useful for certificate pinning and
+        /// overriding certificate errors in the scope of a request.
+        /// </summary>
+        private RemoteCertificateValidationCallback _RemoteCertificateValidationCallback = null;
         #endregion Private Members
 
         #region Constructors
@@ -620,6 +627,16 @@ namespace {{packageName}}.Client
             set { _HttpSigningConfiguration = value; }
         }
         {{/hasHttpSignatureMethods}}
+
+        /// <summary>
+        /// Callback function for handling the validation of remote certificates. Useful for certificate pinning and
+        /// overriding certificate errors in the scope of a request.
+        /// </summary>
+        public RemoteCertificateValidationCallback RemoteCertificateValidationCallback
+        {
+            get { return _RemoteCertificateValidationCallback; }
+            set { _RemoteCertificateValidationCallback = value; }
+        }
 
         #endregion Properties
 
