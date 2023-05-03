@@ -12,6 +12,7 @@ using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Net.Http;
+using System.Net.Security;
 {{#useRestSharp}}
 {{#hasOAuthMethods}}using {{packageName}}.Client.Auth;
 {{/hasOAuthMethods}}
@@ -49,22 +50,10 @@ namespace {{packageName}}.Client
         public static readonly ExceptionFactory DefaultExceptionFactory = (methodName, response) =>
         {
             var status = (int)response.StatusCode;
-            if (status >= 400)
+            if (status < 100 || status >= 400)
             {
                 return new ApiException(status,
                     string.Format("Error calling {0}: {1}", methodName, response.RawContent),
-                    response.RawContent, response.Headers);
-            }
-            {{^netStandard}}
-            if (status == 0)
-            {
-                return new ApiException(status,
-                    string.Format("Error calling {0}: {1}", methodName, response.ErrorText), response.ErrorText);
-            }
-            {{/netStandard}}
-            if (response.Content == null) {
-                return new ApiException(status,
-                    string.Format("Error calling {0}: {1}", methodName, response.ErrorText),
                     response.RawContent, response.Headers);
             }
             return null;
@@ -117,6 +106,12 @@ namespace {{packageName}}.Client
         /// </summary>
         private HttpSigningConfiguration _HttpSigningConfiguration = null;
         {{/hasHttpSignatureMethods}}
+
+        /// <summary>
+        /// Callback function for handling the validation of remote certificates. Useful for certificate pinning and
+        /// overriding certificate errors in the scope of a request.
+        /// </summary>
+        private RemoteCertificateValidationCallback _RemoteCertificateValidationCallback = null;
         #endregion Private Members
 
         #region Constructors
@@ -620,6 +615,16 @@ namespace {{packageName}}.Client
             set { _HttpSigningConfiguration = value; }
         }
         {{/hasHttpSignatureMethods}}
+
+        /// <summary>
+        /// Callback function for handling the validation of remote certificates. Useful for certificate pinning and
+        /// overriding certificate errors in the scope of a request.
+        /// </summary>
+        public RemoteCertificateValidationCallback RemoteCertificateValidationCallback
+        {
+            get { return _RemoteCertificateValidationCallback; }
+            set { _RemoteCertificateValidationCallback = value; }
+        }
 
         #endregion Properties
 
