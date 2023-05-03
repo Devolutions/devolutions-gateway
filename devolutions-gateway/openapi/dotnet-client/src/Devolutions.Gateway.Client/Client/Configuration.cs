@@ -53,15 +53,10 @@ namespace Devolutions.Gateway.Client.Client
         public static readonly ExceptionFactory DefaultExceptionFactory = (methodName, response) =>
         {
             var status = (int)response.StatusCode;
-            if (status >= 400)
+            if (status < 100 || status >= 400)
             {
                 return new ApiException(status,
                     string.Format("Error calling {0}: {1}", methodName, response.RawContent),
-                    response.RawContent, response.Headers);
-            }
-            if (response.Content == null) {
-                return new ApiException(status,
-                    string.Format("Error calling {0}: {1}", methodName, response.ErrorText),
                     response.RawContent, response.Headers);
             }
             return null;
