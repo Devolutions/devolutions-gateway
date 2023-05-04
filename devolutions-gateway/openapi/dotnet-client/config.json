@@ -12,6 +12,6 @@
   "gitUserId": "Devolutions",
   "gitRepoId": "devolutions-gateway",
 
-  "targetFramework": "netstandard2.0;net6.0",
+  "targetFramework": "netstandard2.1;net6.0",
   "excludeTests": true
 }
