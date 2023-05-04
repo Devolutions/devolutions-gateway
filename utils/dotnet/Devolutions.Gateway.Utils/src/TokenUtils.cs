@@ -5,7 +5,7 @@ namespace Devolutions.Gateway.Utils;
 
 public static class TokenUtils
 {
-    public static string Sign<T>(T claims, Picky.PrivateKey signKey, string? keyId, long? lifetime) where T : IGatewayClaims
+    public static TokenResult Sign<T>(T claims, Picky.PrivateKey signKey, string? keyId = null, long? lifetime = null) where T : IGatewayClaims
     {
         Picky.JwtSigBuilder builder = Picky.JwtSig.Builder();
         builder.ContentType = claims.GetContentType();
@@ -22,15 +22,15 @@ public static class TokenUtils
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-        long IssuedAt = now;
-        Guid JwtId = Guid.NewGuid();
-        long? NotBefore = null;
-        long? Expiration = null;
+        long issuedAt = now;
+        Guid jwtId = Guid.NewGuid();
+        long? notBefore = null;
+        long? expiration = null;
 
         if (lifetime != null)
         {
-            NotBefore = now;
-            Expiration = now + lifetime;
+            notBefore = now;
+            expiration = now + lifetime;
         }
 
         JsonNode? body = JsonSerializer.SerializeToNode(claims);
@@ -40,33 +40,25 @@ public static class TokenUtils
             throw new Exception("Unexpected error when serializing claims");
         }
 
-        body["iat"] = IssuedAt;
-        body["jti"] = JwtId;
+        body["iat"] = issuedAt;
+        body["jti"] = jwtId;
 
-        if (NotBefore != null)
+        if (notBefore != null)
         {
-            body["nbf"] = NotBefore;
+            body["nbf"] = notBefore;
         }
 
-        if (Expiration != null)
+        if (expiration != null)
         {
-            body["exp"] = Expiration;
+            body["exp"] = expiration;
         }
 
         builder.Claims = body.ToJsonString();
 
         Picky.JwtSig token = builder.Build();
 
-        return token.Encode(signKey);
-    }
+        string encodedToken = token.Encode(signKey);
 
-    public static string Sign<T>(T claims, Picky.PrivateKey signKey) where T : IGatewayClaims
-    {
-        return Sign(claims, signKey, null, null);
-    }
-
-    public static string Sign<T>(T claims, Picky.PrivateKey signKey, string keyId) where T : IGatewayClaims
-    {
-        return Sign(claims, signKey, keyId, null);
+        return new(encodedToken, issuedAt, jwtId, notBefore, expiration);
     }
 }

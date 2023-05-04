@@ -19,6 +19,7 @@ public struct ApplicationProtocol
     public static ApplicationProtocol SshPwsh = new ApplicationProtocol("ssh-pwsh");
     public static ApplicationProtocol Sftp = new ApplicationProtocol("sftp");
     public static ApplicationProtocol Scp = new ApplicationProtocol("scp");
+    public static ApplicationProtocol Telnet = new ApplicationProtocol("telnet");
     public static ApplicationProtocol WinrmHttpPwsh = new ApplicationProtocol("winrm-http-pwsh");
     public static ApplicationProtocol WinrmHttpsPwsh = new ApplicationProtocol("winrm-https-pwsh");
     public static ApplicationProtocol Http = new ApplicationProtocol("http");

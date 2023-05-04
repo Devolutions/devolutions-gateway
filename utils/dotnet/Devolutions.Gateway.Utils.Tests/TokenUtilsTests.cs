@@ -48,7 +48,8 @@ Z/fDKMxHxeXla54kfV+HiGkH
 
         long lifetime = 1000;
 
-        string token = TokenUtils.Sign(claims, privKey, "my-key-id", lifetime);
+        TokenResult tokenResult = TokenUtils.Sign(claims, privKey, "my-key-id", lifetime);
+        string token = tokenResult.Token;
 
         {
             string[] parts = token.Split('.');
@@ -67,16 +68,23 @@ Z/fDKMxHxeXla54kfV+HiGkH
             string bodyPart = System.Text.Encoding.UTF8.GetString(bodyPartBytes);
 
             JsonElement body = JsonDocument.Parse(bodyPart).RootElement;
+
             Assert.Equal("http://hello.world:80", body.GetProperty("dst_hst").GetString());
             Assert.Equal("http", body.GetProperty("jet_ap").GetString());
             Assert.Equal(sessionId, body.GetProperty("jet_aid").GetGuid());
             Assert.Equal(gatewayId, body.GetProperty("jet_gw_id").GetGuid());
+
             Guid JwtId = body.GetProperty("jti").GetGuid();
+            Assert.Equal(JwtId, tokenResult.JwtId);
+
             long IssuedAt = body.GetProperty("iat").GetInt64();
             long NotBefore = body.GetProperty("nbf").GetInt64();
             long Expiration = body.GetProperty("exp").GetInt64();
             Assert.Equal(IssuedAt, NotBefore);
             Assert.Equal(Expiration - NotBefore, lifetime);
+            Assert.Equal(IssuedAt, tokenResult.IssuedAt);
+            Assert.Equal(NotBefore, tokenResult.NotBefore);
+            Assert.Equal(Expiration, tokenResult.Expiration);
         }
     }
 }
