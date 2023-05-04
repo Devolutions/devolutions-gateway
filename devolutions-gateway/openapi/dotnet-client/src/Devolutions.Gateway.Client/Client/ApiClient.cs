@@ -458,7 +458,7 @@ namespace Devolutions.Gateway.Client.Client
                 RemoteCertificateValidationCallback = configuration.RemoteCertificateValidationCallback
             };
 
-            RestClient client = new RestClient(clientOptions)
+            using RestClient client = new RestClient(clientOptions)
                 .UseSerializer(() => new CustomJsonCodec(SerializerSettings, configuration));
 
             InterceptRequest(req);
@@ -554,7 +554,7 @@ namespace Devolutions.Gateway.Client.Client
                 RemoteCertificateValidationCallback = configuration.RemoteCertificateValidationCallback
             };
 
-            RestClient client = new RestClient(clientOptions)
+            using RestClient client = new RestClient(clientOptions)
                 .UseSerializer(() => new CustomJsonCodec(SerializerSettings, configuration));
 
             InterceptRequest(req);

@@ -458,7 +458,7 @@ namespace {{packageName}}.Client
                 RemoteCertificateValidationCallback = configuration.RemoteCertificateValidationCallback
             };
 
-            RestClient client = new RestClient(clientOptions)
+            using RestClient client = new RestClient(clientOptions)
                 .UseSerializer(() => new CustomJsonCodec(SerializerSettings, configuration));
 
             {{#hasOAuthMethods}}
@@ -571,7 +571,7 @@ namespace {{packageName}}.Client
                 RemoteCertificateValidationCallback = configuration.RemoteCertificateValidationCallback
             };
 
-            RestClient client = new RestClient(clientOptions)
+            using RestClient client = new RestClient(clientOptions)
                 .UseSerializer(() => new CustomJsonCodec(SerializerSettings, configuration));
 
             {{#hasOAuthMethods}}
