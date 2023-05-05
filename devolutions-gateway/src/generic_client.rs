@@ -2,30 +2,32 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context as _;
-use tokio::io::AsyncWriteExt as _;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
 use crate::proxy::Proxy;
-use crate::rdp_pcb::{extract_association_claims, read_preconnection_pdu};
+use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ConnectionMode, CurrentJrl, TokenCache};
 use crate::utils;
 
 #[derive(TypedBuilder)]
-pub struct GenericClient {
+pub struct GenericClient<S> {
     conf: Arc<Conf>,
     token_cache: Arc<TokenCache>,
     jrl: Arc<CurrentJrl>,
     client_addr: SocketAddr,
-    client_stream: TcpStream,
+    client_stream: S,
     sessions: SessionManagerHandle,
     subscriber_tx: SubscriberSender,
 }
 
-impl GenericClient {
+impl<S> GenericClient<S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
     pub async fn serve(self) -> anyhow::Result<()> {
         let Self {
             conf,
@@ -37,7 +39,18 @@ impl GenericClient {
             subscriber_tx,
         } = self;
 
-        let (pdu, mut leftover_bytes) = read_preconnection_pdu(&mut client_stream).await?;
+        let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
+        let read_pcb_fut = read_pcb(&mut client_stream);
+
+        let (pdu, mut leftover_bytes) = tokio::select! {
+            () = timeout => {
+                anyhow::bail!("timed out at preconnection blob reception");
+            }
+            result = read_pcb_fut => {
+                result?
+            }
+        };
+
         let source_ip = client_addr.ip();
         let association_claims = extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl)?;
 

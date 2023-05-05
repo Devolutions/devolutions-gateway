@@ -207,7 +207,7 @@ async fn handle_https_peer(
     handle_http_peer(tls_stream, state, peer_addr).await
 }
 
-async fn handle_http_peer<I>(io: I, state: DgwState, peer_addr: SocketAddr) -> anyhow::Result<()>
+pub(crate) async fn handle_http_peer<I>(io: I, state: DgwState, peer_addr: SocketAddr) -> anyhow::Result<()>
 where
     I: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {

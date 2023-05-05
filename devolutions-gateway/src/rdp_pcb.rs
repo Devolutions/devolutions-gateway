@@ -4,8 +4,7 @@ use std::net::IpAddr;
 use anyhow::Context as _;
 use bytes::BytesMut;
 use ironrdp_pdu::pcb::PreconnectionBlob;
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::config::Conf;
 use crate::token::{AccessTokenClaims, AssociationTokenClaims, CurrentJrl, TokenCache, TokenValidator};
@@ -48,7 +47,7 @@ pub fn extract_association_claims(
     }
 }
 
-pub fn decode_preconnection_pdu(buf: &[u8]) -> Result<Option<PreconnectionBlob>, io::Error> {
+pub fn decode_pcb(buf: &[u8]) -> Result<Option<PreconnectionBlob>, io::Error> {
     match ironrdp_pdu::decode::<PreconnectionBlob>(buf) {
         Ok(preconnection_pdu) => Ok(Some(preconnection_pdu)),
         Err(ironrdp_pdu::Error::NotEnoughBytes { .. }) => Ok(None),
@@ -57,7 +56,7 @@ pub fn decode_preconnection_pdu(buf: &[u8]) -> Result<Option<PreconnectionBlob>,
 }
 
 /// Returns the decoded preconnection PDU and leftover bytes
-pub async fn read_preconnection_pdu(stream: &mut TcpStream) -> io::Result<(PreconnectionBlob, BytesMut)> {
+pub async fn read_pcb(mut stream: impl AsyncRead + AsyncWrite + Unpin) -> io::Result<(PreconnectionBlob, BytesMut)> {
     let mut buf = BytesMut::with_capacity(1024);
 
     loop {
@@ -70,7 +69,7 @@ pub async fn read_preconnection_pdu(stream: &mut TcpStream) -> io::Result<(Preco
             ));
         }
 
-        if let Some(pdu) = decode_preconnection_pdu(&buf)? {
+        if let Some(pdu) = decode_pcb(&buf)? {
             let leftover_bytes = buf.split_off(ironrdp_pdu::size(&pdu));
             return Ok((pdu, leftover_bytes));
         }

@@ -685,6 +685,9 @@ pub mod dto {
 
         /// Ignore KDC address provided by KDC token, and use this one instead
         pub override_kdc: Option<TargetAddr>,
+
+        #[serde(default)]
+        pub enable_ngrok: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -695,6 +698,7 @@ pub mod dto {
                 dump_tokens: false,
                 disable_token_validation: false,
                 override_kdc: None,
+                enable_ngrok: false,
             }
         }
     }
