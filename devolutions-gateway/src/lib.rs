@@ -19,6 +19,7 @@ pub mod jrec;
 pub mod listener;
 pub mod log;
 pub mod middleware;
+pub mod ngrok;
 pub mod plugin_manager;
 pub mod proxy;
 pub mod rdp_extension;

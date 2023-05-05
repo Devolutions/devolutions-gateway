@@ -70,7 +70,7 @@ impl GatewayService {
         let config = self.conf_handle.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
-        let futures = runtime.block_on(async { create_futures(config) })?;
+        let futures = runtime.block_on(create_futures(config))?;
 
         let join_all = futures::future::join_all(futures);
 
@@ -107,7 +107,7 @@ impl GatewayService {
 // TODO: when benchmarking facility is ready, use Handle instead of pinned futures
 type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
 
-fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
+async fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
     let conf = conf_handle.get_conf();
 
     let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
@@ -133,10 +133,25 @@ fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
                 .with_context(|| format!("Failed to initialize {}", listener.internal_url))
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
-        .context("Failed to bind a listener")?;
+        .context("failed to bind listener")?;
 
     for listener in listeners {
         futures.push(Box::pin(listener.run()))
+    }
+
+    if conf.debug.enable_ngrok && std::env::var("NGROK_AUTHTOKEN").is_ok() {
+        let session = devolutions_gateway::ngrok::NgrokSession::connect(state)
+            .await
+            .context("couldn’t create ngrok session")?;
+
+        let tcp_fut = {
+            let session = session.clone();
+            async move { session.run_tcp_endpoint().await }
+        };
+        futures.push(Box::pin(tcp_fut));
+
+        let http_fut = async move { session.run_http_endpoint().await };
+        futures.push(Box::pin(http_fut));
     }
 
     futures.push(Box::pin(async {
