@@ -12,8 +12,8 @@ futures-sink = "0.3.28"
 pin-project-lite = "0.2.9"
 
 [dev-dependencies]
-futures-util = "0.3.26"
+futures-util = "0.3.28"
 test-utils = { path = "../test-utils" }
-tokio = { version = "1.25.0", features = ["rt", "macros"] }
+tokio = { version = "1.28.0", features = ["rt", "macros"] }
 proptest = "1.1.0"
-anyhow = "1.0.69"
+anyhow = "1.0.71"

@@ -7,9 +7,9 @@ publish = false
 
 [dependencies]
 transport = { path = "../transport" }
-tokio = { version = "1.25.0", features = ["io-util"] }
+tokio = { version = "1.28.0", features = ["io-util"] }
 tokio-tungstenite = "0.18.0"
-futures-util = "0.3.26"
+futures-util = "0.3.28"
 proptest = "1.1.0"
-anyhow = "1.0.69"
+anyhow = "1.0.71"
 portpicker = "0.1.1"

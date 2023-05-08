@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 bytes = "1.4.0"
-smol_str = "0.1.24"
+smol_str = "0.2.0"
 
 [dev-dependencies]
 proptest = "1.1.0"

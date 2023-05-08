@@ -58,20 +58,22 @@ impl fmt::Debug for Tls {
 
 impl Tls {
     fn init(certificates: Vec<rustls::Certificate>, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
-        use x509_cert::der::{Decode as _, Encode as _};
+        use x509_cert::der::Decode as _;
 
         let leaf_certificate = certificates.last().context("TLS leaf certificate is missing")?.clone();
 
         let leaf_public_key = x509_cert::Certificate::from_der(&leaf_certificate.0)
-            .context("Failed to parse leaf TLS certificate")?
+            .context("failed to parse leaf TLS certificate")?
             .tbs_certificate
             .subject_public_key_info
-            .to_vec()
-            .context("Failed to retrieve DER encoding of the leaf TLS certificate public key")?
+            .subject_public_key
+            .as_bytes()
+            .context("subject public key BIT STRING is not aligned")?
+            .to_owned()
             .pipe(TlsPublicKey);
 
         let rustls_config =
-            crate::tls_sanity::build_rustls_config(certificates, private_key).context("Failed build TLS config")?;
+            crate::tls_sanity::build_rustls_config(certificates, private_key).context("failed build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(rustls_config));
 
@@ -135,7 +137,7 @@ impl Conf {
             .map(|(cert_file, key_file)| {
                 let tls_certificate = read_rustls_certificate_file(cert_file).context("TLS certificate")?;
                 let tls_private_key = read_rustls_priv_key_file(key_file).context("TLS private key")?;
-                Tls::init(tls_certificate, tls_private_key).context("Failed to init TLS config")
+                Tls::init(tls_certificate, tls_private_key).context("failed to init TLS config")
             })
             .transpose()?;
 
@@ -171,15 +173,15 @@ impl Conf {
             conf_file.provisioner_public_key_file.as_deref(),
             conf_file.provisioner_public_key_data.as_ref(),
         )
-        .context("Provisioner public key")?
-        .context("Provisioner public key is missing (no path nor inlined data provided)")?;
+        .context("provisioner public key")?
+        .context("provisioner public key is missing (no path nor inlined data provided)")?;
 
         let sub_provisioner_public_key = conf_file
             .sub_provisioner_public_key
             .as_ref()
             .map(|subkey| {
                 let kid = subkey.id.clone();
-                let key = read_pub_key_data(&subkey.data).context("Sub provisioner public key")?;
+                let key = read_pub_key_data(&subkey.data).context("sub provisioner public key")?;
                 Ok::<_, anyhow::Error>(Subkey { data: key, kid })
             })
             .transpose()?;
@@ -188,7 +190,7 @@ impl Conf {
             conf_file.delegation_private_key_file.as_deref(),
             conf_file.delegation_private_key_data.as_ref(),
         )
-        .context("Delegation private key")?;
+        .context("delegation private key")?;
 
         Ok(Conf {
             id: conf_file.id,
@@ -233,7 +235,7 @@ impl ConfHandle {
     /// It's best to call this only once to avoid inconsistencies.
     pub fn init() -> anyhow::Result<Self> {
         let conf_file = load_conf_file_or_generate_new()?;
-        let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
+        let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
 
         Ok(Self {
             inner: Arc::new(ConfHandleInner {
@@ -262,8 +264,8 @@ impl ConfHandle {
     /// Atomically saves and replaces current configuration with a new one
     #[instrument(skip(self))]
     pub fn save_new_conf_file(&self, conf_file: dto::ConfFile) -> anyhow::Result<()> {
-        let conf = Conf::from_conf_file(&conf_file).context("Invalid configuration file")?;
-        save_config(&conf_file).context("Failed to save configuration")?;
+        let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
+        save_config(&conf_file).context("failed to save configuration")?;
         *self.inner.conf.write() = Arc::new(conf);
         *self.inner.conf_file.write() = Arc::new(conf_file);
         self.inner.changed.notify_waiters();
@@ -274,7 +276,7 @@ impl ConfHandle {
 
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
-    let json = serde_json::to_string_pretty(conf).context("Failed JSON serialization of configuration")?;
+    let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
     std::fs::write(&conf_file_path, json).with_context(|| format!("Failed to write file at {conf_file_path}"))?;
     Ok(())
 }
@@ -328,12 +330,12 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
-    let conf_file = match load_conf_file(&conf_file_path).context("Failed to load configuration")? {
+    let conf_file = match load_conf_file(&conf_file_path).context("failed to load configuration")? {
         Some(conf_file) => conf_file,
         None => {
             let defaults = dto::ConfFile::generate_new();
             println!("Write default configuration to disk…");
-            save_config(&defaults).context("Failed to save configuration")?;
+            save_config(&defaults).context("failed to save configuration")?;
             defaults
         }
     };
@@ -381,7 +383,7 @@ fn read_rustls_certificate(
                     Err(e @ PemError::HeaderNotFound) => {
                         if x509_chain.is_empty() {
                             return anyhow::Error::new(e)
-                                .context("Couldn't parse first pem document")
+                                .context("couldn't parse first pem document")
                                 .pipe(Err);
                         }
 
@@ -421,14 +423,14 @@ fn read_pub_key(
             .pipe_ref(std::fs::read_to_string)
             .with_context(|| format!("Couldn't read file at {path}"))?
             .pipe_deref(PublicKey::from_pem_str)
-            .context("Couldn't parse pem document")
+            .context("couldn't parse pem document")
             .map(Some),
         (None, Some(data)) => {
             let value = data.decode_value()?;
 
             match data.format {
-                dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("Bad SPKI"),
-                dto::PubKeyFormat::Rsa => PublicKey::from_rsa_der(&value).context("Bad RSA value"),
+                dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("bad SPKI"),
+                dto::PubKeyFormat::Rsa => PublicKey::from_rsa_der(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -450,7 +452,7 @@ fn read_rustls_priv_key(
                 .pipe_ref(std::fs::read_to_string)
                 .with_context(|| format!("Couldn't read file at {path}"))?
                 .pipe_deref(str::parse)
-                .context("Couldn't parse pem document")?;
+                .context("couldn't parse pem document")?;
 
             if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
                 anyhow::bail!("bad pem label (expected one of {:?})", PRIVATE_KEY_LABELS);
@@ -474,15 +476,15 @@ fn read_priv_key(
             .pipe_ref(std::fs::read_to_string)
             .with_context(|| format!("Couldn't read file at {path}"))?
             .pipe_deref(PrivateKey::from_pem_str)
-            .context("Couldn't parse pem document")
+            .context("couldn't parse pem document")
             .map(Some),
         (None, Some(data)) => {
             let value = data.decode_value()?;
 
             match data.format {
-                dto::PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("Bad PKCS8"),
-                dto::PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("Bad EC value"),
-                dto::PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("Bad RSA value"),
+                dto::PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("bad PKCS8"),
+                dto::PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("bad EC value"),
+                dto::PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -500,7 +502,7 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
     }
 
     let mut internal_url = Url::parse(&conf.internal_url)
-        .context("Invalid internal URL")?
+        .context("invalid internal URL")?
         .tap_mut(map_scheme);
 
     let mut internal_url_ipv6 = None;
@@ -508,23 +510,23 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
     if internal_url.host_str() == Some("*") {
         internal_url
             .set_host(Some("0.0.0.0"))
-            .context("Internal URL IPv4 bind address")?;
+            .context("internal URL IPv4 bind address")?;
 
         if auto_ipv6 {
             let mut ipv6_version = internal_url.clone();
             ipv6_version
                 .set_host(Some("[::]"))
-                .context("Internal URL IPv6 bind address")?;
+                .context("internal URL IPv6 bind address")?;
             internal_url_ipv6 = Some(ipv6_version);
         }
     }
 
     let mut external_url = Url::parse(&conf.external_url)
-        .context("Invalid external URL")?
+        .context("invalid external URL")?
         .tap_mut(map_scheme);
 
     if external_url.host_str() == Some("*") {
-        external_url.set_host(Some(hostname)).context("External URL hostname")?;
+        external_url.set_host(Some(hostname)).context("external URL hostname")?;
     }
 
     let mut out = Vec::new();
@@ -813,7 +815,7 @@ pub mod dto {
                 DataEncoding::Base64Url => multibase::Base::Base64Url.decode(&self.value),
                 DataEncoding::Base64UrlPad => multibase::Base::Base64UrlPad.decode(&self.value),
             }
-            .context("Invalid encoding for value")
+            .context("invalid encoding for value")
         }
     }
 
