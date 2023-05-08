@@ -14,7 +14,6 @@ use ironrdp_rdcleanpath::RDCleanPathPdu;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-use tokio_rustls::rustls::client::ClientConfig as TlsClientConfig;
 
 #[derive(Debug, Error)]
 enum AuthorizationError {
@@ -92,6 +91,47 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
     Ok(rdcleanpath)
 }
 
+async fn read_x224_response(mut stream: impl AsyncRead + Unpin + Send) -> anyhow::Result<Vec<u8>> {
+    const INITIAL_SIZE: usize = 19; // X224 Connection Confirm PDU size is 19 bytes, but…
+    const MAX_READ_SIZE: usize = 512; // just in case, we allow this buffer to grow and receive more data
+
+    let mut buf = vec![0; INITIAL_SIZE];
+    let mut filled_end = 0;
+
+    // TODO: check if there is code to be reused from ironrdp code base for that
+    loop {
+        if let Some(info) = ironrdp_pdu::find_size(&buf[..filled_end]).context("find PDU size")? {
+            match filled_end.cmp(&info.length) {
+                std::cmp::Ordering::Less => {}
+                std::cmp::Ordering::Equal => {
+                    buf.truncate(filled_end);
+                    return Ok(buf);
+                }
+                std::cmp::Ordering::Greater => {
+                    anyhow::bail!("received too much");
+                }
+            }
+        }
+
+        // Resize buffer if more space is necessary
+        if filled_end == buf.len() {
+            if buf.len() >= MAX_READ_SIZE {
+                anyhow::bail!("X224 response too large (max allowed: {})", MAX_READ_SIZE);
+            }
+
+            buf.resize(MAX_READ_SIZE, 0);
+        }
+
+        let n = stream.read(&mut buf[filled_end..]).await.context("stream read")?;
+
+        if n == 0 {
+            anyhow::bail!("EOF when reading RDCleanPathPdu");
+        }
+
+        filled_end += n;
+    }
+}
+
 #[derive(Debug, Error)]
 enum CleanPathError {
     #[error("bad request")]
@@ -110,7 +150,7 @@ struct CleanPathResult {
     claims: AssociationTokenClaims,
     destination: TargetAddr,
     server_addr: SocketAddr,
-    server_transport: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
+    server_stream: tokio_rustls::client::TlsStream<tokio::net::TcpStream>,
     x224_rsp: Vec<u8>,
 }
 
@@ -139,9 +179,23 @@ async fn process_cleanpath(
             .pipe(Err);
     };
 
+    // Sanity check
+    match cleanpath_pdu.destination.as_deref() {
+        Some(destination) => match TargetAddr::parse(destination, 3389) {
+            Ok(destination) if !destination.eq(targets.first()) => {
+                warn!(%destination, "destination in RDCleanPath PDU does not match destination in token");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warn!(%error, "invalid destination field in RDCleanPath PDU");
+            }
+        },
+        None => warn!("RDCleanPath PDU is missing the destination field"),
+    }
+
     trace!("Connecting to destination server");
 
-    let ((mut server_stream, server_addr), destination) = utils::successive_try(targets, utils::tcp_connect)
+    let ((mut server_stream, server_addr), selected_target) = utils::successive_try(targets, utils::tcp_connect)
         .await
         .context("couldn’t connect to RDP server")?;
 
@@ -161,79 +215,30 @@ async fn process_cleanpath(
 
     trace!("Receiving X224 response");
 
-    let mut x224_rsp_buf = bytes::BytesMut::with_capacity(512);
-
-    // TODO: check if there is code to be reused from ironrdp code base for that
-    loop {
-        if let Some(info) = ironrdp_pdu::find_size(&x224_rsp_buf).context("invalid X224 response")? {
-            match x224_rsp_buf.len().cmp(&info.length) {
-                std::cmp::Ordering::Less => {}
-                std::cmp::Ordering::Equal => break,
-                std::cmp::Ordering::Greater => {
-                    return anyhow::Error::msg("received too much")
-                        .pipe(CleanPathError::BadRequest)
-                        .pipe(Err);
-                }
-            }
-        }
-
-        let n = server_stream.read_buf(&mut x224_rsp_buf).await?;
-
-        if n == 0 {
-            return anyhow::Error::msg("EOF when reading RDCleanPathPdu")
-                .pipe(CleanPathError::BadRequest)
-                .pipe(Err);
-        }
-    }
+    let x224_rsp = read_x224_response(&mut server_stream)
+        .await
+        .context("read X224 response")
+        .map_err(CleanPathError::BadRequest)?;
 
     trace!("Establishing TLS connection with server");
 
-    let mut server_transport = {
-        // Establish TLS connection with server
+    // Establish TLS connection with server
 
-        let dns_name = destination
-            .host()
-            .try_into()
-            .context("Invalid DNS name in selected target")?;
-
-        // TODO: optimize client config creation
-        //
-        // rustls doc says:
-        //
-        // > Making one of these can be expensive, and should be once per process rather than once per connection.
-        //
-        // source: https://docs.rs/rustls/latest/rustls/struct.ClientConfig.html
-        //
-        // In our case, this doesn’t work, so I’m creating a new ClientConfig from scratch each time (slow).
-        // rustls issue: https://github.com/rustls/rustls/issues/1186
-        let tls_client_config = TlsClientConfig::builder()
-            .with_safe_defaults()
-            .with_custom_certificate_verifier(std::sync::Arc::new(
-                crate::utils::danger_transport::NoCertificateVerification,
-            ))
-            .with_no_client_auth()
-            .pipe(Arc::new);
-
-        tokio_rustls::TlsConnector::from(tls_client_config)
-            .connect(dns_name, server_stream)
-            .await
-            .map_err(CleanPathError::TlsHandshake)?
-    };
-
-    // https://docs.rs/tokio-rustls/latest/tokio_rustls/#why-do-i-need-to-call-poll_flush
-    server_transport.flush().await?;
+    let server_stream = crate::tls::connect(selected_target.host(), server_stream)
+        .await
+        .map_err(CleanPathError::TlsHandshake)?;
 
     Ok(CleanPathResult {
-        destination: destination.to_owned(),
+        destination: selected_target.to_owned(),
         claims,
         server_addr,
-        server_transport,
-        x224_rsp: x224_rsp_buf.to_vec(),
+        server_stream,
+        x224_rsp,
     })
 }
 
 pub async fn handle(
-    mut stream: impl AsyncRead + AsyncWrite + Unpin + Send,
+    mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,
     conf: Arc<Conf>,
     token_cache: &TokenCache,
@@ -245,7 +250,7 @@ pub async fn handle(
 
     trace!("Reading RDCleanPath");
 
-    let cleanpath_pdu = read_cleanpath_pdu(&mut stream)
+    let cleanpath_pdu = read_cleanpath_pdu(&mut client_stream)
         .await
         .context("couldn’t read clean cleanpath PDU")?;
 
@@ -255,13 +260,13 @@ pub async fn handle(
         claims,
         destination,
         server_addr,
-        server_transport,
+        server_stream,
         x224_rsp,
     } = match process_cleanpath(cleanpath_pdu, client_addr, &conf, token_cache, jrl).await {
         Ok(result) => result,
         Err(error) => {
             let response = RDCleanPathPdu::from(&error);
-            send_clean_path_response(&mut stream, &response).await?;
+            send_clean_path_response(&mut client_stream, &response).await?;
             return anyhow::Error::new(error)
                 .context("an error occurred when processing cleanpath PDU")
                 .pipe(Err)?;
@@ -270,7 +275,7 @@ pub async fn handle(
 
     // Send success RDCleanPathPdu response
 
-    let x509_chain = server_transport
+    let x509_chain = server_stream
         .get_ref()
         .1
         .peer_certificates()
@@ -280,9 +285,10 @@ pub async fn handle(
 
     trace!("Sending RDCleanPath response");
 
-    let rd_clean_path_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
-        .map_err(|e| anyhow::anyhow!("Couldn’t build RDCleanPath response: {e}"))?;
-    send_clean_path_response(&mut stream, &rd_clean_path_rsp).await?;
+    let rdcleanpath_rsp = RDCleanPathPdu::new_response(server_addr.to_string(), x224_rsp, x509_chain)
+        .map_err(|e| anyhow::anyhow!("couldn’t build RDCleanPath response: {e}"))?;
+
+    send_clean_path_response(&mut client_stream, &rdcleanpath_rsp).await?;
 
     // Start actual RDP session
 
@@ -301,9 +307,9 @@ pub async fn handle(
         .conf(conf)
         .session_info(info)
         .address_a(client_addr)
-        .transport_a(stream)
+        .transport_a(client_stream)
         .address_b(server_addr)
-        .transport_b(server_transport)
+        .transport_b(server_stream)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
         .build()

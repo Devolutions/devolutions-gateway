@@ -7,9 +7,7 @@ use axum::extract::{self, ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
-use tap::prelude::*;
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
-use tokio_rustls::rustls::client::ClientConfig as TlsClientConfig;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::Instrument as _;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
@@ -185,38 +183,9 @@ where
 
             // Establish TLS connection with server
 
-            let dns_name = selected_target
-                .host()
-                .try_into()
-                .context("Invalid DNS name in selected target")?;
-
-            // TODO: optimize client config creation
-            //
-            // rustls doc says:
-            //
-            // > Making one of these can be expensive, and should be once per process rather than once per connection.
-            //
-            // source: https://docs.rs/rustls/latest/rustls/struct.ClientConfig.html
-            //
-            // In our case, this doesn’t work, so I’m creating a new ClientConfig from scratch each time (slow).
-            // rustls issue: https://github.com/rustls/rustls/issues/1186
-            let tls_client_config = TlsClientConfig::builder()
-                .with_safe_defaults()
-                .with_custom_certificate_verifier(std::sync::Arc::new(
-                    crate::utils::danger_transport::NoCertificateVerification,
-                ))
-                .with_no_client_auth()
-                .pipe(Arc::new);
-
-            let mut server_stream = tokio_rustls::TlsConnector::from(tls_client_config)
-                .connect(dns_name, server_stream)
+            let server_stream = crate::tls::connect(selected_target.host(), server_stream)
                 .await
                 .context("TLS connect")?;
-
-            // https://docs.rs/tokio-rustls/latest/tokio_rustls/#why-do-i-need-to-call-poll_flush
-            server_stream.flush().await?;
-
-            trace!("TLS connection established with success");
 
             info!(
                 "Starting WebSocket-TLS forwarding with application protocol {}",
