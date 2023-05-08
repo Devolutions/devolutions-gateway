@@ -50,7 +50,7 @@ impl GatewayService {
             );
         }
 
-        if let Err(e) = devolutions_gateway::tls_sanity::check_default_configuration() {
+        if let Err(e) = devolutions_gateway::tls::sanity::check_default_configuration() {
             warn!("Anomality detected with TLS configuration: {e:#}");
         }
 

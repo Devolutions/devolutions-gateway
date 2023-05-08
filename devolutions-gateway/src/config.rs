@@ -73,7 +73,7 @@ impl Tls {
             .pipe(TlsPublicKey);
 
         let rustls_config =
-            crate::tls_sanity::build_rustls_config(certificates, private_key).context("failed build TLS config")?;
+            crate::tls::build_server_config(certificates, private_key).context("failed build TLS config")?;
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(rustls_config));
 

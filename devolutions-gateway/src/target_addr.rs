@@ -30,7 +30,7 @@ impl std::error::Error for BadTargetAddr {}
 ///
 /// Similar to `url::Url`, but doesn't contain any route.
 /// Also, when parsing, default scheme is `tcp`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TargetAddr {
     // String representation
     serialization: String,
@@ -43,7 +43,7 @@ pub struct TargetAddr {
     port: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum HostInternal {
     Domain,
     Ip(IpAddr),
@@ -160,6 +160,14 @@ fn target_addr_parse_impl(
 
     TargetAddr::from_components(scheme, host, port)
 }
+
+impl PartialEq for TargetAddr {
+    fn eq(&self, other: &Self) -> bool {
+        self.scheme() == other.scheme() && self.host() == other.host() && self.port() == other.port()
+    }
+}
+
+impl Eq for TargetAddr {}
 
 impl TryFrom<&url::Url> for TargetAddr {
     type Error = BadTargetAddr;
