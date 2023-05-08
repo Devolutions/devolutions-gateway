@@ -183,6 +183,10 @@ pub enum Protocol {
     Http,
     /// Hypertext Transfer Protocol Secure
     Https,
+    /// LDAP Protocol
+    Ldap,
+    /// Secure LDAP Protocol
+    Ldaps,
 }
 
 impl Protocol {
@@ -201,6 +205,8 @@ impl Protocol {
             Self::WinrmHttpsPwsh => 5986,
             Self::Http => 80,
             Self::Https => 443,
+            Self::Ldap => 389,
+            Self::Ldaps => 636,
         }
     }
 }
