@@ -7,4 +7,4 @@ publish = false
 
 [dependencies]
 devolutions-gateway = { path = "../../devolutions-gateway", features = ["openapi"] }
-utoipa = { version = "3.0.3", default-features = false, features = ["uuid", "chrono", "yaml"] }
+utoipa = { version = "3.3.0", default-features = false, features = ["uuid", "chrono", "yaml"] }

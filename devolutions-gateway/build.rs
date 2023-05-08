@@ -1,25 +1,26 @@
-#[cfg(not(target_os = "windows"))]
-use other::main_stub;
-#[cfg(target_os = "windows")]
-use win::main_stub;
-
 fn main() {
-    main_stub();
+    #[cfg(target_os = "windows")]
+    win::embed_version_rc();
 }
 
 #[cfg(target_os = "windows")]
 mod win {
-    extern crate embed_resource;
+    use std::{env, fs};
 
-    use std::env;
-    use std::fs::File;
-    use std::io::Write;
+    pub(super) fn embed_version_rc() {
+        let out_dir = env::var("OUT_DIR").unwrap();
+        let version_rc_file = format!("{}/version.rc", out_dir);
+        let version_rc_data = generate_version_rc();
+        fs::write(&version_rc_file, version_rc_data);
+
+        embed_resource::compile(&version_rc_file, embed_resource::NONE);
+    }
 
     fn generate_version_rc() -> String {
         let output_name = "DevolutionsGateway";
         let filename = format!("{}.exe", output_name);
         let company_name = "Devolutions Inc.";
-        let legal_copyright = format!("Copyright 2020 {}", company_name);
+        let legal_copyright = format!("Copyright 2020-2023 {}", company_name);
 
         let version_number = env::var("CARGO_PKG_VERSION").unwrap() + ".0";
         let version_commas = version_number.replace('.', ",");
@@ -65,8 +66,7 @@ BEGIN
     BEGIN
         VALUE "Translation", 0x409, 1200
     END
-END
-"#,
+END"#,
             vs_file_version = vs_file_version,
             vs_product_version = vs_product_version,
             company_name = company_name,
@@ -81,18 +81,4 @@ END
 
         version_rc
     }
-
-    pub fn main_stub() {
-        let out_dir = env::var("OUT_DIR").unwrap();
-        let version_rc_file = format!("{}/version.rc", out_dir);
-        let version_rc_data = generate_version_rc();
-        let mut file = File::create(&version_rc_file).expect("cannot create version.rc file");
-        file.write_all(version_rc_data.as_bytes()).unwrap();
-        embed_resource::compile(&version_rc_file);
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-mod other {
-    pub fn main_stub() {}
 }

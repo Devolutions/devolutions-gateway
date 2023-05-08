@@ -24,53 +24,53 @@ ceviche = "0.5.2"
 picky-krb = "0.6.0"
 
 # Serialization
-serde = "1.0.152"
-serde_derive = "1.0.152"
-serde_json = "1.0.93"
+serde = "1.0.162"
+serde_derive = "1.0.162"
+serde_json = "1.0.96"
 serde_urlencoded = "0.7.1"
 
 # Utils, misc
 hostname = "0.3.1"
-camino = { version = "1.1.2", features = ["serde1"] }
-smol_str = "0.1.24"
+camino = { version = "1.1.4", features = ["serde1"] }
+smol_str = { version = "0.2.0", features = ["serde"] }
 nonempty = "0.8.1"
 tap = "1.0.1"
 lazy_static = "1.4.0"
 bytes = "1.4"
 cfg-if = "1.0.0"
 url = { version = "2.3.1", features = ["serde"] }
-tempfile = "3.3.0"
-indexmap = "1.9.2"
-uuid = { version = "1.3.0", features = ["v4", "serde"] }
-chrono = { version = "0.4.23", features = ["serde"] } # TODO: switch to `time`
+tempfile = "3.5.0"
+indexmap = "1.9.3"
+uuid = { version = "1.3.2", features = ["v4", "serde"] }
+chrono = { version = "0.4.24", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.1"
-anyhow = "1.0.69"
+anyhow = "1.0.71"
 thiserror = "1"
-typed-builder = "0.12.0"
+typed-builder = "0.14.0"
 # Unicode case folding comparisons
 focaccia = "1.3.1"
 backoff = "0.4.0"
 
 # Security, crypto…
-zeroize = { version = "1.5.7", features = ["derive"] }
+zeroize = { version = "1.6.0", features = ["derive"] }
 rust-argon2 = "1.0.0"
 picky = { version = "7.0.0-rc.5", default-features = false, features = ["jose", "x509"] }
-x509-cert = { version = "0.1.1", features = ["std"] }
-sspi = "0.6.0"
-multihash = "0.18.0"
+x509-cert = { version = "0.2.1", features = ["std"] }
+sspi = "0.8.1"
+multihash = "0.18.1"
 multibase = "0.9.1"
 
 # Logging
 tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
+tracing-subscriber = { version = "0.3.17", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
 tracing-appender = "0.2.2"
 # TODO: consider `tracing-error` crate
 
 # Async, futures…
 tokio = { version = "1.28.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
-reqwest = { version = "0.11.14", features = ["json"] } # TODO: directly use hyper in subscriber module
-futures = "0.3.26"
+reqwest = { version = "0.11.17", features = ["json"] } # TODO: directly use hyper in subscriber module
+futures = "0.3.28"
 async-trait = "0.1.68"
 tower = { version = "0.4.13", features = ["timeout"] }
 ngrok = "0.11.3"
@@ -78,11 +78,11 @@ ngrok = "0.11.3"
 # HTTP
 hyper = "0.14.26"
 axum = { version = "0.6.18", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
-axum-extra = { version = "0.7.2", features = ["query", "async-read-body"] }
+axum-extra = { version = "0.7.4", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4.0", features = ["cors"] }
 
 # OpenAPI generator
-utoipa = { version = "3.0.3", default-features = false, features = ["uuid", "chrono"], optional = true }
+utoipa = { version = "3.3.0", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # Safe pin projection
 pin-project-lite = "0.2.9"
@@ -100,10 +100,10 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 portpicker = "0.1.1"
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "1.8.0"
+embed-resource = "2.1.1"
 
 [dev-dependencies]
 tokio-test = "0.4.2"
 proptest = "1.1.0"
-rstest = "0.16.0"
+rstest = "0.17.0"
 devolutions-gateway-generators = { path = "../crates/devolutions-gateway-generators" }
