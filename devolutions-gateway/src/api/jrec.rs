@@ -6,10 +6,9 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
-use axum::response::{IntoResponse as _, Response};
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
-use tokio::fs::File;
 use tracing::Instrument as _;
 use uuid::Uuid;
 
@@ -141,11 +140,17 @@ pub(crate) async fn list_recordings(
     ),
     security(("jrec_token" = ["pull"])),
 ))]
-pub(crate) async fn pull_recording_file(
+pub(crate) async fn pull_recording_file<ReqBody>(
     State(DgwState { conf_handle, .. }): State<DgwState>,
     extract::Path((id, filename)): extract::Path<(Uuid, String)>,
     JrecToken(claims): JrecToken,
-) -> Result<Response, HttpError> {
+    request: axum::http::Request<ReqBody>,
+) -> Result<Response<tower_http::services::fs::ServeFileSystemResponseBody>, HttpError>
+where
+    ReqBody: Send + 'static,
+{
+    use tower::ServiceExt as _;
+
     if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
         return Err(HttpError::bad_request().msg("invalid file name"));
     }
@@ -164,7 +169,10 @@ pub(crate) async fn pull_recording_file(
         return Err(HttpError::not_found().msg("requested file does not exist"));
     }
 
-    let file = File::open(path).await.map_err(HttpError::internal().err())?;
+    let response = tower_http::services::ServeFile::new(path)
+        .oneshot(request)
+        .await
+        .map_err(HttpError::internal().err())?;
 
-    Ok(axum_extra::body::AsyncReadBody::new(file).into_response())
+    Ok(response)
 }
