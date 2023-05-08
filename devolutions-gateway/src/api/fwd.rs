@@ -131,7 +131,7 @@ async fn handle_fwd_tls(
 }
 
 #[derive(TypedBuilder)]
-pub struct PlainForward<'a, S> {
+pub struct PlainForward<S> {
     conf: Arc<Conf>,
     claims: AssociationTokenClaims,
     client_stream: S,
@@ -140,11 +140,9 @@ pub struct PlainForward<'a, S> {
     subscriber_tx: SubscriberSender,
     #[builder(default = false)]
     with_tls: bool,
-    #[builder(default = "tcp")]
-    scheme: &'a str,
 }
 
-impl<S> PlainForward<'_, S>
+impl<S> PlainForward<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -158,7 +156,6 @@ where
             sessions,
             subscriber_tx,
             with_tls,
-            scheme,
         } = self;
 
         if claims.jet_rec {
@@ -168,10 +165,6 @@ where
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {
             anyhow::bail!("invalid connection mode")
         };
-
-        if let Some(bad_target) = targets.iter().find(|target| target.scheme() != scheme) {
-            anyhow::bail!("invalid scheme for target {bad_target}");
-        }
 
         trace!("Select and connect to target");
 
