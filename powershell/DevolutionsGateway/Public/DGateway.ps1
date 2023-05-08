@@ -729,7 +729,8 @@ function New-DGatewayToken {
 
         # private association claims
         [string] $AssociationId, # jet_aid
-        [ValidateSet('unknown', 'wayk', 'rdp', 'ard', 'vnc', 'ssh', 'ssh-pwsh', 'sftp', 'scp', 'winrm-http-pwsh', 'winrm-https-pwsh', 'http', 'https')]
+        [ValidateSet('unknown', 'wayk', 'rdp', 'ard', 'vnc', 'ssh', 'ssh-pwsh', 'sftp', 'scp',
+            'winrm-http-pwsh', 'winrm-https-pwsh', 'http', 'https', 'ldap', 'ldaps')]
         [string] $ApplicationProtocol, # jet_ap
         [ValidateSet('fwd', 'rdv')]
         [string] $ConnectionMode, # jet_cm

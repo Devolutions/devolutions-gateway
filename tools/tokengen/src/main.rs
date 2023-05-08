@@ -364,6 +364,10 @@ pub enum ApplicationProtocol {
     Http,
     /// Hypertext Transfer Protocol Secure
     Https,
+    /// LDAP Protocol
+    Ldap,
+    /// Secure LDAP Protocol
+    Ldaps,
     /// Unknown Protocol
     Unknown,
 }

@@ -43,6 +43,8 @@ pub fn application_protocol() -> impl Strategy<Value = ApplicationProtocol> {
         Just(ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh)),
         Just(ApplicationProtocol::Known(Protocol::Http)),
         Just(ApplicationProtocol::Known(Protocol::Https)),
+        Just(ApplicationProtocol::Known(Protocol::Ldap)),
+        Just(ApplicationProtocol::Known(Protocol::Ldaps)),
         Just(ApplicationProtocol::unknown()),
     ]
     .no_shrink()

@@ -24,6 +24,8 @@ public struct ApplicationProtocol
     public static ApplicationProtocol WinrmHttpsPwsh = new ApplicationProtocol("winrm-https-pwsh");
     public static ApplicationProtocol Http = new ApplicationProtocol("http");
     public static ApplicationProtocol Https = new ApplicationProtocol("https");
+    public static ApplicationProtocol Ldap = new ApplicationProtocol("ldap");
+    public static ApplicationProtocol Ldaps = new ApplicationProtocol("ldaps");
 
     public override string? ToString()
     {

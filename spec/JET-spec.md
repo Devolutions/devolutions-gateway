@@ -108,9 +108,11 @@ The "ap" (application protocol) claim identifies the application protocol used o
 | "ssh" | Secure Shell (SSH) protocol | 22 |
 | "sftp" | SSH file transfer protocol | 22 |
 | "scp" | SSH secure copy protocol | 22 |
+| "telnet" | Telnet protocol | 23 |
 | "http" | HTTP protocol | 80 |
 | "https" | Secure HTTP protocol | 443 |
-| "telnet" | Telnet protocol | 23 |
+| "ldap" | LDAP protocol | 389 |
+| "ldaps" | Secure LDAP protocol | 636 |
 | "pwsh-ssh" | PowerShell Remoting over SSH | 22 |
 | "winrm-http-pwsh" | PowerShell Remoting (WinRM/HTTP) | 5985 |
 | "winrm-https-pwsh" | PowerShell Remoting (WinRM/HTTPS) | 5986 |
