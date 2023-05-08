@@ -133,7 +133,7 @@ impl ApplicationProtocol {
 
     pub fn known_default_port(&self) -> Option<u16> {
         match self {
-            Self::Known(known) => Some(known.known_default_port()),
+            Self::Known(known) => known.known_default_port(),
             Self::Unknown(_) => None,
         }
     }
@@ -187,26 +187,29 @@ pub enum Protocol {
     Ldap,
     /// Secure LDAP Protocol
     Ldaps,
+    /// Devolutions Gateway Tunnel (generic JMUX tunnel)
+    Tunnel,
 }
 
 impl Protocol {
-    pub fn known_default_port(self) -> u16 {
+    pub fn known_default_port(self) -> Option<u16> {
         match self {
-            Self::Wayk => 12876,
-            Self::Rdp => 3389,
-            Self::Ard => 5900,
-            Self::Vnc => 5900,
-            Self::Ssh => 22,
-            Self::SshPwsh => 22,
-            Self::Sftp => 22,
-            Self::Scp => 22,
-            Self::Telnet => 23,
-            Self::WinrmHttpPwsh => 5985,
-            Self::WinrmHttpsPwsh => 5986,
-            Self::Http => 80,
-            Self::Https => 443,
-            Self::Ldap => 389,
-            Self::Ldaps => 636,
+            Self::Wayk => Some(12876),
+            Self::Rdp => Some(3389),
+            Self::Ard => Some(5900),
+            Self::Vnc => Some(5900),
+            Self::Ssh => Some(22),
+            Self::SshPwsh => Some(22),
+            Self::Sftp => Some(22),
+            Self::Scp => Some(22),
+            Self::Telnet => Some(23),
+            Self::WinrmHttpPwsh => Some(5985),
+            Self::WinrmHttpsPwsh => Some(5986),
+            Self::Http => Some(80),
+            Self::Https => Some(443),
+            Self::Ldap => Some(389),
+            Self::Ldaps => Some(636),
+            Self::Tunnel => None,
         }
     }
 }

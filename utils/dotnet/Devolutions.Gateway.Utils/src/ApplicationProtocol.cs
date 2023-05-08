@@ -26,6 +26,7 @@ public struct ApplicationProtocol
     public static ApplicationProtocol Https = new ApplicationProtocol("https");
     public static ApplicationProtocol Ldap = new ApplicationProtocol("ldap");
     public static ApplicationProtocol Ldaps = new ApplicationProtocol("ldaps");
+    public static ApplicationProtocol Tunnel = new ApplicationProtocol("tunnel");
 
     public override string? ToString()
     {
