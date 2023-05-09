@@ -7,11 +7,16 @@ function ConvertFrom-RsaPublicKey
         [System.Security.Cryptography.RSA] $Rsa
     )
 
-    $stream = [System.IO.MemoryStream]::new()
-    $writer = [PemUtils.PemWriter]::new($stream)
-    $writer.WritePublicKey($Rsa)
-    $stream.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
-    [System.IO.StreamReader]::new($stream).ReadToEnd()
+    if ($PSEdition -eq 'Core') {
+        $bytes = $Rsa.ExportRSAPublicKey()
+        ConvertTo-PemEncoding -Label "PUBLIC KEY" -RawData $bytes
+    } else {
+        $stream = [System.IO.MemoryStream]::new()
+        $writer = [PemUtils.PemWriter]::new($stream)
+        $writer.WritePublicKey($Rsa)
+        $stream.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
+        [System.IO.StreamReader]::new($stream).ReadToEnd()
+    }
 }
 
 function ConvertTo-RsaPublicKey
@@ -22,11 +27,17 @@ function ConvertTo-RsaPublicKey
         [string] $Pem
     )
 
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Pem)
-    $stream = [System.IO.MemoryStream]::new($bytes)
-    $reader = [PemUtils.PemReader]::new($stream)
-    $params = $reader.ReadRsaKey();
-    [System.Security.Cryptography.RSA]::Create($params)
+    if ($PSEdition -eq 'Core') {
+        $Rsa = [System.Security.Cryptography.RSA]::Create()
+        $Rsa.ImportFromPem($Pem)
+        $Rsa
+    } else {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Pem)
+        $stream = [System.IO.MemoryStream]::new($bytes)
+        $reader = [PemUtils.PemReader]::new($stream)
+        $params = $reader.ReadRsaKey();
+        [System.Security.Cryptography.RSA]::Create($params)
+    }
 }
 
 function ConvertFrom-RsaPrivateKey
@@ -37,11 +48,16 @@ function ConvertFrom-RsaPrivateKey
         [System.Security.Cryptography.RSA] $Rsa
     )
 
-    $stream = [System.IO.MemoryStream]::new()
-    $writer = [PemUtils.PemWriter]::new($stream)
-    $writer.WritePrivateKey($Rsa)
-    $stream.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
-    [System.IO.StreamReader]::new($stream).ReadToEnd().Trim()
+    if ($PSEdition -eq 'Core') {
+        $bytes = $Rsa.ExportRSAPrivateKey()
+        ConvertTo-PemEncoding -Label "PRIVATE KEY" -RawData $bytes
+    } else {
+        $stream = [System.IO.MemoryStream]::new()
+        $writer = [PemUtils.PemWriter]::new($stream)
+        $writer.WritePrivateKey($Rsa)
+        $stream.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null
+        [System.IO.StreamReader]::new($stream).ReadToEnd().Trim()
+    }
 }
 
 function ConvertTo-RsaPrivateKey
@@ -52,12 +68,20 @@ function ConvertTo-RsaPrivateKey
         [string] $Pem
     )
 
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Pem)
-    $stream = [System.IO.MemoryStream]::new($bytes)
-    $reader = [PemUtils.PemReader]::new($stream)
-    $params = $reader.ReadRsaKey();
-    [System.Security.Cryptography.RSA]::Create($params)
+    if ($PSEdition -eq 'Core') {
+        $Rsa = [System.Security.Cryptography.RSA]::Create()
+        $Rsa.ImportFromPem($Pem)
+        $Rsa
+    } else {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Pem)
+        $stream = [System.IO.MemoryStream]::new($bytes)
+        $reader = [PemUtils.PemReader]::new($stream)
+        $params = $reader.ReadRsaKey();
+        [System.Security.Cryptography.RSA]::Create($params)
+    }
 }
+
+# No PemUtils beyond this point
 
 function New-RsaKeyPair
 {
