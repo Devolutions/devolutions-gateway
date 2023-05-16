@@ -126,7 +126,7 @@ jobs:
     needs: preflight
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
     strategy:
       matrix:
         arch: [ x86, x86_64, arm64 ]
@@ -273,7 +273,7 @@ jobs:
     needs: preflight
     env:
       CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
+      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
     strategy:
       matrix:
         arch: [ x86_64 ]
