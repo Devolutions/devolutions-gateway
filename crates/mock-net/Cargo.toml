@@ -6,9 +6,9 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
 
 [dependencies]
-tokio = { version = "1.28.0", features = ["io-util", "sync"] }
+tokio = { version = "1.28.1", features = ["io-util", "sync"] }
 loom = { version = "0.5.6", features = ["futures", "checkpoint"] }
 lazy_static = "1.4.0"
 
 [dev-dependencies]
-tokio = { version = "1.28.0", features = ["rt"] }
+tokio = { version = "1.28.1", features = ["rt"] }
