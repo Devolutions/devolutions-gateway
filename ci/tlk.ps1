@@ -248,6 +248,10 @@ class TlkRecipe
     }
 
     [void] BootstrapOpenSSL() {
+        if (-Not $this.Target.IsWindows()) {
+            return
+        }
+
         $OPENSSL_VERSION = '1.1.1l'
         $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
         $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
