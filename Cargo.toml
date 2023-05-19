@@ -21,5 +21,5 @@ inherits = "release"
 lto = true
 
 [patch.crates-io]
-tracing-appender = { git = "https://github.com/CBenoit/tracing", rev = "454313f66da3a662" }
-tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite", rev = "e5e8421f1bd171495" }
+tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "454313f66da3a662" }
+tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite.git", rev = "a6c2d13e1f4919c" }
