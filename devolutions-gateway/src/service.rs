@@ -72,14 +72,22 @@ impl GatewayService {
         // create_futures needs to be run in the runtime in order to bind the sockets.
         let futures = runtime.block_on(create_futures(config))?;
 
-        let join_all = futures::future::join_all(futures);
+        let mut select_all = futures::future::select_all(futures);
 
         runtime.spawn(async {
-            join_all.await.into_iter().for_each(|result| {
-                if let Err(e) = result {
-                    error!("Listeners failed: {}", e)
+            loop {
+                let (result, _, rest) = select_all.await;
+
+                if let Err(error) = result {
+                    error!(error = format!("{error:#}"), "Something went wrong");
                 }
-            });
+
+                if rest.is_empty() {
+                    break;
+                } else {
+                    select_all = futures::future::select_all(rest);
+                }
+            }
         });
 
         self.state = GatewayState::Running { runtime };
@@ -139,19 +147,15 @@ async fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesT
         futures.push(Box::pin(listener.run()))
     }
 
-    if conf.debug.enable_ngrok && std::env::var("NGROK_AUTHTOKEN").is_ok() {
-        let session = devolutions_gateway::ngrok::NgrokSession::connect(state)
+    if let Some(ngrok_conf) = &conf.ngrok {
+        let session = devolutions_gateway::ngrok::NgrokSession::connect(ngrok_conf)
             .await
             .context("couldn’t create ngrok session")?;
 
-        let tcp_fut = {
-            let session = session.clone();
-            async move { session.run_tcp_endpoint().await }
-        };
-        futures.push(Box::pin(tcp_fut));
-
-        let http_fut = async move { session.run_http_endpoint().await };
-        futures.push(Box::pin(http_fut));
+        for (name, conf) in &ngrok_conf.tunnels {
+            let tunnel = session.configure_endpoint(name, conf);
+            futures.push(Box::pin(tunnel.open(state.clone())));
+        }
     }
 
     futures.push(Box::pin(async {
