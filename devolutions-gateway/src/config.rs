@@ -102,6 +102,7 @@ pub struct Conf {
     pub recording_path: Utf8PathBuf,
     pub sogar: dto::SogarConf,
     pub jrl_file: Utf8PathBuf,
+    pub ngrok: Option<dto::NgrokConf>,
     pub debug: dto::DebugConf,
 }
 
@@ -126,9 +127,19 @@ impl Conf {
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "http" | "https" | "ws" | "wss"));
 
-        if !has_http_listener {
-            anyhow::bail!("At least one HTTP-capable listener is required");
-        }
+        let has_ngrok_http_listener = if let Some(ngrok_conf) = &conf_file.ngrok {
+            ngrok_conf
+                .tunnels
+                .values()
+                .any(|t| matches!(t, dto::NgrokTunnelConf::Http(_)))
+        } else {
+            false
+        };
+
+        anyhow::ensure!(
+            has_http_listener | has_ngrok_http_listener,
+            "at least one HTTP-capable listener is required"
+        );
 
         let tls = conf_file
             .tls_certificate_file
@@ -208,6 +219,7 @@ impl Conf {
             recording_path,
             sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
+            ngrok: conf_file.ngrok.clone(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -547,6 +559,10 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 }
 
 pub mod dto {
+    use std::{collections::HashMap, time::Duration};
+
+    use serde::{de, ser};
+
     use super::*;
 
     /// Source of truth for Gateway configuration
@@ -555,7 +571,7 @@ pub mod dto {
     /// and is not trying to be too smart.
     ///
     /// Unstable options are subject to change
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct ConfFile {
         /// This Gateway unique ID (e.g.: 123e4567-e89b-12d3-a456-426614174000)
@@ -590,11 +606,16 @@ pub mod dto {
         pub tls_private_key_file: Option<Utf8PathBuf>,
 
         /// Listeners to launch at startup
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub listeners: Vec<ListenerConf>,
 
         /// Subscriber API
         #[serde(skip_serializing_if = "Option::is_none")]
         pub subscriber: Option<Subscriber>,
+
+        /// Ngrok config (closely maps https://ngrok.com/docs/ngrok-agent/config/)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub ngrok: Option<NgrokConf>,
 
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -655,6 +676,7 @@ pub mod dto {
                     },
                 ],
                 subscriber: None,
+                ngrok: None,
                 log_file: None,
                 jrl_file: None,
                 log_directive: None,
@@ -687,9 +709,6 @@ pub mod dto {
 
         /// Ignore KDC address provided by KDC token, and use this one instead
         pub override_kdc: Option<TargetAddr>,
-
-        #[serde(default)]
-        pub enable_ngrok: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -700,7 +719,6 @@ pub mod dto {
                 dump_tokens: false,
                 disable_token_validation: false,
                 override_kdc: None,
-                enable_ngrok: false,
             }
         }
     }
@@ -846,5 +864,118 @@ pub mod dto {
         pub url: Url,
         /// Bearer token to use when making HTTP requests
         pub token: String,
+    }
+
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct NgrokConf {
+        pub authtoken: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(with = "humantime_serde")]
+        pub heartbeat_interval: Option<Duration>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(with = "humantime_serde")]
+        pub heartbeat_tolerance: Option<Duration>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub metadata: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub server_addr: Option<String>,
+        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+        pub tunnels: HashMap<String, NgrokTunnelConf>,
+    }
+
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    #[serde(tag = "Proto")]
+    pub enum NgrokTunnelConf {
+        Tcp(NgrokTcpTunnelConf),
+        Http(NgrokHttpTunnelConf),
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct NgrokTcpTunnelConf {
+        pub remote_addr: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub metadata: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy_proto: Option<i64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub allow_cidrs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub deny_cidrs: Vec<String>,
+    }
+
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct NgrokHttpTunnelConf {
+        pub domain: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub metadata: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub basic_auth: Vec<NgrokBasicAuth>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub circuit_breaker: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub compression: Option<bool>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub allow_cidrs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub deny_cidrs: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub proxy_proto: Option<i64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub schemes: Vec<String>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone)]
+    pub struct NgrokBasicAuth {
+        pub username: String,
+        pub password: String,
+    }
+
+    impl ser::Serialize for NgrokBasicAuth {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+        {
+            let username_password = format!("{}:{}", self.username, self.password);
+            serializer.serialize_str(&username_password)
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for NgrokBasicAuth {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct BasicAuthVisitor;
+
+            impl<'de> de::Visitor<'de> for BasicAuthVisitor {
+                type Value = NgrokBasicAuth;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("a username:password combination")
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    let mut it = v.splitn(2, ':');
+                    let username = it
+                        .next()
+                        .ok_or_else(|| de::Error::custom("username is missing"))?
+                        .to_owned();
+                    let password = it
+                        .next()
+                        .ok_or_else(|| de::Error::custom("password is missing"))?
+                        .to_owned();
+                    Ok(NgrokBasicAuth { username, password })
+                }
+            }
+
+            deserializer.deserialize_str(BasicAuthVisitor)
+        }
     }
 }
