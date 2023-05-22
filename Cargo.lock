@@ -1960,9 +1960,9 @@ dependencies = [
 
 [[package]]
 name = "ngrok"
-version = "0.11.3"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "463eb318839cc5bae65e95b93bb9201eb442418bf2383e8359fc88f4196db826"
+checksum = "9de885c325dac825949a55dfd0ea64d6118da82e95c5314dd05e905159cad3e8"
 dependencies = [
  "arc-swap",
  "async-rustls",
