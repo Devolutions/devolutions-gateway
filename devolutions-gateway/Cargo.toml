@@ -56,7 +56,7 @@ backoff = "0.4.0"
 zeroize = { version = "1.6.0", features = ["derive"] }
 rust-argon2 = "1.0.0"
 picky = { version = "7.0.0-rc.5", default-features = false, features = ["jose", "x509"] }
-x509-cert = { version = "0.2.1", features = ["std"] }
+x509-cert = { version = "0.2.2", features = ["std"] }
 sspi = "0.8.1"
 multihash = "0.18.1"
 multibase = "0.9.1"
