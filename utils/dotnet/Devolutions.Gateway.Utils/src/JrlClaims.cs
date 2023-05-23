@@ -1,20 +1,18 @@
-﻿
-
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Devolutions.Gateway.Utils
 {
     public class JrlClaims : IGatewayClaims
     {
         [JsonPropertyName("jrl")]
-        public IEnumerable<Guid> RevokedTokenList { get; set; }
+        public RevocationList RevocationList { get; set; }
 
         [JsonPropertyName("jet_gw_id")]
         public Guid ScopeGatewayId { get; set; }
 
-        public JrlClaims(Guid scopeGatewayId, IEnumerable<Guid> revokedTokenList) 
+        public JrlClaims(Guid scopeGatewayId, RevocationList revocationList)
         {
-            this.RevokedTokenList = revokedTokenList;
+            this.RevocationList = revocationList;
             this.ScopeGatewayId = scopeGatewayId;
         }
 

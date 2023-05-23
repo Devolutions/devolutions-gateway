@@ -95,10 +95,11 @@ public class JsonSerialization
     [Fact]
     public void JrlClaims()
     {
-        const string EXPECTED = """{"jrl":["2dd6fb87-5340-4a85-9e96-d383ebef8a41","01f2b129-bfbf-44fb-8b6e-5cbaf7a71300"],"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+        const string EXPECTED = """{"jrl":{"jti":["2dd6fb87-5340-4a85-9e96-d383ebef8a41","01f2b129-bfbf-44fb-8b6e-5cbaf7a71300"]},"jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
 
-        IEnumerable<Guid> revokedTokenList = new List<Guid>() { Guid.Parse("2dd6fb87-5340-4a85-9e96-d383ebef8a41"), Guid.Parse("01f2b129-bfbf-44fb-8b6e-5cbaf7a71300") };
-        var claims = new JrlClaims(gatewayId, revokedTokenList);
+        IEnumerable<Guid> revokedJtiValues = new List<Guid>() { Guid.Parse("2dd6fb87-5340-4a85-9e96-d383ebef8a41"), Guid.Parse("01f2b129-bfbf-44fb-8b6e-5cbaf7a71300") };
+        RevocationList revocationList = new(revokedJtiValues);
+        var claims = new JrlClaims(gatewayId, revocationList);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }

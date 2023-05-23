@@ -13,7 +13,7 @@ public class RecordingClaims : IGatewayClaims
 
     public RecordingClaims(
         Guid scopeGatewayId,
-        Guid sessionId, 
+        Guid sessionId,
         RecordingOperation recordingOperation)
     {
         this.ScopeGatewayId = scopeGatewayId;
