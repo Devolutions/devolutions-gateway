@@ -11,7 +11,7 @@ mod win {
         let out_dir = env::var("OUT_DIR").unwrap();
         let version_rc_file = format!("{}/version.rc", out_dir);
         let version_rc_data = generate_version_rc();
-        fs::write(&version_rc_file, version_rc_data);
+        fs::write(&version_rc_file, version_rc_data).unwrap();
 
         embed_resource::compile(&version_rc_file, embed_resource::NONE);
     }
