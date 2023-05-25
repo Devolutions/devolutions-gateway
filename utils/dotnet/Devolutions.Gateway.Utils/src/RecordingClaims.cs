@@ -25,4 +25,9 @@ public class RecordingClaims : IGatewayClaims
     {
         return "JREC";
     }
+
+    public long? GetDefaultLifetime()
+    {
+        return 14400;
+    }
 }
