@@ -113,5 +113,4 @@ public class JsonSerialization
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
-
 }
