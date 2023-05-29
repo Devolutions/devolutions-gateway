@@ -62,7 +62,7 @@ async fn handle_jrec_push(
 ) {
     let stream = crate::ws::websocket_compat(ws);
 
-    let result = crate::jrec::ClientPush::builder()
+    let result = crate::recording::ClientPush::builder()
         .client_stream(stream)
         .conf(conf)
         .claims(claims)

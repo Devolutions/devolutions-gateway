@@ -1,6 +1,7 @@
 use crate::interceptor::{Dissector, Inspector, PeerSide};
 use anyhow::Context as _;
 use bytes::BytesMut;
+use devolutions_gateway_task::ChildTask;
 use packet::builder::Builder;
 use packet::ether::{Builder as BuildEthernet, Protocol};
 use packet::ip::v6::Builder as BuildV6;
@@ -40,7 +41,7 @@ impl PcapInspector {
 
         let (sender, receiver) = mpsc::unbounded_channel();
 
-        tokio::spawn(writer_task(receiver, pcap_writer, client_addr, server_addr, dissector));
+        ChildTask::spawn(writer_task(receiver, pcap_writer, client_addr, server_addr, dissector)).detach();
 
         Ok((
             Self {

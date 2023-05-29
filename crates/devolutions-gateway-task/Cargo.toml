@@ -1,0 +1,14 @@
+[package]
+name = "devolutions-gateway-task"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+
+[features]
+default = []
+named_tasks = ["tokio/tracing"]
+
+[dependencies]
+tokio = { version = "1.28.1", features = ["sync", "rt", "tracing"] }
+async-trait = "0.1.68"

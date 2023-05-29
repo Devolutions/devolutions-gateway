@@ -2,7 +2,9 @@ use std::io;
 use std::time::SystemTime;
 
 use anyhow::Context as _;
-use camino::Utf8Path;
+use async_trait::async_trait;
+use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::fs;
 use tokio::time::{sleep, Duration};
 use tracing::metadata::LevelFilter;
@@ -82,11 +84,60 @@ pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Resul
     })
 }
 
-/// File deletion task (by age)
+/// Find latest log file (by age)
 ///
 /// Given path is used to filter out by file name prefix.
 #[instrument]
-pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
+pub async fn find_latest_log_file(prefix: &Utf8Path) -> anyhow::Result<std::path::PathBuf> {
+    let cfg = LogPathCfg::from_path(prefix)?;
+
+    let mut read_dir = fs::read_dir(cfg.folder).await.context("couldn't read directory")?;
+
+    let mut most_recent_time = SystemTime::UNIX_EPOCH;
+    let mut most_recent = None;
+
+    while let Ok(Some(entry)) = read_dir.next_entry().await {
+        match entry.file_name().to_str() {
+            Some(file_name) if file_name.starts_with(cfg.prefix) && file_name.contains("log") => {
+                debug!(file_name, "Found a log file");
+                match entry.metadata().await.and_then(|metadata| metadata.modified()) {
+                    Ok(modified) if modified > most_recent_time => {
+                        most_recent_time = modified;
+                        most_recent = Some(entry.path());
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        warn!(%error, file_name, "Couldn't retrieve metadata for file");
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+
+    most_recent.context("no file found")
+}
+
+/// File deletion task (by age)
+///
+/// Given path is used to filter out by file name prefix.
+pub struct LogDeleterTask {
+    pub prefix: Utf8PathBuf,
+}
+
+#[async_trait]
+impl Task for LogDeleterTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "log deleter";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        log_deleter_task(&self.prefix, shutdown_signal).await
+    }
+}
+
+#[instrument(skip(shutdown_signal))]
+async fn log_deleter_task(prefix: &Utf8Path, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24); // once per day
     const MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 90); // 90 days
 
@@ -130,40 +181,15 @@ pub async fn log_deleter_task(prefix: &Utf8Path) -> anyhow::Result<()> {
             }
         }
 
-        sleep(TASK_INTERVAL).await;
-    }
-}
-
-/// Find latest log file (by age)
-///
-/// Given path is used to filter out by file name prefix.
-#[instrument]
-pub async fn find_latest_log_file(prefix: &Utf8Path) -> anyhow::Result<std::path::PathBuf> {
-    let cfg = LogPathCfg::from_path(prefix)?;
-
-    let mut read_dir = fs::read_dir(cfg.folder).await.context("couldn't read directory")?;
-
-    let mut most_recent_time = SystemTime::UNIX_EPOCH;
-    let mut most_recent = None;
-
-    while let Ok(Some(entry)) = read_dir.next_entry().await {
-        match entry.file_name().to_str() {
-            Some(file_name) if file_name.starts_with(cfg.prefix) && file_name.contains("log") => {
-                debug!(file_name, "Found a log file");
-                match entry.metadata().await.and_then(|metadata| metadata.modified()) {
-                    Ok(modified) if modified > most_recent_time => {
-                        most_recent_time = modified;
-                        most_recent = Some(entry.path());
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        warn!(%error, file_name, "Couldn't retrieve metadata for file");
-                    }
-                }
+        tokio::select! {
+            _ = sleep(TASK_INTERVAL) => {}
+            _ = shutdown_signal.wait() => {
+                break;
             }
-            _ => continue,
         }
     }
 
-    most_recent.context("no file found")
+    debug!("Task terminated");
+
+    Ok(())
 }

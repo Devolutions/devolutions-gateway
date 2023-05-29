@@ -1,4 +1,6 @@
 use anyhow::Context as _;
+use async_trait::async_trait;
+use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use futures::TryStreamExt as _;
 use ngrok::config::{HttpTunnelBuilder, TcpTunnelBuilder, TunnelBuilder as _};
 use ngrok::tunnel::UrlTunnel as _;
@@ -192,7 +194,7 @@ async fn run_tcp_tunnel(mut tunnel: ngrok::tunnel::TcpTunnel, state: DgwState) {
                 }
                 .instrument(info_span!("ngrok_tcp", client = %peer_addr));
 
-                tokio::spawn(fut);
+                ChildTask::spawn(fut).detach();
             }
             Ok(None) => {
                 info!(url = tunnel.url(), "Tunnel closed");
@@ -221,7 +223,7 @@ async fn run_http_tunnel(mut tunnel: ngrok::tunnel::HttpTunnel, state: DgwState)
                 }
                 .instrument(info_span!("ngrok_http", client = %peer_addr));
 
-                tokio::spawn(fut);
+                ChildTask::spawn(fut).detach();
             }
             Ok(None) => {
                 info!(url = tunnel.url(), "Tunnel closed");
@@ -230,6 +232,25 @@ async fn run_http_tunnel(mut tunnel: ngrok::tunnel::HttpTunnel, state: DgwState)
             Err(error) => {
                 error!(url = tunnel.url(), %error, "Failed to accept connection");
             }
+        }
+    }
+}
+
+pub struct NgrokTunnelTask {
+    pub tunnel: NgrokTunnel,
+    pub state: DgwState,
+}
+
+#[async_trait]
+impl Task for NgrokTunnelTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "ngrok tunnel";
+
+    async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
+        tokio::select! {
+            result = self.tunnel.open(self.state) => result,
+            _ = shutdown_signal.wait() => Ok(()),
         }
     }
 }

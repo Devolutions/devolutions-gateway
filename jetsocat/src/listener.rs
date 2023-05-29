@@ -129,7 +129,7 @@ async fn socks5_process_socket(
             Ok(()) => {}
             Err(error) => {
                 warn!(%error, "Couldn’t send JMUX API request");
-                anyhow::bail!("Couldn't send JMUX request");
+                anyhow::bail!("couldn't send JMUX request");
             }
         }
 
@@ -137,7 +137,7 @@ async fn socks5_process_socket(
             JmuxApiResponse::Success { id } => id,
             JmuxApiResponse::Failure { id, reason_code } => {
                 let _ = acceptor.failed(jmux_to_socks_error(reason_code)).await;
-                anyhow::bail!("Channel {} failure: {}", id, reason_code);
+                anyhow::bail!("channel {} failure: {}", id, reason_code);
             }
         };
 
@@ -218,7 +218,7 @@ async fn http_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStre
         Err(error) => {
             warn!(%error, "Couldn’t send JMUX API request");
             let _ = acceptor.failure(proxy_http::ErrorCode::InternalServerError).await;
-            anyhow::bail!("Couldn't send JMUX request");
+            anyhow::bail!("couldn't send JMUX request");
         }
     }
 
@@ -226,7 +226,7 @@ async fn http_process_socket(api_request_tx: ApiRequestSender, incoming: TcpStre
         JmuxApiResponse::Success { id } => id,
         JmuxApiResponse::Failure { id, reason_code } => {
             let _ = acceptor.failure(jmux_to_http_error_code(reason_code)).await;
-            anyhow::bail!("Channel {} failure: {}", id, reason_code);
+            anyhow::bail!("channel {} failure: {}", id, reason_code);
         }
     };
 
@@ -284,7 +284,7 @@ where
 
     let listener = TcpListener::bind(&bind_addr)
         .await
-        .with_context(|| format!("Couldn’t bind listener to {bind_addr}"))?;
+        .with_context(|| format!("couldn’t bind listener to {bind_addr}"))?;
 
     info!("Start listener");
 

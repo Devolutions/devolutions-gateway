@@ -15,7 +15,6 @@ pub mod generic_client;
 pub mod http;
 pub mod interceptor;
 pub mod jmux;
-pub mod jrec;
 pub mod listener;
 pub mod log;
 pub mod middleware;
@@ -24,6 +23,7 @@ pub mod plugin_manager;
 pub mod proxy;
 pub mod rdp_extension;
 pub mod rdp_pcb;
+pub mod recording;
 pub mod session;
 pub mod subscriber;
 pub mod target_addr;
@@ -39,6 +39,7 @@ pub struct DgwState {
     pub jrl: Arc<token::CurrentJrl>,
     pub sessions: session::SessionManagerHandle,
     pub subscriber_tx: subscriber::SubscriberSender,
+    pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
 }
 
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {

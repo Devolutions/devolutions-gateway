@@ -20,6 +20,7 @@ transport = { path = "../crates/transport" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
 ironrdp-pdu = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "f11131b18afa5f8ff9" }
 ironrdp-rdcleanpath = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "f11131b18afa5f8ff9" }
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 ceviche = "0.5.2"
 picky-krb = "0.6.0"
 

@@ -2,7 +2,9 @@ use crate::config::dto::Subscriber;
 use crate::config::ConfHandle;
 use crate::session::SessionManagerHandle;
 use anyhow::Context as _;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -132,10 +134,27 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
     Ok(())
 }
 
+pub struct SubscriberPollingTask {
+    pub sessions: SessionManagerHandle,
+    pub subscriber: SubscriberSender,
+}
+
+#[async_trait]
+impl Task for SubscriberPollingTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "subscriber polling";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        subscriber_polling_task(self.sessions, self.subscriber, shutdown_signal).await
+    }
+}
+
 #[instrument(skip_all)]
-pub async fn subscriber_polling_task(
+async fn subscriber_polling_task(
     sessions: SessionManagerHandle,
     subscriber: SubscriberSender,
+    mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
     const TASK_INTERVAL: Duration = Duration::from_secs(60 * 20); // once per 20 minutes
 
@@ -166,12 +185,41 @@ pub async fn subscriber_polling_task(
             }
         }
 
-        sleep(TASK_INTERVAL).await;
+        tokio::select! {
+            _ = sleep(TASK_INTERVAL) => {}
+            _ = shutdown_signal.wait() => {
+                break;
+            }
+        }
+    }
+
+    debug!("Task terminated");
+
+    Ok(())
+}
+
+pub struct SubscriberTask {
+    pub conf_handle: ConfHandle,
+    pub rx: SubscriberReceiver,
+}
+
+#[async_trait]
+impl Task for SubscriberTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "subscriber";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        subscriber_task(self.conf_handle, self.rx, shutdown_signal).await
     }
 }
 
 #[instrument(skip_all)]
-pub async fn subscriber_task(conf_handle: ConfHandle, mut rx: SubscriberReceiver) -> anyhow::Result<()> {
+async fn subscriber_task(
+    conf_handle: ConfHandle,
+    mut rx: SubscriberReceiver,
+    mut shutdown_signal: ShutdownSignal,
+) -> anyhow::Result<()> {
     debug!("Task started");
 
     let mut conf = conf_handle.get_conf();
@@ -185,17 +233,37 @@ pub async fn subscriber_task(conf_handle: ConfHandle, mut rx: SubscriberReceiver
                 let msg = msg.context("All senders are dead")?;
                 if let Some(subscriber) = conf.subscriber.clone() {
                     debug!(?msg, %subscriber.url, "Send message");
-                    tokio::spawn(async {
+
+                    ChildTask::spawn(async {
                         let msg = msg;
                         let subscriber = subscriber;
                         if let Err(error) = send_message(&subscriber, &msg).await {
                             warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
                         }
-                    });
+                    })
+                    .detach();
                 } else {
                     trace!(?msg, "Subscriber is not configured, ignore message");
                 }
             }
+            _ = shutdown_signal.wait() => {
+                break;
+            }
         }
     }
+
+    if let Some(subscriber) = conf.subscriber.clone() {
+        debug!("Task is stopping; notify the subscriber that there is no session running anymore");
+
+        let msg = Message::session_list(Vec::new());
+        debug!(?msg, %subscriber.url, "Send message");
+
+        if let Err(error) = send_message(&subscriber, &msg).await {
+            warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
+        }
+    }
+
+    debug!("Task terminated");
+
+    Ok(())
 }

@@ -2,14 +2,14 @@ use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
 use devolutions_gateway::log::{self, LoggerGuard};
-use devolutions_gateway::session::{session_manager_channel, SessionManagerTask};
+use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
 use devolutions_gateway::DgwState;
+use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use parking_lot::Mutex;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
@@ -20,7 +20,10 @@ pub const DESCRIPTION: &str = "Devolutions Gateway service";
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum GatewayState {
     Stopped,
-    Running { runtime: Runtime },
+    Running {
+        shutdown_handle: ShutdownHandle,
+        runtime: Runtime,
+    },
 }
 
 pub struct GatewayService {
@@ -70,27 +73,34 @@ impl GatewayService {
         let config = self.conf_handle.clone();
 
         // create_futures needs to be run in the runtime in order to bind the sockets.
-        let futures = runtime.block_on(create_futures(config))?;
+        let tasks = runtime.block_on(spawn_tasks(config))?;
 
-        let mut select_all = futures::future::select_all(futures);
+        trace!("Tasks created");
+
+        let mut join_all = futures::future::select_all(tasks.inner.into_iter().map(|child| Box::pin(child.join())));
 
         runtime.spawn(async {
             loop {
-                let (result, _, rest) = select_all.await;
+                let (result, _, rest) = join_all.await;
 
-                if let Err(error) = result {
-                    error!(error = format!("{error:#}"), "Something went wrong");
+                match result {
+                    Ok(Ok(())) => trace!("A task terminated gracefully"),
+                    Ok(Err(error)) => error!(error = format!("{error:#}"), "A task failed"),
+                    Err(error) => error!(%error, "Something went very wrong with a task"),
                 }
 
                 if rest.is_empty() {
                     break;
                 } else {
-                    select_all = futures::future::select_all(rest);
+                    join_all = futures::future::select_all(rest);
                 }
             }
         });
 
-        self.state = GatewayState::Running { runtime };
+        self.state = GatewayState::Running {
+            shutdown_handle: tasks.shutdown_handle,
+            runtime,
+        };
 
         Ok(())
     }
@@ -100,11 +110,27 @@ impl GatewayService {
             GatewayState::Stopped => {
                 info!("Attempted to stop gateway service, but it's already stopped");
             }
-            GatewayState::Running { runtime } => {
+            GatewayState::Running {
+                shutdown_handle,
+                runtime,
+            } => {
                 info!("Stopping gateway service");
 
-                // stop runtime now
-                runtime.shutdown_background();
+                // Send shutdown signals to all tasks
+                shutdown_handle.signal();
+
+                runtime.block_on(async move {
+                    tokio::select! {
+                        _ = shutdown_handle.all_closed() => {
+                            debug!("All tasks closed gracefully");
+                        }
+                        _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                            warn!("Some tasks didn’t terminate at all");
+                        }
+                    }
+                });
+
+                runtime.shutdown_timeout(Duration::from_secs(3));
 
                 self.state = GatewayState::Stopped;
             }
@@ -112,16 +138,40 @@ impl GatewayService {
     }
 }
 
-// TODO: when benchmarking facility is ready, use Handle instead of pinned futures
-type VecOfFuturesType = Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'static>>>;
+struct Tasks {
+    inner: Vec<ChildTask<anyhow::Result<()>>>,
+    shutdown_handle: ShutdownHandle,
+    shutdown_signal: ShutdownSignal,
+}
 
-async fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesType> {
+impl Tasks {
+    fn new() -> Self {
+        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+
+        Self {
+            inner: Vec::new(),
+            shutdown_handle,
+            shutdown_signal,
+        }
+    }
+
+    fn register<T>(&mut self, task: T)
+    where
+        T: devolutions_gateway_task::Task<Output = anyhow::Result<()>> + 'static,
+    {
+        let child = devolutions_gateway_task::spawn_task(task, self.shutdown_signal.clone());
+        self.inner.push(child);
+    }
+}
+
+async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let conf = conf_handle.get_conf();
 
     let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
     let jrl = load_jrl_from_disk(&conf)?;
     let (session_manager_handle, session_manager_rx) = session_manager_channel();
     let (subscriber_tx, subscriber_rx) = subscriber_channel();
+    let mut tasks = Tasks::new();
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -129,23 +179,19 @@ async fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesT
         jrl,
         sessions: session_manager_handle.clone(),
         subscriber_tx: subscriber_tx.clone(),
+        shutdown_signal: tasks.shutdown_signal.clone(),
     };
 
-    let mut futures: VecOfFuturesType = Vec::with_capacity(conf.listeners.len());
-
-    let listeners = conf
-        .listeners
+    conf.listeners
         .iter()
         .map(|listener| {
             GatewayListener::init_and_bind(listener.internal_url.clone(), state.clone())
                 .with_context(|| format!("Failed to initialize {}", listener.internal_url))
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
-        .context("failed to bind listener")?;
-
-    for listener in listeners {
-        futures.push(Box::pin(listener.run()))
-    }
+        .context("failed to bind listener")?
+        .into_iter()
+        .for_each(|listener| tasks.register(listener));
 
     if let Some(ngrok_conf) = &conf.ngrok {
         let session = devolutions_gateway::ngrok::NgrokSession::connect(ngrok_conf)
@@ -154,35 +200,34 @@ async fn create_futures(conf_handle: ConfHandle) -> anyhow::Result<VecOfFuturesT
 
         for (name, conf) in &ngrok_conf.tunnels {
             let tunnel = session.configure_endpoint(name, conf);
-            futures.push(Box::pin(tunnel.open(state.clone())));
+            tasks.register(devolutions_gateway::ngrok::NgrokTunnelTask {
+                tunnel,
+                state: state.clone(),
+            });
         }
     }
 
-    futures.push(Box::pin(async {
-        devolutions_gateway::token::cleanup_task(token_cache).await;
-        Ok(())
-    }));
+    tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
-    {
-        let log_path = conf.log_file.clone();
-        futures.push(Box::pin(async move {
-            devolutions_gateway::log::log_deleter_task(&log_path).await
-        }));
-    }
+    tasks.register(devolutions_gateway::log::LogDeleterTask {
+        prefix: conf.log_file.clone(),
+    });
 
-    futures.push(Box::pin(async move {
-        devolutions_gateway::subscriber::subscriber_polling_task(session_manager_handle, subscriber_tx).await
-    }));
+    tasks.register(devolutions_gateway::subscriber::SubscriberPollingTask {
+        sessions: session_manager_handle,
+        subscriber: subscriber_tx,
+    });
 
-    futures.push(Box::pin(async move {
-        devolutions_gateway::subscriber::subscriber_task(conf_handle, subscriber_rx).await
-    }));
+    tasks.register(devolutions_gateway::subscriber::SubscriberTask {
+        conf_handle,
+        rx: subscriber_rx,
+    });
 
-    futures.push(Box::pin(async move {
-        devolutions_gateway::session::session_manager_task(SessionManagerTask::new(session_manager_rx)).await
-    }));
+    tasks.register(devolutions_gateway::session::SessionManagerTask::new(
+        session_manager_rx,
+    ));
 
-    Ok(futures)
+    Ok(tasks)
 }
 
 fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {

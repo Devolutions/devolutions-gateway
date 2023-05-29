@@ -1,4 +1,6 @@
 use anyhow::Context;
+use async_trait::async_trait;
+use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use std::net::SocketAddr;
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -92,16 +94,32 @@ impl GatewayListener {
     }
 }
 
+#[async_trait]
+impl Task for GatewayListener {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "gateway listener";
+
+    async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
+        tokio::select! {
+            result = self.run() => result,
+            _ = shutdown_signal.wait() => Ok(()),
+        }
+    }
+}
+
 async fn run_tcp_listener(listener: TcpListener, state: DgwState) -> anyhow::Result<()> {
     loop {
         match listener.accept().await.context("failed to accept connection") {
             Ok((stream, peer_addr)) => {
                 let state = state.clone();
-                tokio::spawn(async move {
+
+                ChildTask::spawn(async move {
                     if let Err(e) = handle_tcp_peer(stream, state, peer_addr).await {
                         error!(error = format!("{e:#}"), "Peer failure");
                     }
-                });
+                })
+                .detach();
             }
             Err(e) => error!(error = format!("{e:#}"), "Listener failure"),
         }
@@ -156,7 +174,7 @@ async fn run_http_listener(listener: TcpListener, state: DgwState) -> anyhow::Re
                 }
                 .instrument(info_span!("http", client = %peer_addr));
 
-                tokio::spawn(fut);
+                ChildTask::spawn(fut).detach();
             }
             Err(error) => {
                 error!(%error, "failed to accept connection");
@@ -183,7 +201,7 @@ async fn run_https_listener(listener: TcpListener, state: DgwState) -> anyhow::R
                 }
                 .instrument(info_span!("https", client = %peer_addr));
 
-                tokio::spawn(fut);
+                ChildTask::spawn(fut).detach();
             }
             Err(error) => {
                 error!(%error, "failed to accept connection");

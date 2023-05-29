@@ -51,6 +51,7 @@ pub struct ClientPush<S> {
     session_id: Uuid,
 }
 
+// TODO: harden this!!!
 // FIXME: at some point, we should track ongoing recordings and make sure there is no data race to write the manifest file
 
 impl<S> ClientPush<S>
