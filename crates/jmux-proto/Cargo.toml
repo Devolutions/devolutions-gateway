@@ -10,5 +10,5 @@ bytes = "1.4.0"
 smol_str = "0.2.0"
 
 [dev-dependencies]
-proptest = "1.1.0"
+proptest = "1.2.0"
 jmux-generators = { path = "../jmux-generators" }
