@@ -2,8 +2,10 @@ use crate::subscriber;
 use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, SessionTtl};
 use anyhow::Context as _;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use core::fmt;
+use devolutions_gateway_task::{ShutdownSignal, Task};
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
@@ -79,7 +81,7 @@ pub async fn add_session_in_progress(
     sessions
         .new_session(info, notify_kill)
         .await
-        .context("Couldn't register new session")?;
+        .context("couldn't register new session")?;
 
     let message = subscriber::Message::session_started(subscriber::SubscriberSessionInfo {
         association_id,
@@ -102,7 +104,7 @@ pub async fn remove_session_in_progress(
     let removed_session = sessions
         .remove_session(id)
         .await
-        .context("Couldn't remove running session")?;
+        .context("couldn't remove running session")?;
 
     if let Some(session) = removed_session {
         let message = subscriber::Message::session_ended(subscriber::SubscriberSessionInfo {
@@ -174,7 +176,7 @@ impl SessionManagerHandle {
             .send(SessionManagerMessage::New { info, notify_kill })
             .await
             .ok()
-            .context("Couldn't send New message")
+            .context("couldn't send New message")
     }
 
     pub async fn remove_session(&self, id: Uuid) -> anyhow::Result<Option<SessionInfo>> {
@@ -183,8 +185,8 @@ impl SessionManagerHandle {
             .send(SessionManagerMessage::Remove { id, channel: tx })
             .await
             .ok()
-            .context("Couldn't send Remove message")?;
-        rx.await.context("Couldn't receive info for removed session")
+            .context("couldn't send Remove message")?;
+        rx.await.context("couldn't receive info for removed session")
     }
 
     pub async fn kill_session(&self, id: Uuid) -> anyhow::Result<KillResult> {
@@ -193,8 +195,8 @@ impl SessionManagerHandle {
             .send(SessionManagerMessage::Kill { id, channel: tx })
             .await
             .ok()
-            .context("Couldn't send Kill message")?;
-        rx.await.context("Couldn't receive kill result")
+            .context("couldn't send Kill message")?;
+        rx.await.context("couldn't receive kill result")
     }
 
     pub async fn get_running_sessions(&self) -> anyhow::Result<RunningSessions> {
@@ -203,8 +205,8 @@ impl SessionManagerHandle {
             .send(SessionManagerMessage::GetRunning { channel: tx })
             .await
             .ok()
-            .context("Couldn't send GetRunning message")?;
-        rx.await.context("Couldn't receive running session list")
+            .context("couldn't send GetRunning message")?;
+        rx.await.context("couldn't receive running session list")
     }
 
     pub async fn get_running_session_count(&self) -> anyhow::Result<usize> {
@@ -213,8 +215,8 @@ impl SessionManagerHandle {
             .send(SessionManagerMessage::GetCount { channel: tx })
             .await
             .ok()
-            .context("Couldn't send GetRunning message")?;
-        rx.await.context("Couldn't receive running session count")
+            .context("couldn't send GetRunning message")?;
+        rx.await.context("couldn't receive running session count")
     }
 }
 
@@ -291,8 +293,22 @@ impl SessionManagerTask {
     }
 }
 
+#[async_trait]
+impl Task for SessionManagerTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "session manager";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        session_manager_task(self, shutdown_signal).await
+    }
+}
+
 #[instrument(skip_all)]
-pub async fn session_manager_task(mut manager: SessionManagerTask) -> anyhow::Result<()> {
+async fn session_manager_task(
+    mut manager: SessionManagerTask,
+    mut shutdown_signal: ShutdownSignal,
+) -> anyhow::Result<()> {
     debug!("Task started");
 
     let mut with_ttl = BinaryHeap::<WithTtlInfo>::new();
@@ -364,6 +380,22 @@ pub async fn session_manager_task(mut manager: SessionManagerTask) -> anyhow::Re
                     }
                 }
             }
+            _ = shutdown_signal.wait() => {
+                break;
+            }
         }
     }
+
+    debug!("Task is stopping; kill all running sessions");
+
+    for (_, notify_kill) in manager.all_notify_kill {
+        notify_kill.notify_waiters();
+    }
+
+    // Wait just a bit so we can receive the "Remove" messages
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    debug!("Task terminated");
+
+    Ok(())
 }

@@ -834,6 +834,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "chrono",
  "devolutions-gateway-generators",
+ "devolutions-gateway-task",
  "dlopen",
  "dlopen_derive",
  "embed-resource",
@@ -896,6 +897,14 @@ dependencies = [
  "proptest",
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "devolutions-gateway-task"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "tokio",
 ]
 
 [[package]]
@@ -3633,6 +3642,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.48.0",
 ]
 

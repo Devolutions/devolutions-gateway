@@ -41,7 +41,7 @@ pub async fn forward(cfg: ForwardCfg) -> anyhow::Result<()> {
         )
         .instrument(info_span!("open_pipe_a"))
         .await
-        .context("Couldn't open pipe A")?;
+        .context("couldn't open pipe A")?;
 
         let pipe_b = utils::timeout(
             cfg.pipe_timeout,
@@ -49,13 +49,13 @@ pub async fn forward(cfg: ForwardCfg) -> anyhow::Result<()> {
         )
         .instrument(info_span!("open_pipe_b"))
         .await
-        .context("Couldn't open pipe B")?;
+        .context("couldn't open pipe B")?;
 
         let pipe_fut = pipe(pipe_a, pipe_b);
 
         utils::while_process_is_running(cfg.watch_process, pipe_fut)
             .await
-            .context("Failed to pipe")?;
+            .context("failed to pipe")?;
     }
 
     Ok(())

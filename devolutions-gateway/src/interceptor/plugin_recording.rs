@@ -1,6 +1,7 @@
 use crate::interceptor::{Inspector, PeerSide};
 use crate::plugin_manager::{PacketsParser, Recorder, PLUGIN_MANAGER};
 use anyhow::Context as _;
+use devolutions_gateway_task::ChildTask;
 use parking_lot::{Condvar, Mutex};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,13 +81,14 @@ impl PluginRecordingInspector {
             move || timeout_task(recorder, condition_timeout)
         });
 
-        tokio::spawn(inspector_task(
+        ChildTask::spawn(inspector_task(
             receiver,
             handle,
             packet_parser,
             recorder,
             condition_timeout,
-        ));
+        ))
+        .detach();
 
         Ok(InitResult {
             client_inspector: Self {

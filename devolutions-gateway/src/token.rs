@@ -1,4 +1,6 @@
+use async_trait::async_trait;
 use core::fmt;
+use devolutions_gateway_task::{ShutdownSignal, Task};
 use nonempty::NonEmpty;
 use parking_lot::Mutex;
 use picky::jose::jws::RawJws;
@@ -19,7 +21,6 @@ use crate::target_addr::TargetAddr;
 pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
 
 const LEEWAY_SECS: u16 = 60 * 5; // 5 minutes
-const CLEANUP_TASK_INTERVAL_SECS: u64 = 60 * 30; // 30 minutes
 const MAX_REUSE_INTERVAL_SECS: i64 = 10; // 10 seconds
 
 pub type TokenCache = Mutex<HashMap<Uuid, TokenSource>>; // TODO: compare performance with a token manager task
@@ -700,16 +701,45 @@ pub enum KeyType {
 
 // ----- cache clean up ----- //
 
-pub async fn cleanup_task(token_cache: Arc<TokenCache>) {
+pub struct CleanupTask {
+    pub token_cache: Arc<TokenCache>,
+}
+
+#[async_trait]
+impl Task for CleanupTask {
+    type Output = anyhow::Result<()>;
+
+    const NAME: &'static str = "token cleanup";
+
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        cleanup_task(self.token_cache, shutdown_signal).await;
+        Ok(())
+    }
+}
+
+#[instrument(skip_all)]
+async fn cleanup_task(token_cache: Arc<TokenCache>, mut shutdown_signal: ShutdownSignal) {
     use tokio::time::{sleep, Duration};
 
+    const TASK_INTERVAL: Duration = Duration::from_secs(60 * 30); // 30 minutes
+
+    debug!("Task started");
+
     loop {
-        sleep(Duration::from_secs(CLEANUP_TASK_INTERVAL_SECS)).await;
+        tokio::select! {
+            _ = sleep(TASK_INTERVAL) => {}
+            _ = shutdown_signal.wait() => {
+                break;
+            }
+        }
+
         let clean_threshold = chrono::Utc::now().timestamp() - i64::from(LEEWAY_SECS);
         token_cache
             .lock()
             .retain(|_, src| src.expiration_timestamp > clean_threshold);
     }
+
+    debug!("Task terminated");
 }
 
 // ----- validation ----- //
@@ -1066,6 +1096,8 @@ fn validate_token_impl(
             let _ = jti;
             // TODO: check IP is the same
             // TODO: check if recording is ongoing
+
+            // TODO: handle that!!!
         }
 
         // JREC pull tokens can be re-used until they are expired

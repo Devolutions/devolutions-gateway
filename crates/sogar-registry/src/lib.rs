@@ -1,5 +1,3 @@
-// TODO: extract this module into another crate
-
 mod push_files;
 mod sogar_auth;
 mod sogar_token;
