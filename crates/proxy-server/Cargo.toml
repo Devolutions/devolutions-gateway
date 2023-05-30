@@ -9,4 +9,4 @@ publish = false
 proxy-socks = { path = "../proxy-socks" }
 proxy-http = { path = "../proxy-http" }
 proxy-types = { path = "../proxy-types" }
-tokio = { version = "1.28.1", features = ["rt", "net", "rt-multi-thread", "macros"] }
+tokio = { version = "1.28.2", features = ["rt", "net", "rt-multi-thread", "macros"] }
