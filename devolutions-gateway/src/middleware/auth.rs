@@ -10,6 +10,7 @@ use axum::{RequestPartsExt as _, TypedHeader};
 
 use crate::config::Conf;
 use crate::http::HttpError;
+use crate::recording::ActiveRecordings;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 use crate::DgwState;
 
@@ -25,6 +26,7 @@ pub async fn auth_middleware<B>(
         conf_handle,
         token_cache,
         jrl,
+        recordings,
         ..
     }): State<DgwState>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
@@ -65,8 +67,15 @@ where
 
         let conf = conf_handle.get_conf();
 
-        let access_token_claims =
-            authenticate(source_addr, token, &conf, &token_cache, &jrl).map_err(HttpError::unauthorized().err())?;
+        let access_token_claims = authenticate(
+            source_addr,
+            token,
+            &conf,
+            &token_cache,
+            &jrl,
+            &recordings.active_recordings,
+        )
+        .map_err(HttpError::unauthorized().err())?;
 
         let mut request = Request::from_parts(parts, body);
 
@@ -82,6 +91,7 @@ pub fn authenticate(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
 ) -> Result<AccessTokenClaims, crate::token::TokenError> {
     if conf.debug.dump_tokens {
         debug!(token, "**DEBUG OPTION**");
@@ -99,6 +109,7 @@ pub fn authenticate(
             .delegation_key(delegation_key)
             .token_cache(token_cache)
             .revocation_list(jrl)
+            .active_recordings(active_recordings)
             .gw_id(conf.id)
             .subkey(conf.sub_provisioner_public_key.as_ref())
             .build()

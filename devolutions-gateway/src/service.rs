@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
 use devolutions_gateway::log::{self, LoggerGuard};
+use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
@@ -122,15 +123,16 @@ impl GatewayService {
                 runtime.block_on(async move {
                     tokio::select! {
                         _ = shutdown_handle.all_closed() => {
-                            debug!("All tasks closed gracefully");
+                            debug!("All tasks are terminated");
                         }
                         _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                            warn!("Some tasks didn’t terminate at all");
+                            warn!("Termination of certain tasks is experiencing significant delays");
                         }
                     }
                 });
 
-                runtime.shutdown_timeout(Duration::from_secs(3));
+                // If necessary, wait for another 10 seconds before forcefully shutting down the runtime
+                runtime.shutdown_timeout(Duration::from_secs(10));
 
                 self.state = GatewayState::Stopped;
             }
@@ -170,6 +172,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let token_cache = devolutions_gateway::token::new_token_cache().pipe(Arc::new);
     let jrl = load_jrl_from_disk(&conf)?;
     let (session_manager_handle, session_manager_rx) = session_manager_channel();
+    let (recording_manager_handle, recording_manager_rx) = recording_message_channel();
     let (subscriber_tx, subscriber_rx) = subscriber_channel();
     let mut tasks = Tasks::new();
 
@@ -180,6 +183,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         sessions: session_manager_handle.clone(),
         subscriber_tx: subscriber_tx.clone(),
         shutdown_signal: tasks.shutdown_signal.clone(),
+        recordings: recording_manager_handle,
     };
 
     conf.listeners
@@ -225,6 +229,11 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::session::SessionManagerTask::new(
         session_manager_rx,
+    ));
+
+    tasks.register(devolutions_gateway::recording::RecordingManagerTask::new(
+        recording_manager_rx,
+        conf.recording_path.clone(),
     ));
 
     Ok(tasks)

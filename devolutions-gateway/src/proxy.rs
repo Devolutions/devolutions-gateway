@@ -1,7 +1,7 @@
 use crate::config::Conf;
 use crate::interceptor::pcap::PcapInspector;
 use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
-use crate::session::{SessionInfo, SessionManagerHandle};
+use crate::session::{SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
 use anyhow::Context as _;
@@ -21,7 +21,7 @@ pub struct Proxy<A, B> {
     address_a: SocketAddr,
     transport_b: B,
     address_b: SocketAddr,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
 }
 
@@ -117,8 +117,15 @@ where
         let kill_notified = notify_kill.notified();
         tokio::pin!(kill_notified);
 
+        // NOTE(DGW-86): when recording is required, should we wait for it to start before we forward, or simply spawn
+        // a timer to check if the recording is started within a few seconds?
+
         let res = match futures::future::select(forward_fut, kill_notified).await {
-            Either::Left((res, _)) => res.map(|_| ()),
+            Either::Left((res, _)) => match res {
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(()),
+                Err(e) => Err(e),
+            },
             Either::Right(_) => Ok(()),
         };
 

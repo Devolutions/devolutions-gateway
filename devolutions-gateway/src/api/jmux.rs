@@ -7,7 +7,7 @@ use tracing::Instrument as _;
 
 use crate::extract::JmuxToken;
 use crate::http::HttpError;
-use crate::session::SessionManagerHandle;
+use crate::session::SessionMessageSender;
 use crate::subscriber::SubscriberSender;
 use crate::token::JmuxTokenClaims;
 use crate::DgwState;
@@ -29,7 +29,7 @@ pub async fn handler(
 
 async fn handle_socket(
     ws: WebSocket,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     claims: JmuxTokenClaims,
     source_addr: SocketAddr,

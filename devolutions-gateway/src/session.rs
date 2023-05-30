@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tap::prelude::*;
 use tokio::sync::{mpsc, oneshot, Notify};
-use tokio::time::{self, Instant};
+use tokio::time;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Clone)]
@@ -70,7 +70,7 @@ impl SessionInfo {
 
 #[instrument]
 pub async fn add_session_in_progress(
-    sessions: &SessionManagerHandle,
+    sessions: &SessionMessageSender,
     subscriber_tx: &subscriber::SubscriberSender,
     info: SessionInfo,
     notify_kill: Arc<Notify>,
@@ -97,7 +97,7 @@ pub async fn add_session_in_progress(
 
 #[instrument]
 pub async fn remove_session_in_progress(
-    sessions: &SessionManagerHandle,
+    sessions: &SessionMessageSender,
     subscriber_tx: &subscriber::SubscriberSender,
     id: Uuid,
 ) -> anyhow::Result<()> {
@@ -128,7 +128,7 @@ pub enum KillResult {
     NotFound,
 }
 
-pub enum SessionManagerMessage {
+enum SessionManagerMessage {
     New {
         info: SessionInfo,
         notify_kill: Arc<Notify>,
@@ -168,9 +168,9 @@ impl fmt::Debug for SessionManagerMessage {
 }
 
 #[derive(Clone, Debug)]
-pub struct SessionManagerHandle(mpsc::Sender<SessionManagerMessage>);
+pub struct SessionMessageSender(mpsc::Sender<SessionManagerMessage>);
 
-impl SessionManagerHandle {
+impl SessionMessageSender {
     pub async fn new_session(&self, info: SessionInfo, notify_kill: Arc<Notify>) -> anyhow::Result<()> {
         self.0
             .send(SessionManagerMessage::New { info, notify_kill })
@@ -220,14 +220,14 @@ impl SessionManagerHandle {
     }
 }
 
-pub struct SessionManagerReceiver(mpsc::Receiver<SessionManagerMessage>);
+pub struct SessionMessageReceiver(mpsc::Receiver<SessionManagerMessage>);
 
-pub fn session_manager_channel() -> (SessionManagerHandle, SessionManagerReceiver) {
-    mpsc::channel(64).pipe(|(tx, rx)| (SessionManagerHandle(tx), SessionManagerReceiver(rx)))
+pub fn session_manager_channel() -> (SessionMessageSender, SessionMessageReceiver) {
+    mpsc::channel(64).pipe(|(tx, rx)| (SessionMessageSender(tx), SessionMessageReceiver(rx)))
 }
 
 struct WithTtlInfo {
-    deadline: Instant,
+    deadline: time::Instant,
     session_id: Uuid,
 }
 
@@ -256,13 +256,13 @@ impl Ord for WithTtlInfo {
 }
 
 pub struct SessionManagerTask {
-    rx: SessionManagerReceiver,
-    all_running: HashMap<Uuid, SessionInfo>,
+    rx: SessionMessageReceiver,
+    all_running: RunningSessions,
     all_notify_kill: HashMap<Uuid, Arc<Notify>>,
 }
 
 impl SessionManagerTask {
-    pub fn new(rx: SessionManagerReceiver) -> Self {
+    pub fn new(rx: SessionMessageReceiver) -> Self {
         Self {
             rx,
             all_running: HashMap::new(),
@@ -339,15 +339,19 @@ async fn session_manager_task(
                     auto_kill_sleep.as_mut().reset(next.deadline)
                 }
             }
-            res = manager.rx.0.recv() => {
-                let msg = res.context("All senders are dead")?;
+            msg = manager.rx.0.recv() => {
+                let Some(msg) = msg else {
+                    warn!("All senders are dead");
+                    break;
+                };
+
                 debug!(?msg, "Received message");
 
                 match msg {
                     SessionManagerMessage::New { info, notify_kill } => {
                         if let SessionTtl::Limited { minutes } = info.time_to_live {
                             let duration = Duration::from_secs(minutes.get() * 60);
-                            let now = Instant::now();
+                            let now = time::Instant::now();
                             let deadline = now + duration;
                             with_ttl.push(WithTtlInfo {
                                 deadline,
@@ -388,12 +392,25 @@ async fn session_manager_task(
 
     debug!("Task is stopping; kill all running sessions");
 
-    for (_, notify_kill) in manager.all_notify_kill {
+    for notify_kill in manager.all_notify_kill.values() {
         notify_kill.notify_waiters();
     }
 
-    // Wait just a bit so we can receive the "Remove" messages
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    debug!("Task is stopping; wait for leftover messages");
+
+    while let Some(msg) = manager.rx.0.recv().await {
+        debug!(?msg, "Received message");
+        match msg {
+            SessionManagerMessage::Remove { id, channel } => {
+                let removed_session = manager.handle_remove(id);
+                let _ = channel.send(removed_session);
+            }
+            SessionManagerMessage::Kill { channel, .. } => {
+                let _ = channel.send(KillResult::Success);
+            }
+            _ => {}
+        }
+    }
 
     debug!("Task terminated");
 

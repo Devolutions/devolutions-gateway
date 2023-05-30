@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::config::Conf;
 use crate::proxy::Proxy;
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
+use crate::recording::ActiveRecordings;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::target_addr::TargetAddr;
 use crate::token::{AssociationTokenClaims, CurrentJrl, TokenCache, TokenError};
@@ -31,11 +32,12 @@ fn authorize(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
 ) -> Result<AssociationTokenClaims, AuthorizationError> {
     use crate::token::AccessTokenClaims;
 
     if let AccessTokenClaims::Association(claims) =
-        crate::middleware::auth::authenticate(source_addr, token, conf, token_cache, jrl)?
+        crate::middleware::auth::authenticate(source_addr, token, conf, token_cache, jrl, active_recordings)?
     {
         Ok(claims)
     } else {
@@ -161,6 +163,7 @@ async fn process_cleanpath(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
 ) -> Result<CleanPathResult, CleanPathError> {
     use crate::utils;
 
@@ -171,7 +174,7 @@ async fn process_cleanpath(
 
     trace!("Authorizing session");
 
-    let claims = authorize(client_addr, token, conf, token_cache, jrl)?;
+    let claims = authorize(client_addr, token, conf, token_cache, jrl, active_recordings)?;
 
     let crate::token::ConnectionMode::Fwd { ref targets, .. } = claims.jet_cm else {
         return anyhow::Error::msg("unexpected connection mode")
@@ -243,8 +246,9 @@ pub async fn handle(
     conf: Arc<Conf>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    active_recordings: &ActiveRecordings,
 ) -> anyhow::Result<()> {
     // Special handshake of our RDP extension
 
@@ -262,7 +266,7 @@ pub async fn handle(
         server_addr,
         server_stream,
         x224_rsp,
-    } = match process_cleanpath(cleanpath_pdu, client_addr, &conf, token_cache, jrl).await {
+    } = match process_cleanpath(cleanpath_pdu, client_addr, &conf, token_cache, jrl, active_recordings).await {
         Ok(result) => result,
         Err(error) => {
             let response = RDCleanPathPdu::from(&error);

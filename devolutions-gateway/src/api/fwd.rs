@@ -16,7 +16,7 @@ use crate::config::Conf;
 use crate::extract::AssociationToken;
 use crate::http::HttpError;
 use crate::proxy::Proxy;
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{AssociationTokenClaims, ConnectionMode};
 use crate::{utils, DgwState};
@@ -54,7 +54,7 @@ async fn fwd_tcp(
 async fn handle_fwd_tcp(
     ws: WebSocket,
     conf: Arc<Conf>,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
@@ -104,7 +104,7 @@ async fn fwd_tls(
 async fn handle_fwd_tls(
     ws: WebSocket,
     conf: Arc<Conf>,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
@@ -134,7 +134,7 @@ pub struct PlainForward<S> {
     claims: AssociationTokenClaims,
     client_stream: S,
     client_addr: SocketAddr,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     #[builder(default = false)]
     with_tls: bool,

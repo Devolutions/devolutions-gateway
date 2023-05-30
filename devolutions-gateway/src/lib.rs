@@ -37,9 +37,10 @@ pub struct DgwState {
     pub conf_handle: config::ConfHandle,
     pub token_cache: Arc<token::TokenCache>,
     pub jrl: Arc<token::CurrentJrl>,
-    pub sessions: session::SessionManagerHandle,
+    pub sessions: session::SessionMessageSender,
     pub subscriber_tx: subscriber::SubscriberSender,
     pub shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    pub recordings: recording::RecordingMessageSender,
 }
 
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {

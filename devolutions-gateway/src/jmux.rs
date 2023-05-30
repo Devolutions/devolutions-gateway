@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::JmuxTokenClaims;
 
@@ -15,7 +15,7 @@ use transport::{ErasedRead, ErasedWrite};
 pub async fn handle(
     stream: impl AsyncRead + AsyncWrite + Send + 'static,
     claims: JmuxTokenClaims,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
     use jmux_proxy::{FilteringRule, JmuxConfig};

@@ -16,6 +16,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
+use crate::recording::ActiveRecordings;
 use crate::target_addr::TargetAddr;
 
 pub const MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS: i64 = 60 * 60 * 2; // 2 hours
@@ -818,6 +819,7 @@ pub struct TokenValidator<'a> {
     provisioner_key: &'a PublicKey,
     token_cache: &'a TokenCache,
     revocation_list: &'a CurrentJrl,
+    active_recordings: &'a ActiveRecordings,
     delegation_key: Option<&'a PrivateKey>,
     subkey: Option<&'a Subkey>,
     gw_id: Option<Uuid>,
@@ -831,6 +833,7 @@ impl TokenValidator<'_> {
             self.provisioner_key,
             self.token_cache,
             self.revocation_list,
+            self.active_recordings,
             self.delegation_key,
             self.subkey,
             self.gw_id,
@@ -845,6 +848,7 @@ fn validate_token_impl(
     provisioner_key: &PublicKey,
     token_cache: &TokenCache,
     revocation_list: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
     delegation_key: Option<&PrivateKey>,
     subkey: Option<&Subkey>,
     gw_id: Option<Uuid>,
@@ -1042,7 +1046,7 @@ fn validate_token_impl(
             match token_cache.lock().entry(id) {
                 Entry::Occupied(bucket) => {
                     if bucket.get().ip != source_ip {
-                        warn!("A replay attack may have been attempted.");
+                        warn!("A replay attack may have been attempted");
                         return Err(TokenError::UnexpectedReplay {
                             reason: "different source IP",
                         });
@@ -1071,7 +1075,7 @@ fn validate_token_impl(
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
-                warn!("A replay attack may have been attempted.");
+                warn!("A replay attack may have been attempted");
                 return Err(TokenError::UnexpectedReplay {
                     reason: "never allowed for this usecase",
                 });
@@ -1087,20 +1091,38 @@ fn validate_token_impl(
 
         // JREC push tokens may be re-used as long as recording is considered as ongoing
         AccessTokenClaims::Jrec(JrecTokenClaims {
+            jet_aid,
             jet_rop: RecordingOperation::Push,
-            exp,
             jti,
+            exp,
             ..
-        }) => {
-            let _ = exp;
-            let _ = jti;
-            // TODO: check IP is the same
-            // TODO: check if recording is ongoing
+        }) => match token_cache.lock().entry(jti) {
+            Entry::Occupied(bucket) => {
+                if bucket.get().ip != source_ip {
+                    warn!("A replay attack may have been attempted");
+                    return Err(TokenError::UnexpectedReplay {
+                        reason: "different source IP",
+                    });
+                }
 
-            // TODO: handle that!!!
-        }
+                let recording_is_active = active_recordings.contains(jet_aid);
 
-        // JREC pull tokens can be re-used until they are expired
+                if !recording_is_active {
+                    return Err(TokenError::UnexpectedReplay {
+                        reason: "attempted to reuse jrec token, but the reuse leeway has expired",
+                    });
+                }
+            }
+            Entry::Vacant(bucket) => {
+                bucket.insert(TokenSource {
+                    ip: source_ip,
+                    expiration_timestamp: exp,
+                    last_use_timestamp: chrono::Utc::now().timestamp(),
+                });
+            }
+        },
+
+        // JREC pull tokens can be re-used at will until they are expired
         AccessTokenClaims::Jrec(JrecTokenClaims {
             jet_rop: RecordingOperation::Pull,
             ..

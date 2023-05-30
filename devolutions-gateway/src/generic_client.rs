@@ -8,7 +8,8 @@ use typed_builder::TypedBuilder;
 use crate::config::Conf;
 use crate::proxy::Proxy;
 use crate::rdp_pcb::{extract_association_claims, read_pcb};
-use crate::session::{ConnectionModeDetails, SessionInfo, SessionManagerHandle};
+use crate::recording::ActiveRecordings;
+use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ConnectionMode, CurrentJrl, TokenCache};
 use crate::utils;
@@ -20,8 +21,9 @@ pub struct GenericClient<S> {
     jrl: Arc<CurrentJrl>,
     client_addr: SocketAddr,
     client_stream: S,
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    active_recordings: Arc<ActiveRecordings>,
 }
 
 impl<S> GenericClient<S>
@@ -37,6 +39,7 @@ where
             mut client_stream,
             sessions,
             subscriber_tx,
+            active_recordings,
         } = self;
 
         let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
@@ -52,7 +55,8 @@ where
         };
 
         let source_ip = client_addr.ip();
-        let association_claims = extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl)?;
+        let association_claims =
+            extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
 
         let association_id = association_claims.jet_aid;
         let connection_mode = association_claims.jet_cm;

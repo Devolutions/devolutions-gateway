@@ -1,6 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use anyhow::Context as _;
+use devolutions_gateway::recording::ActiveRecordings;
 use devolutions_gateway::token::{
     new_token_cache, ApplicationProtocol, JrlTokenClaims, Protocol, Subkey, TokenError,
     MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
@@ -110,6 +111,12 @@ fn jrl() -> Mutex<JrlTokenClaims> {
 }
 
 #[fixture]
+fn active_recordings() -> ActiveRecordings {
+    let (rx, _) = devolutions_gateway::recording::recording_message_channel();
+    std::sync::Arc::try_unwrap(rx.active_recordings).unwrap()
+}
+
+#[fixture]
 fn provisioner_key() -> PrivateKey {
     PrivateKey::from_pem_str(PROVISIONER_KEY).unwrap()
 }
@@ -195,7 +202,13 @@ fn revocable_item<'a>(
 
 /// Assert that a token containing revoked claims is refused
 #[rstest]
-fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, source_ip: IpAddr, now: i64) {
+fn revocation_list(
+    active_recordings: ActiveRecordings,
+    provisioner_key: PrivateKey,
+    delegation_key: PrivateKey,
+    source_ip: IpAddr,
+    now: i64,
+) {
     let provisioner_key_pub = provisioner_key.to_public_key();
     let delegation_key_pub = delegation_key.to_public_key();
 
@@ -214,6 +227,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
                 .revocation_list(&empty_jrl)
                 .gw_id(None)
                 .subkey(None)
+                .active_recordings(&active_recordings)
                 .build()
                 .validate(&item.token)
                 .with_context(|| format!("Item n°{idx} validation failed"))?;
@@ -270,6 +284,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
                 .revocation_list(&updated_jrl)
                 .gw_id(None)
                 .subkey(None)
+                .active_recordings(&active_recordings)
                 .build()
                 .validate(&item.token);
 
@@ -295,6 +310,7 @@ fn revocation_list(provisioner_key: PrivateKey, delegation_key: PrivateKey, sour
 #[rstest]
 fn token_cache(
     jrl: Mutex<JrlTokenClaims>,
+    active_recordings: ActiveRecordings,
     provisioner_key: PrivateKey,
     delegation_key: PrivateKey,
     source_ip: IpAddr,
@@ -325,6 +341,7 @@ fn token_cache(
             .revocation_list(&jrl)
             .gw_id(None)
             .subkey(None)
+            .active_recordings(&active_recordings)
             .build()
             .validate(&token)?;
 
@@ -338,6 +355,7 @@ fn token_cache(
             .revocation_list(&jrl)
             .gw_id(None)
             .subkey(None)
+            .active_recordings(&active_recordings)
             .build()
             .validate(&token);
 
@@ -390,6 +408,7 @@ fn jet_gw_id(this_gw_id: Uuid) -> impl Strategy<Value = Option<Uuid>> {
 #[rstest]
 fn with_scopes(
     jrl: Mutex<JrlTokenClaims>,
+    active_recordings: ActiveRecordings,
     provisioner_key: PrivateKey,
     delegation_key: PrivateKey,
     subkey: PrivateKey,
@@ -461,6 +480,7 @@ fn with_scopes(
             .revocation_list(&jrl)
             .gw_id(Some(this_gw_id))
             .subkey(Some(&subkey_metadata))
+            .active_recordings(&active_recordings)
             .build()
             .validate(&token);
 
@@ -508,6 +528,7 @@ fn kid(this_kid: &str) -> impl Strategy<Value = String> + '_ {
 #[rstest]
 fn with_subkey(
     jrl: Mutex<JrlTokenClaims>,
+    active_recordings: ActiveRecordings,
     provisioner_key: PrivateKey,
     delegation_key: PrivateKey,
     subkey: PrivateKey,
@@ -552,6 +573,7 @@ fn with_subkey(
             .revocation_list(&jrl)
             .gw_id(Some(this_gw_id))
             .subkey(Some(&subkey_metadata))
+            .active_recordings(&active_recordings)
             .build()
             .validate(&token);
 
