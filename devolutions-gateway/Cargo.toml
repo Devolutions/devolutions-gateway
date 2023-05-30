@@ -105,6 +105,6 @@ embed-resource = "2.1.1"
 
 [dev-dependencies]
 tokio-test = "0.4.2"
-proptest = "1.1.0"
+proptest = "1.2.0"
 rstest = "0.17.0"
 devolutions-gateway-generators = { path = "../crates/devolutions-gateway-generators" }
