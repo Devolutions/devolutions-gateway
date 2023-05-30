@@ -184,6 +184,7 @@ async fn run_tcp_tunnel(mut tunnel: ngrok::tunnel::TcpTunnel, state: DgwState) {
                         .jrl(state.jrl)
                         .sessions(state.sessions)
                         .subscriber_tx(state.subscriber_tx)
+                        .active_recordings(state.recordings.active_recordings)
                         .build()
                         .serve()
                         .instrument(info_span!("generic-client"))

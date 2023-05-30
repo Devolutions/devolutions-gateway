@@ -10,7 +10,6 @@ use cfg_if::cfg_if;
 use devolutions_gateway::config::ConfHandle;
 use std::sync::mpsc;
 use tap::prelude::*;
-use tracing::info;
 
 use crate::service::{GatewayService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
@@ -101,9 +100,7 @@ fn main() -> anyhow::Result<()> {
                 let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
                 let mut service = GatewayService::load(conf_handle).context("Service loading failed")?;
 
-                service
-                    .start()
-                    .tap_err(|error| tracing::error!(?error, "Failed to start"))?;
+                service.start().tap_err(|error| error!(?error, "Failed to start"))?;
 
                 // Waiting for some stop signal (CTRL-C…)
                 let rt = tokio::runtime::Builder::new_current_thread()
@@ -140,7 +137,7 @@ fn gateway_service_main(
 
     service
         .start()
-        .tap_err(|error| tracing::error!(?error, "Failed to start"))
+        .tap_err(|error| error!(?error, "Failed to start"))
         .expect("start service");
 
     loop {

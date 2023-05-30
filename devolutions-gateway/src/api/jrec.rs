@@ -1,7 +1,6 @@
 use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::Context as _;
 use axum::extract::ws::WebSocket;
@@ -9,12 +8,13 @@ use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
+use devolutions_gateway_task::ShutdownSignal;
 use tracing::Instrument as _;
 use uuid::Uuid;
 
-use crate::config::Conf;
 use crate::extract::{JrecToken, RecordingsReadScope};
 use crate::http::HttpError;
+use crate::recording::RecordingMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
 
@@ -33,7 +33,11 @@ struct JrecPushQueryParam {
 }
 
 async fn jrec_push(
-    State(DgwState { conf_handle, .. }): State<DgwState>,
+    State(DgwState {
+        shutdown_signal,
+        recordings,
+        ..
+    }): State<DgwState>,
     JrecToken(claims): JrecToken,
     Query(query): Query<JrecPushQueryParam>,
     extract::Path(session_id): extract::Path<Uuid>,
@@ -44,17 +48,25 @@ async fn jrec_push(
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
 
-    let conf = conf_handle.get_conf();
-
-    let response =
-        ws.on_upgrade(move |ws| handle_jrec_push(ws, conf, claims, query.file_type, session_id, source_addr));
+    let response = ws.on_upgrade(move |ws| {
+        handle_jrec_push(
+            ws,
+            recordings,
+            shutdown_signal,
+            claims,
+            query.file_type,
+            session_id,
+            source_addr,
+        )
+    });
 
     Ok(response)
 }
 
 async fn handle_jrec_push(
     ws: WebSocket,
-    conf: Arc<Conf>,
+    recordings: RecordingMessageSender,
+    shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
     file_type: RecordingFileType,
     session_id: Uuid,
@@ -64,10 +76,11 @@ async fn handle_jrec_push(
 
     let result = crate::recording::ClientPush::builder()
         .client_stream(stream)
-        .conf(conf)
+        .recordings(recordings)
         .claims(claims)
         .file_type(file_type)
         .session_id(session_id)
+        .shutdown_signal(shutdown_signal)
         .build()
         .run()
         .instrument(info_span!("jrec", client = %source_addr))

@@ -7,6 +7,7 @@ use ironrdp_pdu::pcb::PreconnectionBlob;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::config::Conf;
+use crate::recording::ActiveRecordings;
 use crate::token::{AccessTokenClaims, AssociationTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 
 pub fn extract_association_claims(
@@ -15,6 +16,7 @@ pub fn extract_association_claims(
     conf: &Conf,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
 ) -> anyhow::Result<AssociationTokenClaims> {
     let token = pcb.v2_payload.as_deref().context("V2 payload missing from RDP PCB")?;
 
@@ -36,6 +38,7 @@ pub fn extract_association_claims(
             .revocation_list(jrl)
             .gw_id(conf.id)
             .subkey(conf.sub_provisioner_public_key.as_ref())
+            .active_recordings(active_recordings)
             .build()
             .validate(token)
     }

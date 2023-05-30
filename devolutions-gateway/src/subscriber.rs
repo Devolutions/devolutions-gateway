@@ -1,6 +1,6 @@
 use crate::config::dto::Subscriber;
 use crate::config::ConfHandle;
-use crate::session::SessionManagerHandle;
+use crate::session::SessionMessageSender;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -135,7 +135,7 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
 }
 
 pub struct SubscriberPollingTask {
-    pub sessions: SessionManagerHandle,
+    pub sessions: SessionMessageSender,
     pub subscriber: SubscriberSender,
 }
 
@@ -152,7 +152,7 @@ impl Task for SubscriberPollingTask {
 
 #[instrument(skip_all)]
 async fn subscriber_polling_task(
-    sessions: SessionManagerHandle,
+    sessions: SessionMessageSender,
     subscriber: SubscriberSender,
     mut shutdown_signal: ShutdownSignal,
 ) -> anyhow::Result<()> {
@@ -230,7 +230,11 @@ async fn subscriber_task(
                 conf = conf_handle.get_conf();
             }
             msg = rx.recv() => {
-                let msg = msg.context("All senders are dead")?;
+                let Some(msg) = msg else {
+                    warn!("All senders are dead");
+                    break;
+                };
+
                 if let Some(subscriber) = conf.subscriber.clone() {
                     debug!(?msg, %subscriber.url, "Send message");
 
@@ -262,6 +266,10 @@ async fn subscriber_task(
             warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
         }
     }
+
+    debug!("Task is stopping; wait for leftover messages");
+
+    while rx.recv().await.is_some() {}
 
     debug!("Task terminated");
 

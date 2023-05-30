@@ -1,3 +1,4 @@
+use devolutions_gateway::recording::ActiveRecordings;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims, TokenCache};
 use devolutions_gateway_generators::*;
 use parking_lot::Mutex;
@@ -47,6 +48,7 @@ fn encode_decode_round_trip<C>(
     gw_id: Option<Uuid>,
     token_cache: &TokenCache,
     jrl: &CurrentJrl,
+    active_recordings: &ActiveRecordings,
 ) -> anyhow::Result<()>
 where
     C: serde::ser::Serialize,
@@ -67,6 +69,7 @@ where
         .revocation_list(jrl)
         .gw_id(gw_id)
         .subkey(None)
+        .active_recordings(active_recordings)
         .build()
         .validate(&token)?;
 
@@ -81,6 +84,12 @@ fn token_cache() -> TokenCache {
 #[fixture]
 fn jrl() -> Mutex<JrlTokenClaims> {
     Mutex::new(JrlTokenClaims::default())
+}
+
+#[fixture]
+fn active_recordings() -> ActiveRecordings {
+    let (rx, _) = devolutions_gateway::recording::recording_message_channel();
+    std::sync::Arc::try_unwrap(rx.active_recordings).unwrap()
 }
 
 #[fixture]
@@ -166,6 +175,7 @@ mod as_of_v2022_3_0_0 {
     fn scope_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -179,7 +189,8 @@ mod as_of_v2022_3_0_0 {
                 Some(CTY_SCOPE.to_owned()),
                 Some(jet_gw_id),
                 &token_cache,
-                &jrl
+                &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -243,6 +254,7 @@ mod as_of_v2022_3_0_0 {
     fn association_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -257,6 +269,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -307,6 +320,7 @@ mod as_of_v2022_3_0_0 {
     fn jmux_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -321,6 +335,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -367,6 +382,7 @@ mod as_of_v2022_3_0_0 {
     fn kdc_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -381,6 +397,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -423,6 +440,7 @@ mod as_of_v2022_3_0_0 {
     fn jrl_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -437,6 +455,7 @@ mod as_of_v2022_3_0_0 {
                 Some(jet_gw_id),
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -518,6 +537,7 @@ mod as_of_v2022_2_0_0 {
     fn association_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -530,7 +550,8 @@ mod as_of_v2022_2_0_0 {
                 Some(CTY_ASSOCIATION.to_owned()),
                 None,
                 &token_cache,
-                &jrl
+                &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -578,6 +599,7 @@ mod as_of_v2022_2_0_0 {
     fn jmux_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -591,6 +613,7 @@ mod as_of_v2022_2_0_0 {
                 None,
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -666,6 +689,7 @@ mod as_of_v2021_2_13_0 {
     fn association_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -679,6 +703,7 @@ mod as_of_v2021_2_13_0 {
                 None,
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -746,6 +771,7 @@ mod as_of_v2021_2_4 {
     fn scope_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -759,6 +785,7 @@ mod as_of_v2021_2_4 {
                 None,
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }
@@ -804,6 +831,7 @@ mod as_of_v2021_1_7_0 {
     fn association_token_validation(
         token_cache: TokenCache,
         jrl: Mutex<JrlTokenClaims>,
+        active_recordings: ActiveRecordings,
         priv_key: PrivateKey,
         pub_key: PublicKey,
         now: i64,
@@ -817,6 +845,7 @@ mod as_of_v2021_1_7_0 {
                 None,
                 &token_cache,
                 &jrl,
+                &active_recordings,
             ).map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
         });
     }

@@ -151,6 +151,7 @@ async fn handle_tcp_peer(stream: TcpStream, state: DgwState, peer_addr: SocketAd
                 .jrl(state.jrl)
                 .sessions(state.sessions)
                 .subscriber_tx(state.subscriber_tx)
+                .active_recordings(state.recordings.active_recordings)
                 .build()
                 .serve()
                 .instrument(info_span!("generic-client"))
