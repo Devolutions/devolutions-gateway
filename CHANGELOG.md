@@ -4,6 +4,124 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.2.0 (2023-05-31)
+
+### Features
+
+- _dgw_: `/jet/jrec` endpoint for session recording ([#404](https://github.com/Devolutions/devolutions-gateway/issues/404)) ([bbc0c41941](https://github.com/Devolutions/devolutions-gateway/commit/bbc0c41941798ae06eed7de26f1f5cee51363d66)) ([DGW-64](https://devolutions.atlassian.net/browse/DGW-64)) ([#408](https://github.com/Devolutions/devolutions-gateway/issues/408)) ([51355a1ac4](https://github.com/Devolutions/devolutions-gateway/commit/51355a1ac4bac02775aa7e4f7080c09991958978)) ([#410](https://github.com/Devolutions/devolutions-gateway/issues/410)) ([8a28a44d5d](https://github.com/Devolutions/devolutions-gateway/commit/8a28a44d5d3955f5212542a6185b695dc5090300)) ([#417](https://github.com/Devolutions/devolutions-gateway/issues/417)) ([56578f8785](https://github.com/Devolutions/devolutions-gateway/commit/56578f87850d1df26cd839b428ced0c41ff3b902)) ([1816b9586f](https://github.com/Devolutions/devolutions-gateway/commit/1816b9586f71076aea182703d78b177bebd273dd))
+
+  Adds new JREC token type for session recording.
+  Adds new `jet_rft` (recording file type) private claim.
+  Handles `/jet/jrec` route for WSS to file streaming.
+
+- _dgw_: `/jet/heartbeat` endpoint ([#406](https://github.com/Devolutions/devolutions-gateway/issues/406)) ([605d3871de](https://github.com/Devolutions/devolutions-gateway/commit/605d3871de7a744a8fa2449479e50b12841828e8)) 
+
+  The `/jet/heartbeat` endpoint requires a scope token for the
+  "gateway.heartbeat.read" scope. It is very similar to `/jet/health`, but
+  returns additional information that should not be publicly available
+  such as the current number of running sessions.
+
+- _dgw_: `/jet/jrec/list` endpoint ([#412](https://github.com/Devolutions/devolutions-gateway/issues/412)) ([332c86fc5e](https://github.com/Devolutions/devolutions-gateway/commit/332c86fc5effefab1718d10a3cfe6bb52aba178a)) 
+
+- _dgw_: `/jet/jrec/pull/{id}/{filename}` endpoint ([#416](https://github.com/Devolutions/devolutions-gateway/issues/416)) ([8187f8bb2e](https://github.com/Devolutions/devolutions-gateway/commit/8187f8bb2ee9af4ba3c6c216a1bd71a863faf028)) ([#431](https://github.com/Devolutions/devolutions-gateway/issues/431)) ([66dc4e3009](https://github.com/Devolutions/devolutions-gateway/commit/66dc4e3009e8355faf6bf61aee364c7df73a9b7a))
+
+  Recording files can be fetched using this new endpoint and a
+  JREC token with the `jet_rop` operation set to `pull`.
+
+- _dgw_: ngrok tunnel support ([711164010a](https://github.com/Devolutions/devolutions-gateway/commit/711164010a6660f2946efb99a24ccb1a4cd47ba1)) ([9e29a1d3ce](https://github.com/Devolutions/devolutions-gateway/commit/9e29a1d3cea8182ca0343a45fed0a5e6d5d93196))
+
+- _dgw_: add ldap, ldaps application protocols ([#432](https://github.com/Devolutions/devolutions-gateway/issues/432)) ([bdb34ef27e](https://github.com/Devolutions/devolutions-gateway/commit/bdb34ef27ed39253a3893c1d07852b67f02b8b3b)) 
+
+- _dgw_: add known application protocol "tunnel" ([c3142870f2](https://github.com/Devolutions/devolutions-gateway/commit/c3142870f2ec4ab3bfced9fab3f6cee7c6869bab)) ([ARC-142](https://devolutions.atlassian.net/browse/ARC-142)) 
+
+  This is known as Devolutions Gateway Tunnel on RDM side.
+
+### Improvements
+
+- _dgw_: [**breaking**] move `jet/{tcp,tls}` endpoints under `/jet/fwd` (#407)
+
+  That is:
+
+  - `/jet/tcp` → `/jet/fwd/tcp`
+  - `/jet/tls` → `/jet/fwd/tls`
+
+  This is a breaking change, but these routes were not yet used by any other Devolutions product
+  until `2023.2.x` releases, so it is safe to change this at this point.
+
+- _jetsocat_: default port in WebSocket URLs ([#413](https://github.com/Devolutions/devolutions-gateway/issues/413)) ([354e097d4e](https://github.com/Devolutions/devolutions-gateway/commit/354e097d4e0085f151b6228a458841a012c55b3c)) 
+
+  With this change, port may be omitted from the WebSocket URL.
+  In such case, the default port will be used (either 80 or 443).
+
+- _dgw_: log version on start ([#414](https://github.com/Devolutions/devolutions-gateway/issues/414)) ([7391114a4d](https://github.com/Devolutions/devolutions-gateway/commit/7391114a4dd1d8b654a290df5d4a9f3f03c00c77)) 
+
+  Useful when troubleshooting issues using user’s logs.
+
+- _dgw_: improve HTTP error reporting ([#415](https://github.com/Devolutions/devolutions-gateway/issues/415)) ([ad19a2fa7c](https://github.com/Devolutions/devolutions-gateway/commit/ad19a2fa7cba97a1d4187c003907aa339ea3b5cb)) 
+
+- _pwsh_: use .NET 6 RSA APIs when available ([#435](https://github.com/Devolutions/devolutions-gateway/issues/435)) ([974d8ee1da](https://github.com/Devolutions/devolutions-gateway/commit/974d8ee1da05014e8304835db3fce8df77c98fe1)) 
+
+  Use .NET 6 RSA public/private key APIs when available.
+
+- _dgw_: graceful shutdown ([ef1d12d468](https://github.com/Devolutions/devolutions-gateway/commit/ef1d12d4680107bc7e055234b45d4f7a6e73c096)) 
+
+- _dgw_: do not enforce scheme in `/jet/fwd` routes ([#430](https://github.com/Devolutions/devolutions-gateway/issues/430)) ([54e467f803](https://github.com/Devolutions/devolutions-gateway/commit/54e467f803d94d348aa8b17f6ed6a7ad4a8694ba)) 
+
+  This was inconsistent with other routes such as `/jet/jmux` where
+  `dst_hst` will have the `http` or `https` scheme, but this is
+  simply used as a filter policy and Devolutions Gateway will not
+  wrap the stream further into an "`https` protocol layer".
+  
+  Instead, we rely on the requested URI to choose between plain TCP
+  and TLS wrapping at proxy level (i.e.: `/jet/fwd/tcp` vs `/jet/fwd/tls`).
+
+### Performance
+
+- _dgw_: re-use TLS client config ([#433](https://github.com/Devolutions/devolutions-gateway/issues/433)) ([b6ebb01aad](https://github.com/Devolutions/devolutions-gateway/commit/b6ebb01aadb398de1ca815d1adee140d4bca3521)) 
+
+  As of rustls 0.21, it’s possible to disable the TLS resumption that is
+  not supported by some services such as CredSSP.
+  
+  This allow us to reuse the same TLS client config and connector for
+  all proxy-based TLS connections.
+  (TlsConnector is just a wrapper around the config providing the
+  `connect` method.)
+  
+  > Making one of these can be expensive, and should be once per process
+  > rather than once per connection.
+  
+  [source](https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html)
+
+### Build
+
+- _deps_: update dependencies ([abf5b00d33](https://github.com/Devolutions/devolutions-gateway/commit/abf5b00d33c3f5cdff49f8ee891863ca69f26346)) 
+
+- _deps_: bump serde from 1.0.162 to 1.0.163 ([#437](https://github.com/Devolutions/devolutions-gateway/issues/437)) ([3f3127a178](https://github.com/Devolutions/devolutions-gateway/commit/3f3127a178b02c565270f61abe7d47effe05ed9d)) 
+
+- _deps_: bump tokio from 1.28.0 to 1.28.1 ([#439](https://github.com/Devolutions/devolutions-gateway/issues/439)) ([2fefafe529](https://github.com/Devolutions/devolutions-gateway/commit/2fefafe52920ba123196a287eb943bd6a13fea22)) 
+
+- _deps_: bump uuid from 1.3.2 to 1.3.3 ([#438](https://github.com/Devolutions/devolutions-gateway/issues/438)) ([561c89d0f3](https://github.com/Devolutions/devolutions-gateway/commit/561c89d0f33225fd8f1ff2ea52672f9680268dde)) 
+
+- _deps_: update tokio-tungstenite version ([c1e9f506e1](https://github.com/Devolutions/devolutions-gateway/commit/c1e9f506e12ea1b0958eca36a95ce4e204617040)) 
+
+- _deps_: bump x509-cert from 0.2.1 to 0.2.2 ([#444](https://github.com/Devolutions/devolutions-gateway/issues/444)) ([6bb0b24ff9](https://github.com/Devolutions/devolutions-gateway/commit/6bb0b24ff91346cf8cf3da11af6443f35150d506)) 
+
+- _deps_: bump chrono from 0.4.24 to 0.4.25 ([#447](https://github.com/Devolutions/devolutions-gateway/issues/447)) ([46cdb1e737](https://github.com/Devolutions/devolutions-gateway/commit/46cdb1e737e3a82c7420040120ce89137b5b73f6)) 
+
+- _deps_: bump proptest from 1.1.0 to 1.2.0 ([#449](https://github.com/Devolutions/devolutions-gateway/issues/449)) ([b82e21ac93](https://github.com/Devolutions/devolutions-gateway/commit/b82e21ac935d8813c1c91416a637fe6f4e83a3ee)) 
+
+- _deps_: bump tokio from 1.28.1 to 1.28.2 ([#448](https://github.com/Devolutions/devolutions-gateway/issues/448)) ([7de2a2fd64](https://github.com/Devolutions/devolutions-gateway/commit/7de2a2fd64a83afd7da7e42a32d8398b4ba0c6c9)) 
+
+### Continuous Integration
+
+- Build and package jet-doctor and tokengen ([#423](https://github.com/Devolutions/devolutions-gateway/issues/423)) ([564717fbe2](https://github.com/Devolutions/devolutions-gateway/commit/564717fbe2ba5083a9aa04c3fdae399a6d3ac7eb)) 
+
+- Enable dependabot pull requests ([988921039e](https://github.com/Devolutions/devolutions-gateway/commit/988921039ee33efe7d4ee78c83ca396ff5899394)) 
+
+- Update Artifactory credentials ([#440](https://github.com/Devolutions/devolutions-gateway/issues/440)) ([8a4ecc003b](https://github.com/Devolutions/devolutions-gateway/commit/8a4ecc003b664d19e0f927741fd3b45c6dbb719b)) 
+
+- Limit builds on forked PRs, optimize CI workflow ([#441](https://github.com/Devolutions/devolutions-gateway/issues/441)) ([39d5f9a350](https://github.com/Devolutions/devolutions-gateway/commit/39d5f9a350fbc3188f76ea9afa9c7b9ee3a6fb32)) 
+
 ## 2023.1.3 (2023-03-16)
 
 ### Bug Fixes
