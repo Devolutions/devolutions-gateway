@@ -53,7 +53,7 @@ pub fn extract_association_claims(
 pub fn decode_pcb(buf: &[u8]) -> Result<Option<PreconnectionBlob>, io::Error> {
     match ironrdp_pdu::decode::<PreconnectionBlob>(buf) {
         Ok(preconnection_pdu) => Ok(Some(preconnection_pdu)),
-        Err(ironrdp_pdu::Error::NotEnoughBytes { .. }) => Ok(None),
+        Err(e) if matches!(e.kind, ironrdp_pdu::PduErrorKind::NotEnoughBytes { .. }) => Ok(None),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
     }
 }
