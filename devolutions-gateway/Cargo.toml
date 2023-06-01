@@ -18,9 +18,9 @@ openapi = ["dep:utoipa"]
 # In-house
 transport = { path = "../crates/transport" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
-ironrdp-pdu = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "f11131b18afa5f8ff9" }
-ironrdp-rdcleanpath = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "f11131b18afa5f8ff9" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+ironrdp-pdu = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
+ironrdp-rdcleanpath = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
 ceviche = "0.5.2"
 picky-krb = "0.6.0"
 
