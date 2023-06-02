@@ -92,6 +92,34 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   
   [source](https://docs.rs/rustls/0.21.1/rustls/client/struct.ClientConfig.html)
 
+### Bug Fixes
+
+- _jetsocat_: gracefully handle invalid native root certificates
+
+  In `tokio-tungstenite` crate, the `rustls::RootCertStore::add` method was used
+  to add all the root certificates found by `rustls_native_certs` crate.
+  This is a problem when an ancient or invalid certificate is present
+  in the native root store. `rustls` documentation says the following:
+
+  > This is suitable for a small set of root certificates that
+  > are expected to parse successfully. For large collections of
+  > roots (for example from a system store) it is expected that
+  > some of them might not be valid according to the rules `rustls`
+  > implements. As long as a relatively limited number of certificates
+  > are affected, this should not be a cause for concern. Use
+  > `RootCertStore::add_parsable_certificates` in order to add as many
+  > valid roots as possible and to understand how many certificates have
+  > been diagnosed as malformed.
+
+  It has been updated to use `RootCertStore::add_parsable_certificates`
+  instead for maximal compability with system store.
+
+  > Parse the given DER-encoded certificates and add all that can be
+  > parsed in a best-effort fashion.
+  >
+  > This is because large collections of root certificates often include
+  > ancient or syntactically invalid certificates.
+
 ### Build
 
 - _deps_: update dependencies ([abf5b00d33](https://github.com/Devolutions/devolutions-gateway/commit/abf5b00d33c3f5cdff49f8ee891863ca69f26346)) 
