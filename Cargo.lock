@@ -1089,9 +1089,9 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "focaccia"
-version = "1.3.1"
+version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc925590c53027bd7fe404cdb7b806a021ec4fc7682a470f387f1055d7c74ef9"
+checksum = "e415e05c1870775d4ccef03519c171fac5bf7be3e32b175390df8a85e757b9be"
 
 [[package]]
 name = "foreign-types"
