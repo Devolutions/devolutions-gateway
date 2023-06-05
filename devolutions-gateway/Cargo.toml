@@ -75,7 +75,7 @@ reqwest = { version = "0.11.17", features = ["json"] } # TODO: directly use hype
 futures = "0.3.28"
 async-trait = "0.1.68"
 tower = { version = "0.4.13", features = ["timeout"] }
-ngrok = "0.12.0"
+ngrok = "0.12.2"
 
 # HTTP
 hyper = "0.14.26"
