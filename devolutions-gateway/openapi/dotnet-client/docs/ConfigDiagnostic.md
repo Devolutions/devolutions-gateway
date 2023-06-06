@@ -6,7 +6,7 @@ Service configuration diagnostic
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **Hostname** | **string** | This Gateway&#39;s hostname | 
-**Id** | **Guid** | This Gateway&#39;s unique ID | [optional] 
+**Id** | **Guid?** | This Gateway&#39;s unique ID | [optional] 
 **Listeners** | [**List&lt;ListenerUrls&gt;**](ListenerUrls.md) | Listeners configured on this instance | 
 **_Version** | **string** | Gateway service version | 
 

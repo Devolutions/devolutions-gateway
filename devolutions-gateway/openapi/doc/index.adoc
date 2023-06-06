@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2023.1.3
+2023.2.0
 :toc: left
 :numbered:
 :toclevels: 3
@@ -21,6 +21,10 @@ Protocol-aware fine-grained relay server
 
 
 == Access
+
+
+* *Bearer* Authentication `jrec_token`
+
 
 
 * *Bearer* Authentication `jrl_token`
@@ -150,7 +154,7 @@ Retrieves server's clock in order to diagnose clock drifting.
 
 ===== Description
 
-Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
+Retrieves server's clock in order to diagnose clock drifting.  This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
 
 
 // markup not found, no include::{specDir}jet/diagnostics/clock/GET/spec.adoc[opts=optional]
@@ -588,7 +592,14 @@ Retrieves a recording file for a given session
 
 ===== Security
 
--
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `jrec_token`
+| http
+| bearer
+|===
 
 ===== Parameters
 

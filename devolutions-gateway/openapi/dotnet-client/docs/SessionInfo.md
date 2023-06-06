@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **FilteringPolicy** | **bool** | Filtering Policy | 
 **RecordingPolicy** | **bool** | Recording Policy | 
 **StartTimestamp** | **DateTime** | Date this session was started | 
-**TimeToLive** | **long** | Maximum session duration in minutes (0 is used for the infinite duration) | [optional] 
+**TimeToLive** | **long?** | Maximum session duration in minutes (0 is used for the infinite duration) | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

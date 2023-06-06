@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2023.1.3
+  version: 2023.2.0
 paths:
   /jet/config:
     patch:
@@ -34,7 +34,6 @@ paths:
           description: Insufficient permissions
         '500':
           description: Failed to patch configuration
-      deprecated: false
       security:
       - scope_token:
         - gateway.config.write
@@ -46,7 +45,10 @@ paths:
       description: |-
         Retrieves server's clock in order to diagnose clock drifting.
 
-        Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
+        This route is not secured by access token.
+        Indeed, this route is used to retrieve server's clock when diagnosing clock drifting.
+        If there is clock drift, token validation will fail because claims such as `nbf` will then
+        be invalid, and thus prevent the clock drift diagnosis.
       operationId: GetClockDiagnostic
       responses:
         '200':
@@ -55,7 +57,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ClockDiagnostic'
-      deprecated: false
   /jet/diagnostics/configuration:
     get:
       tags:
@@ -76,7 +77,6 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
-      deprecated: false
       security:
       - scope_token:
         - gateway.diagnostics.read
@@ -102,7 +102,6 @@ paths:
           description: Insufficient permissions
         '500':
           description: Failed to retrieve logs
-      deprecated: false
       security:
       - scope_token:
         - gateway.diagnostics.read
@@ -122,7 +121,6 @@ paths:
                 $ref: '#/components/schemas/Identity'
         '400':
           description: Invalid Accept header
-      deprecated: false
   /jet/heartbeat:
     get:
       tags:
@@ -143,7 +141,6 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
-      deprecated: false
       security:
       - scope_token:
         - gateway.heartbeat.read
@@ -170,7 +167,6 @@ paths:
           description: Invalid or missing authorization token
         '403':
           description: Insufficient permissions
-      deprecated: false
       security:
       - scope_token:
         - gateway.recordings.read
@@ -211,7 +207,6 @@ paths:
           description: Insufficient permissions
         '404':
           description: File not found
-      deprecated: false
       security:
       - jrec_token:
         - pull
@@ -233,7 +228,6 @@ paths:
           description: Insufficient permissions
         '500':
           description: Failed to update the JRL
-      deprecated: false
       security:
       - jrl_token: []
   /jet/jrl/info:
@@ -258,7 +252,6 @@ paths:
           description: Insufficient permissions
         '500':
           description: Failed to update the JRL
-      deprecated: false
       security:
       - scope_token:
         - gateway.jrl.read
@@ -290,7 +283,6 @@ paths:
           description: No running session found with provided ID
         '500':
           description: Unexpected server error
-      deprecated: false
       security:
       - scope_token:
         - gateway.session.terminate
@@ -318,7 +310,6 @@ paths:
           description: Insufficient permissions
         '500':
           description: Unexpected server error
-      deprecated: false
       security:
       - scope_token:
         - gateway.sessions.read
@@ -365,6 +356,7 @@ components:
           type: string
           format: uuid
           description: This Gateway's unique ID
+          nullable: true
         listeners:
           type: array
           items:
@@ -380,10 +372,15 @@ components:
           type: string
           format: uuid
           description: This Gateway's unique ID
+          nullable: true
         SubProvisionerPublicKey:
-          $ref: '#/components/schemas/SubProvisionerKey'
+          allOf:
+          - $ref: '#/components/schemas/SubProvisionerKey'
+          nullable: true
         Subscriber:
-          $ref: '#/components/schemas/Subscriber'
+          allOf:
+          - $ref: '#/components/schemas/Subscriber'
+          nullable: true
     ConnectionMode:
       type: string
       enum:
@@ -411,9 +408,11 @@ components:
           type: string
           format: uuid
           description: This Gateway's unique ID
+          nullable: true
         running_session_count:
           type: integer
           description: Number of running sessions
+          minimum: 0.0
         version:
           type: string
           description: Gateway service version
@@ -429,9 +428,11 @@ components:
           type: string
           format: uuid
           description: This Gateway's unique ID
+          nullable: true
         version:
           type: string
           description: Gateway service version
+          nullable: true
     JrlInfo:
       type: object
       required:
@@ -486,6 +487,7 @@ components:
         destination_host:
           type: string
           description: Destination Host
+          nullable: true
         filtering_policy:
           type: boolean
           description: Filtering Policy
@@ -500,6 +502,8 @@ components:
           type: integer
           format: int64
           description: Maximum session duration in minutes (0 is used for the infinite duration)
+          nullable: true
+          minimum: 0.0
     SubProvisionerKey:
       type: object
       required:
@@ -507,9 +511,13 @@ components:
       - Value
       properties:
         Encoding:
-          $ref: '#/components/schemas/DataEncoding'
+          allOf:
+          - $ref: '#/components/schemas/DataEncoding'
+          nullable: true
         Format:
-          $ref: '#/components/schemas/PubKeyFormat'
+          allOf:
+          - $ref: '#/components/schemas/PubKeyFormat'
+          nullable: true
         Id:
           type: string
           description: The key ID for this subkey
@@ -530,6 +538,11 @@ components:
           type: string
           description: HTTP URL where notification messages are to be sent
   securitySchemes:
+    jrec_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token allowing recording retrieval for a specific session ID
     jrl_token:
       type: http
       scheme: bearer
