@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Id** | **Guid** | This Gateway&#39;s unique ID | [optional] 
+**Id** | **Guid?** | This Gateway&#39;s unique ID | [optional] 
 **SubProvisionerPublicKey** | [**SubProvisionerKey**](SubProvisionerKey.md) |  | [optional] 
 **Subscriber** | [**Subscriber**](Subscriber.md) |  | [optional] 
 

@@ -5,7 +5,7 @@
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **Hostname** | **string** | This Gateway&#39;s hostname | 
-**Id** | **Guid** | This Gateway&#39;s unique ID | [optional] 
+**Id** | **Guid?** | This Gateway&#39;s unique ID | [optional] 
 **RunningSessionCount** | **int** | Number of running sessions | 
 **_Version** | **string** | Gateway service version | 
 

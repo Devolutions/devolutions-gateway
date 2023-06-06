@@ -123,6 +123,9 @@ namespace Example
         {
             Configuration config = new Configuration();
             config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: jrec_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
             var apiInstance = new JrecApi(config);
             var id = "id_example";  // Guid | Recorded session ID
             var filename = "filename_example";  // string | Name of recording file to retrieve
@@ -177,7 +180,7 @@ catch (ApiException e)
 
 ### Authorization
 
-No authorization required
+[jrec_token](../README.md#jrec_token)
 
 ### HTTP request headers
 

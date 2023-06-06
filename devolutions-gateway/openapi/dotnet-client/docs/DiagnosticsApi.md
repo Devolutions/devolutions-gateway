@@ -14,7 +14,7 @@ All URIs are relative to *http://localhost*
 
 Retrieves server's clock in order to diagnose clock drifting.
 
-Retrieves server's clock in order to diagnose clock drifting.  Clock drift is an issue for token validation because of claims such as `nbf` and `exp`.
+Retrieves server's clock in order to diagnose clock drifting.  This route is not secured by access token. Indeed, this route is used to retrieve server's clock when diagnosing clock drifting. If there is clock drift, token validation will fail because claims such as `nbf` will then be invalid, and thus prevent the clock drift diagnosis.
 
 ### Example
 ```csharp

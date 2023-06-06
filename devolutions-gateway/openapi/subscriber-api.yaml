@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2023.1.3
+  version: 2023.2.0
 paths:
   /dgw/subscriber:
     post:
@@ -34,7 +34,6 @@ paths:
           description: Insufficient permissions
         '404':
           description: Gateway Subscriber not found
-      deprecated: false
       security:
       - subscriber_token: []
 components:
@@ -49,12 +48,15 @@ components:
         kind:
           $ref: '#/components/schemas/SubscriberMessageKind'
         session:
-          $ref: '#/components/schemas/SubscriberSessionInfo'
+          allOf:
+          - $ref: '#/components/schemas/SubscriberSessionInfo'
+          nullable: true
         session_list:
           type: array
           items:
             $ref: '#/components/schemas/SubscriberSessionInfo'
           description: Session list associated to this event
+          nullable: true
         timestamp:
           type: string
           format: date-time
