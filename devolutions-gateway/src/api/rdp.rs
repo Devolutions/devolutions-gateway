@@ -45,6 +45,7 @@ pub async fn handler(
     Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_socket(
     ws: WebSocket,
     conf: Arc<Conf>,

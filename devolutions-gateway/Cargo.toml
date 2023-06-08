@@ -49,8 +49,6 @@ parking_lot = "0.12.1"
 anyhow = "1.0.71"
 thiserror = "1"
 typed-builder = "0.14.0"
-# Unicode case folding comparisons
-focaccia = "1.3.2"
 backoff = "0.4.0"
 
 # Security, crypto…
