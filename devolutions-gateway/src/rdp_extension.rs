@@ -240,6 +240,7 @@ async fn process_cleanpath(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,

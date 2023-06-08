@@ -19,8 +19,6 @@ async fn kdc_proxy(
     KdcToken(claims): KdcToken,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, HttpError> {
-    use focaccia::unicode_full_case_eq;
-
     let conf = conf_handle.get_conf();
 
     let kdc_proxy_message = KdcProxyMessage::from_raw(&body).map_err(HttpError::bad_request().err())?;
@@ -41,7 +39,7 @@ async fn kdc_proxy(
 
     debug!("Request is for realm (target_domain): {realm}");
 
-    if !unicode_full_case_eq(&claims.krb_realm, &realm) {
+    if !claims.krb_realm.eq_ignore_ascii_case(&realm) {
         if conf.debug.disable_token_validation {
             warn!("**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token");
         } else {
