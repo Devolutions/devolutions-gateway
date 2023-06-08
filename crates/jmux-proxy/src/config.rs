@@ -66,6 +66,7 @@ impl JmuxConfig {
 ///
 /// assert!(elaborated_rule.validate_destination_str("tcp://doc.rust-lang.org:80").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("ws://devolutions.net:80").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("ws://DeVoLUTiONS.net:80").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("wss://dvls.devolutions.net:80").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://dvls.devolutions.ninja:80").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://devolutions.bad.ninja:80").is_err());
@@ -73,6 +74,7 @@ impl JmuxConfig {
 ///
 /// assert!(elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:22").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://vps.rust-lang.org:22").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("TCP://VPS.RUST-LANG.ORG:22").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://super.vps.ninja:22").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://vps.super.devolutions.ninja:22").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://vps.my-web-site.com:2222").is_err());
@@ -83,9 +85,11 @@ impl JmuxConfig {
 /// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:80").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:8080").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:22").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("tCp://sEkAi.nEt:22").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("tcp://sekai.net:1080").is_err());
 ///
 /// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:8080").is_ok());
+/// assert!(elaborated_rule.validate_destination_str("WSS://127.0.0.1:8080").is_ok());
 /// assert!(elaborated_rule.validate_destination_str("wss://doc.rust-lang.org:8080").is_err());
 /// assert!(elaborated_rule.validate_destination_str("wss://127.0.0.1:80").is_err());
 /// assert!(elaborated_rule.validate_destination_str("tcp://127.0.0.1:8080").is_err());
@@ -232,16 +236,16 @@ fn is_valid(rule: &FilteringRule, target_scheme: &str, target_host: &str, target
         FilteringRule::Any(rules) => rules
             .iter()
             .any(|r| is_valid(r, target_scheme, target_host, target_port)),
-        FilteringRule::Host(host) => target_host == host,
+        FilteringRule::Host(host) => target_host.eq_ignore_ascii_case(host),
         FilteringRule::Port(port) => target_port == *port,
-        FilteringRule::Scheme(scheme) => target_scheme == scheme,
-        FilteringRule::HostAndPort { host, port } => target_host == host && target_port == *port,
+        FilteringRule::Scheme(scheme) => target_scheme.eq_ignore_ascii_case(scheme),
+        FilteringRule::HostAndPort { host, port } => target_host.eq_ignore_ascii_case(host) && target_port == *port,
         FilteringRule::WildcardHost(host) => {
             let mut expected_it = host.rsplit('.');
             let mut actual_it = target_host.rsplit('.');
             loop {
                 match (expected_it.next(), actual_it.next()) {
-                    (Some(expected), Some(actual)) if expected == actual => {}
+                    (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => {}
                     (Some("*"), Some(_)) => {}
                     (None, None) => return true,
                     _ => return false,
