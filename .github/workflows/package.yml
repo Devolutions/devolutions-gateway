@@ -385,7 +385,7 @@ jobs:
 
   Generate-SBOM:
     name: Upload SBOM
-    runs-on: windows-latest # runs slowly on ubuntu
+    runs-on: ubuntu-latest # runs slowly on ubuntu
     needs: preflight
 
     steps:
