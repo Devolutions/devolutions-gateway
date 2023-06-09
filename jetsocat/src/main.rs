@@ -44,9 +44,9 @@ fn generate_usage() -> String {
         \n\
         \t  {command} forward tcp-listen://127.0.0.1:5002 cmd://'pwsh -sshs -NoLogo -NoProfile'\n\
         \n\
-        \tFor detailed logs, use the `RUST_LOG` environment variable:\n\
+        \tFor detailed logs, use the `JETSOCAT_LOG` environment variable:\n\
         \n\
-        \t  RUST_LOG=target[span{{field=value}}]=level\n\
+        \t  JETSOCAT_LOG=target[span{{field=value}}]=level\n\
         \n\
         Build type: {build}",
         command = env!("CARGO_PKG_NAME"),
@@ -566,6 +566,7 @@ fn setup_logger(logging: &Logging) -> LoggerGuard {
 
     let env_filter = EnvFilter::builder()
         .with_default_directive(LevelFilter::INFO.into())
+        .with_env_var("JETSOCAT_LOG")
         .from_env()
         .expect("invalid filtering directive from env");
 
