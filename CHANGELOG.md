@@ -4,6 +4,32 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.2.1 (2023-06-09)
+
+### Improvements
+
+- _jetsocat_: JETSOCAT_LOG instead of RUST_LOG ([db06a3d32](https://github.com/Devolutions/devolutions-gateway/commit/db06a3d32461d9dc4b386538ba61432492a4f277))
+
+### Bug Fixes
+
+- _jetsocat / dgw_: ignore case for hosts and schemes ([6666623219](https://github.com/Devolutions/devolutions-gateway/commit/6666623219a39117bc46f4128910f12b7e4407cf)) 
+
+  Case is irrelevant when comparing hostnames and schemes.
+  Note: using eq_ignore_ascii_case is okay because we don’t
+  really expect unicode in such context.
+
+- _dgw_: KDC proxy auth using token in path ([2173ecec4d](https://github.com/Devolutions/devolutions-gateway/commit/2173ecec4d86818c8850559a7b7bf40a47877f26)) ([DGW-94](https://devolutions.atlassian.net/browse/DGW-94))
+
+### Build
+
+- _deps_: bump ngrok from 0.12.1 to 0.12.2 ([#455](https://github.com/Devolutions/devolutions-gateway/issues/455)) ([ae95b255c0](https://github.com/Devolutions/devolutions-gateway/commit/ae95b255c08804d14472f826897f70c24ab90fae)) 
+
+- _deps_: bump url from 2.3.1 to 2.4.0 ([#456](https://github.com/Devolutions/devolutions-gateway/issues/456)) ([e6c0e7da6a](https://github.com/Devolutions/devolutions-gateway/commit/e6c0e7da6aa2bae3ec825b44bafd80c7b1296742)) 
+
+### Continuous Integration
+
+- Add back SBOM generation  ([#462](https://github.com/Devolutions/devolutions-gateway/issues/462)) ([aa9d39a88e](https://github.com/Devolutions/devolutions-gateway/commit/aa9d39a88e6b264e47621da90a7db5b7e1a8757f)) 
+
 ## 2023.2.0 (2023-05-31)
 
 ### Features
