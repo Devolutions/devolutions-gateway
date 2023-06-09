@@ -415,7 +415,7 @@ jobs:
           path: ./.github/workflows
 
       - name: Generate SBOM
-        uses: ./.github/workflows/toolbox-install
+        uses: ./.github/workflows/cdxgen
 
       - name: Save SBOM
         uses: actions/upload-artifact@v3
