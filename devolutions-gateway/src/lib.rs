@@ -48,8 +48,8 @@ pub fn make_http_service(state: DgwState) -> axum::Router<()> {
 
     axum::Router::new()
         .merge(api::make_router(state.clone()))
-        .nest_service("/KdcProxy", api::kdc_proxy::make_router(state.conf_handle.clone()))
-        .nest_service("/jet/KdcProxy", api::kdc_proxy::make_router(state.conf_handle.clone()))
+        .nest_service("/KdcProxy", api::kdc_proxy::make_router(state.clone()))
+        .nest_service("/jet/KdcProxy", api::kdc_proxy::make_router(state.clone()))
         .layer(axum::middleware::from_fn_with_state(
             state,
             middleware::auth::auth_middleware,
