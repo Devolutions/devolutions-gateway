@@ -405,9 +405,17 @@ jobs:
         uses: ./.github/workflows/toolbox-install
         with:
           token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+        
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v3
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
 
       - name: Generate SBOM
-        uses: devolutions/actions/cdxgen@v1
+        uses: ./.github/workflows/toolbox-install
 
       - name: Save SBOM
         uses: actions/upload-artifact@v3
