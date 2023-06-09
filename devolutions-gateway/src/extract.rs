@@ -6,7 +6,7 @@ use axum::Extension;
 use crate::http::HttpError;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, JmuxTokenClaims, JrecTokenClaims, JrlTokenClaims,
-    KdcTokenClaims, ScopeTokenClaims,
+    ScopeTokenClaims,
 };
 
 #[derive(Clone)]
@@ -100,25 +100,6 @@ where
             Ok(Self(claims))
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected JMUX)"))
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct KdcToken(pub KdcTokenClaims);
-
-#[async_trait]
-impl<S> FromRequestParts<S> for KdcToken
-where
-    S: Send + Sync,
-{
-    type Rejection = HttpError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        if let AccessTokenClaims::Kdc(claims) = AccessToken::from_request_parts(parts, state).await?.0 {
-            Ok(Self(claims))
-        } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected KDC)"))
         }
     }
 }

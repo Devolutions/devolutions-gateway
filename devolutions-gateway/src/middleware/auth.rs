@@ -14,11 +14,43 @@ use crate::recording::ActiveRecordings;
 use crate::token::{AccessTokenClaims, CurrentJrl, TokenCache, TokenValidator};
 use crate::DgwState;
 
-const AUTH_EXCEPTIONS: &[(&Method, &str)] = &[
-    (&Method::GET, "/health"),
-    (&Method::GET, "/jet/health"),
-    (&Method::GET, "/jet/diagnostics/clock"),
-    (&Method::GET, "/jet/rdp"),
+struct AuthException {
+    method: Method,
+    path: &'static str,
+    exact_match: bool,
+}
+
+const AUTH_EXCEPTIONS: &[AuthException] = &[
+    AuthException {
+        method: Method::GET,
+        path: "/health",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/jet/health",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/jet/diagnostics/clock",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/jet/rdp",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::POST,
+        path: "/KdcProxy",
+        exact_match: false,
+    },
+    AuthException {
+        method: Method::POST,
+        path: "/jet/KdcProxy",
+        exact_match: false,
+    },
 ];
 
 pub async fn auth_middleware<B>(
@@ -44,7 +76,19 @@ where
     let method = request.method();
     let uri_path = request.uri().path();
 
-    if AUTH_EXCEPTIONS.contains(&(method, uri_path)) {
+    let skip_authentication = AUTH_EXCEPTIONS.iter().any(|exception| {
+        if method != exception.method {
+            return false;
+        }
+
+        if exception.exact_match {
+            uri_path == exception.path
+        } else {
+            uri_path.starts_with(exception.path)
+        }
+    });
+
+    if skip_authentication {
         trace!("unauthenticated route");
         Ok(next.run(request).await)
     } else {

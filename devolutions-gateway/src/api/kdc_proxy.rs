@@ -1,25 +1,48 @@
-use axum::extract::State;
+use std::net::SocketAddr;
+
+use axum::extract::{self, ConnectInfo, State};
 use axum::routing::post;
 use axum::Router;
 use picky_krb::messages::KdcProxyMessage;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
 
-use crate::config::ConfHandle;
-use crate::extract::KdcToken;
 use crate::http::HttpError;
+use crate::token::AccessTokenClaims;
 use crate::utils::resolve_target_addr;
+use crate::DgwState;
 
-pub fn make_router<S>(conf_handle: ConfHandle) -> Router<S> {
-    Router::new().route("/:token", post(kdc_proxy)).with_state(conf_handle)
+pub fn make_router<S>(state: DgwState) -> Router<S> {
+    Router::new().route("/:token", post(kdc_proxy)).with_state(state)
 }
 
 async fn kdc_proxy(
-    State(conf_handle): State<ConfHandle>,
-    KdcToken(claims): KdcToken,
+    State(DgwState {
+        conf_handle,
+        token_cache,
+        jrl,
+        recordings,
+        ..
+    }): State<DgwState>,
+    extract::Path(token): extract::Path<String>,
+    ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, HttpError> {
     let conf = conf_handle.get_conf();
+
+    let claims = crate::middleware::auth::authenticate(
+        source_addr,
+        &token,
+        &conf,
+        &token_cache,
+        &jrl,
+        &recordings.active_recordings,
+    )
+    .map_err(HttpError::unauthorized().err())?;
+
+    let AccessTokenClaims::Kdc(claims) = claims else {
+        return Err(HttpError::forbidden().msg("token not allowed (expected KDC token)"));
+    };
 
     let kdc_proxy_message = KdcProxyMessage::from_raw(&body).map_err(HttpError::bad_request().err())?;
 
