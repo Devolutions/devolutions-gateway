@@ -26,10 +26,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _deps_: bump url from 2.3.1 to 2.4.0 ([#456](https://github.com/Devolutions/devolutions-gateway/issues/456)) ([e6c0e7da6a](https://github.com/Devolutions/devolutions-gateway/commit/e6c0e7da6aa2bae3ec825b44bafd80c7b1296742)) 
 
-### Continuous Integration
-
-- Add back SBOM generation  ([#462](https://github.com/Devolutions/devolutions-gateway/issues/462)) ([aa9d39a88e](https://github.com/Devolutions/devolutions-gateway/commit/aa9d39a88e6b264e47621da90a7db5b7e1a8757f)) 
-
 ## 2023.2.0 (2023-05-31)
 
 ### Features
