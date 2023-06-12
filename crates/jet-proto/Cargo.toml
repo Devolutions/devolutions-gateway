@@ -20,7 +20,7 @@ ureq = { version = "2.6.2", features = ["json"] }
 url = "2.4.0"
 x509-parser = "0.15.0"
 exitcode = "1.1.2"
-tempfile = "3.5.0"
+tempfile = "3.6.0"
 hex-literal = "0.4.1"
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
 serde = "1.0.163"
