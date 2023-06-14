@@ -161,6 +161,105 @@ BOOL Hook_WinHttpCloseHandle(HINTERNET hInternet)
     return success;
 }
 
+static HMODULE g_hKernelBase = NULL;
+static HMODULE g_hAdvapi32 = NULL;
+static HMODULE g_hRegApi = NULL;
+
+typedef LSTATUS(WINAPI* Func_RegOpenKeyExW)(
+    HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult);
+
+typedef LSTATUS(WINAPI* Func_RegQueryValueExW)(
+    HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWORD lpType, LPBYTE  lpData, LPDWORD lpcbData);
+
+static Func_RegOpenKeyExW Real_RegOpenKeyExW = NULL;
+static Func_RegQueryValueExW Real_RegQueryValueExW = NULL;
+
+static HKEY g_hRegWSManClient = NULL;
+
+LSTATUS Hook_RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKeyW, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
+{
+    LSTATUS lstatus = ERROR_SUCCESS;
+
+#if 0
+    char* lpSubKeyA = NULL;
+
+    if (lpSubKeyW)
+        Jetify_ConvertFromUnicode(CP_UTF8, 0, lpSubKeyW, -1, &lpSubKeyA, 0, NULL, NULL);
+
+    Jetify_LogPrint(DEBUG, "RegOpenKeyExW(lpSubKey: %s)", lpSubKeyA);
+#endif
+
+    lstatus = Real_RegOpenKeyExW(hKey, lpSubKeyW, ulOptions, samDesired, phkResult);
+
+    if ((hKey == HKEY_LOCAL_MACHINE) && lpSubKeyW)
+    {
+        if (!_wcsicmp(lpSubKeyW, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WSMAN\\Client"))
+        {
+            g_hRegWSManClient = *phkResult;
+        }
+    }
+
+    //free(lpSubKeyA);
+    return lstatus;
+}
+
+LSTATUS Hook_RegQueryValueExW(HKEY hKey, LPCWSTR lpValueNameW, LPDWORD lpReserved, LPDWORD lpType, LPBYTE  lpData, LPDWORD lpcbData)
+{
+    LSTATUS lstatus = ERROR_SUCCESS;
+
+#if 0
+    char* lpValueNameA = NULL;
+
+    if (lpValueNameW)
+        Jetify_ConvertFromUnicode(CP_UTF8, 0, lpValueNameW, -1, &lpValueNameA, 0, NULL, NULL);
+
+    Jetify_LogPrint(DEBUG, "RegQueryValueExW(lpValueName: %s)", lpValueNameA);
+#endif
+
+    if ((hKey == g_hRegWSManClient) && lpValueNameW)
+    {
+        if (!_wcsicmp(lpValueNameW, L"TrustedHosts"))
+        {
+            if (lpType)
+                *lpType = REG_DWORD;
+
+            if (lpData && lpcbData && (*lpcbData == sizeof(DWORD)))
+            {
+                *((DWORD*)lpData) = 1;
+                return lstatus;
+            }
+        }
+        else if (!_wcsicmp(lpValueNameW, L"TrustedHostsList"))
+        {
+            if (lpType)
+                *lpType = REG_SZ;
+
+            if (lpData && lpcbData)
+            {
+                if (*lpcbData >= 4)
+                {
+                    WCHAR* lpDataW = (WCHAR*)lpData;
+                    lpDataW[0] = L'*';
+                    lpDataW[1] = 0;
+                    *lpcbData = 4;
+                    return lstatus;
+                }
+            }
+            else
+            {
+                if (lpcbData)
+                    *lpcbData = 4;
+                return ERROR_MORE_DATA;
+            }
+        }
+    }
+
+    lstatus = Real_RegQueryValueExW(hKey, lpValueNameW, lpReserved, lpType, lpData, lpcbData);
+
+    //free(lpValueNameA);
+    return lstatus;
+}
+
 uint32_t Jetify_AttachHooks()
 {
     LONG error;
@@ -172,6 +271,36 @@ uint32_t Jetify_AttachHooks()
     JETIFY_DETOUR_ATTACH(Real_WinHttpSetOption, Hook_WinHttpSetOption);
     JETIFY_DETOUR_ATTACH(Real_WinHttpOpenRequest, Hook_WinHttpOpenRequest);
     JETIFY_DETOUR_ATTACH(Real_WinHttpCloseHandle, Hook_WinHttpCloseHandle);
+
+    g_hKernelBase = GetModuleHandleA("KernelBase.dll");
+    g_hAdvapi32 = GetModuleHandleA("advapi32.dll");
+
+    if (g_hKernelBase)
+    {
+        Real_RegOpenKeyExW = (Func_RegOpenKeyExW)GetProcAddress(g_hKernelBase, "RegOpenKeyExW");
+        Real_RegQueryValueExW = (Func_RegQueryValueExW)GetProcAddress(g_hKernelBase, "RegQueryValueExW");
+    }
+
+    if (g_hAdvapi32)
+    {
+        if (!Real_RegOpenKeyExW)
+            Real_RegOpenKeyExW = (Func_RegOpenKeyExW)GetProcAddress(g_hAdvapi32, "RegOpenKeyExW");
+
+        if (!Real_RegQueryValueExW)
+            Real_RegQueryValueExW = (Func_RegQueryValueExW)GetProcAddress(g_hAdvapi32, "RegQueryValueExW");
+    }
+
+
+    if (Real_RegOpenKeyExW)
+    {
+        JETIFY_DETOUR_ATTACH(Real_RegOpenKeyExW, Hook_RegOpenKeyExW);
+    }
+
+    if (Real_RegQueryValueExW)
+    {
+        JETIFY_DETOUR_ATTACH(Real_RegQueryValueExW, Hook_RegQueryValueExW);
+    }
+
     error = DetourTransactionCommit();
     return (uint32_t) error;
 }
@@ -186,6 +315,17 @@ uint32_t Jetify_DetachHooks()
     JETIFY_DETOUR_DETACH(Real_WinHttpSetOption, Hook_WinHttpSetOption);
     JETIFY_DETOUR_DETACH(Real_WinHttpOpenRequest, Hook_WinHttpOpenRequest);
     JETIFY_DETOUR_DETACH(Real_WinHttpCloseHandle, Hook_WinHttpCloseHandle);
+
+    if (Real_RegOpenKeyExW)
+    {
+        JETIFY_DETOUR_DETACH(Real_RegOpenKeyExW, Hook_RegOpenKeyExW);
+    }
+
+    if (Real_RegQueryValueExW)
+    {
+        JETIFY_DETOUR_DETACH(Real_RegQueryValueExW, Hook_RegQueryValueExW);
+    }
+    
     error = DetourTransactionCommit();
     return (uint32_t)error;
 }
