@@ -405,7 +405,7 @@ jobs:
       - name: Install Devolutions Toolbox
         uses: ./.github/workflows/toolbox-install
         with:
-          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
       - name: Generate SBOM
         uses: ./.github/workflows/cdxgen
