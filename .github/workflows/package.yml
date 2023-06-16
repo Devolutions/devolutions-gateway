@@ -383,7 +383,7 @@ jobs:
           path: jetsocat/nuget/*.nupkg
           if-no-files-found: error
 
-  Generate-SBOM:
+  generate-sbom:
     name: Upload SBOM
     runs-on: ubuntu-latest
     needs: preflight
