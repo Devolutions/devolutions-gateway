@@ -423,5 +423,5 @@ jobs:
           apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
           projectname: devolutions-gateway
           projectversion: ${{ needs.preflight.outputs.version }}
-          bomfilename: devolutions-gateway/bom.xml
+          bomfilename: bom.xml
           autocreate: 'true'
