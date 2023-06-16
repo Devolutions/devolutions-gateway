@@ -419,9 +419,9 @@ jobs:
       - name: Upload SBOM to Dependency-Track
         uses: ./.github/workflows/dtrack-upload-sbom
         with:
-          serverhostname: 'dtrack-api.devolutions.com'
-          apikey: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
-          projectname: devolutions-gateway
-          projectversion: ${{ needs.preflight.outputs.version }}
-          bomfilename: bom.xml
+          api_key: ${{ secrets.DTRACK_AUTOMATION_API_KEY }}
           autocreate: 'true'
+          bom_filename: bom.xml
+          project_name: devolutions-gateway
+          project_version: ${{ needs.preflight.outputs.version }}
+          server_hostname: 'dtrack-api.devolutions.com'
