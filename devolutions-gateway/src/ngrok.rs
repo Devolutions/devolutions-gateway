@@ -10,48 +10,6 @@ use crate::config::dto::{NgrokConf, NgrokTunnelConf};
 use crate::generic_client::GenericClient;
 use crate::DgwState;
 
-macro_rules! builder_call_opt {
-    ($builder:ident . $method:ident ( $ngrok_option:expr ) ) => {{
-        if let Some(option) = $ngrok_option {
-            $builder.$method(option)
-        } else {
-            $builder
-        }
-    }};
-}
-
-macro_rules! builder_call_vec {
-    ($builder:ident . $method:ident ( $ngrok_option:expr ) ) => {{
-        let mut builder = $builder;
-        let mut iter = $ngrok_option;
-        loop {
-            builder = match iter.next() {
-                Some(item) => builder.$method(item),
-                None => break builder,
-            };
-        }
-    }};
-    ($ngrok_option:expr, $builder:ident . $method:ident ( $( $( & )? $field:ident ),+ ) ) => {{
-        let mut builder = $builder;
-        let mut iter = $ngrok_option.iter();
-        loop {
-            builder = match iter.next() {
-                Some(item) => builder.$method($( & item . $field ),+),
-                None => break builder,
-            };
-        }
-    }};
-}
-
-macro_rules! builder_call_flag {
-    ($builder:ident . $method:ident ( $ngrok_option:expr ) ) => {{
-        match $ngrok_option {
-            Some(option) if option => $builder.$method(),
-            _ => $builder,
-        }
-    }};
-}
-
 #[derive(Clone)]
 pub struct NgrokSession {
     inner: ngrok::Session,
@@ -61,11 +19,23 @@ impl NgrokSession {
     pub async fn connect(conf: &NgrokConf) -> anyhow::Result<Self> {
         info!("Connecting to ngrok service");
 
-        let builder = ngrok::Session::builder().authtoken(&conf.authtoken);
-        let builder = builder_call_opt!(builder.heartbeat_interval(conf.heartbeat_interval));
-        let builder = builder_call_opt!(builder.heartbeat_tolerance(conf.heartbeat_tolerance));
-        let builder = builder_call_opt!(builder.metadata(&conf.metadata));
-        let builder = builder_call_opt!(builder.server_addr(&conf.server_addr));
+        let mut builder = ngrok::Session::builder().authtoken(&conf.authtoken);
+
+        if let Some(heartbeat_interval) = conf.heartbeat_interval {
+            builder = builder.heartbeat_interval(heartbeat_interval);
+        }
+
+        if let Some(heartbeat_tolerance) = conf.heartbeat_tolerance {
+            builder = builder.heartbeat_tolerance(heartbeat_tolerance);
+        }
+
+        if let Some(metadata) = &conf.metadata {
+            builder = builder.metadata(metadata);
+        }
+
+        if let Some(server_addr) = &conf.server_addr {
+            builder = builder.server_addr(server_addr);
+        }
 
         // Connect the ngrok session
         let session = builder.connect().await.context("connect to ngrok service")?;
@@ -82,11 +52,25 @@ impl NgrokSession {
 
         match conf {
             NgrokTunnelConf::Tcp(tcp_conf) => {
-                let builder = self.inner.tcp_endpoint().remote_addr(&tcp_conf.remote_addr);
-                let builder = builder_call_opt!(builder.metadata(&tcp_conf.metadata));
-                let builder = builder_call_opt!(builder.proxy_proto(tcp_conf.proxy_proto.map(ProxyProto::from)));
-                let builder = builder_call_vec!(builder.allow_cidr(tcp_conf.allow_cidrs.iter()));
-                let builder = builder_call_vec!(builder.deny_cidr(tcp_conf.deny_cidrs.iter()));
+                let mut builder = self.inner.tcp_endpoint().remote_addr(&tcp_conf.remote_addr);
+
+                if let Some(metadata) = &tcp_conf.metadata {
+                    builder = builder.metadata(metadata);
+                }
+
+                if let Some(proxy_proto) = tcp_conf.proxy_proto {
+                    builder = builder.proxy_proto(ProxyProto::from(proxy_proto));
+                }
+
+                builder = tcp_conf
+                    .allow_cidrs
+                    .iter()
+                    .fold(builder, |builder, cidr| builder.allow_cidr(cidr));
+
+                builder = tcp_conf
+                    .deny_cidrs
+                    .iter()
+                    .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
 
                 NgrokTunnel {
                     name: name.to_owned(),
@@ -94,20 +78,43 @@ impl NgrokSession {
                 }
             }
             NgrokTunnelConf::Http(http_conf) => {
-                let builder = self.inner.http_endpoint().domain(&http_conf.domain);
-                let builder = builder_call_opt!(builder.metadata(&http_conf.metadata));
-                let builder = builder_call_vec!(http_conf.basic_auth, builder.basic_auth(username, password));
-                let builder = builder_call_opt!(builder.circuit_breaker(http_conf.circuit_breaker));
-                let builder = builder_call_flag!(builder.compression(http_conf.compression));
-                let builder = builder_call_vec!(builder.allow_cidr(http_conf.allow_cidrs.iter()));
-                let builder = builder_call_vec!(builder.deny_cidr(http_conf.deny_cidrs.iter()));
-                let builder = builder_call_opt!(builder.proxy_proto(http_conf.proxy_proto.map(ProxyProto::from)));
-                let builder = builder_call_vec!(builder.scheme(
-                    http_conf
-                        .schemes
-                        .iter()
-                        .map(|s| Scheme::from_str(s).unwrap_or(Scheme::HTTPS))
-                ));
+                let mut builder = self.inner.http_endpoint().domain(&http_conf.domain);
+
+                if let Some(metadata) = &http_conf.metadata {
+                    builder = builder.metadata(metadata);
+                }
+
+                builder = http_conf.basic_auth.iter().fold(builder, |builder, basic_auth| {
+                    builder.basic_auth(&basic_auth.username, &basic_auth.password)
+                });
+
+                if let Some(circuit_breaker) = http_conf.circuit_breaker {
+                    builder = builder.circuit_breaker(circuit_breaker);
+                }
+
+                if matches!(http_conf.compression, Some(true)) {
+                    builder = builder.compression();
+                }
+
+                builder = http_conf
+                    .allow_cidrs
+                    .iter()
+                    .fold(builder, |builder, cidr| builder.allow_cidr(cidr));
+
+                builder = http_conf
+                    .deny_cidrs
+                    .iter()
+                    .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
+
+                if let Some(proxy_proto) = http_conf.proxy_proto {
+                    builder = builder.proxy_proto(ProxyProto::from(proxy_proto));
+                }
+
+                builder = http_conf
+                    .schemes
+                    .iter()
+                    .map(|scheme| Scheme::from_str(scheme).unwrap_or(Scheme::HTTPS))
+                    .fold(builder, |builder, scheme| builder.scheme(scheme));
 
                 NgrokTunnel {
                     name: name.to_owned(),
