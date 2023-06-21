@@ -64,7 +64,7 @@ async fn auth_middleware(
 
         let private_key = config.delegation_private_key.clone();
         if let (Some((AuthHeaderType::Bearer, token)), Some(private_key)) = (parse_auth_header(auth_str), private_key) {
-            let public_key = private_key.to_public_key();
+            let public_key = private_key.to_public_key().unwrap();
             match JwtSig::decode(token, &public_key).and_then(|jwt| jwt.validate::<SogarUser>(&NO_CHECK_VALIDATOR)) {
                 Ok(jwt) => {
                     if let Some(permission) = jwt.state.claims.permission {
