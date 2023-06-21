@@ -99,7 +99,7 @@ fn priv_key() -> PrivateKey {
 
 #[fixture]
 fn pub_key() -> PublicKey {
-    priv_key().to_public_key()
+    priv_key().to_public_key().unwrap()
 }
 
 #[fixture]
