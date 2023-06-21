@@ -209,8 +209,8 @@ fn revocation_list(
     source_ip: IpAddr,
     now: i64,
 ) {
-    let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key_pub = delegation_key.to_public_key();
+    let provisioner_key_pub = provisioner_key.to_public_key().unwrap();
+    let delegation_key_pub = delegation_key.to_public_key().unwrap();
 
     let test_impl = |items: Vec<RevocableItem>| -> anyhow::Result<()> {
         // Make sure all tokens are valid before any revocation
@@ -317,8 +317,8 @@ fn token_cache(
     source_ip_2: IpAddr,
     now: i64,
 ) {
-    let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key_pub = delegation_key.to_public_key();
+    let provisioner_key_pub = provisioner_key.to_public_key().unwrap();
+    let delegation_key_pub = delegation_key.to_public_key().unwrap();
 
     let test_impl = |same_ip: bool, claims: TokenClaims| -> anyhow::Result<()> {
         let token =
@@ -417,9 +417,9 @@ fn with_scopes(
     this_gw_id: Uuid,
     now: i64,
 ) {
-    let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key_pub = delegation_key.to_public_key();
-    let subkey_pub = subkey.to_public_key();
+    let provisioner_key_pub = provisioner_key.to_public_key().unwrap();
+    let delegation_key_pub = delegation_key.to_public_key().unwrap();
+    let subkey_pub = subkey.to_public_key().unwrap();
     let subkey_metadata = Subkey {
         data: subkey_pub,
         kid: subkey_kid.into(),
@@ -537,9 +537,9 @@ fn with_subkey(
     this_gw_id: Uuid,
     now: i64,
 ) {
-    let provisioner_key_pub = provisioner_key.to_public_key();
-    let delegation_key_pub = delegation_key.to_public_key();
-    let subkey_pub = subkey.to_public_key();
+    let provisioner_key_pub = provisioner_key.to_public_key().unwrap();
+    let delegation_key_pub = delegation_key.to_public_key().unwrap();
+    let subkey_pub = subkey.to_public_key().unwrap();
     let subkey_metadata = Subkey {
         data: subkey_pub,
         kid: subkey_kid.into(),
