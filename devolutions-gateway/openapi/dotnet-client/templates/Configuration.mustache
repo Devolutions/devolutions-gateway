@@ -53,7 +53,7 @@ namespace {{packageName}}.Client
             if (status < 100 || status >= 400)
             {
                 return new ApiException(status,
-                    string.Format("Error calling {0}: {1}", methodName, response.RawContent),
+                    string.Format("Error calling {0}: HTTP error status code {1}", methodName, status),
                     response.RawContent, response.Headers);
             }
             return null;
