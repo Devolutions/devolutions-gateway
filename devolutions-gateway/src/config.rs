@@ -870,11 +870,9 @@ pub mod dto {
     #[serde(rename_all = "PascalCase")]
     pub struct NgrokConf {
         pub authtoken: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[serde(with = "humantime_serde")]
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "humantime_serde")]
         pub heartbeat_interval: Option<Duration>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        #[serde(with = "humantime_serde")]
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "humantime_serde")]
         pub heartbeat_tolerance: Option<Duration>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub metadata: Option<String>,
