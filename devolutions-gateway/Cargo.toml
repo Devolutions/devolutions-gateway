@@ -68,7 +68,7 @@ reqwest = { version = "0.11.18", features = ["json"] } # TODO: directly use hype
 futures = "0.3.28"
 async-trait = "0.1.68"
 tower = { version = "0.4.13", features = ["timeout"] }
-ngrok = "0.12.3"
+ngrok = "0.12.4"
 windows-sys = { version = "0.45.0", features = ["Win32_Foundation"] } # temporary workaround: https://github.com/ngrok/ngrok-rust/issues/99#issuecomment-1598867386
 
 # HTTP
