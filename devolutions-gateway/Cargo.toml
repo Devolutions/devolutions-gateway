@@ -72,7 +72,7 @@ ngrok = "0.12.3"
 windows-sys = { version = "0.45.0", features = ["Win32_Foundation"] } # temporary workaround: https://github.com/ngrok/ngrok-rust/issues/99#issuecomment-1598867386
 
 # HTTP
-hyper = "0.14.26"
+hyper = "0.14.27"
 axum = { version = "0.6.18", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
 axum-extra = { version = "0.7.4", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4.1", features = ["cors", "fs"] }
