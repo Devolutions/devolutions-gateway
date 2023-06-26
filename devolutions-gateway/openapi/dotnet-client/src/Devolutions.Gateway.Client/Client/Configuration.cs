@@ -34,7 +34,7 @@ namespace Devolutions.Gateway.Client.Client
         /// Version of the package.
         /// </summary>
         /// <value>Version of the package.</value>
-        public const string Version = "2023.6.22";
+        public const string Version = "2023.6.26";
 
         /// <summary>
         /// Identifier for ISO 8601 DateTime Format
@@ -53,12 +53,18 @@ namespace Devolutions.Gateway.Client.Client
         public static readonly ExceptionFactory DefaultExceptionFactory = (methodName, response) =>
         {
             var status = (int)response.StatusCode;
-            if (status < 100 || status >= 400)
+
+            if (status == 0)
+            {
+                return new ApiException(status, string.Format("Error calling {0}: service is unreachable", methodName));
+            }
+            else if (status < 100 || status >= 400)
             {
                 return new ApiException(status,
                     string.Format("Error calling {0}: HTTP error status code {1}", methodName, status),
                     response.RawContent, response.Headers);
             }
+
             return null;
         };
 
@@ -117,7 +123,7 @@ namespace Devolutions.Gateway.Client.Client
         public Configuration()
         {
             Proxy = null;
-            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2023.6.22/csharp");
+            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2023.6.26/csharp");
             BasePath = "http://localhost";
             DefaultHeaders = new ConcurrentDictionary<string, string>();
             ApiKey = new ConcurrentDictionary<string, string>();
@@ -535,7 +541,7 @@ namespace Devolutions.Gateway.Client.Client
             report += "    OS: " + System.Environment.OSVersion + "\n";
             report += "    .NET Framework Version: " + System.Environment.Version  + "\n";
             report += "    Version of the API: 2023.2.1\n";
-            report += "    SDK Package Version: 2023.6.22\n";
+            report += "    SDK Package Version: 2023.6.26\n";
 
             return report;
         }

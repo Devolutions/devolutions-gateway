@@ -50,12 +50,18 @@ namespace {{packageName}}.Client
         public static readonly ExceptionFactory DefaultExceptionFactory = (methodName, response) =>
         {
             var status = (int)response.StatusCode;
-            if (status < 100 || status >= 400)
+
+            if (status == 0)
+            {
+                return new ApiException(status, string.Format("Error calling {0}: service is unreachable", methodName));
+            }
+            else if (status < 100 || status >= 400)
             {
                 return new ApiException(status,
                     string.Format("Error calling {0}: HTTP error status code {1}", methodName, status),
                     response.RawContent, response.Headers);
             }
+
             return null;
         };
 
