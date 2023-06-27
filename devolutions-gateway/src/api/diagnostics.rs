@@ -35,9 +35,53 @@ pub(crate) struct ConfigDiagnostic {
 
 impl From<&Conf> for ConfigDiagnostic {
     fn from(conf: &Conf) -> Self {
+        use crate::config::dto::NgrokTunnelConf;
+        use url::Url;
+
+        let mut listeners = conf.listeners.clone();
+
+        if let Some(ngrok) = &conf.ngrok {
+            for tunnel in ngrok.tunnels.values() {
+                match tunnel {
+                    NgrokTunnelConf::Tcp(tcp_tunnel) => {
+                        let url = format!("tcp://{}", tcp_tunnel.remote_addr);
+                        match Url::parse(&url) {
+                            Ok(url) => listeners.push(ListenerUrls {
+                                internal_url: url.clone(),
+                                external_url: url.clone(),
+                            }),
+                            Err(error) => {
+                                warn!(?tcp_tunnel, %error, "invalid URL for Ngrok TCP tunnel");
+                            }
+                        }
+                    }
+                    NgrokTunnelConf::Http(http_tunnel) => {
+                        let schemes = if http_tunnel.schemes.is_empty() {
+                            vec!["https"]
+                        } else {
+                            http_tunnel.schemes.iter().map(String::as_str).collect()
+                        };
+
+                        for scheme in schemes {
+                            let url = format!("{}://{}", scheme, http_tunnel.domain);
+                            match Url::parse(&url) {
+                                Ok(url) => listeners.push(ListenerUrls {
+                                    internal_url: url.clone(),
+                                    external_url: url.clone(),
+                                }),
+                                Err(error) => {
+                                    warn!(?http_tunnel, %error, "invalid URL for Ngrok HTTP tunnel");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         ConfigDiagnostic {
             id: conf.id,
-            listeners: conf.listeners.clone(),
+            listeners,
             version: env!("CARGO_PKG_VERSION"),
             hostname: conf.hostname.clone(),
         }
