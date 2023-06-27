@@ -30,6 +30,8 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   pub heartbeat_interval: Option<u64>,
   ```
 
+- _dgw_: make Ngrok listeners appear in configuration diagnostic ([#485](https://github.com/Devolutions/devolutions-gateway/issues/485))
+
 ### Bug Fixes
 
 - _dgw_: truncated payload after PCB reading ([#483](https://github.com/Devolutions/devolutions-gateway/issues/483)) ([875967f15b](https://github.com/Devolutions/devolutions-gateway/commit/875967f15bb3577e3ce211def9f8d42df3776b0e)) ([DGW-97](https://devolutions.atlassian.net/browse/DGW-97)) 
