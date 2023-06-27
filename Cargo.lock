@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2023.2.1"
+version = "2023.2.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -838,7 +838,6 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
- "windows-sys 0.45.0",
  "x509-cert",
  "zeroize",
 ]
@@ -1678,7 +1677,7 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2023.2.1"
+version = "2023.2.2"
 dependencies = [
  "anyhow",
  "dirs-next",
@@ -1990,9 +1989,9 @@ dependencies = [
 
 [[package]]
 name = "ngrok"
-version = "0.12.3"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98ce3514eec7338e2d4663e3efb4429e08d8f3662996be4b9585350e7d8ad728"
+checksum = "87e211f407b0a084f720823a00c956aeab2c15dfe7a61760d93227bbaf048026"
 dependencies = [
  "arc-swap",
  "async-rustls",
