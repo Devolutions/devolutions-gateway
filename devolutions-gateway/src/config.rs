@@ -559,7 +559,7 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 }
 
 pub mod dto {
-    use std::{collections::HashMap, time::Duration};
+    use std::collections::HashMap;
 
     use serde::{de, ser};
 
@@ -870,10 +870,10 @@ pub mod dto {
     #[serde(rename_all = "PascalCase")]
     pub struct NgrokConf {
         pub authtoken: String,
-        #[serde(default, skip_serializing_if = "Option::is_none", with = "humantime_serde")]
-        pub heartbeat_interval: Option<Duration>,
-        #[serde(default, skip_serializing_if = "Option::is_none", with = "humantime_serde")]
-        pub heartbeat_tolerance: Option<Duration>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub heartbeat_interval: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub heartbeat_tolerance: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub metadata: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
@@ -22,11 +24,11 @@ impl NgrokSession {
         let mut builder = ngrok::Session::builder().authtoken(&conf.authtoken);
 
         if let Some(heartbeat_interval) = conf.heartbeat_interval {
-            builder = builder.heartbeat_interval(heartbeat_interval);
+            builder = builder.heartbeat_interval(Duration::from_secs(heartbeat_interval));
         }
 
         if let Some(heartbeat_tolerance) = conf.heartbeat_tolerance {
-            builder = builder.heartbeat_tolerance(heartbeat_tolerance);
+            builder = builder.heartbeat_tolerance(Duration::from_secs(heartbeat_tolerance));
         }
 
         if let Some(metadata) = &conf.metadata {
@@ -46,8 +48,7 @@ impl NgrokSession {
     }
 
     pub fn configure_endpoint(&self, name: &str, conf: &NgrokTunnelConf) -> NgrokTunnel {
-        use ngrok::config::ProxyProto;
-        use ngrok::config::Scheme;
+        use ngrok::config::{ProxyProto, Scheme};
         use std::str::FromStr as _;
 
         match conf {

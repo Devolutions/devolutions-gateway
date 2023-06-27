@@ -10,6 +10,26 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _pwsh_: initial devolutions gateway updater tool ([#472](https://github.com/Devolutions/devolutions-gateway/issues/472)) ([d1f5e2053f](https://github.com/Devolutions/devolutions-gateway/commit/d1f5e2053fb001d80c569ab8be10c45e71fecfa7)) 
 
+### Improvements
+
+- _dgw_: durations in seconds in ngrok config ([#485](https://github.com/Devolutions/devolutions-gateway/issues/485))
+
+  Previously, a Duration was deserialized from a string
+  using the `humantime_serde` crate. With this patch, the duration
+  is specified in seconds using an integer.
+
+  In other words, this code:
+  ```rust
+  #[serde(default, skip_serializing_if = "Option::is_none", with = "humantime_serde")]
+  pub heartbeat_interval: Option<Duration>,
+  ```
+
+  Is changed into this:
+  ```rust
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub heartbeat_interval: Option<u64>,
+  ```
+
 ### Bug Fixes
 
 - _dgw_: truncated payload after PCB reading ([#483](https://github.com/Devolutions/devolutions-gateway/issues/483)) ([875967f15b](https://github.com/Devolutions/devolutions-gateway/commit/875967f15bb3577e3ce211def9f8d42df3776b0e)) ([DGW-97](https://devolutions.atlassian.net/browse/DGW-97)) 
@@ -37,71 +57,15 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _deps_: bump tokio-rustls from 0.24.0 to 0.24.1 ([#468](https://github.com/Devolutions/devolutions-gateway/issues/468)) ([5b86f4af33](https://github.com/Devolutions/devolutions-gateway/commit/5b86f4af33e245a40cd6f1873cfb7eca46d30bab)) 
 
-  Bumps [tokio-rustls](https://github.com/rustls/tokio-rustls) from 0.24.0 to 0.24.1.
-  - [Commits](https://github.com/rustls/tokio-rustls/commits)
-  
-  ---
-  updated-dependencies:
-  - dependency-name: tokio-rustls
-    dependency-type: direct:production
-    update-type: version-update:semver-patch
-  ...
-
 - _deps_: bump sysinfo from 0.29.0 to 0.29.2 ([#467](https://github.com/Devolutions/devolutions-gateway/issues/467)) ([dfc3e533b5](https://github.com/Devolutions/devolutions-gateway/commit/dfc3e533b5d2e74af50a511b2101d1012ee89318)) 
-
-  Bumps [sysinfo](https://github.com/GuillaumeGomez/sysinfo) from 0.29.0 to 0.29.2.
-  - [Changelog](https://github.com/GuillaumeGomez/sysinfo/blob/master/CHANGELOG.md)
-  - [Commits](https://github.com/GuillaumeGomez/sysinfo/commits)
-  
-  ---
-  updated-dependencies:
-  - dependency-name: sysinfo
-    dependency-type: direct:production
-    update-type: version-update:semver-patch
-  ...
 
 - _deps_: bump log from 0.4.18 to 0.4.19 ([#475](https://github.com/Devolutions/devolutions-gateway/issues/475)) ([c7bd46cd66](https://github.com/Devolutions/devolutions-gateway/commit/c7bd46cd6651e24d79677241202367b86c704143)) 
 
-  Bumps [log](https://github.com/rust-lang/log) from 0.4.18 to 0.4.19.
-  - [Release notes](https://github.com/rust-lang/log/releases)
-  - [Changelog](https://github.com/rust-lang/log/blob/master/CHANGELOG.md)
-  - [Commits](https://github.com/rust-lang/log/compare/0.4.18...0.4.19)
-  
-  ---
-  updated-dependencies:
-  - dependency-name: log
-    dependency-type: direct:production
-    update-type: version-update:semver-patch
-  ...
-
 - _deps_: bump serde_json from 1.0.96 to 1.0.97 ([#473](https://github.com/Devolutions/devolutions-gateway/issues/473)) ([ff301e7c2b](https://github.com/Devolutions/devolutions-gateway/commit/ff301e7c2b8849db2b977e5d86361b21f4d14ef5)) 
-
-  Bumps [serde_json](https://github.com/serde-rs/json) from 1.0.96 to 1.0.97.
-  - [Release notes](https://github.com/serde-rs/json/releases)
-  - [Commits](https://github.com/serde-rs/json/compare/v1.0.96...v1.0.97)
-  
-  ---
-  updated-dependencies:
-  - dependency-name: serde_json
-    dependency-type: direct:production
-    update-type: version-update:semver-patch
-  ...
 
 - Dependency bump and maintainance ([#476](https://github.com/Devolutions/devolutions-gateway/issues/476)) ([a0f8abc113](https://github.com/Devolutions/devolutions-gateway/commit/a0f8abc1137ac4ff289cadf34f0e82f8557e87c6)) 
 
 - _deps_: bump hyper from 0.14.26 to 0.14.27 ([#480](https://github.com/Devolutions/devolutions-gateway/issues/480)) ([3f8c6cac73](https://github.com/Devolutions/devolutions-gateway/commit/3f8c6cac737b13e5ba86cabb56b1aad5c9cefd3f)) 
-
-  Bumps [hyper](https://github.com/hyperium/hyper) from 0.14.26 to 0.14.27.
-  - [Release notes](https://github.com/hyperium/hyper/releases)
-  - [Changelog](https://github.com/hyperium/hyper/blob/v0.14.27/CHANGELOG.md)
-  - [Commits](https://github.com/hyperium/hyper/compare/v0.14.26...v0.14.27)
-  
-  ---
-  updated-dependencies:
-  - dependency-name: hyper
-    dependency-type: direct:production
-    update-type: version-update:semver-patch
-  ...
 
 ## 2023.2.1 (2023-06-09)
 
