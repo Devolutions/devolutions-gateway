@@ -50,9 +50,24 @@ pub fn extract_association_claims(
     }
 }
 
-pub fn decode_pcb(buf: &[u8]) -> Result<Option<PreconnectionBlob>, io::Error> {
-    match ironrdp_pdu::decode::<PreconnectionBlob>(buf) {
-        Ok(preconnection_pdu) => Ok(Some(preconnection_pdu)),
+fn decode_pcb(buf: &[u8]) -> Result<Option<(PreconnectionBlob, usize)>, io::Error> {
+    let mut cursor = ironrdp_pdu::cursor::ReadCursor::new(buf);
+
+    match ironrdp_pdu::decode_cursor::<PreconnectionBlob>(&mut cursor) {
+        Ok(pcb) => {
+            let pdu_size = ironrdp_pdu::size(&pcb);
+            let read_len = cursor.pos();
+
+            // NOTE: sanity check (reporting the wrong number will corrupt the communication)
+            if read_len != pdu_size {
+                warn!(
+                    read_len,
+                    pdu_size, "inconsistent lengths when reading preconnection blob"
+                );
+            }
+
+            Ok(Some((pcb, read_len)))
+        }
         Err(e) if matches!(e.kind, ironrdp_pdu::PduErrorKind::NotEnoughBytes { .. }) => Ok(None),
         Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
     }
@@ -72,8 +87,8 @@ pub async fn read_pcb(mut stream: impl AsyncRead + AsyncWrite + Unpin) -> io::Re
             ));
         }
 
-        if let Some(pdu) = decode_pcb(&buf)? {
-            let leftover_bytes = buf.split_off(ironrdp_pdu::size(&pdu));
+        if let Some((pdu, read_len)) = decode_pcb(&buf)? {
+            let leftover_bytes = buf.split_off(read_len);
             return Ok((pdu, leftover_bytes));
         }
     }
