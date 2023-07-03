@@ -811,7 +811,7 @@ dependencies = [
  "parking_lot",
  "pcap-file",
  "picky",
- "picky-krb",
+ "picky-krb 0.7.0",
  "pin-project-lite",
  "portpicker",
  "proptest",
@@ -2500,6 +2500,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "picky-krb"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a670a01a7e97384612b8427b19910761ab98ef3a01777ffc59eba631e2fe9444"
+dependencies = [
+ "aes",
+ "byteorder",
+ "cbc",
+ "crypto",
+ "des",
+ "hmac 0.12.1",
+ "num-bigint-dig",
+ "oid",
+ "pbkdf2",
+ "picky-asn1",
+ "picky-asn1-der",
+ "picky-asn1-x509 0.10.0",
+ "rand 0.8.5",
+ "serde",
+ "sha1",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3506,7 +3531,7 @@ dependencies = [
  "picky-asn1",
  "picky-asn1-der",
  "picky-asn1-x509 0.9.0",
- "picky-krb",
+ "picky-krb 0.6.0",
  "rand 0.8.5",
  "serde",
  "serde_derive",
