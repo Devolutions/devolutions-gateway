@@ -613,6 +613,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub subscriber: Option<Subscriber>,
 
+        /// Path to the recordings folder
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub recording_path: Option<Utf8PathBuf>,
+
         /// Ngrok config (closely maps https://ngrok.com/docs/ngrok-agent/config/)
         #[serde(skip_serializing_if = "Option::is_none")]
         pub ngrok: Option<NgrokConf>,
@@ -630,9 +634,6 @@ pub mod dto {
         /// (Unstable) Plugin paths to load at startup
         #[serde(skip_serializing_if = "Option::is_none")]
         pub plugins: Option<Vec<Utf8PathBuf>>,
-        /// (Unstable) Recording path to be provided to the recording plugin
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub recording_path: Option<Utf8PathBuf>,
         /// (Unstable) Folder where pcap recordings should be stored
         /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         #[serde(skip_serializing_if = "Option::is_none")]
