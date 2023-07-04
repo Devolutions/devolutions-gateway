@@ -21,7 +21,7 @@ A default template with minimal options is generated in this location if the fil
 
 Currently, stable options are:
 
-- `Id`: this Gateway's unique ID,
+- `Id`: this Gateway's UUID,
 
 - `Hostname`: this Gateway's hostname (used when inferring external URLs),
 
@@ -44,15 +44,63 @@ Currently, stable options are:
 - `Listeners`: array of listener URLs.
     Each element has the following schema: 
 
-    * `InternalUrl`: internal URL for this listener,
-    * `ExternalUrl`: external URL for this listener.
+    * `InternalUrl`: internal URL for this listener, a socket bound to the specified address (IP address, and port number) will be created, 
 
-    Host segment may be abridged with `*`.
+    * `ExternalUrl`: external URL for this listener, accessing this URL from outside should ultimately redirect to the service.
+        This holds no meaning for the service itself, but the value will be advertised by the `/jet/diagnostics/configuration` HTTP route.
+        This route can be used by other systems to automatically discover the remaining access URIs.
+
+    For both values, host segment may be abridged with `*`.
+
+    When used in internal URLs, `*` will cause two listeners to be created with `*` expanded into:
+    - the IPv4 wildcard bind address `0.0.0.0`, for listening to any IPv4 address, and
+    - the IPv6 wildcard bind address `[::]`, for listening to any IPv6 address.
+
+    When used in external URLs, `*` will be expanded into the value of `Hostname`.
 
 - `Subscriber`: subscriber configuration:
     
     * `Url`: HTTP URL where notification messages are to be sent,
     * `Token`: bearer token to use when making HTTP requests.
+
+- `RecordingPath`: path to the recordings folder,
+
+- `Ngrok`: JSON object describing the ngrok configuration for ingress listeners:
+
+    * `Authtoken`: specifies the authentication token used to connect to the ngrok service,
+    * `HeartbeatInterval`: how often the service should heartbeat to the ngrok servers defined as a number in seconds,
+    * `HeartbeatTolerance`: reconnect the agent tunnel session if the server does not respond to a heartbeat within this
+        tolerance defined as a number on seconds,
+    * `Metadata`: opaque, user-supplied string that will be returned as part of the ngrok API response to the list
+        online sessions resource for all tunnels started by Devolutions Gateway service,
+    * `ServerAddr`: this is the URL of the ngrok server to connect to. You should only set this if you are using a
+        custom ingress URL,
+    * `Tunnels`: a map of ngrok tunnels. The key is the name of the tunnel and value is a JSON object whose schema depends on tunnel protocol.
+
+        Common options are:
+
+        * `AllowCidrs`: array of CIDRs, rejects connections that do not match the given CIDRs,
+        * `DenyCidrs`: array of CIDRS, rejects connections that match the given CIDRs and allows all other CIDRs,
+        * `ProxyProto`: the version of PROXY protocol to use with this tunnel, empty if not using (example values are 1 or 2),
+        * `Metadata`: arbitrary user-defined metadata that will appear in the ngrok service API when listing tunnel sessions.
+
+        Other options for an HTTP tunnel are:
+
+        * `Proto`: MUST be set to `http`,
+        * `Domain`: the domain to request, as registered in the ngrok dashboard,
+        * `Metadata`: arbitrary user-defined metadata that will appear in the ngrok service API when listing tunnel sessions,
+        * `BasicAuth`: array of username:password combinations to use for basic authenticate (passwords must be at least 8 characters long),
+        * `CircuitBreaker`: a float number, reject requests when 5XX responses exceed this ratio,
+        * `Compression`: boolean, gzip compress HTTP responses from your web service,
+        * `Schemes`: array of schemes (`http` or `https`), bind to an HTTPS and/or HTTP endpoint.
+
+        Other options for a TCP tunnel are:
+
+        * `Proto`: MUST be set to `tcp`,
+        * `RemoteAddr`: bind the remote TCP address and port, as registered in the ngrok dashboard,
+
+        Note that in order to accept connections from outside, you must at least configure `AllowCidrs`.
+        The most permissive CIDR is the "zero-address" `0.0.0.0/0`, and defines an IP block containing all possible IP addresses.
 
 ## Sample Usage
 
@@ -136,7 +184,7 @@ $ ./tokengen --provisioner-key /path/to/provisioner/private/key.pem --delegation
 
 4. Open saved ".RDP" file with a text editor
 
-5. Append string "pcb:s:"  to the end of the file (e.g: pcb:s:eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOj...)
+5. Append string "pcb:s:" to the end of the file (e.g: pcb:s:eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOj...)
 
 6. Save file
 
