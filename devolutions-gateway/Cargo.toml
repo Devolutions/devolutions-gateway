@@ -65,7 +65,7 @@ tokio = { version = "1.28.2", features = ["signal", "net", "io-util", "time", "r
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
 reqwest = { version = "0.11.18", features = ["json"] } # TODO: directly use hyper in subscriber module
 futures = "0.3.28"
-async-trait = "0.1.69"
+async-trait = "0.1.71"
 tower = { version = "0.4.13", features = ["timeout"] }
 ngrok = "0.12.4"
 
