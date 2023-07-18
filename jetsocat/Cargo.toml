@@ -16,7 +16,7 @@ native-tls = ["tokio-tungstenite/native-tls"]
 
 # jet protocol support
 jet-proto = { path = "../crates/jet-proto" }
-uuid = "1.4.0"
+uuid = "1.4.1"
 
 # jmux protocol support
 jmux-proto = { path = "../crates/jmux-proto" }
