@@ -11,10 +11,10 @@
   "enumNameSuffix": "",
   "enumUnknownDefaultCase": false,
   
-  "ngMinVersion": "14.0.0",
-  "ngPackagrMinVersion": "14.0.0",
-  "rxjsMinVersion": "7.4.0",
+  "ngMinVersion": "16.1.0",
+  "ngPackagrMinVersion": "16.1.0",
+  "rxjsMinVersion": "7.8.0",
   "tsickleMinVersion": "0.46.0",
-  "tsMinVersion": "4.4.0",
-  "zonejsMinVersion": "0.11.4"
+  "tsMinVersion": "4.9.0",
+  "zonejsMinVersion": "0.13.0"
 }
