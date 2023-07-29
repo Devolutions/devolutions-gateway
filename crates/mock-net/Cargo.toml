@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 tokio = { version = "1.28.2", features = ["io-util", "sync"] }
-loom = { version = "0.5.6", features = ["futures", "checkpoint"] }
+loom = { version = "0.6.1", features = ["futures", "checkpoint"] }
 lazy_static = "1.4.0"
 
 [dev-dependencies]
