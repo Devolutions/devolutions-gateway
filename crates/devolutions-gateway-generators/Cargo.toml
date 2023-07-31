@@ -9,4 +9,4 @@ publish = false
 devolutions-gateway = { path = "../../devolutions-gateway" }
 proptest = "1.2.0"
 uuid = "1.4.1"
-serde = { version = "1.0.171", features = ["derive"] }
+serde = { version = "1.0.179", features = ["derive"] }
