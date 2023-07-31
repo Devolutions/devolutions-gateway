@@ -43,7 +43,7 @@ url = { version = "2.4.0", features = ["serde"] }
 uuid = { version = "1.4.1", features = ["v4", "serde"] }
 chrono = { version = "0.4.26", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.1"
-anyhow = "1.0.71"
+anyhow = "1.0.72"
 thiserror = "1"
 typed-builder = "0.14.0"
 backoff = "0.4.0"

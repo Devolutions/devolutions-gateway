@@ -16,4 +16,4 @@ futures-util = "0.3.28"
 test-utils = { path = "../test-utils" }
 tokio = { version = "1.28.2", features = ["rt", "macros"] }
 proptest = "1.2.0"
-anyhow = "1.0.71"
+anyhow = "1.0.72"
