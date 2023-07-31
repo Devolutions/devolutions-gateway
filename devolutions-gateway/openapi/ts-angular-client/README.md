@@ -1,4 +1,4 @@
-## @devolutions/gateway-client@0.5.0
+## @devolutions/gateway-client@0.6.0
 
 ### Building
 
@@ -19,7 +19,7 @@ Navigate to the folder of your consuming project and run one of next commands.
 _published:_
 
 ```
-npm install @devolutions/gateway-client@0.5.0 --save
+npm install @devolutions/gateway-client@0.6.0 --save
 ```
 
 _without publishing (not recommended):_
