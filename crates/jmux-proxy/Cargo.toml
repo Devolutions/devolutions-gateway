@@ -12,7 +12,7 @@ publish = false
 jmux-proto = { path = "../jmux-proto" }
 
 # async
-tokio = { version = "1.28.2", features = ["net", "rt", "io-util", "macros"] }
+tokio = { version = "1.29.1", features = ["net", "rt", "io-util", "macros"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
 futures-util = { version = "0.3.28", features = ["sink"] }
 
