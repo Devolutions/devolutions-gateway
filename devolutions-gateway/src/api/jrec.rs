@@ -129,8 +129,15 @@ pub(crate) async fn list_recordings(
     _scope: RecordingsReadScope,
 ) -> Result<Json<Vec<Uuid>>, HttpError> {
     let conf = conf_handle.get_conf();
-    let dirs = list_uuid_dirs(conf.recording_path.as_std_path())
-        .map_err(HttpError::internal().with_msg("failed recording listing").err())?;
+    let recording_path = conf.recording_path.as_std_path();
+
+    let dirs = if recording_path.exists() {
+        list_uuid_dirs(recording_path).map_err(HttpError::internal().with_msg("failed recording listing").err())?
+    } else {
+        // If the recording directory does not exist, it means that there is no recording yet
+        Vec::new()
+    };
+
     Ok(Json(dirs))
 }
 
