@@ -9,7 +9,7 @@ publish = false
 tokio = { version = "1.29.1", features = ["io-util"] }
 futures-core = "0.3.28"
 futures-sink = "0.3.28"
-pin-project-lite = "0.2.10"
+pin-project-lite = "0.2.11"
 
 [dev-dependencies]
 futures-util = "0.3.28"
