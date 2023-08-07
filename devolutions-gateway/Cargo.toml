@@ -79,7 +79,7 @@ tower-http = { version = "0.4.1", features = ["cors", "fs"] }
 utoipa = { version = "3.3.0", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # Safe pin projection
-pin-project-lite = "0.2.10"
+pin-project-lite = "0.2.11"
 
 # Native plugins
 dlopen = "0.1.8"

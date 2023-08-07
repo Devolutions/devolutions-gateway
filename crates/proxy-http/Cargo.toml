@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 proxy-types = { path = "../proxy-types" }
 tokio = { version = "1.29.1", features = ["io-util"] }
-pin-project-lite = "0.2.10"
+pin-project-lite = "0.2.11"
 bytes = "1.4.0"
 
 [dev-dependencies]
