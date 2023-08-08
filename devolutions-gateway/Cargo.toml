@@ -22,12 +22,12 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 ironrdp-pdu = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
 ironrdp-rdcleanpath = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
 ceviche = "0.5.2"
-picky-krb = "0.6.0"
+picky-krb = "0.7.1"
 
 # Serialization
-serde = "1.0.179"
-serde_derive = "1.0.164"
-serde_json = "1.0.97"
+serde = "1.0.183"
+serde_derive = "1.0.183"
+serde_json = "1.0.104"
 serde_urlencoded = "0.7.1"
 
 # Utils, misc
@@ -45,13 +45,13 @@ chrono = { version = "0.4.26", features = ["serde"] } # TODO: switch to `time`
 parking_lot = "0.12.1"
 anyhow = "1.0.72"
 thiserror = "1"
-typed-builder = "0.14.0"
+typed-builder = "0.15.2"
 backoff = "0.4.0"
 
 # Security, crypto…
 zeroize = { version = "1.6.0", features = ["derive"] }
-picky = { version = "7.0.0-rc.6", default-features = false, features = ["jose", "x509"] }
-x509-cert = { version = "0.2.3", features = ["std"] }
+picky = { version = "7.0.0-rc.7", default-features = false, features = ["jose", "x509"] }
+x509-cert = { version = "0.2.4", features = ["std"] }
 multibase = "0.9.1"
 
 # Logging
@@ -71,12 +71,12 @@ ngrok = "0.12.4"
 
 # HTTP
 hyper = "0.14.27"
-axum = { version = "0.6.19", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
-axum-extra = { version = "0.7.4", features = ["query", "async-read-body"] }
-tower-http = { version = "0.4.1", features = ["cors", "fs"] }
+axum = { version = "0.6.20", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
+axum-extra = { version = "0.7.7", features = ["query", "async-read-body"] }
+tower-http = { version = "0.4.3", features = ["cors", "fs"] }
 
 # OpenAPI generator
-utoipa = { version = "3.3.0", default-features = false, features = ["uuid", "chrono"], optional = true }
+utoipa = { version = "3.4.4", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # Safe pin projection
 pin-project-lite = "0.2.11"
@@ -94,7 +94,7 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 portpicker = "0.1.1"
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.1.1"
+embed-resource = "2.2.0"
 
 [dev-dependencies]
 tokio-test = "0.4.2"
