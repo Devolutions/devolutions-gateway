@@ -4,6 +4,32 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.2.3 (2023-08-15)
+
+### Bug Fixes
+
+- _dgw_: error 500 when recording folder is missing ([#502](https://github.com/Devolutions/devolutions-gateway/issues/502)) ([3b1992e647](https://github.com/Devolutions/devolutions-gateway/commit/3b1992e647bc2b3b17fc328df091956766f8fdfe)) ([DGW-99](https://devolutions.atlassian.net/browse/DGW-99)) 
+
+  When listing the recordings, if the recording directory does not exist,
+  it means that there is no recording yet (and the folder will be created
+  later). However, Devolutions Gateway is attempting to read this folder
+  anyway and the HTTP error 500 (Internal Server Error) is returned. This
+  patch fixes this by returning an empty list as appropriate.
+
+- _dgw_: typo in TLS forward route ([#510](https://github.com/Devolutions/devolutions-gateway/issues/510)) ([7cea3c055a](https://github.com/Devolutions/devolutions-gateway/commit/7cea3c055ade2a86aaa76ac6fe534d9fe0ecd1a1)) ([DGW-102](https://devolutions.atlassian.net/browse/DGW-102)) 
+
+  The name of the endpoint was wrong, and thus /jet/fwd/tls was
+  returning the 404 Not Found status.
+  Furthermore, the `with_tls` option was not properly set.
+
+### Build
+
+- _deps_: update dependencies 
+
+### Documentation
+
+- _dgw_: stabilize `RecordingPath` and `Ngrok` options ([#489](https://github.com/Devolutions/devolutions-gateway/issues/489)) ([013569884e](https://github.com/Devolutions/devolutions-gateway/commit/013569884ef4b86f62331ba725c6b6f5e6574220)) 
+
 ## 2023.2.2 (2023-06-27)
 
 ### Features
