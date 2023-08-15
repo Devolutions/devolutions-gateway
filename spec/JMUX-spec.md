@@ -7,8 +7,8 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    All JMUX messages share a common 4-byte header structure:
 
       uint8     msgType
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
 
    The **msgType** field contains one of the following values:
 
@@ -41,11 +41,11 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    When either side wishes to open a new channel, it allocates a local number for the channel. It then sends the following message to the other side, and includes the local channel number and initial window size in the message.
 
       uint8     msgType (JMUX_MSG_CHANNEL_OPEN)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    senderChannelId
       uint32    initialWindowSize
-      uint32    maximumPacketSize
+      uint16    maximumPacketSize
       uint8[*]  destinationUrl
 
    **senderChannelId** is a local identifier for the channel used by the sender of this message. **initialWindowSize** specifies how many bytes of channel data can be sent to the sender of this message without adjusting the window. The **maximumPacketSize** specifies the maximum size of an individual data packet that can be sent to the sender. **destinationUrl** is a string containing the destination URL for the channel:
@@ -58,18 +58,18 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    The remote side then decides whether it can open the channel, and responds with either `JMUX_MSG_CHANNEL_OPEN_SUCCESS` or `JMUX_MSG_CHANNEL_OPEN_FAILURE`.
 
       uint8     msgType (JMUX_MSG_CHANNEL_OPEN_SUCCESS)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
       uint32    senderChannelId
       uint32    initialWindowSize
-      uint32    maximumPacketSize
+      uint16    maximumPacketSize
 
    The **recipientChannelId** is the channel number given in the original open request, and **senderChannelId** is the channel number allocated by the other side.
 
       uint8     msgType (JMUX_MSG_CHANNEL_OPEN_FAILURE)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
       uint32    reasonCode
       uint8[*]  description
@@ -81,8 +81,8 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    The window size specifies how many bytes the other party can send before it must wait for the window to be adjusted. Both parties use the following message to adjust the window.
 
       uint8     msgType (JMUX_MSG_CHANNEL_WINDOW_ADJUST)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
       uint32    windowAdjustment
 
@@ -91,8 +91,8 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    Data transfer is done with messages of the following type.
 
       uint8     msgType (JMUX_MSG_CHANNEL_DATA)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
       uint8[*]  transferData
 
@@ -105,8 +105,8 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    When a party will no longer send more data to a channel, it SHOULD send `JMUX_MSG_CHANNEL_EOF`.
 
       uint8     msgType (JMUX_MSG_CHANNEL_EOF)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
 
    No explicit response is sent to this message. However, the application may send EOF to whatever is at the other end of the channel. Note that the channel remains open after this message, and more data may still be sent in the other direction. This message does not consume window space and can be sent even if no window space is available.
@@ -114,8 +114,8 @@ JMUX is a wire protocol for multiplexing connections or streams into a single co
    When either party wishes to terminate the channel, it sends `JMUX_MSG_CHANNEL_CLOSE`. Upon receiving this message, a party MUST send back an `JMUX_MSG_CHANNEL_CLOSE` unless it has already sent this message for the channel. The channel is considered closed for a party when it has both sent and received `JMUX_MSG_CHANNEL_CLOSE`, and the party may then reuse the channel number. A party MAY send `JMUX_MSG_CHANNEL_CLOSE` without having sent or received `JMUX_MSG_CHANNEL_EOF`.
 
       uint8     msgType (JMUX_MSG_CHANNEL_CLOSE)
-      uint8     msgFlags
       uint16    msgSize
+      uint8     msgFlags
       uint32    recipientChannelId
 
    This message does not consume window space and can be sent even if no window space is available.
