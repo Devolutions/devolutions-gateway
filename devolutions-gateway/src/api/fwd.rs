@@ -24,7 +24,7 @@ use crate::{utils, DgwState};
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/tcp/:id", get(fwd_tcp))
-        .route("/fwd/:id", get(fwd_tls))
+        .route("/tls/:id", get(fwd_tls))
         .with_state(state)
 }
 
@@ -61,13 +61,14 @@ async fn handle_fwd_tcp(
 ) {
     let stream = crate::ws::websocket_compat(ws);
 
-    let result = PlainForward::builder()
+    let result = Forward::builder()
         .client_addr(source_addr)
         .client_stream(stream)
         .conf(conf)
         .claims(claims)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
+        .with_tls(false)
         .build()
         .run()
         .instrument(info_span!("tcp", client = %source_addr))
@@ -111,13 +112,14 @@ async fn handle_fwd_tls(
 ) {
     let stream = crate::ws::websocket_compat(ws);
 
-    let result = PlainForward::builder()
+    let result = Forward::builder()
         .client_addr(source_addr)
         .client_stream(stream)
         .conf(conf)
         .claims(claims)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
+        .with_tls(true)
         .build()
         .run()
         .instrument(info_span!("tls", client = %source_addr))
@@ -129,23 +131,22 @@ async fn handle_fwd_tls(
 }
 
 #[derive(TypedBuilder)]
-pub struct PlainForward<S> {
+struct Forward<S> {
     conf: Arc<Conf>,
     claims: AssociationTokenClaims,
     client_stream: S,
     client_addr: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
-    #[builder(default = false)]
     with_tls: bool,
 }
 
-impl<S> PlainForward<S>
+impl<S> Forward<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     #[instrument(skip_all)]
-    pub async fn run(self) -> anyhow::Result<()> {
+    async fn run(self) -> anyhow::Result<()> {
         let Self {
             conf,
             claims,
