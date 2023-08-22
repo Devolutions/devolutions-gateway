@@ -6,7 +6,7 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
 
 [dependencies]
-log = "0.4.19"
+log = "0.4.20"
 byteorder = "1.4.3"
 uuid = { version = "1.4.1", features = ["v4"] }
 httparse = "1.8.0"
