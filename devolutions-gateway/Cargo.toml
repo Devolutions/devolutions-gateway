@@ -76,7 +76,7 @@ axum-extra = { version = "0.7.7", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4.3", features = ["cors", "fs"] }
 
 # OpenAPI generator
-utoipa = { version = "3.4.4", default-features = false, features = ["uuid", "chrono"], optional = true }
+utoipa = { version = "3.5.0", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # Safe pin projection
 pin-project-lite = "0.2.11"
