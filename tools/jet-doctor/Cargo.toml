@@ -12,7 +12,7 @@ members = ["."]
 anyhow = "1.0.71"
 onlyargs = "0.1.2"
 onlyargs_derive = "0.1.2"
-pem = "2.0.1"
+pem = "3.0.1"
 shadow-rs = "0.21.0"
 openssl-probe = "0.1.5"
 
