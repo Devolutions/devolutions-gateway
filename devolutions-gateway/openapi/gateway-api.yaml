@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2023.2.2
+  version: 2023.2.3
 paths:
   /jet/config:
     patch:
@@ -61,8 +61,16 @@ paths:
     get:
       tags:
       - Diagnostics
-      summary: Retrieves configuration.
-      description: Retrieves configuration.
+      summary: Retrieves a subset of the configuration, for diagnosis purposes.
+      description: |-
+        Retrieves a subset of the configuration, for diagnosis purposes.
+
+        This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch,
+        outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to
+        provide configuration auto-filling, in order to assist the end user.
+
+        It must be noted that this route will never return the whole configuration file as-is, for security reasons.
+        For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
       operationId: GetConfigurationDiagnostic
       responses:
         '200':
@@ -412,7 +420,7 @@ components:
         running_session_count:
           type: integer
           description: Number of running sessions
-          minimum: 0.0
+          minimum: 0
         version:
           type: string
           description: Gateway service version
@@ -503,7 +511,7 @@ components:
           format: int64
           description: Maximum session duration in minutes (0 is used for the infinite duration)
           nullable: true
-          minimum: 0.0
+          minimum: 0
     SubProvisionerKey:
       type: object
       required:
