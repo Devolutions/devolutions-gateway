@@ -18,7 +18,7 @@ use tokio_rustls::rustls;
 use url::Url;
 use uuid::Uuid;
 
-const CERTIFICATE_LABEL: &str = "CERTIFICATE";
+const CERTIFICATE_LABELS: &[&str] = &["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE"];
 const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"];
 
 cfg_if! {
@@ -381,11 +381,10 @@ fn read_rustls_certificate(
             loop {
                 match read_pem(&mut x509_chain_file) {
                     Ok(pem) => {
-                        if pem.label() != CERTIFICATE_LABEL {
+                        if CERTIFICATE_LABELS.iter().all(|&label| pem.label() != label) {
                             anyhow::bail!(
-                                "bad pem label (got {}, expected {}) at position {}",
+                                "bad pem label (got {}, expected one of {CERTIFICATE_LABELS:?}) at position {}",
                                 pem.label(),
-                                CERTIFICATE_LABEL,
                                 x509_chain.len(),
                             );
                         }
@@ -467,7 +466,10 @@ fn read_rustls_priv_key(
                 .context("couldn't parse pem document")?;
 
             if PRIVATE_KEY_LABELS.iter().all(|&label| pem.label() != label) {
-                anyhow::bail!("bad pem label (expected one of {:?})", PRIVATE_KEY_LABELS);
+                anyhow::bail!(
+                    "bad pem label (got {}, expected one of {PRIVATE_KEY_LABELS:?})",
+                    pem.label(),
+                );
             }
 
             pem.into_data().into_owned()
