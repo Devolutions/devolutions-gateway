@@ -140,7 +140,14 @@ async fn get_logs(
     Ok(axum_extra::body::AsyncReadBody::new(file).into_response())
 }
 
-/// Retrieves configuration.
+/// Retrieves a subset of the configuration, for diagnosis purposes.
+///
+/// This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch,
+/// outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to
+/// provide configuration auto-filling, in order to assist the end user.
+///
+/// It must be noted that this route will never return the whole configuration file as-is, for security reasons.
+/// For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
     operation_id = "GetConfigurationDiagnostic",

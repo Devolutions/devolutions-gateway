@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2023.2.2
+2023.2.3
 :toc: left
 :numbered:
 :toclevels: 3
@@ -203,11 +203,11 @@ endif::internal-generation[]
 
 `GET /jet/diagnostics/configuration`
 
-Retrieves configuration.
+Retrieves a subset of the configuration, for diagnosis purposes.
 
 ===== Description
 
-Retrieves configuration.
+Retrieves a subset of the configuration, for diagnosis purposes.  This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
 
 
 // markup not found, no include::{specDir}jet/diagnostics/configuration/GET/spec.adoc[opts=optional]

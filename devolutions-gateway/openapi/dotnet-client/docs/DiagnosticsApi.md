@@ -5,7 +5,7 @@ All URIs are relative to *http://localhost*
 | Method | HTTP request | Description |
 |--------|--------------|-------------|
 | [**GetClockDiagnostic**](DiagnosticsApi.md#getclockdiagnostic) | **GET** /jet/diagnostics/clock | Retrieves server&#39;s clock in order to diagnose clock drifting. |
-| [**GetConfigurationDiagnostic**](DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves configuration. |
+| [**GetConfigurationDiagnostic**](DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves a subset of the configuration, for diagnosis purposes. |
 | [**GetLogs**](DiagnosticsApi.md#getlogs) | **GET** /jet/diagnostics/logs | Retrieves latest logs. |
 
 <a name="getclockdiagnostic"></a>
@@ -98,9 +98,9 @@ No authorization required
 # **GetConfigurationDiagnostic**
 > ConfigDiagnostic GetConfigurationDiagnostic ()
 
-Retrieves configuration.
+Retrieves a subset of the configuration, for diagnosis purposes.
 
-Retrieves configuration.
+Retrieves a subset of the configuration, for diagnosis purposes.  This route primary function is to help with configuration diagnosis (e.g.: ID mismatch, hostname mismatch, outdated version). In addition, it may be used to retrieve the listener URLs. This information can be used to provide configuration auto-filling, in order to assist the end user.  It must be noted that this route will never return the whole configuration file as-is, for security reasons. For an exhaustive list of returned keys, refer to the `ConfigDiagnostic` component definition.
 
 ### Example
 ```csharp
@@ -125,7 +125,7 @@ namespace Example
 
             try
             {
-                // Retrieves configuration.
+                // Retrieves a subset of the configuration, for diagnosis purposes.
                 ConfigDiagnostic result = apiInstance.GetConfigurationDiagnostic();
                 Debug.WriteLine(result);
             }
@@ -146,7 +146,7 @@ This returns an ApiResponse object which contains the response data, status code
 ```csharp
 try
 {
-    // Retrieves configuration.
+    // Retrieves a subset of the configuration, for diagnosis purposes.
     ApiResponse<ConfigDiagnostic> response = apiInstance.GetConfigurationDiagnosticWithHttpInfo();
     Debug.Write("Status Code: " + response.StatusCode);
     Debug.Write("Response Headers: " + response.Headers);
