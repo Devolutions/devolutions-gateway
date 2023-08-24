@@ -16,17 +16,11 @@ macro_rules! diagnostic {
 
         print!("\n=> {diagnostic_name}… ");
 
-        let success = match result {
-            Ok(()) => {
-                println!("OK ✅");
-                true
-            },
-            Err(e) => {
-                println!("FAILED ❌");
-                println!("Error: {e:?}");
-                false
-            }
-        };
+        if result.is_ok() {
+            println!("OK ✅");
+        } else {
+            println!("FAILED ❌");
+        }
 
         if !out.is_empty() {
             for line in out.lines() {
@@ -34,7 +28,13 @@ macro_rules! diagnostic {
             }
         }
 
-        success
+        match result {
+            Ok(()) => true,
+            Err(e) => {
+                println!("Error: {e:?}");
+                false
+            }
+        }
     }}
 }
 
@@ -119,7 +119,7 @@ fn check_cert(mut out: impl fmt::Write, cert_path: &Path, subject_name: Option<&
 
             cert_pem.into_contents()
         }
-        Err(pem::PemError::NotUtf8(_)) => {
+        Err(pem::PemError::MalformedFraming | pem::PemError::NotUtf8(_)) => {
             output!(out, "Read as raw DER");
             cert_val
         }
