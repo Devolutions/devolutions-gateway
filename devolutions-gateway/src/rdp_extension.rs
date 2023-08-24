@@ -196,11 +196,13 @@ async fn process_cleanpath(
         None => warn!("RDCleanPath PDU is missing the destination field"),
     }
 
-    trace!("Connecting to destination server");
+    trace!(?targets, "Connecting to destination server");
 
     let ((mut server_stream, server_addr), selected_target) = utils::successive_try(targets, utils::tcp_connect)
         .await
         .context("couldn’t connect to RDP server")?;
+
+    debug!(%selected_target, "Connected to destination server");
 
     // Send preconnection blob if applicable
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
