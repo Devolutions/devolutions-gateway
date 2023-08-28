@@ -441,7 +441,7 @@ fn read_pub_key(
 
             match data.format {
                 dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("bad SPKI"),
-                dto::PubKeyFormat::Rsa => PublicKey::from_rsa_der(&value).context("bad RSA value"),
+                dto::PubKeyFormat::Rsa => PublicKey::from_pkcs1(&value).context("bad RSA value"),
             }
             .map(Some)
         }
