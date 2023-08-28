@@ -50,7 +50,7 @@ backoff = "0.4.0"
 
 # Security, crypto…
 zeroize = { version = "1.6.0", features = ["derive"] }
-picky = { version = "7.0.0-rc.7", default-features = false, features = ["jose", "x509"] }
+picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509"] }
 x509-cert = { version = "0.2.4", features = ["std"] }
 multibase = "0.9.1"
 
