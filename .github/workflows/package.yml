@@ -130,7 +130,7 @@ jobs:
   codesign:
     name: Codesign
     runs-on: ${{ matrix.runner }}
-    environment: build-and-publish
+    environment: publish-prod
     needs: preflight
     strategy:
       matrix:
@@ -179,18 +179,12 @@ jobs:
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
             Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
-          }    
+          }
 
-      - name: Configure certificates (Windows)
+      - name: Install AzureSignTool
         if: matrix.os == 'windows'
-        env:
-          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
         run: |
-          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
-          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
-          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
-          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+          dotnet tool install --global AzureSignTool
 
       - name: Configure certificates (macOS)
         if: matrix.os == 'macos'
@@ -227,16 +221,15 @@ jobs:
           }
           Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
-              $SignCmd = $(@(
-                'signtool', 
-                'sign', 
-                '/fd', 'SHA256', 
-                '/v', 
-                '/n', 'Devolutions', 
-                '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-                '/td', 'sha256',
-                $_.FullName
-              )) -Join ' '
+              $Params = @('sign',
+                '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+                '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+                '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+                '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+                '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+                '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+                '-v')
+              AzureSignTool @Params $_.FullName
             } elseif ('${{ matrix.os }}' -Eq 'macos') {
               $SignCmd = $(@(
                 'codesign', 
@@ -246,13 +239,10 @@ jobs:
                 '-v',
                 $_.FullName
               )) -Join ' '
+              Write-Host $SignCmd
+              Invoke-Expression $SignCmd
             } else {
               echo "::debug::nothing to do for ${{ matrix.os }}"
-            }
-
-            if ($SignCmd) {
-              Write-Host $SignCmd
-              Invoke-Expression $SignCmd            
             }
           }
 
@@ -280,21 +270,17 @@ jobs:
         if: matrix.project == 'devolutions-gateway'
         shell: pwsh
         run: |
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % { 
-            $SignCmd = $(@(
-              'signtool', 
-              'sign', 
-              '/fd', 'SHA256', 
-              '/v', 
-              '/n', 'Devolutions', 
-              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-              '/d', '"Devolutions Gateway"',
-              '/td', 'sha256',
-              $_.FullName
-            )) -Join ' '
-
-            Write-Host $SignCmd
-            Invoke-Expression $SignCmd
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include '*.msi' | % {
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-d', 'Devolutions Gateway',
+              '-v')
+            AzureSignTool @Params $_.FullName
           }
 
       - name: Verification

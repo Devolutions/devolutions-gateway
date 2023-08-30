@@ -91,7 +91,7 @@ jobs:
     name: sign ${{ matrix.tool }} [${{ matrix.platform }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [ build, lipo ]
-    environment: build-and-publish
+    environment: publish-prod
     strategy:
       matrix:
         arch: [ x86_64, aarch64, universal ]
@@ -121,17 +121,11 @@ jobs:
             $Path += ".exe"
           }
           echo "binary-path=$Path" >> $Env:GITHUB_OUTPUT
-          
-      - name: Configure certificates
+
+      - name: Install AzureSignTool
         if: matrix.platform == 'pc-windows-msvc'
-        env:
-          CODE_SIGN_CERT: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
         run: |
-          $CertificatePath = Join-Path -Path $Env:RUNNER_TEMP -ChildPath CodeSigningCertificate.pfx
-          [IO.File]::WriteAllBytes($CertificatePath, ([Convert]::FromBase64String($Env:CODE_SIGN_CERT)))
-          $SecurePassword = ConvertTo-SecureString "$Env:CODE_SIGN_CERT_PASSWORD" -AsPlainText -Force
-          Import-PfxCertificate -FilePath "$CertificatePath" -CertStoreLocation Cert:\CurrentUser\My -Password $SecurePassword
+          dotnet tool install --global AzureSignTool
 
       - name: Configure certificates
         if: matrix.platform == 'apple-darwin'
@@ -160,16 +154,15 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ matrix.platform }}' -Eq 'pc-windows-msvc') {
-            $SignCmd = $(@(
-              'signtool', 
-              'sign', 
-              '/fd', 'SHA256', 
-              '/v', 
-              '/n', 'Devolutions', 
-              '/tr', 'http://timestamp.comodoca.com/?td=sha256',
-              '/td', 'sha256',
-              '${{ steps.get-binary-path.outputs.binary-path }}'
-            )) -Join ' '
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-v')
+            AzureSignTool @Params '${{ steps.get-binary-path.outputs.binary-path }}'
           } elseif ('${{ matrix.platform }}' -Eq 'apple-darwin') {
             $SignCmd = $(@(
               'codesign', 
@@ -180,10 +173,9 @@ jobs:
               '-v',
               '${{ steps.get-binary-path.outputs.binary-path }}'
             )) -Join ' '
+            Write-Host $SignCmd
+            Invoke-Expression $SignCmd
           }
-
-          Write-Host $SignCmd
-          Invoke-Expression $SignCmd
 
       - name: Verification
         shell: pwsh

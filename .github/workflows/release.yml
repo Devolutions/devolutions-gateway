@@ -102,7 +102,7 @@ jobs:
   containers:
     name: Containers [${{ matrix.os }} ${{ matrix.base-image }}]
     runs-on: ${{ matrix.runner }}
-    environment: build-and-publish
+    environment: publish-prod
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
     strategy:
@@ -209,7 +209,7 @@ jobs:
   github-release:
     name: GitHub release
     runs-on: ubuntu-20.04
-    environment: build-and-publish
+    environment: publish-prod
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
@@ -286,7 +286,7 @@ jobs:
   psgallery-release:
     name: PowerShell release
     runs-on: ubuntu-20.04
-    environment: build-and-publish
+    environment: publish-prod
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
 
