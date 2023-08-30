@@ -98,7 +98,7 @@ jobs:
   nuget-publish:
     name: Publish NuGet packages
     runs-on: ubuntu-20.04
-    environment: build-and-publish
+    environment: publish-prod
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
       - preflight
@@ -139,7 +139,7 @@ jobs:
   npm-publish:
     name: Publish NPM packages
     runs-on: ubuntu-20.04
-    environment: build-and-publish
+    environment: publish-prod
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
       - preflight

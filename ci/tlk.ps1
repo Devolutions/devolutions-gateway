@@ -336,19 +336,6 @@ class TlkRecipe
 
         if ($DestinationExecutable) {
             Copy-Item -Path $SrcExecutablePath -Destination $DestinationExecutable
-
-            if (Test-Path Env:SIGNTOOL_NAME) {
-                $SignToolName = $Env:SIGNTOOL_NAME
-                $TimestampServer = 'http://timestamp.comodoca.com/?td=sha256'
-                $SignToolArgs = @(
-                    'sign', '/fd', 'SHA256', '/v',
-                    '/n', $SignToolName,
-                    '/tr', $TimestampServer,
-                    '/td', 'sha256',
-                    $DestinationExecutable
-                )
-                & 'signtool' $SignToolArgs | Out-Host
-            }
         }
 
         Pop-Location
@@ -449,19 +436,6 @@ class TlkRecipe
         if (Test-Path Env:DGATEWAY_PACKAGE) {
             $DGatewayPackage = $Env:DGATEWAY_PACKAGE
             Copy-Item -Path "$($this.PackageName).msi" -Destination $DGatewayPackage
-
-            if (Test-Path Env:SIGNTOOL_NAME) {
-                $SignToolName = $Env:SIGNTOOL_NAME
-                $TimestampServer = 'http://timestamp.comodoca.com/?td=sha256'
-                $SignToolArgs = @(
-                    'sign', '/fd', 'SHA256', '/v',
-                    '/n', $SignToolName,
-                    '/tr', $TimestampServer,
-                    '/td', 'sha256',
-                    $DGatewayPackage
-                )
-                & 'signtool' $SignToolArgs | Out-Host
-            }
         }
 
         Pop-Location
@@ -471,7 +445,7 @@ class TlkRecipe
         $DebianArchitecture = $this.Target.DebianArchitecture()
         $Packager = "Devolutions Inc."
         $Email = "support@devolutions.net"
-        $Website = "http://wayk.devolutions.net"
+        $Website = "https://devolutions.net"
         $PackageVersion = $this.Version
         $DistroCodeName = "xenial" # Ubuntu 16.04
         $Dependencies = @('liblzma5', 'liblz4-1', '${shlibs:Depends}', '${misc:Depends}')
