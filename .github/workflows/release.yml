@@ -393,6 +393,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/upload-onedrive
+        if: needs.preflight.outputs.skip-publishing == 'false' && github.event.inputs.dry-run == 'false'
         with:
           client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}          
