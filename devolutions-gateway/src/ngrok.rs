@@ -42,7 +42,7 @@ impl NgrokSession {
         // Connect the ngrok session
         let session = builder.connect().await.context("connect to ngrok service")?;
 
-        debug!("ngrok session connected");
+        debug!("Connected with success");
 
         Ok(Self { inner: session })
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::extract::ws::WebSocket;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
-use tracing::Instrument as _;
+use tracing::{field, Instrument as _};
 
 use crate::config::Conf;
 use crate::http::HttpError;
@@ -68,7 +68,7 @@ async fn handle_socket(
         subscriber_tx,
         &active_recordings,
     )
-    .instrument(info_span!("rdp", client = %source_addr))
+    .instrument(info_span!("rdp", client = %source_addr, target = field::Empty, session_id = field::Empty))
     .await;
 
     if let Err(error) = result {

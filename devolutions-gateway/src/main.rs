@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
         CliAction::ConfigInitOnly => {
             let conf_file = devolutions_gateway::config::load_conf_file_or_generate_new()?;
             let conf_file_json =
-                serde_json::to_string_pretty(&conf_file).context("Couldn't represent config file as JSON")?;
+                serde_json::to_string_pretty(&conf_file).context("couldn't represent config file as JSON")?;
             println!("{conf_file_json}");
         }
         CliAction::Run { service_mode } => {

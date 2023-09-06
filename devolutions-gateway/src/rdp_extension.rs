@@ -156,7 +156,6 @@ struct CleanPathResult {
     x224_rsp: Vec<u8>,
 }
 
-#[instrument(skip_all)]
 async fn process_cleanpath(
     cleanpath_pdu: RDCleanPathPdu,
     client_addr: SocketAddr,
@@ -182,6 +181,8 @@ async fn process_cleanpath(
             .pipe(Err);
     };
 
+    tracing::Span::current().record("session_id", claims.jet_aid.to_string());
+
     // Sanity check
     match cleanpath_pdu.destination.as_deref() {
         Some(destination) => match TargetAddr::parse(destination, 3389) {
@@ -203,6 +204,7 @@ async fn process_cleanpath(
         .context("couldn’t connect to RDP server")?;
 
     debug!(%selected_target, "Connected to destination server");
+    tracing::Span::current().record("target", selected_target.to_string());
 
     // Send preconnection blob if applicable
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
@@ -308,7 +310,7 @@ pub async fn handle(
     )
     .with_ttl(claims.jet_ttl);
 
-    trace!("Start RDP-TLS session");
+    info!("RDP-TLS forwarding");
 
     Proxy::builder()
         .conf(conf)

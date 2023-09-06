@@ -121,18 +121,31 @@ impl GatewayService {
                 shutdown_handle.signal();
 
                 runtime.block_on(async move {
-                    tokio::select! {
-                        _ = shutdown_handle.all_closed() => {
-                            debug!("All tasks are terminated");
-                        }
-                        _ = tokio::time::sleep(Duration::from_secs(10)) => {
-                            warn!("Termination of certain tasks is experiencing significant delays");
+                    const MAX_COUNT: usize = 3;
+                    let mut count = 0;
+
+                    loop {
+                        tokio::select! {
+                            _ = shutdown_handle.all_closed() => {
+                                debug!("All tasks are terminated");
+                                break;
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                                count += 1;
+
+                                if count >= MAX_COUNT {
+                                    warn!("Terminate forcefully the lingering tasks");
+                                    break;
+                                } else {
+                                    warn!("Termination of certain tasks is experiencing significant delays");
+                                }
+                            }
                         }
                     }
                 });
 
-                // If necessary, wait for another 10 seconds before forcefully shutting down the runtime
-                runtime.shutdown_timeout(Duration::from_secs(10));
+                // Wait for 1 more second before forcefully shutting down the runtime
+                runtime.shutdown_timeout(Duration::from_secs(1));
 
                 self.state = GatewayState::Stopped;
             }
@@ -190,7 +203,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .iter()
         .map(|listener| {
             GatewayListener::init_and_bind(listener.internal_url.clone(), state.clone())
-                .with_context(|| format!("Failed to initialize {}", listener.internal_url))
+                .with_context(|| format!("failed to initialize {}", listener.internal_url))
         })
         .collect::<anyhow::Result<Vec<GatewayListener>>>()
         .context("failed to bind listener")?
@@ -245,9 +258,9 @@ fn load_jrl_from_disk(config: &Conf) -> anyhow::Result<Arc<CurrentJrl>> {
     let claims: JrlTokenClaims = if jrl_file.exists() {
         info!("Reading JRL file from disk (path: {jrl_file})");
         std::fs::read_to_string(jrl_file)
-            .context("Couldn't read JRL file")?
+            .context("couldn't read JRL file")?
             .pipe_deref(serde_json::from_str)
-            .context("Invalid JRL")?
+            .context("invalid JRL")?
     } else {
         info!("JRL file doesn't exist (path: {jrl_file}). Starting with an empty JRL (JWT Revocation List).");
         JrlTokenClaims::default()

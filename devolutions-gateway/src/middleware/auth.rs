@@ -102,7 +102,8 @@ where
                 let query = parts.uri.query().unwrap_or_default();
 
                 let Ok(query) = serde_urlencoded::from_str::<TokenQueryParam>(query) else {
-                    return Err(HttpError::unauthorized().msg("both authorization header and token query param invalid or missing"));
+                    return Err(HttpError::unauthorized()
+                        .msg("both authorization header and token query param invalid or missing"));
                 };
 
                 query.token

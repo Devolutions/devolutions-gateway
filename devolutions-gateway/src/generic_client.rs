@@ -66,24 +66,22 @@ where
 
         match connection_mode {
             ConnectionMode::Rdv => {
-                info!(
-                    "Starting TCP rendezvous redirection for application protocol {}",
-                    application_protocol
-                );
-                anyhow::bail!("not yet supported");
+                anyhow::bail!("TCP rendezvous not supported");
             }
             ConnectionMode::Fwd { targets, creds: None } => {
-                info!(
-                    "Starting plain TCP forward redirection for application protocol {}",
-                    application_protocol
-                );
-
                 if association_claims.jet_rec {
                     anyhow::bail!("can't meet recording policy");
                 }
 
                 let ((mut server_stream, server_addr), selected_target) =
                     utils::successive_try(&targets, utils::tcp_connect).await?;
+
+                info!(
+                    session = %association_claims.jet_aid,
+                    protocol = %application_protocol,
+                    target = %server_addr,
+                    "plain TCP forwarding"
+                );
 
                 server_stream
                     .write_buf(&mut leftover_bytes)

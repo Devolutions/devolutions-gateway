@@ -8,7 +8,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::Instrument as _;
+use tracing::{field, Instrument as _};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
@@ -71,7 +71,13 @@ async fn handle_fwd_tcp(
         .with_tls(false)
         .build()
         .run()
-        .instrument(info_span!("tcp", client = %source_addr))
+        .instrument(info_span!(
+            "tcp",
+            client = %source_addr,
+            session_id = field::Empty,
+            protocol = field::Empty,
+            target = field::Empty
+        ))
         .await;
 
     if let Err(error) = result {
@@ -122,7 +128,13 @@ async fn handle_fwd_tls(
         .with_tls(true)
         .build()
         .run()
-        .instrument(info_span!("tls", client = %source_addr))
+        .instrument(info_span!(
+            "tls",
+            client = %source_addr,
+            session_id = field::Empty,
+            protocol = field::Empty,
+            target = field::Empty
+        ))
         .await;
 
     if let Err(error) = result {
@@ -145,7 +157,6 @@ impl<S> Forward<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    #[instrument(skip_all)]
     async fn run(self) -> anyhow::Result<()> {
         let Self {
             conf,
@@ -165,12 +176,16 @@ where
             anyhow::bail!("invalid connection mode")
         };
 
+        tracing::Span::current().record("session_id", claims.jet_aid.to_string());
+        tracing::Span::current().record("protocol", claims.jet_ap.to_string());
+
         trace!("Select and connect to target");
 
         let ((server_stream, server_addr), selected_target) =
             utils::successive_try(&targets, utils::tcp_connect).await?;
 
         trace!(%selected_target, "Connected");
+        tracing::Span::current().record("target", selected_target.to_string());
 
         if with_tls {
             trace!("Establishing TLS connection with server");
@@ -181,10 +196,7 @@ where
                 .await
                 .context("TLS connect")?;
 
-            info!(
-                "Starting WebSocket-TLS forwarding with application protocol {}",
-                claims.jet_ap
-            );
+            info!(protocol = %claims.jet_ap, target = %server_addr, "WebSocket-TLS forwarding");
 
             let info = SessionInfo::new(
                 claims.jet_aid,
@@ -211,10 +223,7 @@ where
                 .await
                 .context("Encountered a failure during plain tls traffic proxying")
         } else {
-            info!(
-                "Starting WebSocket-TCP forwarding with application protocol {}",
-                claims.jet_ap
-            );
+            info!("WebSocket-TCP forwarding");
 
             let info = SessionInfo::new(
                 claims.jet_aid,

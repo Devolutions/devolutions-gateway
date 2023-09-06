@@ -3986,7 +3986,7 @@ dependencies = [
 [[package]]
 name = "tracing-appender"
 version = "0.2.999"
-source = "git+https://github.com/CBenoit/tracing.git?rev=454313f66da3a662#454313f66da3a66261955924bc283af147758550"
+source = "git+https://github.com/CBenoit/tracing.git?rev=42097daf92e683cf18da7639ddccb056721a796c#42097daf92e683cf18da7639ddccb056721a796c"
 dependencies = [
  "crossbeam-channel",
  "thiserror",

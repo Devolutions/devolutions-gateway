@@ -293,7 +293,7 @@ impl CommonArgs {
             use std::time::{SystemTime, UNIX_EPOCH};
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .context("Couldn't retrieve duration since UNIX epoch")?;
+                .context("couldn't retrieve duration since UNIX epoch")?;
             filepath.push("jetsocat");
             std::fs::create_dir_all(&filepath).context("couldn't create jetsocat folder")?;
             filepath.push(format!("{}_{}", action, now.as_secs()));
@@ -343,11 +343,11 @@ impl CommonArgs {
 
             // Find current process' parent process ID
             let current_pid =
-                sysinfo::get_current_pid().map_err(|e| anyhow::anyhow!("Couldn't find current process ID: {e}"))?;
+                sysinfo::get_current_pid().map_err(|e| anyhow::anyhow!("couldn't find current process ID: {e}"))?;
             let refresh_kind = RefreshKind::new().with_processes(ProcessRefreshKind::new());
             let system = System::new_with_specifics(refresh_kind);
             let current_process = system.process(current_pid).unwrap(); // current process should exist
-            Some(current_process.parent().context("Couldn't find parent process")?)
+            Some(current_process.parent().context("couldn't find parent process")?)
         } else {
             None
         };

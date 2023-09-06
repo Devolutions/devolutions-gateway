@@ -107,7 +107,7 @@ pub async fn jmux_proxy(cfg: JmuxProxyCfg) -> anyhow::Result<()> {
     let pipe = utils::timeout(cfg.pipe_timeout, open_pipe(cfg.pipe_mode, cfg.proxy_cfg))
         .instrument(info_span!("open_jumx_pipe"))
         .await
-        .context("Couldn't open pipe")?;
+        .context("couldn't open pipe")?;
 
     // Start JMUX proxy over the pipe
     let proxy_fut = JmuxProxy::new(pipe.read, pipe.write)
