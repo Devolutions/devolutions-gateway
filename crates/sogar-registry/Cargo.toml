@@ -6,4 +6,4 @@ edition = "2021"
 publish = false
 
 [dependencies]
-tempfile = "3.5.0"
+tempfile = "3.5"

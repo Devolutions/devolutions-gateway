@@ -8,10 +8,10 @@ publish = false
 
 [dependencies]
 proxy-types = { path = "../proxy-types" }
-tokio = { version = "1.32.0", features = ["io-util"] }
-pin-project-lite = "0.2.11"
-bytes = "1.4.0"
+tokio = { version = "1.32", features = ["io-util"] }
+pin-project-lite = "0.2"
+bytes = "1.4"
 
 [dev-dependencies]
-proptest = "1.2.0"
+proptest = "1.2"
 proxy-generators = { path = "../proxy-generators" }

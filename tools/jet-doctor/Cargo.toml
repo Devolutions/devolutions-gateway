@@ -9,18 +9,18 @@ publish = false
 members = ["."]
 
 [dependencies]
-anyhow = "1.0.71"
-onlyargs = "0.1.2"
-onlyargs_derive = "0.1.2"
-pem = "3.0.1"
-shadow-rs = "0.21.0"
-openssl-probe = "0.1.5"
+anyhow = "1.0"
+onlyargs = "0.1"
+onlyargs_derive = "0.1"
+pem = "3.0"
+shadow-rs = "0.21"
+openssl-probe = "0.1"
 
-# Same dependency as tokio-tungstenite 0.18.0
-# https://crates.io/crates/tokio-tungstenite/0.18.0/dependencies
-webpki = "0.22.0"
-rustls = "0.20.0"
-rustls-native-certs = "0.6.1"
+# Same dependency as tokio-tungstenite 0.18
+# https://crates.io/crates/tokio-tungstenite/0.18/dependencies
+webpki = "0.22"
+rustls = "0.20"
+rustls-native-certs = "0.6"
 
 [build-dependencies]
-shadow-rs = "0.21.0"
+shadow-rs = "0.21"

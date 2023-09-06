@@ -19,85 +19,85 @@ openapi = ["dep:utoipa"]
 transport = { path = "../crates/transport" }
 jmux-proxy = { path = "../crates/jmux-proxy" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
-ironrdp-pdu = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
-ironrdp-rdcleanpath = { version = "0.1.0", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
-ceviche = "0.5.2"
-picky-krb = "0.8.0"
+ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
+ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
+ceviche = "0.5"
+picky-krb = "0.8"
 
 # Serialization
-serde = "1.0.183"
-serde_derive = "1.0.183"
-serde_json = "1.0.104"
-serde_urlencoded = "0.7.1"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+serde_urlencoded = "0.7"
 
 # Utils, misc
-hostname = "0.3.1"
-camino = { version = "1.1.6", features = ["serde1"] }
-smol_str = { version = "0.2.0", features = ["serde"] }
-nonempty = "0.8.1"
-tap = "1.0.1"
-lazy_static = "1.4.0"
+hostname = "0.3"
+camino = { version = "1.1", features = ["serde1"] }
+smol_str = { version = "0.2", features = ["serde"] }
+nonempty = "0.8"
+tap = "1.0"
+lazy_static = "1.4"
 bytes = "1.4"
-cfg-if = "1.0.0"
-url = { version = "2.4.0", features = ["serde"] }
-uuid = { version = "1.4.1", features = ["v4", "serde"] }
-chrono = { version = "0.4.28", features = ["serde"] } # TODO: switch to `time`
-parking_lot = "0.12.1"
-anyhow = "1.0.72"
+cfg-if = "1.0"
+url = { version = "2.4", features = ["serde"] }
+uuid = { version = "1.4", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] } # TODO: switch to `time`
+parking_lot = "0.12"
+anyhow = "1.0"
 thiserror = "1"
-typed-builder = "0.15.2"
-backoff = "0.4.0"
+typed-builder = "0.16"
+backoff = "0.4"
 
 # Security, crypto…
-zeroize = { version = "1.6.0", features = ["derive"] }
 picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509"] }
-x509-cert = { version = "0.2.4", features = ["std"] }
-multibase = "0.9.1"
+zeroize = { version = "1.6", features = ["derive"] }
+x509-cert = { version = "0.2", features = ["std"] }
+multibase = "0.9"
 
 # Logging
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
-tracing-appender = "0.2.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "parking_lot", "smallvec", "local-time", "tracing-log"] }
+tracing-appender = "0.2"
 # TODO: consider `tracing-error` crate
 
 # Async, futures…
-tokio = { version = "1.32.0", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio = { version = "1.32", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
-reqwest = { version = "0.11.20", features = ["json"] } # TODO: directly use hyper in subscriber module
-futures = "0.3.28"
-async-trait = "0.1.73"
-tower = { version = "0.4.13", features = ["timeout"] }
-ngrok = "0.12.4"
+reqwest = { version = "0.11", features = ["json"] } # TODO: directly use hyper in subscriber module
+futures = "0.3"
+async-trait = "0.1"
+tower = { version = "0.4", features = ["timeout"] }
+ngrok = "0.13"
 
 # HTTP
-hyper = "0.14.27"
-axum = { version = "0.6.20", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
-axum-extra = { version = "0.7.7", features = ["query", "async-read-body"] }
-tower-http = { version = "0.4.3", features = ["cors", "fs"] }
+hyper = "0.14"
+axum = { version = "0.6", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
+axum-extra = { version = "0.7", features = ["query", "async-read-body"] }
+tower-http = { version = "0.4", features = ["cors", "fs"] }
 
 # OpenAPI generator
-utoipa = { version = "3.5.0", default-features = false, features = ["uuid", "chrono"], optional = true }
+utoipa = { version = "3.5", default-features = false, features = ["uuid", "chrono"], optional = true }
 
 # Safe pin projection
-pin-project-lite = "0.2.11"
+pin-project-lite = "0.2"
 
 # Native plugins
-dlopen = "0.1.8"
-dlopen_derive = "0.1.4"
+dlopen = "0.1"
+dlopen_derive = "0.1"
 
 # Dependencies required for PCAP support (FIXME: should we keep that built-in?)
-pcap-file = "2.0.0"
+pcap-file = "2.0"
 # TODO: replace with https://lib.rs/crates/etherparse (still maintained + less dependencies)
 packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 
 # For KDC proxy
-portpicker = "0.1.1"
+portpicker = "0.1"
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.3.0"
+embed-resource = "2.3"
 
 [dev-dependencies]
-tokio-test = "0.4.2"
-proptest = "1.2.0"
-rstest = "0.18.2"
+tokio-test = "0.4"
+proptest = "1.2"
+rstest = "0.18"
 devolutions-gateway-generators = { path = "../crates/devolutions-gateway-generators" }
