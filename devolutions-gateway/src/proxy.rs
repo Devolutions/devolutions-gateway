@@ -4,7 +4,6 @@ use crate::interceptor::{Dissector, DummyDissector, Interceptor, WaykDissector};
 use crate::session::{SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
-use anyhow::Context as _;
 use camino::Utf8PathBuf;
 use futures::future::Either;
 use std::net::SocketAddr;
@@ -131,6 +130,13 @@ where
 
         crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
 
-        res.context("forward")
+        match res {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {
+                info!(%error, "forwarding ended");
+                Ok(())
+            }
+            Err(error) => Err(anyhow::Error::new(error).context("forward")),
+        }
     }
 }

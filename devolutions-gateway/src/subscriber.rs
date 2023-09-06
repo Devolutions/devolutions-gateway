@@ -89,7 +89,7 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
             .json(message)
             .send()
             .await
-            .context("Failed to post message at the subscriber URL")
+            .context("failed to post message at the subscriber URL")
             .map_err(backoff::Error::permanent)?;
 
         let status = response.status();
@@ -97,12 +97,12 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
         if status.is_client_error() {
             // A client error suggest the request will never succeed no matter how many times we try
             Err(backoff::Error::permanent(anyhow::anyhow!(
-                "Subscriber responded with a client error status: {status}"
+                "subscriber responded with a client error status: {status}"
             )))
         } else if status.is_server_error() {
             // However, server errors are mostly transient
             Err(backoff::Error::transient(anyhow::anyhow!(
-                "Subscriber responded with a server error status: {status}"
+                "subscriber responded with a server error status: {status}"
             )))
         } else {
             Ok::<(), backoff::Error<anyhow::Error>>(())
@@ -129,7 +129,7 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
         };
     }
 
-    trace!("message successfully sent to subscriber");
+    trace!("Message successfully sent to subscriber");
 
     Ok(())
 }
@@ -178,7 +178,7 @@ async fn subscriber_polling_task(
                 subscriber
                     .send(message)
                     .await
-                    .map_err(|e| anyhow::anyhow!("Subscriber Task ended: {e}"))?;
+                    .map_err(|e| anyhow::anyhow!("subscriber task ended: {e}"))?;
             }
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Couldn't retrieve running session list");

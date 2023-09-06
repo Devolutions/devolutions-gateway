@@ -289,7 +289,7 @@ impl ConfHandle {
 fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     let conf_file_path = get_conf_file_path();
     let json = serde_json::to_string_pretty(conf).context("failed JSON serialization of configuration")?;
-    std::fs::write(&conf_file_path, json).with_context(|| format!("Failed to write file at {conf_file_path}"))?;
+    std::fs::write(&conf_file_path, json).with_context(|| format!("failed to write file at {conf_file_path}"))?;
     Ok(())
 }
 
@@ -333,9 +333,9 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
         Ok(file) => BufReader::new(file)
             .pipe(serde_json::from_reader)
             .map(Some)
-            .with_context(|| format!("Invalid config file at {conf_path}")),
+            .with_context(|| format!("invalid config file at {conf_path}")),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(anyhow::anyhow!(e).context(format!("Couldn't open config file at {conf_path}"))),
+        Err(e) => Err(anyhow::anyhow!(e).context(format!("couldn't open config file at {conf_path}"))),
     }
 }
 
@@ -373,7 +373,7 @@ fn read_rustls_certificate(
         (Some(path), _) => {
             let mut x509_chain_file = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(File::open)
-                .with_context(|| format!("Couldn't open file at {path}"))?
+                .with_context(|| format!("couldn't open file at {path}"))?
                 .pipe(std::io::BufReader::new);
 
             let mut x509_chain = Vec::new();
@@ -402,7 +402,7 @@ fn read_rustls_certificate(
                     }
                     Err(e) => {
                         return anyhow::Error::new(e)
-                            .context(format!("Couldn't parse pem document at position {}", x509_chain.len()))
+                            .context(format!("couldn't parse pem document at position {}", x509_chain.len()))
                             .pipe(Err)
                     }
                 }
@@ -432,7 +432,7 @@ fn read_pub_key(
     match (path, data) {
         (Some(path), _) => normalize_data_path(path, &get_data_dir())
             .pipe_ref(std::fs::read_to_string)
-            .with_context(|| format!("Couldn't read file at {path}"))?
+            .with_context(|| format!("couldn't read file at {path}"))?
             .pipe_deref(PublicKey::from_pem_str)
             .context("couldn't parse pem document")
             .map(Some),
@@ -461,7 +461,7 @@ fn read_rustls_priv_key(
         (Some(path), _) => {
             let pem: Pem = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(std::fs::read_to_string)
-                .with_context(|| format!("Couldn't read file at {path}"))?
+                .with_context(|| format!("couldn't read file at {path}"))?
                 .pipe_deref(str::parse)
                 .context("couldn't parse pem document")?;
 
@@ -488,7 +488,7 @@ fn read_priv_key(
     match (path, data) {
         (Some(path), _) => normalize_data_path(path, &get_data_dir())
             .pipe_ref(std::fs::read_to_string)
-            .with_context(|| format!("Couldn't read file at {path}"))?
+            .with_context(|| format!("couldn't read file at {path}"))?
             .pipe_deref(PrivateKey::from_pem_str)
             .context("couldn't parse pem document")
             .map(Some),

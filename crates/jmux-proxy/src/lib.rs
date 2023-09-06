@@ -313,13 +313,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 pending_channels.insert(id, (destination_url.clone(), api_response_tx));
                                 msg_to_send_tx
                                     .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES as u16, destination_url))
-                                    .context("Couldn’t send CHANNEL OPEN message through mpsc channel")?;
+                                    .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
                             }
                             None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
                         }
                     }
                     JmuxApiRequest::Start { id, stream, leftover } => {
-                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("Couldn’t find channel with id {id}"))?;
+                        let channel = jmux_ctx.get_channel(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
 
                         let (data_tx, data_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
@@ -361,7 +361,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
             Some(internal_msg) = internal_msg_rx.recv() => {
                 match internal_msg {
                     InternalMessage::Eof { id } => {
-                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("Couldn’t find channel with id {id}"))?;
+                        let channel = jmux_ctx.get_channel_mut(id).with_context(|| format!("couldn’t find channel with id {id}"))?;
                         let channel_span = channel.span.clone();
                         let local_id = channel.local_id;
                         let distant_id = channel.distant_id;
@@ -371,19 +371,19 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 channel.local_state = JmuxChannelState::Eof;
                                 msg_to_send_tx
                                     .send(Message::eof(distant_id))
-                                    .context("Couldn’t send EOF message")?;
+                                    .context("couldn’t send EOF message")?;
                                 },
                             JmuxChannelState::Eof => {
                                 channel.local_state = JmuxChannelState::Closed;
                                 msg_to_send_tx
                                     .send(Message::close(distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
+                                    .context("couldn’t send CLOSE message")?;
                                 },
                             JmuxChannelState::Closed => {
                                 jmux_ctx.unregister(local_id);
                                 msg_to_send_tx
                                     .send(Message::close(distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
+                                    .context("couldn’t send CLOSE message")?;
                                 channel_span.in_scope(|| {
                                     debug!("Channel closed");
                                 });
@@ -411,7 +411,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                         msg_to_send_tx
                             .send(Message::open_success(distant_id, local_id, initial_window_size, maximum_packet_size))
-                            .context("Couldn’t send OPEN SUCCESS message through mpsc channel")?;
+                            .context("couldn’t send OPEN SUCCESS message through mpsc channel")?;
 
                         channel_span.in_scope(|| {
                             debug!("Channel accepted");
@@ -481,7 +481,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             debug!(%error, %msg.destination_url, %peer_id, "Invalid destination requested");
                             msg_to_send_tx
                                 .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, error.to_string()))
-                                .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                                .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
                             continue;
                         }
 
@@ -491,7 +491,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 warn!("Couldn’t allocate local ID for distant peer {}: no more ID available", peer_id);
                                 msg_to_send_tx
                                     .send(Message::open_failure(peer_id, ReasonCode::GENERAL_FAILURE, "no more ID available"))
-                                    .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                                    .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
                                 continue;
                             }
                         };
@@ -596,7 +596,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         // Simplest flow control logic for now: just send back a WINDOW ADJUST message to
                         // increase back peer’s window size.
                         msg_to_send_tx.send(Message::window_adjust(distant_id, data_length))
-                            .context("Couldn’t send WINDOW ADJUST message")?;
+                            .context("couldn’t send WINDOW ADJUST message")?;
                     }
                     Message::Eof(msg) => {
                         // Per the spec:
@@ -628,7 +628,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 channel.local_state = JmuxChannelState::Closed;
                                 msg_to_send_tx
                                     .send(Message::close(channel.distant_id))
-                                    .context("Couldn’t send CLOSE message")?;
+                                    .context("couldn’t send CLOSE message")?;
                             },
                             JmuxChannelState::Closed => {},
                         }
@@ -671,7 +671,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             channel.local_state = JmuxChannelState::Closed;
                             msg_to_send_tx
                                 .send(Message::close(distant_id))
-                                .context("Couldn’t send CLOSE message")?;
+                                .context("couldn’t send CLOSE message")?;
                         }
 
                         if channel.local_state == JmuxChannelState::Closed {
@@ -734,7 +734,7 @@ impl DataReaderTask {
         trace!("Started forwarding");
 
         while let Some(bytes) = bytes_stream.next().await {
-            let bytes = bytes.context("Couldn’t read next bytes from stream")?;
+            let bytes = bytes.context("couldn’t read next bytes from stream")?;
 
             let chunk_size = maximum_packet_size - Header::SIZE - ChannelData::FIXED_PART_SIZE;
 
@@ -755,7 +755,7 @@ impl DataReaderTask {
                             window_size.fetch_sub(bytes_to_send_now.len(), Ordering::SeqCst);
                             msg_to_send_tx
                                 .send(Message::data(distant_id, bytes_to_send_now))
-                                .context("Couldn’t send DATA message")?;
+                                .context("couldn’t send DATA message")?;
                         }
 
                         window_size_updated.notified().await;
@@ -763,7 +763,7 @@ impl DataReaderTask {
                         window_size.fetch_sub(bytes.len(), Ordering::SeqCst);
                         msg_to_send_tx
                             .send(Message::data(distant_id, bytes))
-                            .context("Couldn’t send DATA message")?;
+                            .context("couldn’t send DATA message")?;
                         break;
                     }
                 }
@@ -773,7 +773,7 @@ impl DataReaderTask {
         trace!("Finished forwarding (EOF)");
         internal_msg_tx
             .send(InternalMessage::Eof { id: local_id })
-            .context("Couldn’t send EOF notification")?;
+            .context("couldn’t send EOF notification")?;
 
         Ok(())
     }
@@ -856,8 +856,8 @@ impl StreamResolverTask {
                         ReasonCode::from(error.kind()),
                         error.to_string(),
                     ))
-                    .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("Couldn't resolve {}:{}: {}", host, port, error);
+                    .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
+                anyhow::bail!("couldn't resolve {}:{}: {}", host, port, error);
             }
         };
         let socket_addr = addrs.next().expect("at least one resolved address should be present");
@@ -867,7 +867,7 @@ impl StreamResolverTask {
                 Ok(stream) => {
                     internal_msg_tx
                         .send(InternalMessage::StreamResolved { channel, stream })
-                        .context("Could't send back resolved stream through internal mpsc channel")?;
+                        .context("could't send back resolved stream through internal mpsc channel")?;
                 }
                 Err(error) => {
                     debug!(?error, "TcpStream::connect failed");
@@ -877,7 +877,7 @@ impl StreamResolverTask {
                             ReasonCode::from(error.kind()),
                             error.to_string(),
                         ))
-                        .context("Couldn’t send OPEN FAILURE message through mpsc channel")?;
+                        .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
                     anyhow::bail!("Couldn’t connect TCP socket to {}:{}: {}", host, port, error);
                 }
             },
