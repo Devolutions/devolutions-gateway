@@ -6,23 +6,23 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 publish = false
 
 [dependencies]
-log = "0.4.20"
-byteorder = "1.4.3"
-uuid = { version = "1.4.1", features = ["v4"] }
-httparse = "1.8.0"
-http = "0.2.9"
+log = "0.4"
+byteorder = "1.4"
+uuid = { version = "1.4", features = ["v4"] }
+httparse = "1.8"
+http = "0.2"
 
 [dev-dependencies]
-lazy_static = "1.4.0"
-bytes = "1.4.0"
-sspi = "0.10.1"
-ureq = { version = "2.7.1", features = ["json"] }
-url = "2.4.0"
-x509-parser = "0.15.1"
-exitcode = "1.1.2"
-tempfile = "3.7.1"
-hex-literal = "0.4.1"
+lazy_static = "1.4"
+bytes = "1.4"
+sspi = "0.10"
+ureq = { version = "2.7", features = ["json"] }
+url = "2.4"
+x509-parser = "0.15"
+exitcode = "1.1"
+tempfile = "3.8"
+hex-literal = "0.4"
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
-serde = "1.0.183"
-serde_derive = "1.0.183"
-serde_json = "1.0.104"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"

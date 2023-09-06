@@ -16,7 +16,7 @@ native-tls = ["tokio-tungstenite/native-tls"]
 
 # jet protocol support
 jet-proto = { path = "../crates/jet-proto" }
-uuid = "1.4.1"
+uuid = "1.4"
 
 # jmux protocol support
 jmux-proto = { path = "../crates/jmux-proto" }
@@ -26,33 +26,33 @@ jmux-proxy = { path = "../crates/jmux-proxy" }
 proxy-http = { path = "../crates/proxy-http" }
 proxy-socks = { path = "../crates/proxy-socks" }
 proxy-types = { path = "../crates/proxy-types" }
-proxy_cfg = { version = "0.4.1", optional = true }
+proxy_cfg = { version = "0.4", optional = true }
 
 # cli
-seahorse = "2.1.0"
-humantime = "2.1.0"
+seahorse = "2.1"
+humantime = "2.1"
 
 # async
-tokio = { version = "1.32.0", features = ["io-std", "io-util", "net", "fs", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
-tokio-tungstenite = "0.20.0"
-futures-util = "0.3.28"
+tokio = { version = "1.32", features = ["io-std", "io-util", "net", "fs", "time", "rt", "sync", "process", "rt-multi-thread", "macros"] }
+tokio-tungstenite = "0.20"
+futures-util = "0.3"
 transport = { path = "../crates/transport" }
 
 # logging
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
-tracing-appender = "0.2.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 
 # error handling
-anyhow = "1.0.72"
+anyhow = "1.0"
 
 # location of special directories
-dirs-next = "2.0.0"
+dirs-next = "2.0"
 
 # find parent process / watch process 
-sysinfo = { version = "0.29.7", default-features = false }
+sysinfo = { version = "0.29", default-features = false }
 
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }
-tokio = { version = "1.32.0", features = ["time"] }
-proptest = "1.2.0"
+tokio = { version = "1.32", features = ["time"] }
+proptest = "1.2"

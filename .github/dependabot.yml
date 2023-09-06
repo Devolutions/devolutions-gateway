@@ -7,3 +7,32 @@ updates:
     assignees:
       - "CBenoit"
     open-pull-requests-limit: 3
+    groups:
+      ironrdp:
+        patterns:
+          - "ironrdp*"
+      picky:
+        patterns:
+          - "picky*"
+          - "sspi*"
+      serde:
+        patterns:
+          - "serde*"
+      tokio:
+        patterns:
+          - "tokio*"
+      tracing:
+        patterns:
+          - "tracing*"
+      http:
+        patterns:
+          - "hyper"
+          - "axum*"
+          - "tower*"
+          - "reqwest*"
+      patch:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+      dev:
+        dependency-type: "development"

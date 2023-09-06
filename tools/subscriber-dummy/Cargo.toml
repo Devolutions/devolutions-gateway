@@ -1,6 +1,6 @@
 [package]
 name = "subscriber-dummy"
-version = "0.1.0"
+version = "0.1"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
@@ -10,6 +10,6 @@ resolver = "2"
 members = ["."]
 
 [dependencies]
-axum = "0.5.15"
-hyper = "0.14.20"
-tokio = { version = "1.20.1", features = ["full"] }
+axum = "0.5"
+hyper = "0.14"
+tokio = { version = "1.20", features = ["full"] }
