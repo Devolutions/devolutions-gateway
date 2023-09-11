@@ -14,7 +14,7 @@ http = "0.2"
 
 [dev-dependencies]
 lazy_static = "1.4"
-bytes = "1.4"
+bytes = "1.5"
 sspi = "0.10"
 ureq = { version = "2.7", features = ["json"] }
 url = "2.4"
