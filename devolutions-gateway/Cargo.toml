@@ -37,7 +37,7 @@ smol_str = { version = "0.2", features = ["serde"] }
 nonempty = "0.8"
 tap = "1.0"
 lazy_static = "1.4"
-bytes = "1.4"
+bytes = "1.5"
 cfg-if = "1.0"
 url = { version = "2.4", features = ["serde"] }
 uuid = { version = "1.4", features = ["v4", "serde"] }

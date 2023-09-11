@@ -10,7 +10,7 @@ publish = false
 proxy-types = { path = "../proxy-types" }
 tokio = { version = "1.32", features = ["io-util"] }
 pin-project-lite = "0.2"
-bytes = "1.4"
+bytes = "1.5"
 
 [dev-dependencies]
 proptest = "1.2"
