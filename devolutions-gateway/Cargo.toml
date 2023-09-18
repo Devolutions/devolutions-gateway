@@ -72,7 +72,7 @@ ngrok = "0.13"
 # HTTP
 hyper = "0.14"
 axum = { version = "0.6", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
-axum-extra = { version = "0.7", features = ["query", "async-read-body"] }
+axum-extra = { version = "0.8", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4", features = ["cors", "fs"] }
 
 # OpenAPI generator
