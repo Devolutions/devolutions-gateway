@@ -69,7 +69,7 @@ jobs:
         id: get-commit
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_RUN: ${{ steps.get-run.outputs.run }}
         run: |
           $Ref = '${{ inputs.ref }}'
@@ -166,7 +166,7 @@ jobs:
         if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           gh run download ${{ needs.preflight.outputs.run }} -n ${{ matrix.project }} -D "$Destination"
@@ -178,7 +178,7 @@ jobs:
         run: |
           $Destination = Join-Path ${{ runner.temp }} ${{ matrix.project }}
           if ('${{ matrix.project }}' -Eq 'jetsocat') {
-            Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse 
+            Get-ChildItem "$Destination" -Exclude ${{ matrix.os }} | Remove-Item -Recurse
           }
 
       - name: Install AzureSignTool
@@ -232,7 +232,7 @@ jobs:
               AzureSignTool @Params $_.FullName
             } elseif ('${{ matrix.os }}' -Eq 'macos') {
               $SignCmd = $(@(
-                'codesign', 
+                'codesign',
                 '--timestamp',
                 '--options=runtime',
                 '-s', '"Developer ID Application: Devolutions inc. (N592S9ASDB)"',
@@ -289,18 +289,18 @@ jobs:
         run: |
           $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
           if ('${{ matrix.os }}' -Eq 'windows') {
-            Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % { 
+            Get-ChildItem -Path $RootPath -Recurse -Include ('*.exe', '*.msi') | % {
               signtool verify /pa "$($_.FullName)"
               if ($LastExitCode -Ne 0) {
-                echo "::error::failed to verify the signature of $($_.FullName)" 
+                echo "::error::failed to verify the signature of $($_.FullName)"
                 exit 1
               }
             }
           } elseif ('${{ matrix.os }}' -Eq 'macos') {
-            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % { 
+            Get-ChildItem -Path $RootPath -Recurse -Include 'jetsocat_*' | % {
               codesign -dvvv "$($_.FullName)"
               if ($LastExitCode -Ne 0) {
-                echo "::error::failed to verify the signature of $($_.FullName)" 
+                echo "::error::failed to verify the signature of $($_.FullName)"
                 exit 1
               }
             }
@@ -348,7 +348,7 @@ jobs:
         run: |
           $Version = '${{ github.event.inputs.jetsocat-nuget-version }}'
           if ([string]::IsNullOrWhitespace($Version)) {
-            $Version = Get-Date -Format "yyyy.M.d"  
+            $Version = Get-Date -Format "yyyy.M.d"
           }
 
           $Nuspec = (Resolve-Path "Devolutions.Jetsocat.nuspec")
