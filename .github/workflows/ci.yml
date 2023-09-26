@@ -512,14 +512,14 @@ jobs:
           }
 
       - name: Upload to OneDrive
-        uses: ./.github/workflows/upload-onedrive
+        uses: ./.github/workflows/onedrive-upload
         with:
-          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
-          remote: prereleases
-          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}-${{ steps.prepare.outputs.short-ref }}
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
           conflict_behavior: replace
-          files: ${{ steps.prepare.outputs.files-to-upload }}
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}-${{ steps.timestamp.outputs.timestamp }}-${{ steps.prepare.outputs.short-ref }}
+          remote: prereleases
+          source_path: ${{ steps.prepare.outputs.files-to-upload }}
 
   dotnet-utils-tests:
       name: dotnet utils tests

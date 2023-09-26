@@ -392,13 +392,12 @@ jobs:
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
 
       - name: Upload to OneDrive
-        uses: ./.github/workflows/upload-onedrive
+        uses: ./.github/workflows/onedrive-upload
         if: needs.preflight.outputs.skip-publishing == 'false' && github.event.inputs.dry-run == 'false'
         with:
-          client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
-          client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
-          remote: releases
-          destination_path: /Gateway/${{ steps.prepare.outputs.version }}
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
           conflict_behavior: fail
-          files: ${{ steps.prepare.outputs.files-to-upload }}
-
+          destination_path: /Gateway/${{ steps.prepare.outputs.version }}
+          remote: releases
+          source_path: ${{ steps.prepare.outputs.files-to-upload }}
