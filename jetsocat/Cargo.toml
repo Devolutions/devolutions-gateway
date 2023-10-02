@@ -55,4 +55,4 @@ sysinfo = { version = "0.29", default-features = false }
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }
 tokio = { version = "1.32", features = ["time"] }
-proptest = "1.2"
+proptest = "1.3"
