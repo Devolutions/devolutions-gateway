@@ -6,8 +6,10 @@ on: pull_request
 
 jobs:
   dependabot:
-    runs-on: ubuntu-latest
+    environment: build-and-publish
     if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+
     steps:
       - name: Enable auto-merge for Dependabot PRs
         run: gh pr merge --auto --squash "$PR_URL"
