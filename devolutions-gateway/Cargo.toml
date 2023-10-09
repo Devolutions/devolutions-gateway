@@ -94,7 +94,7 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 portpicker = "0.1"
 
 [target.'cfg(windows)'.build-dependencies]
-embed-resource = "2.3"
+embed-resource = "2.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
