@@ -158,7 +158,7 @@ impl Conf {
                 let store_name = conf_file
                     .tls_certificate_store_name
                     .clone()
-                    .unwrap_or_else(|| String::from("my"));
+                    .unwrap_or_else(|| String::from("My"));
 
                 let cert_source = crate::tls::CertificateSource::SystemStore {
                     cert_subject_name,
