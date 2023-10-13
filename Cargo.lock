@@ -836,6 +836,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "transport",
+ "tungstenite",
  "typed-builder",
  "url",
  "utoipa",

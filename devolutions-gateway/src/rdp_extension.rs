@@ -15,6 +15,7 @@ use ironrdp_rdcleanpath::RDCleanPathPdu;
 use tap::prelude::*;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tracing::field;
 
 #[derive(Debug, Error)]
 enum AuthorizationError {
@@ -181,7 +182,9 @@ async fn process_cleanpath(
             .pipe(Err);
     };
 
-    tracing::Span::current().record("session_id", claims.jet_aid.to_string());
+    let span = tracing::Span::current();
+
+    span.record("session_id", claims.jet_aid.to_string());
 
     // Sanity check
     match cleanpath_pdu.destination.as_deref() {
@@ -204,7 +207,7 @@ async fn process_cleanpath(
         .context("couldn’t connect to RDP server")?;
 
     debug!(%selected_target, "Connected to destination server");
-    tracing::Span::current().record("target", selected_target.to_string());
+    span.record("target", selected_target.to_string());
 
     // Send preconnection blob if applicable
     if let Some(pcb) = cleanpath_pdu.preconnection_blob {
@@ -245,6 +248,7 @@ async fn process_cleanpath(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[instrument("fwd", skip_all, fields(session_id = field::Empty, target = field::Empty))]
 pub async fn handle(
     mut client_stream: impl AsyncRead + AsyncWrite + Unpin + Send,
     client_addr: SocketAddr,

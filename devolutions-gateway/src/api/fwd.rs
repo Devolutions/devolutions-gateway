@@ -45,44 +45,13 @@ async fn fwd_tcp(
     }
 
     let conf = conf_handle.get_conf();
+    let span = tracing::Span::current();
 
-    let response = ws.on_upgrade(move |ws| handle_fwd_tcp(ws, conf, sessions, subscriber_tx, claims, source_addr));
+    let response = ws.on_upgrade(move |ws| {
+        handle_fwd(ws, conf, sessions, subscriber_tx, claims, source_addr, false).instrument(span)
+    });
 
     Ok(response)
-}
-
-async fn handle_fwd_tcp(
-    ws: WebSocket,
-    conf: Arc<Conf>,
-    sessions: SessionMessageSender,
-    subscriber_tx: SubscriberSender,
-    claims: AssociationTokenClaims,
-    source_addr: SocketAddr,
-) {
-    let stream = crate::ws::websocket_compat(ws);
-
-    let result = Forward::builder()
-        .client_addr(source_addr)
-        .client_stream(stream)
-        .conf(conf)
-        .claims(claims)
-        .sessions(sessions)
-        .subscriber_tx(subscriber_tx)
-        .with_tls(false)
-        .build()
-        .run()
-        .instrument(info_span!(
-            "tcp",
-            client = %source_addr,
-            session_id = field::Empty,
-            protocol = field::Empty,
-            target = field::Empty
-        ))
-        .await;
-
-    if let Err(error) = result {
-        error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-TCP failure");
-    }
 }
 
 async fn fwd_tls(
@@ -102,21 +71,32 @@ async fn fwd_tls(
     }
 
     let conf = conf_handle.get_conf();
+    let span = tracing::Span::current();
 
-    let response = ws.on_upgrade(move |ws| handle_fwd_tls(ws, conf, sessions, subscriber_tx, claims, source_addr));
+    let response = ws.on_upgrade(move |ws| {
+        handle_fwd(ws, conf, sessions, subscriber_tx, claims, source_addr, true).instrument(span)
+    });
 
     Ok(response)
 }
 
-async fn handle_fwd_tls(
+async fn handle_fwd(
     ws: WebSocket,
     conf: Arc<Conf>,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
     claims: AssociationTokenClaims,
     source_addr: SocketAddr,
+    with_tls: bool,
 ) {
     let stream = crate::ws::websocket_compat(ws);
+
+    let span = info_span!(
+        "fwd",
+        session_id = claims.jet_aid.to_string(),
+        protocol = claims.jet_ap.to_string(),
+        target = field::Empty
+    );
 
     let result = Forward::builder()
         .client_addr(source_addr)
@@ -125,20 +105,16 @@ async fn handle_fwd_tls(
         .claims(claims)
         .sessions(sessions)
         .subscriber_tx(subscriber_tx)
-        .with_tls(true)
+        .with_tls(with_tls)
         .build()
         .run()
-        .instrument(info_span!(
-            "tls",
-            client = %source_addr,
-            session_id = field::Empty,
-            protocol = field::Empty,
-            target = field::Empty
-        ))
+        .instrument(span.clone())
         .await;
 
     if let Err(error) = result {
-        error!(client = %source_addr, error = format!("{error:#}"), "WebSocket-TLS failure");
+        span.in_scope(|| {
+            error!(error = format!("{error:#}"), "WebSocket forwarding failure");
+        });
     }
 }
 
@@ -176,8 +152,7 @@ where
             anyhow::bail!("invalid connection mode")
         };
 
-        tracing::Span::current().record("session_id", claims.jet_aid.to_string());
-        tracing::Span::current().record("protocol", claims.jet_ap.to_string());
+        let span = tracing::Span::current();
 
         trace!("Select and connect to target");
 
@@ -185,7 +160,7 @@ where
             utils::successive_try(&targets, utils::tcp_connect).await?;
 
         trace!(%selected_target, "Connected");
-        tracing::Span::current().record("target", selected_target.to_string());
+        span.record("target", selected_target.to_string());
 
         if with_tls {
             trace!("Establishing TLS connection with server");
@@ -196,7 +171,7 @@ where
                 .await
                 .context("TLS connect")?;
 
-            info!(protocol = %claims.jet_ap, target = %server_addr, "WebSocket-TLS forwarding");
+            info!("WebSocket-TLS forwarding");
 
             let info = SessionInfo::new(
                 claims.jet_aid,
