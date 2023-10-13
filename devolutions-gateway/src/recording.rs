@@ -12,14 +12,14 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
-use tokio::{fs, io, time};
+use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
-const DISCONNECTED_TTL_DURATION: time::Duration = time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
+const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -277,7 +277,7 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 }
 
 struct DisconnectedTtl {
-    deadline: time::Instant,
+    deadline: tokio::time::Instant,
     id: Uuid,
 }
 
@@ -339,7 +339,7 @@ impl RecordingManagerTask {
                 JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
             let next_file_idx = existing_manifest.files.len();
 
-            let start_time = chrono::Utc::now().timestamp();
+            let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
             let file_name = format!("recording-{next_file_idx}.{file_type}");
             let recording_file = recording_path.join(&file_name);
@@ -362,7 +362,7 @@ impl RecordingManagerTask {
                 .await
                 .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
-            let start_time = chrono::Utc::now().timestamp();
+            let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
             let file_name = format!("recording-0.{file_type}");
             let recording_file = recording_path.join(&file_name);
 
@@ -416,7 +416,7 @@ impl RecordingManagerTask {
                 anyhow::bail!("a recording not connected can’t be disconnected (there is probably a bug)");
             }
 
-            let end_time = chrono::Utc::now().timestamp();
+            let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
             ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
 
@@ -444,7 +444,7 @@ impl RecordingManagerTask {
 
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
-            let now = chrono::Utc::now().timestamp();
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
             match ongoing.state {
                 // NOTE: Comparing with DISCONNECTED_TTL_SECS - 1 just in case the sleep returns faster than expected.
@@ -484,7 +484,7 @@ async fn recording_manager_task(
 
     let mut disconnected = BinaryHeap::<DisconnectedTtl>::new();
 
-    let next_remove_sleep = time::sleep_until(time::Instant::now());
+    let next_remove_sleep = tokio::time::sleep_until(tokio::time::Instant::now());
     tokio::pin!(next_remove_sleep);
 
     // Consume initial sleep
@@ -525,7 +525,7 @@ async fn recording_manager_task(
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
-                        let now = time::Instant::now();
+                        let now = tokio::time::Instant::now();
                         let deadline = now + DISCONNECTED_TTL_DURATION;
 
                         disconnected.push(DisconnectedTtl {

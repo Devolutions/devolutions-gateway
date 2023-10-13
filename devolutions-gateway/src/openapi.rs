@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use time::OffsetDateTime;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
@@ -52,7 +52,7 @@ struct SessionInfo {
     /// Filtering Policy
     filtering_policy: bool,
     /// Date this session was started
-    start_timestamp: DateTime<Utc>,
+    start_timestamp: OffsetDateTime,
     /// Maximum session duration in minutes (0 is used for the infinite duration)
     // NOTE: Optional purely for client code generation (this field didn't always exist)
     time_to_live: Option<u64>,
@@ -127,7 +127,8 @@ pub struct SubscriberApiDoc;
 #[derive(utoipa::ToSchema, Serialize)]
 struct SubscriberSessionInfo {
     association_id: Uuid,
-    start_timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    start_timestamp: OffsetDateTime,
 }
 
 /// Event type for messages
@@ -155,7 +156,8 @@ struct SubscriberMessage {
     /// Presence or absence of additionnal fields depends on the value of this field.
     kind: SubscriberMessageKind,
     /// Date and time this message was produced
-    timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    timestamp: OffsetDateTime,
     /// Session information associated to this event
     session: Option<SubscriberSessionInfo>,
     /// Session list associated to this event

@@ -40,6 +40,7 @@ Z/fDKMxHxeXla54kfV+HiGkH
 -----END PRIVATE KEY-----"#;
 
 /// This emulate a token validation on Gateway side using the provided claims
+#[allow(clippy::too_many_arguments)] // not an API boundary, and local uses only
 fn encode_decode_round_trip<C>(
     pub_key: &PublicKey,
     priv_key: &PrivateKey,
@@ -104,7 +105,7 @@ fn pub_key() -> PublicKey {
 
 #[fixture]
 fn now() -> i64 {
-    chrono::Utc::now().timestamp()
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 mod as_of_v2022_3_0_0 {
@@ -630,8 +631,8 @@ mod as_of_v2022_2_0_0 {
 
 mod as_of_v2021_2_13_0 {
     use super::*;
-    use chrono::{DateTime, Utc};
     use proptest::collection::vec;
+    use time::OffsetDateTime;
 
     const TYPE_ASSOCIATION: &str = "association";
     const JET_CM: &str = "fwd";
@@ -718,7 +719,8 @@ mod as_of_v2021_2_13_0 {
         filtering_policy: bool,
         connection_mode: String,
         destination_host: String,
-        start_timestamp: DateTime<Utc>,
+        #[serde(with = "time::serde::rfc3339")]
+        start_timestamp: OffsetDateTime,
     }
 
     /// Make sure current Gateway is serializing the session info structure in a way that is understood by DVLS

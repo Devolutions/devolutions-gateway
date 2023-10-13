@@ -99,11 +99,10 @@ pub(crate) struct ClockDiagnostic {
 
 impl ClockDiagnostic {
     pub fn now() -> Self {
-        use chrono::prelude::*;
-        let utc = Utc::now();
+        let now = time::OffsetDateTime::now_utc();
         Self {
-            timestamp_secs: utc.timestamp(),
-            timestamp_millis: utc.timestamp_millis(),
+            timestamp_secs: now.unix_timestamp(),
+            timestamp_millis: (now.unix_timestamp_nanos() / 1_000_000) as i64,
         }
     }
 }

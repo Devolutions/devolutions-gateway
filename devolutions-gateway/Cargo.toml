@@ -41,7 +41,7 @@ bytes = "1.5"
 cfg-if = "1.0"
 url = { version = "2.4", features = ["serde"] }
 uuid = { version = "1.4", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] } # TODO: switch to `time`
+time = { version = "0.3", default-features = false, features = ["std", "serde", "formatting"] }
 parking_lot = "0.12"
 anyhow = "1.0"
 thiserror = "1"
@@ -76,7 +76,7 @@ axum-extra = { version = "0.8", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4", features = ["cors", "fs"] }
 
 # OpenAPI generator
-utoipa = { version = "3.5", default-features = false, features = ["uuid", "chrono"], optional = true }
+utoipa = { version = "3.5", default-features = false, features = ["uuid", "time"], optional = true }
 
 # Safe pin projection
 pin-project-lite = "0.2"

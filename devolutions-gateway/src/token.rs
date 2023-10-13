@@ -734,7 +734,7 @@ async fn cleanup_task(token_cache: Arc<TokenCache>, mut shutdown_signal: Shutdow
             }
         }
 
-        let clean_threshold = chrono::Utc::now().timestamp() - i64::from(LEEWAY_SECS);
+        let clean_threshold = time::OffsetDateTime::now_utc().unix_timestamp() - i64::from(LEEWAY_SECS);
         token_cache
             .lock()
             .retain(|_, src| src.expiration_timestamp > clean_threshold);
@@ -918,7 +918,7 @@ fn validate_token_impl(
 
     // === Extracting content type and validating JWT claims === //
 
-    let timestamp_now = chrono::Utc::now().timestamp();
+    let timestamp_now = time::OffsetDateTime::now_utc().unix_timestamp();
     let now = JwtDate::new_with_leeway(timestamp_now, LEEWAY_SECS);
     let strict_validator = JwtValidator::strict(now);
 
@@ -1041,7 +1041,7 @@ fn validate_token_impl(
                 ..
             },
         ) => {
-            let now = chrono::Utc::now().timestamp();
+            let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
             match token_cache.lock().entry(id) {
                 Entry::Occupied(bucket) => {
@@ -1084,7 +1084,7 @@ fn validate_token_impl(
                 bucket.insert(TokenSource {
                     ip: source_ip,
                     expiration_timestamp: exp,
-                    last_use_timestamp: chrono::Utc::now().timestamp(),
+                    last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
                 });
             }
         },
@@ -1117,7 +1117,7 @@ fn validate_token_impl(
                 bucket.insert(TokenSource {
                     ip: source_ip,
                     expiration_timestamp: exp,
-                    last_use_timestamp: chrono::Utc::now().timestamp(),
+                    last_use_timestamp: time::OffsetDateTime::now_utc().unix_timestamp(),
                 });
             }
         },

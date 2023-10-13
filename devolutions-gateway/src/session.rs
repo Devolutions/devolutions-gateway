@@ -3,7 +3,6 @@ use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, SessionTtl};
 use anyhow::Context as _;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use core::fmt;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use std::cmp;
@@ -11,8 +10,8 @@ use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use tap::prelude::*;
+use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot, Notify};
-use tokio::time;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Clone)]
@@ -29,7 +28,8 @@ pub struct SessionInfo {
     pub application_protocol: ApplicationProtocol,
     pub recording_policy: bool,
     pub filtering_policy: bool,
-    pub start_timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start_timestamp: OffsetDateTime,
     pub time_to_live: SessionTtl,
     #[serde(flatten)]
     pub mode_details: ConnectionModeDetails,
@@ -42,7 +42,7 @@ impl SessionInfo {
             application_protocol: ap,
             recording_policy: false,
             filtering_policy: false,
-            start_timestamp: Utc::now(),
+            start_timestamp: OffsetDateTime::now_utc(),
             time_to_live: SessionTtl::Unlimited,
             mode_details,
         }
@@ -227,7 +227,7 @@ pub fn session_manager_channel() -> (SessionMessageSender, SessionMessageReceive
 }
 
 struct WithTtlInfo {
-    deadline: time::Instant,
+    deadline: tokio::time::Instant,
     session_id: Uuid,
 }
 
@@ -313,7 +313,7 @@ async fn session_manager_task(
 
     let mut with_ttl = BinaryHeap::<WithTtlInfo>::new();
 
-    let auto_kill_sleep = time::sleep_until(time::Instant::now());
+    let auto_kill_sleep = tokio::time::sleep_until(tokio::time::Instant::now());
     tokio::pin!(auto_kill_sleep);
 
     // Consume initial sleep
@@ -351,7 +351,7 @@ async fn session_manager_task(
                     SessionManagerMessage::New { info, notify_kill } => {
                         if let SessionTtl::Limited { minutes } = info.time_to_live {
                             let duration = Duration::from_secs(minutes.get() * 60);
-                            let now = time::Instant::now();
+                            let now = tokio::time::Instant::now();
                             let deadline = now + duration;
                             with_ttl.push(WithTtlInfo {
                                 deadline,
