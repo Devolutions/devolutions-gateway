@@ -136,10 +136,12 @@ fn check_cert(mut out: impl fmt::Write, cert_path: &Path, subject_name: Option<&
     if let Some(subject_name) = subject_name {
         output!(out, "Verify validity for DNS name");
 
-        let subject_name = webpki::DnsNameRef::try_from_ascii_str(subject_name).context("invalid subject name")?;
+        let subject_name = webpki::SubjectNameRef::try_from_ascii_str(subject_name)
+            .ok()
+            .context("invalid subject name")?;
 
         end_entity_cert
-            .verify_is_valid_for_dns_name(subject_name)
+            .verify_is_valid_for_subject_name(subject_name)
             .context("verify DNS name")?;
     }
 
