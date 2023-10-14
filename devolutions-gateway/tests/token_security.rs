@@ -133,7 +133,7 @@ fn subkey() -> PrivateKey {
 
 #[fixture]
 fn now() -> i64 {
-    chrono::Utc::now().timestamp()
+    time::OffsetDateTime::now_utc().unix_timestamp()
 }
 
 #[fixture]

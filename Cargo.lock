@@ -519,7 +519,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-targets 0.48.5",
 ]
@@ -760,6 +759,9 @@ name = "deranged"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2696e8a945f658fd14dc3b87242e6b80cd0f36ff04ea560fa39082368847946"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "derive-into-owned"
@@ -794,7 +796,6 @@ dependencies = [
  "camino",
  "ceviche",
  "cfg-if 1.0.0",
- "chrono",
  "devolutions-gateway-generators",
  "devolutions-gateway-task",
  "dlopen",
@@ -827,6 +828,7 @@ dependencies = [
  "smol_str",
  "tap",
  "thiserror",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-test",

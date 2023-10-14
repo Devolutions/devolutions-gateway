@@ -62,13 +62,16 @@ where
         D: Dissector + Send + 'static,
     {
         if let Some(capture_path) = self.conf.capture_path.as_ref() {
+            let format = time::format_description::parse("[year]-[month]-[day]_[hour]-[minute]-[second]")
+                .expect("valid hardcoded format");
+
             let filename = format!(
                 "{}({})-to-{}({})-at-{}.pcap",
                 self.address_a.ip(),
                 self.address_a.port(),
                 self.address_b.ip(),
                 self.address_b.port(),
-                chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+                time::OffsetDateTime::now_utc().format(&format)?
             );
             let mut path = Utf8PathBuf::from(capture_path);
             path.push(filename);

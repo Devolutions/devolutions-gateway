@@ -3,9 +3,9 @@ use crate::config::ConfHandle;
 use crate::session::SessionMessageSender;
 use anyhow::Context as _;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use std::time::Duration;
+use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -20,7 +20,8 @@ pub fn subscriber_channel() -> (SubscriberSender, SubscriberReceiver) {
 #[derive(Debug, Serialize)]
 pub struct SubscriberSessionInfo {
     pub association_id: Uuid,
-    pub start_timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start_timestamp: OffsetDateTime,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,7 +38,8 @@ enum MessageInner {
 
 #[derive(Debug, Serialize)]
 pub struct Message {
-    timestamp: DateTime<Utc>,
+    #[serde(with = "time::serde::rfc3339")]
+    timestamp: OffsetDateTime,
     #[serde(flatten)]
     inner: MessageInner,
 }
@@ -52,14 +54,14 @@ impl Message {
 
     pub fn session_ended(session: SubscriberSessionInfo) -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             inner: MessageInner::SessionEnded { session },
         }
     }
 
     pub fn session_list(session_list: Vec<SubscriberSessionInfo>) -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: OffsetDateTime::now_utc(),
             inner: MessageInner::SessionList { session_list },
         }
     }
