@@ -31,6 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             dst_hst,
             jet_ap,
             jet_ttl,
+            jet_aid,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -39,7 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: Uuid::new_v4(),
+                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
@@ -52,6 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             prx_pwd,
             dst_usr,
             dst_pwd,
+            jet_aid,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -60,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
-                jet_aid: Uuid::new_v4(),
+                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: Some(CredsClaims {
@@ -72,7 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("ASSOCIATION", serde_json::to_value(&claims)?)
         }
-        SubCommand::Rendezvous { jet_ap } => {
+        SubCommand::Rendezvous { jet_ap, jet_aid } => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
@@ -80,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: None,
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: Uuid::new_v4(),
+                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
@@ -102,12 +104,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             dst_hst,
             dst_addl,
             jet_ttl,
+            jet_aid,
         } => {
             let claims = JmuxClaims {
                 dst_hst: &dst_hst,
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: Uuid::new_v4(),
+                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 exp,
@@ -208,10 +211,14 @@ enum SubCommand {
         jet_ap: Option<ApplicationProtocol>,
         #[clap(long)]
         jet_ttl: Option<u64>,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
     },
     Rendezvous {
         #[clap(long)]
         jet_ap: Option<ApplicationProtocol>,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
     },
     RdpTls {
         #[clap(long)]
@@ -224,6 +231,8 @@ enum SubCommand {
         dst_usr: String,
         #[clap(long)]
         dst_pwd: String,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
     },
     Scope {
         scope: String,
@@ -237,6 +246,8 @@ enum SubCommand {
         dst_addl: Vec<String>,
         #[clap(long)]
         jet_ttl: Option<u64>,
+        #[clap(long)]
+        jet_aid: Option<Uuid>,
     },
     Jrec {
         #[clap(long)]
