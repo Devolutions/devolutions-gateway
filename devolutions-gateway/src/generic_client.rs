@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
+use tracing::field;
 use typed_builder::TypedBuilder;
 
 use crate::config::Conf;
@@ -30,6 +31,11 @@ impl<S> GenericClient<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
+    #[instrument(
+        "generic_client",
+        skip_all,
+        fields(session_id = field::Empty, protocol = field::Empty, target = field::Empty),
+    )]
     pub async fn serve(self) -> anyhow::Result<()> {
         let Self {
             conf,
@@ -41,6 +47,8 @@ where
             subscriber_tx,
             active_recordings,
         } = self;
+
+        let span = tracing::Span::current();
 
         let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(10));
         let read_pcb_fut = read_pcb(&mut client_stream);
@@ -55,33 +63,29 @@ where
         };
 
         let source_ip = client_addr.ip();
-        let association_claims =
-            extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
+        let claims = extract_association_claims(&pdu, source_ip, &conf, &token_cache, &jrl, &active_recordings)?;
 
-        let association_id = association_claims.jet_aid;
-        let connection_mode = association_claims.jet_cm;
-        let application_protocol = association_claims.jet_ap;
-        let recording_policy = association_claims.jet_rec;
-        let filtering_policy = association_claims.jet_flt;
+        span.record("session_id", claims.jet_aid.to_string())
+            .record("protocol", claims.jet_ap.to_string());
 
-        match connection_mode {
+        match claims.jet_cm {
             ConnectionMode::Rdv => {
                 anyhow::bail!("TCP rendezvous not supported");
             }
             ConnectionMode::Fwd { targets, creds: None } => {
-                if association_claims.jet_rec {
+                if claims.jet_rec {
                     anyhow::bail!("can't meet recording policy");
                 }
+
+                trace!("Select and connect to target");
 
                 let ((mut server_stream, server_addr), selected_target) =
                     utils::successive_try(&targets, utils::tcp_connect).await?;
 
-                info!(
-                    session = %association_claims.jet_aid,
-                    protocol = %application_protocol,
-                    target = %server_addr,
-                    "plain TCP forwarding"
-                );
+                trace!(%selected_target, "Connected");
+                span.record("target", selected_target.to_string());
+
+                info!("TCP forwarding");
 
                 server_stream
                     .write_buf(&mut leftover_bytes)
@@ -89,15 +93,15 @@ where
                     .context("Failed to write leftover bytes")?;
 
                 let info = SessionInfo::new(
-                    association_id,
-                    application_protocol,
+                    claims.jet_aid,
+                    claims.jet_ap,
                     ConnectionModeDetails::Fwd {
                         destination_host: selected_target.clone(),
                     },
                 )
-                .with_ttl(association_claims.jet_ttl)
-                .with_recording_policy(recording_policy)
-                .with_filtering_policy(filtering_policy);
+                .with_ttl(claims.jet_ttl)
+                .with_recording_policy(claims.jet_rec)
+                .with_filtering_policy(claims.jet_flt);
 
                 Proxy::builder()
                     .conf(conf)

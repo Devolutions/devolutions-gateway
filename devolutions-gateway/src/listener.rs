@@ -84,7 +84,7 @@ impl GatewayListener {
         self.kind
     }
 
-    #[instrument("listener", skip(self), fields(url = %self.listener_url))]
+    #[instrument("listener", skip(self), fields(port = self.listener_url.port().expect("port")))]
     pub async fn run(self) -> anyhow::Result<()> {
         match self.kind() {
             ListenerKind::Tcp => run_tcp_listener(self.listener, self.state).await,
@@ -154,7 +154,6 @@ async fn handle_tcp_peer(stream: TcpStream, state: DgwState, peer_addr: SocketAd
                 .active_recordings(state.recordings.active_recordings)
                 .build()
                 .serve()
-                .instrument(info_span!("generic-client"))
                 .await?;
         }
     }

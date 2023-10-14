@@ -195,7 +195,6 @@ async fn run_tcp_tunnel(mut tunnel: ngrok::tunnel::TcpTunnel, state: DgwState) {
                         .active_recordings(state.recordings.active_recordings)
                         .build()
                         .serve()
-                        .instrument(info_span!("generic-client"))
                         .await
                     {
                         error!(error = format!("{e:#}"), "handle_tcp_peer failed");

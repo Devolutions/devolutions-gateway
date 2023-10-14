@@ -41,7 +41,7 @@ bytes = "1.5"
 cfg-if = "1.0"
 url = { version = "2.4", features = ["serde"] }
 uuid = { version = "1.4", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] } # TODO: switch to `time`
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] } # TODO: switch to `time`
 parking_lot = "0.12"
 anyhow = "1.0"
 thiserror = "1"
@@ -74,6 +74,7 @@ hyper = "0.14"
 axum = { version = "0.6", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
 axum-extra = { version = "0.8", features = ["query", "async-read-body"] }
 tower-http = { version = "0.4", features = ["cors", "fs"] }
+tungstenite = "0.20" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
 
 # OpenAPI generator
 utoipa = { version = "3.5", default-features = false, features = ["uuid", "chrono"], optional = true }
