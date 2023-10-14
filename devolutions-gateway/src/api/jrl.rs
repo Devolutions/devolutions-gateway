@@ -44,6 +44,8 @@ async fn update_jrl(
 
     info!(path = %jrl_file, "Writing JRL file to disk");
 
+    // FIXME(DGW-104): use a temporary file to write the new JRL, and swap on success
+
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)

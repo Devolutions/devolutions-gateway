@@ -4,7 +4,7 @@ use std::sync::Arc;
 use axum::extract::ws::WebSocket;
 use axum::extract::{ConnectInfo, State, WebSocketUpgrade};
 use axum::response::Response;
-use tracing::{field, Instrument as _};
+use tracing::Instrument as _;
 
 use crate::config::Conf;
 use crate::http::HttpError;
@@ -28,6 +28,7 @@ pub async fn handler(
     ws: WebSocketUpgrade,
 ) -> Result<Response, HttpError> {
     let conf = conf_handle.get_conf();
+    let span = tracing::Span::current();
 
     let response = ws.on_upgrade(move |ws| {
         handle_socket(
@@ -40,6 +41,7 @@ pub async fn handler(
             recordings.active_recordings,
             source_addr,
         )
+        .instrument(span)
     });
 
     Ok(response)
@@ -68,7 +70,6 @@ async fn handle_socket(
         subscriber_tx,
         &active_recordings,
     )
-    .instrument(info_span!("rdp", client = %source_addr, target = field::Empty, session_id = field::Empty))
     .await;
 
     if let Err(error) = result {

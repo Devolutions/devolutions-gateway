@@ -42,7 +42,3 @@ name = "listeners_raw"
 path = "fuzz_targets/listeners_raw.rs"
 test = false
 doc = false
-
-[patch.crates-io]
-tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "454313f66da3a662" }
-tokio-tungstenite = { git = "https://github.com/snapview/tokio-tungstenite.git", rev = "a6c2d13e1f4919c" }

@@ -16,10 +16,10 @@ pem = "3.0"
 shadow-rs = "0.21"
 openssl-probe = "0.1"
 
-# Same dependency as tokio-tungstenite 0.18
-# https://crates.io/crates/tokio-tungstenite/0.18/dependencies
-webpki = "0.22"
-rustls = "0.20"
+# Same dependency as tokio-tungstenite 0.20
+# https://crates.io/crates/tokio-tungstenite/0.20.1/dependencies
+rustls-webpki = "0.101"
+rustls = "0.21"
 rustls-native-certs = "0.6"
 
 [build-dependencies]

@@ -6,6 +6,7 @@ use crate::subscriber::SubscriberSender;
 use crate::token::{ApplicationProtocol, Protocol};
 use camino::Utf8PathBuf;
 use futures::future::Either;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -123,23 +124,65 @@ where
         // a timer to check if the recording is started within a few seconds?
 
         let res = match futures::future::select(forward_fut, kill_notified).await {
-            Either::Left((res, _)) => match res {
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(()),
-                Err(e) => Err(e),
-            },
+            Either::Left((res, _)) => res.map(|_| ()),
             Either::Right(_) => Ok(()),
         };
 
         crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
 
         match res {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {
-                info!(%error, "forwarding ended");
+            Ok(()) => {
+                info!("Forwarding ended");
                 Ok(())
             }
-            Err(error) => Err(anyhow::Error::new(error).context("forward")),
+            Err(error) => {
+                let really_an_error = is_really_an_error(&error);
+
+                let error = anyhow::Error::new(error);
+
+                if really_an_error {
+                    Err(error.context("forward"))
+                } else {
+                    info!(reason = format!("{error:#}"), "Forwarding ended abruptly");
+                    Ok(())
+                }
+            }
         }
     }
+}
+
+/// Walks source chain and check for status codes like ECONNRESET or ECONNABORTED that we don’t consider to be actual errors
+fn is_really_an_error(original_error: &io::Error) -> bool {
+    use std::error::Error as _;
+
+    let mut dyn_error: Option<&dyn std::error::Error> = Some(original_error);
+
+    while let Some(source_error) = dyn_error.take() {
+        if let Some(io_error) = source_error.downcast_ref::<io::Error>() {
+            match io_error.kind() {
+                io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionAborted => {
+                    return false;
+                }
+                io::ErrorKind::Other => {
+                    dyn_error = io_error.source();
+                }
+                _ => {
+                    return true;
+                }
+            }
+        } else if let Some(tungstenite_error) = source_error.downcast_ref::<tungstenite::Error>() {
+            match tungstenite_error {
+                tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => return false,
+                tungstenite::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
+                    return false
+                }
+                tungstenite::Error::Io(io_error) => dyn_error = Some(io_error),
+                _ => return true,
+            }
+        } else {
+            dyn_error = source_error.source();
+        }
+    }
+
+    true
 }
