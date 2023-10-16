@@ -23,7 +23,7 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
 }
 
 macro_rules! impl_tcp_connect {
-    ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, $operation:expr) => {{
+    ($req_addr:expr, $proxy_cfg:expr, $output_ty:ty, | $stream:ident | $operation:block) => {{
         use proxy_socks::{Socks4Stream, Socks5Stream};
 
         let out: $output_ty = match $proxy_cfg {
@@ -31,16 +31,16 @@ macro_rules! impl_tcp_connect {
                 ty: ProxyType::Socks4,
                 addr: proxy_addr,
             }) => {
-                let stream =
+                let $stream =
                     Socks4Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr, "jetsocat").await?;
-                $operation(stream).await
+                $operation.await
             }
             Some(ProxyConfig {
                 ty: ProxyType::Socks5,
                 addr: proxy_addr,
             }) => {
-                let stream = Socks5Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
-                $operation(stream).await
+                let $stream = Socks5Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
+                $operation.await
             }
             Some(ProxyConfig {
                 ty: ProxyType::Socks,
@@ -48,11 +48,11 @@ macro_rules! impl_tcp_connect {
             }) => {
                 // unknown SOCKS version, try SOCKS5 first and then SOCKS4
                 match Socks5Stream::connect(TcpStream::connect(&proxy_addr).await?, &$req_addr).await {
-                    Ok(socks5) => $operation(socks5).await,
+                    Ok($stream) => $operation.await,
                     Err(_) => {
-                        let socks4 =
+                        let $stream =
                             Socks4Stream::connect(TcpStream::connect(proxy_addr).await?, $req_addr, "jetsocat").await?;
-                        $operation(socks4).await
+                        $operation.await
                     }
                 }
             }
@@ -64,16 +64,18 @@ macro_rules! impl_tcp_connect {
                 ty: ProxyType::Https,
                 addr: proxy_addr,
             }) => {
-                let stream = proxy_http::ProxyStream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
-                $operation(stream).await
+                let $stream =
+                    proxy_http::ProxyStream::connect(TcpStream::connect(proxy_addr).await?, $req_addr).await?;
+                $operation.await
             }
             None => {
                 let dest_addr =
                     resolve_dest_addr($req_addr.to_dest_addr().with_context(|| "Invalid target address")?).await?;
-                let stream = TcpStream::connect(dest_addr).await?;
-                $operation(stream).await
+                let $stream = TcpStream::connect(dest_addr).await?;
+                $operation.await
             }
         };
+
         out
     }};
 }
