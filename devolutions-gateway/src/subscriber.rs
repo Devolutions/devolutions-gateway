@@ -240,9 +240,7 @@ async fn subscriber_task(
                 if let Some(subscriber) = conf.subscriber.clone() {
                     debug!(?msg, %subscriber.url, "Send message");
 
-                    ChildTask::spawn(async {
-                        let msg = msg;
-                        let subscriber = subscriber;
+                    ChildTask::spawn(async move {
                         if let Err(error) = send_message(&subscriber, &msg).await {
                             warn!(error = format!("{error:#}"), "Couldn't send message to the subscriber");
                         }
