@@ -8,8 +8,9 @@ use camino::Utf8PathBuf;
 use futures::future::Either;
 use std::io;
 use std::net::SocketAddr;
+use std::pin::pin;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _};
 use tokio::sync::Notify;
 use typed_builder::TypedBuilder;
 
@@ -103,6 +104,9 @@ where
     }
 
     pub async fn forward(self) -> anyhow::Result<()> {
+        let mut transport_a = self.transport_a;
+        let mut transport_b = self.transport_b;
+
         let session_id = self.session_info.id();
         let notify_kill = Arc::new(Notify::new());
 
@@ -114,19 +118,19 @@ where
         )
         .await?;
 
-        let forward_fut = transport::forward_bidirectional(self.transport_a, self.transport_b);
-        tokio::pin!(forward_fut);
-
-        let kill_notified = notify_kill.notified();
-        tokio::pin!(kill_notified);
-
         // NOTE(DGW-86): when recording is required, should we wait for it to start before we forward, or simply spawn
         // a timer to check if the recording is started within a few seconds?
 
-        let res = match futures::future::select(forward_fut, kill_notified).await {
+        let forward_fut = tokio::io::copy_bidirectional(&mut transport_a, &mut transport_b);
+        let kill_notified = notify_kill.notified();
+
+        let res = match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
             Either::Left((res, _)) => res.map(|_| ()),
             Either::Right(_) => Ok(()),
         };
+
+        // Ensure we close the transports cleanly at the end (ignore errors at this point)
+        let _ = tokio::join!(transport_a.shutdown(), transport_b.shutdown());
 
         crate::session::remove_session_in_progress(&self.sessions, &self.subscriber_tx, session_id).await?;
 
