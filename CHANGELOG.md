@@ -4,6 +4,76 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.2.4 (2023-10-16)
+
+### Features
+
+- _dgw_: new `VerbosityProfile` option ([#570](https://github.com/Devolutions/devolutions-gateway/issues/570)) ([969c42f7a7](https://github.com/Devolutions/devolutions-gateway/commit/969c42f7a75e66fe9cfd6d77ba365be58c842291)) 
+
+  This adds a stable option to configure log verbosity.
+
+### Improvements
+
+- _dgw_: add support for more X.509 cert PEM labels ([#519](https://github.com/Devolutions/devolutions-gateway/issues/519)) ([67e9a483a2](https://github.com/Devolutions/devolutions-gateway/commit/67e9a483a26a45020da066fbad080f25944b1d82)) 
+
+  Devolutions Gateway will now recognize `X509 CERTIFICATE` and
+  `TRUSTED CERTIFICATE` as valid PEM labels for X.509 certificates.
+
+- _dgw_: more trace records for RDP extension ([#518](https://github.com/Devolutions/devolutions-gateway/issues/518)) ([84134481f2](https://github.com/Devolutions/devolutions-gateway/commit/84134481f2c36502d1cfee948eaf0c9d2ca327cd)) 
+
+  This will help when troubleshooting web client issues.
+
+- _dgw_: improve logs quality ([#557](https://github.com/Devolutions/devolutions-gateway/issues/557)) ([fb1ffd07f7](https://github.com/Devolutions/devolutions-gateway/commit/fb1ffd07f7e0e814e61436d5667eb02e389bcfe0)) ([#528](https://github.com/Devolutions/devolutions-gateway/issues/528)) ([433e25382e](https://github.com/Devolutions/devolutions-gateway/commit/433e25382edcd99ea2de9a1a0c4fe099463fc85c)) 
+
+  - Records additional info on running sessions
+  - Improves file rotation
+
+### Bug Fixes
+
+- _dgw_: proper timeout for HTTP listeners ([#561](https://github.com/Devolutions/devolutions-gateway/issues/561)) ([90a0725651](https://github.com/Devolutions/devolutions-gateway/commit/90a0725651587cbbf51c8b53d9465f0a2243e2ce)) 
+
+- _dgw_: shutdown streams gracefully after forwarding ([#562](https://github.com/Devolutions/devolutions-gateway/issues/562)) ([6902137ad8](https://github.com/Devolutions/devolutions-gateway/commit/6902137ad80bdfaa11718829d570125f53985128)) 
+
+### Build
+
+- Update dependencies
+  ([#513](https://github.com/Devolutions/devolutions-gateway/issues/513)/[837589748b](https://github.com/Devolutions/devolutions-gateway/commit/837589748b2c278ac25ce68a4c8a65e83c1fdbb5))
+  ([#514](https://github.com/Devolutions/devolutions-gateway/issues/514)/[12af944c57](https://github.com/Devolutions/devolutions-gateway/commit/12af944c574f8d19e239fbcde25f1728726ab695))
+  ([#515](https://github.com/Devolutions/devolutions-gateway/issues/515)/[116e42285f](https://github.com/Devolutions/devolutions-gateway/commit/116e42285f8d5c215edee732b50063ba24db274c))
+  ([#522](https://github.com/Devolutions/devolutions-gateway/issues/522)/[1fd5584365](https://github.com/Devolutions/devolutions-gateway/commit/1fd5584365f4cd0de36f75fd7f420f70592556cc))
+  ([#521](https://github.com/Devolutions/devolutions-gateway/issues/521)/[25649a2bbe](https://github.com/Devolutions/devolutions-gateway/commit/25649a2bbefa52a6074a25e7241e2b5c9966bbdd))
+  ([#520](https://github.com/Devolutions/devolutions-gateway/issues/520)/[b2a3849a8a](https://github.com/Devolutions/devolutions-gateway/commit/b2a3849a8ac08ef6ba9727d11a35ce0fa94c5810))
+  ([#526](https://github.com/Devolutions/devolutions-gateway/issues/526)/[ec184527d8](https://github.com/Devolutions/devolutions-gateway/commit/ec184527d80cef7b4a4706747a9d613be696688a))
+  ([#527](https://github.com/Devolutions/devolutions-gateway/issues/527)/[7b7c3c065d](https://github.com/Devolutions/devolutions-gateway/commit/7b7c3c065dbdf05c2c7bcb0e98741257c975076f))
+  ([#525](https://github.com/Devolutions/devolutions-gateway/issues/525)/[b1819084bc](https://github.com/Devolutions/devolutions-gateway/commit/b1819084bcb94a3b90d480372a7a3ccec8754d17))
+  ([#531](https://github.com/Devolutions/devolutions-gateway/issues/531)/[b472c830bd](https://github.com/Devolutions/devolutions-gateway/commit/b472c830bda90209899eb7cea1e9dd3a978d5449))
+  ([#532](https://github.com/Devolutions/devolutions-gateway/issues/532)/[66ee3dff62](https://github.com/Devolutions/devolutions-gateway/commit/66ee3dff62634f98e26a033f656ea3fa659a0b57))
+  ([#533](https://github.com/Devolutions/devolutions-gateway/issues/533)/[38ff1f27f6](https://github.com/Devolutions/devolutions-gateway/commit/38ff1f27f647d0c984d5425d6785aad918fd999a))
+  ([#535](https://github.com/Devolutions/devolutions-gateway/issues/535)/[54ce98208e](https://github.com/Devolutions/devolutions-gateway/commit/54ce98208eafb9a8ad8dd827769c91d8c12cd78a))
+  ([#537](https://github.com/Devolutions/devolutions-gateway/issues/537)/[d4afcd6a3a](https://github.com/Devolutions/devolutions-gateway/commit/d4afcd6a3a2f7435b851ee911f3249b2776c8cfa))
+  ([#538](https://github.com/Devolutions/devolutions-gateway/issues/538)/[3d35fbb635](https://github.com/Devolutions/devolutions-gateway/commit/3d35fbb63540bb1b4ec054d86968b67488cb1a3d))
+  ([#541](https://github.com/Devolutions/devolutions-gateway/issues/541)/[b50c0b7d20](https://github.com/Devolutions/devolutions-gateway/commit/b50c0b7d20d40408270ac0f441277080bb19a319))
+  ([#540](https://github.com/Devolutions/devolutions-gateway/issues/540)/[d92c3433ab](https://github.com/Devolutions/devolutions-gateway/commit/d92c3433ab02ddc1cbf44b2c74b2bd28572ee9ba))
+  ([#543](https://github.com/Devolutions/devolutions-gateway/issues/543)/[2384fc8e8f](https://github.com/Devolutions/devolutions-gateway/commit/2384fc8e8f323ea3faca293d8c5480c42c0d5e8b))
+  ([#545](https://github.com/Devolutions/devolutions-gateway/issues/545)/[b1e05b1e7a](https://github.com/Devolutions/devolutions-gateway/commit/b1e05b1e7a8221ef2f3e21ced7f62d4100eaa7af))
+  ([#548](https://github.com/Devolutions/devolutions-gateway/issues/548)/[25f3c6c778](https://github.com/Devolutions/devolutions-gateway/commit/25f3c6c7789eafda641a465dd648517ce80bb850))
+  ([#547](https://github.com/Devolutions/devolutions-gateway/issues/547)/[9560dc9cfd](https://github.com/Devolutions/devolutions-gateway/commit/9560dc9cfd8b7159b31d2238d1c0a3858f4f656f))
+  ([#549](https://github.com/Devolutions/devolutions-gateway/issues/549)/[37faedcfee](https://github.com/Devolutions/devolutions-gateway/commit/37faedcfee5d716ba79a3655a8a8ea3a2f6eefa9))
+  ([#554](https://github.com/Devolutions/devolutions-gateway/issues/554)/[7987906a52](https://github.com/Devolutions/devolutions-gateway/commit/7987906a5267e7b5b4047a54da6912a1565ae493))
+  ([#553](https://github.com/Devolutions/devolutions-gateway/issues/553)/[ccf737c11f](https://github.com/Devolutions/devolutions-gateway/commit/ccf737c11fa9c70e32d67537c28f776f39d4d26d))
+  ([#552](https://github.com/Devolutions/devolutions-gateway/issues/552)/[e98b7f27ef](https://github.com/Devolutions/devolutions-gateway/commit/e98b7f27ef50bdad4601395b8793a0e2abb4cbf7))
+  ([#556](https://github.com/Devolutions/devolutions-gateway/issues/556)/[2e839ae5ac](https://github.com/Devolutions/devolutions-gateway/commit/2e839ae5acac02606fe8ff7f48d1f27da00e308b)) 
+
+- Update Rust toolchain to 1.73.0 ([#560](https://github.com/Devolutions/devolutions-gateway/issues/560)) ([375ec71cf9](https://github.com/Devolutions/devolutions-gateway/commit/375ec71cf91fdf1b996f74b17dfbd2ace42b53e0)) 
+
+### Continuous Integration
+
+- Skip OneDrive upload if the release workflow is a dry run ([36ad076f32](https://github.com/Devolutions/devolutions-gateway/commit/36ad076f326e90f9e61a3bdd9ae123ce15f9b0de)) 
+
+- Change github token ([#542](https://github.com/Devolutions/devolutions-gateway/issues/542)) ([afbb7abcbf](https://github.com/Devolutions/devolutions-gateway/commit/afbb7abcbf697d3f9b3cec89ec4adcc907e2e694)) 
+
+- Fix OneDrive upload job ([#546](https://github.com/Devolutions/devolutions-gateway/issues/546)) ([787024e1f6](https://github.com/Devolutions/devolutions-gateway/commit/787024e1f6e4191f9918acf5d8280c70d412d1c7)) 
+
 ## 2023.2.3 (2023-08-15)
 
 ### Bug Fixes
