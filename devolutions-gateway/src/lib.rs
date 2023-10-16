@@ -44,26 +44,23 @@ pub struct DgwState {
 }
 
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {
+    use tower::ServiceBuilder;
+
     trace!("make http service");
 
     axum::Router::new()
         .merge(api::make_router(state.clone()))
         .nest_service("/KdcProxy", api::kdc_proxy::make_router(state.clone()))
         .nest_service("/jet/KdcProxy", api::kdc_proxy::make_router(state.clone()))
-        .layer(axum::middleware::from_fn_with_state(
-            state,
-            middleware::auth::auth_middleware,
-        ))
-        .layer(middleware::cors::make_middleware())
-        .layer(axum::middleware::from_fn(middleware::log::log_middleware))
         .layer(
-            tower::ServiceBuilder::new()
-                .layer(axum::error_handling::HandleErrorLayer::new(
-                    |error: tower::BoxError| async move {
-                        debug!(%error, "timed out");
-                        axum::http::StatusCode::REQUEST_TIMEOUT
-                    },
-                ))
-                .timeout(std::time::Duration::from_secs(15)),
+            // NOTE: It is recommended to use `tower::ServiceBuilder` when applying multiple middlewares at once:
+            // https://docs.rs/axum/0.6.20/axum/middleware/index.html#applying-multiple-middleware
+            ServiceBuilder::new()
+                .layer(axum::middleware::from_fn(middleware::log::log_middleware))
+                .layer(middleware::cors::make_middleware())
+                .layer(axum::middleware::from_fn_with_state(
+                    state,
+                    middleware::auth::auth_middleware,
+                )),
         )
 }
