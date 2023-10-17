@@ -91,9 +91,7 @@ pub struct Conf {
     pub hostname: String,
     pub listeners: Vec<ListenerUrls>,
     pub subscriber: Option<dto::Subscriber>,
-    pub capture_path: Option<Utf8PathBuf>,
     pub log_file: Utf8PathBuf,
-    pub log_directive: Option<String>,
     pub tls: Option<Tls>,
     pub provisioner_public_key: PublicKey,
     pub sub_provisioner_public_key: Option<Subkey>,
@@ -103,6 +101,7 @@ pub struct Conf {
     pub sogar: dto::SogarConf,
     pub jrl_file: Utf8PathBuf,
     pub ngrok: Option<dto::NgrokConf>,
+    pub verbosity_profile: dto::VerbosityProfile,
     pub debug: dto::DebugConf,
 }
 
@@ -208,9 +207,7 @@ impl Conf {
             hostname,
             listeners,
             subscriber: conf_file.subscriber.clone(),
-            capture_path: conf_file.capture_path.clone(),
             log_file,
-            log_directive: conf_file.log_directive.clone(),
             tls,
             provisioner_public_key,
             sub_provisioner_public_key,
@@ -220,6 +217,7 @@ impl Conf {
             sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
+            verbosity_profile: conf_file.verbosity_profile,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -599,7 +597,6 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
 
-        // TLS config
         /// Certificate to use for TLS
         #[serde(alias = "CertificateFile")]
         pub tls_certificate_file: Option<Utf8PathBuf>,
@@ -623,23 +620,21 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub ngrok: Option<NgrokConf>,
 
+        /// Verbosity profile
+        #[serde(default, skip_serializing_if = "VerbosityProfile::is_default")]
+        pub verbosity_profile: VerbosityProfile,
+
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
+
         /// (Unstable) Path to the JRL file
         #[serde(skip_serializing_if = "Option::is_none")]
         pub jrl_file: Option<Utf8PathBuf>,
-        /// (Unstable) Directive string in the same form as the RUST_LOG environment variable
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub log_directive: Option<String>,
 
         /// (Unstable) Plugin paths to load at startup
         #[serde(skip_serializing_if = "Option::is_none")]
         pub plugins: Option<Vec<Utf8PathBuf>>,
-        /// (Unstable) Folder where pcap recordings should be stored
-        /// Providing this option will cause the PCAP interceptor to be attached to each stream.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub capture_path: Option<Utf8PathBuf>,
 
         /// (Unstable) Sogar (generic OCI registry)
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -680,16 +675,38 @@ pub mod dto {
                 ],
                 subscriber: None,
                 ngrok: None,
+                verbosity_profile: VerbosityProfile::default(),
                 log_file: None,
                 jrl_file: None,
-                log_directive: None,
                 plugins: None,
                 recording_path: None,
-                capture_path: None,
                 sogar: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
+        }
+    }
+
+    /// Verbosity profile (pre-defined tracing directives)
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum VerbosityProfile {
+        /// The default profile, mostly info records
+        #[default]
+        Default,
+        /// Recommended profile for developers
+        Debug,
+        /// Verbose logging for TLS troubleshooting
+        TlsTroubleshoot,
+        /// Show all traces
+        All,
+        /// Only show warnings and errors
+        Quiet,
+    }
+
+    impl VerbosityProfile {
+        pub fn is_default(&self) -> bool {
+            Self::default().eq(self)
         }
     }
 
@@ -712,6 +729,13 @@ pub mod dto {
 
         /// Ignore KDC address provided by KDC token, and use this one instead
         pub override_kdc: Option<TargetAddr>,
+
+        /// Directives string in the same form as the RUST_LOG environment variable
+        pub log_directives: Option<String>,
+
+        /// Folder where pcap recordings should be stored
+        /// Providing this option will cause the PCAP interceptor to be attached to each stream
+        pub capture_path: Option<Utf8PathBuf>,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -722,6 +746,8 @@ pub mod dto {
                 dump_tokens: false,
                 disable_token_validation: false,
                 override_kdc: None,
+                log_directives: None,
+                capture_path: None,
             }
         }
     }

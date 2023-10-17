@@ -102,6 +102,16 @@ Currently, stable options are:
         Note that in order to accept connections from outside, you must at least configure `AllowCidrs`.
         The most permissive CIDR is the "zero-address" `0.0.0.0/0`, and defines an IP block containing all possible IP addresses.
 
+- `VerbosityProfile`: Verbosity profile (pre-defined tracing directives)
+
+    Possible values are:
+
+    * `default`: the default profile
+    * `debug`: recommended profile for developers
+    * `tls-troubleshoot`: verbose logging for TLS troubleshooting
+    * `all`: extra-verbose profile, showing all traces
+    * `quiet`: only show warnings and errors
+
 ## Sample Usage
 
 ### RDP routing

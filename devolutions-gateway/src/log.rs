@@ -7,12 +7,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::fs;
 use tokio::time::{sleep, Duration};
-use tracing::metadata::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_appender::rolling;
-use tracing_subscriber::filter::Directive;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{fmt, EnvFilter};
+
+use crate::config::dto::VerbosityProfile;
 
 const MAX_BYTES_PER_LOG_FILE: u64 = 3_000_000; // 3 MB
 const MAX_LOG_FILES: usize = 10;
@@ -43,7 +43,23 @@ impl<'a> LogPathCfg<'a> {
     }
 }
 
-pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Result<LoggerGuard> {
+fn profile_to_directives(profile: VerbosityProfile) -> &'static str {
+    match profile {
+        VerbosityProfile::Default => "info",
+        VerbosityProfile::Debug => "info,devolutions_gateway=debug,devolutions_gateway::api=trace",
+        VerbosityProfile::TlsTroubleshoot => {
+            "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
+        }
+        VerbosityProfile::All => "trace",
+        VerbosityProfile::Quiet => "warn",
+    }
+}
+
+pub fn init(
+    path: &Utf8Path,
+    profile: VerbosityProfile,
+    debug_filtering_directives: Option<&str>,
+) -> anyhow::Result<LoggerGuard> {
     let log_cfg = LogPathCfg::from_path(path)?;
     let file_appender = rolling::Builder::new()
         .rotation(rolling::Rotation::max_bytes(MAX_BYTES_PER_LOG_FILE))
@@ -58,19 +74,16 @@ pub fn init(path: &Utf8Path, filtering_directive: Option<&str>) -> anyhow::Resul
     let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(std::io::stdout());
     let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
 
-    let default_directive = Directive::from(LevelFilter::INFO);
+    let env_filter = EnvFilter::try_new(profile_to_directives(profile))
+        .context("invalid built-in filtering directives (this is a bug)")?;
 
-    let env_filter = if let Some(filtering_directive) = filtering_directive {
-        EnvFilter::builder()
-            .with_default_directive(default_directive)
-            .parse(filtering_directive)
-            .context("invalid filtering directive from config")?
-    } else {
-        EnvFilter::builder()
-            .with_default_directive(default_directive)
-            .from_env()
-            .context("invalid filtering directive from env")?
-    };
+    // Optionally add additional debugging filtering directives
+    let env_filter = debug_filtering_directives
+        .into_iter()
+        .flat_map(|directives| directives.split(','))
+        .fold(env_filter, |env_filter, directive| {
+            env_filter.add_directive(directive.parse().unwrap())
+        });
 
     tracing_subscriber::registry()
         .with(file_layer)
