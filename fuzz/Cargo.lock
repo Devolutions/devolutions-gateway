@@ -689,7 +689,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2023.2.3"
+version = "2023.2.4"
 dependencies = [
  "anyhow",
  "async-trait",
