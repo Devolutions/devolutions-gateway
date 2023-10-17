@@ -391,9 +391,21 @@ jobs:
           New-Item -Path "$destinationFolder" -ItemType "directory"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
 
+      # workflow_call: dry-run will be null, let's make sure we have a value for the following step
+      - name: Check inputs
+        id: check
+        shell: pwsh
+        run: |
+          $DryRun = $false
+          if ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          }
+          $DryRun = $DryRun.ToString().ToLower()
+          echo "dry-run=$DryRun" >> $Env:GITHUB_OUTPUT
+
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: needs.preflight.outputs.skip-publishing == 'false' && github.event.inputs.dry-run == 'false'
+        if: needs.preflight.outputs.skip-publishing == 'false' && steps.check.outputs.dry-run == 'false'
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
