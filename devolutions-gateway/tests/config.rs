@@ -36,7 +36,7 @@ fn sample_1() -> Sample {
         			"ExternalUrl": "wss://*:443"
         		}
         	],
-        	"LogDirective": "info,devolutions_gateway=trace,devolutions_gateway::log=debug"
+        	"VerbosityProfile": "tls-troubleshoot"
         }"#,
         file_conf: ConfFile {
             id: Some(Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap()),
@@ -72,12 +72,11 @@ fn sample_1() -> Sample {
             subscriber: None,
             log_file: None,
             jrl_file: None,
-            log_directive: Some("info,devolutions_gateway=trace,devolutions_gateway::log=debug".to_owned()),
             plugins: None,
             recording_path: None,
-            capture_path: None,
             sogar: None,
             ngrok: None,
+            verbosity_profile: VerbosityProfile::TlsTroubleshoot,
             debug: None,
             rest: Default::default(),
         },
@@ -107,12 +106,11 @@ fn sample_2() -> Sample {
             subscriber: None,
             log_file: Some("/path/to/log/file.log".into()),
             jrl_file: None,
-            log_directive: None,
             plugins: None,
             recording_path: None,
-            capture_path: None,
             sogar: None,
             ngrok: None,
+            verbosity_profile: VerbosityProfile::Default,
             debug: None,
             rest: Default::default(),
         },

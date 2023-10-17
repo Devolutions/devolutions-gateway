@@ -37,8 +37,12 @@ impl GatewayService {
     pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
         let conf = conf_handle.get_conf();
 
-        let logger_guard =
-            log::init(&conf.log_file, conf.log_directive.as_deref()).context("failed to setup logger")?;
+        let logger_guard = log::init(
+            &conf.log_file,
+            conf.verbosity_profile,
+            conf.debug.log_directives.as_deref(),
+        )
+        .context("failed to setup logger")?;
 
         info!(version = env!("CARGO_PKG_VERSION"));
 

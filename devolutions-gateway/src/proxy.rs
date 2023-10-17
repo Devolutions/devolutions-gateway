@@ -62,7 +62,7 @@ where
     where
         D: Dissector + Send + 'static,
     {
-        if let Some(capture_path) = self.conf.capture_path.as_ref() {
+        if let Some(capture_path) = self.conf.debug.capture_path.as_ref() {
             let format = time::format_description::parse("[year]-[month]-[day]_[hour]-[minute]-[second]")
                 .expect("valid hardcoded format");
 
