@@ -142,6 +142,125 @@ class DGatewaySubscriber {
     }
 }
 
+class DGatewayNgrokTunnel {
+    [string] $Proto
+    [string] $Metadata
+    [string[]] $AllowCidrs
+    [string[]] $DenyCidrs
+
+    # HTTP tunnel
+    [string] $Domain
+    [System.Nullable[System.Single]] $CircuitBreaker
+    [System.Nullable[System.Boolean]] $Compression
+
+    # TCP tunnel
+    [string] $RemoteAddr
+
+    DGatewayNgrokTunnel() { }
+}
+
+class DGatewayNgrokConfig {
+    [string] $AuthToken
+    [System.Nullable[System.UInt32]] $HeartbeatInterval
+    [System.Nullable[System.UInt32]] $HeartbeatTolerance
+    [string] $Metadata
+    [string] $ServerAddr
+    [PSCustomObject] $Tunnels
+
+    DGatewayNgrokConfig() { }
+}
+
+function New-DGatewayNgrokTunnel() {
+    [CmdletBinding(DefaultParameterSetName = 'http')]
+    param(
+        [Parameter(Mandatory = $false, ParameterSetName = 'http',
+            HelpMessage = "HTTP tunnel")]
+        [switch] $Http,
+
+        [Parameter(Mandatory = $false, ParameterSetName = 'tcp',
+            HelpMessage = "TCP tunnel")]
+        [switch] $Tcp,
+
+        [Parameter(Mandatory = $false,
+            HelpMessage = "User-defined metadata that appears when listing tunnel sessions with ngrok")]
+        [string] $Metadata,
+
+        [ValidateScript({
+            $_ -match '^((\d{1,3}\.){3}\d{1,3}\/\d{1,2}|([\dA-Fa-f]{0,4}:){2,7}[\dA-Fa-f]{0,4}\/\d{1,3})$'
+        })]
+        [Parameter(Mandatory = $false,
+            HelpMessage = "Reject connections that do not match the given CIDRs")]
+        [string[]] $AllowCidrs,
+
+        [ValidateScript({
+            $_ -match '^((\d{1,3}\.){3}\d{1,3}\/\d{1,2}|([\dA-Fa-f]{0,4}:){2,7}[\dA-Fa-f]{0,4}\/\d{1,3})$'
+        })]
+        [Parameter(Mandatory = $false,
+            HelpMessage = "Reject connections that match the given CIDRs")]
+        [string[]] $DenyCidrs,
+
+        [ValidateScript({
+            $_ -match '^(\*\.)?([a-zA-Z0-9](-?[a-zA-Z0-9])*\.)*[a-zA-Z]{2,}$'
+        })]
+        [Parameter(Mandatory = $false, ParameterSetName = 'http',
+            HelpMessage = "Any valid domain or hostname previously registered with ngrok")]
+        [string] $Domain,
+
+        [ValidateRange(0.0, 1.0)]
+        [Parameter(Mandatory = $false, ParameterSetName = 'http',
+            HelpMessage = "Reject requests when 5XX responses exceed this ratio")]
+        [System.Single] $CircuitBreaker,
+
+        [Parameter(Mandatory = $false, ParameterSetName = 'http',
+            HelpMessage = "Use gzip compression on HTTP responses")]
+        [System.Boolean] $Compression,
+
+        [ValidateScript({
+            $_ -match '^([a-zA-Z0-9](-?[a-zA-Z0-9])*\.)*[a-zA-Z]{2,}:\d{1,5}$'
+        })]
+        [Parameter(Mandatory = $false, ParameterSetName = 'tcp',
+            HelpMessage = "The remote TCP address and port to bind. For example: remote_addr: 2.tcp.ngrok.io:21746")]
+        [string] $RemoteAddr
+    )
+
+    $tunnel = [DGatewayNgrokTunnel]::new()
+
+    if ($Tcp) {
+        $tunnel.Proto = "tcp"
+    } else {
+        $tunnel.Proto = "http"
+    }
+
+    $properties = [DGatewayNgrokTunnel].GetProperties() | ForEach-Object { $_.Name }
+    foreach ($param in $PSBoundParameters.GetEnumerator()) {
+        if ($properties -Contains $param.Key) {
+            $tunnel.($param.Key) = $param.Value
+        }
+    }
+
+    $tunnel
+}
+
+function New-DGatewayNgrokConfig() {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $AuthToken
+    )
+
+    $ngrok = [DGatewayNgrokConfig]::new()
+    $ngrok.AuthToken = $AuthToken
+    $ngrok
+}
+
+enum VerbosityProfile {
+    Default
+    Debug
+    Tls
+    All
+    Quiet
+}
+
 class DGatewayConfig {
     [System.Nullable[Guid]] $Id
     [string] $Hostname
@@ -159,7 +278,28 @@ class DGatewayConfig {
     [DGatewayListener[]] $Listeners
     [DGatewaySubscriber] $Subscriber
 
+    [DGatewayNgrokConfig] $Ngrok
+
     [string] $LogDirective
+    [string] $VerbosityProfile
+}
+
+Function Remove-NullObjectProperties {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline, Mandatory)]
+        [object[]] $InputObject
+    )
+    process {
+        foreach ($OldObj in $InputObject) {
+            $NonNullProperties = $OldObj.PSObject.Properties.Name.Where( { -Not [string]::IsNullOrEmpty($OldObj.$_) })
+            $NewObj = $OldObj | Select-Object $NonNullProperties
+            $NewObj.PSObject.Properties | Where-Object { $_.TypeNameOfValue.EndsWith('PSCustomObject') } | ForEach-Object {
+                $NewObj."$($_.Name)" = $NewObj."$($_.Name)" | Remove-NullObjectProperties
+            }
+            $NewObj
+        }
+    }
 }
 
 function Save-DGatewayConfig {
@@ -172,10 +312,8 @@ function Save-DGatewayConfig {
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
     $ConfigFile = Join-Path $ConfigPath $DGatewayConfigFileName
-
-    $Properties = $Config.PSObject.Properties.Name
-    $NonNullProperties = $Properties.Where( { -Not [string]::IsNullOrEmpty($Config.$_) })
-    $ConfigData = $Config | Select-Object $NonNullProperties | ConvertTo-Json
+    $ConfigClean = $Config | ConvertTo-Json -Depth 4 | ConvertFrom-Json # drop class type info
+    $ConfigData = $ConfigClean | Remove-NullObjectProperties | ConvertTo-Json -Depth 4
 
     [System.IO.File]::WriteAllLines($ConfigFile, $ConfigData, $(New-Object System.Text.UTF8Encoding $False))
 }
@@ -203,7 +341,11 @@ function Set-DGatewayConfig {
         [string] $DelegationPublicKeyFile,
         [string] $DelegationPrivateKeyFile,
 
-        [DGatewaySubProvisionerKey] $SubProvisionerPublicKey
+        [DGatewaySubProvisionerKey] $SubProvisionerPublicKey,
+
+        [DGatewayNgrokConfig] $Ngrok,
+
+        [VerbosityProfile] $VerbosityProfile
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath

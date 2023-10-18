@@ -8,6 +8,7 @@ Describe 'Devolutions Gateway config' {
 
 		Context 'Fresh environment' {
 			It 'Creates basic configuration' {
+				Remove-Item (Join-Path $ConfigPath 'gateway.json') -ErrorAction SilentlyContinue | Out-Null
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -Hostname 'gateway.local'
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Hostname | Should -Be 'gateway.local'
 			}
@@ -42,6 +43,59 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayRecordingPath -ConfigPath:$ConfigPath) | Should -Be $DefaultRecordingPath
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -RecordingPath $RecordingPath
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).RecordingPath | Should -Be $RecordingPath
+			}
+
+			It 'Sets log verbosity profile' {
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -VerbosityProfile 'All'
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).VerbosityProfile | Should -Be 'All'
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -VerbosityProfile 'Default'
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).VerbosityProfile | Should -Be 'Default'
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -VerbosityProfile 'Tls'
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).VerbosityProfile | Should -Be 'Tls'
+				{ Set-DGatewayConfig -ConfigPath:$ConfigPath -VerbosityProfile 'yolo' } | Should -Throw
+			}
+
+			It 'Sets ngrok configuration' {
+				$AuthToken = '4nq9771bPxe8ctg7LKr_2ClH7Y15Zqe4bWLWF9p'
+				$Metadata = '{"serial": "00012xa-33rUtz9", "comment": "For customer alan@example.com"}'
+				$HeartbeatInterval = 15
+				$HeartbeatTolerance = 5
+				$ngrok = New-DGatewayNgrokConfig -AuthToken $AuthToken
+				$ngrok.Metadata = $Metadata
+				$ngrok.HeartbeatInterval = $HeartbeatInterval
+				$ngrok.HeartbeatTolerance = $HeartbeatTolerance
+				$httpTunnelParams = @{
+					Http = $true
+					Metadata = "c6481452-6f5d-11ee-b962-0242ac120002"
+					AllowCidrs = @("0.0.0.0/0")
+					Domain = "gateway.ngrok.io"
+					CircuitBreaker = 0.5
+					Compression = $true
+				}
+				$tcpTunnelParams = @{
+					Tcp = $true
+					AllowCidrs = @("0.0.0.0/0")
+					RemoteAddr = "7.tcp.ngrok.io:20560"
+				}
+				$httpTunnel = New-DGatewayNgrokTunnel @httpTunnelParams
+				$tcpTunnel = New-DGatewayNgrokTunnel @tcpTunnelParams
+				$ngrok.Tunnels = [PSCustomObject]@{
+					"http-endpoint" = $httpTunnel
+					"tcp-endpoint" = $tcpTunnel
+				}
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -Ngrok $ngrok
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Ngrok.AuthToken | Should -Be $AuthToken
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Ngrok.Metadata | Should -Be $Metadata
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Ngrok.HeartbeatInterval | Should -Be $HeartbeatInterval
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Ngrok.HeartbeatTolerance | Should -Be $HeartbeatTolerance
+				$Tunnels = $(Get-DGatewayConfig -ConfigPath:$ConfigPath).Ngrok.Tunnels
+				$Tunnels.'http-endpoint'.Proto | Should -Be 'http'
+				$Tunnels.'http-endpoint'.Domain | Should -Be $httpTunnel.Domain
+				$Tunnels.'http-endpoint'.Metadata | Should -Be $httpTunnel.Metadata
+				$Tunnels.'http-endpoint'.AllowCidrs | Should -Be $httpTunnel.AllowCidrs
+				$Tunnels.'tcp-endpoint'.Proto | Should -Be 'tcp'
+				$Tunnels.'tcp-endpoint'.RemoteAddr | Should -Be $tcpTunnel.RemoteAddr
+				$Tunnels.'tcp-endpoint'.AllowCidrs | Should -Be $tcpTunnel.AllowCidrs
 			}
 		}
 	}

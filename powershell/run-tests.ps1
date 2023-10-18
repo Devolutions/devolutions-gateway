@@ -7,8 +7,7 @@ Import-Module Pester
 Push-Location -Path $(Join-Path $PSScriptRoot 'pester')
 
 try {
-	Invoke-Pester .
+	Invoke-Pester . -Show All
 } finally {
 	Pop-Location
 }
-
