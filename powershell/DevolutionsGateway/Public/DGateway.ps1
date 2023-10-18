@@ -1,7 +1,6 @@
 
 . "$PSScriptRoot/../Private/CertificateHelper.ps1"
 . "$PSScriptRoot/../Private/PlatformHelper.ps1"
-. "$PSScriptRoot/../Private/DockerHelper.ps1"
 . "$PSScriptRoot/../Private/TokenHelper.ps1"
 
 $script:DGatewayConfigFileName = 'gateway.json'
@@ -45,22 +44,6 @@ function Get-DGatewayVersion {
     }
 
     $DGatewayVersion
-}
-
-function Get-DGatewayImage {
-    param(
-        [string] $Platform
-    )
-
-    $DGatewayVersion = Get-DGatewayVersion 'PSModule'
-
-    $image = if ($Platform -ne 'windows') {
-        "devolutions/devolutions-gateway:${DGatewayVersion}-buster"
-    } else {
-        "devolutions/devolutions-gateway:${DGatewayVersion}-servercore-ltsc2019"
-    }
-
-    return $image
 }
 
 class DGatewayListener {
@@ -162,8 +145,6 @@ class DGatewaySubscriber {
 class DGatewayConfig {
     [System.Nullable[Guid]] $Id
     [string] $Hostname
-    [string] $FarmName
-    [string[]] $FarmMembers
 
     [string] $RecordingPath
 
@@ -177,12 +158,6 @@ class DGatewayConfig {
 
     [DGatewayListener[]] $Listeners
     [DGatewaySubscriber] $Subscriber
-
-    [string] $DockerPlatform
-    [string] $DockerIsolation
-    [string] $DockerRestartPolicy
-    [string] $DockerImage
-    [string] $DockerContainerName
 
     [string] $LogDirective
 }
@@ -213,16 +188,11 @@ function Set-DGatewayConfig {
 
         [Guid] $Id,
         [string] $Hostname,
-        [string] $FarmName,
-        [string[]] $FarmMembers,
+
+        [string] $RecordingPath,
 
         [DGatewayListener[]] $Listeners,
         [DGatewaySubscriber] $Subscriber,
-
-        [Obsolete("You should use TlsCertificateFile")]
-        [string] $CertificateFile,
-        [Obsolete("You should use TlsPrivateKeyFile")]
-        [string] $PrivateKeyFile,
 
         [string] $TlsCertificateFile,
         [string] $TlsPrivateKeyFile,
@@ -233,16 +203,7 @@ function Set-DGatewayConfig {
         [string] $DelegationPublicKeyFile,
         [string] $DelegationPrivateKeyFile,
 
-        [DGatewaySubProvisionerKey] $SubProvisionerPublicKey,
-
-        [ValidateSet('linux', 'windows')]
-        [string] $DockerPlatform,
-        [ValidateSet('process', 'hyperv')]
-        [string] $DockerIsolation,
-        [ValidateSet('no', 'on-failure', 'always', 'unless-stopped')]
-        [string] $DockerRestartPolicy,
-        [string] $DockerImage,
-        [string] $DockerContainerName
+        [DGatewaySubProvisionerKey] $SubProvisionerPublicKey
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
@@ -257,14 +218,6 @@ function Set-DGatewayConfig {
         $config = [DGatewayConfig]::new()
     } else {
         $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    }
-
-    if ($PSBoundParameters.ContainsKey('CertificateFile')) {
-        $PSBoundParameters.TlsCertificateFile = $CertificateFile
-    }
-
-    if ($PSBoundParameters.ContainsKey('PrivateKeyFile')) {
-        $PSBoundParameters.TlsPrivateKeyFile = $PrivateKeyFile
     }
 
     $properties = [DGatewayConfig].GetProperties() | ForEach-Object { $_.Name }
@@ -309,14 +262,6 @@ function Get-DGatewayConfig {
             $config.$Name = $Value
         }
     }
-    
-    if ($json.CertificateFile -Ne $null) {
-        $config.TlsCertificateFile = $json.CertificateFile
-    }
-
-    if ($json.PrivateKeyFile -Ne $null) {
-        $config.TlsPrivateKeyFile = $json.PrivateKeyFile
-    }
 
     if ($Expand) {
         Expand-DGatewayConfig $config
@@ -335,26 +280,6 @@ function Expand-DGatewayConfig {
     param(
         [DGatewayConfig] $Config
     )
-
-    if (-Not $config.DockerPlatform) {
-        if ($IsWindows) {
-            $config.DockerPlatform = 'windows'
-        } else {
-            $config.DockerPlatform = 'linux'
-        }
-    }
-
-    if (-Not $config.DockerRestartPolicy) {
-        $config.DockerRestartPolicy = 'always'
-    }
-
-    if (-Not $config.DockerImage) {
-        $config.DockerImage = Get-DGatewayImage -Platform $config.DockerPlatform
-    }
-
-    if (-Not $config.DockerContainerName) {
-        $config.DockerContainerName = 'devolutions-gateway'
-    }
 }
 
 function Find-DGatewayConfig {
@@ -470,51 +395,6 @@ function Reset-DGatewayRecordingPath {
 
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     $Config.RecordingPath = $null
-    Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
-}
-
-function Get-DGatewayFarmName {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath
-    )
-
-    $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).FarmName
-}
-
-function Set-DGatewayFarmName {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath,
-        [Parameter(Mandatory = $true, Position = 0)]
-        [string] $FarmName
-    )
-
-    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    $Config.FarmName = $FarmName
-    Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
-}
-
-function Get-DGatewayFarmMembers {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath
-    )
-
-    $(Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties).FarmMembers
-}
-
-function Set-DGatewayFarmMembers {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath,
-        [Parameter(Mandatory = $true, Position = 0)]
-        [AllowEmptyCollection()]
-        [string[]] $FarmMembers
-    )
-
-    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    $Config.FarmMembers = $FarmMembers
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
@@ -930,45 +810,6 @@ function New-DGatewayToken {
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey
 }
 
-function Get-DGatewayService {
-    param(
-        [string] $ConfigPath,
-        [DGatewayConfig] $Config
-    )
-
-    if ($config.DockerPlatform -eq 'linux') {
-        $ContainerConfigPath = '/etc/devolutions-gateway'
-    } else {
-        $ContainerConfigPath = 'C:\ProgramData\Devolutions\Gateway'
-    }
-
-    $Service = [DockerService]::new()
-    $Service.ContainerName = $config.DockerContainerName
-    $Service.Image = $config.DockerImage
-    $Service.Platform = $config.DockerPlatform
-    $Service.Isolation = $config.DockerIsolation
-    $Service.RestartPolicy = $config.DockerRestartPolicy
-    $Service.TargetPorts = @()
-
-    foreach ($Listener in $config.Listeners) {
-        $InternalUrl = $Listener.InternalUrl -Replace '://\*', '://localhost'
-        $url = [System.Uri]::new($InternalUrl)
-        $Service.TargetPorts += @($url.Port)
-    }
-    $Service.TargetPorts = $Service.TargetPorts | Select-Object -Unique
-
-    $Service.PublishAll = $true
-    $Service.Environment = [ordered]@{
-        'DGATEWAY_CONFIG_PATH' = $ContainerConfigPath;
-        'RUST_BACKTRACE'       = '1';
-        'RUST_LOG'             = 'info';
-    }
-    $Service.Volumes = @("${ConfigPath}:${ContainerConfigPath}")
-    $Service.External = $false
-
-    return $Service
-}
-
 function Get-DGatewayPackage {
     [CmdletBinding()]
     param(
@@ -1117,126 +958,39 @@ function Uninstall-DGatewayPackage {
     }
 }
 
-function Update-DGatewayImage {
+function Start-DGateway {
     [CmdletBinding()]
     param(
         [string] $ConfigPath
     )
 
-    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    Expand-DGatewayConfig -Config $config
-
-    $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
-    Request-ContainerImage -Name $Service.Image
-}
-
-function Get-DGatewayLaunchType {
-    [CmdletBinding()]
-    param(
-        [Parameter(Position = 0)]
-        [ValidateSet('Detect', 'Container', 'Service')]
-        [string] $LaunchType = 'Detect'
-    )
-
-    if ($LaunchType -eq 'Detect') {
-        if (Get-DGatewayVersion 'Installed') {
-            $LaunchType = 'Service'
-        } elseif ($(Get-Command 'docker' -ErrorAction SilentlyContinue)) {
-            $LaunchType = 'Container'
-        } else {
-            $LaunchType = $null
-        }
-    }
-
-    $LaunchType
-}
-
-function Start-DGateway {
-    [CmdletBinding()]
-    param(
-        [string] $ConfigPath,
-        [Parameter(Position = 0)]
-        [ValidateSet('Detect', 'Container', 'Service')]
-        [string] $LaunchType = 'Detect'
-    )
-
-    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    Expand-DGatewayConfig -Config:$config
-
-    $LaunchType = Get-DGatewayLaunchType $LaunchType
-
-    if (-Not $LaunchType) {
-        throw 'No suitable Devolutions Gateway launch type detected'
-    }
-
-    if ($LaunchType -eq 'Container') {
-        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
-
-        # pull docker images only if they are not cached locally
-        if (-Not (Get-ContainerImageId -Name $Service.Image)) {
-            Request-ContainerImage -Name $Service.Image
-        }
-    
-        Start-DockerService -Service $Service -Remove
-    } elseif ($LaunchType -eq 'Service') {
-        if ($IsWindows) {
-            Start-Service 'DevolutionsGateway'
-        } else {
-            throw 'not implemented'
-        }
+    if ($IsWindows) {
+        Start-Service 'DevolutionsGateway'
+    } else {
+        throw 'not implemented'
     }
 }
 
 function Stop-DGateway {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath,
-        [Parameter(Position = 0)]
-        [ValidateSet('Detect', 'Container', 'Service')]
-        [string] $LaunchType = 'Detect',
-        [switch] $Remove
+        [string] $ConfigPath
     )
 
-    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    $config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
-    Expand-DGatewayConfig -Config $config
-
-    $LaunchType = Get-DGatewayLaunchType $LaunchType
-
-    if (-Not $LaunchType) {
-        throw 'No suitable Devolutions Gateway launch type detected'
-    }
-
-    if ($LaunchType -eq 'Container') {
-        $Service = Get-DGatewayService -ConfigPath:$ConfigPath -Config:$config
-
-        Write-Host "Stopping $($Service.ContainerName)"
-        Stop-Container -Name $Service.ContainerName -Quiet
-    
-        if ($Remove) {
-            Remove-Container -Name $Service.ContainerName
-        }
-    } elseif ($LaunchType -eq 'Service') {
-        if ($IsWindows) {
-            Stop-Service 'DevolutionsGateway'
-        } else {
-            throw 'not implemented'
-        }
+    if ($IsWindows) {
+        Stop-Service 'DevolutionsGateway'
+    } else {
+        throw 'not implemented'
     }
 }
 
 function Restart-DGateway {
     [CmdletBinding()]
     param(
-        [string] $ConfigPath,
-        [Parameter(Position = 0)]
-        [ValidateSet('Detect', 'Container', 'Service')]
-        [string] $LaunchType = 'Detect'
+        [string] $ConfigPath
     )
 
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    Stop-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
-    Start-DGateway -ConfigPath:$ConfigPath -LaunchType:$LaunchType
+    Stop-DGateway -ConfigPath:$ConfigPath
+    Start-DGateway -ConfigPath:$ConfigPath
 }

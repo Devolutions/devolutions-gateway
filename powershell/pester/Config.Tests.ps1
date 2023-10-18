@@ -8,24 +8,13 @@ Describe 'Devolutions Gateway config' {
 
 		Context 'Fresh environment' {
 			It 'Creates basic configuration' {
-				Set-DGatewayConfig -ConfigPath:$ConfigPath -Hostname 'gateway.local' -DockerRestartPolicy 'no'
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -Hostname 'gateway.local'
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Hostname | Should -Be 'gateway.local'
 			}
 
 			It 'Sets gateway hostname' {
 				Set-DGatewayHostname -ConfigPath:$ConfigPath 'host1.gateway.local'
 				$(Get-DGatewayHostname -ConfigPath:$ConfigPath) | Should -Be 'host1.gateway.local'
-			}
-
-			It 'Sets gateway farm name' {
-				Set-DGatewayFarmName -ConfigPath:$ConfigPath 'farm.gateway.local'
-				$(Get-DGatewayFarmName -ConfigPath:$ConfigPath) | Should -Be 'farm.gateway.local'
-			}
-
-			It 'Sets gateway farm members' {
-				$FarmMembers = @('host1.gateway.local','host2.gateway.local','host3.gateway.local')
-				Set-DGatewayFarmMembers -ConfigPath:$ConfigPath $FarmMembers
-				$(Get-DGatewayFarmMembers -ConfigPath:$ConfigPath) | Should -Be $FarmMembers
 			}
 
 			It 'Sets gateway listeners' {
@@ -51,6 +40,8 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayRecordingPath -ConfigPath:$ConfigPath) | Should -Be $RecordingPath
 				Reset-DGatewayRecordingPath -ConfigPath:$ConfigPath
 				$(Get-DGatewayRecordingPath -ConfigPath:$ConfigPath) | Should -Be $DefaultRecordingPath
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -RecordingPath $RecordingPath
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).RecordingPath | Should -Be $RecordingPath
 			}
 		}
 	}
