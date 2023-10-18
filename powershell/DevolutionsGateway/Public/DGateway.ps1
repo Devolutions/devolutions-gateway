@@ -165,6 +165,8 @@ class DGatewayConfig {
     [string] $FarmName
     [string[]] $FarmMembers
 
+    [string] $RecordingPath
+
     [string] $TlsCertificateFile
     [string] $TlsPrivateKeyFile
     [string] $ProvisionerPublicKeyFile
@@ -427,6 +429,48 @@ function Get-DGatewayPath() {
         'ConfigPath' { $ConfigPath }
         default { throw("Invalid path type: $PathType") }
     }
+}
+
+function Get-DGatewayRecordingPath {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath
+    )
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+
+    $RecordingPath = $Config.RecordingPath
+
+    if ([string]::IsNullOrEmpty($RecordingPath)) {
+        $RecordingPath = Join-Path $ConfigPath "recordings"
+    }
+
+    $RecordingPath
+}
+
+function Set-DGatewayRecordingPath {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath,
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string] $RecordingPath
+    )
+
+    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+    $Config.RecordingPath = $RecordingPath
+    Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
+}
+
+function Reset-DGatewayRecordingPath {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath
+    )
+
+    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+    $Config.RecordingPath = $null
+    Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
 }
 
 function Get-DGatewayFarmName {
