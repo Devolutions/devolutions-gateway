@@ -47,7 +47,7 @@ fn profile_to_directives(profile: VerbosityProfile) -> &'static str {
     match profile {
         VerbosityProfile::Default => "info",
         VerbosityProfile::Debug => "info,devolutions_gateway=debug,devolutions_gateway::api=trace",
-        VerbosityProfile::TlsTroubleshoot => {
+        VerbosityProfile::Tls => {
             "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
         }
         VerbosityProfile::All => "trace",
