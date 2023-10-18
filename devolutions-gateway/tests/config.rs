@@ -36,7 +36,7 @@ fn sample_1() -> Sample {
         			"ExternalUrl": "wss://*:443"
         		}
         	],
-        	"VerbosityProfile": "tls-troubleshoot"
+        	"VerbosityProfile": "Tls"
         }"#,
         file_conf: ConfFile {
             id: Some(Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap()),
@@ -76,7 +76,7 @@ fn sample_1() -> Sample {
             recording_path: None,
             sogar: None,
             ngrok: None,
-            verbosity_profile: VerbosityProfile::TlsTroubleshoot,
+            verbosity_profile: VerbosityProfile::Tls,
             debug: None,
             rest: Default::default(),
         },

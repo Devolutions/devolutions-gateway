@@ -106,11 +106,11 @@ Currently, stable options are:
 
     Possible values are:
 
-    * `default`: the default profile
-    * `debug`: recommended profile for developers
-    * `tls-troubleshoot`: verbose logging for TLS troubleshooting
-    * `all`: extra-verbose profile, showing all traces
-    * `quiet`: only show warnings and errors
+    * `Default`: the default profile
+    * `Debug`: recommended profile for developers
+    * `Tls`: verbose logging for TLS troubleshooting
+    * `All`: extra-verbose profile, showing all traces
+    * `Quiet`: only show warnings and errors
 
 ## Sample Usage
 

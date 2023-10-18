@@ -689,7 +689,6 @@ pub mod dto {
 
     /// Verbosity profile (pre-defined tracing directives)
     #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize, Default)]
-    #[serde(rename_all = "kebab-case")]
     pub enum VerbosityProfile {
         /// The default profile, mostly info records
         #[default]
@@ -697,7 +696,7 @@ pub mod dto {
         /// Recommended profile for developers
         Debug,
         /// Verbose logging for TLS troubleshooting
-        TlsTroubleshoot,
+        Tls,
         /// Show all traces
         All,
         /// Only show warnings and errors
