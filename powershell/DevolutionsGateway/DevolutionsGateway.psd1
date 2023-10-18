@@ -67,11 +67,8 @@
     FunctionsToExport = @(
         'Find-DGatewayConfig', 'Enter-DGatewayConfig', 'Exit-DGatewayConfig',
         'Set-DGatewayConfig', 'Get-DGatewayConfig',
-        'Set-DGatewayFarmName', 'Get-DGatewayFarmName',
-        'Set-DGatewayFarmMembers', 'Get-DGatewayFarmMembers',
         'Set-DGatewayHostname', 'Get-DGatewayHostname',
         'New-DGatewayListener', 'Get-DGatewayListeners', 'Set-DGatewayListeners',
-        'Set-DGatewayApplicationProtocols', 'Get-DGatewayApplicationProtocols',
         'Get-DGatewayPath', 'Get-DGatewayRecordingPath',
         'Set-DGatewayRecordingPath', 'Reset-DGatewayRecordingPath',
         'Import-DGatewayCertificate',
@@ -79,7 +76,6 @@
         'New-DGatewayDelegationKeyPair', 'Import-DGatewayDelegationKey',
         'New-DGatewayToken',
         'Start-DGateway', 'Stop-DGateway', 'Restart-DGateway',
-        'Get-DGatewayImage', 'Update-DGatewayImage',
         'Get-DGatewayVersion', 'Get-DGatewayPackage',
         'Install-DGatewayPackage', 'Uninstall-DGatewayPackage')
     
