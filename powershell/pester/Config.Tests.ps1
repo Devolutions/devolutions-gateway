@@ -43,6 +43,15 @@ Describe 'Devolutions Gateway config' {
 				$ActualListeners = Get-DGatewayListeners -ConfigPath:$ConfigPath
 				$ExpectedListeners.Count | Should -Be $ActualListeners.Count
 			}
+
+			It 'Sets gateway recording path' {
+				$RecordingPath = "C:\Users\Public\Gateway\Recordings"
+				$DefaultRecordingPath = Join-Path $ConfigPath "recordings"
+				Set-DGatewayRecordingPath -ConfigPath:$ConfigPath $RecordingPath
+				$(Get-DGatewayRecordingPath -ConfigPath:$ConfigPath) | Should -Be $RecordingPath
+				Reset-DGatewayRecordingPath -ConfigPath:$ConfigPath
+				$(Get-DGatewayRecordingPath -ConfigPath:$ConfigPath) | Should -Be $DefaultRecordingPath
+			}
 		}
 	}
 }
