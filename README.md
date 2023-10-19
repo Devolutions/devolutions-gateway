@@ -67,7 +67,7 @@ Currently, stable options are:
 
 - `Ngrok`: JSON object describing the ngrok configuration for ingress listeners:
 
-    * `Authtoken`: specifies the authentication token used to connect to the ngrok service,
+    * `AuthToken`: specifies the authentication token used to connect to the ngrok service,
     * `HeartbeatInterval`: how often the service should heartbeat to the ngrok servers defined as a number in seconds,
     * `HeartbeatTolerance`: reconnect the agent tunnel session if the server does not respond to a heartbeat within this
         tolerance defined as a number on seconds,
@@ -81,7 +81,6 @@ Currently, stable options are:
 
         * `AllowCidrs`: array of CIDRs, rejects connections that do not match the given CIDRs,
         * `DenyCidrs`: array of CIDRS, rejects connections that match the given CIDRs and allows all other CIDRs,
-        * `ProxyProto`: the version of PROXY protocol to use with this tunnel, empty if not using (example values are 1 or 2),
         * `Metadata`: arbitrary user-defined metadata that will appear in the ngrok service API when listing tunnel sessions.
 
         Other options for an HTTP tunnel are:
@@ -89,10 +88,8 @@ Currently, stable options are:
         * `Proto`: MUST be set to `http`,
         * `Domain`: the domain to request, as registered in the ngrok dashboard,
         * `Metadata`: arbitrary user-defined metadata that will appear in the ngrok service API when listing tunnel sessions,
-        * `BasicAuth`: array of username:password combinations to use for basic authenticate (passwords must be at least 8 characters long),
         * `CircuitBreaker`: a float number, reject requests when 5XX responses exceed this ratio,
         * `Compression`: boolean, gzip compress HTTP responses from your web service,
-        * `Schemes`: array of schemes (`http` or `https`), bind to an HTTPS and/or HTTP endpoint.
 
         Other options for a TCP tunnel are:
 
