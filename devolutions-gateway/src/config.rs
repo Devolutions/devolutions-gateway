@@ -897,7 +897,8 @@ pub mod dto {
     #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct NgrokConf {
-        pub authtoken: String,
+        // NOTE: here, we deviate deliberately from ngrok where the name is `authtoken`
+        pub auth_token: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub heartbeat_interval: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -924,8 +925,6 @@ pub mod dto {
         pub remote_addr: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub metadata: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub proxy_proto: Option<i64>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub allow_cidrs: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -938,8 +937,6 @@ pub mod dto {
         pub domain: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub metadata: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub basic_auth: Vec<NgrokBasicAuth>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub circuit_breaker: Option<f64>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -948,60 +945,5 @@ pub mod dto {
         pub allow_cidrs: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub deny_cidrs: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub proxy_proto: Option<i64>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub schemes: Vec<String>,
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone)]
-    pub struct NgrokBasicAuth {
-        pub username: String,
-        pub password: String,
-    }
-
-    impl ser::Serialize for NgrokBasicAuth {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: ser::Serializer,
-        {
-            let username_password = format!("{}:{}", self.username, self.password);
-            serializer.serialize_str(&username_password)
-        }
-    }
-
-    impl<'de> de::Deserialize<'de> for NgrokBasicAuth {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            struct BasicAuthVisitor;
-
-            impl<'de> de::Visitor<'de> for BasicAuthVisitor {
-                type Value = NgrokBasicAuth;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str("a username:password combination")
-                }
-
-                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-                where
-                    E: de::Error,
-                {
-                    let mut it = v.splitn(2, ':');
-                    let username = it
-                        .next()
-                        .ok_or_else(|| de::Error::custom("username is missing"))?
-                        .to_owned();
-                    let password = it
-                        .next()
-                        .ok_or_else(|| de::Error::custom("password is missing"))?
-                        .to_owned();
-                    Ok(NgrokBasicAuth { username, password })
-                }
-            }
-
-            deserializer.deserialize_str(BasicAuthVisitor)
-        }
     }
 }

@@ -21,7 +21,7 @@ impl NgrokSession {
     pub async fn connect(conf: &NgrokConf) -> anyhow::Result<Self> {
         info!("Connecting to ngrok service");
 
-        let mut builder = ngrok::Session::builder().authtoken(&conf.authtoken);
+        let mut builder = ngrok::Session::builder().authtoken(&conf.auth_token);
 
         if let Some(heartbeat_interval) = conf.heartbeat_interval {
             builder = builder.heartbeat_interval(Duration::from_secs(heartbeat_interval));
@@ -48,8 +48,7 @@ impl NgrokSession {
     }
 
     pub fn configure_endpoint(&self, name: &str, conf: &NgrokTunnelConf) -> NgrokTunnel {
-        use ngrok::config::{ProxyProto, Scheme};
-        use std::str::FromStr as _;
+        use ngrok::config::Scheme;
 
         match conf {
             NgrokTunnelConf::Tcp(tcp_conf) => {
@@ -57,10 +56,6 @@ impl NgrokSession {
 
                 if let Some(metadata) = &tcp_conf.metadata {
                     builder = builder.metadata(metadata);
-                }
-
-                if let Some(proxy_proto) = tcp_conf.proxy_proto {
-                    builder = builder.proxy_proto(ProxyProto::from(proxy_proto));
                 }
 
                 builder = tcp_conf
@@ -79,15 +74,15 @@ impl NgrokSession {
                 }
             }
             NgrokTunnelConf::Http(http_conf) => {
-                let mut builder = self.inner.http_endpoint().domain(&http_conf.domain);
+                let mut builder = self
+                    .inner
+                    .http_endpoint()
+                    .domain(&http_conf.domain)
+                    .scheme(Scheme::HTTPS);
 
                 if let Some(metadata) = &http_conf.metadata {
                     builder = builder.metadata(metadata);
                 }
-
-                builder = http_conf.basic_auth.iter().fold(builder, |builder, basic_auth| {
-                    builder.basic_auth(&basic_auth.username, &basic_auth.password)
-                });
 
                 if let Some(circuit_breaker) = http_conf.circuit_breaker {
                     builder = builder.circuit_breaker(circuit_breaker);
@@ -106,16 +101,6 @@ impl NgrokSession {
                     .deny_cidrs
                     .iter()
                     .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
-
-                if let Some(proxy_proto) = http_conf.proxy_proto {
-                    builder = builder.proxy_proto(ProxyProto::from(proxy_proto));
-                }
-
-                builder = http_conf
-                    .schemes
-                    .iter()
-                    .map(|scheme| Scheme::from_str(scheme).unwrap_or(Scheme::HTTPS))
-                    .fold(builder, |builder, scheme| builder.scheme(scheme));
 
                 NgrokTunnel {
                     name: name.to_owned(),

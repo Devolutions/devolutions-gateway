@@ -45,6 +45,7 @@ impl From<&Conf> for ConfigDiagnostic {
                 match tunnel {
                     NgrokTunnelConf::Tcp(tcp_tunnel) => {
                         let url = format!("tcp://{}", tcp_tunnel.remote_addr);
+
                         match Url::parse(&url) {
                             Ok(url) => listeners.push(ListenerUrls {
                                 internal_url: url.clone(),
@@ -56,22 +57,15 @@ impl From<&Conf> for ConfigDiagnostic {
                         }
                     }
                     NgrokTunnelConf::Http(http_tunnel) => {
-                        let schemes = if http_tunnel.schemes.is_empty() {
-                            vec!["https"]
-                        } else {
-                            http_tunnel.schemes.iter().map(String::as_str).collect()
-                        };
+                        let url = format!("https://{}", http_tunnel.domain);
 
-                        for scheme in schemes {
-                            let url = format!("{}://{}", scheme, http_tunnel.domain);
-                            match Url::parse(&url) {
-                                Ok(url) => listeners.push(ListenerUrls {
-                                    internal_url: url.clone(),
-                                    external_url: url.clone(),
-                                }),
-                                Err(error) => {
-                                    warn!(?http_tunnel, %error, "invalid URL for Ngrok HTTP tunnel");
-                                }
+                        match Url::parse(&url) {
+                            Ok(url) => listeners.push(ListenerUrls {
+                                internal_url: url.clone(),
+                                external_url: url.clone(),
+                            }),
+                            Err(error) => {
+                                warn!(?http_tunnel, %error, "invalid URL for Ngrok HTTP tunnel");
                             }
                         }
                     }
