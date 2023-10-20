@@ -93,15 +93,11 @@ pub mod windows {
     use std::sync::Arc;
 
     use anyhow::Context as _;
-    use rustls_cng::{
-        signer::CngSigningKey,
-        store::{CertStore, CertStoreType},
-    };
-    use tokio_rustls::rustls::{
-        server::{ClientHello, ResolvesServerCert},
-        sign::CertifiedKey,
-        Certificate,
-    };
+    use rustls_cng::signer::CngSigningKey;
+    use rustls_cng::store::{CertStore, CertStoreType};
+    use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
+    use tokio_rustls::rustls::sign::CertifiedKey;
+    use tokio_rustls::rustls::Certificate;
 
     use crate::config::dto;
 

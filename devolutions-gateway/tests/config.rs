@@ -89,14 +89,14 @@ fn sample_1() -> Sample {
 fn sample_2() -> Sample {
     Sample {
         json_repr: r#"{
-        	"PrivateKeyFile": "/path/to/tls-private.key",
-        	"CertificateFile": "/path/to/tls-certificate.pem",
-        	"ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
+            "PrivateKeyFile": "/path/to/tls-private.key",
+            "CertificateFile": "/path/to/tls-certificate.pem",
+            "ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
             "UseWindowsCertificateStore": true,
             "WindowsCertificateStoreType": "LocalMachine",
             "WindowsCertificateStoreName": "my",
-        	"Listeners": [],
-        	"LogFile": "/path/to/log/file.log"
+            "Listeners": [],
+            "LogFile": "/path/to/log/file.log"
         }"#,
         file_conf: ConfFile {
             id: None,
