@@ -39,11 +39,11 @@ Currently, stable options are:
 
 - `TlsCertificateSource`: source for the TLS certificate. Possible values are `External` (default) and `System`,
 
-- `TlsCertificateSubjectName`: subject name of the certificate to use for TLS when using system source
+- `TlsCertificateSubjectName`: subject name of the certificate to use for TLS when using system source,
 
-- `TlsCertificateStoreName`: name of the System Certificate Store to use for TLS
+- `TlsCertificateStoreName`: name of the System Certificate Store to use for TLS,
 
-- `TlsCertificateStoreLocation`: location of the System Certificate Store to use for TLS
+- `TlsCertificateStoreLocation`: location of the System Certificate Store to use for TLS,
 
 - `TlsCertificateFile`: path to the certificate to use for TLS,
 

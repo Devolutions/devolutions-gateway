@@ -93,10 +93,6 @@ fn sample_2() -> Sample {
             "PrivateKeyFile": "/path/to/tls-private.key",
             "CertificateFile": "/path/to/tls-certificate.pem",
             "ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
-            "TlsCertificateSource": "System",
-            "TlsCertificateSubjectName": "localhost",
-            "TlsCertificateStoreLocation": "LocalMachine",
-            "TlsCertificateStoreName": "my",
             "Listeners": [],
             "LogFile": "/path/to/log/file.log"
         }"#,
@@ -108,9 +104,46 @@ fn sample_2() -> Sample {
             sub_provisioner_public_key: None,
             delegation_private_key_file: None,
             delegation_private_key_data: None,
-            tls_certificate_source: Some(CertSource::System),
+            tls_certificate_source: None,
             tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
             tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
+            listeners: vec![],
+            subscriber: None,
+            log_file: Some("/path/to/log/file.log".into()),
+            jrl_file: None,
+            plugins: None,
+            recording_path: None,
+            sogar: None,
+            ngrok: None,
+            verbosity_profile: None,
+            debug: None,
+            rest: Default::default(),
+        },
+    }
+}
+
+fn sample_system_store() -> Sample {
+    Sample {
+        json_repr: r#"{
+            "TlsCertificateSource": "System",
+            "TlsCertificateSubjectName": "localhost",
+            "TlsCertificateStoreLocation": "LocalMachine",
+            "TlsCertificateStoreName": "my",
+        }"#,
+        file_conf: ConfFile {
+            id: None,
+            hostname: None,
+            provisioner_public_key_file: None,
+            provisioner_public_key_data: None,
+            sub_provisioner_public_key: None,
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_source: Some(CertSource::System),
+            tls_certificate_file: None,
+            tls_private_key_file: None,
             tls_certificate_subject_name: Some("localhost".to_owned()),
             tls_certificate_store_location: Some(CertStoreLocation::LocalMachine),
             tls_certificate_store_name: Some("my".to_owned()),
@@ -132,6 +165,7 @@ fn sample_2() -> Sample {
 #[rstest]
 #[case(sample_1())]
 #[case(sample_2())]
+#[case(sample_system_store())]
 fn sample_parsing(#[case] sample: Sample) {
     let from_json = serde_json::from_str::<ConfFile>(sample.json_repr)
         .unwrap()
