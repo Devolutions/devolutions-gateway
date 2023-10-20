@@ -822,6 +822,7 @@ dependencies = [
  "proptest",
  "reqwest",
  "rstest",
+ "rustls-cng",
  "serde",
  "serde_derive",
  "serde_json",
@@ -844,7 +845,6 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
- "x509-cert",
  "zeroize",
 ]
 
@@ -3101,6 +3101,18 @@ dependencies = [
  "ring 0.16.20",
  "rustls-webpki",
  "sct",
+]
+
+[[package]]
+name = "rustls-cng"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3612780e9bada1c1f6cf3ad98604c86f403947a78e91943bbec58f690f77ce09"
+dependencies = [
+ "rustls 0.21.7",
+ "sha2 0.10.8",
+ "thiserror",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

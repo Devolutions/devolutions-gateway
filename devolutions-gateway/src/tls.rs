@@ -52,18 +52,105 @@ pub async fn connect(dns_name: &str, stream: TcpStream) -> io::Result<TlsStream<
     Ok(tls_stream)
 }
 
-pub fn build_server_config(
-    certificates: Vec<rustls::Certificate>,
-    private_key: rustls::PrivateKey,
-) -> anyhow::Result<rustls::ServerConfig> {
-    rustls::ServerConfig::builder()
+pub enum CertificateSource {
+    External {
+        certificates: Vec<rustls::Certificate>,
+        private_key: rustls::PrivateKey,
+    },
+    #[cfg(windows)]
+    WindowsCertificateStore {
+        store_type: crate::config::dto::WindowsCertStoreType,
+        store_name: String,
+    },
+}
+
+pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rustls::ServerConfig> {
+    let builder = rustls::ServerConfig::builder()
         .with_cipher_suites(rustls::DEFAULT_CIPHER_SUITES) // = with_safe_default_cipher_suites, but explicit, just to show we are using rustls's default cipher suites
         .with_safe_default_kx_groups()
         .with_protocol_versions(rustls::DEFAULT_VERSIONS) // = with_safe_default_protocol_versions, but explicit as well
         .context("couldn't set supported TLS protocol versions")?
-        .with_no_client_auth()
-        .with_single_cert(certificates, private_key)
-        .context("couldn't set server config cert")
+        .with_no_client_auth();
+
+    match cert_source {
+        CertificateSource::External {
+            certificates,
+            private_key,
+        } => builder
+            .with_single_cert(certificates, private_key)
+            .context("couldn't set server config cert"),
+        #[cfg(windows)]
+        CertificateSource::WindowsCertificateStore { store_type, store_name } => {
+            let resolver = windows::ServerCertResolver::open_store(store_type, &store_name)
+                .context("create ServerCertResolver")?;
+            Ok(builder.with_cert_resolver(Arc::new(resolver)))
+        }
+    }
+}
+
+#[cfg(windows)]
+pub mod windows {
+    use std::sync::Arc;
+
+    use anyhow::Context as _;
+    use rustls_cng::{
+        signer::CngSigningKey,
+        store::{CertStore, CertStoreType},
+    };
+    use tokio_rustls::rustls::{
+        server::{ClientHello, ResolvesServerCert},
+        sign::CertifiedKey,
+        Certificate,
+    };
+
+    use crate::config::dto;
+
+    pub struct ServerCertResolver(CertStore);
+
+    impl ServerCertResolver {
+        pub fn open_store(store_type: dto::WindowsCertStoreType, store_name: &str) -> anyhow::Result<Self> {
+            let store_type = match store_type {
+                dto::WindowsCertStoreType::LocalMachine => CertStoreType::LocalMachine,
+                dto::WindowsCertStoreType::CurrentUser => CertStoreType::CurrentUser,
+                dto::WindowsCertStoreType::CurrentService => CertStoreType::CurrentService,
+            };
+
+            let store = CertStore::open(store_type, store_name).context("open Windows certificate store")?;
+
+            Ok(Self(store))
+        }
+    }
+
+    impl ResolvesServerCert for ServerCertResolver {
+        fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+            trace!(server_name = ?client_hello.server_name());
+            let name = client_hello.server_name()?;
+
+            // look up certificate by subject
+            let contexts = self.0.find_by_subject_str(name).ok()?;
+
+            // attempt to acquire a private key and construct CngSigningKey
+            let (context, key) = contexts.into_iter().find_map(|ctx| {
+                let key = ctx.acquire_key().ok()?;
+                CngSigningKey::new(key).ok().map(|key| (ctx, key))
+            })?;
+
+            trace!(key_algorithm_group = ?key.key().algorithm_group());
+            trace!(key_algorithm = ?key.key().algorithm());
+
+            // attempt to acquire a full certificate chain
+            let chain = context.as_chain_der().ok()?;
+            let certs = chain.into_iter().map(Certificate).collect();
+
+            // return CertifiedKey instance
+            Some(Arc::new(CertifiedKey {
+                cert: certs,
+                key: Arc::new(key),
+                ocsp: None,
+                sct_list: None,
+            }))
+        }
+    }
 }
 
 pub mod sanity {

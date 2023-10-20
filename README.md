@@ -41,6 +41,12 @@ Currently, stable options are:
 
 - `TlsPrivateKeyFile`: path to the private key to use for TLS,
 
+- `UseWindowsCertificateStore`: enable usage of the Windows Certificate Store,
+
+- `WindowsCertificateStoreType`: type of the Windows Certificate Store to use,
+
+- `WindowsCertificateStoreName`: name of the Windows Certificate Store to use,
+
 - `Listeners`: array of listener URLs.
     Each element has the following schema: 
 
