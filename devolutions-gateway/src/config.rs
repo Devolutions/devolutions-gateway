@@ -116,45 +116,61 @@ impl Conf {
             "at least one HTTP-capable listener is required"
         );
 
-        let tls = conf_file
-            .tls_certificate_file
-            .as_ref()
-            .zip(conf_file.tls_private_key_file.as_ref())
-            .map(|(cert_file, key_file)| -> anyhow::Result<_> {
-                let certificates = read_rustls_certificate_file(cert_file).context("TLS certificate")?;
-                let private_key = read_rustls_priv_key_file(key_file).context("TLS private key")?;
-                Ok(crate::tls::CertificateSource::External {
-                    certificates,
-                    private_key,
-                })
-            })
-            .transpose()?
-            .or_else(|| {
-                #[cfg(windows)]
-                {
-                    conf_file.use_windows_certificate_store.unwrap_or(false).then(|| {
-                        crate::tls::CertificateSource::WindowsCertificateStore {
-                            store_type: conf_file.windows_certificate_store_type.unwrap_or_default(),
-                            store_name: conf_file
-                                .windows_certificate_store_name
-                                .clone()
-                                .unwrap_or_else(|| String::from("my")),
-                        }
-                    })
-                }
-
-                #[cfg(not(windows))]
-                {
-                    None
-                }
-            })
-            .map(|cert_source| Tls::init(cert_source).context("failed to init TLS config"))
-            .transpose()?;
-
         let requires_tls = listeners
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
 
+        let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
+            _ if !requires_tls => {
+                trace!("not configured to use HTTPS, ignoring TLS configuration");
+                None
+            }
+            dto::CertSource::External => {
+                let certificates = conf_file
+                    .tls_certificate_file
+                    .as_ref()
+                    .context("TLS certificate file is missing")?
+                    .pipe_deref(read_rustls_certificate_file)
+                    .context("TLS certificate")?;
+
+                let private_key = conf_file
+                    .tls_private_key_file
+                    .as_ref()
+                    .context("TLS private key file is missing")?
+                    .pipe_deref(read_rustls_priv_key_file)
+                    .context("TLS private key")?;
+
+                let cert_source = crate::tls::CertificateSource::External {
+                    certificates,
+                    private_key,
+                };
+
+                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+            }
+            dto::CertSource::System => {
+                let cert_subject_name = conf_file
+                    .tls_certificate_subject_name
+                    .clone()
+                    .context("TLS certificate subject name is missing")?;
+
+                let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
+
+                let store_name = conf_file
+                    .tls_certificate_store_name
+                    .clone()
+                    .unwrap_or_else(|| String::from("my"));
+
+                let cert_source = crate::tls::CertificateSource::SystemStore {
+                    cert_subject_name,
+                    store_location,
+                    store_name,
+                };
+
+                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+            }
+        };
+
+        // Sanity check
         if requires_tls && tls.is_none() {
             anyhow::bail!("TLS usage implied but TLS configuration is missing (certificate or/and private key)");
         }
@@ -595,21 +611,24 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
 
+        /// Source for the TLS certificate
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_source: Option<CertSource>,
         /// Certificate to use for TLS
-        #[serde(alias = "CertificateFile")]
+        #[serde(alias = "CertificateFile", skip_serializing_if = "Option::is_none")]
         pub tls_certificate_file: Option<Utf8PathBuf>,
         /// Private key to use for TLS
-        #[serde(alias = "PrivateKeyFile")]
+        #[serde(alias = "PrivateKeyFile", skip_serializing_if = "Option::is_none")]
         pub tls_private_key_file: Option<Utf8PathBuf>,
-        /// Enable usage of the Windows Certificate Store
+        /// Subject name of the certificate to use for TLS
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub use_windows_certificate_store: Option<bool>,
-        /// Type of the Windows Certificate Store to use
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub windows_certificate_store_type: Option<WindowsCertStoreType>,
+        pub tls_certificate_subject_name: Option<String>,
         /// Name of the Windows Certificate Store to use
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub windows_certificate_store_name: Option<String>,
+        pub tls_certificate_store_name: Option<String>,
+        /// Location of the Windows Certificate Store to use
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_store_location: Option<CertStoreLocation>,
 
         /// Listeners to launch at startup
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -668,11 +687,12 @@ pub mod dto {
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,
                 delegation_private_key_data: None,
+                tls_certificate_source: None,
                 tls_certificate_file: None,
                 tls_private_key_file: None,
-                use_windows_certificate_store: None,
-                windows_certificate_store_type: None,
-                windows_certificate_store_name: None,
+                tls_certificate_subject_name: None,
+                tls_certificate_store_name: None,
+                tls_certificate_store_location: None,
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8181".try_into().unwrap(),
@@ -952,10 +972,19 @@ pub mod dto {
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
-    pub enum WindowsCertStoreType {
+    pub enum CertSource {
+        /// Provided by filesystem
         #[default]
-        LocalMachine,
+        External,
+        /// Provided by Operating System (Windows Certificate Store, etc)
+        System,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
+    pub enum CertStoreLocation {
+        #[default]
         CurrentUser,
         CurrentService,
+        LocalMachine,
     }
 }

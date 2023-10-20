@@ -57,9 +57,9 @@ pub enum CertificateSource {
         certificates: Vec<rustls::Certificate>,
         private_key: rustls::PrivateKey,
     },
-    #[cfg(windows)]
-    WindowsCertificateStore {
-        store_type: crate::config::dto::WindowsCertStoreType,
+    SystemStore {
+        cert_subject_name: String,
+        store_location: crate::config::dto::CertStoreLocation,
         store_name: String,
     },
 }
@@ -79,11 +79,20 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
         } => builder
             .with_single_cert(certificates, private_key)
             .context("couldn't set server config cert"),
+
         #[cfg(windows)]
-        CertificateSource::WindowsCertificateStore { store_type, store_name } => {
-            let resolver = windows::ServerCertResolver::open_store(store_type, &store_name)
+        CertificateSource::SystemStore {
+            cert_subject_name,
+            store_location,
+            store_name,
+        } => {
+            let resolver = windows::ServerCertResolver::new(cert_subject_name, store_location, &store_name)
                 .context("create ServerCertResolver")?;
             Ok(builder.with_cert_resolver(Arc::new(resolver)))
+        }
+        #[cfg(not(windows))]
+        CertificateSource::SystemStore { .. } => {
+            bail!("System Certificate Store not supported for this platform")
         }
     }
 }
@@ -101,50 +110,90 @@ pub mod windows {
 
     use crate::config::dto;
 
-    pub struct ServerCertResolver(CertStore);
+    pub struct ServerCertResolver {
+        subject_name: String,
+        store: CertStore,
+    }
 
     impl ServerCertResolver {
-        pub fn open_store(store_type: dto::WindowsCertStoreType, store_name: &str) -> anyhow::Result<Self> {
+        pub fn new(
+            cert_subject_name: String,
+            store_type: dto::CertStoreLocation,
+            store_name: &str,
+        ) -> anyhow::Result<Self> {
             let store_type = match store_type {
-                dto::WindowsCertStoreType::LocalMachine => CertStoreType::LocalMachine,
-                dto::WindowsCertStoreType::CurrentUser => CertStoreType::CurrentUser,
-                dto::WindowsCertStoreType::CurrentService => CertStoreType::CurrentService,
+                dto::CertStoreLocation::LocalMachine => CertStoreType::LocalMachine,
+                dto::CertStoreLocation::CurrentUser => CertStoreType::CurrentUser,
+                dto::CertStoreLocation::CurrentService => CertStoreType::CurrentService,
             };
 
             let store = CertStore::open(store_type, store_name).context("open Windows certificate store")?;
 
-            Ok(Self(store))
+            Ok(Self {
+                subject_name: cert_subject_name,
+                store,
+            })
         }
-    }
 
-    impl ResolvesServerCert for ServerCertResolver {
-        fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
-            trace!(server_name = ?client_hello.server_name());
-            let name = client_hello.server_name()?;
+        fn resolve(&self, client_hello: ClientHello) -> anyhow::Result<Arc<CertifiedKey>> {
+            trace!(server_name = ?client_hello.server_name(), "Received ClientHello");
 
-            // look up certificate by subject
-            let contexts = self.0.find_by_subject_str(name).ok()?;
+            let request_server_name = client_hello
+                .server_name()
+                .context("server name missing from ClientHello")?;
 
-            // attempt to acquire a private key and construct CngSigningKey
-            let (context, key) = contexts.into_iter().find_map(|ctx| {
-                let key = ctx.acquire_key().ok()?;
-                CngSigningKey::new(key).ok().map(|key| (ctx, key))
-            })?;
+            if request_server_name != self.subject_name {
+                warn!(
+                    request_server_name,
+                    expected_server_name = self.subject_name,
+                    "Subject name mismatch"
+                )
+            }
+
+            // Look up certificate by subject
+            // TODO(perf): the resolution result could probably be cached
+            let contexts = self
+                .store
+                .find_by_subject_str(&self.subject_name)
+                .context("failed to find server certificate from system store")?;
+
+            // Attempt to acquire a private key and construct CngSigningKey
+            let (context, key) = contexts
+                .into_iter()
+                .find_map(|ctx| {
+                    let key = ctx.acquire_key().ok()?;
+                    CngSigningKey::new(key).ok().map(|key| (ctx, key))
+                })
+                .context("failed to aquire private key for certificate")?;
 
             trace!(key_algorithm_group = ?key.key().algorithm_group());
             trace!(key_algorithm = ?key.key().algorithm());
 
             // attempt to acquire a full certificate chain
-            let chain = context.as_chain_der().ok()?;
+            let chain = context
+                .as_chain_der()
+                .context("certification chain is not available for this certificate")?;
             let certs = chain.into_iter().map(Certificate).collect();
 
             // return CertifiedKey instance
-            Some(Arc::new(CertifiedKey {
+            Ok(Arc::new(CertifiedKey {
                 cert: certs,
                 key: Arc::new(key),
                 ocsp: None,
                 sct_list: None,
             }))
+        }
+    }
+
+    impl ResolvesServerCert for ServerCertResolver {
+        fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+            match self.resolve(client_hello) {
+                Ok(certified_key) => Some(certified_key),
+                Err(error) => {
+                    debug!(error = format!("{error:#?}"), "Failed to resolve TLS certificate");
+                    None
+                }
+            }
         }
     }
 }
