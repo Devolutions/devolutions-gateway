@@ -9,7 +9,7 @@ struct Sample {
     file_conf: ConfFile,
 }
 
-fn sample_1() -> Sample {
+fn hub_sample() -> Sample {
     Sample {
         json_repr: r#"{
         	"Id": "123e4567-e89b-12d3-a456-426614174000",
@@ -57,8 +57,12 @@ fn sample_1() -> Sample {
                 format: PrivKeyFormat::Pkcs8,
                 encoding: DataEncoding::Multibase,
             }),
+            tls_certificate_source: None,
             tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
             tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
             listeners: vec![
                 ListenerConf {
                     internal_url: "tcp://*:8080".try_into().unwrap(),
@@ -76,21 +80,21 @@ fn sample_1() -> Sample {
             recording_path: None,
             sogar: None,
             ngrok: None,
-            verbosity_profile: VerbosityProfile::Tls,
+            verbosity_profile: Some(VerbosityProfile::Tls),
             debug: None,
             rest: Default::default(),
         },
     }
 }
 
-fn sample_2() -> Sample {
+fn legacy_sample() -> Sample {
     Sample {
         json_repr: r#"{
-        	"PrivateKeyFile": "/path/to/tls-private.key",
-        	"CertificateFile": "/path/to/tls-certificate.pem",
-        	"ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
-        	"Listeners": [],
-        	"LogFile": "/path/to/log/file.log"
+            "PrivateKeyFile": "/path/to/tls-private.key",
+            "CertificateFile": "/path/to/tls-certificate.pem",
+            "ProvisionerPublicKeyFile": "/path/to/provisioner.pub.key",
+            "Listeners": [],
+            "LogFile": "/path/to/log/file.log"
         }"#,
         file_conf: ConfFile {
             id: None,
@@ -100,8 +104,12 @@ fn sample_2() -> Sample {
             sub_provisioner_public_key: None,
             delegation_private_key_file: None,
             delegation_private_key_data: None,
+            tls_certificate_source: None,
             tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
             tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
             listeners: vec![],
             subscriber: None,
             log_file: Some("/path/to/log/file.log".into()),
@@ -110,7 +118,44 @@ fn sample_2() -> Sample {
             recording_path: None,
             sogar: None,
             ngrok: None,
-            verbosity_profile: VerbosityProfile::Default,
+            verbosity_profile: None,
+            debug: None,
+            rest: Default::default(),
+        },
+    }
+}
+
+fn system_store_sample() -> Sample {
+    Sample {
+        json_repr: r#"{
+            "TlsCertificateSource": "System",
+            "TlsCertificateSubjectName": "localhost",
+            "TlsCertificateStoreLocation": "LocalMachine",
+            "TlsCertificateStoreName": "my"
+        }"#,
+        file_conf: ConfFile {
+            id: None,
+            hostname: None,
+            provisioner_public_key_file: None,
+            provisioner_public_key_data: None,
+            sub_provisioner_public_key: None,
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_source: Some(CertSource::System),
+            tls_certificate_file: None,
+            tls_private_key_file: None,
+            tls_certificate_subject_name: Some("localhost".to_owned()),
+            tls_certificate_store_location: Some(CertStoreLocation::LocalMachine),
+            tls_certificate_store_name: Some("my".to_owned()),
+            listeners: vec![],
+            subscriber: None,
+            log_file: None,
+            jrl_file: None,
+            plugins: None,
+            recording_path: None,
+            sogar: None,
+            ngrok: None,
+            verbosity_profile: None,
             debug: None,
             rest: Default::default(),
         },
@@ -118,8 +163,9 @@ fn sample_2() -> Sample {
 }
 
 #[rstest]
-#[case(sample_1())]
-#[case(sample_2())]
+#[case(hub_sample())]
+#[case(legacy_sample())]
+#[case(system_store_sample())]
 fn sample_parsing(#[case] sample: Sample) {
     let from_json = serde_json::from_str::<ConfFile>(sample.json_repr)
         .unwrap()

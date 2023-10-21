@@ -43,45 +43,21 @@ pub struct TlsPublicKey(pub Vec<u8>);
 #[derive(Clone)]
 pub struct Tls {
     pub acceptor: tokio_rustls::TlsAcceptor,
-    pub leaf_certificate: rustls::Certificate,
-    pub leaf_public_key: TlsPublicKey,
 }
 
 impl fmt::Debug for Tls {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("TlsConfig")
-            .field("certificate", &self.leaf_certificate)
-            .field("public_key", &self.leaf_public_key)
-            .finish_non_exhaustive()
+        f.debug_struct("TlsConfig").finish_non_exhaustive()
     }
 }
 
 impl Tls {
-    fn init(certificates: Vec<rustls::Certificate>, private_key: rustls::PrivateKey) -> anyhow::Result<Self> {
-        use x509_cert::der::Decode as _;
+    fn init(cert_source: crate::tls::CertificateSource) -> anyhow::Result<Self> {
+        let tls_server_config = crate::tls::build_server_config(cert_source).context("failed build TLS config")?;
 
-        let leaf_certificate = certificates.last().context("TLS leaf certificate is missing")?.clone();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config));
 
-        let leaf_public_key = x509_cert::Certificate::from_der(&leaf_certificate.0)
-            .context("failed to parse leaf TLS certificate")?
-            .tbs_certificate
-            .subject_public_key_info
-            .subject_public_key
-            .as_bytes()
-            .context("subject public key BIT STRING is not aligned")?
-            .to_owned()
-            .pipe(TlsPublicKey);
-
-        let rustls_config =
-            crate::tls::build_server_config(certificates, private_key).context("failed build TLS config")?;
-
-        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(rustls_config));
-
-        Ok(Self {
-            acceptor,
-            leaf_certificate,
-            leaf_public_key,
-        })
+        Ok(Self { acceptor })
     }
 }
 
@@ -140,21 +116,61 @@ impl Conf {
             "at least one HTTP-capable listener is required"
         );
 
-        let tls = conf_file
-            .tls_certificate_file
-            .as_ref()
-            .zip(conf_file.tls_private_key_file.as_ref())
-            .map(|(cert_file, key_file)| {
-                let tls_certificate = read_rustls_certificate_file(cert_file).context("TLS certificate")?;
-                let tls_private_key = read_rustls_priv_key_file(key_file).context("TLS private key")?;
-                Tls::init(tls_certificate, tls_private_key).context("failed to init TLS config")
-            })
-            .transpose()?;
-
         let requires_tls = listeners
             .iter()
             .any(|l| matches!(l.internal_url.scheme(), "https" | "wss"));
 
+        let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
+            _ if !requires_tls => {
+                trace!("not configured to use HTTPS, ignoring TLS configuration");
+                None
+            }
+            dto::CertSource::External => {
+                let certificates = conf_file
+                    .tls_certificate_file
+                    .as_ref()
+                    .context("TLS certificate file is missing")?
+                    .pipe_deref(read_rustls_certificate_file)
+                    .context("TLS certificate")?;
+
+                let private_key = conf_file
+                    .tls_private_key_file
+                    .as_ref()
+                    .context("TLS private key file is missing")?
+                    .pipe_deref(read_rustls_priv_key_file)
+                    .context("TLS private key")?;
+
+                let cert_source = crate::tls::CertificateSource::External {
+                    certificates,
+                    private_key,
+                };
+
+                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+            }
+            dto::CertSource::System => {
+                let cert_subject_name = conf_file
+                    .tls_certificate_subject_name
+                    .clone()
+                    .context("TLS certificate subject name is missing")?;
+
+                let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
+
+                let store_name = conf_file
+                    .tls_certificate_store_name
+                    .clone()
+                    .unwrap_or_else(|| String::from("my"));
+
+                let cert_source = crate::tls::CertificateSource::SystemStore {
+                    cert_subject_name,
+                    store_location,
+                    store_name,
+                };
+
+                Tls::init(cert_source).context("failed to init TLS config")?.pipe(Some)
+            }
+        };
+
+        // Sanity check
         if requires_tls && tls.is_none() {
             anyhow::bail!("TLS usage implied but TLS configuration is missing (certificate or/and private key)");
         }
@@ -217,7 +233,7 @@ impl Conf {
             sogar: conf_file.sogar.clone().unwrap_or_default(),
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
-            verbosity_profile: conf_file.verbosity_profile,
+            verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -561,8 +577,6 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 pub mod dto {
     use std::collections::HashMap;
 
-    use serde::{de, ser};
-
     use super::*;
 
     /// Source of truth for Gateway configuration
@@ -597,12 +611,24 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
 
+        /// Source for the TLS certificate
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_source: Option<CertSource>,
         /// Certificate to use for TLS
-        #[serde(alias = "CertificateFile")]
+        #[serde(alias = "CertificateFile", skip_serializing_if = "Option::is_none")]
         pub tls_certificate_file: Option<Utf8PathBuf>,
         /// Private key to use for TLS
-        #[serde(alias = "PrivateKeyFile")]
+        #[serde(alias = "PrivateKeyFile", skip_serializing_if = "Option::is_none")]
         pub tls_private_key_file: Option<Utf8PathBuf>,
+        /// Subject name of the certificate to use for TLS
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_subject_name: Option<String>,
+        /// Name of the Windows Certificate Store to use
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_store_name: Option<String>,
+        /// Location of the Windows Certificate Store to use
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_certificate_store_location: Option<CertStoreLocation>,
 
         /// Listeners to launch at startup
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -621,8 +647,8 @@ pub mod dto {
         pub ngrok: Option<NgrokConf>,
 
         /// Verbosity profile
-        #[serde(default, skip_serializing_if = "VerbosityProfile::is_default")]
-        pub verbosity_profile: VerbosityProfile,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub verbosity_profile: Option<VerbosityProfile>,
 
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -661,8 +687,12 @@ pub mod dto {
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,
                 delegation_private_key_data: None,
+                tls_certificate_source: None,
                 tls_certificate_file: None,
                 tls_private_key_file: None,
+                tls_certificate_subject_name: None,
+                tls_certificate_store_name: None,
+                tls_certificate_store_location: None,
                 listeners: vec![
                     ListenerConf {
                         internal_url: "tcp://*:8181".try_into().unwrap(),
@@ -675,7 +705,7 @@ pub mod dto {
                 ],
                 subscriber: None,
                 ngrok: None,
-                verbosity_profile: VerbosityProfile::default(),
+                verbosity_profile: None,
                 log_file: None,
                 jrl_file: None,
                 plugins: None,
@@ -701,12 +731,6 @@ pub mod dto {
         All,
         /// Only show warnings and errors
         Quiet,
-    }
-
-    impl VerbosityProfile {
-        pub fn is_default(&self) -> bool {
-            Self::default().eq(self)
-        }
     }
 
     /// Unsafe debug options that should only ever be used at development stage
@@ -796,7 +820,7 @@ pub mod dto {
         }
     }
 
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
     pub enum SogarPermission {
         Push,
         Pull,
@@ -810,7 +834,7 @@ pub mod dto {
     }
 
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
     pub enum DataEncoding {
         #[default]
         Multibase,
@@ -820,13 +844,13 @@ pub mod dto {
         Base64UrlPad,
     }
 
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
     pub enum CertFormat {
         #[default]
         X509,
     }
 
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
     pub enum PrivKeyFormat {
         #[default]
         Pkcs8,
@@ -835,7 +859,7 @@ pub mod dto {
     }
 
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
     pub enum PubKeyFormat {
         #[default]
         Spki,
@@ -945,5 +969,22 @@ pub mod dto {
         pub allow_cidrs: Vec<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub deny_cidrs: Vec<String>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
+    pub enum CertSource {
+        /// Provided by filesystem
+        #[default]
+        External,
+        /// Provided by Operating System (Windows Certificate Store, etc)
+        System,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize, Deserialize)]
+    pub enum CertStoreLocation {
+        #[default]
+        CurrentUser,
+        CurrentService,
+        LocalMachine,
     }
 }

@@ -37,6 +37,14 @@ Currently, stable options are:
 
 - `DelegationPrivateKeyFile`: path to the delegation private key (used to decipher sensitive data from tokens),
 
+- `TlsCertificateSource`: source for the TLS certificate. Possible values are `External` (default) and `System`,
+
+- `TlsCertificateSubjectName`: subject name of the certificate to use for TLS when using system source,
+
+- `TlsCertificateStoreName`: name of the System Certificate Store to use for TLS,
+
+- `TlsCertificateStoreLocation`: location of the System Certificate Store to use for TLS,
+
 - `TlsCertificateFile`: path to the certificate to use for TLS,
 
 - `TlsPrivateKeyFile`: path to the private key to use for TLS,

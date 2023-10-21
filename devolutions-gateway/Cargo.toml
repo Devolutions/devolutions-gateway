@@ -51,7 +51,6 @@ backoff = "0.4"
 # Security, crypto…
 picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509"] }
 zeroize = { version = "1.6", features = ["derive"] }
-x509-cert = { version = "0.2", features = ["std"] }
 multibase = "0.9"
 
 # Logging
@@ -93,6 +92,9 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 
 # For KDC proxy
 portpicker = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+rustls-cng = "0.3"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
