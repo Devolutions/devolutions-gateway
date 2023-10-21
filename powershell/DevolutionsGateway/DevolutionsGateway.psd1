@@ -67,6 +67,7 @@
     FunctionsToExport = @(
         'Find-DGatewayConfig', 'Enter-DGatewayConfig', 'Exit-DGatewayConfig',
         'Set-DGatewayConfig', 'Get-DGatewayConfig',
+        'New-DGatewayNgrokConfig', 'New-DGatewayNgrokTunnel',
         'Set-DGatewayHostname', 'Get-DGatewayHostname',
         'New-DGatewayListener', 'Get-DGatewayListeners', 'Set-DGatewayListeners',
         'Get-DGatewayPath', 'Get-DGatewayRecordingPath',

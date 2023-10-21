@@ -5,17 +5,17 @@ Describe 'Devolutions Gateway certificate import' {
 		BeforeAll {
 			$DummyPrivateKey = Join-Path $TestDrive 'dummy.key'
 			New-Item -Path $DummyPrivateKey -Value 'dummy'
-
 			$ConfigPath = Join-Path $TestDrive 'Gateway'
 		}
 
 		It 'Smoke' {
-			ForEach ($certFile in Get-ChildItem -Path ./ImportCertificate/WellOrdered) {
+			(Get-Item -Path ".\ImportCertificate\WellOrdered\*.crt") | ForEach-Object {
+				$CertFile = $_.FullName
 				$expected = Get-Content -Path $certFile
 
 				Import-DGatewayCertificate -ConfigPath:$ConfigPath -CertificateFile $certFile -PrivateKeyFile $DummyPrivateKey
 
-				$resultingFile = Join-Path $TestDrive 'Gateway' 'server.crt'
+				$resultingFile = Join-Path $ConfigPath 'server.crt'
 				$result = Get-Content -Path $resultingFile
 
 				$result | Should -Be $expected
@@ -23,13 +23,14 @@ Describe 'Devolutions Gateway certificate import' {
 		}
 
 		It 'Sorting' {
-			ForEach ($unorderedCertFile in Get-ChildItem -Path ./ImportCertificate/Unordered) {
-				$wellOrderedCertFile = Join-Path './ImportCertificate/WellOrdered' $unorderedCertFile.Name
+			(Get-Item -Path ".\ImportCertificate\Unordered\*.crt") | ForEach-Object {
+				$unorderedCertFile = $_.FullName
+				$wellOrderedCertFile = $_.FullName -Replace 'Unordered', 'WellOrdered'
 				$expected = Get-Content -Path $wellOrderedCertFile
 
 				Import-DGatewayCertificate -ConfigPath:$ConfigPath -CertificateFile $unorderedCertFile -PrivateKeyFile $DummyPrivateKey
 
-				$resultingFile = Join-Path $TestDrive 'Gateway' 'server.crt'
+				$resultingFile = Join-Path $ConfigPath 'server.crt'
 				$result = Get-Content -Path $ResultingFile
 
 				$result | Should -Be $expected
