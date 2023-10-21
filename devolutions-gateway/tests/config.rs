@@ -9,7 +9,7 @@ struct Sample {
     file_conf: ConfFile,
 }
 
-fn sample_1() -> Sample {
+fn hub_sample() -> Sample {
     Sample {
         json_repr: r#"{
         	"Id": "123e4567-e89b-12d3-a456-426614174000",
@@ -87,7 +87,7 @@ fn sample_1() -> Sample {
     }
 }
 
-fn sample_2() -> Sample {
+fn legacy_sample() -> Sample {
     Sample {
         json_repr: r#"{
             "PrivateKeyFile": "/path/to/tls-private.key",
@@ -125,13 +125,13 @@ fn sample_2() -> Sample {
     }
 }
 
-fn sample_system_store() -> Sample {
+fn system_store_sample() -> Sample {
     Sample {
         json_repr: r#"{
             "TlsCertificateSource": "System",
             "TlsCertificateSubjectName": "localhost",
             "TlsCertificateStoreLocation": "LocalMachine",
-            "TlsCertificateStoreName": "my",
+            "TlsCertificateStoreName": "my"
         }"#,
         file_conf: ConfFile {
             id: None,
@@ -149,7 +149,7 @@ fn sample_system_store() -> Sample {
             tls_certificate_store_name: Some("my".to_owned()),
             listeners: vec![],
             subscriber: None,
-            log_file: Some("/path/to/log/file.log".into()),
+            log_file: None,
             jrl_file: None,
             plugins: None,
             recording_path: None,
@@ -163,9 +163,9 @@ fn sample_system_store() -> Sample {
 }
 
 #[rstest]
-#[case(sample_1())]
-#[case(sample_2())]
-#[case(sample_system_store())]
+#[case(hub_sample())]
+#[case(legacy_sample())]
+#[case(system_store_sample())]
 fn sample_parsing(#[case] sample: Sample) {
     let from_json = serde_json::from_str::<ConfFile>(sample.json_repr)
         .unwrap()

@@ -92,7 +92,7 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
         }
         #[cfg(not(windows))]
         CertificateSource::SystemStore { .. } => {
-            bail!("System Certificate Store not supported for this platform")
+            anyhow::bail!("System Certificate Store not supported for this platform")
         }
     }
 }
