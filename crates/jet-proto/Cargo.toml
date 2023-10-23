@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 log = "0.4"
 byteorder = "1.4"
-uuid = { version = "1.4", features = ["v4"] }
+uuid = { version = "1.5", features = ["v4"] }
 httparse = "1.8"
 http = "0.2"
 
