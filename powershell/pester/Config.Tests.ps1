@@ -97,6 +97,20 @@ Describe 'Devolutions Gateway config' {
 				$Tunnels.'tcp-endpoint'.RemoteAddr | Should -Be $tcpTunnel.RemoteAddr
 				$Tunnels.'tcp-endpoint'.AllowCidrs | Should -Be $tcpTunnel.AllowCidrs
 			}
+
+			It 'Sets TLS certificate configuration' {
+				$Params = @{
+					TlsCertificateSource = "System"
+					TlsCertificateSubjectName = "dvls.ad.it-help.ninja"
+					TlsCertificateStoreName = "My"
+					TlsCertificateStoreLocation = "LocalMachine"
+				}
+				Set-DGatewayConfig -ConfigPath:$ConfigPath @Params
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateSource | Should -Be "System"
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateSubjectName | Should -Be "dvls.ad.it-help.ninja"
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateStoreName | Should -Be "My"
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateStoreLocation | Should -Be "LocalMachine"
+			}
 		}
 	}
 }
