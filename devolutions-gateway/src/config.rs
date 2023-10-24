@@ -126,19 +126,28 @@ impl Conf {
                 None
             }
             dto::CertSource::External => {
-                let certificates = conf_file
+                let certificate_path = conf_file
                     .tls_certificate_file
                     .as_ref()
-                    .context("TLS certificate file is missing")?
-                    .pipe_deref(read_rustls_certificate_file)
-                    .context("TLS certificate")?;
+                    .context("TLS usage implied, but TLS certificate file is missing")?;
 
-                let private_key = conf_file
-                    .tls_private_key_file
-                    .as_ref()
-                    .context("TLS private key file is missing")?
-                    .pipe_deref(read_rustls_priv_key_file)
-                    .context("TLS private key")?;
+                let (certificates, private_key) = match certificate_path.extension() {
+                    Some("pfx" | "p12") => read_pfx_file(certificate_path, conf_file.tls_private_key_password.as_ref())
+                        .context("read PFX/PKCS12 file")?,
+                    None | Some(_) => {
+                        let certificates =
+                            read_rustls_certificate_file(certificate_path).context("read TLS certificate")?;
+
+                        let private_key = conf_file
+                            .tls_private_key_file
+                            .as_ref()
+                            .context("TLS private key file is missing")?
+                            .pipe_deref(read_rustls_priv_key_file)
+                            .context("read TLS private key")?;
+
+                        (certificates, private_key)
+                    }
+                };
 
                 let cert_source = crate::tls::CertificateSource::External {
                     certificates,
@@ -151,7 +160,7 @@ impl Conf {
                 let cert_subject_name = conf_file
                     .tls_certificate_subject_name
                     .clone()
-                    .context("TLS certificate subject name is missing")?;
+                    .context("TLS usage implied, but TLS certificate subject name is missing")?;
 
                 let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
@@ -373,6 +382,117 @@ fn default_hostname() -> Option<String> {
     hostname::get().ok()?.into_string().ok()
 }
 
+fn read_pfx_file(
+    path: &Utf8Path,
+    password: Option<&dto::Password>,
+) -> anyhow::Result<(Vec<rustls::Certificate>, rustls::PrivateKey)> {
+    use picky::pkcs12::{
+        Pfx, Pkcs12AttributeKind, Pkcs12CryptoContext, Pkcs12ParsingParams, SafeBagKind, SafeContentsKind,
+    };
+    use picky::x509::certificate::CertType;
+    use std::cmp::Ordering;
+
+    let crypto_context = password
+        .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.get()))
+        .unwrap_or_else(|| Pkcs12CryptoContext::new_without_password());
+    let parsing_params = Pkcs12ParsingParams::default();
+
+    let pfx_contents = normalize_data_path(path, &get_data_dir())
+        .pipe_ref(std::fs::read)
+        .with_context(|| format!("failed to read file at {path}"))?;
+
+    let pfx = Pfx::from_der(&pfx_contents, &crypto_context, &parsing_params).context("failed to decode PFX")?;
+
+    // Build an iterator over all the safe bags of the PFX
+    let safe_bags_it = pfx
+        .safe_contents()
+        .iter()
+        .flat_map(|safe_contents| match safe_contents.kind() {
+            SafeContentsKind::SafeBags(safe_bags) => safe_bags.iter(),
+            SafeContentsKind::EncryptedSafeBags { safe_bags, .. } => safe_bags.iter(),
+            SafeContentsKind::Unknown => std::slice::Iter::default(),
+        })
+        .flat_map(|safe_bag| {
+            if let SafeBagKind::Nested(safe_bags) = safe_bag.kind() {
+                safe_bags.iter()
+            } else {
+                std::slice::from_ref(safe_bag).iter()
+            }
+        });
+
+    let mut certificates = Vec::new();
+    let mut private_keys = Vec::new();
+
+    // Iterate on all safe bags, and collect all certificates and private keys along their local key id (which is optional)
+    for safe_bag in safe_bags_it {
+        let local_key_id = safe_bag.attributes().iter().find_map(|attr| {
+            if let Pkcs12AttributeKind::LocalKeyId(key_id) = attr.kind() {
+                Some(key_id.as_slice())
+            } else {
+                None
+            }
+        });
+
+        match safe_bag.kind() {
+            SafeBagKind::PrivateKey(key) | SafeBagKind::EncryptedPrivateKey { key, .. } => {
+                private_keys.push((key, local_key_id))
+            }
+            SafeBagKind::Certificate(cert) => certificates.push((cert, local_key_id)),
+            _ => {}
+        }
+    }
+
+    // Sort certificates such that: Leaf < Unknown < Intermediate < Root (stable sort usage is deliberate)
+    certificates.sort_by(|(lhs, _), (rhs, _)| match (lhs.ty(), rhs.ty()) {
+        // Equality
+        (CertType::Leaf, CertType::Leaf) => Ordering::Equal,
+        (CertType::Unknown, CertType::Unknown) => Ordering::Equal,
+        (CertType::Intermediate, CertType::Intermediate) => Ordering::Equal,
+        (CertType::Root, CertType::Root) => Ordering::Equal,
+
+        // Leaf
+        (CertType::Leaf, _) => Ordering::Less,
+        (_, CertType::Leaf) => Ordering::Greater,
+
+        // Unknown
+        (CertType::Unknown, _) => Ordering::Less,
+        (_, CertType::Unknown) => Ordering::Greater,
+
+        // Intermediate
+        (CertType::Intermediate, CertType::Root) => Ordering::Less,
+        (CertType::Root, CertType::Intermediate) => Ordering::Greater,
+    });
+
+    // Find the first certificate that is "closer" to being a leaf
+    let (_, leaf_local_key_id) = certificates.first().context("leaf certificate not found")?;
+
+    // If there is a local key id, find the key with this same local key id, otherwise take the first key
+    let private_key = if let Some(leaf_local_key_id) = *leaf_local_key_id {
+        private_keys
+            .into_iter()
+            .find_map(|(pk, local_key_id)| match local_key_id {
+                Some(local_key_id) if local_key_id == leaf_local_key_id => Some(pk),
+                _ => None,
+            })
+    } else {
+        private_keys.into_iter().map(|(pk, _)| pk).next()
+    };
+
+    let private_key = private_key.context("leaf private key not found")?.clone();
+    let private_key = private_key
+        .to_pkcs8()
+        .map(rustls::PrivateKey)
+        .context("invalid private key")?;
+
+    let certificates = certificates
+        .into_iter()
+        .map(|(cert, _)| cert.to_der().map(rustls::Certificate))
+        .collect::<Result<_, _>>()
+        .context("invalid certificate")?;
+
+    Ok((certificates, private_key))
+}
+
 fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::Certificate>> {
     read_rustls_certificate(Some(path), None).transpose().unwrap()
 }
@@ -577,6 +697,8 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
 pub mod dto {
     use std::collections::HashMap;
 
+    use serde::{de, ser};
+
     use super::*;
 
     /// Source of truth for Gateway configuration
@@ -620,6 +742,9 @@ pub mod dto {
         /// Private key to use for TLS
         #[serde(alias = "PrivateKeyFile", skip_serializing_if = "Option::is_none")]
         pub tls_private_key_file: Option<Utf8PathBuf>,
+        /// Password to use for decrypting the TLS private key
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub tls_private_key_password: Option<Password>,
         /// Subject name of the certificate to use for TLS
         #[serde(skip_serializing_if = "Option::is_none")]
         pub tls_certificate_subject_name: Option<String>,
@@ -690,6 +815,7 @@ pub mod dto {
                 tls_certificate_source: None,
                 tls_certificate_file: None,
                 tls_private_key_file: None,
+                tls_private_key_password: None,
                 tls_certificate_subject_name: None,
                 tls_certificate_store_name: None,
                 tls_certificate_store_location: None,
@@ -986,5 +1112,65 @@ pub mod dto {
         CurrentUser,
         CurrentService,
         LocalMachine,
+    }
+
+    #[derive(PartialEq, Eq, Clone, zeroize::Zeroize)]
+    pub struct Password(String);
+
+    impl fmt::Debug for Password {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Password").finish_non_exhaustive()
+        }
+    }
+
+    impl Password {
+        /// Do not copy the return value without wrapping into some "Zeroize"able structure.
+        pub fn get(&self) -> &str {
+            &self.0
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for Password {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct V;
+
+            impl<'de> de::Visitor<'de> for V {
+                type Value = Password;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("a string")
+                }
+
+                fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    Ok(Password(v))
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+                where
+                    E: de::Error,
+                {
+                    Ok(Password(v.to_owned()))
+                }
+            }
+
+            let password = deserializer.deserialize_string(V)?;
+
+            Ok(password)
+        }
+    }
+
+    impl ser::Serialize for Password {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(&self.0)
+        }
     }
 }

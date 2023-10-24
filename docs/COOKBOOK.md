@@ -2,6 +2,9 @@
 
 Developer-oriented cookbook for testing purposes.
 
+- [RDP routing](#rdp-routing)
+- [WebSocket-to-TCP tunnel using jetsocat](#websocket-to-tcp-tunnel-using-jetsocat)
+
 ## RDP routing
 
 Devolutions Gateway can redirect RDP traffic authorized by a JWT (Json Web Token) signed (JWS) and
@@ -119,5 +122,5 @@ Finally, run the following command to connect to the Devolutions Gateway service
 cargo run -p jetsocat -- forward - "ws://127.0.0.1:7171/jet/fwd/tcp/123e4567-e89b-12d3-a456-426614174000?token=<TOKEN>"
 ```
 
-Try to entering text and see it printed on the other side.
+Try entering text and see it printed on the other side.
 

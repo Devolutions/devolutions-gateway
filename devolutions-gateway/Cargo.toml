@@ -49,7 +49,7 @@ typed-builder = "0.17"
 backoff = "0.4"
 
 # Security, crypto…
-picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509"] }
+picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509", "pkcs12"] }
 zeroize = { version = "1.6", features = ["derive"] }
 multibase = "0.9"
 

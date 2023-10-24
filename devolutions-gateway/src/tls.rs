@@ -78,7 +78,7 @@ pub fn build_server_config(cert_source: CertificateSource) -> anyhow::Result<rus
             private_key,
         } => builder
             .with_single_cert(certificates, private_key)
-            .context("couldn't set server config cert"),
+            .context("failed to set server config cert"),
 
         #[cfg(windows)]
         CertificateSource::SystemStore {

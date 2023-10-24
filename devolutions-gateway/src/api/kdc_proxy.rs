@@ -108,7 +108,7 @@ async fn kdc_proxy(
             .map_err(HttpError::internal().with_msg("unable to read KDC reply message").err())?
     } else {
         // we assume that ticket length is not greater than 2048
-        let mut buff = [0; 2048];
+        let mut buf = [0; 2048];
 
         let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("No free ports"))?;
 
@@ -134,7 +134,7 @@ async fn kdc_proxy(
 
         trace!("Reading KDC reply...");
 
-        let n = udp_socket.recv(&mut buff).await.map_err(
+        let n = udp_socket.recv(&mut buf).await.map_err(
             HttpError::internal()
                 .with_msg("unable to read reply from the KDC server")
                 .err(),
@@ -142,7 +142,7 @@ async fn kdc_proxy(
 
         let mut reply_buf = Vec::new();
         reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
-        reply_buf.extend_from_slice(&buff[0..n]);
+        reply_buf.extend_from_slice(&buf[0..n]);
         reply_buf
     };
 
