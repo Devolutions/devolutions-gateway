@@ -269,6 +269,13 @@ class DGatewayConfig {
 
     [string] $TlsCertificateFile
     [string] $TlsPrivateKeyFile
+    [string] $TlsPrivateKeyPassword
+
+    [string] $TlsCertificateSource
+    [string] $TlsCertificateSubjectName
+    [string] $TlsCertificateStoreName
+    [string] $TlsCertificateStoreLocation
+
     [string] $ProvisionerPublicKeyFile
     [string] $ProvisionerPrivateKeyFile
     [string] $DelegationPublicKeyFile
@@ -334,6 +341,14 @@ function Set-DGatewayConfig {
 
         [string] $TlsCertificateFile,
         [string] $TlsPrivateKeyFile,
+        [string] $TlsPrivateKeyPassword,
+
+        [ValidateSet("External", "System")]
+        [string] $TlsCertificateSource,
+        [string] $TlsCertificateSubjectName,
+        [string] $TlsCertificateStoreName,
+        [ValidateSet("CurrentUser", "LocalMachine", "CurrentService")]
+        [string] $TlsCertificateStoreLocation,
 
         [string] $ProvisionerPublicKeyFile,
         [string] $ProvisionerPrivateKeyFile,
