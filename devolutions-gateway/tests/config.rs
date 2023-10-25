@@ -60,6 +60,7 @@ fn hub_sample() -> Sample {
             tls_certificate_source: None,
             tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
             tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_private_key_password: None,
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
@@ -107,6 +108,7 @@ fn legacy_sample() -> Sample {
             tls_certificate_source: None,
             tls_certificate_file: Some("/path/to/tls-certificate.pem".into()),
             tls_private_key_file: Some("/path/to/tls-private.key".into()),
+            tls_private_key_password: None,
             tls_certificate_subject_name: None,
             tls_certificate_store_location: None,
             tls_certificate_store_name: None,
@@ -131,7 +133,7 @@ fn system_store_sample() -> Sample {
             "TlsCertificateSource": "System",
             "TlsCertificateSubjectName": "localhost",
             "TlsCertificateStoreLocation": "LocalMachine",
-            "TlsCertificateStoreName": "my"
+            "TlsCertificateStoreName": "My"
         }"#,
         file_conf: ConfFile {
             id: None,
@@ -144,9 +146,10 @@ fn system_store_sample() -> Sample {
             tls_certificate_source: Some(CertSource::System),
             tls_certificate_file: None,
             tls_private_key_file: None,
+            tls_private_key_password: None,
             tls_certificate_subject_name: Some("localhost".to_owned()),
             tls_certificate_store_location: Some(CertStoreLocation::LocalMachine),
-            tls_certificate_store_name: Some("my".to_owned()),
+            tls_certificate_store_name: Some("My".to_owned()),
             listeners: vec![],
             subscriber: None,
             log_file: None,

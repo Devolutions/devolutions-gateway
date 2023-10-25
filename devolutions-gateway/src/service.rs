@@ -58,6 +58,13 @@ impl GatewayService {
             );
         }
 
+        if conf_file.tls_private_key_password.is_some() {
+            warn!(
+                "Detected TlsPrivateKeyPassword option. This option doesn’t inherently enhance \
+                security beyond using a plain, unencrypted private key."
+            );
+        }
+
         if let Err(e) = devolutions_gateway::tls::sanity::check_default_configuration() {
             warn!("Anomality detected with TLS configuration: {e:#}");
         }

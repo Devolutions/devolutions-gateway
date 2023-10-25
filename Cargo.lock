@@ -2384,21 +2384,26 @@ version = "7.0.0-rc.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52cccdaffd2f361b4b4eb70b4249bd71d89bb66cb84b7f76483ecd1640c543ce"
 dependencies = [
+ "aes",
  "aes-gcm",
  "aes-kw",
  "base64 0.21.4",
  "cbc",
+ "des",
  "digest 0.10.7",
  "ed25519-dalek",
+ "hmac 0.12.1",
  "md-5 0.10.6",
  "num-bigint-dig",
  "p256",
  "p384",
+ "pbkdf2 0.12.2",
  "picky-asn1 0.8.0",
  "picky-asn1-der",
  "picky-asn1-x509 0.12.0",
  "rand",
  "rand_core",
+ "rc2",
  "rsa",
  "serde",
  "serde_json",
@@ -2827,6 +2832,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25bf25ec5ae4a3f1b92f929810509a2f53d7dca2f50b794ff57e3face536c8f"
 dependencies = [
  "rand_core",
+]
+
+[[package]]
+name = "rc2"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62c64daa8e9438b84aaae55010a93f396f8e60e3911590fcba770d04643fc1dd"
+dependencies = [
+ "cipher",
 ]
 
 [[package]]

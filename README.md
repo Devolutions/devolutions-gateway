@@ -80,9 +80,18 @@ Stable options are:
         * `Base64Url`
         * `Base64UrlPad`
 
-- **DelegationPrivateKeyFile** (_FilePath_): Path to the delegation private key (used to decipher sensitive data from tokens).
+- **DelegationPrivateKeyFile** (_FilePath_): Path to the delegation private key which is used to
+    decipher sensitive data from tokens.
 
-- **TlsCertificateSource** (_String_): Source for the TLS certificate. Possible values are: `External` (default), `System`.
+- **TlsCertificateSource** (_String_): Source for the TLS certificate.
+
+    Possible values:
+
+    * `External` (default): Retrieve a certificate stored on the file system.
+        See the options **TlsCertificateFile**, **TlsPrivateKeyFile** and **TlsPrivateKeyPassword**.
+    
+    * `System`: Retrieve the certificate managed by the system certificate store. 
+        See the options **TlsCertificateSubjectName**, **TlsCertificateStoreName** and **TlsCertificateStoreLocation**.
 
 - **TlsCertificateSubjectName** (_String_): Subject name of the certificate to use for TLS when using system source.
 
@@ -99,6 +108,17 @@ Stable options are:
 - **TlsCertificateFile** (_FilePath_): Path to the certificate to use for TLS.
 
 - **TlsPrivateKeyFile** (_FilePath_): Path to the private key to use for TLS.
+
+- **TlsPrivateKeyPassword** (_String_): Password to use for decrypting the TLS private key.
+
+    It's important to understand that using this option in order to use an encrypted private key
+    does not inherently enhance security beyond using a plain, unencrypted private key. In fact,
+    storing the password in plain text within the configuration file is _discouraged_ because it
+    provides minimal security advantages over the unencrypted private key. If an unauthorized person
+    gains access to both the configuration file and the private key, they can easily retrieve the
+    password, making it as vulnerable as an unencrypted private key. To bolster security, consider
+    additional measures like securing access to the files or using the system certificate store (see
+    **TlsCertificateSource** option).
 
 - **Listeners** (_Array_): Array of listener URLs.
 
@@ -207,9 +227,9 @@ anymore by default.
 
 See [this page from Microsoft documentation][microsoft_tls] to learn how to properly configure SChannel.
 
-### More
+## Knowledge base
 
-Read [our knowledge base](https://docs.devolutions.net/kb/devolutions-gateway/).
+Read more on [our knowledge base](https://docs.devolutions.net/kb/devolutions-gateway/).
 
 ## Cookbook
 

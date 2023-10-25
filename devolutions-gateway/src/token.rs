@@ -1131,7 +1131,7 @@ fn validate_token_impl(
         // No mitigation if token has no ID (might be disallowed in the future)
         AccessTokenClaims::Scope(ScopeTokenClaims { jti: None, .. }) => {}
 
-        // KDC tokens are long-lived and may be reused safely
+        // KDC tokens may be long-lived and reusing them is allowed
         AccessTokenClaims::Kdc(_) => {}
 
         // JRL token must be more recent than the current revocation list
