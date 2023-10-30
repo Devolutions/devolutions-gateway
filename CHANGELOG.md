@@ -10,9 +10,9 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _pwsh_: add (Get|Set|Reset)-DGatewayConfigPath cmdlets ([#572](https://github.com/Devolutions/devolutions-gateway/issues/572)) ([d162015843](https://github.com/Devolutions/devolutions-gateway/commit/d162015843a34e933ae76110edb1a40b124c63df)) ([DGW-113](https://devolutions.atlassian.net/browse/DGW-113)) 
 
-- _pwsh_: verbosity profile, ngrok tunnel configuration ([#577](https://github.com/Devolutions/devolutions-gateway/issues/577)) ([51c4d9cee3](https://github.com/Devolutions/devolutions-gateway/commit/51c4d9cee3c989fac19f37ee007abac97767c1ef)) 
+- _pwsh_: verbosity profile, ngrok tunnel configuration ([#577](https://github.com/Devolutions/devolutions-gateway/issues/577)) ([51c4d9cee3](https://github.com/Devolutions/devolutions-gateway/commit/51c4d9cee3c989fac19f37ee007abac97767c1ef)) ([DGW-112](https://devolutions.atlassian.net/browse/DGW-112))
 
-- _dgw_: support for Windows Certificate Store ([#576](https://github.com/Devolutions/devolutions-gateway/issues/576)) ([913f9fad03](https://github.com/Devolutions/devolutions-gateway/commit/913f9fad030d46d7db2e5651008c19391e9c908c)) 
+- _dgw_: support for Windows Certificate Store ([#576](https://github.com/Devolutions/devolutions-gateway/issues/576)) ([913f9fad03](https://github.com/Devolutions/devolutions-gateway/commit/913f9fad030d46d7db2e5651008c19391e9c908c)) ([DGW-105](https://devolutions.atlassian.net/browse/DGW-105))
 
   New configuration keys:
   
