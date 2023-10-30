@@ -4,6 +4,55 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2023.3.0 (2023-10-30)
+
+### Features
+
+- _pwsh_: add (Get|Set|Reset)-DGatewayConfigPath cmdlets ([#572](https://github.com/Devolutions/devolutions-gateway/issues/572)) ([d162015843](https://github.com/Devolutions/devolutions-gateway/commit/d162015843a34e933ae76110edb1a40b124c63df)) ([DGW-113](https://devolutions.atlassian.net/browse/DGW-113)) 
+
+- _pwsh_: verbosity profile, ngrok tunnel configuration ([#577](https://github.com/Devolutions/devolutions-gateway/issues/577)) ([51c4d9cee3](https://github.com/Devolutions/devolutions-gateway/commit/51c4d9cee3c989fac19f37ee007abac97767c1ef)) ([DGW-112](https://devolutions.atlassian.net/browse/DGW-112))
+
+- _dgw_: support for Windows Certificate Store ([#576](https://github.com/Devolutions/devolutions-gateway/issues/576)) ([913f9fad03](https://github.com/Devolutions/devolutions-gateway/commit/913f9fad030d46d7db2e5651008c19391e9c908c)) ([DGW-105](https://devolutions.atlassian.net/browse/DGW-105))
+
+  New configuration keys:
+  
+  - `TlsCertificateSource`: Source for the TLS certificate (`External` or `System`).
+  - `TlsCertificateSubjectName`: Subject name of the certificate.
+  - `TlsCertificateStoreName`: Name of the System Certificate Store.
+  - `TlsCertificateStoreLocation`: Location of the System Certificate Store.
+
+- _pwsh_: add new TLS configuration options ([#581](https://github.com/Devolutions/devolutions-gateway/issues/581)) ([3c12469989](https://github.com/Devolutions/devolutions-gateway/commit/3c124699891472403d0f3b6c96d360304476ffba)) ([DGW-120](https://devolutions.atlassian.net/browse/DGW-120)) 
+
+- _dgw_: support for PFX files ([#583](https://github.com/Devolutions/devolutions-gateway/issues/583)) ([9ab145d7ea](https://github.com/Devolutions/devolutions-gateway/commit/9ab145d7eaf800167d97620f372e67ae58b4dfdb)) ([DGW-121](https://devolutions.atlassian.net/browse/DGW-121)) 
+
+  PFX files may now be specified in the `TlsCertificateFile` option.
+  Furthermore, a new optional option is added: `TlsPrivateKeyPassword`.
+  This option may be used when the PFX file is encrypted using a passkey.
+
+### Improvements
+
+- _dgw_: [**breaking**] adjust ngrok options ([#575](https://github.com/Devolutions/devolutions-gateway/issues/575)) ([c30de99d5b](https://github.com/Devolutions/devolutions-gateway/commit/c30de99d5b833dc876aca4197482297cb0fc134e)) 
+
+  Some ngrok options are not making much sense for Devolutions Gateway
+  and were removed:
+  
+  - PROXY protocol: we do not handle PROXY protocol in Devolutions Gateway
+    and instead make use of Conn::peer_addr to find the original client IP.
+  - Basic Authentication: we have our own way to handle the authentication
+    using Json Web Tokens.
+  - Schemes: only HTTPS should be used when exposing a Devolutions Gateway
+    on internet.
+  
+  The `Authtoken` key was also renamed to `AuthToken` for readability.
+
+### Documentation
+
+- Update README.md + COOKBOOK.md ([#582](https://github.com/Devolutions/devolutions-gateway/issues/582)) ([4da466553e](https://github.com/Devolutions/devolutions-gateway/commit/4da466553e88da296752649646a0f5512d3ba7fd)) 
+
+### Continuous Integration
+
+- Ensure upload to OneDrive works when dispatched with workflow_call ([#571](https://github.com/Devolutions/devolutions-gateway/issues/571)) ([efe8019faa](https://github.com/Devolutions/devolutions-gateway/commit/efe8019faab05d6628bbce722da738292646ee45)) 
+
 ## 2023.2.4 (2023-10-16)
 
 ### Features
@@ -36,34 +85,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Build
 
-- Update dependencies
-  ([#513](https://github.com/Devolutions/devolutions-gateway/issues/513)/[837589748b](https://github.com/Devolutions/devolutions-gateway/commit/837589748b2c278ac25ce68a4c8a65e83c1fdbb5))
-  ([#514](https://github.com/Devolutions/devolutions-gateway/issues/514)/[12af944c57](https://github.com/Devolutions/devolutions-gateway/commit/12af944c574f8d19e239fbcde25f1728726ab695))
-  ([#515](https://github.com/Devolutions/devolutions-gateway/issues/515)/[116e42285f](https://github.com/Devolutions/devolutions-gateway/commit/116e42285f8d5c215edee732b50063ba24db274c))
-  ([#522](https://github.com/Devolutions/devolutions-gateway/issues/522)/[1fd5584365](https://github.com/Devolutions/devolutions-gateway/commit/1fd5584365f4cd0de36f75fd7f420f70592556cc))
-  ([#521](https://github.com/Devolutions/devolutions-gateway/issues/521)/[25649a2bbe](https://github.com/Devolutions/devolutions-gateway/commit/25649a2bbefa52a6074a25e7241e2b5c9966bbdd))
-  ([#520](https://github.com/Devolutions/devolutions-gateway/issues/520)/[b2a3849a8a](https://github.com/Devolutions/devolutions-gateway/commit/b2a3849a8ac08ef6ba9727d11a35ce0fa94c5810))
-  ([#526](https://github.com/Devolutions/devolutions-gateway/issues/526)/[ec184527d8](https://github.com/Devolutions/devolutions-gateway/commit/ec184527d80cef7b4a4706747a9d613be696688a))
-  ([#527](https://github.com/Devolutions/devolutions-gateway/issues/527)/[7b7c3c065d](https://github.com/Devolutions/devolutions-gateway/commit/7b7c3c065dbdf05c2c7bcb0e98741257c975076f))
-  ([#525](https://github.com/Devolutions/devolutions-gateway/issues/525)/[b1819084bc](https://github.com/Devolutions/devolutions-gateway/commit/b1819084bcb94a3b90d480372a7a3ccec8754d17))
-  ([#531](https://github.com/Devolutions/devolutions-gateway/issues/531)/[b472c830bd](https://github.com/Devolutions/devolutions-gateway/commit/b472c830bda90209899eb7cea1e9dd3a978d5449))
-  ([#532](https://github.com/Devolutions/devolutions-gateway/issues/532)/[66ee3dff62](https://github.com/Devolutions/devolutions-gateway/commit/66ee3dff62634f98e26a033f656ea3fa659a0b57))
-  ([#533](https://github.com/Devolutions/devolutions-gateway/issues/533)/[38ff1f27f6](https://github.com/Devolutions/devolutions-gateway/commit/38ff1f27f647d0c984d5425d6785aad918fd999a))
-  ([#535](https://github.com/Devolutions/devolutions-gateway/issues/535)/[54ce98208e](https://github.com/Devolutions/devolutions-gateway/commit/54ce98208eafb9a8ad8dd827769c91d8c12cd78a))
-  ([#537](https://github.com/Devolutions/devolutions-gateway/issues/537)/[d4afcd6a3a](https://github.com/Devolutions/devolutions-gateway/commit/d4afcd6a3a2f7435b851ee911f3249b2776c8cfa))
-  ([#538](https://github.com/Devolutions/devolutions-gateway/issues/538)/[3d35fbb635](https://github.com/Devolutions/devolutions-gateway/commit/3d35fbb63540bb1b4ec054d86968b67488cb1a3d))
-  ([#541](https://github.com/Devolutions/devolutions-gateway/issues/541)/[b50c0b7d20](https://github.com/Devolutions/devolutions-gateway/commit/b50c0b7d20d40408270ac0f441277080bb19a319))
-  ([#540](https://github.com/Devolutions/devolutions-gateway/issues/540)/[d92c3433ab](https://github.com/Devolutions/devolutions-gateway/commit/d92c3433ab02ddc1cbf44b2c74b2bd28572ee9ba))
-  ([#543](https://github.com/Devolutions/devolutions-gateway/issues/543)/[2384fc8e8f](https://github.com/Devolutions/devolutions-gateway/commit/2384fc8e8f323ea3faca293d8c5480c42c0d5e8b))
-  ([#545](https://github.com/Devolutions/devolutions-gateway/issues/545)/[b1e05b1e7a](https://github.com/Devolutions/devolutions-gateway/commit/b1e05b1e7a8221ef2f3e21ced7f62d4100eaa7af))
-  ([#548](https://github.com/Devolutions/devolutions-gateway/issues/548)/[25f3c6c778](https://github.com/Devolutions/devolutions-gateway/commit/25f3c6c7789eafda641a465dd648517ce80bb850))
-  ([#547](https://github.com/Devolutions/devolutions-gateway/issues/547)/[9560dc9cfd](https://github.com/Devolutions/devolutions-gateway/commit/9560dc9cfd8b7159b31d2238d1c0a3858f4f656f))
-  ([#549](https://github.com/Devolutions/devolutions-gateway/issues/549)/[37faedcfee](https://github.com/Devolutions/devolutions-gateway/commit/37faedcfee5d716ba79a3655a8a8ea3a2f6eefa9))
-  ([#554](https://github.com/Devolutions/devolutions-gateway/issues/554)/[7987906a52](https://github.com/Devolutions/devolutions-gateway/commit/7987906a5267e7b5b4047a54da6912a1565ae493))
-  ([#553](https://github.com/Devolutions/devolutions-gateway/issues/553)/[ccf737c11f](https://github.com/Devolutions/devolutions-gateway/commit/ccf737c11fa9c70e32d67537c28f776f39d4d26d))
-  ([#552](https://github.com/Devolutions/devolutions-gateway/issues/552)/[e98b7f27ef](https://github.com/Devolutions/devolutions-gateway/commit/e98b7f27ef50bdad4601395b8793a0e2abb4cbf7))
-  ([#556](https://github.com/Devolutions/devolutions-gateway/issues/556)/[2e839ae5ac](https://github.com/Devolutions/devolutions-gateway/commit/2e839ae5acac02606fe8ff7f48d1f27da00e308b)) 
-
 - Update Rust toolchain to 1.73.0 ([#560](https://github.com/Devolutions/devolutions-gateway/issues/560)) ([375ec71cf9](https://github.com/Devolutions/devolutions-gateway/commit/375ec71cf91fdf1b996f74b17dfbd2ace42b53e0)) 
 
 ### Continuous Integration
@@ -91,10 +112,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   The name of the endpoint was wrong, and thus /jet/fwd/tls was
   returning the 404 Not Found status.
   Furthermore, the `with_tls` option was not properly set.
-
-### Build
-
-- _deps_: update dependencies 
 
 ### Documentation
 
@@ -151,20 +168,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - SBOM cdxgen ([#471](https://github.com/Devolutions/devolutions-gateway/issues/471)) ([08520cdbbb](https://github.com/Devolutions/devolutions-gateway/commit/08520cdbbb8e46732ef2836cd780edbfc4ca0bd2)) 
 
-### Build
-
-- _deps_: bump tokio-rustls from 0.24.0 to 0.24.1 ([#468](https://github.com/Devolutions/devolutions-gateway/issues/468)) ([5b86f4af33](https://github.com/Devolutions/devolutions-gateway/commit/5b86f4af33e245a40cd6f1873cfb7eca46d30bab)) 
-
-- _deps_: bump sysinfo from 0.29.0 to 0.29.2 ([#467](https://github.com/Devolutions/devolutions-gateway/issues/467)) ([dfc3e533b5](https://github.com/Devolutions/devolutions-gateway/commit/dfc3e533b5d2e74af50a511b2101d1012ee89318)) 
-
-- _deps_: bump log from 0.4.18 to 0.4.19 ([#475](https://github.com/Devolutions/devolutions-gateway/issues/475)) ([c7bd46cd66](https://github.com/Devolutions/devolutions-gateway/commit/c7bd46cd6651e24d79677241202367b86c704143)) 
-
-- _deps_: bump serde_json from 1.0.96 to 1.0.97 ([#473](https://github.com/Devolutions/devolutions-gateway/issues/473)) ([ff301e7c2b](https://github.com/Devolutions/devolutions-gateway/commit/ff301e7c2b8849db2b977e5d86361b21f4d14ef5)) 
-
-- Dependency bump and maintainance ([#476](https://github.com/Devolutions/devolutions-gateway/issues/476)) ([a0f8abc113](https://github.com/Devolutions/devolutions-gateway/commit/a0f8abc1137ac4ff289cadf34f0e82f8557e87c6)) 
-
-- _deps_: bump hyper from 0.14.26 to 0.14.27 ([#480](https://github.com/Devolutions/devolutions-gateway/issues/480)) ([3f8c6cac73](https://github.com/Devolutions/devolutions-gateway/commit/3f8c6cac737b13e5ba86cabb56b1aad5c9cefd3f)) 
-
 ## 2023.2.1 (2023-06-09)
 
 ### Improvements
@@ -180,12 +183,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   really expect unicode in such context.
 
 - _dgw_: KDC proxy auth using token in path ([2173ecec4d](https://github.com/Devolutions/devolutions-gateway/commit/2173ecec4d86818c8850559a7b7bf40a47877f26)) ([DGW-94](https://devolutions.atlassian.net/browse/DGW-94))
-
-### Build
-
-- _deps_: bump ngrok from 0.12.1 to 0.12.2 ([#455](https://github.com/Devolutions/devolutions-gateway/issues/455)) ([ae95b255c0](https://github.com/Devolutions/devolutions-gateway/commit/ae95b255c08804d14472f826897f70c24ab90fae)) 
-
-- _deps_: bump url from 2.3.1 to 2.4.0 ([#456](https://github.com/Devolutions/devolutions-gateway/issues/456)) ([e6c0e7da6a](https://github.com/Devolutions/devolutions-gateway/commit/e6c0e7da6aa2bae3ec825b44bafd80c7b1296742)) 
 
 ## 2023.2.0 (2023-05-31)
 
@@ -302,26 +299,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   >
   > This is because large collections of root certificates often include
   > ancient or syntactically invalid certificates.
-
-### Build
-
-- _deps_: update dependencies ([abf5b00d33](https://github.com/Devolutions/devolutions-gateway/commit/abf5b00d33c3f5cdff49f8ee891863ca69f26346)) 
-
-- _deps_: bump serde from 1.0.162 to 1.0.163 ([#437](https://github.com/Devolutions/devolutions-gateway/issues/437)) ([3f3127a178](https://github.com/Devolutions/devolutions-gateway/commit/3f3127a178b02c565270f61abe7d47effe05ed9d)) 
-
-- _deps_: bump tokio from 1.28.0 to 1.28.1 ([#439](https://github.com/Devolutions/devolutions-gateway/issues/439)) ([2fefafe529](https://github.com/Devolutions/devolutions-gateway/commit/2fefafe52920ba123196a287eb943bd6a13fea22)) 
-
-- _deps_: bump uuid from 1.3.2 to 1.3.3 ([#438](https://github.com/Devolutions/devolutions-gateway/issues/438)) ([561c89d0f3](https://github.com/Devolutions/devolutions-gateway/commit/561c89d0f33225fd8f1ff2ea52672f9680268dde)) 
-
-- _deps_: update tokio-tungstenite version ([c1e9f506e1](https://github.com/Devolutions/devolutions-gateway/commit/c1e9f506e12ea1b0958eca36a95ce4e204617040)) 
-
-- _deps_: bump x509-cert from 0.2.1 to 0.2.2 ([#444](https://github.com/Devolutions/devolutions-gateway/issues/444)) ([6bb0b24ff9](https://github.com/Devolutions/devolutions-gateway/commit/6bb0b24ff91346cf8cf3da11af6443f35150d506)) 
-
-- _deps_: bump chrono from 0.4.24 to 0.4.25 ([#447](https://github.com/Devolutions/devolutions-gateway/issues/447)) ([46cdb1e737](https://github.com/Devolutions/devolutions-gateway/commit/46cdb1e737e3a82c7420040120ce89137b5b73f6)) 
-
-- _deps_: bump proptest from 1.1.0 to 1.2.0 ([#449](https://github.com/Devolutions/devolutions-gateway/issues/449)) ([b82e21ac93](https://github.com/Devolutions/devolutions-gateway/commit/b82e21ac935d8813c1c91416a637fe6f4e83a3ee)) 
-
-- _deps_: bump tokio from 1.28.1 to 1.28.2 ([#448](https://github.com/Devolutions/devolutions-gateway/issues/448)) ([7de2a2fd64](https://github.com/Devolutions/devolutions-gateway/commit/7de2a2fd64a83afd7da7e42a32d8398b4ba0c6c9)) 
 
 ### Continuous Integration
 

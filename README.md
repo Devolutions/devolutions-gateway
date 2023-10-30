@@ -6,18 +6,17 @@ A blazing fast relay server adaptable to different protocols and desired levels 
 
 ## Install
 
-### Using the Devolutions Server Management Console
+### From our website (recommended)
 
-Download from [Devolutions official website][official_website].
-
-### Using the offline Windows Installer
-
-Download from [Devolutions official website][official_website] or the [GitHub releases page][github_release].
+You can download either the Devolutions Server Management Console or the offline Windows Installer
+from the [official Devolutions website][official_website]. Only releases that have successfully
+passed our quality assurance team's acceptance testing are accessible through this channel.
 
 ### From GitHub
 
-Signed binaries and installers are available for all versions are available at all times from the
-[GitHub releases page][github_release].
+Signed binaries and installers for all versions can be conveniently obtained from the
+[GitHub releases page][github_release]. It's important to note that these are made available
+immediately, without going through the acceptance testing process of our quality assurance team.
 
 ### From sources
 

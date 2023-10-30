@@ -21,7 +21,7 @@ body = """
 
 {% for group, commits in commits | group_by(attribute="group") -%}
 
-### {{ group | upper_first }}
+### {{ group | striptags | trim | upper_first }}
 
 {%- for commit in commits %}
 
@@ -65,28 +65,39 @@ conventional_commits = true
 filter_unconventional = true
 # regex for preprocessing the commit messages
 commit_preprocessors = [
+  # Check spelling of the commit with https://github.com/crate-ci/typos
+  # If the spelling is incorrect, it will be automatically fixed.
+  { pattern = '.*', replace_command = 'typos --write-changes -' },
   # Replace issue number with the link
   { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/Devolutions/devolutions-gateway/issues/${2}))" },
   # Replace commit sha1 with the link
   { pattern = '([a-f0-9]{10})([a-f0-9]{30})', replace = "[${0}](https://github.com/Devolutions/devolutions-gateway/commit/${1}${2})" }
 ]
 # regex for parsing and grouping commits
+# <!-- <NUMBER> --> is a trick to control the section order: https://github.com/orhun/git-cliff/issues/9#issuecomment-914521594
 commit_parsers = [
-    { message = "^chore", skip = true },
-    { message = "^style", skip = true },
-    { message = "^refactor", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^style", skip = true },
+  { message = "^refactor", skip = true },
+  { message = "^chore\\(release\\): prepare for", skip = true },
+  { message = "^chore\\(deps\\)", skip = true },
+  { message = "^build\\(deps\\)", skip = true },
 
-    { message = "^ci", group = "Continuous Integration" },
-    { message = "^build", group = "Build" },
+  { message = "(?i)security", group = "<!-- 0 -->Security" },
+  { body = "(?i)security", group = "<!-- 0 -->Security" },
 
-    { message = "(?i)security", group = "Security" },
-    { body = "(?i)security", group = "Security" },
+  { message = "(?i)improve", group = "<!-- 2 -->Improvements" },
+  { message = "(?i)adjust", group = "<!-- 2 -->Improvements" },
+  { message = "(?i)change", group = "<!-- 2 -->Improvements" },
 
-    { message = "^feat", group = "Features" },
-    { message = "^fix", group = "Bug Fixes" },
-    { message = "^doc", group = "Documentation" },
-    { message = "^perf", group = "Performance" },
-    { message = "^test", group = "Testing" },
+  { message = "^feat", group = "<!-- 1 -->Features" },
+  { message = "^revert", group = "<!-- 3 -->Revert" },
+  { message = "^fix", group = "<!-- 4 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 5 -->Performance" },
+  { message = "^doc", group = "<!-- 6 -->Documentation" },
+  { message = "^test", group = "<!-- 7 -->Testing" },
+  { message = "^build", group = "<!-- 8 -->Build" },
+  { message = "^ci", group = "<!-- 9 -->Continuous Integration" },
 ]
 # filter out the commits that are not matched by commit parsers
 filter_commits = false
