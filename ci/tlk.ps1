@@ -247,28 +247,6 @@ class TlkRecipe
         $this.Target = [TlkTarget]::new()
     }
 
-    [void] BootstrapOpenSSL() {
-        if (-Not $this.Target.IsWindows()) {
-            return
-        }
-
-        $OPENSSL_VERSION = '1.1.1l'
-        $ConanPackage = "openssl/${OPENSSL_VERSION}@devolutions/stable"
-        $ConanProfile = "$($this.Target.Platform)-$($this.Target.Architecture)"
-
-        Write-Host "conan profile: $ConanProfile"
-
-        & 'conan' 'install' $ConanPackage '-g' 'virtualenv' '-pr' $ConanProfile '-s' 'build_type=Release' | Out-Host
-        $dotenv = Get-DotEnvFile ".\environment.sh.env"
-    
-        Get-ChildItem 'conanbuildinfo.*' | Remove-Item
-        Get-ChildItem 'environment.*.env' | Remove-Item
-        Get-ChildItem '*activate.*' | Remove-Item
-    
-        $OPENSSL_DIR = $dotenv['OPENSSL_DIR']
-        $Env:OPENSSL_DIR = $OPENSSL_DIR
-    }
-
     [void] Cargo([string[]]$CargoArgs) {
         $CargoTarget = $this.Target.CargoTarget()
         $CargoProfile = $this.Target.CargoProfile
@@ -288,8 +266,6 @@ class TlkRecipe
     }
 
     [void] Build() {
-        $this.BootstrapOpenSSL()
-
         $BuildStagingDirectory = Join-Path $this.SourcePath "artifacts"
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
