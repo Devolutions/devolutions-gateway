@@ -24,7 +24,6 @@ jobs:
     outputs:
       ref: ${{ steps.get-commit.outputs.ref }}
       version: ${{ steps.get-version.outputs.version }}
-      rust-channel: ${{ steps.rust-toolchain.outputs.rust-channel }}
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
@@ -102,15 +101,6 @@ jobs:
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
-      - name: Configure rust toolchain
-        id: rust-toolchain
-        shell: pwsh
-        run: |
-          $Channel = (Get-Content 'rust-toolchain.toml' | Select -Skip 1 | ConvertFrom-StringData).channel
-          rustup toolchain install $Channel
-          rustup component add rustfmt
-          echo "rust-channel=$Channel" >> $Env:GITHUB_OUTPUT
-
       - name: Check formatting
         run: |
           cargo fmt --all -- --check
@@ -157,9 +147,6 @@ jobs:
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
-        - name: Configure rust toolchain
-          run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
-
         - name: Configure Linux runner
           if: matrix.os == 'linux'
           run: |
@@ -186,9 +173,6 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: ${{ needs.preflight.outputs.ref }}
-
-      - name: Configure rust toolchain
-        run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
 
       - name: Configure Linux runner
         if: matrix.os == 'linux'
@@ -341,9 +325,6 @@ jobs:
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
           echo "target-output-path=$TargetOutputPath" >> $Env:GITHUB_OUTPUT
           echo "dgateway-executable=$DGatewayExecutable" >> $Env:GITHUB_OUTPUT
-
-      - name: Configure rust toolchain
-        run: rustup toolchain install ${{ needs.preflight.outputs.rust-channel }}
 
       - name: Configure Linux runner
         if: matrix.os == 'linux'
