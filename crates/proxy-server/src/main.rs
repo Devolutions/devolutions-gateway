@@ -193,26 +193,15 @@ async fn process_https(incoming: TcpStream) -> io::Result<()> {
 
     println!("Requested proxying to {dest_addr:?}");
 
-    let socket_addr = {
-        match dest_addr.clone() {
-            proxy_types::DestAddr::Ip(addr) => addr,
-            proxy_types::DestAddr::Domain(domain, port) => {
-                let mut addrs = match tokio::net::lookup_host((domain, port)).await {
-                    Ok(addrs) => addrs,
-                    Err(e) => {
-                        acceptor.failure(proxy_http::ErrorCode::BadGateway).await?;
-                        return Err(e);
-                    }
-                };
-                addrs.next().expect("at least one resolved address should be present")
-            }
-        }
+    let connect_result = match dest_addr {
+        proxy_types::DestAddr::Ip(addr) => TcpStream::connect(addr).await,
+        proxy_types::DestAddr::Domain(domain, port) => TcpStream::connect((domain.as_str(), *port)).await,
     };
 
-    let target_stream = match TcpStream::connect(socket_addr).await {
+    let target_stream = match connect_result {
         Ok(stream) => stream,
         Err(e) => {
-            acceptor.failure(proxy_http::ErrorCode::InternalServerError).await?;
+            acceptor.failure(proxy_http::ErrorCode::BadGateway).await?;
             return Err(e);
         }
     };

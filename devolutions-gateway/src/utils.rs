@@ -6,30 +6,31 @@ use url::Url;
 
 use crate::target_addr::TargetAddr;
 
-pub async fn resolve_target_addr(dest: &TargetAddr) -> anyhow::Result<SocketAddr> {
-    let port = dest.port();
-
-    if let Some(ip) = dest.host_ip() {
-        Ok(SocketAddr::new(ip, port))
-    } else {
-        lookup_host((dest.host(), port))
-            .await?
-            .next()
-            .context("host lookup yielded no result")
-    }
-}
-
 pub async fn tcp_connect(dest: &TargetAddr) -> anyhow::Result<(TcpStream, SocketAddr)> {
     const CONNECTION_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(10);
 
     let fut = async move {
-        let socket_addr = resolve_target_addr(dest).await?;
-        let stream = TcpStream::connect(socket_addr)
+        let addrs = lookup_host(dest.as_addr())
             .await
-            .context("couldn't connect stream")?;
-        Ok::<_, anyhow::Error>((stream, socket_addr))
+            .context("failed to lookup destination address")?;
+
+        let mut last_err = None;
+
+        for addr in addrs {
+            match TcpStream::connect(addr).await {
+                Ok(stream) => return Ok((stream, addr)),
+                Err(error) => {
+                    warn!(%error, resolved = %addr, destination = %dest, "Failed to connect to a resolved address");
+                    last_err = Some(anyhow::Error::new(error).context("TcpStream::connect"))
+                }
+            }
+        }
+
+        Err::<_, anyhow::Error>(last_err.unwrap_or_else(|| anyhow::format_err!("could not resolve to any address")))
     };
+
     let result = tokio::time::timeout(CONNECTION_TIMEOUT, fut).await??;
+
     Ok(result)
 }
 

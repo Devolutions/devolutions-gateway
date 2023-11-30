@@ -9,7 +9,6 @@ use tokio::net::{TcpStream, UdpSocket};
 
 use crate::http::HttpError;
 use crate::token::AccessTokenClaims;
-use crate::utils::resolve_target_addr;
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -79,14 +78,10 @@ async fn kdc_proxy(
 
     let protocol = kdc_addr.scheme();
 
-    let kdc_addr = resolve_target_addr(kdc_addr)
-        .await
-        .map_err(HttpError::internal().with_msg("unable to locate KDC server").err())?;
-
     trace!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
 
     let kdc_reply_message = if protocol == "tcp" {
-        let mut connection = TcpStream::connect(kdc_addr)
+        let mut connection = TcpStream::connect(kdc_addr.as_addr())
             .await
             .map_err(HttpError::internal().with_msg("unable to connect to KDC server").err())?;
 
@@ -124,7 +119,7 @@ async fn kdc_proxy(
 
         // first 4 bytes contains message length. we don't need it for UDP
         udp_socket
-            .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr)
+            .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr.as_addr())
             .await
             .map_err(
                 HttpError::internal()

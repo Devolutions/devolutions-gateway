@@ -846,24 +846,8 @@ impl StreamResolverTask {
         let host = destination_url.host();
         let port = destination_url.port();
 
-        let mut addrs = match tokio::net::lookup_host((host, port)).await {
-            Ok(addrs) => addrs,
-            Err(error) => {
-                debug!(?error, "tokio::net::lookup_host failed");
-                msg_to_send_tx
-                    .send(Message::open_failure(
-                        channel.distant_id,
-                        ReasonCode::from(error.kind()),
-                        error.to_string(),
-                    ))
-                    .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
-                anyhow::bail!("couldn't resolve {}:{}: {}", host, port, error);
-            }
-        };
-        let socket_addr = addrs.next().expect("at least one resolved address should be present");
-
         match scheme {
-            "tcp" => match TcpStream::connect(socket_addr).await {
+            "tcp" => match TcpStream::connect((host, port)).await {
                 Ok(stream) => {
                     internal_msg_tx
                         .send(InternalMessage::StreamResolved { channel, stream })
@@ -878,7 +862,7 @@ impl StreamResolverTask {
                             error.to_string(),
                         ))
                         .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
-                    anyhow::bail!("Couldn’t connect TCP socket to {}:{}: {}", host, port, error);
+                    anyhow::bail!("couldn’t open TCP stream to {}:{}: {}", host, port, error);
                 }
             },
             _ => anyhow::bail!("unsupported scheme: {}", scheme),

@@ -394,7 +394,7 @@ fn read_pfx_file(
 
     let crypto_context = password
         .map(|pwd| Pkcs12CryptoContext::new_with_password(pwd.get()))
-        .unwrap_or_else(|| Pkcs12CryptoContext::new_without_password());
+        .unwrap_or_else(Pkcs12CryptoContext::new_without_password);
     let parsing_params = Pkcs12ParsingParams::default();
 
     let pfx_contents = normalize_data_path(path, &get_data_dir())

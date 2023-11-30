@@ -2,6 +2,7 @@ use core::fmt;
 use serde::{de, ser};
 use smol_str::SmolStr;
 use std::net::IpAddr;
+use std::ops::RangeBounds;
 use std::str::FromStr;
 use tap::Pipe as _;
 
@@ -96,11 +97,11 @@ impl TargetAddr {
     }
 
     pub fn scheme(&self) -> &str {
-        self.h_slice(0, self.scheme_end)
+        self.h_slice_repr(..self.scheme_end)
     }
 
     pub fn host(&self) -> &str {
-        self.h_slice(self.host_start, self.host_end)
+        self.h_slice_repr(self.host_start..self.host_end)
     }
 
     pub fn host_ip(&self) -> Option<IpAddr> {
@@ -114,9 +115,28 @@ impl TargetAddr {
         self.port
     }
 
-    #[inline]
-    fn h_slice(&self, start: u16, end: u16) -> &str {
-        &self.serialization[usize::from(start)..usize::from(end)]
+    pub fn as_addr(&self) -> &str {
+        self.h_slice_repr((self.scheme_end + 3)..)
+    }
+
+    // Slice the internal representation using a [`Range<u16>`]
+    fn h_slice_repr(&self, range: impl RangeBounds<u16>) -> &str {
+        use std::ops::Bound;
+
+        // TODO(@CBenoit): use Bound::map when stabilized (bound_map feature)
+        // https://github.com/rust-lang/rust/issues/86026
+        let lo = match range.start_bound() {
+            Bound::Included(idx) => Bound::Included(usize::from(*idx)),
+            Bound::Excluded(idx) => Bound::Excluded(usize::from(*idx)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let hi = match range.end_bound() {
+            Bound::Included(idx) => Bound::Included(usize::from(*idx)),
+            Bound::Excluded(idx) => Bound::Excluded(usize::from(*idx)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        &self.serialization.as_str()[(lo, hi)]
     }
 }
 
@@ -237,6 +257,14 @@ impl<'de> de::Deserialize<'de> for TargetAddr {
     }
 }
 
+impl std::net::ToSocketAddrs for TargetAddr {
+    type Iter = std::vec::IntoIter<std::net::SocketAddr>;
+
+    fn to_socket_addrs(&self) -> std::io::Result<Self::Iter> {
+        self.as_addr().to_socket_addrs()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,34 +273,38 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[rstest]
-    #[case("localhost:80", "tcp", "localhost", None, 80)]
+    #[case("localhost:80", "tcp", "localhost", None, 80, "localhost:80")]
     #[case(
         "udp://127.0.0.1:8080",
         "udp",
         "127.0.0.1",
         Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
-        8080
+        8080,
+        "127.0.0.1:8080"
     )]
     #[case(
         "tcp://[2001:db8::8a2e:370:7334]:7171",
         "tcp",
         "2001:db8::8a2e:370:7334",
         Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0x8a2e, 0x0370, 0x7334))),
-        7171
+        7171,
+        "[2001:db8::8a2e:370:7334]:7171"
     )]
     #[case(
         "https://[2001:0db8:0000:0000:0000:8a2e:0370:7334]:433",
         "https",
         "2001:0db8:0000:0000:0000:8a2e:0370:7334",
         Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0x8a2e, 0x0370, 0x7334))),
-        433
+        433,
+        "[2001:0db8:0000:0000:0000:8a2e:0370:7334]:433"
     )]
     #[case(
         "ws://[::1]:2222",
         "ws",
         "::1",
         Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))),
-        2222
+        2222,
+        "[::1]:2222"
     )]
     fn target_addr_parsing(
         #[case] repr: &str,
@@ -280,12 +312,14 @@ mod tests {
         #[case] host: &str,
         #[case] ip: Option<IpAddr>,
         #[case] port: u16,
+        #[case] as_addr: &str,
     ) {
         let addr = TargetAddr::parse(repr, None).unwrap();
         assert_eq!(addr.scheme(), scheme);
         assert_eq!(addr.host(), host);
         assert_eq!(addr.host_ip(), ip);
         assert_eq!(addr.port(), port);
+        assert_eq!(addr.as_addr(), as_addr);
     }
 
     #[rstest]
