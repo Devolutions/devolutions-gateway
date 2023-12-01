@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net451</TargetFramework>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Build\**" />
+    <EmbeddedResource Remove="Build\**" />
+    <None Remove="*.msi" />
+    <None Remove="*.exe" />
+    <None Remove="*.wxs" />
+    <None Remove="*.wixpdb" />
+    <None Remove="*.wixobj" />
+    <None Remove="Build\**" />
+    <None Remove="App.config" />
+    <None Remove="Resources\DevolutionsGateway_en-us.wxl" />
+    <None Remove="Resources\DevolutionsGateway_fr-fr.wxl" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\DevolutionsGateway_en-us.wxl" />
+    <EmbeddedResource Include="Resources\DevolutionsGateway_fr-fr.wxl" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WixSharp" Version="1.24.1" />
+    <PackageReference Include="WixSharp.bin" Version="1.24.1" />
+    <PackageReference Include="WixSharp.wix.bin" Version="3.14.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.ServiceProcess">
+      <HintPath>..\..\..\..\..\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.5.1\System.ServiceProcess.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Update="Dialogs\SummaryDialog.cs" />
+    <Compile Update="Dialogs\ServiceDialog.cs" />
+    <Compile Update="Dialogs\PublicKeyDialog.cs" />
+    <Compile Update="Dialogs\ListenersDialog.cs" />
+    <Compile Update="Dialogs\CustomizeDialog.cs" />
+    <Compile Update="Dialogs\CertificateDialog.cs" />
+    <Compile Update="Dialogs\AccessUriDialog.cs" />
+    <Compile Update="Dialogs\VerifyReadyDialog.cs" />
+    <Compile Update="Properties\GatewayProperties.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>GatewayProperties.g.tt</DependentUpon>
+    </Compile>
+    <None Include="Properties\GatewayProperties.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>GatewayProperties.g.tt</DependentUpon>
+    </None>
+    <None Include="wix\$(ProjectName).g.wxs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Service Include="{508349b6-6b84-4df5-91f0-309beebad82d}" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Properties\GatewayProperties.g.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>GatewayProperties.g.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+</Project>

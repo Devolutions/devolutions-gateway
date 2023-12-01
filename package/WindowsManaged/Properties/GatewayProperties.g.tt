@@ -1,0 +1,82 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ output extension=".cs" #>
+
+namespace DevolutionsGateway.Properties
+{
+    internal partial class GatewayProperties
+    {
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+        internal static readonly WixProperty<<#= this.properties[idx,0] #>> _<#= this.properties[idx,1] #> = new()
+        {
+            Id = "P.<# if (string.IsNullOrEmpty(this.properties[idx, 5])) { #><#= this.properties[idx,1].ToUpper() #><# } else { #><#= this.properties[idx,5].ToUpper() #><# } #>",
+<# if (this.properties[idx,0] == "string" && this.properties[idx,2] != "string.Empty" && !this.properties[idx,2].StartsWith("Constants.")) { #>
+            Default = "<#= this.properties[idx,2] #>",
+<# } else { #>
+            Default = <#= this.properties[idx,2] #>,
+<# } #>
+            Secure = <#= this.properties[idx,3] #>,
+            Hidden = <#= this.properties[idx,4] #>,
+        };
+
+<# if (this.properties[idx,6] != "") { #>
+        /// <#= this.properties[idx,6] #>
+<# } #>
+        public <#= this.properties[idx,0] #> <#= this.properties[idx,1] #>
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_<#= this.properties[idx,1] #>.Id);
+                return WixProperties.GetPropertyValue<<#= this.properties[idx,0] #>>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_<#= this.properties[idx,1] #>, value); 
+                }
+            }
+        }
+<# } #> 
+
+        public static IWixProperty[] Properties =
+        {
+<# for (int idx = 0; idx < this.properties.GetLength(0); idx++) { #> 
+            _<#= this.properties[idx,1] #>,
+<# } #> 
+        };
+    }
+}
+
+<#+      
+  string[,] properties = {     
+    // type name default secure hidden id comment
+    {"string", "AccessUriHost", "string.Empty", "true", "false", "", ""},
+    {"uint", "AccessUriPort", "443", "true", "false", "", ""},
+    {"string", "AccessUriScheme", "Constants.HttpsProtocol", "true", "false", "", ""},
+    {"string", "CertificateFile", "string.Empty", "true", "false", "", ""},
+    {"string", "CertificatePassword", "string.Empty", "true", "true", "", ""},
+    {"string", "CertificatePrivateKeyFile", "string.Empty", "true", "false", "", ""},
+    {"bool", "ConfigureGateway", "false", "false", "false", "", "`true` to configure the Gateway interactively"},    
+    {"bool", "HasPowerShell", "false", "false", "false", "", ""},
+    {"string", "HttpListenerHost", "0.0.0.0", "true", "false", "", ""},
+    {"uint", "HttpListenerPort", "7171", "true", "false", "", ""},
+    {"string", "HttpListenerScheme", "Constants.HttpsProtocol", "true", "false", "", ""},
+    {"string", "NoStartService", "string.Empty", "true", "false", "dgw.no_start_service", ""},
+    {"string", "PowerShellPath", "string.Empty", "true", "false", "", ""},
+    {"string", "PublicKeyFile", "string.Empty", "true", "false", "", ""},
+    {"int", "ServiceStart", "3", "true", "false", "", ""},
+    {"string", "TcpListenerHost", "0.0.0.0", "true", "false", "", ""},
+    {"uint", "TcpListenerPort", "8181", "true", "false", "", ""},
+    {"string", "TcpListenerScheme", "Constants.TcpProtocol", "true", "false", "", ""},
+
+    {"bool", "FirstInstall", "false", "true", "false", "", ""},
+    {"bool", "Upgrading", "false", "true", "false", "", ""},
+    {"bool", "RemovingForUpgrade", "false", "true", "false", "", ""},
+    {"bool", "Uninstalling", "false", "true", "false", "", ""},
+    {"bool", "Maintenance", "false", "true", "false", "", ""},
+  };               
+#>
