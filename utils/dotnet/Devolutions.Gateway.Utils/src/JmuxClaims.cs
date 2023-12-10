@@ -30,21 +30,21 @@ public class JmuxClaims : IGatewayClaims
 
     public void HttpAllowAnyAdditional()
     {
-        this.AdditionalDestinations = new List<TargetAddr> { "*:80", "*:443" };
+        if (this.AdditionalDestinations is null)
+        {
+            this.AdditionalDestinations = new List<TargetAddr>();
+        }
+
+        this.AdditionalDestinations.Add(new TargetAddr("http", "*", 80));
+        this.AdditionalDestinations.Add(new TargetAddr("https", "*", 443));
     }
 
     /// <summary>Add common redirections as additional destinations.</summary>
     public void HttpExpandAdditionals()
     {
-        List<TargetAddr> additionalDestinations;
-
-        if (this.AdditionalDestinations != null)
+        if (this.AdditionalDestinations is null)
         {
-            additionalDestinations = this.AdditionalDestinations;
-        }
-        else
-        {
-            additionalDestinations = new List<TargetAddr>();
+            this.AdditionalDestinations = new List<TargetAddr>();
         }
 
         bool isPlainHttp = this.ApplicationProtocol.Equals(ApplicationProtocol.Http) || this.Destination.Port == 80 || this.Destination.Scheme == "http";
@@ -52,22 +52,20 @@ public class JmuxClaims : IGatewayClaims
         if (isPlainHttp)
         {
             // e.g.: http://www.google.com:80 => https://www.google.com:443
-            additionalDestinations.Add($"https://{this.Destination.Host}:443");
+            this.AdditionalDestinations.Add($"https://{this.Destination.Host}:443");
         }
 
         if (!this.Destination.Host.Contains("www"))
         {
             // e.g.: http://google.com:80 => http://www.google.com:80
-            additionalDestinations.Add($"{this.Destination.Scheme}://www.{this.Destination.Host}:{this.Destination.Port}");
+            this.AdditionalDestinations.Add($"{this.Destination.Scheme}://www.{this.Destination.Host}:{this.Destination.Port}");
 
             if (isPlainHttp)
             {
                 // e.g.: http://google.com:80 => https://www.google.com:443
-                additionalDestinations.Add($"https://www.{this.Destination.Host}:443");
+                this.AdditionalDestinations.Add($"https://www.{this.Destination.Host}:443");
             }
         }
-
-        this.AdditionalDestinations = additionalDestinations;
     }
 
     public string GetContentType()
