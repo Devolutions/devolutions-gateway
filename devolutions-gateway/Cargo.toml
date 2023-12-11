@@ -50,7 +50,7 @@ backoff = "0.4"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509", "pkcs12"] }
-zeroize = { version = "1.6", features = ["derive"] }
+zeroize = { version = "1.7", features = ["derive"] }
 multibase = "0.9"
 
 # Logging
