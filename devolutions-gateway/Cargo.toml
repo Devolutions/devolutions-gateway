@@ -69,10 +69,10 @@ tower = "0.4"
 ngrok = "0.13"
 
 # HTTP
-hyper = "0.14"
+hyper = "1.0"
 axum = { version = "0.6", default-features = false, features = ["http1", "json", "ws", "query", "tracing", "tower-log", "headers"] }
-axum-extra = { version = "0.8", features = ["query", "async-read-body"] }
-tower-http = { version = "0.4", features = ["cors", "fs"] }
+axum-extra = { version = "0.9", features = ["query", "async-read-body"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
 tungstenite = "0.20" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
 
 # OpenAPI generator
