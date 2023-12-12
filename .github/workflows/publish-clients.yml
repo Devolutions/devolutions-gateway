@@ -63,12 +63,15 @@ jobs:
 
           New-Item -ItemType "directory" -Path . -Name "nuget-packages"
           Get-ChildItem -Path $Path -Recurse *.nupkg | ForEach { Copy-Item $_ "./nuget-packages" }
+          Get-ChildItem -Path $Path -Recurse *.snupkg | ForEach { Copy-Item $_ "./nuget-packages" }
 
       - name: Upload packages
         uses: actions/upload-artifact@v3
         with:
           name: nupkg
-          path: nuget-packages/*.nupkg
+          path: |
+            nuget-packages/*.nupkg
+            nuget-packages/*.snupkg
 
   npm-build:
     name: NPM package build
@@ -116,7 +119,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
+          $Files = Get-ChildItem -Recurse nuget-packages/*
     
           foreach ($File in $Files) {
             $PushCmd = @(
