@@ -1,4 +1,5 @@
-use anyhow::Context as _;
+use std::io;
+
 use bytes::BytesMut;
 use jmux_proto::{Header, Message};
 use tokio_util::codec::{Decoder, Encoder};
@@ -11,7 +12,7 @@ pub struct JmuxCodec;
 impl Decoder for JmuxCodec {
     type Item = Message;
 
-    type Error = anyhow::Error;
+    type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.len() < Header::SIZE {
@@ -25,11 +26,10 @@ impl Decoder for JmuxCodec {
         let length = u16::from_be_bytes(length_bytes) as usize;
 
         if length > MAXIMUM_PACKET_SIZE_IN_BYTES {
-            anyhow::bail!(
-                "Received JMUX packet is exceeding the maximum packet size: {} (max is {})",
-                length,
-                MAXIMUM_PACKET_SIZE_IN_BYTES
-            );
+            return Err(io::Error::other(format!(
+                "received JMUX packet is exceeding the maximum packet size: {} (max is {})",
+                length, MAXIMUM_PACKET_SIZE_IN_BYTES,
+            )));
         }
 
         if src.len() < length {
@@ -45,7 +45,7 @@ impl Decoder for JmuxCodec {
         let packet_bytes = src.split_to(length).freeze();
 
         // Parse the JMUX packet contained in this frame
-        let packet = Message::decode(packet_bytes).context("Couldn’t process frame into a valid JMUX packet")?;
+        let packet = Message::decode(packet_bytes).map_err(io::Error::other)?;
 
         // Hands the frame
         Ok(Some(packet))
@@ -53,18 +53,18 @@ impl Decoder for JmuxCodec {
 }
 
 impl Encoder<Message> for JmuxCodec {
-    type Error = anyhow::Error;
+    type Error = io::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
         if item.size() > MAXIMUM_PACKET_SIZE_IN_BYTES {
-            anyhow::bail!(
-                "Attempted to send a JMUX packet whose size is too big: {} (max is {})",
+            return Err(io::Error::other(format!(
+                "attempted to send a JMUX packet whose size is too big: {} (max is {})",
                 item.size(),
                 MAXIMUM_PACKET_SIZE_IN_BYTES
-            );
+            )));
         }
 
-        item.encode(dst)?;
+        item.encode(dst).map_err(io::Error::other)?;
 
         Ok(())
     }
