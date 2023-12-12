@@ -715,6 +715,7 @@ namespace {{packageName}}.Client
                 {{#hasHttpSignatureMethods}}
                 HttpSigningConfiguration = second.HttpSigningConfiguration ?? first.HttpSigningConfiguration,
                 {{/hasHttpSignatureMethods}}
+                RemoteCertificateValidationCallback = second.RemoteCertificateValidationCallback ?? first.RemoteCertificateValidationCallback,
                 TempFolderPath = second.TempFolderPath ?? first.TempFolderPath,
                 DateTimeFormat = second.DateTimeFormat ?? first.DateTimeFormat,
                 ClientCertificates = second.ClientCertificates ?? first.ClientCertificates,
