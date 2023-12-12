@@ -12,12 +12,14 @@
     <Description>Client for Devolutions Gateway REST API</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Gateway.Client</RootNamespace>
-    <Version>2023.6.26</Version>
+    <Version>2023.12.12</Version>
     <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Gateway.Client.xml</DocumentationFile>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReleaseNotes>Minor update</PackageReleaseNotes>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 
   <ItemGroup>
