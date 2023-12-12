@@ -34,7 +34,7 @@ namespace Devolutions.Gateway.Client.Client
         /// Version of the package.
         /// </summary>
         /// <value>Version of the package.</value>
-        public const string Version = "2023.12.12";
+        public const string Version = "2023.12.13";
 
         /// <summary>
         /// Identifier for ISO 8601 DateTime Format
@@ -123,7 +123,7 @@ namespace Devolutions.Gateway.Client.Client
         public Configuration()
         {
             Proxy = null;
-            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2023.12.12/csharp");
+            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2023.12.13/csharp");
             BasePath = "http://localhost";
             DefaultHeaders = new ConcurrentDictionary<string, string>();
             ApiKey = new ConcurrentDictionary<string, string>();
@@ -541,7 +541,7 @@ namespace Devolutions.Gateway.Client.Client
             report += "    OS: " + System.Environment.OSVersion + "\n";
             report += "    .NET Framework Version: " + System.Environment.Version  + "\n";
             report += "    Version of the API: 2023.3.0\n";
-            report += "    SDK Package Version: 2023.12.12\n";
+            report += "    SDK Package Version: 2023.12.13\n";
 
             return report;
         }
@@ -600,6 +600,7 @@ namespace Devolutions.Gateway.Client.Client
                 Username = second.Username ?? first.Username,
                 Password = second.Password ?? first.Password,
                 AccessToken = second.AccessToken ?? first.AccessToken,
+                RemoteCertificateValidationCallback = second.RemoteCertificateValidationCallback ?? first.RemoteCertificateValidationCallback,
                 TempFolderPath = second.TempFolderPath ?? first.TempFolderPath,
                 DateTimeFormat = second.DateTimeFormat ?? first.DateTimeFormat,
                 ClientCertificates = second.ClientCertificates ?? first.ClientCertificates,
