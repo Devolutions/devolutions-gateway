@@ -119,7 +119,7 @@ jobs:
         run: |
           Set-PSDebug -Trace 1
 
-          $Files = Get-ChildItem -Recurse nuget-packages/*
+          $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
     
           foreach ($File in $Files) {
             $PushCmd = @(
