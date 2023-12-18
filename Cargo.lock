@@ -3108,9 +3108,9 @@ dependencies = [
 
 [[package]]
 name = "seahorse"
-version = "2.1.0"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3367111e93171f2f51f16fb46201bf6687f9da95eb1d409b6067cbc77af9c9c"
+checksum = "d25679a62f678e7485f21abdea76f91a15322a0fe51efea791fd9d124f1c473c"
 
 [[package]]
 name = "sec1"
