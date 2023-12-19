@@ -190,7 +190,7 @@ pub mod windows {
             match self.resolve(client_hello) {
                 Ok(certified_key) => Some(certified_key),
                 Err(error) => {
-                    debug!(error = format!("{error:#?}"), "Failed to resolve TLS certificate");
+                    error!(error = format!("{error:#?}"), "Failed to resolve TLS certificate");
                     None
                 }
             }
