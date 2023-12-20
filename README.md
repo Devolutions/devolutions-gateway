@@ -51,8 +51,11 @@ Stable options are:
 
 - **Hostname** (_String_): This Gateway's hostname (used when inferring external URLs).
 
-- **ProvisionerPublicKeyFile** (_FilePath_): Path to the provisioner public key which used to verify tokens
+- **ProvisionerPublicKeyFile** (_FilePath_): Path to the provisioner public key which is used to verify tokens
     without any specific restriction.
+
+- **ProvisionerPrivateKeyFile** (_FilePath_): Path to the provisioner private key which is used to generate session
+    tokens when using the standalone web application.
 
 - **SubProvisionerPublicKey** (_Object_): A JSON object describing the sub provisioner public key which may only be used to verify
     tokens when establishing a session.
@@ -182,6 +185,29 @@ Stable options are:
         Note that in order to accept connections from outside, you must at least configure `AllowCidrs`.
         The most permissive CIDR is the "zero-address" `0.0.0.0/0`, and defines an IP block containing all possible IP addresses.
 
+- **WebApp** (_Object_): JSON object describing the standalone web application configuration.
+
+    * **Enabled** (_Boolean_): Whether to enable or disable the standalone web application.
+        When enabled, the **ProvisionerPrivateKeyFile** option must be set.
+
+    * **Authentication** (_String_): The authentication method for accessing the web application.
+
+        Possible values:
+        
+        * `Custom`: Requires a username/password pair.
+        * `None`: Disable authentication, anyone can access the web application.
+
+    * **Users** (_Array_): A list of users authorized to access the web application when using the
+        `Custom` authentication method.
+
+        Each element has the following schema: 
+
+        * **Name** (_String_): The name of the user.
+
+        * **Password** (_String_): Hash of the password in the [PHC string format][phc-string].
+            Currently, the only supported hash algorithm is [Argon2][argon2-wikipedia].
+            It’s possible to use the online tool [argon2.online][argon2-online] to generate a hash.
+
 - **VerbosityProfile** (_String_): Logging verbosity profile (pre-defined tracing directives).
 
     Possible values:
@@ -191,6 +217,10 @@ Stable options are:
     * `Tls`: Verbose logging for TLS troubleshooting.
     * `All`: Extra-verbose profile, showing all traces.
     * `Quiet`: Only show warnings and errors.
+
+[phc-string]: https://github.com/P-H-C/phc-string-format/blob/5f1e4ec633845d43776849f503f8ce8314b5290c/phc-sf-spec.md
+[argon2-wikipedia]: https://en.wikipedia.org/wiki/Argon2
+[argon2-online]: https://argon2.online/
 
 ## Troubleshooting
 

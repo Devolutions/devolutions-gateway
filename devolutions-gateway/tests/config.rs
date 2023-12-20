@@ -43,6 +43,8 @@ fn hub_sample() -> Sample {
             hostname: Some("hostname.example.io".to_owned()),
             provisioner_public_key_file: Some("/path/to/provisioner.pub.key".into()),
             provisioner_public_key_data: None,
+            provisioner_private_key_file: None,
+            provisioner_private_key_data: None,
             sub_provisioner_public_key: Some(SubProvisionerKeyConf {
                 id: "subkey-id".to_owned(),
                 data: ConfData {
@@ -82,6 +84,7 @@ fn hub_sample() -> Sample {
             sogar: None,
             ngrok: None,
             verbosity_profile: Some(VerbosityProfile::Tls),
+            web_app: None,
             debug: None,
             rest: Default::default(),
         },
@@ -102,6 +105,8 @@ fn legacy_sample() -> Sample {
             hostname: None,
             provisioner_public_key_file: Some("/path/to/provisioner.pub.key".into()),
             provisioner_public_key_data: None,
+            provisioner_private_key_file: None,
+            provisioner_private_key_data: None,
             sub_provisioner_public_key: None,
             delegation_private_key_file: None,
             delegation_private_key_data: None,
@@ -121,6 +126,7 @@ fn legacy_sample() -> Sample {
             sogar: None,
             ngrok: None,
             verbosity_profile: None,
+            web_app: None,
             debug: None,
             rest: Default::default(),
         },
@@ -140,6 +146,8 @@ fn system_store_sample() -> Sample {
             hostname: None,
             provisioner_public_key_file: None,
             provisioner_public_key_data: None,
+            provisioner_private_key_file: None,
+            provisioner_private_key_data: None,
             sub_provisioner_public_key: None,
             delegation_private_key_file: None,
             delegation_private_key_data: None,
@@ -159,6 +167,177 @@ fn system_store_sample() -> Sample {
             sogar: None,
             ngrok: None,
             verbosity_profile: None,
+            web_app: None,
+            debug: None,
+            rest: Default::default(),
+        },
+    }
+}
+
+fn standalone_custom_auth_sample() -> Sample {
+    Sample {
+        json_repr: r#"{
+            "Id": "aa0b2a02-ba9d-4e87-b707-03c6391b86fb",
+            "Hostname": "hostname.example.io",
+            "ProvisionerPublicKeyFile": "provisioner.pem",
+            "ProvisionerPrivateKeyFile": "provisioner.key",
+            "Listeners": [
+                {
+                    "InternalUrl": "tcp://*:8080",
+                    "ExternalUrl": "tcp://*:8080"
+                },
+                {
+                    "InternalUrl": "http://*:7171",
+                    "ExternalUrl": "https://*:7171"
+                }
+            ],
+            "WebApp": {
+                "Enabled": true,
+                "Authentication": "Custom",
+                "Users": [
+                    {
+                        "Name": "David",
+                        "Password": "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg"
+                    },
+                    {
+                        "Name": "Maurice",
+                        "Password": "$argon2id$v=19$m=16,t=2,p=1$ZmdQWTkwQUNWcWh4T1YzQw$B6qWmJXHODN/bxZGIe/lyg"
+                    }
+                ]
+            }
+        }"#,
+        file_conf: ConfFile {
+            id: Some(Uuid::from_str("aa0b2a02-ba9d-4e87-b707-03c6391b86fb").unwrap()),
+            hostname: Some("hostname.example.io".to_owned()),
+            provisioner_public_key_file: Some("provisioner.pem".into()),
+            provisioner_public_key_data: None,
+            provisioner_private_key_file: Some("provisioner.key".into()),
+            provisioner_private_key_data: None,
+            sub_provisioner_public_key: None,
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_source: None,
+            tls_certificate_file: None,
+            tls_private_key_file: None,
+            tls_private_key_password: None,
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
+            listeners: vec![
+                ListenerConf {
+                    internal_url: "tcp://*:8080".try_into().unwrap(),
+                    external_url: "tcp://*:8080".try_into().unwrap(),
+                },
+                ListenerConf {
+                    internal_url: "http://*:7171".try_into().unwrap(),
+                    external_url: "https://*:7171".try_into().unwrap(),
+                },
+            ],
+            subscriber: None,
+            log_file: None,
+            jrl_file: None,
+            plugins: None,
+            recording_path: None,
+            sogar: None,
+            ngrok: None,
+            verbosity_profile: None,
+            web_app: Some(WebAppConf {
+                enabled: true,
+                authentication: WebAppAuth::Custom,
+                users: vec![
+                    WebAppUser {
+                        name: "David".to_owned(),
+                        password: Password::from(
+                            "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
+                        ),
+                    },
+                    WebAppUser {
+                        name: "Maurice".to_owned(),
+                        password: Password::from(
+                            "$argon2id$v=19$m=16,t=2,p=1$ZmdQWTkwQUNWcWh4T1YzQw$B6qWmJXHODN/bxZGIe/lyg",
+                        ),
+                    },
+                ],
+            }),
+            debug: None,
+            rest: Default::default(),
+        },
+    }
+}
+
+fn standalone_no_auth_sample() -> Sample {
+    Sample {
+        json_repr: r#"{
+            "Id": "aa0b2a02-ba9d-4e87-b707-03c6391b86fb",
+            "Hostname": "hostname.example.io",
+            "ProvisionerPublicKeyFile": "provisioner.pem",
+            "ProvisionerPrivateKeyFile": "provisioner.key",
+            "Listeners": [
+                {
+                    "InternalUrl": "tcp://*:8080",
+                    "ExternalUrl": "tcp://*:8080"
+                },
+                {
+                    "InternalUrl": "http://*:7171",
+                    "ExternalUrl": "https://*:7171"
+                }
+            ],
+            "WebApp": {
+                "Enabled": true,
+                "Authentication": "None",
+                "Users": [
+                    {
+                        "Name": "LeftoverUnusedUser",
+                        "Password": "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg"
+                    }
+                ]
+            }
+        }"#,
+        file_conf: ConfFile {
+            id: Some(Uuid::from_str("aa0b2a02-ba9d-4e87-b707-03c6391b86fb").unwrap()),
+            hostname: Some("hostname.example.io".to_owned()),
+            provisioner_public_key_file: Some("provisioner.pem".into()),
+            provisioner_public_key_data: None,
+            provisioner_private_key_file: Some("provisioner.key".into()),
+            provisioner_private_key_data: None,
+            sub_provisioner_public_key: None,
+            delegation_private_key_file: None,
+            delegation_private_key_data: None,
+            tls_certificate_source: None,
+            tls_certificate_file: None,
+            tls_private_key_file: None,
+            tls_private_key_password: None,
+            tls_certificate_subject_name: None,
+            tls_certificate_store_location: None,
+            tls_certificate_store_name: None,
+            listeners: vec![
+                ListenerConf {
+                    internal_url: "tcp://*:8080".try_into().unwrap(),
+                    external_url: "tcp://*:8080".try_into().unwrap(),
+                },
+                ListenerConf {
+                    internal_url: "http://*:7171".try_into().unwrap(),
+                    external_url: "https://*:7171".try_into().unwrap(),
+                },
+            ],
+            subscriber: None,
+            log_file: None,
+            jrl_file: None,
+            plugins: None,
+            recording_path: None,
+            sogar: None,
+            ngrok: None,
+            verbosity_profile: None,
+            web_app: Some(WebAppConf {
+                enabled: true,
+                authentication: WebAppAuth::None,
+                users: vec![WebAppUser {
+                    name: "LeftoverUnusedUser".to_owned(),
+                    password: Password::from(
+                        "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
+                    ),
+                }],
+            }),
             debug: None,
             rest: Default::default(),
         },
@@ -169,6 +348,8 @@ fn system_store_sample() -> Sample {
 #[case(hub_sample())]
 #[case(legacy_sample())]
 #[case(system_store_sample())]
+#[case(standalone_custom_auth_sample())]
+#[case(standalone_no_auth_sample())]
 fn sample_parsing(#[case] sample: Sample) {
     let from_json = serde_json::from_str::<ConfFile>(sample.json_repr)
         .unwrap()
