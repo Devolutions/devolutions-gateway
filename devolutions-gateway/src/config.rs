@@ -70,6 +70,7 @@ pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub tls: Option<Tls>,
     pub provisioner_public_key: PublicKey,
+    pub provisioner_private_key: Option<PrivateKey>,
     pub sub_provisioner_public_key: Option<Subkey>,
     pub delegation_private_key: Option<PrivateKey>,
     pub plugins: Option<Vec<Utf8PathBuf>>,
@@ -78,7 +79,20 @@ pub struct Conf {
     pub jrl_file: Utf8PathBuf,
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
+    pub web_app: Option<WebAppConf>,
     pub debug: dto::DebugConf,
+}
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+pub struct WebAppConf {
+    pub enabled: bool,
+    pub authentication: WebAppAuth,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+pub enum WebAppAuth {
+    Custom(Vec<dto::WebAppUser>),
+    None,
 }
 
 impl Conf {
@@ -113,7 +127,7 @@ impl Conf {
 
         anyhow::ensure!(
             has_http_listener | has_ngrok_http_listener,
-            "at least one HTTP-capable listener is required"
+            "at least one HTTP-capable listener is required",
         );
 
         let requires_tls = listeners
@@ -211,6 +225,12 @@ impl Conf {
         .context("provisioner public key")?
         .context("provisioner public key is missing (no path nor inlined data provided)")?;
 
+        let provisioner_private_key = read_priv_key(
+            conf_file.provisioner_private_key_file.as_deref(),
+            conf_file.provisioner_private_key_data.as_ref(),
+        )
+        .context("provisioner public key")?;
+
         let sub_provisioner_public_key = conf_file
             .sub_provisioner_public_key
             .as_ref()
@@ -227,6 +247,15 @@ impl Conf {
         )
         .context("delegation private key")?;
 
+        if let Some(web_app_conf) = &conf_file.web_app {
+            if web_app_conf.enabled {
+                anyhow::ensure!(
+                    provisioner_private_key.is_some(),
+                    "provisioner private key must be specified when the standalone web application is enabled",
+                );
+            }
+        }
+
         Ok(Conf {
             id: conf_file.id,
             hostname,
@@ -235,6 +264,7 @@ impl Conf {
             log_file,
             tls,
             provisioner_public_key,
+            provisioner_private_key,
             sub_provisioner_public_key,
             delegation_private_key,
             plugins: conf_file.plugins.clone(),
@@ -243,6 +273,7 @@ impl Conf {
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
+            web_app: conf_file.web_app.clone().map(WebAppConf::from),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -694,6 +725,18 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
     Ok(out)
 }
 
+impl From<dto::WebAppConf> for WebAppConf {
+    fn from(value: dto::WebAppConf) -> Self {
+        Self {
+            enabled: value.enabled,
+            authentication: match value.authentication {
+                dto::WebAppAuth::Custom => WebAppAuth::Custom(value.users),
+                dto::WebAppAuth::None => WebAppAuth::None,
+            },
+        }
+    }
+}
+
 pub mod dto {
     use std::collections::HashMap;
 
@@ -716,20 +759,25 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub hostname: Option<String>,
 
-        /// Path to provisioner key to verify tokens without restriction
+        /// Path to provisioner public key to verify tokens without restriction
         pub provisioner_public_key_file: Option<Utf8PathBuf>,
-        /// Inlined provisioner key to verify tokens without restriction
+        /// Inlined provisioner public key to verify tokens without restriction
         #[serde(skip_serializing_if = "Option::is_none")]
         pub provisioner_public_key_data: Option<ConfData<PubKeyFormat>>,
+        /// Path to the provisioner private key, to generate session tokens in standalone mode (via web application)
+        pub provisioner_private_key_file: Option<Utf8PathBuf>,
+        /// Inlined provisioner private key, to generate session tokens in standalone mode (via web application)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub provisioner_private_key_data: Option<ConfData<PrivKeyFormat>>,
 
-        /// Sub provisioner key which can only be used when establishing a session
+        /// Sub provisioner public key which can only be used when establishing a session
         #[serde(skip_serializing_if = "Option::is_none")]
         pub sub_provisioner_public_key: Option<SubProvisionerKeyConf>,
 
-        /// Delegation key used to decipher sensitive data
+        /// Delegation private key used to decipher sensitive data
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_file: Option<Utf8PathBuf>,
-        /// Inlined delegation key to decipher sensitive data
+        /// Inlined delegation private key to decipher sensitive data
         #[serde(skip_serializing_if = "Option::is_none")]
         pub delegation_private_key_data: Option<ConfData<PrivKeyFormat>>,
 
@@ -775,6 +823,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub verbosity_profile: Option<VerbosityProfile>,
 
+        /// Web application configuration for standalone mode
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub web_app: Option<WebAppConf>,
+
         /// (Unstable) Folder and prefix for log files
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
@@ -809,6 +861,8 @@ pub mod dto {
                 hostname: None,
                 provisioner_public_key_file: Some("provisioner.pem".into()),
                 provisioner_public_key_data: None,
+                provisioner_private_key_file: None,
+                provisioner_private_key_data: None,
                 sub_provisioner_public_key: None,
                 delegation_private_key_file: None,
                 delegation_private_key_data: None,
@@ -836,6 +890,7 @@ pub mod dto {
                 jrl_file: None,
                 plugins: None,
                 recording_path: None,
+                web_app: None,
                 sogar: None,
                 debug: None,
                 rest: serde_json::Map::new(),
@@ -1117,16 +1172,28 @@ pub mod dto {
     #[derive(PartialEq, Eq, Clone, zeroize::Zeroize)]
     pub struct Password(String);
 
-    impl fmt::Debug for Password {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.debug_struct("Password").finish_non_exhaustive()
-        }
-    }
-
     impl Password {
         /// Do not copy the return value without wrapping into some "Zeroize"able structure.
         pub fn get(&self) -> &str {
             &self.0
+        }
+    }
+
+    impl From<&str> for Password {
+        fn from(value: &str) -> Self {
+            Self(value.to_owned())
+        }
+    }
+
+    impl From<String> for Password {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+
+    impl fmt::Debug for Password {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("Password").finish_non_exhaustive()
         }
     }
 
@@ -1172,5 +1239,28 @@ pub mod dto {
         {
             serializer.serialize_str(&self.0)
         }
+    }
+
+    #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct WebAppConf {
+        pub enabled: bool,
+        pub authentication: WebAppAuth,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub users: Vec<WebAppUser>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
+    pub enum WebAppAuth {
+        Custom,
+        None,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct WebAppUser {
+        pub name: String,
+        /// Hash of the password, in the PHC string format
+        pub password: Password,
     }
 }
