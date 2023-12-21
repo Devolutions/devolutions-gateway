@@ -11,6 +11,9 @@ updates:
       ironrdp:
         patterns:
           - "ironrdp*"
+      ironvnc:
+        patterns:
+          - "ironvnc*"
       picky:
         patterns:
           - "picky*"
@@ -26,10 +29,22 @@ updates:
           - "tracing*"
       http:
         patterns:
-          - "hyper"
+          - "hyper*"
           - "axum*"
           - "tower*"
           - "reqwest*"
+      crypto:
+        patterns:
+          - "md-5"
+          - "md5"
+          - "sha1"
+          - "pkcs1"
+          - "x509-cert"
+          - "der"
+          - "*tls*"
+          - "*rand*"
+          - "argon2"
+          - "zeroize"
       patch:
         dependency-type: "production"
         update-types:
