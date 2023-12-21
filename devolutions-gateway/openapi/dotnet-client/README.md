@@ -115,12 +115,16 @@ Class | Method | HTTP request | Description
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *SessionsApi* | [**GetSessions**](docs/SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions
 *SessionsApi* | [**TerminateSession**](docs/SessionsApi.md#terminatesession) | **POST** /jet/session/{id}/terminate | Terminate forcefully a running session
+*WebAppApi* | [**SignAppToken**](docs/WebAppApi.md#signapptoken) | **POST** /jet/webapp/app-token | Requests a web application token using the configured authorization method
+*WebAppApi* | [**SignSessionToken**](docs/WebAppApi.md#signsessiontoken) | **POST** /jet/webapp/session-token | Requests a session token using a web application token
 
 
 <a name="documentation-for-models"></a>
 ## Documentation for Models
 
  - [Model.AccessScope](docs/AccessScope.md)
+ - [Model.AppTokenContentType](docs/AppTokenContentType.md)
+ - [Model.AppTokenSignRequest](docs/AppTokenSignRequest.md)
  - [Model.ClockDiagnostic](docs/ClockDiagnostic.md)
  - [Model.ConfigDiagnostic](docs/ConfigDiagnostic.md)
  - [Model.ConfigPatch](docs/ConfigPatch.md)
@@ -132,6 +136,8 @@ Class | Method | HTTP request | Description
  - [Model.ListenerUrls](docs/ListenerUrls.md)
  - [Model.PubKeyFormat](docs/PubKeyFormat.md)
  - [Model.SessionInfo](docs/SessionInfo.md)
+ - [Model.SessionTokenContentType](docs/SessionTokenContentType.md)
+ - [Model.SessionTokenSignRequest](docs/SessionTokenSignRequest.md)
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
 
@@ -151,6 +157,16 @@ Class | Method | HTTP request | Description
 
 <a name="scope_token"></a>
 ### scope_token
+
+- **Type**: Bearer Authentication
+
+<a name="web_app_custom_auth"></a>
+### web_app_custom_auth
+
+- **Type**: HTTP basic authentication
+
+<a name="web_app_token"></a>
+### web_app_token
 
 - **Type**: Bearer Authentication
 

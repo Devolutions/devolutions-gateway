@@ -9,10 +9,13 @@ api/heartbeat.service.ts
 api/jrec.service.ts
 api/jrl.service.ts
 api/sessions.service.ts
+api/webApp.service.ts
 configuration.ts
 encoder.ts
 index.ts
 model/accessScope.ts
+model/appTokenContentType.ts
+model/appTokenSignRequest.ts
 model/clockDiagnostic.ts
 model/configDiagnostic.ts
 model/configPatch.ts
@@ -25,6 +28,8 @@ model/listenerUrls.ts
 model/models.ts
 model/pubKeyFormat.ts
 model/sessionInfo.ts
+model/sessionTokenContentType.ts
+model/sessionTokenSignRequest.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
 ng-package.json

@@ -46,7 +46,9 @@ impl<'a> LogPathCfg<'a> {
 fn profile_to_directives(profile: VerbosityProfile) -> &'static str {
     match profile {
         VerbosityProfile::Default => "info",
-        VerbosityProfile::Debug => "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug",
+        VerbosityProfile::Debug => {
+            "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace"
+        }
         VerbosityProfile::Tls => {
             "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
         }

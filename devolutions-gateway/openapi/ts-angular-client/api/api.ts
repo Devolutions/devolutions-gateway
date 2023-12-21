@@ -12,4 +12,6 @@ export * from './jrl.service';
 import { JrlService } from './jrl.service';
 export * from './sessions.service';
 import { SessionsService } from './sessions.service';
-export const APIS = [ConfigService, DiagnosticsService, HealthService, HeartbeatService, JrecService, JrlService, SessionsService];
+export * from './webApp.service';
+import { WebAppService } from './webApp.service';
+export const APIS = [ConfigService, DiagnosticsService, HealthService, HeartbeatService, JrecService, JrlService, SessionsService, WebAppService];

@@ -10,9 +10,10 @@ pub mod kdc_proxy;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
+pub mod webapp;
 
 pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
-    axum::Router::new()
+    let mut router = axum::Router::new()
         .route("/jet/health", axum::routing::get(health::get_health))
         .route("/jet/heartbeat", axum::routing::get(heartbeat::get_heartbeat))
         .nest("/jet/jrl", jrl::make_router(state.clone()))
@@ -24,5 +25,14 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .route("/jet/jmux", axum::routing::get(jmux::handler))
         .route("/jet/rdp", axum::routing::get(rdp::handler))
         .nest("/jet/fwd", fwd::make_router(state.clone()))
-        .with_state(state)
+        .nest("/jet/webapp", webapp::make_router(state.clone()));
+
+    if state.conf_handle.get_conf().webapp_is_enabled() {
+        router = router.route(
+            "/",
+            axum::routing::get(|| async { axum::response::Redirect::temporary("/jet/webapp/client") }),
+        );
+    }
+
+    router.with_state(state)
 }

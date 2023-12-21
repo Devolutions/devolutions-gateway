@@ -2,6 +2,8 @@
 Devolutions.Gateway.Client.sln
 README.md
 docs/AccessScope.md
+docs/AppTokenContentType.md
+docs/AppTokenSignRequest.md
 docs/ClockDiagnostic.md
 docs/ConfigApi.md
 docs/ConfigDiagnostic.md
@@ -19,9 +21,12 @@ docs/JrlInfo.md
 docs/ListenerUrls.md
 docs/PubKeyFormat.md
 docs/SessionInfo.md
+docs/SessionTokenContentType.md
+docs/SessionTokenSignRequest.md
 docs/SessionsApi.md
 docs/SubProvisionerKey.md
 docs/Subscriber.md
+docs/WebAppApi.md
 src/Devolutions.Gateway.Client/Api/ConfigApi.cs
 src/Devolutions.Gateway.Client/Api/DiagnosticsApi.cs
 src/Devolutions.Gateway.Client/Api/HealthApi.cs
@@ -29,6 +34,7 @@ src/Devolutions.Gateway.Client/Api/HeartbeatApi.cs
 src/Devolutions.Gateway.Client/Api/JrecApi.cs
 src/Devolutions.Gateway.Client/Api/JrlApi.cs
 src/Devolutions.Gateway.Client/Api/SessionsApi.cs
+src/Devolutions.Gateway.Client/Api/WebAppApi.cs
 src/Devolutions.Gateway.Client/Client/ApiClient.cs
 src/Devolutions.Gateway.Client/Client/ApiException.cs
 src/Devolutions.Gateway.Client/Client/ApiResponse.cs
@@ -48,6 +54,8 @@ src/Devolutions.Gateway.Client/Client/RetryConfiguration.cs
 src/Devolutions.Gateway.Client/Devolutions.Gateway.Client.csproj
 src/Devolutions.Gateway.Client/Model/AbstractOpenAPISchema.cs
 src/Devolutions.Gateway.Client/Model/AccessScope.cs
+src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
+src/Devolutions.Gateway.Client/Model/AppTokenSignRequest.cs
 src/Devolutions.Gateway.Client/Model/ClockDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigDiagnostic.cs
 src/Devolutions.Gateway.Client/Model/ConfigPatch.cs
@@ -59,5 +67,7 @@ src/Devolutions.Gateway.Client/Model/JrlInfo.cs
 src/Devolutions.Gateway.Client/Model/ListenerUrls.cs
 src/Devolutions.Gateway.Client/Model/PubKeyFormat.cs
 src/Devolutions.Gateway.Client/Model/SessionInfo.cs
+src/Devolutions.Gateway.Client/Model/SessionTokenContentType.cs
+src/Devolutions.Gateway.Client/Model/SessionTokenSignRequest.cs
 src/Devolutions.Gateway.Client/Model/SubProvisionerKey.cs
 src/Devolutions.Gateway.Client/Model/Subscriber.cs

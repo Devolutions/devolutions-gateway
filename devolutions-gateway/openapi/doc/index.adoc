@@ -34,6 +34,14 @@ Protocol-aware fine-grained relay server
 * *Bearer* Authentication `scope_token`
 
 
+* *HTTP Basic* Authentication `web_app_custom_auth`
+
+
+
+
+* *Bearer* Authentication `web_app_token`
+
+
 
 
 == Endpoints
@@ -1031,6 +1039,212 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.WebApp]
+=== WebApp
+
+
+[.signAppToken]
+==== signAppToken
+
+`POST /jet/webapp/app-token`
+
+Requests a web application token using the configured authorization method
+
+===== Description
+
+Requests a web application token using the configured authorization method
+
+
+// markup not found, no include::{specDir}jet/webapp/app-token/POST/spec.adoc[opts=optional]
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `web_app_custom_auth`
+| http
+| basic
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| AppTokenSignRequest
+| JSON-encoded payload specifying the desired claims <<AppTokenSignRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+
+<<String>>
+
+
+===== Content Type
+
+* text/plain
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The application token has been granted
+|  <<String>>
+
+
+| 400
+| Bad signature request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization header
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 415
+| Unsupported content type in request body
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/webapp/app-token/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.signSessionToken]
+==== signSessionToken
+
+`POST /jet/webapp/session-token`
+
+Requests a session token using a web application token
+
+===== Description
+
+Requests a session token using a web application token
+
+
+// markup not found, no include::{specDir}jet/webapp/session-token/POST/spec.adoc[opts=optional]
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `web_app_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| SessionTokenSignRequest
+| JSON-encoded payload specifying the desired claims <<SessionTokenSignRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+
+<<String>>
+
+
+===== Content Type
+
+* text/plain
+
+===== Responses
+
+.http response codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The application token has been granted
+|  <<String>>
+
+
+| 400
+| Bad signature request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization header
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 415
+| Unsupported content type in request body
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/webapp/session-token/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [#models]
 == Models
 
@@ -1063,6 +1277,52 @@ endif::internal-generation[]
 
 | `"gateway.recordings.read"`
 |===
+
+
+[#AppTokenContentType]
+=== _AppTokenContentType_ 
+
+
+
+
+[cols="1"]
+|===
+| Allowed values
+
+| `"WEBAPP"`
+|===
+
+
+[#AppTokenSignRequest]
+=== _AppTokenSignRequest_ 
+
+
+
+[.fields-AppTokenSignRequest]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| content_type
+| X
+| AppTokenContentType 
+| 
+|  
+
+| lifetime
+| 
+| Long 
+| The validity duration in seconds for the app token.  This value cannot exceed the configured maximum lifetime. If no value is provided, the configured maximum lifetime will be granted.
+| int64 
+
+| subject
+| X
+| String 
+| The username used to request the app token.
+|  
+
+|===
+
 
 
 [#ClockDiagnostic]
@@ -1394,6 +1654,80 @@ Information about an ongoing Gateway session
 | Long 
 | Maximum session duration in minutes (0 is used for the infinite duration)
 | int64 
+
+|===
+
+
+
+[#SessionTokenContentType]
+=== _SessionTokenContentType_ 
+
+
+
+
+[cols="1"]
+|===
+| Allowed values
+
+| `"ASSOCIATION"`
+
+| `"JMUX"`
+
+| `"KDC"`
+|===
+
+
+[#SessionTokenSignRequest]
+=== _SessionTokenSignRequest_ 
+
+
+
+[.fields-SessionTokenSignRequest]
+[cols="2,1,2,4,1"]
+|===
+| Field Name| Required| Type| Description| Format
+
+| content_type
+| X
+| SessionTokenContentType 
+| 
+|  
+
+| destination
+| 
+| String 
+| Destination host
+|  
+
+| krb_kdc
+| 
+| String 
+| Kerberos KDC address.  E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`. Default scheme is `tcp`. Default port is `88`.
+|  
+
+| krb_realm
+| 
+| String 
+| Kerberos realm.  E.g.: `ad.it-help.ninja`. Should be lowercased (actual validation is case-insensitive though).
+|  
+
+| lifetime
+| X
+| Long 
+| The validity duration in seconds for the session token.  This value cannot exceed 2 hours.
+| int64 
+
+| protocol
+| 
+| String 
+| Protocol for the session (e.g.: \"rdp\")
+|  
+
+| session_id
+| 
+| UUID 
+| Unique ID for this session
+| uuid 
 
 |===
 
