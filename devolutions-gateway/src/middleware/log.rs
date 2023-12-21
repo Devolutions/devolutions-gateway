@@ -1,3 +1,4 @@
+use axum::body::Body;
 use axum::http::Request;
 use axum::middleware::Next;
 use axum::response::Response;
@@ -6,7 +7,7 @@ use tracing::Instrument as _;
 
 use crate::http::HttpError;
 
-pub async fn log_middleware<B>(request: Request<B>, next: Next<B>) -> Result<Response, HttpError> {
+pub async fn log_middleware(request: Request<Body>, next: Next) -> Result<Response, HttpError> {
     let uri_path = request.uri().path();
     let method = request.method();
 

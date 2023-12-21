@@ -23,6 +23,16 @@ impl HttpErrorBuilder {
     }
 
     #[inline]
+    pub fn build<T: Into<Box<dyn StdError + Sync + Send + 'static>>>(self, source: T) -> HttpError {
+        HttpError {
+            code: self.code,
+            loc: self.loc,
+            msg: self.msg,
+            source: Some(source.into()),
+        }
+    }
+
+    #[inline]
     pub fn err<T: Into<Box<dyn StdError + Sync + Send + 'static>>>(self) -> impl FnOnce(T) -> HttpError {
         move |source| HttpError {
             code: self.code,

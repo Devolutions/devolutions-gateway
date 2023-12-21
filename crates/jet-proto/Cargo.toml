@@ -10,7 +10,7 @@ log = "0.4"
 byteorder = "1.4"
 uuid = { version = "1.5", features = ["v4"] }
 httparse = "1.8"
-http = "0.2"
+http = "1.0"
 
 [dev-dependencies]
 lazy_static = "1.4"

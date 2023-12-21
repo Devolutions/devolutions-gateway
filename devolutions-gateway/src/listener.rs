@@ -235,14 +235,23 @@ where
     I: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     use axum::extract::connect_info::ConnectInfo;
+    use hyper::service::service_fn;
+    use tower::Service as _;
 
-    let app = crate::make_http_service(state).layer(axum::Extension(ConnectInfo(peer_addr)));
+    let service = service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+        // We have to clone `tower_service` because hyper's `Service` uses `&self` whereas
+        // tower's `Service` requires `&mut self`.
+        //
+        // We don't need to call `poll_ready` since `Router` is always ready.
+        crate::make_http_service(state.clone())
+            .layer(axum::Extension(ConnectInfo(peer_addr)))
+            .call(request)
+    });
 
-    hyper::server::conn::Http::new()
-        .serve_connection(io, app)
-        .with_upgrades()
+    hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+        .serve_connection_with_upgrades(hyper_util::rt::TokioIo::new(io), service)
         .await
-        .context("HTTP server")
+        .map_err(|e| anyhow::anyhow!(e).context("HTTP server"))
 }
 
 pub trait ToInternalUrl {
