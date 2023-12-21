@@ -178,5 +178,5 @@ fn unable_to_reach_kdc_server_err(error: io::Error) -> HttpError {
         _ => HttpError::bad_gateway(),
     };
 
-    builder.with_msg("unable to reach KDC server").err()(error)
+    builder.with_msg("unable to reach KDC server").build(error)
 }

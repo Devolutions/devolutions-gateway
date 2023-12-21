@@ -1,12 +1,14 @@
 use std::net::SocketAddr;
 
+use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
-use axum::headers::authorization::Bearer;
-use axum::headers::Authorization;
 use axum::http::{Method, Request};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::{RequestPartsExt as _, TypedHeader};
+use axum::RequestPartsExt as _;
+use axum_extra::headers::authorization::Bearer;
+use axum_extra::headers::Authorization;
+use axum_extra::TypedHeader;
 
 use crate::config::Conf;
 use crate::http::HttpError;
@@ -53,7 +55,7 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
     },
 ];
 
-pub async fn auth_middleware<B>(
+pub async fn auth_middleware(
     State(DgwState {
         conf_handle,
         token_cache,
@@ -62,12 +64,9 @@ pub async fn auth_middleware<B>(
         ..
     }): State<DgwState>,
     ConnectInfo(source_addr): ConnectInfo<SocketAddr>,
-    request: Request<B>,
-    next: Next<B>,
-) -> Result<Response, HttpError>
-where
-    B: Send,
-{
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, HttpError> {
     #[derive(Deserialize)]
     struct TokenQueryParam<'a> {
         token: &'a str,
