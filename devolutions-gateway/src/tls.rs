@@ -224,7 +224,7 @@ pub mod sanity {
     }
 
     pub fn check_default_configuration() -> anyhow::Result<()> {
-        trace!("TLS cipher suites: {:?}", rustls::DEFAULT_CIPHER_SUITES);
+        trace!("TLS cipher suites: {:?}", rustls::crypto::ring::DEFAULT_CIPHER_SUITES);
         trace!("TLS protocol versions: {:?}", rustls::DEFAULT_VERSIONS);
 
         // Make sure we have a few TLS 1.2 cipher suites in our build.
@@ -250,19 +250,41 @@ pub mod sanity {
 mod danger {
     use tokio_rustls::rustls;
 
+    #[derive(Debug)]
     pub(super) struct NoCertificateVerification;
 
-    impl rustls::client::ServerCertVerifier for NoCertificateVerification {
+    impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
         fn verify_server_cert(
             &self,
-            _end_entity: &rustls::Certificate,
-            _intermediates: &[rustls::Certificate],
-            _server_name: &rustls::ServerName,
-            _scts: &mut dyn Iterator<Item = &[u8]>,
-            _ocsp_response: &[u8],
-            _now: std::time::SystemTime,
-        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::ServerCertVerified::assertion())
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
+            intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            server_name: &rustls::pki_types::ServerName<'_>,
+            ocsp_response: &[u8],
+            now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            todo!()
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            todo!()
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            todo!()
         }
     }
 }
