@@ -1,4 +1,7 @@
-use std::{io::{Read, Write}, net::Ipv4Addr};
+use std::{
+    io::{Read, Write},
+    net::Ipv4Addr,
+};
 
 use socket2::SockAddr;
 use std::result::Result::Ok;
@@ -25,18 +28,16 @@ impl TokioRawSocketStream {
                 .connect(&socket_addr)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-            socket
-                .set_nonblocking(true)?;
+            socket.set_nonblocking(true)?;
 
             tracing::trace!("Connected to {:?}", &socket_addr);
             Ok(socket)
         })
         .await?
-        .map_err(|e:std::io::Error| e)?;
+        .map_err(|e: std::io::Error| e)?;
 
         Ok(TokioRawSocketStream { socket })
     }
-
 }
 
 impl AsyncRead for TokioRawSocketStream {
