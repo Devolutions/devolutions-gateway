@@ -2013,7 +2013,7 @@ dependencies = [
 
 [[package]]
 name = "network-scanner"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "network-scanner-net",
@@ -2025,7 +2025,7 @@ dependencies = [
 
 [[package]]
 name = "network-scanner-net"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "socket2",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "network-scanner-proto"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "byteorder",
 ]
