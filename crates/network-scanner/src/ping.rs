@@ -7,7 +7,7 @@ use crate::NetworkScanError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 type NetowrkScanResult<T> = Result<T, NetworkScanError>;
 
-pub async fn ping(ip: impl Into<Ipv4Addr>) -> NetowrkScanResult<()> {
+pub async fn ping(ip: Ipv4Addr) -> NetowrkScanResult<()> {
     let mut socket = TokioRawSocketStream::connect(ip)
         .await
         .map_err(|e| NetworkScanError::IoError(e))?;
