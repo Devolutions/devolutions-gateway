@@ -374,6 +374,8 @@ impl std::fmt::Display for PacketParseError {
     }
 }
 
+impl std::error::Error for PacketParseError {}
+
 fn sum_big_endian_words(bs: &[u8]) -> u32 {
     if bs.len() == 0 {
         return 0;
