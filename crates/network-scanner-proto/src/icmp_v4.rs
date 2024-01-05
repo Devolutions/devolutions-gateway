@@ -355,12 +355,9 @@ impl Icmpv4Packet {
     }
 }
 
-/// Error type returned by parsing the ICMP packets.
 #[derive(Debug)]
 pub enum PacketParseError {
-    /// Not enough bytes to properly parse the packet from.
     PacketTooSmall(usize),
-    /// An unrecognized ICMP type.
     UnrecognizedICMPType(u8),
 }
 
@@ -368,10 +365,10 @@ impl std::fmt::Display for PacketParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PacketParseError::PacketTooSmall(size) => {
-                write!(f, "Packet too small to parse: {}", size)
+                write!(f, "packet too small to parse: {}", size)
             }
             PacketParseError::UnrecognizedICMPType(t) => {
-                write!(f, "Unrecognized ICMP type: {}", t)
+                write!(f, "unrecognized ICMP type: {}", t)
             }
         }
     }
