@@ -3,18 +3,17 @@ use std::net::Ipv4Addr;
 use network_scanner_net::tokio_raw_socket::TokioRawSocketStream;
 use network_scanner_proto::icmp_v4;
 
-use crate::NetworkScanError;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-type NetowrkScanResult<T> = Result<T, NetworkScanError>;
+use tracing::instrument;
 
-pub async fn ping(ip: Ipv4Addr) -> NetowrkScanResult<()> {
+pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut socket = TokioRawSocketStream::connect(ip)
         .await
-        .map_err(|e| NetworkScanError::IoError(e))?;
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| NetworkScanError::Other(format!("Failed to get time: {}", e)))?
+        .map_err(|e| anyhow::anyhow!("cannot access system time"))?
         .as_secs();
 
     let echo_message = network_scanner_proto::icmp_v4::Icmpv4Message::Echo {
@@ -29,24 +28,22 @@ pub async fn ping(ip: Ipv4Addr) -> NetowrkScanResult<()> {
     let size = socket
         .read(&mut buffer)
         .await
-        .map_err(|e| NetworkScanError::IoError(e))?;
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let packet = icmp_v4::Icmpv4Packet::parse(&buffer[..size])
-        .map_err(|e| NetworkScanError::ProtocolError(format!("Failed to parse ICMP packet: {:?}", e)))?;
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     match packet.message {
         icmp_v4::Icmpv4Message::EchoReply {
-            identifier,
-            sequence,
             payload,
+            ..
         } => {
-            tracing::info!("Received echo reply: {:?} {:?} {:?}", identifier, sequence, payload);
             if payload != time.to_be_bytes().to_vec() {
-                return Err(NetworkScanError::ProtocolError(format!("Payload mismatch")));
+                anyhow::bail!("Payload does not match");
             }
         }
         _ => {
-            return Err(NetworkScanError::ProtocolError(format!("Unexpected message type")));
+            anyhow::bail!("Received non-echo reply");
         }
     }
 

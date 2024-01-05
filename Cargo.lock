@@ -2015,6 +2015,7 @@ dependencies = [
 name = "network-scanner"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "network-scanner-net",
  "network-scanner-proto",
  "tokio",

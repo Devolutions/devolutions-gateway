@@ -364,6 +364,19 @@ pub enum PacketParseError {
     UnrecognizedICMPType(u8),
 }
 
+impl std::fmt::Display for PacketParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PacketParseError::PacketTooSmall(size) => {
+                write!(f, "Packet too small to parse: {}", size)
+            }
+            PacketParseError::UnrecognizedICMPType(t) => {
+                write!(f, "Unrecognized ICMP type: {}", t)
+            }
+        }
+    }
+}
+
 fn sum_big_endian_words(bs: &[u8]) -> u32 {
     if bs.len() == 0 {
         return 0;
