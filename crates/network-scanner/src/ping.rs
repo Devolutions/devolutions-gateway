@@ -4,7 +4,7 @@ use network_scanner_net::tokio_raw_socket::TokioRawSocketStream;
 use network_scanner_proto::icmp_v4;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::instrument;
+use tracing::trace;
 
 pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut socket = TokioRawSocketStream::connect(ip)
@@ -13,7 +13,7 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| anyhow::anyhow!("cannot access system time"))?
+        .map_err(|e| anyhow::anyhow!(e))?
         .as_secs();
 
     let echo_message = network_scanner_proto::icmp_v4::Icmpv4Message::Echo {
@@ -25,19 +25,17 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let packet = icmp_v4::Icmpv4Packet::from_message(echo_message);
     socket.write(&packet.to_bytes(true)).await?;
     let mut buffer = [0u8; icmp_v4::ICMPV4_MTU];
-    let size = socket
-        .read(&mut buffer)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let size = socket.read(&mut buffer).await.map_err(|e| anyhow::anyhow!(e))?;
 
-    let packet = icmp_v4::Icmpv4Packet::parse(&buffer[..size])
-        .map_err(|e| anyhow::anyhow!(e))?;
+    let packet = icmp_v4::Icmpv4Packet::parse(&buffer[..size]).map_err(|e| anyhow::anyhow!(e))?;
 
     match packet.message {
         icmp_v4::Icmpv4Message::EchoReply {
             payload,
-            ..
+            identifier,
+            sequence,
         } => {
+            trace!(%identifier, %sequence,?payload, "Received echo reply");
             if payload != time.to_be_bytes().to_vec() {
                 anyhow::bail!("payload does not match for echo reply");
             }
