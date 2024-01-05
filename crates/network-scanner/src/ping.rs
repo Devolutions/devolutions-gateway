@@ -39,11 +39,11 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
             ..
         } => {
             if payload != time.to_be_bytes().to_vec() {
-                anyhow::bail!("Payload does not match");
+                anyhow::bail!("payload does not match for echo reply");
             }
         }
         _ => {
-            anyhow::bail!("Received non-echo reply");
+            anyhow::bail!("received non-echo reply");
         }
     }
 
