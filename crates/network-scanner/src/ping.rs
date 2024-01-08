@@ -13,7 +13,7 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| anyhow::anyhow!(e))?
+        .context("cannot access system time")?
         .as_secs();
 
     let echo_message = network_scanner_proto::icmp_v4::Icmpv4Message::Echo {
