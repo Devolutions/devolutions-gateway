@@ -4,12 +4,13 @@ use network_scanner_net::tokio_raw_socket::TokioRawSocketStream;
 use network_scanner_proto::icmp_v4;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use anyhow::Context;
 use tracing::trace;
 
 pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let mut socket = TokioRawSocketStream::connect(ip)
         .await
-        .map_err(|e| anyhow::anyhow!(e))?;
+        .with_context(|| format!("could not connect to {ip}"))?;
 
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
