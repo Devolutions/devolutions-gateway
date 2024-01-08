@@ -3,8 +3,8 @@ use std::net::Ipv4Addr;
 use network_scanner_net::tokio_raw_socket::TokioRawSocketStream;
 use network_scanner_proto::icmp_v4;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Context;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::trace;
 
 pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
