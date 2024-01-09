@@ -1,0 +1,18 @@
+[package]
+name = "network-scanner"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.79"
+network-scanner-net ={ path = "../network-scanner-net" }
+network-scanner-proto ={ path = "../network-scanner-proto" }
+tokio = { version = "1.35.1", features = ["io-util"] }
+tracing = "0.1.40"
+
+[dev-dependencies]
+tokio = { version = "1.35.1", features = ["rt","macros","rt-multi-thread"] }
+tracing-subscriber = "0.3.18"
