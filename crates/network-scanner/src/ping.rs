@@ -7,8 +7,6 @@ use anyhow::Context;
 use network_scanner_net::tokio_raw_socket::TokioRawSocket;
 use network_scanner_proto::icmp_v4;
 
-use tracing::trace;
-
 #[macro_export]
 macro_rules! create_echo_request {
     () => {{
@@ -43,14 +41,14 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     socket
         .send_to(&packet.to_bytes(true), socket2::SockAddr::from(addr))
         .await
-        .with_context(|| format!("Failed to send packet to {}", ip))?;
+        .with_context(|| format!("failed to send packet to {}", ip))?;
 
     let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
 
     let (size, _) = socket
         .recv_from(&mut buffer)
         .await
-        .with_context(|| format!("Failed to receive packet from {}", ip))?;
+        .with_context(|| format!("failed to receive packet from {}", ip))?;
 
     let inited_buf = buffer[..size].as_ref();
 
@@ -86,12 +84,12 @@ pub fn block_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     socket
         .send_to(&packet.to_bytes(true), &addr.into())
-        .with_context(|| format!("Failed to send packet to {}", ip))?;
+        .with_context(|| format!("failed to send packet to {}", ip))?;
 
     let mut buffer = [MaybeUninit::uninit(); icmp_v4::ICMPV4_MTU];
     let (size, _) = socket
         .recv_from(&mut buffer)
-        .with_context(|| format!("Failed to receive packet from {}", ip))?;
+        .with_context(|| format!("failed to receive packet from {}", ip))?;
 
     let inited_buf = buffer[..size].as_ref();
 
