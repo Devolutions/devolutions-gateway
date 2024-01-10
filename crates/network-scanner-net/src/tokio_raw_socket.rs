@@ -18,7 +18,6 @@ impl TokioRawSocket {
         ty: socket2::Type,
         protocol: Option<socket2::Protocol>,
     ) -> std::io::Result<TokioRawSocket> {
-
         let socket = socket2::Socket::new(domain, ty, protocol)?;
         let socket = Arc::new(Mutex::new(socket));
         Ok(TokioRawSocket { socket })
