@@ -321,6 +321,69 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/webapp/app-token:
+    post:
+      tags:
+      - WebApp
+      summary: Requests a web application token using the configured authorization method
+      description: Requests a web application token using the configured authorization method
+      operationId: SignAppToken
+      requestBody:
+        description: JSON-encoded payload specifying the desired claims
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppTokenSignRequest'
+        required: true
+      responses:
+        '200':
+          description: The application token has been granted
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Bad signature request
+        '401':
+          description: Invalid or missing authorization header
+        '403':
+          description: Insufficient permissions
+        '415':
+          description: Unsupported content type in request body
+      security:
+      - {}
+      - web_app_custom_auth: []
+  /jet/webapp/session-token:
+    post:
+      tags:
+      - WebApp
+      summary: Requests a session token using a web application token
+      description: Requests a session token using a web application token
+      operationId: SignSessionToken
+      requestBody:
+        description: JSON-encoded payload specifying the desired claims
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionTokenSignRequest'
+        required: true
+      responses:
+        '200':
+          description: The application token has been granted
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          description: Bad signature request
+        '401':
+          description: Invalid or missing authorization header
+        '403':
+          description: Insufficient permissions
+        '415':
+          description: Unsupported content type in request body
+      security:
+      - web_app_token: []
 components:
   schemas:
     AccessScope:
@@ -335,6 +398,31 @@ components:
       - gateway.config.write
       - gateway.heartbeat.read
       - gateway.recordings.read
+    AppTokenContentType:
+      type: string
+      enum:
+      - WEBAPP
+    AppTokenSignRequest:
+      type: object
+      required:
+      - content_type
+      - subject
+      properties:
+        content_type:
+          $ref: '#/components/schemas/AppTokenContentType'
+        lifetime:
+          type: integer
+          format: int64
+          description: |-
+            The validity duration in seconds for the app token.
+
+            This value cannot exceed the configured maximum lifetime.
+            If no value is provided, the configured maximum lifetime will be granted.
+          nullable: true
+          minimum: 0
+        subject:
+          type: string
+          description: The username used to request the app token.
     ClockDiagnostic:
       type: object
       required:
@@ -512,6 +600,58 @@ components:
           description: Maximum session duration in minutes (0 is used for the infinite duration)
           nullable: true
           minimum: 0
+    SessionTokenContentType:
+      type: string
+      enum:
+      - ASSOCIATION
+      - JMUX
+      - KDC
+    SessionTokenSignRequest:
+      type: object
+      required:
+      - content_type
+      - lifetime
+      properties:
+        content_type:
+          $ref: '#/components/schemas/SessionTokenContentType'
+        destination:
+          type: string
+          description: Destination host
+          nullable: true
+        krb_kdc:
+          type: string
+          description: |-
+            Kerberos KDC address.
+
+            E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`.
+            Default scheme is `tcp`.
+            Default port is `88`.
+          nullable: true
+        krb_realm:
+          type: string
+          description: |-
+            Kerberos realm.
+
+            E.g.: `ad.it-help.ninja`.
+            Should be lowercased (actual validation is case-insensitive though).
+          nullable: true
+        lifetime:
+          type: integer
+          format: int64
+          description: |-
+            The validity duration in seconds for the session token.
+
+            This value cannot exceed 2 hours.
+          minimum: 0
+        protocol:
+          type: string
+          description: 'Protocol for the session (e.g.: "rdp")'
+          nullable: true
+        session_id:
+          type: string
+          format: uuid
+          description: Unique ID for this session
+          nullable: true
     SubProvisionerKey:
       type: object
       required:
@@ -561,4 +701,13 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Token allowing a single HTTP request for a specific scope
+    web_app_custom_auth:
+      type: http
+      scheme: basic
+      description: Custom authentication method for the standalone web application
+    web_app_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token allowing usage of the standalone web application
 

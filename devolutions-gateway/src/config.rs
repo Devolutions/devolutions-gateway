@@ -8,6 +8,7 @@ use core::fmt;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -20,6 +21,8 @@ use uuid::Uuid;
 
 const CERTIFICATE_LABELS: &[&str] = &["CERTIFICATE", "X509 CERTIFICATE", "TRUSTED CERTIFICATE"];
 const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"];
+const WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS: u64 = 28800; // 8 hours
+const WEB_APP_DEFAULT_LOGIN_LIMIT_RATE: u8 = 10;
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -87,11 +90,13 @@ pub struct Conf {
 pub struct WebAppConf {
     pub enabled: bool,
     pub authentication: WebAppAuth,
+    pub app_token_maximum_lifetime: std::time::Duration,
+    pub login_limit_rate: u8,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum WebAppAuth {
-    Custom(Vec<dto::WebAppUser>),
+    Custom(HashMap<String, dto::WebAppUser>),
     None,
 }
 
@@ -136,7 +141,7 @@ impl Conf {
 
         let tls = match conf_file.tls_certificate_source.unwrap_or_default() {
             _ if !requires_tls => {
-                trace!("not configured to use HTTPS, ignoring TLS configuration");
+                trace!("Not configured to use HTTPS, ignoring TLS configuration");
                 None
             }
             dto::CertSource::External => {
@@ -277,6 +282,17 @@ impl Conf {
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
+
+    pub fn webapp_conf_if_enabled(&self) -> Option<&WebAppConf> {
+        match self.web_app.as_ref() {
+            Some(conf) if conf.enabled => Some(conf),
+            _ => None,
+        }
+    }
+
+    pub fn webapp_is_enabled(&self) -> bool {
+        self.webapp_conf_if_enabled().is_some()
+    }
 }
 
 fn detect_ipv6_support() -> bool {
@@ -301,6 +317,20 @@ impl ConfHandle {
     /// It's best to call this only once to avoid inconsistencies.
     pub fn init() -> anyhow::Result<Self> {
         let conf_file = load_conf_file_or_generate_new()?;
+        let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
+
+        Ok(Self {
+            inner: Arc::new(ConfHandleInner {
+                conf: parking_lot::RwLock::new(Arc::new(conf)),
+                conf_file: parking_lot::RwLock::new(Arc::new(conf_file)),
+                changed: Notify::new(),
+            }),
+        })
+    }
+
+    #[doc(hidden)]
+    pub fn mock(json_config: &str) -> anyhow::Result<Self> {
+        let conf_file = serde_json::from_str::<dto::ConfFile>(json_config).context("invalid JSON config")?;
         let conf = Conf::from_conf_file(&conf_file).context("invalid configuration file")?;
 
         Ok(Self {
@@ -730,9 +760,18 @@ impl From<dto::WebAppConf> for WebAppConf {
         Self {
             enabled: value.enabled,
             authentication: match value.authentication {
-                dto::WebAppAuth::Custom => WebAppAuth::Custom(value.users),
+                dto::WebAppAuth::Custom => {
+                    let users = value.users.into_iter().map(|user| (user.name.clone(), user)).collect();
+                    WebAppAuth::Custom(users)
+                }
                 dto::WebAppAuth::None => WebAppAuth::None,
             },
+            app_token_maximum_lifetime: std::time::Duration::from_secs(
+                value
+                    .app_token_maximum_lifetime
+                    .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
+            ),
+            login_limit_rate: value.login_limit_rate.unwrap_or(WEB_APP_DEFAULT_LOGIN_LIMIT_RATE),
         }
     }
 }
@@ -1246,6 +1285,10 @@ pub mod dto {
     pub struct WebAppConf {
         pub enabled: bool,
         pub authentication: WebAppAuth,
+        /// Maximum lifetime granted for application tokens, in seconds
+        pub app_token_maximum_lifetime: Option<u64>,
+        /// The maximum number of login requests for a given username over a minute.
+        pub login_limit_rate: Option<u8>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         pub users: Vec<WebAppUser>,
     }
@@ -1261,6 +1304,7 @@ pub mod dto {
     pub struct WebAppUser {
         pub name: String,
         /// Hash of the password, in the PHC string format
-        pub password: Password,
+        #[serde(rename = "Password")]
+        pub password_hash: Password,
     }
 }

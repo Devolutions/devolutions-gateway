@@ -1,4 +1,6 @@
 export * from './accessScope';
+export * from './appTokenContentType';
+export * from './appTokenSignRequest';
 export * from './clockDiagnostic';
 export * from './configDiagnostic';
 export * from './configPatch';
@@ -10,5 +12,7 @@ export * from './jrlInfo';
 export * from './listenerUrls';
 export * from './pubKeyFormat';
 export * from './sessionInfo';
+export * from './sessionTokenContentType';
+export * from './sessionTokenSignRequest';
 export * from './subProvisionerKey';
 export * from './subscriber';

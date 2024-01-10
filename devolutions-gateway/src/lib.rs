@@ -43,10 +43,50 @@ pub struct DgwState {
     pub recordings: recording::RecordingMessageSender,
 }
 
+#[doc(hidden)]
+pub struct MockHandles {
+    pub session_manager_rx: session::SessionMessageReceiver,
+    pub recording_manager_rx: recording::RecordingMessageReceiver,
+    pub subscriber_rx: subscriber::SubscriberReceiver,
+    pub shutdown_handle: devolutions_gateway_task::ShutdownHandle,
+}
+
+impl DgwState {
+    #[doc(hidden)]
+    pub fn mock(json_config: &str) -> anyhow::Result<(Self, MockHandles)> {
+        let conf_handle = config::ConfHandle::mock(json_config)?;
+        let token_cache = Arc::new(token::new_token_cache());
+        let jrl = Arc::new(parking_lot::Mutex::new(token::JrlTokenClaims::default()));
+        let (session_manager_handle, session_manager_rx) = session::session_manager_channel();
+        let (recording_manager_handle, recording_manager_rx) = recording::recording_message_channel();
+        let (subscriber_tx, subscriber_rx) = subscriber::subscriber_channel();
+        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+
+        let state = Self {
+            conf_handle,
+            token_cache,
+            jrl,
+            sessions: session_manager_handle,
+            subscriber_tx,
+            shutdown_signal,
+            recordings: recording_manager_handle,
+        };
+
+        let handles = MockHandles {
+            session_manager_rx,
+            recording_manager_rx,
+            subscriber_rx,
+            shutdown_handle,
+        };
+
+        Ok((state, handles))
+    }
+}
+
 pub fn make_http_service(state: DgwState) -> axum::Router<()> {
     use tower::ServiceBuilder;
 
-    trace!("make http service");
+    trace!("Make http service");
 
     axum::Router::new()
         .merge(api::make_router(state.clone()))

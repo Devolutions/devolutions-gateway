@@ -5,7 +5,6 @@ use nonempty::NonEmpty;
 use parking_lot::Mutex;
 use picky::jose::jws::RawJws;
 use picky::key::{PrivateKey, PublicKey};
-use serde::{de, ser};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -42,6 +41,7 @@ pub enum ContentType {
     Jrec,
     Kdc,
     Jrl,
+    WebApp,
 }
 
 impl FromStr for ContentType {
@@ -56,6 +56,7 @@ impl FromStr for ContentType {
             "JREC" => Ok(ContentType::Jrec),
             "KDC" => Ok(ContentType::Kdc),
             "JRL" => Ok(ContentType::Jrl),
+            "WEBAPP" => Ok(ContentType::WebApp),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -73,6 +74,7 @@ impl fmt::Display for ContentType {
             ContentType::Jrec => write!(f, "JREC"),
             ContentType::Kdc => write!(f, "KDC"),
             ContentType::Jrl => write!(f, "JRL"),
+            ContentType::WebApp => write!(f, "WEBAPP"),
         }
     }
 }
@@ -103,6 +105,7 @@ pub enum AccessTokenClaims {
     Jrec(JrecTokenClaims),
     Kdc(KdcTokenClaims),
     Jrl(JrlTokenClaims),
+    WebApp(WebAppTokenClaims),
 }
 
 impl AccessTokenClaims {
@@ -115,6 +118,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Jrec(_) => false,
             AccessTokenClaims::Kdc(_) => false,
             AccessTokenClaims::Jrl(_) => false,
+            AccessTokenClaims::WebApp(_) => false,
         }
     }
 }
@@ -137,6 +141,13 @@ impl ApplicationProtocol {
         match self {
             Self::Known(known) => known.known_default_port(),
             Self::Unknown(_) => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            ApplicationProtocol::Known(known) => known.as_str(),
+            ApplicationProtocol::Unknown(unknown) => unknown.as_str(),
         }
     }
 }
@@ -214,6 +225,27 @@ impl Protocol {
             Self::Tunnel => None,
         }
     }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Protocol::Wayk => "wayk",
+            Protocol::Rdp => "rdp",
+            Protocol::Ard => "ard",
+            Protocol::Vnc => "vnc",
+            Protocol::Ssh => "ssh",
+            Protocol::SshPwsh => "ssh-pwsh",
+            Protocol::Sftp => "sftp",
+            Protocol::Scp => "scp",
+            Protocol::Telnet => "telnet",
+            Protocol::WinrmHttpPwsh => "winrm-http-pwsh",
+            Protocol::WinrmHttpsPwsh => "winrm-https-pwsh",
+            Protocol::Http => "http",
+            Protocol::Https => "https",
+            Protocol::Ldap => "ldap",
+            Protocol::Ldaps => "ldaps",
+            Protocol::Tunnel => "tunnel",
+        }
+    }
 }
 
 // ----- recording file types ----- //
@@ -278,7 +310,7 @@ pub enum ConnectionMode {
     },
 }
 
-#[derive(Deserialize, Zeroize, Clone)]
+#[derive(Serialize, Deserialize, Zeroize, Clone)]
 #[zeroize(drop)]
 pub struct CredsClaims {
     // Proxy credentials (client ↔ jet)
@@ -291,10 +323,13 @@ pub struct CredsClaims {
 }
 
 /// Maximum duration in minutes for a session (aka time to live)
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub enum SessionTtl {
+    #[default]
     Unlimited,
-    Limited { minutes: NonZeroU64 },
+    Limited {
+        minutes: NonZeroU64,
+    },
 }
 
 impl From<u64> for SessionTtl {
@@ -303,18 +338,6 @@ impl From<u64> for SessionTtl {
             Self::Limited { minutes }
         } else {
             Self::Unlimited
-        }
-    }
-}
-
-impl ser::Serialize for SessionTtl {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            SessionTtl::Unlimited => serializer.serialize_u64(0),
-            SessionTtl::Limited { minutes } => serializer.serialize_u64(minutes.get()),
         }
     }
 }
@@ -339,99 +362,21 @@ pub struct AssociationTokenClaims {
     /// Max session duration
     pub jet_ttl: SessionTtl,
 
-    // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
-    exp: i64,
+    /// JWT expiration time claim.
+    ///
+    /// We need this to build our token invalidation cache.
+    /// This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
+    pub exp: i64,
 
-    // Unique ID for this token
-    // DVLS up to 2022.1.9 do not generate this claim.
-    jti: Option<Uuid>,
+    /// Unique ID for this token
+    ///
+    /// DVLS up to 2022.1.9 do not generate this claim.
+    pub jti: Option<Uuid>,
 }
 
 impl AssociationTokenClaims {
     fn contains_secret(&self) -> bool {
         matches!(&self.jet_cm, ConnectionMode::Fwd { creds: Some(_), .. })
-    }
-}
-
-impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize, Clone)]
-        #[serde(rename_all = "kebab-case")]
-        #[serde(tag = "jet_cm")]
-        #[allow(clippy::large_enum_variant)]
-        enum ConnectionModeHelper {
-            Rdv,
-            Fwd {
-                /// Destination Host
-                dst_hst: SmolStr,
-                /// Alternate Destination Hosts
-                #[serde(default)]
-                dst_alt: Vec<SmolStr>,
-                #[serde(flatten)]
-                creds: Option<CredsClaims>,
-            },
-        }
-
-        #[derive(Deserialize)]
-        struct ClaimsHelper {
-            #[serde(default = "Uuid::new_v4")] // DVLS up to 2021.2.10 do not generate this claim.
-            jet_aid: Uuid,
-            jet_ap: ApplicationProtocol,
-            #[serde(flatten)]
-            jet_cm: ConnectionModeHelper,
-            #[serde(default)]
-            jet_rec: bool,
-            #[serde(default)]
-            jet_flt: bool,
-            #[serde(default)]
-            jet_ttl: u64,
-            exp: i64,
-            jti: Option<Uuid>, // DVLS up to 2022.1.9 do not generate this claim.
-        }
-
-        let claims = ClaimsHelper::deserialize(deserializer)?;
-
-        let jet_cm = match claims.jet_cm {
-            ConnectionModeHelper::Rdv => ConnectionMode::Rdv,
-            ConnectionModeHelper::Fwd {
-                dst_hst,
-                dst_alt,
-                creds,
-            } => {
-                let primary_target =
-                    TargetAddr::parse(&dst_hst, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
-
-                let mut targets = NonEmpty {
-                    head: primary_target,
-                    tail: Vec::with_capacity(dst_alt.len()),
-                };
-
-                for alt in dst_alt {
-                    let alt = TargetAddr::parse(&alt, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
-                    targets.push(alt);
-                }
-
-                ConnectionMode::Fwd { targets, creds }
-            }
-        };
-
-        let jet_ttl = SessionTtl::from(claims.jet_ttl);
-
-        Ok(Self {
-            jet_aid: claims.jet_aid,
-            jet_ap: claims.jet_ap,
-            jet_cm,
-            jet_rec: claims.jet_rec,
-            jet_flt: claims.jet_flt,
-            jet_ttl,
-            exp: claims.exp,
-            jti: claims.jti,
-        })
     }
 }
 
@@ -464,11 +409,12 @@ pub enum AccessScope {
 pub struct ScopeTokenClaims {
     pub scope: AccessScope,
 
-    // JWT expiration time claim.
+    /// JWT expiration time claim.
     exp: i64,
 
-    // Unique ID for this token
-    // DVLS up to 2022.1.9 do not generate this claim.
+    /// JWT "JWT ID" claim, the unique ID for this token
+    ///
+    /// DVLS up to 2022.1.9 do not generate this claim.
     jti: Option<Uuid>,
 }
 
@@ -478,10 +424,10 @@ pub struct ScopeTokenClaims {
 pub struct BridgeTokenClaims {
     pub target_host: TargetAddr,
 
-    // JWT expiration time claim.
+    /// JWT expiration time claim.
     exp: i64,
 
-    // Unique ID for this token
+    /// JWT "JWT ID" claim, the unique ID for this token
     jti: Uuid,
 }
 
@@ -501,79 +447,11 @@ pub struct JmuxTokenClaims {
     /// Max duration
     pub jet_ttl: SessionTtl,
 
-    // JWT expiration time claim.
-    exp: i64,
+    /// JWT expiration time claim.
+    pub exp: i64,
 
-    // Unique ID for this token
-    jti: Uuid,
-}
-
-impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use crate::target_addr::BadTargetAddr;
-
-        #[derive(Deserialize)]
-        struct ClaimsHelper {
-            // Main target host
-            dst_hst: SmolStr,
-            // Additional target hosts
-            #[serde(default)]
-            dst_addl: Vec<SmolStr>,
-            #[serde(default)]
-            jet_ap: ApplicationProtocol,
-            jet_aid: Uuid,
-            #[serde(default)]
-            jet_ttl: u64,
-            exp: i64,
-            jti: Uuid,
-        }
-
-        fn parse_target_address(s: &str, jet_ap: &ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
-            const PORT_HTTP: u16 = 80;
-            const PORT_HTTPS: u16 = 443;
-            const PORT_FTP: u16 = 21;
-            const DEFAULT_SCHEME: &str = "tcp";
-
-            let default_port = match s.split("://").next() {
-                Some("http" | "ws") => PORT_HTTP,
-                Some("https" | "wss") => PORT_HTTPS,
-                Some("ftp") => PORT_FTP,
-                Some(_) | None => jet_ap.known_default_port().unwrap_or(PORT_HTTP),
-            };
-
-            TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
-        }
-
-        let claims = ClaimsHelper::deserialize(deserializer)?;
-
-        let jet_ap = claims.jet_ap;
-
-        let primary = parse_target_address(&claims.dst_hst, &jet_ap).map_err(de::Error::custom)?;
-
-        let mut hosts = NonEmpty {
-            head: primary,
-            tail: Vec::with_capacity(claims.dst_addl.len()),
-        };
-
-        for additional in claims.dst_addl {
-            let additional = parse_target_address(&additional, &jet_ap).map_err(de::Error::custom)?;
-            hosts.push(additional);
-        }
-
-        let jet_ttl = SessionTtl::from(claims.jet_ttl);
-
-        Ok(Self {
-            jet_aid: claims.jet_aid,
-            hosts,
-            jet_ap,
-            jet_ttl,
-            exp: claims.exp,
-            jti: claims.jti,
-        })
-    }
+    /// JWT "JWT ID" claim, the unique ID for this token
+    pub jti: Uuid,
 }
 
 // ----- jrec claims ----- //
@@ -583,15 +461,16 @@ pub struct JrecTokenClaims {
     /// Association ID (= Session ID)
     pub jet_aid: Uuid,
 
-    // Recording operation
+    /// Recording operation
     pub jet_rop: RecordingOperation,
 
-    // JWT expiration time claim.
-    // We need this to build our token invalidation cache.
-    // This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
+    /// JWT expiration time claim.
+    ///
+    /// We need this to build our token invalidation cache.
+    /// This doesn't need to be explicitly written in the structure to be checked by the JwtValidator.
     exp: i64,
 
-    // Unique ID for this token
+    /// JWT "JWT ID" claim, the unique ID for this token
     jti: Uuid,
 }
 
@@ -600,65 +479,28 @@ pub struct JrecTokenClaims {
 #[derive(Clone)]
 pub struct KdcTokenClaims {
     /// Kerberos realm.
-    /// e.g.: ad.it-help.ninja
+    ///
+    /// E.g.: `ad.it-help.ninja`
     /// Should be lowercased (actual validation is case-insensitive though).
     pub krb_realm: SmolStr,
 
     /// Kerberos KDC address.
-    /// e.g.: tcp://IT-HELP-DC.ad.it-help.ninja:88
+    ///
+    /// E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`
     /// Default scheme is `tcp`.
     /// Default port is `88`.
     pub krb_kdc: TargetAddr,
-}
-
-impl<'de> de::Deserialize<'de> for KdcTokenClaims {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const DEFAULT_KDC_PORT: u16 = 88;
-
-        #[derive(Deserialize)]
-        struct ClaimsHelper {
-            krb_realm: SmolStr,
-            krb_kdc: SmolStr,
-        }
-
-        let claims = ClaimsHelper::deserialize(deserializer)?;
-
-        // Validate krb_realm value
-
-        if claims.krb_realm.chars().any(char::is_uppercase) {
-            return Err(de::Error::custom("krb_realm field contains uppercases"));
-        }
-
-        // Validate krb_kdc field
-
-        let krb_kdc = TargetAddr::parse(&claims.krb_kdc, DEFAULT_KDC_PORT).map_err(de::Error::custom)?;
-        match krb_kdc.scheme() {
-            "tcp" | "udp" => { /* supported! */ }
-            unsupported_scheme => {
-                return Err(de::Error::custom(format!(
-                    "unsupported protocol for KDC proxy: {unsupported_scheme}"
-                )));
-            }
-        }
-
-        Ok(Self {
-            krb_realm: claims.krb_realm,
-            krb_kdc,
-        })
-    }
 }
 
 // ----- jrl claims ----- //
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JrlTokenClaims {
-    /// Unique ID for this token
+    /// JWT "JWT ID" claim, the unique ID for this token
     pub jti: Uuid,
 
     /// JWT "Issued At" claim.
+    ///
     /// Revocation list is saved only for the more recent token.
     pub iat: i64,
 
@@ -698,6 +540,29 @@ pub enum KeyType {
     /// Elliptic Curve
     #[serde(rename = "RSA")]
     Rsa,
+}
+
+// ----- web app claims ----- //
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAppTokenClaims {
+    /// JWT "JWT ID" claim, the unique ID for this token
+    pub jti: Uuid,
+
+    /// JWT "Issued At" claim.
+    pub iat: i64,
+
+    /// JWT "Not Before" claim.
+    pub nbf: i64,
+
+    /// JWT "Expiration Time" claim.
+    pub exp: i64,
+
+    /// JWT "Subject" claim.
+    ///
+    /// Identifies the principal that is the subject of the JWT.
+    /// This is the username used to obtain this web application token.
+    pub sub: String,
 }
 
 // ----- cache clean up ----- //
@@ -933,7 +798,8 @@ fn validate_token_impl(
             | ContentType::Bridge
             | ContentType::Jmux
             | ContentType::Jrec
-            | ContentType::Kdc => jwt.validate::<Value>(&strict_validator)?.state.claims,
+            | ContentType::Kdc
+            | ContentType::WebApp => jwt.validate::<Value>(&strict_validator)?.state.claims,
             ContentType::Jrl => {
                 // NOTE: JRL tokens are not expected to expire.
                 // However, `iat` (Issued At) claim is required, and only more recent tokens will
@@ -1015,6 +881,7 @@ fn validate_token_impl(
         ContentType::Jrec => serde_json::from_value(claims).map(AccessTokenClaims::Jrec),
         ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+        ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
     }
     .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
@@ -1140,6 +1007,9 @@ fn validate_token_impl(
                 return Err(TokenError::OldJrl);
             }
         }
+
+        // Web application tokens are long-lived and reusing them is allowed
+        AccessTokenClaims::WebApp(_) => {}
     }
 
     Ok(claims)
@@ -1215,11 +1085,297 @@ pub mod unsafe_debug {
             ContentType::Jrec => serde_json::from_value(claims).map(AccessTokenClaims::Jrec),
             ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
+            ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
         }
         .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
         // Other checks are removed as well
 
         Ok(claims)
+    }
+}
+
+mod serde_impl {
+    use nonempty::NonEmpty;
+    use serde::{de, ser};
+    use smol_str::SmolStr;
+    use uuid::Uuid;
+
+    use crate::target_addr::TargetAddr;
+
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Clone)]
+    #[serde(rename_all = "kebab-case")]
+    #[serde(tag = "jet_cm")]
+    #[allow(clippy::large_enum_variant)]
+    enum ConnectionModeHelper {
+        Rdv,
+        Fwd {
+            /// Destination Host
+            dst_hst: SmolStr,
+            /// Alternate Destination Hosts
+            #[serde(default)]
+            dst_alt: Vec<SmolStr>,
+            #[serde(flatten)]
+            creds: Option<CredsClaims>,
+        },
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct AssociationClaimsHelper {
+        #[serde(default = "Uuid::new_v4")] // DVLS up to 2021.2.10 do not generate this claim.
+        jet_aid: Uuid,
+        jet_ap: ApplicationProtocol,
+        #[serde(flatten)]
+        jet_cm: ConnectionModeHelper,
+        #[serde(default)]
+        jet_rec: bool,
+        #[serde(default)]
+        jet_flt: bool,
+        #[serde(default)]
+        jet_ttl: SessionTtl,
+        exp: i64,
+        jti: Option<Uuid>, // DVLS up to 2022.1.9 do not generate this claim.
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct JmuxClaimsHelper {
+        // Main target host
+        dst_hst: SmolStr,
+        // Additional target hosts
+        #[serde(default)]
+        dst_addl: Vec<SmolStr>,
+        #[serde(default)]
+        jet_ap: ApplicationProtocol,
+        jet_aid: Uuid,
+        #[serde(default)]
+        jet_ttl: SessionTtl,
+        exp: i64,
+        jti: Uuid,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct KdcClaimsHelper {
+        krb_realm: SmolStr,
+        krb_kdc: SmolStr,
+    }
+
+    impl ser::Serialize for SessionTtl {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            match self {
+                SessionTtl::Unlimited => serializer.serialize_u64(0),
+                SessionTtl::Limited { minutes } => serializer.serialize_u64(minutes.get()),
+            }
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for SessionTtl {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            u64::deserialize(deserializer).map(SessionTtl::from)
+        }
+    }
+
+    impl ser::Serialize for AssociationTokenClaims {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            AssociationClaimsHelper {
+                jet_aid: self.jet_aid,
+                jet_ap: self.jet_ap.clone(),
+                jet_cm: match &self.jet_cm {
+                    ConnectionMode::Rdv => ConnectionModeHelper::Rdv,
+                    ConnectionMode::Fwd { targets, creds } => ConnectionModeHelper::Fwd {
+                        dst_hst: SmolStr::new(targets.first().as_str()),
+                        dst_alt: targets
+                            .tail()
+                            .iter()
+                            .map(|target| SmolStr::new(target.as_str()))
+                            .collect(),
+                        creds: creds.clone(),
+                    },
+                },
+                jet_rec: self.jet_rec,
+                jet_flt: self.jet_flt,
+                jet_ttl: self.jet_ttl,
+                exp: self.exp,
+                jti: self.jti,
+            }
+            .serialize(serializer)
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for AssociationTokenClaims {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let claims = AssociationClaimsHelper::deserialize(deserializer)?;
+
+            let jet_cm = match claims.jet_cm {
+                ConnectionModeHelper::Rdv => ConnectionMode::Rdv,
+                ConnectionModeHelper::Fwd {
+                    dst_hst,
+                    dst_alt,
+                    creds,
+                } => {
+                    let primary_target =
+                        TargetAddr::parse(&dst_hst, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
+
+                    let mut targets = NonEmpty {
+                        head: primary_target,
+                        tail: Vec::with_capacity(dst_alt.len()),
+                    };
+
+                    for alt in dst_alt {
+                        let alt =
+                            TargetAddr::parse(&alt, claims.jet_ap.known_default_port()).map_err(de::Error::custom)?;
+                        targets.push(alt);
+                    }
+
+                    ConnectionMode::Fwd { targets, creds }
+                }
+            };
+
+            Ok(Self {
+                jet_aid: claims.jet_aid,
+                jet_ap: claims.jet_ap,
+                jet_cm,
+                jet_rec: claims.jet_rec,
+                jet_flt: claims.jet_flt,
+                jet_ttl: claims.jet_ttl,
+                exp: claims.exp,
+                jti: claims.jti,
+            })
+        }
+    }
+
+    impl ser::Serialize for JmuxTokenClaims {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            JmuxClaimsHelper {
+                dst_hst: SmolStr::new(self.hosts.first().as_str()),
+                dst_addl: self
+                    .hosts
+                    .tail()
+                    .iter()
+                    .map(|target| SmolStr::new(target.as_str()))
+                    .collect(),
+                jet_ap: self.jet_ap.clone(),
+                jet_aid: self.jet_aid,
+                jet_ttl: self.jet_ttl,
+                exp: self.exp,
+                jti: self.jti,
+            }
+            .serialize(serializer)
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for JmuxTokenClaims {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            use crate::target_addr::BadTargetAddr;
+
+            let claims = JmuxClaimsHelper::deserialize(deserializer)?;
+
+            let jet_ap = claims.jet_ap;
+
+            let primary = parse_target_address(&claims.dst_hst, &jet_ap).map_err(de::Error::custom)?;
+
+            let mut hosts = NonEmpty {
+                head: primary,
+                tail: Vec::with_capacity(claims.dst_addl.len()),
+            };
+
+            for additional in claims.dst_addl {
+                let additional = parse_target_address(&additional, &jet_ap).map_err(de::Error::custom)?;
+                hosts.push(additional);
+            }
+
+            return Ok(Self {
+                jet_aid: claims.jet_aid,
+                hosts,
+                jet_ap,
+                jet_ttl: claims.jet_ttl,
+                exp: claims.exp,
+                jti: claims.jti,
+            });
+
+            // -- local helper -- //
+
+            fn parse_target_address(s: &str, jet_ap: &ApplicationProtocol) -> Result<TargetAddr, BadTargetAddr> {
+                const PORT_HTTP: u16 = 80;
+                const PORT_HTTPS: u16 = 443;
+                const PORT_FTP: u16 = 21;
+                const DEFAULT_SCHEME: &str = "tcp";
+
+                let default_port = match s.split("://").next() {
+                    Some("http" | "ws") => PORT_HTTP,
+                    Some("https" | "wss") => PORT_HTTPS,
+                    Some("ftp") => PORT_FTP,
+                    Some(_) | None => jet_ap.known_default_port().unwrap_or(PORT_HTTP),
+                };
+
+                TargetAddr::parse_with_default_scheme(s, DEFAULT_SCHEME, default_port)
+            }
+        }
+    }
+
+    impl ser::Serialize for KdcTokenClaims {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            KdcClaimsHelper {
+                krb_realm: self.krb_realm.clone(),
+                krb_kdc: SmolStr::new(self.krb_kdc.as_str()),
+            }
+            .serialize(serializer)
+        }
+    }
+
+    impl<'de> de::Deserialize<'de> for KdcTokenClaims {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            const DEFAULT_KDC_PORT: u16 = 88;
+
+            let claims = KdcClaimsHelper::deserialize(deserializer)?;
+
+            // Validate krb_realm value
+
+            if claims.krb_realm.chars().any(char::is_uppercase) {
+                return Err(de::Error::custom("krb_realm field contains uppercases"));
+            }
+
+            // Validate krb_kdc field
+
+            let krb_kdc = TargetAddr::parse(&claims.krb_kdc, DEFAULT_KDC_PORT).map_err(de::Error::custom)?;
+            match krb_kdc.scheme() {
+                "tcp" | "udp" => { /* supported! */ }
+                unsupported_scheme => {
+                    return Err(de::Error::custom(format!(
+                        "unsupported protocol for KDC proxy: {unsupported_scheme}"
+                    )));
+                }
+            }
+
+            Ok(Self {
+                krb_realm: claims.krb_realm,
+                krb_kdc,
+            })
+        }
     }
 }

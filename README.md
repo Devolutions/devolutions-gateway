@@ -197,6 +197,12 @@ Stable options are:
         * `Custom`: Requires a username/password pair.
         * `None`: Disable authentication, anyone can access the web application.
 
+    * **AppTokenMaximumLifetime** (_Integer_): The maximum lifetime granted to web application tokens
+        defined as a number in seconds (default is `28800` for 8 hours).
+
+    * **LoginLimitRate** (_Integer_): The maximum number of login requests for a given username/IP pair
+        over a minute (default is `10`).
+
     * **Users** (_Array_): A list of users authorized to access the web application when using the
         `Custom` authentication method.
 

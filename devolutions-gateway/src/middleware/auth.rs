@@ -23,6 +23,7 @@ struct AuthException {
 }
 
 const AUTH_EXCEPTIONS: &[AuthException] = &[
+    // -- Non sensitive information required for diagnostics -- //
     AuthException {
         method: Method::GET,
         path: "/health",
@@ -38,11 +39,13 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/diagnostics/clock",
         exact_match: true,
     },
+    // -- Custom authentication via RDCleanPath PDU -- //
     AuthException {
         method: Method::GET,
         path: "/jet/rdp",
         exact_match: true,
     },
+    // -- KDC proxy -- //
     AuthException {
         method: Method::POST,
         path: "/KdcProxy",
@@ -52,6 +55,27 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         method: Method::POST,
         path: "/jet/KdcProxy",
         exact_match: false,
+    },
+    // -- Standalone web application -- //
+    AuthException {
+        method: Method::GET,
+        path: "/jet/webapp/client",
+        exact_match: false,
+    },
+    AuthException {
+        method: Method::POST,
+        path: "/jet/webapp/app-token",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/",
+        exact_match: true,
+    },
+    AuthException {
+        method: Method::GET,
+        path: "/jet/webapp",
+        exact_match: true,
     },
 ];
 

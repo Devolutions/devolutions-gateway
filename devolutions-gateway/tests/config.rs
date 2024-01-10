@@ -194,6 +194,8 @@ fn standalone_custom_auth_sample() -> Sample {
             "WebApp": {
                 "Enabled": true,
                 "Authentication": "Custom",
+                "AppTokenMaximumLifetime": 28800,
+                "LoginLimitRate": 10,
                 "Users": [
                     {
                         "Name": "David",
@@ -244,16 +246,18 @@ fn standalone_custom_auth_sample() -> Sample {
             web_app: Some(WebAppConf {
                 enabled: true,
                 authentication: WebAppAuth::Custom,
+                app_token_maximum_lifetime: Some(28800),
+                login_limit_rate: Some(10),
                 users: vec![
                     WebAppUser {
                         name: "David".to_owned(),
-                        password: Password::from(
+                        password_hash: Password::from(
                             "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
                         ),
                     },
                     WebAppUser {
                         name: "Maurice".to_owned(),
-                        password: Password::from(
+                        password_hash: Password::from(
                             "$argon2id$v=19$m=16,t=2,p=1$ZmdQWTkwQUNWcWh4T1YzQw$B6qWmJXHODN/bxZGIe/lyg",
                         ),
                     },
@@ -331,9 +335,11 @@ fn standalone_no_auth_sample() -> Sample {
             web_app: Some(WebAppConf {
                 enabled: true,
                 authentication: WebAppAuth::None,
+                app_token_maximum_lifetime: None,
+                login_limit_rate: None,
                 users: vec![WebAppUser {
                     name: "LeftoverUnusedUser".to_owned(),
-                    password: Password::from(
+                    password_hash: Password::from(
                         "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
                     ),
                 }],

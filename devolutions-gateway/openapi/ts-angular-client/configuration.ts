@@ -113,6 +113,24 @@ export class Configuration {
                     : this.accessToken;
             };
         }
+
+        // init default web_app_custom_auth credential
+        if (!this.credentials['web_app_custom_auth']) {
+            this.credentials['web_app_custom_auth'] = () => {
+                return (this.username || this.password)
+                    ? btoa(this.username + ':' + this.password)
+                    : undefined;
+            };
+        }
+
+        // init default web_app_token credential
+        if (!this.credentials['web_app_token']) {
+            this.credentials['web_app_token'] = () => {
+                return typeof this.accessToken === 'function'
+                    ? this.accessToken()
+                    : this.accessToken;
+            };
+        }
     }
 
     /**

@@ -18,6 +18,8 @@ use uuid::Uuid;
         crate::api::jrl::get_jrl_info,
         crate::api::jrec::list_recordings,
         crate::api::jrec::pull_recording_file,
+        crate::api::webapp::sign_app_token,
+        crate::api::webapp::sign_session_token,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -34,6 +36,10 @@ use uuid::Uuid;
         crate::api::config::ConfigPatch,
         crate::api::jrl::JrlInfo,
         crate::token::AccessScope,
+        crate::api::webapp::AppTokenSignRequest,
+        crate::api::webapp::AppTokenContentType,
+        SessionTokenContentType,
+        SessionTokenSignRequest,
     )),
     modifiers(&SecurityAddon),
 )]
@@ -113,6 +119,31 @@ impl Modify for SecurityAddon {
                     .build(),
             ),
         );
+
+        components.add_security_scheme(
+            "web_app_custom_auth",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Basic)
+                    .description(Some(
+                        "Custom authentication method for the standalone web application".to_owned(),
+                    ))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "web_app_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "Token allowing usage of the standalone web application".to_owned(),
+                    ))
+                    .build(),
+            ),
+        );
     }
 }
 
@@ -149,7 +180,6 @@ enum SubscriberMessageKind {
 
 /// Message produced on various Gateway events
 #[derive(utoipa::ToSchema, Serialize)]
-#[serde(tag = "kind")]
 struct SubscriberMessage {
     /// Name of the event type associated to this message
     ///
@@ -162,6 +192,42 @@ struct SubscriberMessage {
     session: Option<SubscriberSessionInfo>,
     /// Session list associated to this event
     session_list: Option<Vec<SubscriberSessionInfo>>,
+}
+
+#[allow(unused)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "UPPERCASE")]
+enum SessionTokenContentType {
+    Association,
+    Jmux,
+    Kdc,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+struct SessionTokenSignRequest {
+    /// The content type for the session token
+    content_type: SessionTokenContentType,
+    /// Protocol for the session (e.g.: "rdp")
+    protocol: Option<String>,
+    /// Destination host
+    destination: Option<String>,
+    /// Unique ID for this session
+    session_id: Option<Uuid>,
+    /// Kerberos realm.
+    ///
+    /// E.g.: `ad.it-help.ninja`.
+    /// Should be lowercased (actual validation is case-insensitive though).
+    krb_realm: Option<String>,
+    /// Kerberos KDC address.
+    ///
+    /// E.g.: `tcp://IT-HELP-DC.ad.it-help.ninja:88`.
+    /// Default scheme is `tcp`.
+    /// Default port is `88`.
+    krb_kdc: Option<String>,
+    /// The validity duration in seconds for the session token.
+    ///
+    /// This value cannot exceed 2 hours.
+    lifetime: u64,
 }
 
 struct SubscriberSecurityAddon;
