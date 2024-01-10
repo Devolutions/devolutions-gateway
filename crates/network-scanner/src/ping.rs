@@ -62,23 +62,15 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let packet = icmp_v4::Icmpv4Packet::parse(&buffer[..size])
         .with_context(|| format!("failed to parse incomming icmp v4 packet"))?;
 
-    match packet.message {
-        icmp_v4::Icmpv4Message::EchoReply {
-            payload,
-            identifier,
-            sequence,
-        } => {
-            trace!(%identifier, %sequence,?payload, "Received echo reply");
-            if payload != verifier {
-                anyhow::bail!("payload does not match for echo reply");
-            }
+    if let icmp_v4::Icmpv4Message::EchoReply { payload, .. } = packet.message {
+        if payload != verifier {
+            anyhow::bail!("payload does not match for echo reply");
+        } else {
+            Ok(())
         }
-        _ => {
-            anyhow::bail!("received non-echo reply");
-        }
+    } else {
+        anyhow::bail!("received non-echo reply");
     }
-
-    Ok(())
 }
 
 pub fn block_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
@@ -109,21 +101,14 @@ pub fn block_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
         .collect::<Vec<u8>>();
 
     let packet = icmp_v4::Icmpv4Packet::parse(&buffer[..size]).with_context(|| format!("cannot parse icmp packet"))?;
-    match packet.message {
-        icmp_v4::Icmpv4Message::EchoReply {
-            payload,
-            identifier,
-            sequence,
-        } => {
-            trace!(%identifier, %sequence,?payload, "Received echo reply");
-            if payload != verifier {
-                anyhow::bail!("payload does not match for echo reply");
-            } else {
-                Ok(())
-            }
+
+    if let icmp_v4::Icmpv4Message::EchoReply { payload, .. } = packet.message {
+        if payload != verifier {
+            anyhow::bail!("payload does not match for echo reply");
+        } else {
+            Ok(())
         }
-        _ => {
-            anyhow::bail!("received non-echo reply");
-        }
+    } else {
+        anyhow::bail!("received non-echo reply");
     }
 }
