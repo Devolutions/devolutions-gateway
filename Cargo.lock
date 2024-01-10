@@ -2038,6 +2038,7 @@ dependencies = [
  "anyhow",
  "network-scanner-net",
  "network-scanner-proto",
+ "socket2",
  "tokio",
  "tracing",
  "tracing-subscriber",
