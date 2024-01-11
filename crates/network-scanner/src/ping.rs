@@ -19,7 +19,7 @@ pub fn blocking_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
 
     let addr = SocketAddr::new(ip.into(), 0);
 
-    let (packet, verifier) = create_echo_request!();
+    let (packet, verifier) = create_echo_request()?;
 
     socket
         .send_to(&packet.to_bytes(true), &addr.into())
