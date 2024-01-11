@@ -1,8 +1,11 @@
-use std::{mem::MaybeUninit, sync::Arc, usize};
+use std::{
+    mem::MaybeUninit,
+    sync::{Arc, Mutex},
+    usize,
+};
 
 use socket2::SockAddr;
 use std::result::Result::Ok;
-use tokio::sync::Mutex;
 
 /// A wrapper on raw socket that can be used with async tokio runtime
 /// This currently only throws the blocking calls on a blocking thread pool
@@ -10,6 +13,14 @@ use tokio::sync::Mutex;
 /// We are seeking to match the function signatures of socket2::Socket, but in async form
 pub struct TokioRawSocket {
     socket: Arc<Mutex<socket2::Socket>>,
+}
+
+macro_rules! lock_socket {
+    ($socket:expr) => {
+        $socket
+            .lock()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("failed to lock socket: {}", e)))?
+    };
 }
 
 impl TokioRawSocket {
@@ -28,13 +39,12 @@ impl TokioRawSocket {
         let socket = self.socket.clone();
         let cloned_data = data.to_vec();
         let res = tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
             tracing::trace!(
                 "send_to blocking lock, sending data {:?} to addr {:?}",
                 cloned_data,
                 addr
             );
-            socket.send_to(cloned_data.as_ref(), &addr)
+            lock_socket!(socket).send_to(cloned_data.as_ref(), &addr)
         })
         .await??;
 
@@ -47,9 +57,8 @@ impl TokioRawSocket {
         let (rx, mut tx) = tokio::sync::mpsc::channel(1);
         let size = buf.len();
         let (len, socket_addr) = tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
             let mut inner_buf = vec![MaybeUninit::uninit(); size];
-            let (usize, socket_addr) = socket.recv_from(&mut inner_buf)?;
+            let (usize, socket_addr) = lock_socket!(socket).recv_from(&mut inner_buf)?;
             rx.blocking_send(inner_buf)
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Channel failed to send"))?;
             Ok::<(usize, SockAddr), std::io::Error>((usize, socket_addr))
@@ -69,56 +78,34 @@ impl TokioRawSocket {
     pub async fn send(&self, data: &[u8]) -> std::io::Result<usize> {
         let socket = self.socket.clone();
         let cloned_data = data.to_vec();
-        let res = tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
-            socket.send(cloned_data.as_ref())
-        })
-        .await??;
+        let res = tokio::task::spawn_blocking(move || lock_socket!(socket).send(cloned_data.as_ref())).await??;
 
         Ok(res)
     }
 
     pub async fn connect(&self, addr: socket2::SockAddr) -> std::io::Result<()> {
         let socket = self.socket.clone();
-        tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
-            socket.connect(&addr)
-        })
-        .await??;
+        tokio::task::spawn_blocking(move || lock_socket!(socket).connect(&addr)).await??;
 
         Ok(())
     }
 
     pub async fn bind(&self, addr: socket2::SockAddr) -> std::io::Result<()> {
         let socket = self.socket.clone();
-        tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
-            socket.bind(&addr)
-        })
-        .await??;
+        tokio::task::spawn_blocking(move || lock_socket!(socket).bind(&addr)).await??;
 
         Ok(())
     }
 
     pub async fn set_ttl(&self, ttl: u32) -> std::io::Result<()> {
-        let socket = self.socket.clone();
-        tokio::task::spawn_blocking(move || {
-            let socket = socket.blocking_lock();
-            socket.set_ttl(ttl)
-        })
-        .await??;
-
-        Ok(())
+        lock_socket!(self.socket.clone()).set_ttl(ttl)
     }
 
-    pub async fn set_read_timeout(&self, timeout: std::time::Duration) -> std::io::Result<()> {
-        self.socket.lock().await.set_read_timeout(Some(timeout))?;
-
-        Ok(())
+    pub fn set_read_timeout(&self, timeout: std::time::Duration) -> std::io::Result<()> {
+        lock_socket!(self.socket.clone()).set_read_timeout(Some(timeout))
     }
 
-    #[inline]
-    pub async fn set_broadcast(&self, broadcast: bool) -> std::io::Result<()> {
-        self.socket.lock().await.set_broadcast(broadcast)
+    pub fn set_broadcast(&self, broadcast: bool) -> std::io::Result<()> {
+        lock_socket!(self.socket.clone()).set_broadcast(broadcast)
     }
 }
