@@ -71,7 +71,7 @@ pub async fn ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     }
 }
 
-pub fn block_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
+pub fn blocking_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     let socket = socket2::Socket::new(
         socket2::Domain::IPV4,
         socket2::Type::RAW,
