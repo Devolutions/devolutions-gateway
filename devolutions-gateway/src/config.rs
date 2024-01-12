@@ -181,9 +181,10 @@ impl Conf {
                     .clone()
                     .context("TLS usage implied, but TLS certificate subject name is missing")?;
 
-                if !crate::utils::wildcard_host_match(&cert_subject_name, &hostname) {
-                    warn!("Gateway hostname doesn’t match the TLS certificate subject name configured");
-                }
+                anyhow::ensure!(
+                    crate::utils::wildcard_host_match(&cert_subject_name, &hostname),
+                    "hostname doesn’t match the TLS certificate subject name configured",
+                );
 
                 let store_location = conf_file.tls_certificate_store_location.unwrap_or_default();
 
