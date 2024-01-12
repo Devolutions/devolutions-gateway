@@ -1,0 +1,98 @@
+<form [formGroup]="connectSessionForm" autocomplete="off">
+
+  <div class="container">
+
+    <div class="box centered-box flex flex-column">
+      <span class="box-header flex justify-content-between align-items-center">
+        <span class="box-title">Remote Session Information</span>
+      </span>
+      <div class="box-content grid nomargin nopad">
+        <div class="col-4 gateway-form-group col-pad-right">
+          <label for="protocol">Protocol</label>
+          <div class="gateway-form-input">
+            <p-dropdown id="protocol"
+                        styleClass="protocol-dropdown"
+                        appendTo="body"
+                        formControlName="protocol"
+                        [options]="protocolSelectItems"
+                        required></p-dropdown>
+          </div>
+        </div>
+
+        <div class="col-8 gateway-form-group">
+          <label for="hostname">Hostname</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="hostname"
+                   type="text"
+                   autocomplete="off"
+                   placeholder="Enter hostname"
+                   formControlName="hostname"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('hostname').hasError('required') && connectSessionForm.get('hostname').touched">
+            Hostname is required.
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group">
+          <label for="username">Username</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="username"
+                   type="text"
+                   autocomplete="off"
+                   placeholder="Enter username"
+                   formControlName="username"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('username').hasError('required') && connectSessionForm.get('username').touched">
+            Username is required.
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group">
+          <label for="password">Password</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="password"
+                   type="password"
+                   autocomplete="off"
+                   placeholder="Enter password"
+                   formControlName="password"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('password').hasError('required') && connectSessionForm.get('password').touched">
+            Password is required.
+          </div>
+        </div>
+        <!--
+        <div class="col-6 gateway-form-group">
+
+            <span class="p-btn-link" (click)="showSettings()">
+                More Settings
+                <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 10 10" fill="none">
+                    <path d="M9 5L1 5" stroke="#0068C3" stroke-width="1.25" stroke-linecap="round"/>
+                    <path d="M5 9L5 1" stroke="#0068C3" stroke-width="1.25" stroke-linecap="round"/>
+                </svg>
+            </span>
+
+        </div>
+        -->
+        <div class="col-12 gateway-form-group" style="text-align: right;">
+          <p-button   styleClass="btn-connect-session"
+                      [disabled]="connectSessionForm.invalid"
+                      [type]="'submit'"
+                      [label]="'Connect Session'"
+                      (onClick)="onConnectSession()">
+          </p-button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</form>

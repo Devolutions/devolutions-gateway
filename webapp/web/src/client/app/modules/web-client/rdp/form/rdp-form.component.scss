@@ -1,0 +1,112 @@
+@import '../../../../../../assets/css/style/mixins';
+@import "../../../../../../assets/css/style/variables";
+@import "../../../../../../assets/css/theme/theme-mode-variables";
+
+:host {
+  --status-rgb: var(--base-color-rgb);
+
+  --status-label-opacity: 0.6;
+  --status-text-opacity: 0.4;
+
+  --box-background-color: white;
+  --box-text-color: rgb(var(--base-color-rgb));
+
+  :host-context(.dark-theme) & {
+    --box-background-color: #252525 !important;
+  }
+}
+
+:host.has-warning,
+:host.has-danger,
+:host.has-success {
+
+  &.has-some {
+    --status-rgb: var(--entry-status-color-rgb);
+
+    --status-label-opacity: 1;
+    --status-text-opacity: 1;
+  }
+}
+
+:host ::ng-deep .protocol-dropdown {
+  min-width: 100% !important;
+}
+
+:host ::ng-deep .btn-connect-session {
+  margin-right: 0px;
+}
+
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+///#1a1a1a
+.box {
+  background-color: var(--box-background-color);
+  width: 377px;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+.centered-box {
+  margin: auto; /* for horizontal centering */
+}
+
+.box-header {
+  //width: 329px;
+  padding-bottom: 24px;
+}
+
+.box-title {
+  color: var(--box-text-color);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0em;
+  text-align: left;
+}
+
+.box-content {
+  overflow: auto;
+  max-height: 100%;
+}
+
+.gateway-form-group {
+  padding: 0px 0px 18px 0px;
+}
+
+.gateway-form-input {
+  display: flex;
+  align-items: center;
+  //TODO error styles here. I think?
+}
+
+.col-pad-right {
+  padding-right: 16px !important;
+}
+
+.box-content {
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 400;
+  font-family: $fontFamily;
+  color: $default-text-color !important;
+  line-height: 11px;
+}
+
+.form-helper-text {
+  line-height: 11px;
+  word-wrap: break-word;
+  color: var(--status-error-text-color);
+  font-size: 11px;
+  font-family: Open Sans;
+  font-weight: 400;
+  padding-left: 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  display: inline-flex
+}

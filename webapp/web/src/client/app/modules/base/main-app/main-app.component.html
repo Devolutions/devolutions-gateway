@@ -1,0 +1,24 @@
+<div class="layout-wrapper">
+
+  <div class="layout-data">
+    <div class="layout-menu-container dark-theme dark">
+      <app-menu></app-menu>
+    </div>
+
+    <div class="layout-main visible-layout">
+      <!-- //TODO Show toolbar for Session as per the figma design -->
+<!--      <div *ngIf="!isWebClientSession" class="layout-main-header">-->
+<!--        {{isWebClientSession}}-->
+<!--        <app-header></app-header>-->
+<!--      </div>-->
+      <div class="layout-main-content">
+        <router-outlet></router-outlet>
+      </div>
+    </div>
+  </div>
+
+  <p-sidebar  position="left" styleClass="sidebar-account-container">
+    <div>p Sidebar?</div>
+  </p-sidebar>
+
+</div>

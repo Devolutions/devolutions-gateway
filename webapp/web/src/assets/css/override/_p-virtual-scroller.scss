@@ -1,0 +1,42 @@
+p-virtualscroller {
+  height: 100%;
+}
+
+.p-virtualscroller {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  &.p-group-view {
+    margin-bottom: 30px;
+  }
+
+  &.no-data {
+    display: none;
+  }
+
+  &-header {
+    border-bottom: 1px solid #e3e3e3;
+    padding: .75em .50em .75em .75em;
+  }
+
+  &-content {
+    flex: 1;
+    overflow: auto;
+  }
+
+  &-list {
+    background: transparent;
+    height: 100%;
+
+    cdk-virtual-scroll-viewport {
+      @include custom-scrollbar();
+      height: 100%;
+
+      .cdk-virtual-scroll-content-wrapper {
+        width: 100%;
+        min-width: unset;
+      }
+    }
+  }
+}

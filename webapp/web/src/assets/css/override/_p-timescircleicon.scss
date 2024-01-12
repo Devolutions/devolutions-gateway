@@ -1,0 +1,11 @@
+timescircleicon {
+  &:before {
+    font-family: devolutions-icons, 'Open Sans', serif;
+    content: "\e93e";
+    cursor: pointer;
+  }
+
+  .p-icon {
+    display: none;
+  }
+}

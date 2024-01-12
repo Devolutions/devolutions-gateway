@@ -1,0 +1,48 @@
+/* Header */
+$defaultPadding: .429em .857em;
+$headerPadding: .429em .857em;
+
+/* Border */
+$borderRadius: 4px;
+$borderRadiusLarge: 8px;
+$borderRadiusSecondary: 10px;
+
+/* List Items */
+$listItemPadding: .429em .857em;
+
+/* Fonts Variables */
+$fontFamily: "Open Sans", sans-serif;
+$fontFamilyBold: "Roboto", sans-serif;
+$fontSize: 14px;
+$primaryTitleFontSize: 1.3rem;
+$secondaryTitleFontSize: 1.15rem;
+$buttonTextFontSize: 1.15rem;
+$headersFontSize: 1.5rem;
+$subtitleFontSize: 0.75rem;
+$primaryButtonsFontSize: 24px;
+$secondaryButtonsFontSize: 22px;
+$formInputHeaderFontSize: 1.05em;
+
+/* Transitions */
+$transitionDuration: .2s;
+
+/* Shadow box */
+$defaultBoxShadow: 0 4px 8px -2px rgba(0, 0, 0, 0.25), 0 0 1px rgba(66,66,66, 0.30);
+
+/* Buttons */
+$buttonRadius: 6px;
+$buttonPadding: 7px 12px;
+$closeButtonSize: 24px;
+
+/* Dialog */
+$dialogPadding: 20px;
+
+
+// -------------------------------
+// var style variables
+
+:root {
+  /* Buttons */
+  --button-padding: 7px 12px;
+  --dialog-padding: 20px;
+}

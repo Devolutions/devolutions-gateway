@@ -11,6 +11,7 @@ use axum_extra::headers::{self, HeaderMapExt as _};
 use axum_extra::TypedHeader;
 use picky::key::PrivateKey;
 use tap::prelude::*;
+use tower_http::services::ServeFile;
 use uuid::Uuid;
 
 use crate::config::dto::WebAppUser;
@@ -440,6 +441,7 @@ where
         .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
 
     match ServeDir::new("webapp/client/")
+        .fallback(ServeFile::new("webapp/client/index.html"))
         .append_index_html_on_directories(true)
         .oneshot(request)
         .await

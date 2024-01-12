@@ -1,0 +1,186 @@
+.p-multiselect {
+  white-space: nowrap;
+
+  &.multi-select-placeholder {
+    .p-multiselect-label {
+      text-align: start;
+    }
+
+    .p-multiselect-clear-icon {
+      right: 30px;
+    }
+  }
+
+  .p-multiselect-label {
+    padding: 0 2.3em 0 0;
+  }
+
+  &.p-multiSelect-ellipsis {
+    width: 18rem;
+
+    .p-multiselect-label-container {
+      @include text-ellipsis();
+    }
+  }
+}
+
+.p-multiselect-label-container,
+.p-multiselect-label-container:focus,
+.p-multiselect-label-container:hover {
+  border: none;
+  padding: 5px 0 5px 8px;
+  line-height: 24px;
+  margin-right: 1.5em;
+}
+
+.p-multiselect:not(.p-disabled):hover {
+  border: 1px solid $input-default-border-hover-color;
+}
+
+.p-multiselect:not(.p-disabled).p-focus {
+  border: 1px solid $input-default-border-hover-color;
+}
+
+.p-multiselect-panel .p-multiselect-items-wrapper {
+  background: $dropdown-container-bg-color;
+  border-bottom-right-radius: $borderRadius;
+  border-bottom-left-radius: $borderRadius;
+
+  @include custom-scrollbar();
+}
+
+.p-multiselect {
+  background: $dropdown-bg-color;
+  border: 1px solid $input-default-border-color;
+  @include transition(border-color $transitionDuration, box-shadow $transitionDuration);
+
+  .p-multiselect-label {
+    color: $input-txt-color;
+    padding-right: 2.3em;
+  }
+
+  .p-multiselect-trigger {
+    width: 2em;
+    line-height: 2em;
+    box-sizing: border-box;
+    padding: 0;
+    text-align: center;
+
+    .pi {
+      color: $dropdown-trigger-color;
+    }
+  }
+
+  &:not(.p-disabled):hover {
+    border: 1px solid $input-default-border-hover-color;
+  }
+
+  &:not(.p-disabled).p-focus {
+    border: 1px solid $input-default-border-hover-color;
+
+    .p-multiselect-trigger {
+      .pi {
+        color: $dropdown-trigger-color;
+      }
+    }
+  }
+
+  &.p-multiselect-open {
+    border: 1px solid $dropdown-overlay-border-color !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+  }
+}
+
+.p-multiselect-panel {
+  padding: 0;
+  background: $dropdown-container-bg-color;
+  min-width: 12em;
+  margin-top: -1px; /* hack to simulate a thin line */
+  border: 1px solid $dropdown-overlay-border-color;
+  border-bottom-right-radius: $borderRadius;
+  border-bottom-left-radius: $borderRadius;
+
+  .p-multiselect-header {
+    padding: $headerPadding;
+    background: $dropdown-container-bg-color;
+    border-bottom: 1px solid $dropdown-filter-container-separator-color;
+    border-radius: 0;
+
+    .p-multiselect-filter-container {
+      padding: $headerPadding;
+      border-bottom: 1px solid $dropdown-filter-container-separator-color;
+      background: $dropdown-container-bg-color;
+
+      .p-multiselect-filter {
+        width: 100%;
+        border: none;
+        box-sizing: border-box;
+        padding-right: 20px;
+        padding-left: 0;
+        text-overflow: unset;
+
+        &:hover, &:active, &:focus {
+          border: none !important;
+          box-shadow: none !important;
+        }
+      }
+
+      .p-multiselect-filter-icon {
+        @include devolutions-dropdown-filter-icon-input();
+      }
+    }
+
+    .p-checkbox {
+      margin-right: 8px;
+      float: none;
+      vertical-align: middle;
+    }
+
+    .p-multiselect-close {
+      color: $action-btn-default-icon-color;
+      font-size: $fontSize;
+      @include transition(color $transitionDuration);
+
+      &:hover {
+        padding: 0;
+        color: $admin-text-hover-color;
+      }
+
+      &:focus {
+        outline: 0 none;
+        color: $input-txt-border-focus-color;
+      }
+    }
+  }
+
+  .p-multiselect-items {
+    .p-multiselect-item {
+      padding: $listItemPadding;
+
+      .p-checkbox {
+        position: static;
+        margin-top: 0;
+        display: inline-block;
+        vertical-align: middle;
+        padding-right: 10px;
+      }
+
+      label {
+        padding: 0;
+        margin: 0 0 0 0.615em;
+        display: inline-block;
+        vertical-align: middle;
+      }
+
+      &:not(.p-highlight):not(.p-disabled):hover {
+        background: $dropdown-item-selected-bg-hover-color;
+      }
+
+      &.p-highlight {
+        background-color: inherit;
+        color: inherit;
+      }
+    }
+  }
+}

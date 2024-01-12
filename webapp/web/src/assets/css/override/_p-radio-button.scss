@@ -1,0 +1,136 @@
+:root,
+.light-theme, // will be removed once we wrap our default css prop in :root
+.dark-theme { // will be removed once we wrap our default css prop in :root
+  --radio-border-color: var(--input-border-color);
+  --radio-background-color: var(--input-background-color);
+  --radio-label-color: var(--input-label-color);
+  --radio-icon-color: var(--input-border-color);
+  --radio-box-shadow: var(--input-box-shadow);
+
+  --radio-size: 20px;
+  --radio-dot-size: 10px;
+}
+
+.p-radiobutton {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+  width: auto;
+  height: auto;
+
+  .p-hidden-accessible {
+    width: 0 !important;
+  }
+
+  // Overwrite primeng default styles
+  &.p-radiobutton-disabled {
+    cursor: default;
+  }
+}
+
+.p-radiobutton-box {
+  @include transition(background-color $transitionDuration, border-color $transitionDuration, box-shadow $transitionDuration);
+
+  width: var(--radio-size);
+  height: var(--radio-size);
+
+  background-color: var(--radio-background-color);
+  border: 2px solid var(--radio-border-color);
+  border-radius: 50%;
+  font-size: 14px;
+  display: flex;
+  justify-content: center;
+  cursor: pointer;
+
+  // Make sure we include label in hover
+  p-radiobutton:hover &:not(.p-disabled),
+  &:not(.p-disabled):hover {
+    --radio-border-color: var(--input-accent-color);
+  }
+
+  &.p-focus {
+    --radio-border-color: var(--input-accent-color);
+
+    box-shadow: var(--radio-box-shadow);
+  }
+
+  &.p-highlight {
+    --radio-border-color: var(--input-accent-color);
+    --radio-icon-color: var(--input-accent-color);
+
+    .p-radiobutton-icon {
+      background-color: var(--radio-icon-color);
+      height: 100%;
+      transform: translateZ(0) scale(0.65) !important;
+      visibility: visible;
+      width: 100%;
+    }
+  }
+
+  &.p-disabled {
+    --radio-border-color: var(--input-disabled-border-color);
+    --radio-icon-color: var(--input-disabled-selected-indicator-color);
+    --radio-background-color: var(--input-disabled-background-color);
+
+    // Needed to overwrite .p-disabled !important from base.scss
+    border-color: var(--radio-border-color) !important;
+
+    opacity: 1;
+  }
+}
+
+.p-radiobutton-label {
+  cursor: pointer;
+  padding: 0 0 0 .5em;
+  color: var(--radio-label-color);
+
+  &.p-disabled {
+    --radio-label-color: var(--input-disabled-label-color);
+
+    opacity: 1;
+  }
+}
+
+.checkbox-align {
+  .p-radiobutton {
+    align-self: center;
+  }
+}
+
+.radiobutton-group {
+  display: flex;
+  flex-direction: column;
+
+  small {
+    margin-left: 32px;
+    margin-top: -0.5em;
+  }
+
+  p-radiobutton {
+    margin: 10px 0;
+
+    &:first-child {
+      margin-top: 0;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &-row {
+    flex-direction: row;
+
+    p-radiobutton {
+      margin: 0 10px;
+
+      &:first-child {
+        margin-left: 0;
+      }
+
+      &:last-child {
+        margin-right: 0;
+      }
+    }
+  }
+}

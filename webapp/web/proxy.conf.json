@@ -1,0 +1,15 @@
+{
+  "/jet/webapp/app-token": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/webapp/session-token": {
+    "target": "http://localhost:7171",
+    "secure": false
+  },
+  "/jet/rdp": {
+    "target": "http://localhost:7171",
+    "secure": false,
+    "ws": true
+  }
+}

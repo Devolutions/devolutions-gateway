@@ -1,0 +1,81 @@
+.p-steps {
+  position: relative;
+  overflow-x: hidden;
+
+  ul[role='tablist'] {
+    justify-content: space-evenly;
+  }
+
+  .p-steps-item {
+    background-color: transparent;
+    text-align: center;
+    flex: none;
+
+    .p-menuitem-link {
+      display: inline-block;
+      text-align: center;
+      background-color: transparent;
+      overflow: hidden;
+
+      .p-steps-number {
+        display: inline-block;
+        background-color: $menu-panel-txt-color;
+        @include border-radius(50%);
+        padding: 0.5em;
+        font-size: 1em;
+        color: $secondary-text-color;
+        position: relative;
+        top: 1em;
+        margin-bottom: 1em;
+        //border: 1px solid lighten($primaryColor, 15%);
+        border: 1px solid $dropdown-overlay-border-color;
+        width: 2.5em;
+        height: 2.5em;
+      }
+
+      .p-steps-title {
+        display: block;
+        margin-top: 0.45em;
+        color: $lighter-default-text-color;
+      }
+    }
+
+    &.p-disabled {
+      .p-steps-number {
+        background-color: $grid-container-bg-color;
+        border-color: $grid-item-border-color;
+        color: $default-text-color;
+      }
+    }
+
+    &.p-highlight {
+      .p-steps-number.p-menuitem-link {
+        background-color: $paginator-active-bg-color;
+        border: 2px solid var(--input-txt-border-focus-color);
+        color: var(--input-background-color);
+        font-weight: bold;
+      }
+
+      .p-steps-title {
+        font-weight: 600;
+        color: $default-text-color;
+      }
+    }
+
+    &:last-child {
+      .p-menuitem-link {
+        display: block;
+      }
+    }
+  }
+
+  &:before {
+    content: ' ';
+    border: 1px solid $overlay-panel-border-color;
+    width: 100%;
+    top: 45%;
+    left: 0;
+    display: block;
+    position: absolute;
+  }
+}

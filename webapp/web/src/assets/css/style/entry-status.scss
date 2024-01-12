@@ -1,0 +1,95 @@
+:root,
+.light-theme,
+.dark-theme {
+  --entry-status-color-rgb: var(--base-color-rgb);
+}
+
+.has-danger,
+.is-expired,
+.is-corrupted,
+.is-opened,
+.is-checkout,
+.is-locked,
+.is-flag-expired {
+  --entry-status-color-rgb: var(--entry-status-by-others-color-rgb);
+}
+
+.has-success,
+.is-opened-by-me,
+.is-checkout-by-me,
+.is-locked-by-me,
+.is-approved {
+  --entry-status-color-rgb: var(--entry-status-by-me-color-rgb);
+}
+
+.is-flag-archived {
+  --entry-status-color-rgb: var(--entry-status-flag-archived-color-rgb);
+}
+
+.is-flag-warning {
+  --entry-status-color-rgb: var(--entry-status-flag-warning-color-rgb);
+}
+
+.has-warning,
+.is-expiring,
+.is-unhealthy,
+.is-flag-broken {
+  --entry-status-color-rgb: var(--entry-status-flag-broken-color-rgb);
+}
+
+.is-pending,
+.is-flag-locked {
+  --entry-status-color-rgb: var(--entry-status-flag-locked-color-rgb);
+}
+
+.is-flag-disabled {
+  --entry-status-color-rgb: var(--entry-status-flag-disabled-color-rgb);
+}
+
+// Action button
+.p-action-button.entry-status:not(.entry-icons):not(.hub-menu-button) {
+  background-color: rgba(var(--entry-status-color-rgb), .1);
+  color: rgba(var(--entry-status-color-rgb), 1);
+
+  &:hover:not(.p-disabled):not([disabled]) {
+    background-color: rgba(var(--entry-status-color-rgb), var(--entry-status-background-opacity)) !important; // needs to overwrite p-button
+    color: #fff;
+  }
+}
+
+// Tree view and export view
+.approval-status,
+.entry-icons.entry-status i {
+  background-color: rgba(var(--entry-status-color-rgb), .1) !important;
+  color: rgba(var(--entry-status-color-rgb), 1) !important;
+  font-size: 14px;
+  padding: 2px;
+  border-radius: 4px;
+
+  &:not(:first-child) {
+    margin-left: 3px;
+  }
+}
+
+// Dropdown for changing entry's status
+.hub-menu-button.entry-status .p-button-icon {
+  color: rgba(var(--entry-status-color-rgb), 1);
+}
+
+// Root dashboard box counter
+.box-count .entry-status {
+  .box-counter-icon {
+    background-color: rgba(var(--entry-status-color-rgb, .1));
+    color: rgba(var(--entry-status-color-rgb, 1));
+  }
+
+  .box-counter-total,
+  .box-counter-label {
+    color: rgba(var(--entry-status-color-rgb), 1);
+  }
+}
+
+.box .entry-status {
+  background-color: rgba(var(--entry-status-color-rgb), .1);
+  color: rgba(var(--entry-status-color-rgb), 1);
+}

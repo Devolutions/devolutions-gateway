@@ -1,0 +1,19 @@
+:host {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
+}
+
+:host ::ng-deep .tabview-container {
+  height: 100%;
+  width: 100%;
+}
+
+:host ::ng-deep .hidden-tab-headers .p-tabview-nav {
+  display: none;
+}
+
+:host ::ng-deep .session-background {
+  background: #F9F9F9 url('../../../../../assets/images/session_background.png');
+}
