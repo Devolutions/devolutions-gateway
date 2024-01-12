@@ -3,10 +3,11 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0</TargetFrameworks>
     <RootNamespace>DevolutionsGateway</RootNamespace>
+    <IsPowerShell>true</IsPowerShell>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="PemUtils" Version="3.0.0.81" />
+    <PackageReference Include="Devolutions.Picky" Version="2023.9.20" />
     <PackageReference Include="PowerShellStandard.Library" Version="5.1.0" />
     <PackageReference Include="System.Collections" Version="4.3.0" />
     <PackageReference Include="System.Diagnostics.Debug" Version="4.3.0" />
