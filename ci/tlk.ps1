@@ -348,7 +348,7 @@ class TlkRecipe
 
         $PSModuleParentPath = Split-Path $DGatewayPSModulePath -Parent
         $PSModuleZipFilePath = Join-Path $PSModuleParentPath "$PSModuleName-ps-$PSModuleVersion.zip"
-        Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath
+        Compress-Archive -Path $DGatewayPSModulePath -Destination $PSModuleZipFilePath -Update
 
         New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
 

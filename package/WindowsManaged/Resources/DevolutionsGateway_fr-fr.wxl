@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="fr-fr" Codepage="1252" Language="1036" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+   <String Id="Language">1036</String>
+   <!-- Supported language and codepage codes can be found here: http://www.tramontana.co.hu/wix/lesson2.php#2.4 -->
+   <String Id="VendorName">Devolutions</String>
+   <String Id="VendorFullName">Devolutions inc.</String>
+   <String Id="ProductDescription">Accès et soutien à distance instantanés</String>
+   <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum</String>
+   <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
+   <String Id="x64VersionRequired">Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows.</String>
+   <String Id="x86VersionRequired">Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows.</String>
+   <String Id="ShortcutSelectionDlgTitle">Configurer les raccourcis</String>
+   <String Id="ShortcutSelectionDlgDescription">Créer des raccourcis de l'application</String>
+   <String Id="ShortcutSelectionDlgLabel">Créer des raccourcis de [ProductName] aux endroits suivants:</String>
+   <String Id="DesktopShortcutChoice">Bureau</String>
+   <String Id="StartMenuShortcutChoice">Dossier Programmes du menu Démarrer</String>
+   <String Id="ProgramSettingsDlgTitle">Configuration des paramètres</String>
+   <String Id="ProgramSettingsDlgDescription">Configurer les paramètres avancés</String>
+   <String Id="ProgramSettingsDlgAnalyticsLabel">Partager des données d'utilisation anonymisées afin de contribue</String>
+   <String Id="ProgramSettingsDlgAnalyticsLabel2">à l'amélioration de [ProductName]</String>
+   <String Id="ProgramSettingsDlgAnalyticsCheckbox">Partager des données de télémétrie</String>
+   <String Id="ProgramSettingsDlgCrashReportsLabel">Soumettre des rapports d'incidents anonymisés afin de contribuer</String>
+   <String Id="ProgramSettingsDlgCrashReportsLabel2">à l'amélioration de la stabilité et de la sécurité:</String>
+   <String Id="ProgramSettingsDlgCrashReportsCheckbox">Activer le rapporteur d'incidents</String>
+
+   <String Id="UACPromptLabel">Please wait for UAC prompt to appear.&#13;&#10;&#13;&#10;If it appears minimized then active it from the taskbar.</String>
+
+  <!--All following strings should be copied from Wix directly. The only goal to have those strings here is to change the 
+      font color for white. No other way has been found to change that.-->
+  <String Id="AdvancedWelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
+  
+  <String Id="BrowseDlgTitle">{\MyWixUI_Font_Title}Modifier le dossier de destination</String>
+  <String Id="BrowseDlgDescription">{\MyWixUI_Font_Description}Sélectionnez le dossier de destination</String>
+  
+  <String Id="CustomizeInstallDlgTitle">{\MyWixUI_Font_Title}Configuration personnalisée</String>
+  <String Id="CustomizeInstallDlgDescription">{\MyWixUI_Font_Description}Sélectionnez la méthode d'installation des fonctionnalités</String>
+  
+  <String Id="DiskCostDlgTitle">{\MyWixUI_Font_Title}Espace disque nécessaire</String>
+  <String Id="DiskCostDlgDescription">{\MyWixUI_Font_Description}L'espace de disque dur nécessaire pour l'installation des fonctionnalités sélectionnées.</String>
+  
+  <String Id="FeaturesDlgTitle">{\MyWixUI_Font_Title}Fonctionnalités du produit</String>
+  <String Id="FeaturesDlgDescription">{\MyWixUI_Font_Description}Sélectionnez la méthode d'installation des fonctionnalités.</String>
+  
+  <String Id="FilesInUseTitle">{\MyWixUI_Font_Title}Fichiers en cours d'utilisation</String>
+  <String Id="FilesInUseDescription">{\MyWixUI_Font_Description}Certains fichiers à mettre à jour sont en cours d'utilisation.</String>
+  
+  <String Id="InstallDirDlgTitle">{\MyWixUI_Font_Title}Dossier de destination</String>
+  <String Id="InstallDirDlgDescription">{\MyWixUI_Font_Description}Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier.</String>
+  
+  <String Id="InstallScopeDlgTitle">{\MyWixUI_Font_Title}Type d'installation</String>
+  <String Id="InstallScopeDlgDescription">{\MyWixUI_Font_Description}Choisissez le type d'installation ainsi que le dossier de destination</String>
+  
+  <String Id="LicenseAgreementDlgTitle">{\MyWixUI_Font_Title}Convention de licence d'utilisation</String>
+  <String Id="LicenseAgreementDlgDescription">{\MyWixUI_Font_Description}Veuillez lire attentivement la Convention de licence suivante</String>
+  
+  <String Id="MaintenanceTypeDlgTitle">{\MyWixUI_Font_Title}Modifier, réparer ou supprimer l'installation</String>
+  <String Id="MaintenanceTypeDlgDescription">{\MyWixUI_Font_Description}Sélectionnez l'opération à effectuer.</String>
+  
+  <String Id="MsiRMFilesInUseTitle">{\MyWixUI_Font_Title}Fichiers en cours d'utilisation</String>
+  <String Id="MsiRMFilesInUseDescription">{\MyWixUI_Font_Description}Certains fichiers à mettre à jour sont en cours d'utilisation.</String>
+  
+  <String Id="OutOfDiskDlgTitle">{\MyWixUI_Font_Title}Espace de disque insuffisant</String>
+  <String Id="OutOfDiskDlgDescription">{\MyWixUI_Font_Description}L'espace disque disponible est insuffisant pour l'installation.</String>
+  
+  <String Id="OutOfRbDiskDlgTitle">{\MyWixUI_Font_Title}Espace de disque insuffisant</String>
+  <String Id="OutOfRbDiskDlgDescription">{\MyWixUI_Font_Description}L'espace disque disponible est insuffisant pour l'installation.</String>
+  
+  <String Id="ProgressDlgTitleInstalling">{\MyWixUI_Font_Title}Installation de [ProductName]</String>
+  <String Id="ProgressDlgTitleChanging">{\MyWixUI_Font_Title}Modification de [ProductName]</String>
+  <String Id="ProgressDlgTitleRepairing">{\MyWixUI_Font_Title}Réparation de [ProductName]</String>
+  <String Id="ProgressDlgTitleRemoving">{\MyWixUI_Font_Title}Suppression de [ProductName]</String>
+  <String Id="ProgressDlgTitleUpdating">{\MyWixUI_Font_Title}Mise à jour de [ProductName]</String>
+  
+  <String Id="SetupTypeDlgTitle">{\MyWixUI_Font_Title}Choisir le type de configuration</String>
+  <String Id="SetupTypeDlgDescription">{\MyWixUI_Font_Description}Choisissez le type de configuration qui correspond le mieux à vos besoins</String>
+  
+  <String Id="VerifyReadyDlgInstallTitle">{\MyWixUI_Font_Title}Prêt pour l'installation de [ProductName]</String>
+  <String Id="VerifyReadyDlgChangeTitle">{\MyWixUI_Font_Title}Prêt pour la modification de [ProductName]</String>
+  <String Id="VerifyReadyDlgRepairTitle">{\MyWixUI_Font_Title}Prêt pour la réparation de [ProductName]</String>
+  <String Id="VerifyReadyDlgRemoveTitle">{\MyWixUI_Font_Title}Prêt pour la suppression de [ProductName]</String>
+  <String Id="VerifyReadyDlgUpdateTitle">{\MyWixUI_Font_Title}Prêt pour la mise à jour de [ProductName]</String>
+
+  <!--All following strings come from firewall extension. There is no french translation in that extension.-->
+  <String Id="msierrFirewallCannotConnect" Overridable="yes">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
+  <String Id="WixSchedFirewallExceptionsInstall" Overridable="yes">Configuration du Pare-feu Windows</String>
+  <String Id="WixSchedFirewallExceptionsUninstall" Overridable="yes">Configuration du Pare-feu Windows</String>
+  <String Id="WixRollbackFirewallExceptionsInstall" Overridable="yes">Restauration de la configuration du Pare-feu Windows</String>
+  <String Id="WixExecFirewallExceptionsInstall" Overridable="yes">Installation de la configuration du Pare-feu Windows</String>
+  <String Id="WixRollbackFirewallExceptionsUninstall" Overridable="yes">Restauration de la configuration du Pare-feu Windows</String>
+  <String Id="WixExecFirewallExceptionsUninstall" Overridable="yes">Désinstallation de la configuration du Pare-feu Windows</String>
+
+  <!--All following strings come from user privileges extension. There is no french translation in that extension.-->
+  <String Id="CreatingLocalUsers">Création des utilisateurs locaux</String>
+  <String Id="CreatingLocalGroups">Création des groupes locaux</String>
+  <String Id="AddingLocalGroupMembers">Ajouter des membres au groupe local</String>
+  <String Id="DeletingLocalUsers">Suppression des utilisateurs locaux</String>
+  <String Id="DeletingLocalGroups">Suppression des groupes locaux</String>
+  <String Id="RemovingLocalGroupMembers">Suppression des membres du groupe local</String>
+
+  <!-- Custom UI -->
+  <String Id="AccessUriDlg_Title">Installation de [ProductName]</String>
+  <String Id="AccessUriDlgTitle">{\MyWixUI_Font_Title}URL Externe</String>
+  <String Id="AccessUriDlgDescription">{\MyWixUI_Font_Description}URL pour rejoindre Devolutions Gateway.</String>
+  <String Id="AccessUriDlgAccessUriLabel">URI d'accès</String>
+
+  <String Id="CertificateDlg_Title">Installation de [ProductName]</String>
+  <String Id="CertificateDlgTitle">{\MyWixUI_Font_Title}Certificat</String>
+  <String Id="CertificateDlgDescription">{\MyWixUI_Font_Description}Un certificat est nécessaire pour utiliser HTTPS</String>
+  <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
+  <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
+  <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
+  <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>
+
+  <String Id="CustomInstallDlg_Title">Installation de [ProductName]</String>
+  <String Id="CustomInstallDlgTitle">{\MyWixUI_Font_Title}Configuration</String>
+  <String Id="CustomInstallDlgDescription">{\MyWixUI_Font_Description}Veuillez choisir comment configurer Devolutions Gateway</String>
+  <String Id="CustomInstallDlgInfoLabel">L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant.</String>
+  <String Id="CustomInstallDlgConfigureNowLabel">Configurer maintenant</String>
+  <String Id="CustomInstallDlgConfigureLaterLabel">Configurer plus tard</String>
+
+  <String Id="InvalidConfigurationDlg_Title">Installation de [ProductName]</String>
+  <String Id="InvalidConfigurationDlgInfoLabel">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau</String>
+
+  <String Id="ListenersDlg_Title">Installation de [ProductName]</String>
+  <String Id="ListenersDlgTitle">{\MyWixUI_Font_Title}Écouteurs</String>
+  <String Id="ListenersDlgDescription">{\MyWixUI_Font_Description}Écouteurs HTTP(S) et TCP</String>
+  <String Id="ListenersDlgListenersLabel">Écouteurs</String>
+  <String Id="ListenersDlgHTTPLabel">Écouteur HTTP</String>
+  <String Id="ListenersDlgTCPLabel">Écouteur TCP</String>
+
+  <String Id="PublicKeyDlg_Title">Installation de [ProductName]</String>
+  <String Id="PublicKeyDlgTitle">{\MyWixUI_Font_Title}Paire de clés</String>
+  <String Id="PublicKeyDlgDescription">{\MyWixUI_Font_Description}Clé publique du fournisseur pour vérification de jetons</String>
+  <String Id="PublicKeyDlgInfoLabel">Clé publique du fournisseur</String>
+  <String Id="PublicKeyDlgFromFileLabel">À partir d'un fichier</String>
+
+  <String Id="ServiceDlg_Title">Installation de [ProductName]</String>
+  <String Id="ServiceDlgTitle">{\MyWixUI_Font_Title}Service Options</String>
+  <String Id="ServiceDlgDescription">{\MyWixUI_Font_Description}Configuration for the Devolutions Gateway service.</String>
+  <String Id="ServiceDlgInfoLabel">Service Startup</String>
+  <String Id="ServiceDlgStartTypeLabel">Lancement du service Devolutions Gateway:</String>
+  <String Id="ServiceDlgStartManualLabel">Manuel</String>
+  <String Id="ServiceDlgStartAutoLabel">Automatique</String>
+
+  <String Id="SummaryDlg_Title">Installation de [ProductName]</String>
+  <String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Résumé</String>
+  <String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
+  <String Id="SummaryDlgAccessUriLabel">URI d'accès:</String>
+  <String Id="SummaryDlgHTTPLabel">Écouteur HTTP:</String>
+  <String Id="SummaryDlgTCPLabel">Écouteur TCP:</String>
+  <String Id="SummaryDlgListenersLabel">Écouteurs Devolutions Gateway</String>
+  <String Id="SummaryDlgKeyPairLabel">Configuration de paire de clés Devolutions Gateway</String>
+  <String Id="SummaryDlgPublicKeyLabel">Clé publique du fournisseur:</String>
+  <String Id="SummaryDlgCertificateLabel">Configuration de certificat Devolutions Gateway</String>
+  <String Id="SummaryDlgCertificateFileLabel">Fichier de certificat:</String>
+  <String Id="SummaryDlgCertificatePasswordLabel">Mot de passe du certificat:</String>
+  <String Id="SummaryDlgCertificateKeyLabel">Fichier de clée privée:</String>
+
+  <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
+  <String Id="WelcomeDlgTitleX" Overridable="yes">{\WixUI_Font_Bigger}Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
+
+  <String Id="Error29989">Échec de la configuration de la clé publique du fournisseur.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29990">Échec de la configuration du certificat.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29991">Échec de la configuration des écouteurs.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29992">Échec de la configuration des URI d'accès.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29993">L'exécution d'une commande de configuration a échoué.&#xa;&#xa;Détails: [2]</String>
+  <String Id="Error29994">Échec de lecture de la configuration existante du service</String> 
+  <String Id="Error29995">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
+  <String Id="Error29996">Le chemin de fichier spécifié est invalide ou inaccessible</String>
+  <String Id="Error29997">Vous devez entrer un nom de fichier</String>
+  <String Id="Error29998">Vous devez entrer un nom de protocole valide</String>
+  <String Id="Error29999">Vous devez entrer un numéro de port valide</String>
+  <String Id="Error30000">Vous devez fournir un nom d'hôte valide</String>
+</WixLocalization>
