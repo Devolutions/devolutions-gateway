@@ -10,5 +10,5 @@ publish = false
 [dependencies]
 anyhow = "1.0.79"
 socket2 = { version = "0.5.5", features = ["all"] }
-tokio = { version = "1.35.1", features = ["io-util","rt"] }
+tokio = { version = "1.35.1", features = ["io-util","rt","sync"] }
 tracing = "0.1.40"
