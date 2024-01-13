@@ -352,6 +352,13 @@ class TlkRecipe
 
         New-ModulePackage $DGatewayPSModulePath $PSModuleParentPath
 
+        $DGatewayPSModuleStagingPath = Join-Path $Env:Temp "DevolutionsGateway"
+        New-Item -Force -Type Directory $DGatewayPSModuleStagingPath
+        Copy-Item -Force -Recurse $DGatewayPSModulePath/* $DGatewayPSModuleStagingPath
+        $DotNetRid = "win-x64"
+        Get-Item "$DGatewayPSModuleStagingPath\bin\*\*DevolutionsPicky*" | ? { $_.Directory.Name -ne $DotNetRid } | % { Remove-Item $_.Directory -Recurse }
+        Remove-Item $(Join-Path $DGatewayPSModuleStagingPath "src") -Recurse  -ErrorAction SilentlyContinue
+
         $TargetConfiguration = "Release"
         $ActionsProjectPath = Join-Path $(Get-Location) 'Actions' 
 
@@ -361,7 +368,7 @@ class TlkRecipe
 
         & 'MSBuild.exe' "$(Join-Path $ActionsProjectPath 'DevolutionsGateway.Installer.Actions.sln')" "/p:Configuration=$TargetConfiguration" "/p:Platform=$TargetArch" | Out-Host
 
-        $HeatArgs = @('dir', "$DGatewayPSModulePath",
+        $HeatArgs = @('dir', "$DGatewayPSModuleStagingPath",
             '-dr', 'D.DGATEWAYPSROOTDIRECTORY',
             '-cg', 'CG.DGatewayPSComponentGroup',
             '-var', 'var.DGatewayPSSourceDir',
@@ -373,7 +380,7 @@ class TlkRecipe
         $WixExtensions += $(Join-Path $(Get-Location) 'WixUserPrivilegesExtension.dll')
         
         $WixArgs = @($WixExtensions | ForEach-Object { @('-ext', $_) }) + @(
-            "-dDGatewayPSSourceDir=$DGatewayPSModulePath",
+            "-dDGatewayPSSourceDir=$DGatewayPSModuleStagingPath",
             "-dDGatewayExecutable=$DGatewayExecutable",
             "-dVersion=$ShortVersion",
             "-dActionsLib=$(Join-Path $ActionsProjectPath $TargetArch $TargetConfiguration 'DevolutionsGateway.Installer.Actions.dll')",
@@ -407,6 +414,7 @@ class TlkRecipe
         if (Test-Path Env:DGATEWAY_PSMODULE_CLEAN) {
             # clean up the extracted PowerShell module directory
             Remove-Item -Path $DGatewayPSModulePath -Recurse
+            Remove-Item -Path $DGatewayPSModuleStagingPath -Recurse
         }
 
         if (Test-Path Env:DGATEWAY_PACKAGE) {
