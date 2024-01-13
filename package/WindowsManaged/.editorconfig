@@ -2,3 +2,6 @@
 [*]
 end_of_line = lf
 insert_final_newline = true
+
+[*.tt]
+end_of_line = crlf

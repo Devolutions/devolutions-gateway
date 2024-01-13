@@ -63,8 +63,13 @@ public class GatewayDialog : ManagedForm
     {
         string errorMessage = this.Localize(string.IsNullOrEmpty(message) ? "InvalidConfigurationDlgInfoLabel" : message);
 
+        this.ShowValidationErrorString(errorMessage);
+    }
+
+    protected void ShowValidationErrorString(string message)
+    {
         MessageBox.Show(
-            errorMessage,
+            message,
             this.Localize("InvalidConfigurationDlg_Title"),
             MessageBoxButtons.OK,
             MessageBoxIcon.Warning);

@@ -5,6 +5,9 @@
 <#@ import namespace="System.Collections.Generic" #>
 <#@ output extension=".cs" #>
 
+using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
+using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
+
 namespace DevolutionsGateway.Properties
 {
     internal partial class GatewayProperties
@@ -54,21 +57,38 @@ namespace DevolutionsGateway.Properties
 <#+      
   string[,] properties = {     
     // type name default secure hidden id comment
+
     {"string", "AccessUriHost", "string.Empty", "true", "false", "", ""},
     {"uint", "AccessUriPort", "443", "true", "false", "", ""},
     {"string", "AccessUriScheme", "Constants.HttpsProtocol", "true", "false", "", ""},
+
+    {"Constants.CertificateMode", "CertificateMode", "Constants.CertificateMode.External", "true", "false", "", ""},
+    // External certificate mode
     {"string", "CertificateFile", "string.Empty", "true", "false", "", ""},
     {"string", "CertificatePassword", "string.Empty", "true", "true", "", ""},
     {"string", "CertificatePrivateKeyFile", "string.Empty", "true", "false", "", ""},
+    // System certificate mode
+    {"StoreLocation", "CertificateLocation", "StoreLocation.CurrentUser", "true", "false", "", ""},
+    {"StoreName", "CertificateStore", "StoreName.My", "true", "true", "", ""},
+    {"string", "CertificateName", "string.Empty", "true", "false", "", ""},
+    // UI Helpers
+    {"Constants.CertificateFindType", "CertificateFindType", "Constants.CertificateFindType.Thumbprint", "false", "false", "", ""},
+    {"string", "CertificateSearchText", "string.Empty", "true", "false", "", ""},
+    {"string", "CertificateThumbprint", "string.Empty", "true", "false", "", ""},
+
     {"bool", "ConfigureGateway", "false", "false", "false", "", "`true` to configure the Gateway interactively"},    
     {"bool", "HasPowerShell", "false", "false", "false", "", ""},
+
     {"string", "HttpListenerHost", "0.0.0.0", "true", "false", "", ""},
     {"uint", "HttpListenerPort", "7171", "true", "false", "", ""},
     {"string", "HttpListenerScheme", "Constants.HttpsProtocol", "true", "false", "", ""},
-    {"string", "NoStartService", "string.Empty", "true", "false", "dgw.no_start_service", ""},
-    {"string", "PowerShellPath", "string.Empty", "true", "false", "", ""},
+
     {"string", "PublicKeyFile", "string.Empty", "true", "false", "", ""},
+
+    {"string", "PowerShellPath", "string.Empty", "true", "false", "", ""},
+    {"string", "NoStartService", "string.Empty", "true", "false", "dgw.no_start_service", ""},
     {"int", "ServiceStart", "3", "true", "false", "", ""},
+
     {"string", "TcpListenerHost", "0.0.0.0", "true", "false", "", ""},
     {"uint", "TcpListenerPort", "8181", "true", "false", "", ""},
     {"string", "TcpListenerScheme", "Constants.TcpProtocol", "true", "false", "", ""},
@@ -77,6 +97,7 @@ namespace DevolutionsGateway.Properties
     {"bool", "Upgrading", "false", "true", "false", "", ""},
     {"bool", "RemovingForUpgrade", "false", "true", "false", "", ""},
     {"bool", "Uninstalling", "false", "true", "false", "", ""},
+
     {"bool", "Maintenance", "false", "true", "false", "", ""},
   };               
 #>

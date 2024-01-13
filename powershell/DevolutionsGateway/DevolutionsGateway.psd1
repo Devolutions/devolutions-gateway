@@ -22,7 +22,7 @@
     CompanyName = 'Devolutions'
 
     # Copyright statement for this module
-    Copyright = '(c) 2019-2023 Devolutions Inc. All rights reserved.'
+    Copyright = '(c) 2019-2024 Devolutions Inc. All rights reserved.'
 
     # Description of the functionality provided by this module
     Description = 'Devolutions Gateway PowerShell Module'

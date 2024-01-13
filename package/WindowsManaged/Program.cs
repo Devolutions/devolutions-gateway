@@ -158,7 +158,7 @@ internal class Program
         {
             project.CandleOptions = "-fips";
         }
-
+        
         project.Dirs = new Dir[]
         {
             new ("%ProgramFiles%", new Dir(Includes.VENDOR_NAME, new InstallDir(Includes.SHORT_NAME)
@@ -248,12 +248,13 @@ internal class Program
             .Add<MaintenanceTypeDialog>()
             .Add<ProgressDialog>()
             .Add<ExitDialog>();
-
+        
         project.UIInitialized += Project_UIInitialized;
 
         project.Language = enUS.Key;
         project.LocalizationFile = $"Resources/{enUS.Value}";
         project.PreserveTempFiles = true;
+        
         string msi = project.BuildMsi();
 
         project.Language = frFR.Key;
