@@ -146,14 +146,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   //TODO obtain all data required from form - basic given so far.
   private getFormData() : Observable<IronRDPConnectionParameters> {
-    const { hostname, username, password } = this.formData;
+    const { hostname, username, password, desktopSize, preConnectionBlob } = this.formData;
     const domain: string = '';
-
-    //TODO obtain screenSize from form.
-    const screenSize = null;
-
-    //TODO obtain preConnectionBlob from form.
-    const preConnectionBlob = undefined;
 
     //TODO Obtain gateway address
     const gatewayHttpAddress: URL = new URL(this.JET_RDP_URL,window.location.href);
@@ -168,7 +162,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       host: hostname,
       domain: domain,
       gatewayAddress: websocketUrl,
-      screenSize: screenSize,
+      screenSize: desktopSize,
       preConnectionBlob: preConnectionBlob,
       kdcProxyUrl: kdcProxyUrl
     };

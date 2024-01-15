@@ -1,4 +1,5 @@
-import {AfterViewInit,
+import {
+  AfterViewInit,
   Component,
   EventEmitter,
   OnInit,
@@ -11,6 +12,7 @@ import {WebSessionService} from "@shared/services/web-session.service";
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebSession} from "@shared/models/web-session.model";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
+import {ScreenSize} from "@shared/enums/screen-size.enum";
 
 @Component({
     selector: 'web-client-rdp-form',
@@ -23,6 +25,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   @Output() isComponentViewInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
 
   connectSessionForm: FormGroup;
+  screenSizeOptions: SelectItem[];
+  showMoreSettings: boolean = false;
 
   //TODO Use proper types
   session = {
@@ -43,16 +47,15 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   }
 
   ngOnInit(): void {
-    this.connectSessionForm = this.formBuilder.group({
-      protocol: [0, Validators.required],
-      hostname: ['', Validators.required],
-      username: ['', Validators.required],
-      password: ['', Validators.required]
-    });
+    this.setupScreenSizeDropdown();
   }
 
   ngAfterViewInit(): void {
     this.isComponentViewInitialized.emit(true);
+  }
+
+  get showCustomSize(): boolean {
+    return this.connectSessionForm.get('screenSize').value === ScreenSize.Custom;
   }
 
   onConnectSession(): void {
@@ -66,6 +69,55 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     newSessionTab.component = WebClientRdpComponent;
     newSessionTab.data = submittedData;
     newSessionTab.icon = 'dvl-icon-entry-session-rdp';
+    console.log('newSessionTab', newSessionTab);
     this.webSessionService.addSession(newSessionTab);
+  }
+
+  initComboEnum(enums: any): SelectItem[] {
+    const dropDownItems: SelectItem[] = [];
+    const values: string[] = Object.keys(ScreenSize).filter(key => isNaN(Number(key)));
+    for (const label of values) {
+      const value = enums[label];
+      dropDownItems.push({label, value});
+    }
+    return dropDownItems;
+  }
+
+  toggleMoreSettings(event: Event): void {
+    event.preventDefault();
+    this.showMoreSettings = !this.showMoreSettings;
+  }
+
+  isMoreSettingsOpened(): boolean {
+    return this.showMoreSettings;
+  }
+
+  private setupScreenSizeDropdown(): void {
+    this.screenSizeOptions = this.initComboEnum(ScreenSize);
+    this.connectSessionForm = this.formBuilder.group({
+      protocol: [0, Validators.required],
+      hostname: ['', Validators.required],
+      username: ['', Validators.required],
+      password: ['', Validators.required],
+      screenSize: [null],
+      customWidth: [{value: '', disabled: true}],
+      customHeight: [{value: '', disabled: true}],
+      preConnectionBlob: ['']
+    });
+
+    this.subscribeToFormScreenSize();
+  }
+
+  private subscribeToFormScreenSize(): void {
+    this.connectSessionForm.get('screenSize').valueChanges
+      .subscribe(value => {
+        if (value === ScreenSize.Custom) {
+          this.connectSessionForm.get('customWidth').enable();
+          this.connectSessionForm.get('customHeight').enable();
+        } else {
+          this.connectSessionForm.get('customWidth').disable();
+          this.connectSessionForm.get('customHeight').disable();
+        }
+      });
   }
 }

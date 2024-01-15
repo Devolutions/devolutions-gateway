@@ -6,6 +6,7 @@ import {WebClientRdpComponent} from './rdp/web-client-rdp.component';
 import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
 import {TabViewComponent} from "@shared/components/tab-view/tab-view.component";
 import {DynamicTabComponent} from "@shared/components/dynamic-tab/dynamic-tab.component";
+import {KeyFilterModule} from "primeng/keyfilter";
 
 const routes: Routes = [
   {
@@ -15,10 +16,11 @@ const routes: Routes = [
 ];
 
 @NgModule({
-  imports: [
-    RouterModule.forChild(routes),
-    SharedModule
-  ],
+    imports: [
+        RouterModule.forChild(routes),
+        SharedModule,
+        KeyFilterModule
+    ],
   schemas: [ CUSTOM_ELEMENTS_SCHEMA ],
   declarations: [
     WebClientComponent,

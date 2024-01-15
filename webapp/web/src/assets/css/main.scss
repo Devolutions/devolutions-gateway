@@ -79,6 +79,9 @@
 @import url('https://fontsdevolutions.azureedge.net/OpenSans/variable-font/OpenSans.css');
 @import url('https://fontsdevolutions.azureedge.net/Roboto/static/Roboto.css');
 
+.full-width-dropdown .p-dropdown {
+  width: 100%;
+}
 
 .debug {
   border: 1px solid red;

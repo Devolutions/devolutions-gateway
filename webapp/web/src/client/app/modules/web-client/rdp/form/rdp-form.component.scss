@@ -29,6 +29,7 @@
 }
 
 :host ::ng-deep .protocol-dropdown {
+  width: 100%;
   min-width: 100% !important;
 }
 
@@ -84,8 +85,14 @@
   //TODO error styles here. I think?
 }
 
-.col-pad-right {
-  padding-right: 16px !important;
+.col-pad-right-lg {
+  padding-right: 15px !important;
+}
+.col-pad-right-md {
+  padding-right: 10px !important;
+}
+.col-pad-right-sm {
+  padding-right: 5px !important;
 }
 
 .box-content {
@@ -104,9 +111,13 @@
   font-size: 11px;
   font-family: Open Sans;
   font-weight: 400;
-  padding-left: 8px;
+  padding-left: 0px;
   justify-content: flex-start;
   align-items: flex-start;
   gap: 10px;
   display: inline-flex
+}
+
+.more-text {
+  color: var(--security-box-action-color);
 }
