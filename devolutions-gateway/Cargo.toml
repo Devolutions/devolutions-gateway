@@ -78,7 +78,7 @@ tower-http = { version = "0.5", features = ["cors", "fs"] }
 tungstenite = "0.21" # Should be the same version as `axum` (we perform error downcasting for better error reporting)
 
 # OpenAPI generator
-utoipa = { version = "4.1", default-features = false, features = ["uuid", "time"], optional = true }
+utoipa = { version = "4.2", default-features = false, features = ["uuid", "time"], optional = true }
 
 # Safe pin projection
 pin-project-lite = "0.2"
