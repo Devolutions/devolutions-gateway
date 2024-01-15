@@ -253,6 +253,32 @@ function New-DGatewayNgrokConfig() {
     $ngrok
 }
 
+class DGatewayWebAppConfig {
+    [bool] $Enabled
+    [string] $Authentication
+    [System.Nullable[System.UInt32]] $AppTokenMaximumLifetime
+    [System.Nullable[System.UInt32]] $LoginLimitRate
+
+    DGatewayWebAppConfig() { }
+}
+
+function New-DGatewayWebAppConfig() {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool] $Enabled,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("None", "Custom")]
+        [string] $Authentication
+    )
+
+    $webapp = [DGatewayWebAppConfig]::new()
+    $webapp.Enabled = $Enabled
+    $webapp.Authentication = $Authentication
+    $webapp
+}
+
 enum VerbosityProfile {
     Default
     Debug
@@ -286,6 +312,8 @@ class DGatewayConfig {
     [DGatewaySubscriber] $Subscriber
 
     [DGatewayNgrokConfig] $Ngrok
+    
+    [DGatewayWebAppConfig] $WebApp
 
     [string] $LogDirective
     [string] $VerbosityProfile
@@ -359,6 +387,8 @@ function Set-DGatewayConfig {
         [DGatewaySubProvisionerKey] $SubProvisionerPublicKey,
 
         [DGatewayNgrokConfig] $Ngrok,
+
+        [DGatewayWebAppConfig] $WebApp,
 
         [VerbosityProfile] $VerbosityProfile
     )

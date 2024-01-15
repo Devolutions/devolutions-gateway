@@ -111,6 +111,31 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateStoreName | Should -Be "My"
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).TlsCertificateStoreLocation | Should -Be "LocalMachine"
 			}
+
+			It 'Sets web app configuration' {
+				$Params = @{
+					Enabled = $true
+					Authentication = "None"
+				}
+				$WebApp = New-DGatewayWebAppConfig @Params
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -WebApp $WebApp
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Enabled | Should -Be $true
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Authentication | Should -Be "None"
+
+				$WebApp.Enabled = $false
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -WebApp $WebApp
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Enabled | Should -Be $false
+
+				$WebApp.Enabled = $true
+				$WebApp.Authentication = "Custom"
+				$WebApp.AppTokenMaximumLifetime = 600 # 10 minutes
+				$WebApp.LoginLimitRate = 8
+				Set-DGatewayConfig -ConfigPath:$ConfigPath -WebApp $WebApp
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Enabled | Should -Be $true
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Authentication | Should -Be "Custom"
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.AppTokenMaximumLifetime | Should -Be 600
+				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.LoginLimitRate | Should -Be 8
+			}
 		}
 	}
 }
