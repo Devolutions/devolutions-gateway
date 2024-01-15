@@ -96,7 +96,7 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 portpicker = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-rustls-cng = "0.3"
+rustls-cng = "0.4"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
