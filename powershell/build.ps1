@@ -23,6 +23,14 @@ $Env:NUGET_CERT_REVOCATION_MODE='offline'
 
 & dotnet publish "$PSScriptRoot\$ModuleName\src\$ModuleName.csproj" -f netstandard2.0 -c Release -o "$PSScriptRoot\$ModuleName\bin"
 
+$ManagedBasePath = "$PSScriptRoot\$ModuleName\bin"
+Get-Item "$ManagedBasePath\runtimes\*\native*" | ForEach-Object {
+	$NativeDirName = $_.Parent.Name
+    Remove-Item "$ManagedBasePath\$NativeDirName" -Recurse -ErrorAction SilentlyContinue
+	Move-Item $_ "$ManagedBasePath\$NativeDirName" -Force
+}
+Remove-Item "$ManagedBasePath\runtimes" -Recurse -ErrorAction SilentlyContinue
+
 Copy-Item "$PSScriptRoot\$ModuleName\bin" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
 
 Copy-Item "$PSScriptRoot\$ModuleName\Private" -Destination "$PSModuleOutputPath\$ModuleName" -Recurse -Force
