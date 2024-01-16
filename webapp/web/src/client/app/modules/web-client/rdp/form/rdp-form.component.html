@@ -1,0 +1,160 @@
+<form [formGroup]="connectSessionForm" autocomplete="off">
+
+  <div class="container">
+
+    <div class="box centered-box flex flex-column">
+      <span class="box-header flex justify-content-between align-items-center">
+        <span class="box-title">Remote Session Information</span>
+      </span>
+      <div class="box-content grid nomargin nopad">
+        <div class="col-4 gateway-form-group col-pad-right-lg">
+          <label for="protocol">Protocol</label>
+          <div class="gateway-form-input">
+            <p-dropdown id="protocol"
+                        styleClass="protocol-dropdown"
+                        appendTo="body"
+                        formControlName="protocol"
+                        [options]="protocolSelectItems"
+                        required></p-dropdown>
+          </div>
+        </div>
+
+        <div class="col-8 gateway-form-group">
+          <label for="hostname">Hostname</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="hostname"
+                   type="text"
+                   autocomplete="off"
+                   placeholder="Enter hostname"
+                   formControlName="hostname"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('hostname').hasError('required') && connectSessionForm.get('hostname').touched">
+            Hostname is required.
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group">
+          <label for="username">Username</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="username"
+                   type="text"
+                   autocomplete="off"
+                   placeholder="Enter username"
+                   formControlName="username"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('username').hasError('required') && connectSessionForm.get('username').touched">
+            Username is required.
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group">
+          <label for="password">Password</label>
+          <div class="gateway-form-input">
+            <input pInputText
+                   id="password"
+                   type="password"
+                   autocomplete="off"
+                   placeholder="Enter password"
+                   formControlName="password"
+                   required/>
+          </div>
+          <div class="form-helper-text"
+               *ngIf="connectSessionForm.get('password').hasError('required') && connectSessionForm.get('password').touched">
+            Password is required.
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group">
+            <a href="#" (click)="toggleMoreSettings($event)">More Settings
+              <span *ngIf="!isMoreSettingsOpened()" >+</span>
+              <span *ngIf="isMoreSettingsOpened()">-</span>
+            </a>
+        </div>
+
+        <div *ngIf="showMoreSettings" class="col-12 gateway-form-group">
+          <div class="col-12 gateway-form-group">
+            <label for="username">Screen Size</label>
+            <div class="gateway-form-input">
+              <!--//TODO get full-width-dropdown to work properly -->
+              <p-dropdown id="screenSize"
+                          styleClass="full-width-dropdown"
+                          appendTo="body"
+                          formControlName="screenSize"
+                          [options]="screenSizeOptions"></p-dropdown>
+            </div>
+          </div>
+
+          <div class="col-12 grid nomargin nopad">
+            <div *ngIf="showCustomSize"
+                 class="col-6 gateway-form-group col-pad-right-md">
+
+              <label for="customWidth">Desktop Width</label>
+              <div class="gateway-form-input">
+                <input pInputText
+                       id="customWidth"
+                       type="number"
+                       [min]="0" [max]="4096"
+                       autocomplete="off"
+                       placeholder="Size in px"
+                       formControlName="customWidth"
+                       pKeyFilter="pint"/>
+              </div>
+              <div class="form-helper-text"
+                   *ngIf="connectSessionForm.get('customWidth').hasError('max') && connectSessionForm.get('customWidth').touched">
+                Maximum value is 4096
+              </div>
+            </div>
+            <div *ngIf="showCustomSize"
+                 class="col-6 gateway-form-group">
+              <label for="customHeight">Desktop Height</label>
+              <div class="gateway-form-input">
+                <input pInputText
+                       id="customHeight"
+                       type="number"
+                       [min]="0" [max]="2048"
+                       autocomplete="off"
+                       placeholder="Size in px"
+                       formControlName="customHeight"
+                       pKeyFilter="pint"/>
+              </div>
+              <div class="form-helper-text"
+                   *ngIf="connectSessionForm.get('customHeight').hasError('max') && connectSessionForm.get('customHeight').touched">
+                Maximum value is 2048
+              </div>
+            </div>
+
+          </div>
+
+          <div class="col-12 gateway-form-group">
+            <label for="preConnectionBlob">Pre Connection Blob</label>
+            <div class="gateway-form-input">
+              <input pInputText
+                     id="preConnectionBlob"
+                     type="text"
+                     autocomplete="off"
+                     placeholder="Enter Blob"
+                     formControlName="preConnectionBlob"/>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group" style="text-align: right;">
+          <p-button   styleClass="btn-connect-session"
+                      [disabled]="connectSessionForm.invalid"
+                      [type]="'submit'"
+                      [label]="'Connect Session'"
+                      (onClick)="onConnectSession()">
+          </p-button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</form>

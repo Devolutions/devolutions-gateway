@@ -1,0 +1,41 @@
+<div style="display: flex; flex-direction: column; height: 100%">
+  <div class="session-toolbar" *ngIf="!loading"> <!--  class="session-toolbar" *ngIf="!loading" -->
+    <p-button
+      size="large "
+      icon="dvl-icon dvl-icon-fullscreen"
+      [title]="'Full Screen'"
+      (onClick)="scaleTo(screenScale.Full)"></p-button>
+
+    <p-button
+      size="large"
+      icon="dvl-icon dvl-icon-smallscreen"
+      [title]="'Fit to Screen'"
+      (onClick)="scaleTo(screenScale.Fit)"></p-button>
+
+    <p-button
+      size="large"
+      icon="dvl-icon dvl-icon-screen"
+      [title]="'Actual Size'"
+      (onClick)="scaleTo(screenScale.Real)"></p-button>
+
+    <p-button
+      size="large"
+      icon="dvl-icon dvl-icon-windows"
+      [title]="'Start'"
+      (onClick)="sendWindowsKey()"></p-button>
+
+    <p-button
+      size="large"
+      icon="dvl-icon dvl-icon-admin"
+      [title]="'Ctrl+Alt+Del'"
+      (onClick)="sendCtrlAltDel()"></p-button>
+
+    <p-button
+      size="large"
+      icon="dvl-icon dvl-icon-close"
+      [title]="'Terminate Session'"
+      (onClick)="sendTerminateSessionCmd()"></p-button>
+  </div>
+</div>
+
+<iron-remote-gui #ironGuiElement debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui>

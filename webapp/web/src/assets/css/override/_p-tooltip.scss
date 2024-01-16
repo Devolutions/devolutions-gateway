@@ -1,0 +1,59 @@
+.p-tooltip {
+  display: inline-flex !important;
+  max-width: 26.5rem !important;
+
+  .p-tooltip-text {
+    background-color: $tooltip-bg-color;
+    border-radius: $borderRadius;
+    box-shadow: 0 1px 3px $tooltip-box-shadow-color;
+    color: $tooltip-txt-color;
+    line-height: 1;
+    max-width: 26.5rem;
+    padding: 7px;
+    pointer-events: none;
+    text-align: start;
+    width: max-content;
+    white-space: break-spaces !important;
+    word-break: break-word !important;
+  }
+}
+
+.p-tooltip-top {
+  padding: 0.4em 0 !important;
+
+  .p-tooltip-arrow {
+    border-top-color: $tooltip-bg-color;
+    border-width: 6px 6px 0 6px !important;
+    margin-left: -6px !important;
+  }
+}
+
+.p-tooltip-bottom {
+  padding: 0.4em 0 !important;
+
+  .p-tooltip-arrow {
+    border-bottom-color: $tooltip-bg-color;
+    border-width: 0 6px 6px 6px !important;
+    margin-left: -6px !important;
+  }
+}
+
+.p-tooltip-right {
+  padding: 0 0.4em !important;
+
+  .p-tooltip-arrow {
+    border-right-color: $tooltip-bg-color;
+    border-width: 6px 6px 6px 0 !important;
+    margin-top: -6px !important;
+  }
+}
+
+.p-tooltip-left {
+  padding: 0 0.4em !important;
+
+  .p-tooltip-arrow {
+    border-left-color: $tooltip-bg-color;
+    border-width: 6px 0 6px 6px !important;
+    margin-top: -6px !important;
+  }
+}

@@ -1,0 +1,9 @@
+<div class="menu-list-item-container">
+  <div class="menu-list-item"
+       [class.selected]="selected"
+       [class.disabled]="disabled">
+    <!-- (click)="onMenuListItemClick($event)"-->
+    <i *ngIf="icon" class="dvl-icon" [ngClass]="icon"></i>
+    <span class="menu-list-item-label">{{label}}</span>
+  </div>
+</div>

@@ -1,0 +1,9 @@
+<div class="menu-group-list-item" [class.accordion]="accordion">
+    <div *ngIf="accordion || title" class="menu-group-list-header" (click)="onToggleMenuGroupList($event)">
+        <i *ngIf="accordion" class="dvl-icon dvl-icon-arrow-down" [class.closed]="isClosed"></i>
+        <span *ngIf="title">{{title}}</span>
+    </div>
+    <div class="menu-group-list-body" *ngIf="!isClosed">
+        <ng-content></ng-content>
+    </div>
+</div>

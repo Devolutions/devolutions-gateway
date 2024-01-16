@@ -1,0 +1,15 @@
+@import "mixins";
+
+.p-dataview {
+  padding-top: 1em;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  .p-dataview-content {
+    border: none;
+    margin-left: -0.5rem;
+
+    @include custom-scrollbar();
+  }
+}

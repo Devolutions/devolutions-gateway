@@ -1,0 +1,37 @@
+:host .menu-group-list-item {
+  padding: 8px;
+
+  .menu-group-list-header {
+    color: var(--text-tertiary-color);
+    padding: 4px;
+
+    i {
+      font-size: 16px;
+      padding-right: 8px;
+
+      &:before {
+        display: inline-block;
+        transition: transform 100ms ease-in-out;
+        transform: rotate(0deg);
+      }
+
+      &.closed:before {
+        transform: rotate(-90deg);
+      }
+    }
+  }
+
+  &.accordion {
+    font-size: 12px;
+
+    .menu-group-list-header {
+      cursor: pointer;
+    }
+  }
+}
+
+:host-context(.app-menu-container.layout-menu-slim) {
+  .menu-group-list-item {
+    padding: 4px;
+  }
+}

@@ -1,0 +1,37 @@
+:root {
+  --base-black-rgb: 0, 0, 0; // #000
+  --base-accent-rgb: 0, 104, 195; // #0068c3
+  --base-white-rgb: 255, 255, 255; // #fff
+  --base-color-rgb: var(--base-black-rgb);
+  --base-color-inverted-rgb: var(--base-white-rgb);
+
+  --title-color: rgba(var(--base-color-rgb), .8);
+
+  --base-border-rgb: var(--base-color-rgb);
+
+  --accent-color: rgb(var(--base-accent-rgb));
+
+  --entry-layout-horizontal-padding: 15px;
+
+  --btn-icon-color: rgba(var(--base-color-rgb), .8);
+
+  --entry-status-color: rgba(var(--base-color-rgb), .6); // Default
+  --entry-status-background-opacity: 1;
+  --entry-status-by-me-color-rgb: 97, 170, 48;
+  --entry-status-by-others-color-rgb: 255, 26, 26;
+  --entry-status-flag-expired-color-rgb: var(--entry-status-by-others-color-rgb);
+  --entry-status-flag-archived-color-rgb: 139, 69, 19;
+  --entry-status-flag-warning-color-rgb: 0, 104, 195;
+  --entry-status-flag-broken-color-rgb: 245, 208, 0;
+  --entry-status-flag-locked-color-rgb: 255, 130, 0;
+  --entry-status-flag-disabled-color-rgb: 153, 153, 153;
+
+  --status-banner-info-color-rgb: 0, 104, 195;
+  --status-banner-warning-color-rgb: 240, 201, 9;
+  --status-banner-pending-color-rgb: 255, 142, 38;
+  --status-banner-success-color-rgb: 97, 170, 48;
+  --status-banner-disabled-color-rgb: 184, 184, 184;
+  --status-banner-error-color-rgb: 255, 26, 26;
+  --status-banner-neutral-color-rgb: 0, 0, 0;
+  --status-banner-background-opacity: .25;
+}
