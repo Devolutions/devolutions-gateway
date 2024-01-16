@@ -8,7 +8,6 @@ Describe 'Devolutions Gateway config' {
 
 		Context 'Fresh environment' {
 			It 'Creates basic configuration' {
-				Remove-Item (Join-Path $ConfigPath 'gateway.json') -ErrorAction SilentlyContinue | Out-Null
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -Hostname 'gateway.local'
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).Hostname | Should -Be 'gateway.local'
 			}
@@ -26,12 +25,12 @@ Describe 'Devolutions Gateway config' {
 				$ExpectedListeners = @($HttpListener, $WsListener, $TcpListener)
 				Set-DGatewayConfig -ConfigPath:$ConfigPath -Listeners $ExpectedListeners
 				$ActualListeners = Get-DGatewayListeners -ConfigPath:$ConfigPath
-				$ExpectedListeners.Count | Should -Be $ActualListeners.Count
+				$ActualListeners.Count | Should -Be 3
 
 				$ExpectedListeners = @($HttpListener, $TcpListener)
 				Set-DGatewayListeners -ConfigPath:$ConfigPath $ExpectedListeners
 				$ActualListeners = Get-DGatewayListeners -ConfigPath:$ConfigPath
-				$ExpectedListeners.Count | Should -Be $ActualListeners.Count
+				$ActualListeners.Count | Should -Be 2
 			}
 
 			It 'Sets gateway recording path' {
@@ -135,6 +134,19 @@ Describe 'Devolutions Gateway config' {
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.Authentication | Should -Be "Custom"
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.AppTokenMaximumLifetime | Should -Be 600
 				$(Get-DGatewayConfig -ConfigPath:$ConfigPath).WebApp.LoginLimitRate | Should -Be 8
+			}
+
+			It 'Sets basic standalone configuration' {
+				$Hostname = "localhost"
+				$HttpListener = New-DGatewayListener 'http://*:7172' 'http://*:7172'
+				$WebApp = New-DGatewayWebAppConfig -Enabled $true -Authentication None
+				$ConfigParams = @{
+				  Hostname = $Hostname
+				  Listeners = @($HttpListener)
+				  WebApp = $WebApp
+				}
+				Set-DGatewayConfig -ConfigPath:$ConfigPath @ConfigParams
+				New-DGatewayProvisionerKeyPair -ConfigPath:$ConfigPath -Force
 			}
 		}
 	}

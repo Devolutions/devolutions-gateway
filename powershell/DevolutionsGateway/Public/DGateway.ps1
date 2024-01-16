@@ -319,7 +319,7 @@ class DGatewayConfig {
     [string] $VerbosityProfile
 }
 
-Function Remove-NullObjectProperties {
+function Remove-NullObjectProperties {
     [CmdletBinding()]
     param(
         [Parameter(ValueFromPipeline, Mandatory)]
@@ -327,11 +327,16 @@ Function Remove-NullObjectProperties {
     )
     process {
         foreach ($OldObj in $InputObject) {
-            $NonNullProperties = $OldObj.PSObject.Properties.Name.Where( { -Not [string]::IsNullOrEmpty($OldObj.$_) })
+            $NonNullProperties = $OldObj.PSObject.Properties | Where-Object {
+                ($_.Value -is [Array] -and $_.Value.Count -gt 0) -or
+                (-Not [string]::IsNullOrEmpty($_.Value))
+            } | Select-Object -ExpandProperty Name
             $NewObj = $OldObj | Select-Object $NonNullProperties
-            $NewObj.PSObject.Properties | Where-Object { $_.TypeNameOfValue.EndsWith('PSCustomObject') } | ForEach-Object {
-                $NewObj."$($_.Name)" = $NewObj."$($_.Name)" | Remove-NullObjectProperties
-            }
+            $NewObj.PSObject.Properties |
+                Where-Object { $_.TypeNameOfValue.EndsWith('PSCustomObject') } |
+                ForEach-Object {
+                    $NewObj."$($_.Name)" = $NewObj."$($_.Name)" | Remove-NullObjectProperties
+                }
             $NewObj
         }
     }
@@ -396,7 +401,7 @@ function Set-DGatewayConfig {
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
 
     if (-Not (Test-Path -Path $ConfigPath -PathType 'Container')) {
-        New-Item -Path $ConfigPath -ItemType 'Directory'
+        New-Item -Path $ConfigPath -ItemType 'Directory' | Out-Null
     }
 
     $ConfigFile = Join-Path $ConfigPath $DGatewayConfigFileName
@@ -632,6 +637,60 @@ function Set-DGatewayListeners {
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
     $Config.Listeners = $Listeners
     Save-DGatewayConfig -ConfigPath:$ConfigPath -Config:$Config
+}
+
+function New-DGatewayCertificate {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath,
+        [string] $Hostname,
+        [switch] $Force
+    )
+
+    if (-Not $IsWindows) {
+        throw "unsupported platform"
+    }
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+
+    if (-Not [string]::IsNullOrEmpty($Hostname)) {
+        $Hostname = $Config.Hostname
+    }
+
+    if ([string]::IsNullOrEmpty($Hostname)) {
+        $Hostname = [System.Environment]::MachineName
+    }
+
+    Set-DGatewayHostname -ConfigPath:$ConfigPath $Hostname
+
+    $Password = "cert123!" # dummy password (it's just a self-signed certificate)
+    $SecurePassword = ConvertTo-SecureString -String $Password -Force -AsPlainText
+
+    # Create a self-signed certificate for the specified hostname and export to a .pfx file
+    $NotBefore = Get-Date
+    $ExtendedKeyUsage = "2.5.29.37={text}1.3.6.1.5.5.7.3.1"
+    $Params = @{
+        DnsName = $Hostname
+        CertStoreLocation = "cert:\CurrentUser\My"
+        KeyExportPolicy = "Exportable"
+        KeyAlgorithm = "RSA"
+        KeyLength = 2048
+        HashAlgorithm = 'SHA256'
+        TextExtension = @($ExtendedKeyUsage)
+        KeyUsageProperty = "All"
+        KeyUsage = 'CertSign', 'DigitalSignature', 'KeyEncipherment'
+        NotBefore = $NotBefore.AddHours(-1)
+        NotAfter = $NotBefore.AddYears(5)
+    }
+    $Certificate = New-SelfSignedCertificate @Params
+    
+    $PfxCertificateFile = Join-Path ([System.IO.Path]::GetTempPath()) "gateway-$Hostname.pfx"
+    Export-PfxCertificate -Cert $Certificate -FilePath $PfxCertificateFile -Password $securePassword | Out-Null
+    Remove-Item -Path ("cert:\CurrentUser\My\" + $Certificate.Thumbprint) | Out-Null
+
+    Import-DGatewayCertificate -ConfigPath:$ConfigPath -CertificateFile $PfxCertificateFile -Password $Password
+    Remove-Item $PfxCertificateFile | Out-Null # remove temporary .pfx file
 }
 
 function Import-DGatewayCertificate {

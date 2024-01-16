@@ -72,7 +72,7 @@
         'New-DGatewayListener', 'Get-DGatewayListeners', 'Set-DGatewayListeners',
         'Get-DGatewayPath', 'Get-DGatewayRecordingPath',
         'Set-DGatewayRecordingPath', 'Reset-DGatewayRecordingPath',
-        'Import-DGatewayCertificate',
+        'New-DGatewayCertificate', 'Import-DGatewayCertificate',
         'New-DGatewayProvisionerKeyPair', 'Import-DGatewayProvisionerKey',
         'New-DGatewayDelegationKeyPair', 'Import-DGatewayDelegationKey',
         'New-DGatewayToken',

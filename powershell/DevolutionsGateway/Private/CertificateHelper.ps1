@@ -16,6 +16,22 @@ function ConvertTo-RsaPrivateKey
     }
 }
 
+function ConvertFrom-RsaPrivateKey
+{
+    [OutputType('System.String')]
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.Security.Cryptography.RSA] $Rsa
+    )
+
+    if ($PSEdition -eq 'Core') {
+        $bytes = $Rsa.ExportRSAPrivateKey()
+        ConvertTo-PemEncoding -Label "PRIVATE KEY" -RawData $bytes
+    } else {
+        throw "ConvertFrom-RsaPrivateKey unsupported in Windows PowerShell"
+    }
+}
+
 function New-RsaKeyPair
 {
     param(
