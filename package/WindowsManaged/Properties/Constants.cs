@@ -8,6 +8,18 @@ namespace DevolutionsGateway.Properties
 {
     internal class Constants
     {
+        internal enum CertificateMode
+        {
+            External,
+            System
+        }
+
+        internal enum CertificateFindType
+        {
+            Thumbprint,
+            SubjectName
+        }
+
         internal const string HttpProtocol = "http";
 
         internal const string HttpsProtocol = "https";
@@ -21,6 +33,8 @@ namespace DevolutionsGateway.Properties
         internal const string ImportDGatewayCertificateWithPasswordCommandFormat = "Import-DGatewayCertificate -CertificateFile '{0}' -Password '{1}'";
 
         internal const string ImportDGatewayCertificateWithPrivateKeyCommandFormat = "Import-DGatewayCertificate -CertificateFile '{0} -PrivateKeyFile '{1}'";
+
+        internal const string ImportDGatewayCertificateFromSystemFormat = "Set-DGatewayConfig -TlsCertificateSource {0} -TlsCertificateSubjectName {1} -TlsCertificateStoreName {2} -TlsCertificateStoreLocation {3}";
 
         internal const string ImportDGatewayProvisionerKeyCommandFormat = "Import-DGatewayProvisionerKey -PublicKeyFile '{0}'";
     }

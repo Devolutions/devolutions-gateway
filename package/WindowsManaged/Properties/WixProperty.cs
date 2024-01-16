@@ -31,7 +31,7 @@ namespace DevolutionsGateway.Properties
 
         public static void Set<T>(this ISession session, WixProperty<T> prop, T value)
         {
-            session[prop.Id] = value.ToString();
+            session[prop.Id] = value?.ToString();
         }
 
         public static Property ToWixSharpProperty(this IWixProperty property)
@@ -49,6 +49,11 @@ namespace DevolutionsGateway.Properties
             if (string.IsNullOrWhiteSpace(propertyValue))
             {
                 return default;
+            }
+
+            if (typeof(T).IsEnum)
+            {
+                return (T) Enum.Parse(typeof(T), propertyValue);
             }
 
             var type = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);

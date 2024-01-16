@@ -225,9 +225,13 @@ namespace DevolutionsGateway.Actions
             When.After, new Step(configureListeners.Id),
             new IWixProperty[]
             {
+                    GatewayProperties._CertificateMode,
                     GatewayProperties._CertificateFile,
                     GatewayProperties._CertificatePassword,
                     GatewayProperties._CertificatePrivateKeyFile,
+                    GatewayProperties._CertificateLocation,
+                    GatewayProperties._CertificateStore,
+                    GatewayProperties._CertificateName,
             },
             "HideTarget=yes", // Don't print the custom action data to logs, it might contain a password
             $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)})"); // Only if the HTTP listener uses https

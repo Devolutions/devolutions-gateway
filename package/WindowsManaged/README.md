@@ -52,11 +52,40 @@ Either configure the environment variables detailed above, or override the relev
 - This appears to be a bug in the latest wixsharp versions. Try the build again and it should work.
 - If it still doesn't work, it's possible a crash in a prior run is causing msiexec to keep a handle open to the msi file. Either use Task Manager to kill all `msiexec` processes, or reboot your machine.
 
+### Nuget and references
+
+It's possible to include managed references in the installer project and use them in the mananged UI and custom actions.
+
+The references are added as normal but it's necessary to declare them to the installer script, e.g.
+
+```
+/// Add Devolutions.Picky to be available at runtinme
+project.DefaultRefAssemblies.Add(typeof(PickyError).Assembly.Location);
+```
+
+Native references are trickier. First they must be embedded in the MSI as binaries:
+
+```
+string pickyPath = Path.GetDirectoryName(typeof(PickyError).Assembly.Location;
+string nativePath = Path.Combine(pickyPath, "runtimes", "win-x64", "native", "DevolutionsPicky.dll");
+project.AddBinary(new Binary(nativePath)); // optionally specify an ID here
+```
+
+But the binary won't be copied to the installer's temp directory at runtime. It's necessary to extract it manually, this can be done in the `UIInitialized` event for example:
+
+```
+byte[] pickyBytes = e.Session.GetEmbeddedData("DevolutionsPicky.dll");
+System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "DevolutionsPicky.dll"),pickyBytes);
+```
+
 ## Compatibility
 
 The custom UI targets .NET Framework 4.5.1; which is available out-of-the-box on Windows. The provides compatiblity with Windows 8.1 and Windows Server 2012 R2, but it's an additional download on Windows 8 / Windows Server 2012.
 
-The project only targets the x64 architecture and the install won't run on an x86 operating system. Behaviour on arm64 is currently undefined.
+> [!IMPORTANT]  
+> The managed installer UI and actions are currently run as x86, meaning x64-only references cannot be used. Additionally, when querying the registry, it's important to ensure you don't check the WoW64 view.
+
+The MSI project only targets the x64 architecture and the install won't execute on an x86 operating system. Behaviour on arm64 is currently undefined.
 
 ## Debugging
 
@@ -73,6 +102,10 @@ It doesn't seem straightforward to debug the event driven custom actions (`OnLoa
 3. "Attach to process" in Visual Studio
 4. Filter the process list by "msiexec" and look for the proper Window title ("Devolutions Gateway Setup")
 5. Attach the debugger and debug as normal
+
+While developing custom UI, it can be faster to use "Demo mode" to "play" dialogs without running the full msi:
+
+`UIShell.Play(typeof(CertificateDialog));`
 
 ### Custom Actions
 

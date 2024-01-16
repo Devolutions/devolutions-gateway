@@ -58,21 +58,35 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                if (string.IsNullOrEmpty(session.Get(GatewayProperties._CertificatePassword)))
+                Constants.CertificateMode mode = session.Get(GatewayProperties._CertificateMode);
+
+                if (mode == Constants.CertificateMode.External)
                 {
-                    command = string.Format(
-                        Constants.ImportDGatewayCertificateWithPrivateKeyCommandFormat,
-                        session.Get(GatewayProperties._CertificateFile),
-                        session.Get(GatewayProperties._CertificatePrivateKeyFile));
+                    if (string.IsNullOrEmpty(session.Get(GatewayProperties._CertificatePassword)))
+                    {
+                        command = string.Format(
+                            Constants.ImportDGatewayCertificateWithPrivateKeyCommandFormat,
+                            session.Get(GatewayProperties._CertificateFile),
+                            session.Get(GatewayProperties._CertificatePrivateKeyFile));
+                    }
+                    else
+                    {
+                        command = string.Format(
+                            Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
+                            session.Get(GatewayProperties._CertificateFile),
+                            session.Get(GatewayProperties._CertificatePassword));
+                    }
                 }
                 else
                 {
                     command = string.Format(
-                        Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
-                        session.Get(GatewayProperties._CertificateFile),
-                        session.Get(GatewayProperties._CertificatePassword));
+                        Constants.ImportDGatewayCertificateFromSystemFormat,
+                        session.Get(GatewayProperties._CertificateMode),
+                        session.Get(GatewayProperties._CertificateName),
+                        session.Get(GatewayProperties._CertificateStore),
+                        session.Get(GatewayProperties._CertificateLocation));
                 }
-
+                
                 command = FormatPowerShellCommand(session, command);
             }
             catch (Exception e)

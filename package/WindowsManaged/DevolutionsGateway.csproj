@@ -14,7 +14,6 @@
     <None Remove="*.wixpdb" />
     <None Remove="*.wixobj" />
     <None Remove="Build\**" />
-    <None Remove="App.config" />
     <None Remove="Resources\DevolutionsGateway_en-us.wxl" />
     <None Remove="Resources\DevolutionsGateway_fr-fr.wxl" />
   </ItemGroup>
@@ -28,6 +27,7 @@
     <PackageReference Include="WixSharp.wix.bin" Version="3.14.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="System.Security" />
     <Reference Include="System.ServiceProcess">
       <HintPath>..\..\..\..\..\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.5.1\System.ServiceProcess.dll</HintPath>
     </Reference>
@@ -52,6 +52,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>GatewayProperties.g.tt</DependentUpon>
     </None>
+    <None Remove="wix\DevolutionsGateway.g.wxs" />
     <None Include="wix\$(ProjectName).g.wxs" />
   </ItemGroup>
   <ItemGroup>

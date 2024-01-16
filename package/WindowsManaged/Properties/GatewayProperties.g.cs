@@ -1,4 +1,7 @@
 ﻿
+using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
+using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
+
 namespace DevolutionsGateway.Properties
 {
     internal partial class GatewayProperties
@@ -76,6 +79,30 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<Constants.CertificateMode> _CertificateMode = new()
+        {
+            Id = "P.CERTIFICATEMODE",
+            Default = Constants.CertificateMode.External,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public Constants.CertificateMode CertificateMode
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateMode.Id);
+                return WixProperties.GetPropertyValue<Constants.CertificateMode>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateMode, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<string> _CertificateFile = new()
         {
             Id = "P.CERTIFICATEFILE",
@@ -144,6 +171,150 @@ namespace DevolutionsGateway.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(_CertificatePrivateKeyFile, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<StoreLocation> _CertificateLocation = new()
+        {
+            Id = "P.CERTIFICATELOCATION",
+            Default = StoreLocation.CurrentUser,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public StoreLocation CertificateLocation
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateLocation.Id);
+                return WixProperties.GetPropertyValue<StoreLocation>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateLocation, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<StoreName> _CertificateStore = new()
+        {
+            Id = "P.CERTIFICATESTORE",
+            Default = StoreName.My,
+            Secure = true,
+            Hidden = true,
+        };
+
+        public StoreName CertificateStore
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateStore.Id);
+                return WixProperties.GetPropertyValue<StoreName>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateStore, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _CertificateName = new()
+        {
+            Id = "P.CERTIFICATENAME",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string CertificateName
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateName.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateName, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<Constants.CertificateFindType> _CertificateFindType = new()
+        {
+            Id = "P.CERTIFICATEFINDTYPE",
+            Default = Constants.CertificateFindType.Thumbprint,
+            Secure = false,
+            Hidden = false,
+        };
+
+        public Constants.CertificateFindType CertificateFindType
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateFindType.Id);
+                return WixProperties.GetPropertyValue<Constants.CertificateFindType>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateFindType, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _CertificateSearchText = new()
+        {
+            Id = "P.CERTIFICATESEARCHTEXT",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string CertificateSearchText
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateSearchText.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateSearchText, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _CertificateThumbprint = new()
+        {
+            Id = "P.CERTIFICATETHUMBPRINT",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string CertificateThumbprint
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_CertificateThumbprint.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_CertificateThumbprint, value); 
                 }
             }
         }
@@ -269,26 +440,26 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<string> _NoStartService = new()
+        internal static readonly WixProperty<string> _PublicKeyFile = new()
         {
-            Id = "P.DGW.NO_START_SERVICE",
+            Id = "P.PUBLICKEYFILE",
             Default = string.Empty,
             Secure = true,
             Hidden = false,
         };
 
-        public string NoStartService
+        public string PublicKeyFile
         {
             get
             {
-                string stringValue = this.FnGetPropValue(_NoStartService.Id);
+                string stringValue = this.FnGetPropValue(_PublicKeyFile.Id);
                 return WixProperties.GetPropertyValue<string>(stringValue);
             }
             set 
             { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(_NoStartService, value); 
+                    this.runtimeSession.Set(_PublicKeyFile, value); 
                 }
             }
         }
@@ -317,26 +488,26 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<string> _PublicKeyFile = new()
+        internal static readonly WixProperty<string> _NoStartService = new()
         {
-            Id = "P.PUBLICKEYFILE",
+            Id = "P.DGW.NO_START_SERVICE",
             Default = string.Empty,
             Secure = true,
             Hidden = false,
         };
 
-        public string PublicKeyFile
+        public string NoStartService
         {
             get
             {
-                string stringValue = this.FnGetPropValue(_PublicKeyFile.Id);
+                string stringValue = this.FnGetPropValue(_NoStartService.Id);
                 return WixProperties.GetPropertyValue<string>(stringValue);
             }
             set 
             { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(_PublicKeyFile, value); 
+                    this.runtimeSession.Set(_NoStartService, value); 
                 }
             }
         }
@@ -567,11 +738,25 @@ namespace DevolutionsGateway.Properties
  
             _AccessUriScheme,
  
+            _CertificateMode,
+ 
             _CertificateFile,
  
             _CertificatePassword,
  
             _CertificatePrivateKeyFile,
+ 
+            _CertificateLocation,
+ 
+            _CertificateStore,
+ 
+            _CertificateName,
+ 
+            _CertificateFindType,
+ 
+            _CertificateSearchText,
+ 
+            _CertificateThumbprint,
  
             _ConfigureGateway,
  
@@ -583,11 +768,11 @@ namespace DevolutionsGateway.Properties
  
             _HttpListenerScheme,
  
-            _NoStartService,
+            _PublicKeyFile,
  
             _PowerShellPath,
  
-            _PublicKeyFile,
+            _NoStartService,
  
             _ServiceStart,
  
