@@ -69,3 +69,16 @@ pub fn url_to_socket_addr(url: &Url) -> anyhow::Result<SocketAddr> {
 
     Ok((host, port).to_socket_addrs().unwrap().next().unwrap())
 }
+
+pub fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {
+    let mut expected_it = wildcard_host.rsplit('.');
+    let mut actual_it = actual_host.rsplit('.');
+    loop {
+        match (expected_it.next(), actual_it.next()) {
+            (Some(expected), Some(actual)) if expected.eq_ignore_ascii_case(actual) => {}
+            (Some("*"), Some(_)) => {}
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
