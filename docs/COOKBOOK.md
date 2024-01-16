@@ -130,19 +130,19 @@ Try entering text and see it printed on the other side.
 This section demonstrates how to use `curl` to test the `/jet/webapp/app-token` and `/jet/webapp/session-token` endpoints.
 
 The standalone web application must be enabled and configured to use the custom authentication mode.
-For instance, with a user named `David` protected by the password `abc`:
 
 ```json
 "WebApp": {
   "Enabled": true,
-  "Authentication": "Custom",
-  "Users": [
-    {
-      "Name": "David",
-      "Password": "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg"
-    }
-  ]
+  "Authentication": "Custom"
 }
+```
+
+A `users.txt` file is expected as well.
+For instance, with a user named `David` protected by the password `abc`:
+
+```
+David:$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg
 ```
 
 It’s possible to retrieve a web application token using the `POST /jet/webapp/app-token` endpoint.

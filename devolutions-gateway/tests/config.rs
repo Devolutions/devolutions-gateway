@@ -195,17 +195,7 @@ fn standalone_custom_auth_sample() -> Sample {
                 "Enabled": true,
                 "Authentication": "Custom",
                 "AppTokenMaximumLifetime": 28800,
-                "LoginLimitRate": 10,
-                "Users": [
-                    {
-                        "Name": "David",
-                        "Password": "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg"
-                    },
-                    {
-                        "Name": "Maurice",
-                        "Password": "$argon2id$v=19$m=16,t=2,p=1$ZmdQWTkwQUNWcWh4T1YzQw$B6qWmJXHODN/bxZGIe/lyg"
-                    }
-                ]
+                "LoginLimitRate": 10
             }
         }"#,
         file_conf: ConfFile {
@@ -248,20 +238,7 @@ fn standalone_custom_auth_sample() -> Sample {
                 authentication: WebAppAuth::Custom,
                 app_token_maximum_lifetime: Some(28800),
                 login_limit_rate: Some(10),
-                users: vec![
-                    WebAppUser {
-                        name: "David".to_owned(),
-                        password_hash: Password::from(
-                            "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
-                        ),
-                    },
-                    WebAppUser {
-                        name: "Maurice".to_owned(),
-                        password_hash: Password::from(
-                            "$argon2id$v=19$m=16,t=2,p=1$ZmdQWTkwQUNWcWh4T1YzQw$B6qWmJXHODN/bxZGIe/lyg",
-                        ),
-                    },
-                ],
+                users_path: None,
             }),
             debug: None,
             rest: Default::default(),
@@ -289,12 +266,7 @@ fn standalone_no_auth_sample() -> Sample {
             "WebApp": {
                 "Enabled": true,
                 "Authentication": "None",
-                "Users": [
-                    {
-                        "Name": "LeftoverUnusedUser",
-                        "Password": "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg"
-                    }
-                ]
+                "UsersPath": "/path/to/users.txt"
             }
         }"#,
         file_conf: ConfFile {
@@ -337,12 +309,7 @@ fn standalone_no_auth_sample() -> Sample {
                 authentication: WebAppAuth::None,
                 app_token_maximum_lifetime: None,
                 login_limit_rate: None,
-                users: vec![WebAppUser {
-                    name: "LeftoverUnusedUser".to_owned(),
-                    password_hash: Password::from(
-                        "$argon2id$v=19$m=16,t=2,p=1$U0tDR3NSSjlBaVJMRmV0Tg$4KRKy3UsOganH/qTYVvOQg",
-                    ),
-                }],
+                users_path: Some("/path/to/users.txt".into()),
             }),
             debug: None,
             rest: Default::default(),
