@@ -189,6 +189,13 @@ pub(crate) async fn sign_app_token(
         let lifetime = req
             .lifetime
             .map(Duration::from_secs)
+            .map(|lifetime| {
+                if lifetime < conf.app_token_maximum_lifetime {
+                    lifetime
+                } else {
+                    conf.app_token_maximum_lifetime
+                }
+            })
             .unwrap_or(conf.app_token_maximum_lifetime);
 
         let jti = Uuid::new_v4();
