@@ -246,6 +246,22 @@ jobs:
             }
           }
 
+      - name: Download web client artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action' && matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+        uses: actions/download-artifact@v3
+        with:
+          name: webapp-client
+          path: webapp/client
+
+      - name: Download web client artifacts (cli)
+        if: needs.preflight.outputs.dl-strategy == 'cli' && matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $Destination = Join-Path "webapp" "client"
+          gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
+
       - name: Add msbuild to PATH
         if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
         uses: microsoft/setup-msbuild@v1.1
@@ -259,6 +275,7 @@ jobs:
           $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_PSMODULE_CLEAN = "1"
+          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client"
 
           Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
             Remove-Item $_.FullName -Force
