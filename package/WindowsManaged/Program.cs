@@ -98,6 +98,29 @@ internal class Program
         }
     }
 
+    private static bool SourceOnlyBuild => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DGATEWAY_MSI_SOURCE_ONLY_BUILD"));
+
+    private static string ProjectLangId
+    {
+        get
+        {
+            string langId = Environment.GetEnvironmentVariable("DGATEWAY_MSI_LANG_ID");
+
+            if (string.IsNullOrWhiteSpace(langId))
+            {
+                return "en-US";
+            }
+
+            // ReSharper disable once SimplifyLinqExpressionUseAll
+            if (!Languages.Any(x => x.Key == langId))
+            {
+                throw new Exception($"unrecognized language id: {langId}");
+            }
+
+            return langId;
+        }
+    }
+
     private static readonly Dictionary<string, string> Languages = new()
     {
         { "en-US", "DevolutionsGateway_en-us.wxl" },
@@ -251,17 +274,37 @@ internal class Program
         
         project.UIInitialized += Project_UIInitialized;
 
-        project.Language = enUS.Key;
-        project.LocalizationFile = $"Resources/{enUS.Value}";
-        project.PreserveTempFiles = true;
-        
-        string msi = project.BuildMsi();
+        if (SourceOnlyBuild)
+        {
+            project.Language = ProjectLangId;
+            project.LocalizationFile = $"Resources/{Languages.First(x => x.Key == ProjectLangId).Value}";
 
-        project.Language = frFR.Key;
-        string mstFile = project.BuildLanguageTransform(msi, project.Language, $"Resources/{frFR.Value}");
+            if (ProjectLangId != enUS.Key)
+            {
+                project.OutDir = System.IO.Path.Combine(project.OutDir, ProjectLangId);
+            }
 
-        msi.EmbedTransform(mstFile);
-        msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
+            project.BuildMsiCmd();
+        }
+        else
+        {
+            // Build the multi-language MSI in the {Debug/Release} directory
+
+            project.Language = enUS.Key;
+            project.LocalizationFile = $"Resources/{enUS.Value}";
+
+            string msi = project.BuildMsi();
+
+            foreach (KeyValuePair<string, string> language in Languages.Where(x => x.Key != enUS.Key))
+            {
+                project.Language = language.Key;
+                string mstFile = project.BuildLanguageTransform(msi, project.Language, $"Resources/{language.Value}");
+
+                msi.EmbedTransform(mstFile);
+            }
+            
+            msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
+        }
     }
 
     private static void Project_UIInitialized(SetupEventArgs e)
