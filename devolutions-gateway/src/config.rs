@@ -318,14 +318,14 @@ impl WebAppConf {
             enabled: value.enabled,
             authentication: match value.authentication {
                 dto::WebAppAuth::Custom => {
-                    let users_path = value
-                        .users_path
+                    let users_file = value
+                        .users_file
                         .clone()
                         .unwrap_or_else(|| Utf8PathBuf::from("users.txt"))
                         .pipe_ref(|path| normalize_data_path(path, &get_data_dir()));
 
-                    let users_contents = std::fs::read_to_string(&users_path)
-                        .with_context(|| format!("failed to read file at {users_path}"))?;
+                    let users_contents = std::fs::read_to_string(&users_file)
+                        .with_context(|| format!("failed to read file at {users_file}"))?;
 
                     let mut users = HashMap::new();
 
@@ -1337,7 +1337,7 @@ pub mod dto {
         pub login_limit_rate: Option<u8>,
         /// Path to the users file with <user>:<hash> lines
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub users_path: Option<Utf8PathBuf>,
+        pub users_file: Option<Utf8PathBuf>,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]

@@ -238,7 +238,7 @@ fn standalone_custom_auth_sample() -> Sample {
                 authentication: WebAppAuth::Custom,
                 app_token_maximum_lifetime: Some(28800),
                 login_limit_rate: Some(10),
-                users_path: None,
+                users_file: None,
             }),
             debug: None,
             rest: Default::default(),
@@ -266,7 +266,7 @@ fn standalone_no_auth_sample() -> Sample {
             "WebApp": {
                 "Enabled": true,
                 "Authentication": "None",
-                "UsersPath": "/path/to/users.txt"
+                "UsersFile": "/path/to/users.txt"
             }
         }"#,
         file_conf: ConfFile {
@@ -309,7 +309,7 @@ fn standalone_no_auth_sample() -> Sample {
                 authentication: WebAppAuth::None,
                 app_token_maximum_lifetime: None,
                 login_limit_rate: None,
-                users_path: Some("/path/to/users.txt".into()),
+                users_file: Some("/path/to/users.txt".into()),
             }),
             debug: None,
             rest: Default::default(),
