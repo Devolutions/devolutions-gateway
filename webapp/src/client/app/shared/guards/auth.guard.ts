@@ -1,15 +1,17 @@
-import { inject } from '@angular/core';
-import {Router, UrlTree} from '@angular/router';
+import {inject} from '@angular/core';
+import {ActivatedRouteSnapshot, Router, RouterStateSnapshot} from '@angular/router';
 
 import { AuthService } from "@shared/services/auth.service";
 
-export const authGuard = (): boolean | UrlTree => {
-  const authService: AuthService = inject(AuthService);
+export function authGuard(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean {
   const router: Router = inject(Router);
+  const authService: AuthService = inject(AuthService);
 
-  if (authService.isLoggedIn) {
+  if (authService.isAuthenticated) {
     return true;
   }
 
-  return router.parseUrl('/login');
-};
+  //TODO Add when standalone has more feature pages: { queryParams: { returnUrl: state.url } }
+  router.navigate(['login'])
+  return false;
+}

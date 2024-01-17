@@ -16,6 +16,7 @@ import {SESSIONS_MENU_OFFSET, WebSessionService} from "@shared/services/web-sess
 import {BaseComponent} from "@shared/bases/base.component";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 import {noop} from "rxjs";
+import {UserIronRdpError} from "@devolutions/iron-remote-gui";
 
 @Component({
   selector: 'web-client-dynamic-tab',
@@ -61,14 +62,19 @@ export class DynamicTabComponent extends BaseComponent implements AfterContentIn
     if (this.webSessionTab?.data?.hostname) {
       componentRef["hostname"] = this.webSessionTab.data.hostname;
     }
-    this.webSessionTab.componentRef = componentRef;
     this.cdr.detectChanges();
 
-    componentRef.instance.isComponentViewInitialized.pipe(takeUntil(this.destroyed$)).subscribe((isInitialized: boolean): void => {
-      if (!isInitialized) {
-        this.onComponentNotInitialized(this.activeTabIndex, componentRef);
-      }
+    //TODO not sure if BOTH event emitters are needed anymore.
+    componentRef.instance.initializationMessage.subscribe((error: Error) => {
+      this.onComponentNotInitialized(this.activeTabIndex, componentRef);
+      this.webSessionService.setupNewWebSession();
     });
+
+    componentRef.instance.isInitialized.pipe(takeUntil(this.destroyed$)).subscribe((isInitialized: boolean): void => {
+      console.log(componentRef["hostname"], 'isInitialized', isInitialized)
+    });
+
+    this.webSessionTab.componentRef = componentRef;
   }
 
   private subscribeToActiveTabIndexChanges(): void {

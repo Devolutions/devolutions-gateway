@@ -13,6 +13,7 @@ import {BaseComponent} from "@shared/bases/base.component";
 import {WebSession} from "@shared/models/web-session.model";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
+import {Subject} from "rxjs";
 
 @Component({
     selector: 'web-client-rdp-form',
@@ -22,7 +23,8 @@ import {ScreenSize} from "@shared/enums/screen-size.enum";
 export class RdpFormComponent extends BaseComponent implements  OnInit,
                                                                 AfterViewInit {
 
-  @Output() isComponentViewInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
+  @Output() isInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
+  @Output() initializationMessage: EventEmitter<Error> = new EventEmitter<Error>();
 
   connectSessionForm: FormGroup;
   screenSizeOptions: SelectItem[];
@@ -51,7 +53,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   }
 
   ngAfterViewInit(): void {
-    this.isComponentViewInitialized.emit(true);
+    this.isInitialized.emit(true);
   }
 
   get showCustomSize(): boolean {

@@ -60,8 +60,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
   private subscribeToWebSessionsUpdates(): void {
     this.webSessionService.getMenuWebSessions().pipe(takeUntil(this.destroyed$)).subscribe({
       next: (tabs:WebSession<any, any>[]) => this.activeWebSessions = tabs,
-      error: (e) => console.error(e),
-      complete: () => console.info('complete')
+      error: (e) => console.error(e)
     });
   }
 
@@ -71,8 +70,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
         this.activeWebSessionIndex = activeIndex;
         this.selectedMenuIndex = this.adjustMenuIndex(activeIndex);
       },
-      error: (e) => console.error(e),
-      complete: () => console.info('complete')
+      error: (e) => console.error(e)
     });
   }
 }

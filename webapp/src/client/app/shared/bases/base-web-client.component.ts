@@ -19,31 +19,55 @@ export abstract class WebClientBaseComponent extends BaseComponent {
   protected webClientConnectionSuccess(message?:string): void {
     if (!message) {
       //TODO var for translation 'ConnectionSuccessful'
-      console.log('Connection successful')
-    } else {
-      console.log(message);
+      console.log('TODO: Display to screen---> Connection successful')
+      return;
     }
+
+    console.log(message);
   }
 
   protected webClientConnecting() {
     //TODO message to user connecting
   }
 
-  protected webClientConnectionFail(message?:string): void {
+  protected webClientConnectionFail(message?:string, trace?: string): void {
+
+    // TODO: Replace console.error with a more user-friendly error display mechanism
+    // For example, using a toast notification service or error dialog
+    // this.toastService.showError(errorMessage);
+
     if (!message) {
       //TODO var for translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-      console.log('Connection error: Please verify your connection settings.')
-    } else {
-      console.log(message);
+      console.error('TODO: Display to screen---> Connection error: Please verify your connection settings.')
+      return;
+    }
+    console.error(message);
+
+    if (trace) {
+      console.error(trace);
     }
   }
 
-  protected webClientConnectionClosed() {
+  protected webClientConnectionClosed(message?:string): void {
     //TODO message to user connection closed
+    if (!message) {
+      //TODO var for translation 'connection closed'
+      console.log('TODO: Display to screen---> Connection Closed.')
+      return;
+    }
+
+    console.log(message);
   }
 
-  protected webClientConnectionTimeout() {
+  protected webClientConnectionTimeout(message?:string): void {
     //TODO message to user connection timeout
+    if (!message) {
+      //TODO var for translation 'connection time out'
+      console.log('TODO: Display to screen---> Connection timeout.')
+      return;
+    }
+
+    console.log(message);
   }
 
   protected setProgressionText(text: string) {

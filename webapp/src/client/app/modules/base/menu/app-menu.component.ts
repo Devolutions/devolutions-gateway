@@ -7,6 +7,7 @@ import {noop} from "rxjs";
 import {takeUntil} from "rxjs/operators";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {KeyValue} from "@angular/common";
+import {AuthService} from "@shared/services/auth.service";
 
 
 @Component({
@@ -21,7 +22,8 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
 
   constructor(public app: MainAppComponent,
               private navigationService: NavigationService,
-              private webSessionService: WebSessionService) {
+              private webSessionService: WebSessionService,
+              private authService: AuthService) {
     super();
     this.initMenu();
   }
@@ -86,4 +88,9 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   onMenuModeTogglerClick(): void {
     this.isMenuSlim = !this.isMenuSlim;
   }
+
+  logout(): void {
+    this.authService.logout();
+  }
+
 }

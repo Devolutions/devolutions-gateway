@@ -22,6 +22,10 @@ export class WebSessionService {
 
   constructor(private dynamicComponentService: DynamicComponentService) {}
 
+  public get numberOfActiveSessions() {
+    return this.webSessionDataSubject.getValue().length - SESSIONS_MENU_OFFSET;
+  }
+
   addSession(newSession: WebSession<any, any>): void {
     const currentSessions = this.webSessionDataSubject.value;
     const updatedSessions = [...currentSessions, newSession];
@@ -47,9 +51,18 @@ export class WebSessionService {
     }
   }
 
+  removeAllSessions(): void {
+    const currentWebSessions = this.webSessionDataSubject.getValue();
+    for (let i: number = currentWebSessions.length - 1; i >= 0; i--) {
+      this.destroyWebSessionComponentRef(i);
+    }
+    this.webSessionDataSubject.next([]);
+    this.webSessionCurrentIndexSubject.next(0);
+  }
+
   destroyWebSessionComponentRef(indexToRemove: number): void {
     const webSessionToDestroy = this.getWebSession(indexToRemove);
-    if (webSessionToDestroy && webSessionToDestroy.componentRef) {
+    if (this.isSessionValid(webSessionToDestroy)) {
       this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
     }
   }
@@ -101,5 +114,14 @@ export class WebSessionService {
 
     const lastSessionIndex: number = this.webSessionDataSubject.getValue().length - 1;
     this.setWebSessionCurrentIndex(lastSessionIndex);
+  }
+
+  hasActiveWebSessions(): boolean {
+    console.log('numberOfActiveSessions', this.numberOfActiveSessions)
+    return this.numberOfActiveSessions > 0;
+  }
+
+  private isSessionValid(session) {
+    return session && session.componentRef
   }
 }

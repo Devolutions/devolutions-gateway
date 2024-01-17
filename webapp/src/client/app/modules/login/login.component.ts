@@ -29,18 +29,22 @@ export class LoginComponent extends BaseComponent implements OnInit {
   onSubmit(): void {
     const submittedData = this.loginForm.value;
 
-    this.authService.login(submittedData.username, submittedData.password).subscribe(() => {
-      if (this.authService.isLoggedIn) {
-        this.navigationService.navigateToNewSession().then(noop);
+    this.authService.login(submittedData.username, submittedData.password).subscribe(
+      (success) => {
+        if (success) {
+          this.navigationService.navigateToNewSession();
+        } else {
+          this.handleLoginError(new Error('Invalid username or password'));
+        }
+      },
+      (error) => {
+          this.handleLoginError(error);
       }
-    });
+    );
   }
 
-  // login(): void {
-  //   this.authService.login(this.username, this.password).subscribe(() => {
-  //     if (this.authService.isLoggedIn) {
-  //       this.navigationService.navigateToNewSession().then(noop);
-  //     }
-  //   });
-  // }
+  private handleLoginError(error: Error): void {
+    //TODO Send message to user
+    console.error('Login Error', error);
+  }
 }

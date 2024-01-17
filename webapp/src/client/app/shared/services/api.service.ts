@@ -19,15 +19,13 @@ export class ApiService {
     const body = {
       content_type: 'WEBAPP',
       subject: username,
-      lifetime: 7200
+      lifetime: 7200 // 2hours
     };
 
     return this.http.post(this.appTokenApiUrl, body, { headers, responseType: 'text' });
   }
 
   generateSessionToken(tokenParameters: any): Observable<string> {
-    const appToken: string = localStorage.getItem('appToken');
-
     const headers: HttpHeaders = new HttpHeaders({
       'Content-Type': 'application/json'
     });

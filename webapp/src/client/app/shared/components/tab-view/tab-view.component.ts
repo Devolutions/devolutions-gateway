@@ -2,7 +2,7 @@ import {
   Component,
   OnInit,
   ViewChild,
-  ChangeDetectorRef, Type, OnDestroy
+  ChangeDetectorRef, Type, OnDestroy, HostListener
 } from '@angular/core';
 import {WebSession} from "@shared/models/web-session.model";
 import {WebSessionService} from "@shared/services/web-session.service";
@@ -29,6 +29,16 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
     super();
   }
 
+  @HostListener('window:beforeunload', ['$event'])
+  unloadNotification($event: any): void {
+    if (this.webSessionService.hasActiveWebSessions()) {
+      $event.preventDefault();
+      $event.returnValue = true;
+      // KAH Jan 2024
+      // Note: Custom message is not shown in most modern browsers due to security reasons
+    }
+  }
+
   ngOnInit(): void {
     this.loadFormTab();
     this.subscribeToTabMenuArray();
@@ -37,6 +47,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
 
   ngOnDestroy(): void {
     super.ngOnDestroy();
+    this.webSessionService.removeAllSessions();
   }
 
   closeTab(webSessionTab: WebSession<any, any>, index: number): void {
