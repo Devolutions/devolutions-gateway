@@ -203,8 +203,8 @@ Stable options are:
     * **LoginLimitRate** (_Integer_): The maximum number of login requests for a given username/IP pair
         over a minute (default is `10`).
 
-    * **UsersPath** (_FilePath_): Path to the users file which holds the list of users authorized to access
-        the web application when using the `Custom` authentication method.
+    * **UsersFile** (_FilePath_): Path to the users file which holds the list of users authorized to access
+        the web application when using the `Custom` authentication method (default is `users.txt`).
 
         For each line such as `<user>:<hash>`:
 
