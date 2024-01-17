@@ -34,6 +34,9 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Update="Dialogs\WebClientDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="Dialogs\SummaryDialog.cs" />
     <Compile Update="Dialogs\ServiceDialog.cs" />
     <Compile Update="Dialogs\PublicKeyDialog.cs" />

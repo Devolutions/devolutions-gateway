@@ -24,6 +24,15 @@ public partial class PublicKeyDialog : GatewayDialog
             return false;
         }
 
+        if (new GatewayProperties(this.Session()).ConfigureWebApp)
+        {
+            if (string.IsNullOrWhiteSpace(this.txtPrivateKeyFile.Text) || !File.Exists(this.txtPrivateKeyFile.Text.Trim()))
+            {
+                ShowValidationError("Error29996");
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -31,14 +40,34 @@ public partial class PublicKeyDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session);
         this.txtPublicKeyFile.Text = properties.PublicKeyFile;
+        this.txtPrivateKeyFile.Text = properties.PrivateKeyFile;
+
+        this.lblPrivateKeyDescription.Visible =
+            this.lblPrivateKeyFile.Visible =
+                this.txtPrivateKeyFile.Visible =
+                    this.butBrowsePrivateKeyFile.Visible = properties.ConfigureWebApp;
+
+        this.SetControlStates();
     }
 
     public override bool ToProperties()
     {
-        GatewayProperties _ = new(this.Runtime.Session)
+        GatewayProperties properties = new(this.Runtime.Session)
         {
-            PublicKeyFile = this.txtPublicKeyFile.Text.Trim()
+            PublicKeyFile = this.txtPublicKeyFile.Text.Trim(),
+            PrivateKeyFile = this.txtPrivateKeyFile.Text.Trim(),
         };
+
+        if (properties.GenerateKeyPair)
+        {
+            properties.PublicKeyFile = string.Empty;
+            properties.PrivateKeyFile = string.Empty;
+        }
+
+        if (properties.ConfigureWebApp)
+        {
+            properties.PrivateKeyFile = string.Empty;
+        }
 
         return true;
     }
@@ -59,6 +88,11 @@ public partial class PublicKeyDialog : GatewayDialog
     // ReSharper disable once RedundantOverriddenMember
     protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);
 
+    private void SetControlStates()
+    {
+
+    }
+
     private void butBrowsePublicKeyFile_Click(object sender, EventArgs e)
     {
         // TODO: (rmarkiewicz) localization
@@ -68,6 +102,18 @@ public partial class PublicKeyDialog : GatewayDialog
         if (!string.IsNullOrEmpty(file))
         {
             this.txtPublicKeyFile.Text = file;
+        }
+    }
+
+    private void butBrowsePrivateKeyFile_Click(object sender, EventArgs e)
+    {
+        // TODO: (rmarkiewicz) localization
+        const string filter = "Public Key Files (*.pem)|*.pem|Private Key Files (*.key)|*.key|All Files|*.*";
+        string file = this.BrowseForFile(filter);
+
+        if (!string.IsNullOrEmpty(file))
+        {
+            this.txtPrivateKeyFile.Text = file;
         }
     }
 

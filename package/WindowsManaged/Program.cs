@@ -72,6 +72,30 @@ internal class Program
         }
     }
 
+    private static string DevolutionsWebClientPath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DGATEWAY_WEBCLIENT_PATH");
+
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\webapp\\client";
+#else
+                throw new Exception("The environment variable DGATEWAY_WEBCLIENT_PATH is not specified or the directory does not exist");
+#endif
+            }
+
+            if (!Directory.Exists(path))
+            {
+                throw new DirectoryNotFoundException("The web client was not found");
+            }
+
+            return path;
+        }
+    }
+
     private static Version DevolutionsGatewayVersion
     {
         get
@@ -181,7 +205,7 @@ internal class Program
         {
             project.CandleOptions = "-fips";
         }
-        
+
         project.Dirs = new Dir[]
         {
             new ("%ProgramFiles%", new Dir(Includes.VENDOR_NAME, new InstallDir(Includes.SHORT_NAME)
@@ -237,7 +261,9 @@ internal class Program
                     {
                         Dirs = new Dir[]
                         {
-                            new("bin", new Files($@"{DevolutionsGatewayPsModulePath}\bin\*.*")),
+                            new("bin", new Files($@"{DevolutionsGatewayPsModulePath}\bin\*.*", (path) => 
+                                    (path.EndsWith(".dll") || path.EndsWith(".pdb") || path.EndsWith(".json")) &&
+                                    !(path.Contains("-arm64") || path.Contains("linux-") || path.Contains("osx-")))),
                             new("Private", new Files($@"{DevolutionsGatewayPsModulePath}\Private\*.*")),
                             new("Public", new Files($@"{DevolutionsGatewayPsModulePath}\Public\*.*")),
                         },
@@ -246,10 +272,18 @@ internal class Program
                             new($@"{DevolutionsGatewayPsModulePath}\DevolutionsGateway.psm1"),
                             new($@"{DevolutionsGatewayPsModulePath}\DevolutionsGateway.psd1"),
                         }
-                    }))
+                    })),
+                    new ("webapp")
+                    {
+                        Dirs = new Dir[]
+                        {
+                            new("client", new Files($@"{DevolutionsWebClientPath}\*.*"))
+                        }
+                    }
                 }
             })),
         };
+        project.ResolveWildCards(true);
 
         project.Actions = GatewayActions.Actions;
         project.RegValues = new RegValue[]
@@ -341,6 +375,18 @@ internal class Program
 
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
+        }
+        
+        if (!CustomActions.TryGetInstalledNetFx45Version(out uint netfx45Version) || netfx45Version < 394802)
+        {
+            MessageBox.Show("This product requires at least .NET Framework 4.6.2. .NET Framework 4.8 is strongly recommended.", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            e.ManagedUI.Shell.ErrorDetected = true;
+            e.Result = ActionResult.UserExit;
+        }
+
+        if (netfx45Version < 528040)
+        {
+            MessageBox.Show(".NET Framework 4.8 is strongly recommended.", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         e.ManagedUI.OnCurrentDialogChanged += Wizard.DialogChanged;

@@ -26,7 +26,7 @@ namespace DevolutionsGateway.Properties
         };
 
 <# if (this.properties[idx,6] != "") { #>
-        /// <#= this.properties[idx,6] #>
+        /// <summary><#= this.properties[idx,6] #></summary>
 <# } #>
         public <#= this.properties[idx,0] #> <#= this.properties[idx,1] #>
         {
@@ -71,6 +71,7 @@ namespace DevolutionsGateway.Properties
     {"StoreLocation", "CertificateLocation", "StoreLocation.CurrentUser", "true", "false", "", ""},
     {"StoreName", "CertificateStore", "StoreName.My", "true", "true", "", ""},
     {"string", "CertificateName", "string.Empty", "true", "false", "", ""},
+    {"bool", "GenerateCertificate", "false", "true", "false", "", ""},
     // UI Helpers
     {"Constants.CertificateFindType", "CertificateFindType", "Constants.CertificateFindType.Thumbprint", "false", "false", "", ""},
     {"string", "CertificateSearchText", "string.Empty", "true", "false", "", ""},
@@ -84,6 +85,8 @@ namespace DevolutionsGateway.Properties
     {"string", "HttpListenerScheme", "Constants.HttpsProtocol", "true", "false", "", ""},
 
     {"string", "PublicKeyFile", "string.Empty", "true", "false", "", ""},
+    {"string", "PrivateKeyFile", "string.Empty", "true", "false", "", ""},
+    {"bool", "GenerateKeyPair", "false", "true", "false", "", ""},
 
     {"string", "PowerShellPath", "string.Empty", "true", "false", "", ""},
     {"string", "NoStartService", "string.Empty", "true", "false", "dgw.no_start_service", ""},
@@ -93,11 +96,16 @@ namespace DevolutionsGateway.Properties
     {"uint", "TcpListenerPort", "8181", "true", "false", "", ""},
     {"string", "TcpListenerScheme", "Constants.TcpProtocol", "true", "false", "", ""},
 
+    {"bool", "ConfigureWebApp", "false", "true", "false", "", "`true` to configure the standalone web application interactively"},
+    {"Constants.AuthenticationMode", "AuthenticationMode", "Constants.AuthenticationMode.None", "true", "true", "", ""},
+    {"string", "WebUsername", "string.Empty", "true", "false", "", ""},
+    {"string", "WebPassword", "string.Empty", "true", "true", "", ""},
+
+    {"uint", "NetFx45Version", "0", "false", "false", "", ""},
     {"bool", "FirstInstall", "false", "true", "false", "", ""},
     {"bool", "Upgrading", "false", "true", "false", "", ""},
     {"bool", "RemovingForUpgrade", "false", "true", "false", "", ""},
     {"bool", "Uninstalling", "false", "true", "false", "", ""},
-
     {"bool", "Maintenance", "false", "true", "false", "", ""},
   };               
 #>

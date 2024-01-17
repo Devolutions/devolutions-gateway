@@ -28,5 +28,10 @@ namespace DevolutionsGateway.Resources
         /// SYSTEM/BuiltInAdministrators = Full Control, LocalService = Read / Write / Execute, BuiltInUsers - Read/Execute
         /// </summary>
         internal static string PROGRAM_DATA_SDDL = "D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+
+        /// <summary>
+        /// NT AUTHORITY\SYSTEM Allow  FullControl, NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize, BUILTIN\Administrators Allow  FullControl
+        /// </summary>
+        internal static string USERS_FILE_SDDL = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;FA;;;BA)";
     }
 }

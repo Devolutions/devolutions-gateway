@@ -45,7 +45,7 @@ namespace WixSharpSetup.Dialogs
             this.txtCertificatePassword = new System.Windows.Forms.TextBox();
             this.lblPrivateKeyFile = new System.Windows.Forms.Label();
             this.lblCertificatePassword = new System.Windows.Forms.Label();
-            this.label3 = new System.Windows.Forms.Label();
+            this.lblCertificateFile = new System.Windows.Forms.Label();
             this.txtCertificateFile = new System.Windows.Forms.TextBox();
             this.butBrowseCertificateFile = new System.Windows.Forms.Button();
             this.lblHint = new System.Windows.Forms.Label();
@@ -136,14 +136,15 @@ namespace WixSharpSetup.Dialogs
             this.pnlExternal.Controls.Add(this.txtCertificatePassword, 1, 3);
             this.pnlExternal.Controls.Add(this.lblPrivateKeyFile, 0, 5);
             this.pnlExternal.Controls.Add(this.lblCertificatePassword, 0, 3);
-            this.pnlExternal.Controls.Add(this.label3, 0, 1);
+            this.pnlExternal.Controls.Add(this.lblCertificateFile, 0, 1);
             this.pnlExternal.Controls.Add(this.txtCertificateFile, 1, 1);
             this.pnlExternal.Controls.Add(this.butBrowseCertificateFile, 2, 1);
             this.pnlExternal.Controls.Add(this.lblHint, 1, 6);
             this.pnlExternal.Dock = System.Windows.Forms.DockStyle.Fill;
             this.pnlExternal.Location = new System.Drawing.Point(3, 16);
             this.pnlExternal.Name = "pnlExternal";
-            this.pnlExternal.RowCount = 7;
+            this.pnlExternal.RowCount = 6;
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -151,7 +152,6 @@ namespace WixSharpSetup.Dialogs
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
             this.pnlExternal.Size = new System.Drawing.Size(464, 205);
             this.pnlExternal.TabIndex = 8;
             // 
@@ -212,17 +212,17 @@ namespace WixSharpSetup.Dialogs
             this.lblCertificatePassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             this.lblCertificatePassword.Visible = false;
             // 
-            // label3
+            // lblCertificateFile
             // 
-            this.label3.AutoSize = true;
-            this.label3.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label3.Location = new System.Drawing.Point(3, 3);
-            this.label3.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(144, 20);
-            this.label3.TabIndex = 1;
-            this.label3.Text = "[CertificateDlgCertFileLabel]";
-            this.label3.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblCertificateFile.AutoSize = true;
+            this.lblCertificateFile.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCertificateFile.Location = new System.Drawing.Point(3, 3);
+            this.lblCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.lblCertificateFile.Name = "lblCertificateFile";
+            this.lblCertificateFile.Size = new System.Drawing.Size(144, 20);
+            this.lblCertificateFile.TabIndex = 1;
+            this.lblCertificateFile.Text = "[CertificateDlgCertFileLabel]";
+            this.lblCertificateFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // txtCertificateFile
             // 
@@ -248,12 +248,13 @@ namespace WixSharpSetup.Dialogs
             // lblHint
             // 
             this.lblHint.AutoSize = true;
+            this.pnlExternal.SetColumnSpan(this.lblHint, 2);
             this.lblHint.Dock = System.Windows.Forms.DockStyle.Top;
             this.lblHint.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.lblHint.ForeColor = System.Drawing.Color.Blue;
             this.lblHint.Location = new System.Drawing.Point(153, 96);
             this.lblHint.Name = "lblHint";
-            this.lblHint.Size = new System.Drawing.Size(275, 13);
+            this.lblHint.Size = new System.Drawing.Size(308, 13);
             this.lblHint.TabIndex = 8;
             // 
             // gbSystem
@@ -643,13 +644,8 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
         private System.Windows.Forms.Button butBrowseCertificateFile;
-        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.Label lblCertificateFile;
         private System.Windows.Forms.TextBox txtCertificateFile;
-        private System.Windows.Forms.TextBox txtCertificatePassword;
-        private System.Windows.Forms.Label lblCertificatePassword;
-        private System.Windows.Forms.TextBox txtPrivateKeyFile;
-        private System.Windows.Forms.Label lblPrivateKeyFile;
-        private System.Windows.Forms.Button butBrowsePrivateKeyFile;
         private System.Windows.Forms.TableLayoutPanel pnlExternal;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.ComboBox cmbCertificateSource;
@@ -669,5 +665,10 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.GroupBox gbSystem;
         private System.Windows.Forms.GroupBox gbExternal;
         private System.Windows.Forms.Label lblHint;
+        private System.Windows.Forms.Button butBrowsePrivateKeyFile;
+        private System.Windows.Forms.TextBox txtPrivateKeyFile;
+        private System.Windows.Forms.TextBox txtCertificatePassword;
+        private System.Windows.Forms.Label lblPrivateKeyFile;
+        private System.Windows.Forms.Label lblCertificatePassword;
     }
 }

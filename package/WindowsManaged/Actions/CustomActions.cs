@@ -5,6 +5,7 @@ using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -23,7 +24,21 @@ namespace DevolutionsGateway.Actions
             "Devolutions", "Gateway");
 
         [CustomAction]
-        public static ActionResult CheckPowerShellVersion(Session session)
+        public static ActionResult CheckInstalledNetFx45Version(Session session)
+        {
+            uint version = session.Get(GatewayProperties._NetFx45Version);
+
+            if (version < 394802) //4.6.2
+            {
+                session.Log($"netfx45 version: {version} is too old");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult CheckPowerShellVersion(Session _)
         {
             return CheckPowerShellVersion() ? ActionResult.Success : ActionResult.Failure;
         }
@@ -60,7 +75,11 @@ namespace DevolutionsGateway.Actions
             {
                 Constants.CertificateMode mode = session.Get(GatewayProperties._CertificateMode);
 
-                if (mode == Constants.CertificateMode.External)
+                if (session.Get(GatewayProperties._ConfigureWebApp) && session.Get(GatewayProperties._GenerateCertificate))
+                {
+                    command = Constants.NewDGatewayCertificateCommand;
+                }
+                else if (mode == Constants.CertificateMode.External)
                 {
                     if (string.IsNullOrEmpty(session.Get(GatewayProperties._CertificatePassword)))
                     {
@@ -134,8 +153,83 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                command = string.Format(
-                    Constants.ImportDGatewayProvisionerKeyCommandFormat, session.Get(GatewayProperties._PublicKeyFile));
+                if (session.Get(GatewayProperties._ConfigureWebApp) && session.Get(GatewayProperties._GenerateKeyPair))
+                {
+                    command = Constants.NewDGatewayProvisionerKeyPairCommand;
+                }
+                else
+                {
+                    command = Constants.ImportDGatewayProvisionerKeyCommand;
+
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties._PublicKeyFile)))
+                    {
+                        command += $" -PublicKeyFile '{session.Get(GatewayProperties._PublicKeyFile)}'";
+                    }
+
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties._PrivateKeyFile)))
+                    {
+                        command += $" -PrivateKeyFile '{session.Get(GatewayProperties._PrivateKeyFile)}'";
+                    }
+                }
+                
+                command = FormatPowerShellCommand(session, command);
+            }
+            catch (Exception e)
+            {
+                session.Log($"command {nameof(ConfigurePublicKey)} execution failure: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ExecuteCommand(session, command);
+        }
+
+        [CustomAction]
+        public static ActionResult ConfigureWebApp(Session session)
+        {
+            string command;
+
+            try
+            {
+                // TODO: constants
+                command = "$WebApp = New-DGatewayWebAppConfig -Enabled $true";
+
+                switch (session.Get(GatewayProperties._AuthenticationMode))
+                {
+                    case Constants.AuthenticationMode.None:
+                    {
+                        command += " -Authentication None";
+                        break;
+                    }
+
+                    case Constants.AuthenticationMode.Custom:
+                    {
+                        command += " -Authentication Custom";
+                        break;
+                    }
+                }
+                
+                command += "; Set-DGatewayConfig -WebApp $WebApp";
+
+                command = FormatPowerShellCommand(session, command);
+            }
+            catch (Exception e)
+            {
+                session.Log($"command {nameof(ConfigurePublicKey)} execution failure: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ExecuteCommand(session, command);
+        }
+
+        [CustomAction]
+        public static ActionResult ConfigureWebAppUser(Session session)
+        {
+            string command;
+
+            try
+            {
+                // TODO: constants
+                command = $"Set-DGatewayUser -Username '{session.Get(GatewayProperties._WebUsername)}' -Password '{session.Get(GatewayProperties._WebPassword)}'";
                 command = FormatPowerShellCommand(session, command);
             }
             catch (Exception e)
@@ -196,6 +290,20 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult GetInstalledNetFx45Version(Session session)
+        {
+            if (!TryGetInstalledNetFx45Version(out uint version))
+            {
+                return ActionResult.Failure;
+            }
+
+            session.Log($"read netFxRelease path from registry: {version}");
+            session.Set(GatewayProperties._NetFx45Version, version);
+
+            return ActionResult.Success;
+        }
+        
+        [CustomAction]
         public static ActionResult GetPowerShellPathFromRegistry(Session session)
         {
             try
@@ -222,6 +330,24 @@ namespace DevolutionsGateway.Actions
             }
 
             return ActionResult.Failure;
+        }
+
+        [CustomAction]
+        public static ActionResult OpenWebApp(Session session)
+        {
+            if (session.Get(GatewayProperties._ConfigureWebApp))
+            {
+                try
+                {
+                    Process.Start(
+                        $"{session.Get(GatewayProperties._HttpListenerScheme)}://{session.Get(GatewayProperties._AccessUriHost)}:{session.Get(GatewayProperties._HttpListenerPort)}");
+                }
+                catch
+                {
+                }
+            }
+
+            return ActionResult.Success;
         }
 
         [CustomAction]
@@ -269,7 +395,15 @@ namespace DevolutionsGateway.Actions
         public static ActionResult RollbackConfig(Session session)
         {
             string path = ProgramDataDirectory;
-            string[] configFiles = { "gateway.json", "server.crt", "server.key", "provisioner.pem" };
+            string[] configFiles =
+            {
+                "gateway.json", 
+                "server.crt", 
+                "server.key", 
+                "provisioner.pem",
+                "delegation.pem",
+                "delegation.key"
+            };
 
             foreach (string configFile in configFiles.Select(x => Path.Combine(path, x)))
             {
@@ -515,7 +649,7 @@ namespace DevolutionsGateway.Actions
                 };
 
                 hTempFile.Close();
-
+                
                 record.SetString(1, finalPath);
                 session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
 
@@ -564,6 +698,32 @@ namespace DevolutionsGateway.Actions
                     session.Log($"failed to read service start type: {e}");
                     return false;
                 }
+            }
+        }
+
+        public static bool TryGetInstalledNetFx45Version(out uint version)
+        {
+            version = 0;
+
+            try
+            {
+                // https://learn.microsoft.com/en-us/dotnet/framework/migration-guide/how-to-determine-which-versions-are-installed
+                using RegistryKey localKey = RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, RegistryView.Registry64);
+                using RegistryKey netFxKey = localKey.OpenSubKey(@"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full");
+
+                if (netFxKey is null)
+                {
+                    // If the Full subkey is missing, then .NET Framework 4.5 or above isn't installed
+                    return false;
+                }
+
+                version = Convert.ToUInt32(netFxKey.GetValue("Release"));
+
+                return true;
+            }
+            catch
+            {
+                return false;
             }
         }
 

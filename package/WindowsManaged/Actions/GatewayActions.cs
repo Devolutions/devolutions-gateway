@@ -33,6 +33,21 @@ namespace DevolutionsGateway.Actions
             new Id(nameof(isMaintenance)), GatewayProperties._Maintenance.Id, $"{true}", Return.check, When.After, new Step(isUninstalling.Id),
             new Condition($"Installed AND NOT {GatewayProperties._Upgrading.Id} AND NOT {GatewayProperties._Uninstalling.Id} AND NOT UPGRADINGPRODUCTCODE"));
 
+        private static readonly ManagedAction getNetFxInstalledVersion = new(
+            new Id($"CA.{nameof(getNetFxInstalledVersion)}"),
+            CustomActions.GetInstalledNetFx45Version,
+            Return.check, When.After, Step.LaunchConditions, Condition.Always)
+        {
+            Execute = Execute.immediate,
+        };
+
+        private static readonly ManagedAction checkNetFxInstalledVersion = new(
+            CustomActions.CheckInstalledNetFx45Version,
+            Return.check, When.After, new Step(getNetFxInstalledVersion.Id), Condition.Always)
+        {
+            Execute = Execute.immediate,
+        };
+
         /// <summary>
         /// Set the ARP installation location to the chosen install directory
         /// </summary>
@@ -111,6 +126,21 @@ namespace DevolutionsGateway.Actions
         };
 
         /// <summary>
+        /// Set or reset the ACL on %programdata%\Devolutions\Gateway\users.txt
+        /// </summary>
+        private static readonly WixQuietExecAction setUserDatabasePermissions = new(
+            "cmd.exe",
+            $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\\users.txt\" /S:{Includes.USERS_FILE_SDDL} /C",
+            Return.ignore,
+            When.Before, Step.InstallFinalize,
+            Condition.Always,
+            Sequence.InstallExecuteSequence)
+        {
+            Execute = Execute.deferred,
+            Impersonate = false,
+        };
+
+        /// <summary>
         /// Execute the installed DevolutionsGateway with the --config-init-only argument
         /// </summary>
         /// <remarks>
@@ -127,6 +157,27 @@ namespace DevolutionsGateway.Actions
         {
             Execute = Execute.deferred,
             Impersonate = false,
+        };
+
+        /// <summary>
+        /// Open the installed web application in the user's system browser
+        /// </summary>
+        /// <remarks>
+        /// Shouldn't be done on silent installs, but we only support customization by UI currently
+        /// </remarks>
+        private static readonly ManagedAction openWebApp = new(
+            CustomActions.OpenWebApp,
+            Return.ignore, When.After,
+            Step.InstallFinalize,
+            new Condition(GatewayProperties._FirstInstall.Id, true.ToString()))
+        {
+            UsesProperties = UseProperties(new IWixProperty[]
+            {
+                GatewayProperties._ConfigureWebApp,
+                GatewayProperties._HttpListenerScheme,
+                GatewayProperties._HttpListenerPort,
+                GatewayProperties._AccessUriHost,
+            })
         };
 
         /// <summary>
@@ -232,9 +283,11 @@ namespace DevolutionsGateway.Actions
                     GatewayProperties._CertificateLocation,
                     GatewayProperties._CertificateStore,
                     GatewayProperties._CertificateName,
+                    GatewayProperties._ConfigureWebApp,
+                    GatewayProperties._GenerateCertificate,
             },
-            "HideTarget=yes", // Don't print the custom action data to logs, it might contain a password
-            $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)})"); // Only if the HTTP listener uses https
+            attributesDefinition: "HideTarget=yes", // Don't print the custom action data to logs, it might contain a password
+            additionalCondition: $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)})"); // Only if the HTTP listener uses https
 
         /// <summary>
         /// Configure the public key using PowerShell
@@ -245,8 +298,40 @@ namespace DevolutionsGateway.Actions
             When.After, new Step(configureCertificate.Id),
             new IWixProperty[]
             {
-                    GatewayProperties._PublicKeyFile,
+                GatewayProperties._PublicKeyFile,
+                GatewayProperties._PrivateKeyFile,
+                GatewayProperties._ConfigureWebApp,
+                GatewayProperties._GenerateKeyPair,
             });
+            
+
+        /// <summary>
+        /// Configure the standalone web application using PowerShell
+        /// </summary>
+        private static readonly ElevatedManagedAction configureWebApp = BuildConfigureAction(
+            $"CA.{nameof(configureWebApp)}",
+            CustomActions.ConfigureWebApp,
+            When.After, new Step(configurePublicKey.Id),
+            new IWixProperty[]
+            {
+                GatewayProperties._AuthenticationMode,
+            }, 
+            additionalCondition: $" AND ({GatewayProperties._ConfigureWebApp.Id} = \"{true}\")");
+
+        /// <summary>
+        /// Configure the standalone web application default user using PowerShell
+        /// </summary>
+        private static readonly ElevatedManagedAction configureWebAppUser = BuildConfigureAction(
+            $"CA.{nameof(configureWebAppUser)}",
+            CustomActions.ConfigureWebAppUser,
+            When.After, new Step(configurePublicKey.Id),
+            new IWixProperty[]
+            {
+                GatewayProperties._WebUsername,
+                GatewayProperties._WebPassword,
+            },
+            attributesDefinition: "HideTarget=yes", // Don't print the custom action data to logs, it contains a password
+            additionalCondition: $" AND ({GatewayProperties._ConfigureWebApp.Id} = \"{true}\") AND ({GatewayProperties._AuthenticationMode.Id} = \"{Constants.AuthenticationMode.Custom}\")");
 
         private static string UseProperties(IEnumerable<IWixProperty> properties)
         {
@@ -306,12 +391,16 @@ namespace DevolutionsGateway.Actions
             isRemovingForUpgrade,
             isUninstalling,
             isMaintenance,
+            getNetFxInstalledVersion,
+            checkNetFxInstalledVersion,
             getPowerShellPath,
             getInstallDirFromRegistry,
             setArpInstallLocation,
             createProgramDataDirectory,
             setProgramDataDirectoryPermissions,
+            setUserDatabasePermissions,
             initGatewayConfigIfNeeded,
+            openWebApp,
             queryGatewayStartupType,
             setGatewayStartupType,
             startGatewayIfNeeded,
@@ -321,6 +410,8 @@ namespace DevolutionsGateway.Actions
             configureListeners,
             configureCertificate,
             configurePublicKey,
+            configureWebApp,
+            configureWebAppUser,
         };
     }
 }

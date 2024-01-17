@@ -9,6 +9,7 @@
 
 # dependencies
 node_modules/
+web/node_modules/
 
 # IDEs and editors
 .idea
@@ -30,6 +31,7 @@ node_modules/
 
 # misc
 .angular/cache
+web/.angular/cache
 /.sass-cache
 /connect.lock
 /coverage/
