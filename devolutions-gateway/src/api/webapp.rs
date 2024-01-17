@@ -14,8 +14,7 @@ use tap::prelude::*;
 use tower_http::services::ServeFile;
 use uuid::Uuid;
 
-use crate::config::dto::WebAppUser;
-use crate::config::{WebAppAuth, WebAppConf};
+use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;

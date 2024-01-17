@@ -35,15 +35,23 @@ const CONFIG: &str = r#"{
     "WebApp": {
         "Enabled": true,
         "Authentication": "Custom",
-        "AppTokenMaximumLifetime": 28800,
-        "Users": [
-            {
-                "Name": "David",
-                "Password": "$argon2i$v=19$m=8,t=1,p=1$UmVleXNGUUVScDJCcUsxWQ$ObHZQP70tRZhxzsfD9yvMw"
-            }
-        ]
+        "AppTokenMaximumLifetime": 28800
     }
 }"#;
+
+fn initialize_conf() {
+    use std::sync::Once;
+
+    const CONTENTS: &str = "David:$argon2i$v=19$m=8,t=1,p=1$UmVleXNGUUVScDJCcUsxWQ$ObHZQP70tRZhxzsfD9yvMw";
+
+    static CREATE: Once = Once::new();
+
+    CREATE.call_once(|| {
+        let users_txt_file = format!("{}/users.txt", std::env!("CARGO_TARGET_TMPDIR"));
+        std::fs::write(users_txt_file, CONTENTS.as_bytes()).unwrap();
+        std::env::set_var("DGATEWAY_CONFIG_PATH", std::env!("CARGO_TARGET_TMPDIR"));
+    });
+}
 
 // TODO(@CBenoit): move that to another crate for usage in other tests?
 #[derive(Clone, Debug)]
@@ -133,6 +141,7 @@ impl tracing::field::Visit for CovMarkVisitor {
 #[tokio::test]
 async fn custom_authentication_flow() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
+    initialize_conf();
     let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG)?;
 
     let mut app =
@@ -241,6 +250,7 @@ async fn custom_authentication_flow() -> anyhow::Result<()> {
 #[tokio::test]
 async fn sign_app_token_bad_password() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
+    initialize_conf();
     let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG)?;
 
     let app =
@@ -278,6 +288,7 @@ async fn sign_app_token_bad_password() -> anyhow::Result<()> {
 #[tokio::test]
 async fn sign_app_token_username_mismatch() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
+    initialize_conf();
     let (state, _handles) = devolutions_gateway::DgwState::mock(CONFIG)?;
 
     let app =

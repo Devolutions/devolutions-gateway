@@ -203,16 +203,18 @@ Stable options are:
     * **LoginLimitRate** (_Integer_): The maximum number of login requests for a given username/IP pair
         over a minute (default is `10`).
 
-    * **Users** (_Array_): A list of users authorized to access the web application when using the
-        `Custom` authentication method.
+    * **UsersPath** (_FilePath_): Path to the users file which holds the list of users authorized to access
+        the web application when using the `Custom` authentication method.
 
-        Each element has the following schema: 
+        For each line such as `<user>:<hash>`:
 
-        * **Name** (_String_): The name of the user.
+        * `<user>`: The name of the user.
 
-        * **Password** (_String_): Hash of the password in the [PHC string format][phc-string].
+        * `<hash>`: Hash of the password in the [PHC string format][phc-string].
             Currently, the only supported hash algorithm is [Argon2][argon2-wikipedia].
             It’s possible to use the online tool [argon2.online][argon2-online] to generate a hash.
+
+        Blank lines and lines starting by `#` are ignored.
 
 - **VerbosityProfile** (_String_): Logging verbosity profile (pre-defined tracing directives).
 

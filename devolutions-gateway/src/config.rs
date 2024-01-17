@@ -86,7 +86,7 @@ pub struct Conf {
     pub debug: dto::DebugConf,
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct WebAppConf {
     pub enabled: bool,
     pub authentication: WebAppAuth,
@@ -94,10 +94,17 @@ pub struct WebAppConf {
     pub login_limit_rate: u8,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum WebAppAuth {
-    Custom(HashMap<String, dto::WebAppUser>),
+    Custom(HashMap<String, WebAppUser>),
     None,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct WebAppUser {
+    pub name: String,
+    /// Hash of the password, in the PHC string format
+    pub password_hash: dto::Password,
 }
 
 impl Conf {
@@ -283,7 +290,12 @@ impl Conf {
             jrl_file,
             ngrok: conf_file.ngrok.clone(),
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
-            web_app: conf_file.web_app.clone().map(WebAppConf::from),
+            web_app: conf_file
+                .web_app
+                .as_ref()
+                .map(WebAppConf::from_dto)
+                .transpose()
+                .context("webapp config")?,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -297,6 +309,56 @@ impl Conf {
 
     pub fn webapp_is_enabled(&self) -> bool {
         self.webapp_conf_if_enabled().is_some()
+    }
+}
+
+impl WebAppConf {
+    fn from_dto(value: &dto::WebAppConf) -> anyhow::Result<Self> {
+        let conf = Self {
+            enabled: value.enabled,
+            authentication: match value.authentication {
+                dto::WebAppAuth::Custom => {
+                    let users_path = value
+                        .users_path
+                        .clone()
+                        .unwrap_or_else(|| Utf8PathBuf::from("users.txt"))
+                        .pipe_ref(|path| normalize_data_path(path, &get_data_dir()));
+
+                    let users_contents = std::fs::read_to_string(&users_path)
+                        .with_context(|| format!("failed to read file at {users_path}"))?;
+
+                    let mut users = HashMap::new();
+
+                    for line in users_contents.lines() {
+                        // Skip blank lines and commented lines.
+                        if line.trim().is_empty() || line.starts_with('#') {
+                            continue;
+                        }
+
+                        let (user, hash) = line.split_once(':').context("missing separator in users file")?;
+
+                        users.insert(
+                            user.to_owned(),
+                            WebAppUser {
+                                name: user.to_owned(),
+                                password_hash: hash.to_owned().into(),
+                            },
+                        );
+                    }
+
+                    WebAppAuth::Custom(users)
+                }
+                dto::WebAppAuth::None => WebAppAuth::None,
+            },
+            app_token_maximum_lifetime: std::time::Duration::from_secs(
+                value
+                    .app_token_maximum_lifetime
+                    .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
+            ),
+            login_limit_rate: value.login_limit_rate.unwrap_or(WEB_APP_DEFAULT_LOGIN_LIMIT_RATE),
+        };
+
+        Ok(conf)
     }
 }
 
@@ -758,27 +820,6 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
     });
 
     Ok(out)
-}
-
-impl From<dto::WebAppConf> for WebAppConf {
-    fn from(value: dto::WebAppConf) -> Self {
-        Self {
-            enabled: value.enabled,
-            authentication: match value.authentication {
-                dto::WebAppAuth::Custom => {
-                    let users = value.users.into_iter().map(|user| (user.name.clone(), user)).collect();
-                    WebAppAuth::Custom(users)
-                }
-                dto::WebAppAuth::None => WebAppAuth::None,
-            },
-            app_token_maximum_lifetime: std::time::Duration::from_secs(
-                value
-                    .app_token_maximum_lifetime
-                    .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
-            ),
-            login_limit_rate: value.login_limit_rate.unwrap_or(WEB_APP_DEFAULT_LOGIN_LIMIT_RATE),
-        }
-    }
 }
 
 pub mod dto {
@@ -1292,24 +1333,16 @@ pub mod dto {
         pub authentication: WebAppAuth,
         /// Maximum lifetime granted for application tokens, in seconds
         pub app_token_maximum_lifetime: Option<u64>,
-        /// The maximum number of login requests for a given username over a minute.
+        /// The maximum number of login requests for a given username over a minute
         pub login_limit_rate: Option<u8>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        pub users: Vec<WebAppUser>,
+        /// Path to the users file with <user>:<hash> lines
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub users_path: Option<Utf8PathBuf>,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
     pub enum WebAppAuth {
         Custom,
         None,
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct WebAppUser {
-        pub name: String,
-        /// Hash of the password, in the PHC string format
-        #[serde(rename = "Password")]
-        pub password_hash: Password,
     }
 }
