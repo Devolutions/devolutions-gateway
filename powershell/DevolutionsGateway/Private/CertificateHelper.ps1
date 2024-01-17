@@ -159,6 +159,38 @@ function Get-CertificateSubjectName
     return $cert.SubjectName.Name
 }
 
+function Expand-PfxCertificate
+{
+    param (
+        [Parameter(Mandatory = $true)]
+        [Devolutions.Picky.Pfx] $Pfx
+    )
+
+    $Certificates = New-Object 'System.Collections.Generic.List[Devolutions.Picky.Cert]'
+
+    $safeBagIterator = $Pfx.SafeBags()
+    $safeBag = $safeBagIterator.Next()
+
+    while ($null -ne $safeBag) {
+        switch ($safeBag.Kind) {
+            'Certificate' {
+                $Certificates.Add($safeBag.Certificate)
+            }
+            'PrivateKey' {
+                $PrivateKey = $safeBag.PrivateKey
+            }
+        }
+
+        $safeBag.Dispose()
+        $safeBag = $safeBagIterator.Next()
+    }
+
+    return [PSCustomObject]@{
+        Certificates = $Certificates
+        PrivateKey = $PrivateKey
+    }
+}
+
 function Get-PemCertificate
 {
     param(
@@ -172,23 +204,37 @@ function Get-PemCertificate
 
     if (($CertificateFile -match ".pfx") -or ($CertificateFile -match ".p12")) {
         $AsByteStream = if ($PSEdition -eq 'Core') { @{AsByteStream = $true} } else { @{'Encoding' = 'Byte'} }
-        $CertificateData = Get-Content -Path $CertificateFile -Raw @AsByteStream
-        $collection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
-        $collection.Import($CertificateData, $Password, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
-    
-        foreach ($cert in $collection) {
-            if ($cert.HasPrivateKey) {
-                $PrivateKey = ConvertFrom-RsaPrivateKey -Rsa $cert.PrivateKey
-            }
-            $PemCert = ConvertTo-PemEncoding -Label 'CERTIFICATE' -RawData $cert.RawData    
-            $PemChain += $PemCert
+        $PfxBytes = Get-Content -Path $CertificateFile -Raw @AsByteStream
+
+        $parsingParams = [Devolutions.Picky.Pkcs12ParsingParams]::New.Invoke(@())
+        $parsingParams.SkipDecryptionErrors = $true
+        $parsingParams.SkipMacValidation = $true
+
+        $pkcs12CryptoContext = if ($null -eq $password) {
+            [Devolutions.Picky.Pkcs12CryptoContext]::NoPassword()
+        } else {
+            [Devolutions.Picky.Pkcs12CryptoContext]::WithPassword($password)
+        }
+
+        $pfx = [Devolutions.Picky.Pfx]::FromDer($PfxBytes, $pkcs12CryptoContext, $parsingParams)
+        $expanded = Expand-PfxCertificate -Pfx $pfx
+
+        $sb = New-Object System.Text.StringBuilder
+        foreach ($cert in $expanded.Certificates) {
+            $pem = $cert.ToPem()
+            [void]$sb.AppendLine($pem.ToRepr())
+        }
+        $PemData = $sb.ToString()
+
+        if ($null -ne $expanded.PrivateKey) {
+            $PrivateKey = $expanded.PrivateKey.ToPem().ToRepr()
         }
     } else {
         $PemData = Get-Content -Path $CertificateFile -Raw
-        $PemChain = Split-PemChain -Label 'CERTIFICATE' -PemData $PemData
-
         $PrivateKey = Get-Content -Path $PrivateKeyFile -Raw
     }
+
+    $PemChain = Split-PemChain -Label 'CERTIFICATE' -PemData $PemData
 
     if ($PemChain.Count -eq 0) {
         throw "Empty certificate chain!"
@@ -203,11 +249,11 @@ function Get-PemCertificate
         $Certs
     }
 
-    $LeafCert = $PemChain | Where { -Not ( Get-IsPemCertificateAuthority -PemData $_ )}
+    $LeafCert = $PemChain | Where-Object { -Not ( Get-IsPemCertificateAuthority -PemData $_ )}
 
     [string[]] $SortedPemChain = @()
 
-    if ($LeafCert -Eq $null) {
+    if ($null -eq $LeafCert) {
         # Do not apply any transformation to the provided chain if no leaf certificate is found
         $SortedPemChain = $PemChain
     } else {

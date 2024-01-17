@@ -654,7 +654,7 @@ function New-DGatewayCertificate {
     $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
     $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
 
-    if (-Not [string]::IsNullOrEmpty($Hostname)) {
+    if ([string]::IsNullOrEmpty($Hostname)) {
         $Hostname = $Config.Hostname
     }
 

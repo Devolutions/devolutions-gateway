@@ -8,6 +8,20 @@ Describe 'Devolutions Gateway certificate import' {
 			$ConfigPath = Join-Path $TestDrive 'Gateway'
 		}
 
+		It 'Import self-signed .pfx certificate with key' {
+			$CertificateFile = Get-Item -Path ".\ImportCertificate\SelfSigned\localhost.pfx"
+			$ExpectedCertificateData = Get-Content -Path ".\ImportCertificate\SelfSigned\localhost.crt"
+			$ExpectedPrivateKeyData = Get-Content -Path ".\ImportCertificate\SelfSigned\localhost.key"
+			$PasswordFile = [System.IO.Path]::ChangeExtension($CertificateFile.FullName, ".pwd")
+			$Password = (Get-Content -Path $PasswordFile -Raw).Trim()
+			Import-DGatewayCertificate -ConfigPath:$ConfigPath -CertificateFile $CertificateFile -Password $Password
+
+			$ActualCertificateData = Get-Content -Path (Join-Path $ConfigPath 'server.crt')
+			$ActualPrivateKeyData = Get-Content -Path (Join-Path $ConfigPath 'server.key')
+			$ActualCertificateData | Should -Be $ExpectedCertificateData
+			$ActualPrivateKeyData | Should -Be $ExpectedPrivateKeyData
+		}
+
 		It 'Smoke' {
 			(Get-Item -Path ".\ImportCertificate\WellOrdered\*.crt") | ForEach-Object {
 				$CertFile = $_.FullName
