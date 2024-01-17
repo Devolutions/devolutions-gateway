@@ -10,7 +10,7 @@ on:
         description: 'If true, the workflow only indicates which artifacts would be uploaded'
         required: true
         type: boolean
-        default: 'true'
+        default: true
   workflow_call:
     inputs:
       dispatch:
@@ -245,10 +245,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
 
-      ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
         shell: pwsh
-        run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+        run: |
+          # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
+          Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
+          # Swap the latest msi for the legacy one
+          $RootPath = Join-Path devolutions-gateway Windows x86_64
+          $NewMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
+          Remove-Item $NewMsi -Force
+          $OldMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
+          Rename-Item -Path $OldMsi -NewName $NewMsi.Name
 
       - name: Create GitHub release
         shell: pwsh
@@ -376,6 +383,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+
+      - name: Manage artifacts
+        shell: pwsh
+        run: |
+          # Swap the latest msi for the legacy one
+          $RootPath = Join-Path Windows x86_64
+          $NewMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
+          Remove-Item $NewMsi -Force
+          $OldMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
+          Rename-Item -Path $OldMsi -NewName $NewMsi.Name
 
       - name: Prepare upload
         id: prepare

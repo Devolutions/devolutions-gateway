@@ -235,6 +235,17 @@ class TlkRecipe
     [bool] $Verbose
     [TlkTarget] $Target
 
+    static [object[]] $PackageLanguages = @(
+        [PSCustomObject]@{
+            Name = "en-US";
+            LCID = 1033;
+        },
+        [PSCustomObject]@{
+            Name = "fr-FR";
+            LCID = 1036;
+        }
+    )
+
     TlkRecipe() {
         $this.Init()
     }
@@ -317,19 +328,8 @@ class TlkRecipe
         Pop-Location
     }
 
-    [void] Package_Windows() {
+    [string[]] Package_Windows_Prepare_Ps1Module() {
         $PackageVersion = $this.Version
-        $ShortVersion = $this.Version.Substring(2) # msi version
-        $TargetArch = $this.Target.WindowsArchitecture()
-
-        Push-Location
-        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
-        
-        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
-            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
-        } else {
-            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
-        }
 
         if (Test-Path Env:DGATEWAY_PSMODULE_PATH) {
             $DGatewayPSModulePath = $Env:DGATEWAY_PSMODULE_PATH
@@ -358,6 +358,115 @@ class TlkRecipe
         $DotNetRid = "win-x64"
         Get-Item "$DGatewayPSModuleStagingPath\bin\*\*DevolutionsPicky*" | ? { $_.Directory.Name -ne $DotNetRid } | % { Remove-Item $_.Directory -Recurse }
         Remove-Item $(Join-Path $DGatewayPSModuleStagingPath "src") -Recurse  -ErrorAction SilentlyContinue
+
+        return $DGatewayPSModulePath, $DGatewayPSModuleStagingPath
+    }
+
+    [void] Package_Windows_Managed_Assemble() {
+        Push-Location
+        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)Managed"
+
+        $TargetConfiguration = "Release"
+
+        # Build the base (en-US) MSI
+        & .\$TargetConfiguration\Build_DevolutionsGateway.cmd
+
+        $BaseMsi = Join-Path $TargetConfiguration "$($this.PackageName).msi"
+
+        foreach ($PackageLanguage in $([TlkRecipe]::PackageLanguages | Select-Object -Skip 1)) {
+            # Build the localized MSI
+            & .\$TargetConfiguration\$($PackageLanguage.Name)\Build_DevolutionsGateway.cmd
+            $LangMsi = Join-Path $TargetConfiguration $($PackageLanguage.Name) "$($this.PackageName).msi"
+            $Transform = Join-Path $TargetConfiguration "$($PackageLanguage.Name).mst"
+            # Generate a language transform
+            & 'torch.exe' "$BaseMsi" "$LangMsi" "-o" "$Transform" | Out-Host
+            # Embed the transform in the base MSI
+            & 'cscript.exe' "/nologo" "../Windows/WiSubStg.vbs" "$BaseMsi" "$Transform" "$($PackageLanguage.LCID)" | Out-Host
+        }
+
+        # Set the complete language list on the base MSI
+        $LCIDs = ([TlkRecipe]::PackageLanguages | ForEach-Object { $_.LCID }) -join ','
+        & 'cscript.exe' "/nologo" "../Windows/WiLangId.vbs" "$BaseMsi" "Package" "$LCIDs" | Out-Host
+
+        if (Test-Path Env:DGATEWAY_PACKAGE) {
+            $DGatewayPackage = $Env:DGATEWAY_PACKAGE
+            Copy-Item -Path "$BaseMsi" -Destination $DGatewayPackage
+        }
+
+        Pop-Location
+    }
+
+    [void] Package_Windows_Managed([bool] $SourceOnlyBuild) {
+        $ShortVersion = $this.Version.Substring(2) # msi version
+
+        $Env:DGATEWAY_VERSION="$ShortVersion"
+
+        Push-Location
+        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)Managed"
+
+        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+        } else {
+            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
+        }
+
+        $PSModulePaths = $this.Package_Windows_Prepare_Ps1Module()
+        $DGatewayPSModulePath = $PSModulePaths[0]
+        $DGatewayPSModuleStagingPath = $PSModulePaths[1]
+
+        $TargetConfiguration = "Release"
+
+        if ((Get-Command "MSBuild.exe" -ErrorAction SilentlyContinue) -Eq $Null) {
+            throw 'MSBuild was not found in the PATH'
+        }
+
+        if ($SourceOnlyBuild) {
+            $Env:DGATEWAY_MSI_SOURCE_ONLY_BUILD = "1"
+        }
+
+        & 'MSBuild.exe' "DevolutionsGateway.sln" "/t:restore,build" "/p:Configuration=$TargetConfiguration" | Out-Host
+
+        if ($SourceOnlyBuild) {
+            foreach ($PackageLanguage in $([TlkRecipe]::PackageLanguages | Select-Object -Skip 1)) {
+                $Env:DGATEWAY_MSI_LANG_ID = $PackageLanguage.Name
+                & 'MSBuild.exe' "DevolutionsGateway.sln" "/t:restore,build" "/p:Configuration=$TargetConfiguration" | Out-Host
+            }
+        }
+
+        $Env:DGATEWAY_MSI_SOURCE_ONLY_BUILD = ""
+        $Env:DGATEWAY_MSI_LANG_ID = ""
+
+        if (!$SourceOnlyBuild -And (Test-Path Env:DGATEWAY_PSMODULE_CLEAN)) {
+            # clean up the extracted PowerShell module directory
+            Remove-Item -Path $DGatewayPSModulePath -Recurse
+            Remove-Item -Path $DGatewayPSModuleStagingPath -Recurse
+        }
+
+        if (!$SourceOnlyBuild -And (Test-Path Env:DGATEWAY_PACKAGE)) {
+            $DGatewayPackage = $Env:DGATEWAY_PACKAGE
+            $MsiPath = Join-Path "Release" "$($this.PackageName).msi"
+            Copy-Item -Path "$MsiPath" -Destination $DGatewayPackage
+        }
+
+        Pop-Location
+    }
+
+    [void] Package_Windows() {
+        $ShortVersion = $this.Version.Substring(2) # msi version
+        $TargetArch = $this.Target.WindowsArchitecture()
+
+        Push-Location
+        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)"
+        
+        if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+            $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
+        } else {
+            throw ("Specify DGATEWAY_EXECUTABLE environment variable")
+        }
+
+        $PSModulePaths = $this.Package_Windows_Prepare_Ps1Module()
+        $DGatewayPSModulePath = $PSModulePaths[0]
+        $DGatewayPSModuleStagingPath = $PSModulePaths[1]
 
         $TargetConfiguration = "Release"
         $ActionsProjectPath = Join-Path $(Get-Location) 'Actions' 
@@ -543,9 +652,27 @@ class TlkRecipe
         Pop-Location
     }
 
-    [void] Package() {
+    [void] Package([string]$PackageOption) {
         if ($this.Target.IsWindows()) {
-            $this.Package_Windows()
+            if (-Not $PackageOption ) {
+                $this.Package_Windows_Managed($false)
+                return
+            }
+
+            switch ($PackageOption) {
+                "legacy" {
+                    $this.Package_Windows()
+                }
+                "generate" {
+                    $this.Package_Windows_Managed($true)
+                }
+                "assemble" {
+                    $this.Package_Windows_Managed_Assemble()
+                }
+                default {
+                    throw "unrecognized package command: $PackageOption"
+                }
+            }
         } elseif ($this.Target.IsLinux()) {
             $this.Package_Linux()
         }
@@ -581,6 +708,8 @@ function Invoke-TlkStep {
         [Parameter(Position=0,Mandatory=$true)]
 		[ValidateSet('build','package','test')]
 		[string] $TlkVerb,
+        [ValidateSet('legacy', 'generate', 'assemble')]
+        [string] $PackageOption,
 		[ValidateSet('windows','macos','linux')]
 		[string] $Platform,
 		[ValidateSet('x86','x86_64','arm64')]
@@ -611,7 +740,7 @@ function Invoke-TlkStep {
 
     switch ($TlkVerb) {
         "build" { $tlk.Build() }
-        "package" { $tlk.Package() }
+        "package" { $tlk.Package($PackageOption) }
         "test" { $tlk.Test() }
     }
 }

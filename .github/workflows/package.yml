@@ -266,22 +266,58 @@ jobs:
         if: matrix.os == 'windows' && matrix.project == 'devolutions-gateway'
         uses: microsoft/setup-msbuild@v1.1
 
-      - name: Repackage
+      - name: Regenerate MSI
         if: matrix.project == 'devolutions-gateway'
         shell: pwsh
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
           $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
-          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
-          $Env:DGATEWAY_PSMODULE_CLEAN = "1"
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client"
 
           Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
             Remove-Item $_.FullName -Force
           }
 
-          ./ci/tlk.ps1 package
+          ./ci/tlk.ps1 package -PackageOption generate
+
+      - name: Sign msi runtime
+        if: matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        working-directory: package/WindowsManaged/Release
+        run: |
+          Get-ChildItem -Path .\* -Include "*.exe" | % {
+            $Params = @('sign',
+              '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
+              '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
+              '-kvi', '${{ secrets.CODE_SIGNING_CLIENT_ID }}',
+              '-kvs', '${{ secrets.CODE_SIGNING_CLIENT_SECRET }}',
+              '-kvc', '${{ secrets.CODE_SIGNING_CERTIFICATE_NAME }}',
+              '-tr', '${{ vars.CODE_SIGNING_TIMESTAMP_SERVER }}',
+              '-v')
+            AzureSignTool @Params $_.FullName
+          }
+
+      - name: Repackage
+        if: matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
+          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
+
+          ./ci/tlk.ps1 package -PackageOption assemble
+
+      - name: Repackage legacy msi
+        if: matrix.project == 'devolutions-gateway'
+        shell: pwsh
+        run: |
+          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
+          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
+          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*-legacy.msi' | Select -First 1
+          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
+          $Env:DGATEWAY_PSMODULE_CLEAN = "1"
+
+          ./ci/tlk.ps1 package -PackageOption legacy
 
       - name: Sign packages
         if: matrix.project == 'devolutions-gateway'
