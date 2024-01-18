@@ -307,11 +307,11 @@ jobs:
         run: |
           "dir=$(npm config get cache)" >> $Env:GITHUB_OUTPUT
         shell: pwsh
-        working-directory: webapp/web
+        working-directory: webapp
 
       - uses: actions/cache@v3
         with:
-          key: ${{ runner.os }}-node-${{ hashFiles('webapp/web/package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('webapp/package-lock.json') }}
           path: ${{ steps.npm-cache.outputs.dir }}
           restore-keys: |
             ${{ runner.os }}-node-
@@ -322,7 +322,7 @@ jobs:
           npm_token: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
 
       - name: Install NPM dependencies
-        working-directory: webapp/web
+        working-directory: webapp
         run: npm ci
 
       - name: Configure runner
@@ -331,7 +331,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        working-directory: webapp/web
+        working-directory: webapp
         run: ng build
 
       - uses: actions/upload-artifact@v3
