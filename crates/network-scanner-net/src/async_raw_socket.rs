@@ -34,11 +34,11 @@ impl AsyncRawSocket {
         Ok(AsyncRawSocket { socket, id, runtime })
     }
 
-    pub fn send_to<'short>(
+    pub fn send_to<'a>(
         &self,
-        data: &'short [u8],
-        addr: &'short socket2::SockAddr,
-    ) -> impl Future<Output = std::io::Result<usize>> + 'short {
+        data: &'a [u8],
+        addr: &'a socket2::SockAddr,
+    ) -> impl Future<Output = std::io::Result<usize>> + 'a {
         SendToFuture {
             socket: self.socket.clone(),
             runtime: self.runtime.clone(),
