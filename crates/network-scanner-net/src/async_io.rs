@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     num::NonZeroUsize,
-    os::windows::io::AsRawSocket,
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         Arc,
@@ -66,7 +65,7 @@ impl Socket2Runtime {
         socket.set_nonblocking(true)?;
         let id = self.next_socket_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         unsafe {
-            self.poller.add(socket.as_raw_socket(), Event::all(id))?;
+            self.poller.add(&socket, Event::all(id))?;
         }
         Ok(AsyncRawSocket::from_socket(socket, id, self.clone())?)
     }
