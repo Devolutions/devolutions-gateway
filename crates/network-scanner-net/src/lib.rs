@@ -1,12 +1,11 @@
-pub mod tokio_raw_socket;
 pub mod async_io;
+pub mod async_raw_socket;
 
-#[derive(Debug,thiserror::Error)]
-pub enum ScannnerNetError{
-
+#[derive(Debug, thiserror::Error)]
+pub enum ScannnerNetError {
     #[error("std::io::Error")]
-    StdIoError(std::io::Error),
-    
+    StdIoError(#[from] std::io::Error),
+
     #[error("async run time has failed")]
-    AsyncRuntimeError(anyhow::Error),
+    AsyncRuntimeError(#[from] anyhow::Error),
 }

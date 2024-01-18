@@ -1,150 +1,150 @@
 use std::{
+    collections::HashMap,
     num::NonZeroUsize,
-    os::windows::io::{AsRawSocket},
-    sync::Arc,
+    os::windows::io::AsRawSocket,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc,
+    },
 };
 
+use crossbeam::channel::Receiver;
+use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
-use tokio::sync::{Mutex};
 
-use crate::tokio_raw_socket::TokioRawSocket;
-
-#[derive(Debug)]
-pub struct AsyncIoRuntime {
-    poller: Arc<polling::Poller>,
-    socket_id: usize,
-    loop_handle: Option<std::thread::JoinHandle<()>>,
-    waiting_list: Arc<Mutex<Vec<SocketWaiter>>>,
-}
+use crate::async_raw_socket::AsyncRawSocket;
 
 #[derive(Debug)]
-struct SocketWaiter {
-    id: usize,
-    waker: std::task::Waker,
+pub struct Socket2Runtime {
+    poller: polling::Poller,
+    next_socket_id: AtomicUsize,
+    is_terminated: AtomicBool,
+    map: Arc<Mutex<HashMap<usize, std::task::Waker>>>,
+    sender: crossbeam::channel::Sender<(Event, std::task::Waker, Arc<Socket>)>,
 }
 
-impl AsyncIoRuntime {
-    pub fn new() -> anyhow::Result<Self> {
-        let poller = Arc::new(polling::Poller::new()?);
-        Ok(Self {
+impl Drop for Socket2Runtime {
+    fn drop(&mut self) {
+        self.is_terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.poller
+            .notify()
+            .map_err(|e| tracing::error!("failed to notify poller: {:?}", e))
+            .ok();
+        // event loop will terminate after this
+        // register loop will terminate becase of sender is dropped after this.
+    }
+}
+
+impl Socket2Runtime {
+    pub fn new() -> anyhow::Result<Arc<Self>> {
+        let poller = polling::Poller::new()?;
+        //unbounded channel performance is worse, but prevents sender from blocking, in case of Tokio crashes completely
+        let (sender, receiver) = crossbeam::channel::unbounded();
+        let runtime = Self {
             poller,
-            socket_id: 0,
-            loop_handle: None,
-            waiting_list: Arc::new(Mutex::new(Vec::new())),
-        })
-    }
-
-    fn get_handle(self) -> AsyncIoHandle {
-        AsyncIoHandle {
-            runtime: Arc::new(Mutex::new(self)),
-        }
-    }
-
-    fn add_socket(&mut self, socket: &socket2::Socket) -> anyhow::Result<usize> {
-        let id = self.get_socket_id();
-        unsafe {
-            self.poller.add(socket.as_raw_socket(), Event::all(id))?;
-        }
-        Ok(id)
-    }
-
-    fn get_socket_id(&mut self) -> usize {
-        self.socket_id += 1;
-        self.socket_id
-    }
-
-    pub fn start_loop(mut self) -> anyhow::Result<AsyncIoHandle> {
-        let poller = self.poller.clone();
-        let waiting_list = self.waiting_list.clone();
-        fn get_map(waiting_list: &Mutex<Vec<SocketWaiter>>) -> std::collections::HashMap<usize, std::task::Waker> {
-            let map = waiting_list
-                .blocking_lock()
-                .iter()
-                .map(|waiter| (waiter.id, waiter.waker.clone()))
-                .collect::<std::collections::HashMap<_, _>>();
-            map
-        }
-        let thread_builder = std::thread::Builder::new().name("async-io-event-loop".to_string());
-        let handle = thread_builder.spawn(move || {
-            let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
-            tracing::trace!("starting io event loop");
-            loop {
-                events.clear();
-
-                tracing::trace!("polling events");
-                poller.wait(&mut events, None).expect("polling failed");
-                let map = get_map(&waiting_list);
-                let mut to_remove = vec![];
-                for event in events.iter() {
-                    tracing::warn!("event {:?}", event);
-                    let key = event.key;
-                    map.get(&key).map(|waker| {
-                        tracing::warn!("waking up waker {:?}", waker);
-                        waker.wake_by_ref();
-                        to_remove.push(key);
-                    });
-                }
-
-                waiting_list
-                    .blocking_lock()
-                    .retain(|waiter| !to_remove.contains(&waiter.id));
-            }
-        })?;
-        self.loop_handle = Some(handle);
-        Ok(self.get_handle())
-    }
-
-    async fn awake_when_ready(&self, socket: Arc<Socket>, event: Event, waker: std::task::Waker) -> anyhow::Result<()> {
-        let waiter = SocketWaiter {
-            id: event.key,
-            waker: waker.clone(),
+            next_socket_id: AtomicUsize::new(0),
+            map: Arc::new(Mutex::new(HashMap::new())),
+            is_terminated: AtomicBool::new(false),
+            sender,
         };
 
-        // acquire lock
-        let exist = self
-            .waiting_list
-            .lock()
-            .await
-            .iter()
-            .any(|waiter| waiter.id == event.key);
-
-        if exist {
-            return Ok(());
-        }
-
-        self.waiting_list.lock().await.push(waiter);
-        self.poller.modify(socket.as_ref(), event)?;
-
-        tracing::debug!("awake_when_ready, modified socket {:?} to poller", socket.as_ref());
-        Ok(())
+        let runtime = Arc::new(runtime);
+        runtime.clone().start_register_loop(receiver)?;
+        runtime.clone().start_loop()?;
+        Ok(runtime)
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct AsyncIoHandle {
-    runtime: Arc<Mutex<AsyncIoRuntime>>,
-}
-
-impl AsyncIoHandle {
-    pub async fn new_socket(
-        &mut self,
+    pub fn new_socket(
+        self: &Arc<Self>,
         domain: socket2::Domain,
         ty: socket2::Type,
         protocol: Option<socket2::Protocol>,
-    ) -> anyhow::Result<TokioRawSocket> {
+    ) -> anyhow::Result<AsyncRawSocket> {
         let socket = socket2::Socket::new(domain, ty, protocol)?;
-        let id = self.runtime.lock().await.add_socket(&socket)?;
-        Ok(TokioRawSocket::from_socket(socket, id, self.clone())?)
+        socket.set_nonblocking(true)?;
+        let id = self.next_socket_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        unsafe {
+            self.poller.add(socket.as_raw_socket(), Event::all(id))?;
+        }
+        Ok(AsyncRawSocket::from_socket(socket, id, self.clone())?)
     }
 
-    pub(crate) fn awake(&self, socket: Arc<Socket>, id: Event, waker: std::task::Waker) -> anyhow::Result<()> {
-        let runtime = self.runtime.clone();
-        tokio::task::spawn(async move {
-            let runtime = runtime.lock().await;
-            runtime.awake_when_ready(socket, id, waker).await
-        });
+    pub(crate) fn remove_socket(&self, socket: &socket2::Socket) -> anyhow::Result<()> {
+        self.poller.delete(socket)?;
+        Ok(())
+    }
 
+    fn start_register_loop(
+        self: Arc<Self>,
+        receiver: Receiver<(Event, std::task::Waker, Arc<Socket>)>,
+    ) -> anyhow::Result<()> {
+        std::thread::Builder::new()
+            .name("[raw-socket]:register-loop | ".to_string())
+            .spawn(move || {
+                tracing::debug!("starting event register loop");
+                loop {
+                    let (event, waker, socket) = match receiver.recv() {
+                        //recv is blocking if channel is empty
+                        Ok(a) => a,
+                        Err(_) => break,
+                    };
+
+                    {
+                        tracing::trace!(?event, ?socket, "registering event");
+                        let mut map = self.map.lock();
+                        if map.contains_key(&event.key) {
+                            continue;
+                        }
+                        map.insert(event.key, waker);
+                    } // drop the lock before registering the event
+
+                    self.poller
+                        .modify(socket, event)
+                        .map_err(|e| tracing::warn!(error = ?e, "Event registration failed"))
+                        .ok(); // cannot handle this error
+                    tracing::trace!("event registered successfully");
+                }
+                tracing::warn!("register loop terminated")
+            })?;
+        Ok(())
+    }
+
+    fn start_loop(self: Arc<Self>) -> anyhow::Result<()> {
+        std::thread::Builder::new()
+            .name("[raw-socket]:io-event-loop | ".to_string())
+            .spawn(move || {
+                let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
+                tracing::debug!("starting io event loop");
+                loop {
+                    if self.is_terminated.load(std::sync::atomic::Ordering::Acquire) {
+                        break;
+                    }
+
+                    tracing::debug!("polling events");
+                    events.clear();
+                    self.poller.wait(&mut events, None).expect("polling failed");
+                    {
+                        // Important: lock after blocking poll
+                        let mut map = self.map.lock();
+                        for event in events.iter() {
+                            tracing::trace!(?event, "events polled");
+                            let key = event.key;
+                            if let Some(waker) = map.get(&key) {
+                                waker.wake_by_ref();
+                                tracing::trace!(?key, "waker called");
+                                map.remove(&key);
+                            }
+                        }
+                    }
+                }
+                self.is_terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: std::task::Waker) -> anyhow::Result<()> {
+        self.sender.send((event, waker, socket))?; //non-blocking if channel is not full
         Ok(())
     }
 }
