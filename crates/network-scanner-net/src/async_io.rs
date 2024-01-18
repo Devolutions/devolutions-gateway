@@ -8,6 +8,7 @@ use std::{
     },
 };
 
+use anyhow::Context;
 use crossbeam::channel::Receiver;
 use parking_lot::Mutex;
 use polling::{Event, Events};
@@ -144,7 +145,9 @@ impl Socket2Runtime {
     }
 
     pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: std::task::Waker) -> anyhow::Result<()> {
-        self.sender.send((event, waker, socket))?; //non-blocking if channel is not full
-        Ok(())
+        //non-blocking if channel is not full
+        self.sender
+            .send((event, waker, socket))
+            .with_context(|| "failed to send event to register loop")
     }
 }
