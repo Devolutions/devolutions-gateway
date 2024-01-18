@@ -9,6 +9,13 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.79"
+futures = "0.3.30"
+polling = "3.3.2"
 socket2 = { version = "0.5.5", features = ["all"] }
+thiserror = "1.0.56"
 tokio = { version = "1.35.1", features = ["io-util","rt","sync"] }
 tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+
+[dev-dependencies]
+tokio = { version = "1.35.1", features = ["io-util","rt","sync","macros","rt-multi-thread"] }
