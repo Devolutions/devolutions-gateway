@@ -1,4 +1,8 @@
-<div class="login-background">
+<div id="gateway-loading" *ngIf="!autoLoginAttempted">
+  <i class="dvl-icon dvl-icon-logo-gateway"></i>
+</div>
+
+<div *ngIf="autoLoginAttempted" class="login-background">
 
   <div class="login-box">
     <div class="login-box-header">

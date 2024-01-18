@@ -5,6 +5,8 @@ import {Observable} from "rxjs";
 
 @Injectable({ providedIn: 'root' })
 export class NavigationService {
+  private static readonly SESSION_KEY: string = 'session';
+  private static readonly LOGIN_KEY: string = 'login';
 
   constructor(
     private readonly router: Router,
@@ -16,12 +18,19 @@ export class NavigationService {
     return this.router.navigateByUrl(anyPath);
   }
 
+  navigateToLogin(): Promise<boolean> {
+    return this.router.navigateByUrl(NavigationService.LOGIN_KEY);
+  }
+
   navigateToRoot(): Promise<boolean> {
     return this.router.navigateByUrl('/');
   }
 
   navigateToNewSession(): Promise<boolean> {
-    return this.router.navigateByUrl('session');
+    if(this.isCurrentRouteUrl(NavigationService.SESSION_KEY)) {
+      return;
+    }
+    return this.router.navigateByUrl(NavigationService.SESSION_KEY);
   }
 
   navigateToRDPSession(connectionTypeRoute: WebClientSection, queryParams?: string) {

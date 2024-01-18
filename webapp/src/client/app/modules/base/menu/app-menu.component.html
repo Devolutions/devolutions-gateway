@@ -50,15 +50,19 @@
   </gateway-menu-group-list-item>
 
   <hub-divider></hub-divider>
-
   <!-- Logout -->
-  <gateway-menu-group-list-item class="primary-menu-group-list" [accordion]="false">
-    <div class="menu-list-item-container">
+  <gateway-menu-group-list-item
+    *ngIf="!isAutoLoginOn"
+    class="primary-menu-group-list"
+    [accordion]="false">
+
+    <div class="menu-list-item-container menu-list-item-container-footer">
       <div class="menu-list-item"
            (click)="logout()">
         <i class="dvl-icon dvl-icon-logout"></i>
         <span class="menu-list-item-label">Logout</span>
       </div>
     </div>
+
   </gateway-menu-group-list-item>
 </div>

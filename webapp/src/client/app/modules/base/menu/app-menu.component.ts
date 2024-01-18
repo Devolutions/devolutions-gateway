@@ -17,6 +17,7 @@ import {AuthService} from "@shared/services/auth.service";
 })
 export class AppMenuComponent extends BaseComponent implements  OnInit {
 
+  isAutoLoginOn = false;
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
 
@@ -30,6 +31,7 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
 
   ngOnInit(): void {
     this.subscribeRouteChange();
+    this.subscribeToIsAutoLoginOn();
   }
 
   onClickGoToNewSessionTab(): void {
@@ -44,6 +46,11 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     this.navigationService.getRouteChange().pipe(takeUntil(this.destroyed$)).subscribe((navigationEnd) => {
       this.resetSelectedMenu(navigationEnd.url);
     });
+  }
+
+  private subscribeToIsAutoLoginOn(): void {
+    this.authService.isAutoLoginOn.pipe(takeUntil(this.destroyed$))
+      .subscribe(isAutoLoginOn => this.isAutoLoginOn = isAutoLoginOn);
   }
 
   private initMenu(): void {

@@ -117,7 +117,6 @@ export class WebSessionService {
   }
 
   hasActiveWebSessions(): boolean {
-    console.log('numberOfActiveSessions', this.numberOfActiveSessions)
     return this.numberOfActiveSessions > 0;
   }
 
