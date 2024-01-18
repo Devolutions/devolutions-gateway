@@ -87,7 +87,7 @@ impl Future for RecvFromFuture<'_> {
         let socket = &self.socket.clone(); // avoid borrow checker error
         match socket.recv_from(self.buf) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
-            Err(e) => resolve(e, &self.socket, &self.runtime, self.id, cx.waker()),
+            Err(e) => resolve(e, &self.socket, &self.runtime, Event::readable(self.id), cx.waker()),
         }
     }
 }
@@ -106,7 +106,7 @@ impl<'a> Future for SendToFuture<'a> {
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match self.socket.send_to(self.data, self.addr) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
-            Err(e) => resolve(e, &self.socket, &self.runtime, self.id, cx.waker()),
+            Err(e) => resolve(e, &self.socket, &self.runtime, Event::writable(self.id), cx.waker()),
         }
     }
 }
@@ -115,12 +115,12 @@ fn resolve<T>(
     e: std::io::Error,
     socket: &Arc<Socket>,
     runtime: &Arc<Socket2Runtime>,
-    id: usize,
+    event: Event,
     waker: &std::task::Waker,
 ) -> std::task::Poll<std::io::Result<T>> {
     if e.kind() == std::io::ErrorKind::WouldBlock {
         tracing::trace!("operation would block");
-        if let Err(e) = runtime.register(socket.clone(), Event::writable(id), waker.clone()) {
+        if let Err(e) = runtime.register(socket.clone(), event, waker.clone()) {
             tracing::warn!("failed to register socket to poller: {:?}", e);
             return std::task::Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
