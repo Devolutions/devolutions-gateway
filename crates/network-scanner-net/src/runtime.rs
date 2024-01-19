@@ -2,31 +2,32 @@ use std::{
     collections::HashMap,
     num::NonZeroUsize,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
+    task::Waker,
 };
 
 use anyhow::Context;
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
-use crate::async_raw_socket::AsyncRawSocket;
+use crate::socket::AsyncRawSocket;
 
 #[derive(Debug)]
 pub struct Socket2Runtime {
     poller: polling::Poller,
     next_socket_id: AtomicUsize,
     is_terminated: AtomicBool,
-    map: Arc<Mutex<HashMap<usize, std::task::Waker>>>,
-    sender: crossbeam::channel::Sender<(Event, std::task::Waker, Arc<Socket>)>,
+    map: Arc<Mutex<HashMap<usize, Waker>>>,
+    sender: Sender<(Event, Waker, Arc<Socket>)>,
 }
 
 impl Drop for Socket2Runtime {
     fn drop(&mut self) {
-        self.is_terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.is_terminated.store(true, Ordering::SeqCst);
         self.poller
             .notify()
             .map_err(|e| tracing::error!("failed to notify poller: {:?}", e))
@@ -63,7 +64,7 @@ impl Socket2Runtime {
     ) -> anyhow::Result<AsyncRawSocket> {
         let socket = socket2::Socket::new(domain, ty, protocol)?;
         socket.set_nonblocking(true)?;
-        let id = self.next_socket_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self.next_socket_id.fetch_add(1, Ordering::SeqCst);
         unsafe {
             self.poller.add(&socket, Event::all(id))?;
         }
@@ -75,10 +76,7 @@ impl Socket2Runtime {
         Ok(())
     }
 
-    fn start_register_loop(
-        self: Arc<Self>,
-        receiver: Receiver<(Event, std::task::Waker, Arc<Socket>)>,
-    ) -> anyhow::Result<()> {
+    fn start_register_loop(self: Arc<Self>, receiver: Receiver<(Event, Waker, Arc<Socket>)>) -> anyhow::Result<()> {
         std::thread::Builder::new()
             .name("[raw-socket]:register-loop | ".to_string())
             .spawn(move || {
@@ -117,7 +115,7 @@ impl Socket2Runtime {
                 let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
                 tracing::debug!("starting io event loop");
                 loop {
-                    if self.is_terminated.load(std::sync::atomic::Ordering::Acquire) {
+                    if self.is_terminated.load(Ordering::Acquire) {
                         break;
                     }
 
@@ -138,12 +136,12 @@ impl Socket2Runtime {
                         }
                     }
                 }
-                self.is_terminated.store(true, std::sync::atomic::Ordering::SeqCst);
+                self.is_terminated.store(true, Ordering::SeqCst);
             })?;
         Ok(())
     }
 
-    pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: std::task::Waker) -> anyhow::Result<()> {
+    pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: Waker) -> anyhow::Result<()> {
         //non-blocking if channel is not full
         self.sender
             .send((event, waker, socket))

@@ -20,4 +20,5 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
-tokio = { version = "1.35.1", features = ["rt","sync","macros","rt-multi-thread"] }
+tokio = { version = "1.35.1", features = ["rt","sync","macros","rt-multi-thread","time","net"] }
+trust-dns-resolver = "0.23.2"
