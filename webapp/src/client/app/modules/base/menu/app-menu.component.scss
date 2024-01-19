@@ -284,6 +284,12 @@ border: 1px solid rgba(58, 163, 255, 0.24)
   }
 }
 
+.menu-list-item-container-footer {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+}
+
 :host-context(.app-menu-container.layout-menu-slim) {
   .menu-list-item-container {
     justify-content: center;
