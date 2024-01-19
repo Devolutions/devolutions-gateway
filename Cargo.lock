@@ -2155,7 +2155,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "crossbeam",
- "futures",
  "parking_lot",
  "polling",
  "socket2",
