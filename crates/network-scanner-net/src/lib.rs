@@ -6,6 +6,6 @@ pub enum ScannnerNetError {
     #[error("std::io::Error")]
     StdIoError(#[from] std::io::Error),
 
-    #[error("async run time has failed")]
-    AsyncRuntimeError(#[from] anyhow::Error),
+    #[error("async run time has failed with error: {0}")]
+    AsyncRuntimeError(String),
 }

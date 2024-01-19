@@ -14,26 +14,26 @@ use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
-use crate::socket::AsyncRawSocket;
+use crate::{socket::AsyncRawSocket, ScannnerNetError};
 
 #[derive(Debug)]
 pub struct Socket2Runtime {
     poller: polling::Poller,
     next_socket_id: AtomicUsize,
     is_terminated: AtomicBool,
-    map: Arc<Mutex<HashMap<usize, Waker>>>,
+    map: Mutex<HashMap<usize, Waker>>,
     sender: Sender<RegisterEvent>,
 }
 
 impl Drop for Socket2Runtime {
     fn drop(&mut self) {
         self.is_terminated.store(true, Ordering::SeqCst);
-        self.poller
+        let _ = self // ignore errors, cannot handle it here
+            .poller
             .notify()
-            .map_err(|e| tracing::error!("failed to notify poller: {:?}", e))
-            .ok();
+            .map_err(|e| tracing::error!("failed to notify poller: {:?}", e));
         // event loop will terminate after this
-        // register loop will terminate becase of sender is dropped after this.
+        // register loop will terminate because of sender is dropped after this.
     }
 }
 
@@ -45,7 +45,7 @@ impl Socket2Runtime {
         let runtime = Self {
             poller,
             next_socket_id: AtomicUsize::new(0),
-            map: Arc::new(Mutex::new(HashMap::new())),
+            map: Mutex::new(HashMap::new()),
             is_terminated: AtomicBool::new(false),
             sender,
         };
@@ -98,10 +98,10 @@ impl Socket2Runtime {
                                 map.insert(event.key, waker);
                             } // drop the lock before registering the event
 
-                            self.poller
+                            let _ = self
+                                .poller // cannot handle this error
                                 .modify(socket, event)
-                                .map_err(|e| tracing::warn!(error = ?e, "Event registration failed"))
-                                .ok(); // cannot handle this error
+                                .map_err(|e| tracing::warn!(error = ?e, "Event registration failed"));
                             tracing::trace!("event registered successfully");
                         }
 
@@ -109,10 +109,12 @@ impl Socket2Runtime {
                             {
                                 self.map.lock().remove(&id);
                             }
-                            self.poller
+                            let _ = self
+                                .poller // cannot handle this error
                                 .modify(&socket, Event::none(id))
-                                .map_err(|e| tracing::warn!(error = ?e, "Event unregistration failed"))
-                                .ok(); // cannot handle this error
+                                .map_err(|e| tracing::warn!(error = ?e, "Event unregistration failed"));
+
+                            tracing::trace!("event unregistered successfully");
                         }
                     }
                 }
@@ -155,13 +157,20 @@ impl Socket2Runtime {
     }
 
     pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: Waker) -> anyhow::Result<()> {
-        //non-blocking if channel is not full
+        if self.is_terminated.load(Ordering::Acquire) {
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+        }
+        //The sender will be non-blocking if the channel is not full
+        //This will prevent Tokio or other async runtime from panicking on blocking operation
         self.sender
             .send(RegisterEvent::Register { socket, event, waker })
             .with_context(|| "failed to send register event to register loop")
     }
 
     pub(crate) fn unregister(&self, socket: Arc<Socket>, id: usize) -> anyhow::Result<()> {
+        if self.is_terminated.load(Ordering::Acquire) {
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+        }
         self.sender
             .send(RegisterEvent::Unregister { socket, id })
             .with_context(|| "failed to send unregister event to register loop")

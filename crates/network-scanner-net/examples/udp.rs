@@ -12,7 +12,7 @@ pub async fn main() -> anyhow::Result<()> {
     let async_runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
     let clone = async_runtime.clone();
     tokio::task::spawn(async move {
-        let socket = clone
+        let mut socket = clone
             .new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)
             .unwrap();
         let addr = SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), 31255));
@@ -26,7 +26,7 @@ pub async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
+    let mut socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
     let addr = SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), 31255));
     socket.bind(&SockAddr::from(addr))?;
 

@@ -14,7 +14,7 @@ pub async fn main() -> anyhow::Result<()> {
         .init();
 
     let async_runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
-    let socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+    let mut socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     //create a tcp socket
     let ip = {
         let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());

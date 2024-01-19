@@ -6,7 +6,7 @@ use std::result::Result::Ok;
 
 use crate::runtime::Socket2Runtime;
 
-/// A wrapper on raw socket that can be used with async runtime
+/// A wrapper on raw socket that can be used with a IO event loop provided by `Socket2Runtime`.
 pub struct AsyncRawSocket {
     socket: Arc<socket2::Socket>,
     runtime: Arc<Socket2Runtime>,
@@ -15,15 +15,16 @@ pub struct AsyncRawSocket {
 
 impl Drop for AsyncRawSocket {
     fn drop(&mut self) {
-        self.runtime
+        let _ = self // We ignore errors here, avoid crashing the thread
+            .runtime
             .remove_socket(&self.socket)
-            .map_err(|e| tracing::error!("failed to remove socket from poller: {:?}", e))
-            .ok(); // ignore the error
+            .map_err(|e| tracing::error!("failed to remove socket from poller: {:?}", e));
     }
 }
 
 impl AsyncRawSocket {
-    // prevent direct instantiation
+    // Raw socket creation must be done through a `Socket2Runtime`,
+    // and this function is `pub(crate)` instead of `pub` on purpose.
     pub(crate) fn from_socket(
         socket: socket2::Socket,
         id: usize,
@@ -53,7 +54,7 @@ impl AsyncRawSocket {
 
 impl<'a> AsyncRawSocket {
     pub fn recv_from(
-        &'a self,
+        &'a mut self,
         buf: &'a mut [MaybeUninit<u8>],
     ) -> impl Future<Output = std::io::Result<(usize, SockAddr)>> + 'a {
         RecvFromFuture {
@@ -116,10 +117,10 @@ impl<'a> AsyncRawSocket {
 }
 
 struct RecvFromFuture<'a> {
-    pub socket: Arc<socket2::Socket>,
-    pub buf: &'a mut [MaybeUninit<u8>],
-    pub id: usize,
-    pub runtime: Arc<Socket2Runtime>,
+    socket: Arc<socket2::Socket>,
+    buf: &'a mut [MaybeUninit<u8>],
+    id: usize,
+    runtime: Arc<Socket2Runtime>,
 }
 
 impl Future for RecvFromFuture<'_> {
@@ -134,11 +135,11 @@ impl Future for RecvFromFuture<'_> {
 }
 
 struct SendToFuture<'a> {
-    pub socket: Arc<socket2::Socket>,
-    pub runtime: Arc<Socket2Runtime>,
-    pub id: usize,
-    pub data: &'a [u8],
-    pub addr: &'a socket2::SockAddr,
+    socket: Arc<socket2::Socket>,
+    runtime: Arc<Socket2Runtime>,
+    id: usize,
+    data: &'a [u8],
+    addr: &'a socket2::SockAddr,
 }
 
 impl<'a> Future for SendToFuture<'a> {
@@ -153,9 +154,9 @@ impl<'a> Future for SendToFuture<'a> {
 }
 
 struct AcceptFuture {
-    pub socket: Arc<socket2::Socket>,
-    pub runtime: Arc<Socket2Runtime>,
-    pub id: usize,
+    socket: Arc<socket2::Socket>,
+    runtime: Arc<Socket2Runtime>,
+    id: usize,
 }
 
 impl Future for AcceptFuture {
@@ -172,11 +173,11 @@ impl Future for AcceptFuture {
     }
 }
 struct ConnectFuture<'a> {
-    pub socket: Arc<socket2::Socket>,
-    pub runtime: Arc<Socket2Runtime>,
-    pub id: usize,
-    pub addr: &'a socket2::SockAddr,
-    pub is_first_poll: bool,
+    socket: Arc<socket2::Socket>,
+    runtime: Arc<Socket2Runtime>,
+    id: usize,
+    addr: &'a socket2::SockAddr,
+    is_first_poll: bool,
 }
 
 impl<'a> Future for ConnectFuture<'a> {
@@ -196,10 +197,10 @@ impl<'a> Future for ConnectFuture<'a> {
 }
 
 struct SendFuture<'a> {
-    pub socket: Arc<socket2::Socket>,
-    pub runtime: Arc<Socket2Runtime>,
-    pub id: usize,
-    pub data: &'a [u8],
+    socket: Arc<socket2::Socket>,
+    runtime: Arc<Socket2Runtime>,
+    id: usize,
+    data: &'a [u8],
 }
 
 impl<'a> Future for SendFuture<'a> {
@@ -214,10 +215,10 @@ impl<'a> Future for SendFuture<'a> {
 }
 
 struct RecvFuture<'a> {
-    pub socket: Arc<socket2::Socket>,
-    pub buf: &'a mut [MaybeUninit<u8>],
-    pub id: usize,
-    pub runtime: Arc<Socket2Runtime>,
+    socket: Arc<socket2::Socket>,
+    buf: &'a mut [MaybeUninit<u8>],
+    id: usize,
+    runtime: Arc<Socket2Runtime>,
 }
 
 impl<'a> Future for RecvFuture<'a> {
@@ -232,13 +233,13 @@ impl<'a> Future for RecvFuture<'a> {
     }
 }
 
-/// non-blocking socket does not work with timeout, so we need impl Drop for unregistering socket from poller
+/// Non-blocking socket does not work with timeout, so we need impl Drop for unregistering socket from poller
 /// Impl Drop for unregistering socket from poller, the caller can use other async timer for timeout
 macro_rules! impl_drop {
     ($type:ty) => {
         impl Drop for $type {
             fn drop(&mut self) {
-                self.runtime.unregister(self.socket.clone(), self.id).ok();
+                let _ = self.runtime.unregister(self.socket.clone(), self.id);
             }
         }
     };

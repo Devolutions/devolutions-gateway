@@ -10,7 +10,7 @@ pub async fn main() -> anyhow::Result<()> {
         .init();
 
     let runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
-    let socket = runtime.new_socket(
+    let mut socket = runtime.new_socket(
         socket2::Domain::IPV4,
         socket2::Type::RAW,
         Some(socket2::Protocol::ICMPV4),

@@ -11,9 +11,9 @@ pub async fn main() -> anyhow::Result<()> {
 
     let async_runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
 
-    let socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::RAW, Some(Protocol::ICMPV4))?;
+    let mut socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::RAW, Some(Protocol::ICMPV4))?;
 
-    let socket2 = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::RAW, Some(Protocol::ICMPV4))?;
+    let mut socket2 = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::RAW, Some(Protocol::ICMPV4))?;
 
     let echo_request: Vec<u8> = vec![
         8, 0, 77, 1, 0, 1, 0, 90, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113,
