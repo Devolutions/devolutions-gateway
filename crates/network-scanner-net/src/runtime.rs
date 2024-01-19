@@ -22,7 +22,7 @@ pub struct Socket2Runtime {
     next_socket_id: AtomicUsize,
     is_terminated: AtomicBool,
     map: Arc<Mutex<HashMap<usize, Waker>>>,
-    sender: Sender<(Event, Waker, Arc<Socket>)>,
+    sender: Sender<RegisterEvent>,
 }
 
 impl Drop for Socket2Runtime {
@@ -49,7 +49,6 @@ impl Socket2Runtime {
             is_terminated: AtomicBool::new(false),
             sender,
         };
-
         let runtime = Arc::new(runtime);
         runtime.clone().start_register_loop(receiver)?;
         runtime.clone().start_loop()?;
@@ -76,32 +75,46 @@ impl Socket2Runtime {
         Ok(())
     }
 
-    fn start_register_loop(self: Arc<Self>, receiver: Receiver<(Event, Waker, Arc<Socket>)>) -> anyhow::Result<()> {
+    fn start_register_loop(self: Arc<Self>, receiver: Receiver<RegisterEvent>) -> anyhow::Result<()> {
         std::thread::Builder::new()
             .name("[raw-socket]:register-loop | ".to_string())
             .spawn(move || {
                 tracing::debug!("starting event register loop");
                 loop {
-                    let (event, waker, socket) = match receiver.recv() {
+                    let event = match receiver.recv() {
                         //recv is blocking if channel is empty
                         Ok(a) => a,
                         Err(_) => break,
                     };
 
-                    {
-                        tracing::trace!(?event, ?socket, "registering event");
-                        let mut map = self.map.lock();
-                        if map.contains_key(&event.key) {
-                            continue;
-                        }
-                        map.insert(event.key, waker);
-                    } // drop the lock before registering the event
+                    match event {
+                        RegisterEvent::Register { socket, event, waker } => {
+                            {
+                                tracing::trace!(?event, ?socket, "registering event");
+                                let mut map = self.map.lock();
+                                if map.contains_key(&event.key) {
+                                    continue;
+                                }
+                                map.insert(event.key, waker);
+                            } // drop the lock before registering the event
 
-                    self.poller
-                        .modify(socket, event)
-                        .map_err(|e| tracing::warn!(error = ?e, "Event registration failed"))
-                        .ok(); // cannot handle this error
-                    tracing::trace!("event registered successfully");
+                            self.poller
+                                .modify(socket, event)
+                                .map_err(|e| tracing::warn!(error = ?e, "Event registration failed"))
+                                .ok(); // cannot handle this error
+                            tracing::trace!("event registered successfully");
+                        }
+
+                        RegisterEvent::Unregister { socket, id } => {
+                            {
+                                self.map.lock().remove(&id);
+                            }
+                            self.poller
+                                .modify(&socket, Event::none(id))
+                                .map_err(|e| tracing::warn!(error = ?e, "Event unregistration failed"))
+                                .ok(); // cannot handle this error
+                        }
+                    }
                 }
                 tracing::warn!("register loop terminated")
             })?;
@@ -144,7 +157,25 @@ impl Socket2Runtime {
     pub(crate) fn register(&self, socket: Arc<Socket>, event: Event, waker: Waker) -> anyhow::Result<()> {
         //non-blocking if channel is not full
         self.sender
-            .send((event, waker, socket))
-            .with_context(|| "failed to send event to register loop")
+            .send(RegisterEvent::Register { socket, event, waker })
+            .with_context(|| "failed to send register event to register loop")
     }
+
+    pub(crate) fn unregister(&self, socket: Arc<Socket>, id: usize) -> anyhow::Result<()> {
+        self.sender
+            .send(RegisterEvent::Unregister { socket, id })
+            .with_context(|| "failed to send unregister event to register loop")
+    }
+}
+
+enum RegisterEvent {
+    Register {
+        socket: Arc<Socket>,
+        event: Event,
+        waker: Waker,
+    },
+    Unregister {
+        socket: Arc<Socket>,
+        id: usize,
+    },
 }

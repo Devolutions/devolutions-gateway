@@ -124,7 +124,6 @@ struct RecvFromFuture<'a> {
 
 impl Future for RecvFromFuture<'_> {
     type Output = std::io::Result<(usize, SockAddr)>;
-
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         let socket = &self.socket.clone(); // avoid borrow checker error
         match socket.recv_from(self.buf) {
@@ -172,7 +171,6 @@ impl Future for AcceptFuture {
         }
     }
 }
-
 struct ConnectFuture<'a> {
     pub socket: Arc<socket2::Socket>,
     pub runtime: Arc<Socket2Runtime>,
@@ -233,6 +231,25 @@ impl<'a> Future for RecvFuture<'a> {
         }
     }
 }
+
+/// non-blocking socket does not work with timeout, so we need impl Drop for unregistering socket from poller
+/// Impl Drop for unregistering socket from poller, the caller can use other async timer for timeout
+macro_rules! impl_drop {
+    ($type:ty) => {
+        impl Drop for $type {
+            fn drop(&mut self) {
+                self.runtime.unregister(self.socket.clone(), self.id).ok();
+            }
+        }
+    };
+}
+
+impl_drop!(RecvFromFuture<'_>);
+impl_drop!(SendToFuture<'_>);
+impl_drop!(AcceptFuture);
+impl_drop!(ConnectFuture<'_>);
+impl_drop!(SendFuture<'_>);
+impl_drop!(RecvFuture<'_>);
 
 fn resolve<T>(
     e: std::io::Error,

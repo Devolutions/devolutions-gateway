@@ -34,7 +34,7 @@ pub fn blocking_ping(ip: Ipv4Addr) -> anyhow::Result<()> {
     // elements are in an initialized state.
     let filled = unsafe { assume_init(&buffer[..size]) };
 
-    let packet = icmp_v4::Icmpv4Packet::parse(filled).with_context(|| format!("cannot parse icmp packet"))?;
+    let packet = icmp_v4::Icmpv4Packet::parse(filled).with_context(|| "cannot parse icmp packet".to_string())?;
 
     if let icmp_v4::Icmpv4Message::EchoReply { payload, .. } = packet.message {
         if payload != verifier {
