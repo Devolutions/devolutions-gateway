@@ -77,6 +77,7 @@
         'New-DGatewayDelegationKeyPair', 'Import-DGatewayDelegationKey',
         'New-DGatewayToken',
         'New-DGatewayWebAppConfig',
+        'Set-DGatewayUser', 'Remove-DGatewayUser', 'Get-DGatewayUser',
         'Start-DGateway', 'Stop-DGateway', 'Restart-DGateway',
         'Get-DGatewayVersion', 'Get-DGatewayPackage',
         'Install-DGatewayPackage', 'Uninstall-DGatewayPackage')

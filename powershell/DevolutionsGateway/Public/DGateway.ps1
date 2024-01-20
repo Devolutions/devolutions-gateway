@@ -10,6 +10,7 @@ $script:DGatewayProvisionerPublicKeyFileName = 'provisioner.pem'
 $script:DGatewayProvisionerPrivateKeyFileName = 'provisioner.key'
 $script:DGatewayDelegationPublicKeyFileName = 'delegation.pem'
 $script:DGatewayDelegationPrivateKeyFileName = 'delegation.key'
+$script:DGatewayCustomUsersFileName = 'users.txt'
 
 function Get-DGatewayVersion {
     param(
@@ -258,6 +259,7 @@ class DGatewayWebAppConfig {
     [string] $Authentication
     [System.Nullable[System.UInt32]] $AppTokenMaximumLifetime
     [System.Nullable[System.UInt32]] $LoginLimitRate
+    [string] $UsersFile
 
     DGatewayWebAppConfig() { }
 }
@@ -1054,6 +1056,142 @@ function New-DGatewayToken {
     }
 
     New-JwtRs256 -Header $Header -Payload $Payload -PrivateKey $PrivateKey
+}
+
+function ConvertTo-DGatewayHash
+{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0)]
+        [string] $Password
+    )
+
+    $parameters = [Devolutions.Picky.Argon2Params]::New.Invoke(@())
+    $algorithm = [Devolutions.Picky.Argon2Algorithm]::Argon2id
+    $argon2 = [Devolutions.Picky.Argon2]::New.Invoke(@($algorithm, $parameters))
+    $argon2.HashPassword($Password)
+}
+
+function Get-DGatewayUsersFilePath
+{
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath
+    )
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+    $Config = Get-DGatewayConfig -ConfigPath:$ConfigPath -NullProperties
+    
+    if ($Config.WebApp.UsersFile) {
+        $fileName = $Config.WebApp.UsersFile
+    } else {
+        $fileName = $script:DGatewayCustomUsersFileName
+    }
+
+    $filePath = Join-Path -Path $ConfigPath -ChildPath $fileName
+    return $filePath
+}
+
+function Set-DGatewayUser {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath,
+        [Parameter(Mandatory=$true, Position=0)]
+        [string] $Username,
+        [Parameter(Mandatory=$true, Position=1)]
+        [string] $Password
+    )
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+
+    $filePath = Get-DGatewayUsersFilePath -ConfigPath $ConfigPath
+    $hash = ConvertTo-DGatewayHash -Password $Password
+
+    $fileContent = @()
+    if (Test-Path $filePath) {
+        try {
+            $fileContent = [System.IO.File]::ReadLines($filePath)
+        }
+        catch {
+            Write-Host "Error reading file: $_"
+            return
+        }
+    }
+
+    $entry = "$Username`:$hash"
+    $updated = $false
+
+    $fileContentList = New-Object System.Collections.Generic.List[System.String]
+    foreach ($line in $fileContent) {
+        $fileContentList.Add($line)
+    }
+
+    for ($i = 0; $i -lt $fileContentList.Count; $i++) {
+        if ((-Not [string]::IsNullOrEmpty($fileContentList[$i])) -And
+            $fileContentList[$i].StartsWith("${Username}:")) {
+            $fileContentList[$i] = $entry
+            $updated = $true
+            break
+        }
+    }
+
+    if (-Not $updated) {
+        $fileContentList.Add($entry)
+    }
+
+    [System.IO.File]::WriteAllLines($filePath, $fileContentList)
+}
+
+function Remove-DGatewayUser {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath,
+        [Parameter(Mandatory=$true, Position=0)]
+        [string] $Username
+    )
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+
+    $filePath = Get-DGatewayUsersFilePath -ConfigPath $ConfigPath
+    $fileContent = Get-Content $filePath
+
+    $newContent = $fileContent | Where-Object { $_ -notmatch "^${Username}:" }
+    Set-Content -Path $filePath -Value $newContent
+}
+
+function Get-DGatewayUser {
+    [CmdletBinding()]
+    param(
+        [string] $ConfigPath,
+        [string] $Username
+    )
+
+    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
+
+    $filePath = Get-DGatewayUsersFilePath -ConfigPath $ConfigPath
+    $fileContent = Get-Content $filePath
+    $users = @()
+
+    foreach ($line in $fileContent) {
+        # Splitting at the first ':' character
+        $splitIndex = $line.IndexOf(':')
+        if ($splitIndex -lt 0) { continue }
+
+        $user = $line.Substring(0, $splitIndex)
+        $hash = $line.Substring($splitIndex + 1)
+
+        $users += New-Object PSObject -Property @{
+            User = $user
+            Hash = $hash
+        }
+    }
+
+    if ($Username) {
+        $user = $users | Where-Object { $_.User -eq $Username }
+        return $user
+    } else {
+        return $users
+    }
 }
 
 function Get-DGatewayPackage {
