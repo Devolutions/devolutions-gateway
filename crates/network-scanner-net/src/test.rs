@@ -182,7 +182,7 @@ fn handle_client(mut stream: std::net::TcpStream) -> std::io::Result<()> {
         // Read data from the stream
         let size = stream.read(&mut buffer)?;
         println!("Received {} bytes: {:?}", size, &buffer[..size]);
-        std::thread::sleep(std::time::Duration::from_millis(500)); // simulate some work
+        std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
         stream.write_all(&buffer[..size])?; // Echo the data back to the client
         println!("Echoed back {} bytes", size);
     }
