@@ -4,7 +4,7 @@ use std::net::ToSocketAddrs;
 use network_scanner_net::assume_init;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Context: Both Tokio/Mio and Polling uses the same OS's async IO API, 
+/// Context: Both Tokio/Mio and Polling uses the same OS's async IO API,
 /// this example shows that it will not be a problem to use both of them in the same program.
 /// The event loop managed by Tokio/Mio will not be affected by the raw socket and vice versa.
 #[tokio::main]
@@ -27,13 +27,13 @@ pub async fn main() -> anyhow::Result<()> {
 
     let handle = tokio::task::spawn(async move {
         tracing::info!("connecting to cern using tokio");
-        let mut stream = tokio::net::TcpStream::connect(clone).await?; 
+        let mut stream = tokio::net::TcpStream::connect(clone).await?;
         tracing::info!("conncted to cern using tokio");
         let _ = stream.write(request_clone.as_bytes()).await?;
         let buf = &mut [0u8; 1024];
         let size = stream.read(buf).await?;
         Ok::<Vec<_>, anyhow::Error>(buf[..size].to_vec())
-    }); 
+    });
 
     let handle_for_raw = tokio::task::spawn(async move {
         socket.connect(&socket2::SockAddr::from(socket_addr)).await?;
