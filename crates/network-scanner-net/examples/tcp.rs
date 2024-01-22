@@ -14,7 +14,7 @@ pub async fn main() -> anyhow::Result<()> {
         .with_thread_names(true)
         .init();
 
-    let async_runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
+    let async_runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
     let mut socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     //create a tcp socket
     let request = "GET / HTTP/1.0\r\nHost: info.cern.ch\r\n\r\n".to_string();

@@ -38,9 +38,10 @@ impl Drop for Socket2Runtime {
 
 const QUEUE_CAPACITY: usize = 1024;
 impl Socket2Runtime {
-    pub fn new() -> anyhow::Result<Arc<Self>> {
+    /// Create a new runtime with a queue capacity, default is 1024.
+    pub fn new(queue_capacity: Option<usize>) -> anyhow::Result<Arc<Self>> {
         let poller = polling::Poller::new()?;
-        let (sender, receiver) = crossbeam::channel::bounded(QUEUE_CAPACITY);
+        let (sender, receiver) = crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
         let runtime = Self {
             poller,
             next_socket_id: AtomicUsize::new(0),
@@ -123,8 +124,12 @@ impl Socket2Runtime {
         }
         tracing::trace!(?event, ?socket, "registering event");
         self.poller.modify(socket, event)?;
+
+        // Use try_send instead of send, in case some io events blocked the queue completely,
+        // it would be better to drop the register event then block the worker thread or main thread.
+        // as the worker thread is shared for the entire application.
         self.sender
-            .send(RegisterEvent::Register { id: event.key, waker })
+            .try_send(RegisterEvent::Register { id: event.key, waker })
             .with_context(|| "failed to send register event to register loop")
     }
 
@@ -133,7 +138,7 @@ impl Socket2Runtime {
             Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
         }
         self.sender
-            .send(RegisterEvent::Unregister { id })
+            .try_send(RegisterEvent::Unregister { id })
             .with_context(|| "failed to send unregister event to register loop")
     }
 }

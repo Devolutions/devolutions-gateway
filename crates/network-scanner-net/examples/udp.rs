@@ -10,7 +10,7 @@ pub async fn main() -> anyhow::Result<()> {
         .with_thread_names(true)
         .init();
 
-    let async_runtime = network_scanner_net::runtime::Socket2Runtime::new()?;
+    let async_runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
     let clone = async_runtime.clone();
     tokio::task::spawn(async move {
         let mut socket = clone

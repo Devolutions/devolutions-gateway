@@ -12,7 +12,7 @@ use crate::socket::AsyncRawSocket;
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_connectivity() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
-    let runtime = crate::runtime::Socket2Runtime::new()?;
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     socket.connect(&socket2::SockAddr::from(addr)).await?;
     Ok(())
@@ -22,7 +22,7 @@ async fn test_connectivity() -> anyhow::Result<()> {
 async fn multiple_udp() -> anyhow::Result<()> {
     let addr = local_udp_server()?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
-    let runtime = crate::runtime::Socket2Runtime::new()?;
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket0 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
     let socket1 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
     let socket2 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
@@ -64,7 +64,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
-    let runtime = crate::runtime::Socket2Runtime::new()?;
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket0 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket1 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket2 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
@@ -101,7 +101,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
-    let runtime = crate::runtime::Socket2Runtime::new()?;
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let mut socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
     let handle = tokio::task::spawn(async move {
