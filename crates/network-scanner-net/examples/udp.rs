@@ -43,7 +43,7 @@ pub async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        let inited = unsafe { assume_init(&mut buf[..size]) };
+        let inited = unsafe { assume_init(&buf[..size]) };
         counter += 1;
         if counter == 9 {
             break;

@@ -41,7 +41,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
                 .await
                 .unwrap_or_else(|_| panic!("recv_from: {}", number));
             tracing::info!("size: {}, addr: {:?}", size, addr);
-            let back = unsafe { crate::assume_init(&mut buf[..size]) };
+            let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, format!("hello from socket {}", number).as_bytes());
         })
     }
@@ -78,7 +78,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let size = socket.recv(&mut buf).await.expect("recv");
             tracing::info!("size: {}", size);
-            let back = unsafe { crate::assume_init(&mut buf[..size]) };
+            let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, format!("hello from socket {}", number).as_bytes());
         })
     }
@@ -112,7 +112,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let size = socket.recv(&mut buf).await?;
             tracing::info!("size: {}", size);
-            let back = unsafe { crate::assume_init(&mut buf[..size]) };
+            let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, msg.as_bytes());
         }
 
@@ -123,7 +123,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
         let mut stream = tokio::net::TcpStream::connect(addr).await?;
         let msg = "hello from tokio socket".to_string();
         for _ in 0..10 {
-            stream.write(msg.as_bytes()).await?;
+            let _ = stream.write(msg.as_bytes()).await?;
             let mut buf = [0u8; 1024];
             let size = stream.read(&mut buf).await?;
             tracing::info!("size: {}", size);
@@ -155,12 +155,11 @@ fn local_udp_server() -> anyhow::Result<SocketAddr> {
             match socket.recv_from(&mut buffer) {
                 Ok((size, src)) => {
                     println!("Received {} bytes from {}", size, src);
-
-                    // Handle the incoming data (e.g., echo it back)
-                    match socket.send_to(&buffer[..size], src) {
-                        Ok(sent) => println!("Sent {} bytes back to {}", sent, src),
-                        Err(e) => tracing::error!("Failed to send data: {}", e),
-                    }
+                    let socket_clone = socket.try_clone().expect("Failed to clone socket");
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
+                        socket_clone.send_to(&buffer[..size], src).expect("Failed to send data")
+                    });
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     continue;
@@ -183,9 +182,8 @@ fn handle_client(mut stream: std::net::TcpStream) -> std::io::Result<()> {
         // Read data from the stream
         let size = stream.read(&mut buffer)?;
         println!("Received {} bytes: {:?}", size, &buffer[..size]);
-
-        // Echo the data back to the client
-        stream.write_all(&buffer[..size])?;
+        std::thread::sleep(std::time::Duration::from_millis(500)); // simulate some work
+        stream.write_all(&buffer[..size])?; // Echo the data back to the client
         println!("Echoed back {} bytes", size);
     }
 }
