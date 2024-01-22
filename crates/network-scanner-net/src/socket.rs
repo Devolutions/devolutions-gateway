@@ -215,7 +215,7 @@ impl<'a> Future for ConnectFuture<'a> {
                 tracing::trace!("connect should register");
                 if let Err(e) = self
                     .runtime
-                    .register(&self.socket, Event::writable(self.id), cx.waker().clone())
+                    .register(&self.socket, Event::all(self.id), cx.waker().clone())
                 {
                     tracing::warn!(?self.socket, ?self.addr, "failed to register socket to poller");
                     return std::task::Poll::Ready(Err(std::io::Error::new(
