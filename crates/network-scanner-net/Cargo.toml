@@ -23,6 +23,6 @@ tokio = { version = "1.35.1", features = [
     "macros",
     "rt-multi-thread",
     "time",
-    "net"
+    "net",
+    "io-util"
 ] }
-trust-dns-resolver = "0.23.2"

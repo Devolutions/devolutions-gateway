@@ -15,6 +15,7 @@ pub struct AsyncRawSocket {
 
 impl Drop for AsyncRawSocket {
     fn drop(&mut self) {
+        tracing::trace!(id = %self.id,socket = ?self.socket, "drop socket");
         let _ = self // We ignore errors here, avoid crashing the thread
             .runtime
             .remove_socket(&self.socket)
@@ -30,8 +31,8 @@ impl AsyncRawSocket {
         id: usize,
         runtime: Arc<Socket2Runtime>,
     ) -> std::io::Result<AsyncRawSocket> {
-        socket.set_nonblocking(true)?;
         let socket = Arc::new(socket);
+        socket.set_nonblocking(true)?;
         Ok(AsyncRawSocket { socket, id, runtime })
     }
 
@@ -53,6 +54,7 @@ impl AsyncRawSocket {
 }
 
 impl<'a> AsyncRawSocket {
+    #[tracing::instrument(skip(self, buf))]
     pub fn recv_from(
         &'a mut self,
         buf: &'a mut [MaybeUninit<u8>],
@@ -65,6 +67,7 @@ impl<'a> AsyncRawSocket {
         }
     }
 
+    #[tracing::instrument(skip(self, data))]
     pub fn send_to(
         &self,
         data: &'a [u8],
@@ -79,6 +82,7 @@ impl<'a> AsyncRawSocket {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn accept(&self) -> impl Future<Output = std::io::Result<(AsyncRawSocket, SockAddr)>> {
         AcceptFuture {
             socket: self.socket.clone(),
@@ -87,6 +91,7 @@ impl<'a> AsyncRawSocket {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn connect(&self, addr: &'a SockAddr) -> impl Future<Output = std::io::Result<()>> + 'a {
         ConnectFuture {
             socket: self.socket.clone(),
@@ -97,7 +102,8 @@ impl<'a> AsyncRawSocket {
         }
     }
 
-    pub fn send(&self, data: &'a [u8]) -> impl Future<Output = std::io::Result<usize>> + 'a {
+    #[tracing::instrument(skip(self, data))]
+    pub fn send(&mut self, data: &'a [u8]) -> impl Future<Output = std::io::Result<usize>> + 'a {
         SendFuture {
             socket: self.socket.clone(),
             runtime: self.runtime.clone(),
@@ -106,7 +112,8 @@ impl<'a> AsyncRawSocket {
         }
     }
 
-    pub fn recv(&self, buf: &'a mut [MaybeUninit<u8>]) -> impl Future<Output = std::io::Result<usize>> + 'a {
+    #[tracing::instrument(skip(self, buf))]
+    pub fn recv(&mut self, buf: &'a mut [MaybeUninit<u8>]) -> impl Future<Output = std::io::Result<usize>> + 'a {
         RecvFuture {
             socket: self.socket.clone(),
             buf,
@@ -239,7 +246,8 @@ macro_rules! impl_drop {
     ($type:ty) => {
         impl Drop for $type {
             fn drop(&mut self) {
-                let _ = self.runtime.unregister(self.socket.clone(), self.id);
+                tracing::trace!(id = %self.id,socket = ?self.socket, "drop future");
+                let _ = self.runtime.unregister(self.id);
             }
         }
     };
@@ -260,12 +268,12 @@ fn resolve<T>(
     waker: &std::task::Waker,
 ) -> std::task::Poll<std::io::Result<T>> {
     if e.kind() == std::io::ErrorKind::WouldBlock {
-        tracing::trace!("operation would block");
-        if let Err(e) = runtime.register(socket.clone(), event, waker.clone()) {
-            tracing::warn!("failed to register socket to poller: {:?}", e);
+        tracing::trace!(?event, "operation would block");
+        if let Err(e) = runtime.register(socket, event, waker.clone()) {
+            tracing::warn!(?socket, ?event, "failed to register socket to poller");
             return std::task::Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                "failed to register socket to event loop",
+                format!("failed to register socket to poller: {}", e),
             )));
         }
         std::task::Poll::Pending

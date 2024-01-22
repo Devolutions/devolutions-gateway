@@ -1,5 +1,6 @@
 use std::{mem::MaybeUninit, net::SocketAddr};
 
+use network_scanner_net::assume_init;
 use socket2::SockAddr;
 
 #[tokio::main]
@@ -17,12 +18,12 @@ pub async fn main() -> anyhow::Result<()> {
             .unwrap();
         let addr = SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), 31255));
         tokio::time::sleep(std::time::Duration::from_secs(1)).await; // wait for the other socket to start
-
-        for _ in 0..10 {
+        tracing::info!("starting to send");
+        for i in 0..10 {
             socket.send_to(b"hello", &SockAddr::from(addr)).await.expect("send_to");
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let (size, addr) = socket.recv_from(&mut buf).await.expect("recv_from");
-            tracing::info!("size: {}, addr: {:?}", size, addr);
+            tracing::info!("size: {}, addr: {:?}, counter: {}", size, addr, i);
         }
     });
 
@@ -30,8 +31,11 @@ pub async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from((std::net::Ipv4Addr::new(127, 0, 0, 1), 31255));
     socket.bind(&SockAddr::from(addr))?;
 
+    tracing::info!("starting to receive");
+    let mut counter = 0;
     loop {
         let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
+
         let (size, addr) = match socket.recv_from(&mut buf).await {
             Ok(a) => a,
             Err(e) => {
@@ -39,14 +43,13 @@ pub async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        let inited = unsafe { init_buf(&mut buf, size) };
-        tracing::info!("size: {}, addr: {:?}", size, addr);
+        let inited = unsafe { assume_init(&mut buf[..size]) };
+        counter += 1;
+        if counter == 9 {
+            break;
+        }
         socket.send_to(inited, &addr).await?;
     }
-}
 
-unsafe fn init_buf(buf: &mut [MaybeUninit<u8>], size: usize) -> &[u8] {
-    let buf = &mut buf[..size];
-
-    std::mem::transmute::<&mut [MaybeUninit<u8>], &mut [u8]>(buf) as _
+    Ok(())
 }
