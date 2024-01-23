@@ -13,6 +13,7 @@ use crossbeam::channel::{Receiver, Sender};
 use polling::{Event, Events};
 use socket2::Socket;
 
+
 use crate::{socket::AsyncRawSocket, ScannnerNetError};
 
 #[derive(Debug)]
@@ -78,38 +79,47 @@ impl Socket2Runtime {
             .spawn(move || {
                 let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
                 tracing::debug!("starting io event loop");
-                let mut map = HashMap::new();
+                let mut events_registered = HashMap::new();
+                let mut events_happend = HashMap::new();
                 loop {
                     if self.is_terminated.load(Ordering::Acquire) {
                         break;
                     }
 
                     tracing::debug!("polling events");
-                    events.clear();
                     if let Err(e) = self.poller.wait(&mut events, None) {
                         tracing::error!(error = ?e, "failed to poll events");
                         self.is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
+                    for event in events.iter() {
+                        tracing::trace!(?event, "event happend");
+                        events_happend.insert(event.key, event);
+                    }
+                    events.clear();
 
                     while let Ok(event) = receiver.try_recv() {
                         match event {
                             RegisterEvent::Register { id, waker } => {
-                                map.insert(id, waker);
+                                events_registered.insert(id, waker);
                             }
                             RegisterEvent::Unregister { id } => {
-                                map.remove(&id);
+                                events_registered.remove(&id);
                             }
                         }
                     }
 
-                    map.retain(|id, waker| {
-                        if events.iter().any(|event| event.key == *id) {
-                            waker.wake_by_ref();
-                            false
-                        } else {
-                            true
-                        }
+                    let intersection = events_happend
+                        .keys()
+                        .filter(|key| events_registered.contains_key(key))
+                        .cloned()
+                        .collect::<Vec<_>>();
+
+                    intersection.into_iter().for_each(|ref key| {
+                        let event = events_happend.remove(key).unwrap();
+                        let waker = events_registered.remove(key).unwrap();
+                        waker.wake_by_ref();
+                        tracing::trace!(?event, "waking up waker");
                     });
                 }
             })
@@ -122,6 +132,7 @@ impl Socket2Runtime {
         if self.is_terminated.load(Ordering::Acquire) {
             Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
         }
+
         tracing::trace!(?event, ?socket, "registering event");
         self.poller.modify(socket, event)?;
 

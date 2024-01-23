@@ -205,7 +205,10 @@ fn local_tcp_server() -> anyhow::Result<SocketAddr> {
                         }
                     });
                 }
-                Err(e) => tracing::error!("Connection failed: {}", e),
+                Err(e) => {
+                    tracing::error!("Connection failed: {}", e);
+                    return;
+                }
             }
         }
     });

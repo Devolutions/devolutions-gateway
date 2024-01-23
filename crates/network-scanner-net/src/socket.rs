@@ -296,7 +296,7 @@ fn resolve<T>(
     waker: &std::task::Waker,
 ) -> std::task::Poll<std::io::Result<T>> {
     if err.kind() == std::io::ErrorKind::WouldBlock {
-        tracing::trace!(?event, "operation would block");
+        tracing::trace!(?event, "operation would block, expecting event");
         if let Err(e) = runtime.register(socket, event, waker.clone()) {
             tracing::warn!(?socket, ?event, "failed to register socket to poller");
             return std::task::Poll::Ready(Err(std::io::Error::new(
