@@ -13,7 +13,6 @@ use crossbeam::channel::{Receiver, Sender};
 use polling::{Event, Events};
 use socket2::Socket;
 
-
 use crate::{socket::AsyncRawSocket, ScannnerNetError};
 
 #[derive(Debug)]
