@@ -216,6 +216,9 @@ Stable options are:
 
         Blank lines and lines starting by `#` are ignored.
 
+    * **StaticRootPath** (_FilePath_): Path to the static files for the standalone web application.
+        This is an advanced option which should typically not be changed.
+
 - **VerbosityProfile** (_String_): Logging verbosity profile (pre-defined tracing directives).
 
     Possible values:
