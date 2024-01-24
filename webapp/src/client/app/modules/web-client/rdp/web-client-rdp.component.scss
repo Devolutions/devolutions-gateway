@@ -28,21 +28,16 @@
   margin-left: 8px;
 }
 
-.loading-infos {
+.container {
   display: flex;
-  align-items: center;
   justify-content: center;
-  flex-grow: 1;
-  z-index: 10;
+  align-items: center;
+  height: 100vh;
 }
 
-.preview {
-  pointer-events: none;
-  position: absolute;
-  bottom: 30px;
-  right: 30px;
-  font-size: 50px;
-  color: grey;
-  opacity: 0.4;
-  user-select: none;
+.loading-info {
+  display: grid;
+  place-items: center;
+  height: 100vh; /* Full height of the viewport */
+  width: 100vw; /* Full width of the viewport */
 }

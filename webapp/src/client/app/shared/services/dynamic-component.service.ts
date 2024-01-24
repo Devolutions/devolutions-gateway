@@ -7,7 +7,7 @@ import {Subject} from "rxjs";
 export class DynamicComponentService {
   constructor() {}
 
-  createComponent<T>(component: Type<T>, container: ViewContainerRef, data?: any): ComponentRef<T> {
+  createComponent<T>(component: Type<T>, container: ViewContainerRef, data?: any, tabIndex?: number): ComponentRef<T> {
     container.clear();
     const componentRef: ComponentRef<any> = container.createComponent(component);
 
@@ -16,7 +16,7 @@ export class DynamicComponentService {
         componentRef.instance[key] = data[key];
       }
     }
-
+    componentRef.instance["tabIndex"] = tabIndex;
     return componentRef;
   }
 

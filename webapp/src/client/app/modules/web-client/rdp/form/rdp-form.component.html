@@ -3,6 +3,9 @@
   <div class="container">
 
     <div class="box centered-box flex flex-column">
+      <div class="form__message">
+        <p-messages *ngIf="messages.length > 0" [closable]="true" [value]="messages"></p-messages>
+      </div>
       <span class="box-header flex justify-content-between align-items-center">
         <span class="box-title">Remote Session Information</span>
       </span>

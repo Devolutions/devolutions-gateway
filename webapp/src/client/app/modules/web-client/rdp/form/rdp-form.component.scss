@@ -121,3 +121,35 @@
 .more-text {
   color: var(--security-box-action-color);
 }
+
+.form__message {
+  .p-messages {
+    padding: 15px 15px 15px 10px;
+  }
+
+  //TODO Set up icon as per figma
+  //.p-messages-icon {
+  //  font-size: 2em;
+  //}
+
+  .p-messages-summary {
+    display: none;
+  }
+
+  margin-bottom: 5px;
+}
+
+:host ::ng-deep .p-message-summary {
+  display: none !important;
+}
+
+:host ::ng-deep .p-message {
+  //timescircleicon {
+  //  display: inline !important;
+  //}
+  text-align: left;
+}
+
+//:host ::ng-deep .p-message-icon {
+//  font-size: 20px;
+//}

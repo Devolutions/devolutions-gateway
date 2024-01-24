@@ -11,7 +11,7 @@ import {NavigationService} from "@shared/services/navigation.service";
   providedIn: 'root',
 })
 export class AuthService extends BaseComponent {
-  private static readonly TOKEN_LIFESPAN: number = 28800; // app token lasts (default is 28800 for 8 hours)
+  private static readonly TOKEN_LIFESPAN: number = 8 * 60 * 60 * 1000; // app token lasts (default is 28800 for 8 hours)
   private static readonly SESSION_STORAGE_KEY: string = 'session';
   private static readonly AUTO_LOGIN_KEY: string = 'autologin';
 
@@ -22,7 +22,6 @@ export class AuthService extends BaseComponent {
   public session: Observable<Session | null>;
 
   isAutoLoginOn: BehaviorSubject<boolean> = new BehaviorSubject(false);
-  isLoggedIn: BehaviorSubject<boolean> = new BehaviorSubject(false);
 
   constructor(
     private apiService: ApiService,
@@ -49,6 +48,10 @@ export class AuthService extends BaseComponent {
   }
 
   public autoLogin(): Observable<boolean> {
+    if (this.checkSessionState()) {
+      return of(true);
+    }
+
     const username = '';
     const password = '';
     return this.login(username, password).pipe(
@@ -56,7 +59,12 @@ export class AuthService extends BaseComponent {
       tap((success) => {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(success));
         this.isAutoLoginOn.next(success);
-        console.log('isAutoLoginOn', this.isAutoLoginOn.value)
+      }),
+      catchError(error => {
+        sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(false));
+        console.log('isAutoLoginOn', false)
+        this.isAutoLoginOn.next(false);
+        throw error
       }),
       map(success => !!success)
     );
@@ -68,13 +76,12 @@ export class AuthService extends BaseComponent {
       tap(token => {
         if (token) {
           this.storeToken(username, token);
-          this.isLoggedIn.next(true);
         }
       }),
       map(token => !!token),
       catchError(error => {
         console.error('Login error:', error);
-        return of(false);
+        throw error
       })
     );
   }
@@ -82,7 +89,6 @@ export class AuthService extends BaseComponent {
   public logout(): void {
     this.removeAllStorageData();
     this.sessionSubject.next(null);
-    this.isLoggedIn.next(false);
     this.isAutoLoginOn.next(false);
     this.navigationService.navigateToLogin();
   }
@@ -109,14 +115,15 @@ export class AuthService extends BaseComponent {
     return this.apiService.generateAppToken(username, password).pipe(
       catchError(error => {
         console.error('Error requesting token:', error);
-        return of(null); // Return null - failure
+        throw error;
       })
     );
   }
 
   private initializeAutoLogonStorageData(): void {
     const storedAutoLogonFlag: string = sessionStorage.getItem(AuthService.AUTO_LOGIN_KEY);
-    const storedAutoLogon: boolean = storedAutoLogonFlag !== 'false';
+    console.log('storedAutoLogonFlag', storedAutoLogonFlag)
+    const storedAutoLogon: boolean = (storedAutoLogonFlag) ? storedAutoLogonFlag !== 'false' : false;
     this.isAutoLoginOn.next(storedAutoLogon);
   }
 
@@ -127,7 +134,7 @@ export class AuthService extends BaseComponent {
     this.sessionSubject = new BehaviorSubject<Session | null>(storedSession);
     this.session = this.sessionSubject.asObservable();
 
-    this.checkInitialSessionState();
+    this.checkSessionState();
   }
 
   private storeToken(username: string, token: string): void {
@@ -142,11 +149,13 @@ export class AuthService extends BaseComponent {
     sessionStorage.removeItem(AuthService.AUTO_LOGIN_KEY);
   }
 
-  private checkInitialSessionState(): void {
+  private checkSessionState(): boolean {
     const session: Session = this.getStoredSession();
     if (session && this.isSessionValid(session)) {
-      this.isLoggedIn.next(true);
       this.sessionSubject.next(session);
+      return true;
+    } else {
+      return false;
     }
   }
 
@@ -172,6 +181,7 @@ export class AuthService extends BaseComponent {
     const now: number = new Date().getTime();
     const expiresTime: number = new Date(session.expires).getTime();
     console.log('isAuthenticated - valid Session', now <= expiresTime)
+
     return now <= expiresTime;
   }
 

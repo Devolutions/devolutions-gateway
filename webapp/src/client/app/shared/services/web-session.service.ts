@@ -27,43 +27,73 @@ export class WebSessionService {
   }
 
   addSession(newSession: WebSession<any, any>): void {
+    newSession.tabIndex = this.webSessionDataSubject.getValue().length;
     const currentSessions = this.webSessionDataSubject.value;
     const updatedSessions = [...currentSessions, newSession];
     this.webSessionDataSubject.next(updatedSessions);
     this.setWebSessionIndexToLastCreated();
   }
 
-  async removeSession(indexToRemove?: number): Promise<void> {
-    if (typeof indexToRemove === 'undefined') {
-      indexToRemove = this.webSessionCurrentIndexSubject.getValue();
-    }
 
-    this.destroyWebSessionComponentRef(indexToRemove);
-    const currentWebSessions = this.webSessionDataSubject.getValue();
+  updateSession(tabIndex: number, newSession: WebSession<any, any>): void {
+    newSession.tabIndex = tabIndex;
 
-    if (indexToRemove >= 0 && indexToRemove < currentWebSessions.length) {
-      const updatedSessions = currentWebSessions.filter((_, index) => index !== indexToRemove);
-      this.webSessionDataSubject.next(updatedSessions);
-
-      this.setWebSessionCurrentIndex(indexToRemove-1);
-    } else {
-      throw new Error('Remove Session: Index is out of bounds.');
-    }
+    this.removeSession(tabIndex).then(() => {
+      this.addSession(newSession);
+      }
+    )
   }
 
+  async removeSession(tabIndexToRemove?: number): Promise<void> {
+    console.log('removeSession', tabIndexToRemove)
+
+    await this.destroyWebSessionComponentRef(tabIndexToRemove);
+
+    const currentSessions = this.webSessionDataSubject.value;
+    const updatedSessions = currentSessions.filter(session => session.tabIndex !== tabIndexToRemove);
+    this.webSessionDataSubject.next(updatedSessions);
+
+    this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
+    // if (typeof indexToRemove === 'undefined') {
+    //   indexToRemove = this.webSessionCurrentIndexSubject.getValue();
+    // }
+    // console.log('Checking again.... ', indexToRemove)
+    // this.destroyWebSessionComponentRef(indexToRemove);
+    // const currentWebSessions = this.webSessionDataSubject.getValue();
+    //
+    // if (indexToRemove >= 0) {
+    //   const updatedSessions = currentWebSessions.filter((_, index) => index !== indexToRemove);
+    //   this.webSessionDataSubject.next(updatedSessions);
+    //
+    //   //TODO Should I delay for a few seconds before moving to another tab?
+    //   this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
+    // } else {
+    //   throw new Error('Remove Session: Index is out of bounds.');
+    // }
+  }
+
+  //TODO Fix bc tabIndex is in Web Session
   removeAllSessions(): void {
-    const currentWebSessions = this.webSessionDataSubject.getValue();
-    for (let i: number = currentWebSessions.length - 1; i >= 0; i--) {
-      this.destroyWebSessionComponentRef(i);
-    }
-    this.webSessionDataSubject.next([]);
-    this.webSessionCurrentIndexSubject.next(0);
+    // const currentWebSessions = this.webSessionDataSubject.getValue();
+    // for (let i: number = currentWebSessions.length - 1; i >= 0; i--) {
+    //   this.destroyWebSessionComponentRef(i);
+    // }
+    // this.webSessionDataSubject.next([]);
+    // this.webSessionCurrentIndexSubject.next(0);
   }
 
-  destroyWebSessionComponentRef(indexToRemove: number): void {
-    const webSessionToDestroy = this.getWebSession(indexToRemove);
-    if (this.isSessionValid(webSessionToDestroy)) {
-      this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
+  async destroyWebSessionComponentRef(indexToRemove: number): Promise<void> {
+    try {
+      const webSessionToDestroy = await this.getWebSession(indexToRemove);
+      console.log('webSessionToDestroy', webSessionToDestroy);
+
+      if (this.isSessionValid(webSessionToDestroy)) {
+        await this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
+      } else {
+        console.warn('Invalid or non-existent session to destroy:', indexToRemove);
+      }
+    } catch (error) {
+      console.error('Error destroying web session:', error);
     }
   }
 
@@ -77,13 +107,14 @@ export class WebSessionService {
     );
   }
 
-  getWebSession(indexOfWebSession?: number): WebSession<any, any> {
-    if (!indexOfWebSession) {
-      indexOfWebSession = this.getWebSessionCurrentIndexSnapshot();
-    }
-
+  async getWebSession(indexOfWebSession: number): Promise<WebSession<any, any>> {
     const currentWebSessions = this.webSessionDataSubject.value;
-    return currentWebSessions[indexOfWebSession] || null;
+    const session = currentWebSessions.filter(session => session.tabIndex === indexOfWebSession);
+
+    if (session.length === 0) {
+      return null
+    }
+    return session[0];
   }
 
   getWebSessionSnapshot(): WebSession<any, any>[] {

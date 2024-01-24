@@ -1,19 +1,19 @@
 import {
   AfterViewInit,
   Component,
-  EventEmitter,
+  EventEmitter, Input, OnChanges,
   OnInit,
-  Output, Type
+  Output, SimpleChanges, Type
 } from '@angular/core';
 import {FormBuilder, FormGroup, Validators} from "@angular/forms";
-import {SelectItem} from "primeng/api";
+import {Message, SelectItem} from "primeng/api";
 
 import {WebSessionService} from "@shared/services/web-session.service";
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebSession} from "@shared/models/web-session.model";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
-import {Subject} from "rxjs";
+import {ComponentStatus} from "@shared/models/component-status.model";
 
 @Component({
     selector: 'web-client-rdp-form',
@@ -21,22 +21,19 @@ import {Subject} from "rxjs";
     styleUrls: ['rdp-form.component.scss']
 })
 export class RdpFormComponent extends BaseComponent implements  OnInit,
-                                                                AfterViewInit {
+                                                                AfterViewInit,
+                                                                OnChanges {
 
-  @Output() isInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
-  @Output() initializationMessage: EventEmitter<Error> = new EventEmitter<Error>();
+  @Input() isEmbedded: boolean = false;
+  @Input() inputFormData: any | undefined;
+  @Input() tabIndex: number | undefined;
+  @Input() error: string;
+  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
 
   connectSessionForm: FormGroup;
   screenSizeOptions: SelectItem[];
   showMoreSettings: boolean = false;
-
-  //TODO Use proper types
-  session = {
-    hostname: '',
-    protocol: '',
-    username: '',
-    password: ''
-  }
+  messages: Message[] = [];
 
   protocolSelectItems: SelectItem[] = [
     { label: 'RDP', value: '0' }
@@ -49,11 +46,46 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   }
 
   ngOnInit(): void {
-    this.setupScreenSizeDropdown();
+    this.populateForm()
   }
 
   ngAfterViewInit(): void {
-    this.isInitialized.emit(true);
+    this.initializeStatus();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    this.messages = [];
+
+    if (changes.error && this.error) {
+      let message: string = this.error;
+
+      if (changes.error && this.error) {
+        setTimeout(() => {
+          this.addMessages([{
+            severity: 'error',
+            summary: 'Error', //For translation lblError
+            detail: message
+          }]);
+        }, 500);
+      }
+    }
+  }
+
+  private initializeStatus(): void {
+    const status: ComponentStatus = {
+      isInitialized: true,
+      tabIndex: 0
+    }
+    this.componentStatus.emit(status);
+  }
+
+  private addMessages(messages: Message[]) {
+    this.messages = [];
+    if (messages?.length > 0) {
+      messages.forEach(message => {
+        this.messages.push(message);
+      })
+    }
   }
 
   get showCustomSize(): boolean {
@@ -62,6 +94,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
 
   onConnectSession(): void {
     const submittedData = this.connectSessionForm.value;
+    console.log('this.connectSessionForm.value;', this.connectSessionForm.value)
 
     const newSessionTab: WebSession<Type<WebClientRdpComponent>, any> =  new WebSession(submittedData.hostname,
                                                               WebClientRdpComponent,
@@ -71,8 +104,12 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     newSessionTab.component = WebClientRdpComponent;
     newSessionTab.data = submittedData;
     newSessionTab.icon = 'dvl-icon-entry-session-rdp';
-    console.log('newSessionTab', newSessionTab);
-    this.webSessionService.addSession(newSessionTab);
+
+    if (this.isEmbedded) {
+      this.webSessionService.updateSession(this.tabIndex, newSessionTab);
+    } else {
+      this.webSessionService.addSession(newSessionTab);
+    }
   }
 
   initComboEnum(enums: any): SelectItem[] {
@@ -94,19 +131,37 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     return this.showMoreSettings;
   }
 
-  private setupScreenSizeDropdown(): void {
-    this.screenSizeOptions = this.initComboEnum(ScreenSize);
-    this.connectSessionForm = this.formBuilder.group({
-      protocol: [0, Validators.required],
-      hostname: ['', Validators.required],
-      username: ['', Validators.required],
-      password: ['', Validators.required],
-      screenSize: [null],
-      customWidth: [{value: '', disabled: true}],
-      customHeight: [{value: '', disabled: true}],
-      preConnectionBlob: ['']
-    });
+  private populateForm(): void {
 
+    if (this.isEmbedded) {
+      this.connectSessionForm = this.formBuilder.group({
+        protocol: [this.inputFormData.protocol, Validators.required],
+        hostname: [this.inputFormData.hostname, Validators.required],
+        username: [this.inputFormData.username, Validators.required],
+        password: [this.inputFormData.password, Validators.required],
+        screenSize: [this.inputFormData.screenSize],
+        customWidth: [this.inputFormData.customWidth],
+        customHeight: [this.inputFormData.customHeight],
+        preConnectionBlob: [this.inputFormData.preConnectionBlob]
+      });
+    } else {
+      this.connectSessionForm = this.formBuilder.group({
+        protocol: [0, Validators.required],
+        hostname: ['', Validators.required],
+        username: ['', Validators.required],
+        password: ['', Validators.required],
+        screenSize: [null],
+        customWidth: [{value: '', disabled: true}],
+        customHeight: [{value: '', disabled: true}],
+        preConnectionBlob: ['']
+      });
+    }
+    this.setupScreenSizeDropdown();
+  }
+
+  private setupScreenSizeDropdown(): void {
+    //TODO take into account the form data if embedded
+    this.screenSizeOptions = this.initComboEnum(ScreenSize);
     this.subscribeToFormScreenSize();
   }
 

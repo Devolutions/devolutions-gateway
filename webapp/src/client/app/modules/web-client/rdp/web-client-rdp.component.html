@@ -1,7 +1,15 @@
+<div *ngIf="status.isDisabled" style="display: flex; flex-direction: column; height: 100%">
+  <web-client-rdp-form
+    [tabIndex]="tabIndex"
+    [inputFormData]="inputFormData"
+    [error]="rdpError"
+    [isEmbedded]="true"></web-client-rdp-form>
+</div>
+
 <div style="display: flex; flex-direction: column; height: 100%">
-  <div class="session-toolbar" *ngIf="!loading"> <!--  class="session-toolbar" *ngIf="!loading" -->
+  <div class="session-toolbar" *ngIf="!loading && !status.isDisabled">
     <p-button
-      size="large "
+      size="large"
       icon="dvl-icon dvl-icon-fullscreen"
       [title]="'Full Screen'"
       (onClick)="scaleTo(screenScale.Full)"></p-button>
@@ -38,4 +46,11 @@
   </div>
 </div>
 
+<div class="container" *ngIf="loading">
+  <div class="loading-info">
+    <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+  </div>
+</div>
+
 <iron-remote-gui #ironGuiElement debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui>
+

@@ -66,13 +66,6 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   private changeTabIndex(): void {
     if (!this.tabView) return;
     this.tabView.activeIndex = this.tabCurrentIndex;
-
-    const customEvent = new CustomEvent('tabChanged', {
-      detail: {
-        activeTabIndex: this.tabView.activeIndex
-      }
-    });
-    window.dispatchEvent(customEvent);
   }
 
   private loadFormTab(): void {
@@ -85,16 +78,18 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   }
 
   private subscribeToTabMenuArray(): void {
-    this.webSessionService.getAllWebSessions().pipe(takeUntil(this.destroyed$)).subscribe((tabs: WebSession<any, any>[]) => {
-      this.webSessionTabs = tabs;
-      this.cdr.detectChanges();
+    this.webSessionService.getAllWebSessions().pipe(takeUntil(this.destroyed$)).subscribe(
+      (tabs: WebSession<any, any>[]) => {
+        this.webSessionTabs = tabs;
+        this.cdr.detectChanges();
     });
   }
 
   private subscribeToTabActiveIndex(): void {
-    this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe((tabActiveIndex: number): void => {
-      this.tabCurrentIndex = tabActiveIndex;
-      this.changeTabIndex();
+    this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe(
+      (tabActiveIndex: number): void => {
+        this.tabCurrentIndex = tabActiveIndex;
+        this.changeTabIndex();
     })
   }
 }
