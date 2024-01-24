@@ -1012,6 +1012,7 @@ pub mod dto {
         pub dump_tokens: bool,
 
         /// Ignore token signature and accept as-is (any signer is accepted), expired tokens and token
+        ///
         /// reuse is allowed, etc. Only restriction is to provide claims in the right format.
         #[serde(default)]
         pub disable_token_validation: bool,
@@ -1023,8 +1024,12 @@ pub mod dto {
         pub log_directives: Option<String>,
 
         /// Folder where pcap recordings should be stored
-        /// Providing this option will cause the PCAP interceptor to be attached to each stream
+        ///
+        /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         pub capture_path: Option<Utf8PathBuf>,
+
+        /// Override the path to the standalone web application
+        pub webapp_path: Option<Utf8PathBuf>,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -1037,6 +1042,7 @@ pub mod dto {
                 override_kdc: None,
                 log_directives: None,
                 capture_path: None,
+                webapp_path: None,
             }
         }
     }

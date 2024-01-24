@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::env;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use anyhow::Context as _;
 use axum::extract::{self, ConnectInfo, State};
 use axum::http::HeaderMap;
 use axum::response::{IntoResponse as _, Response};
@@ -16,7 +16,7 @@ use tap::prelude::*;
 use tower_http::services::ServeFile;
 use uuid::Uuid;
 
-use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
+use crate::config::{Conf, WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;
@@ -448,7 +448,7 @@ where
         .build()
         .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
 
-    let webapp_root_path = find_webapp_root().map_err(HttpError::internal().err())?;
+    let webapp_root_path = find_webapp_root(&conf).map_err(HttpError::internal().err())?;
     let client_root = webapp_root_path.join("client/");
     let client_index = webapp_root_path.join("client/index.html");
 
@@ -463,15 +463,30 @@ where
     }
 }
 
-fn find_webapp_root() -> anyhow::Result<PathBuf> {
-    if let Ok(path) = env::var("DGATEWAY_WEBAPP_PATH") {
-        Ok(PathBuf::from(path))
-    } else {
-        let mut exe_path = std::env::current_exe()?;
-        exe_path.pop();
-        exe_path.push("webapp");
-        Ok(exe_path)
+fn find_webapp_root(conf: &Conf) -> anyhow::Result<&Path> {
+    use std::sync::OnceLock;
+
+    static CELL: OnceLock<PathBuf> = OnceLock::new();
+
+    if let Some(path) = &conf.debug.webapp_path {
+        return Ok(path.as_std_path());
     }
+
+    if let Some(path) = CELL.get() {
+        return Ok(path);
+    }
+
+    // TODO(@CBenoit): Use `get_or_try_init` once stabilized.
+    // https://doc.rust-lang.org/std/sync/struct.OnceLock.html#method.get_or_try_init
+    // https://github.com/rust-lang/rust/issues/109737
+
+    let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+    exe_path.pop();
+    exe_path.push("webapp");
+
+    let path = CELL.get_or_init(move || exe_path);
+
+    Ok(path)
 }
 
 mod login_rate_limit {
