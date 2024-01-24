@@ -9,16 +9,18 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::socket::AsyncRawSocket;
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_connectivity() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::SubscriberBuilder::default()
+        .with_max_level(tracing::Level::TRACE)
+        .with_thread_names(true)
+        .init();
     let addr = local_tcp_server()?;
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     socket.connect(&socket2::SockAddr::from(addr)).await?;
     Ok(())
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_udp() -> anyhow::Result<()> {
@@ -63,7 +65,6 @@ async fn multiple_udp() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
@@ -100,7 +101,6 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 
     Ok(())
 }
-
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
