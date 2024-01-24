@@ -59,7 +59,7 @@ pub(crate) unsafe fn assume_init(buf: &[MaybeUninit<u8>]) -> &[u8] {
     &*(buf as *const [MaybeUninit<u8>] as *const [u8])
 }
 
-fn create_echo_request() -> anyhow::Result<(icmp_v4::Icmpv4Packet, Vec<u8>)> {
+pub(crate) fn create_echo_request() -> anyhow::Result<(icmp_v4::Icmpv4Packet, Vec<u8>)> {
     let time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .with_context(|| "failed to get current time")?
