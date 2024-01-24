@@ -1,8 +1,10 @@
 ﻿using DevolutionsGateway.Properties;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
+using System.CodeDom;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows.Forms.VisualStyles;
 using DevolutionsGateway.Helpers;
 using WixSharp;
 using WixSharpSetup.Dialogs;
@@ -17,6 +19,7 @@ internal static class Wizard
         typeof(ListenersDialog),
         typeof(CertificateDialog),
         typeof(PublicKeyDialog),
+        typeof(WebClientDialog),
         typeof(ServiceDialog),
         typeof(SummaryDialog),
     };
@@ -65,6 +68,32 @@ internal static class Wizard
             {
                 return true;
             }
+
+            if (properties.ConfigureWebApp && properties.GenerateCertificate)
+            {
+                return true;
+            }
+        }
+
+        if (dialog == typeof(PublicKeyDialog))
+        {
+            if (properties.ConfigureWebApp && properties.GenerateKeyPair)
+            {
+                return true;
+            }
+        }
+
+        if (dialog == typeof(WebClientDialog))
+        {
+            if (!properties.ConfigureWebApp)
+            {
+                return true;
+            }
+        }
+
+        if (dialog == typeof(ServiceDialog))
+        {
+            return true;
         }
 
         if (CustomizeSequence.Contains(dialog))

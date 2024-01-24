@@ -36,6 +36,7 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
+            this.lblPublicKeyDescription = new System.Windows.Forms.Label();
             this.txtPort = new System.Windows.Forms.TextBox();
             this.txtHostname = new System.Windows.Forms.TextBox();
             this.cmbProtocol = new System.Windows.Forms.ComboBox();
@@ -79,9 +80,9 @@ namespace WixSharpSetup.Dialogs
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.middlePanel.Controls.Add(this.tableLayoutPanel2);
-            this.middlePanel.Location = new System.Drawing.Point(22, 75);
+            this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
-            this.middlePanel.Size = new System.Drawing.Size(449, 59);
+            this.middlePanel.Size = new System.Drawing.Size(493, 261);
             this.middlePanel.TabIndex = 16;
             // 
             // tableLayoutPanel2
@@ -90,28 +91,42 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel2.Controls.Add(this.txtPort, 2, 0);
-            this.tableLayoutPanel2.Controls.Add(this.txtHostname, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.cmbProtocol, 0, 0);
-            this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyDescription, 0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.txtPort, 2, 1);
+            this.tableLayoutPanel2.Controls.Add(this.txtHostname, 1, 1);
+            this.tableLayoutPanel2.Controls.Add(this.cmbProtocol, 0, 1);
+            this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 1;
+            this.tableLayoutPanel2.RowCount = 2;
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 59);
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 130);
             this.tableLayoutPanel2.TabIndex = 0;
+            // 
+            // lblPublicKeyDescription
+            // 
+            this.lblPublicKeyDescription.AutoSize = true;
+            this.tableLayoutPanel2.SetColumnSpan(this.lblPublicKeyDescription, 3);
+            this.lblPublicKeyDescription.Location = new System.Drawing.Point(3, 0);
+            this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
+            this.lblPublicKeyDescription.Size = new System.Drawing.Size(262, 13);
+            this.lblPublicKeyDescription.TabIndex = 3;
+            this.lblPublicKeyDescription.Text = "The external access URI for the Devolutions Gateway";
             // 
             // txtPort
             // 
             this.txtPort.CausesValidation = false;
-            this.txtPort.Location = new System.Drawing.Point(362, 3);
+            this.txtPort.Location = new System.Drawing.Point(362, 21);
             this.txtPort.Name = "txtPort";
             this.txtPort.Size = new System.Drawing.Size(40, 20);
             this.txtPort.TabIndex = 2;
             // 
             // txtHostname
             // 
-            this.txtHostname.Location = new System.Drawing.Point(79, 3);
+            this.txtHostname.Location = new System.Drawing.Point(79, 21);
             this.txtHostname.Name = "txtHostname";
             this.txtHostname.Size = new System.Drawing.Size(277, 20);
             this.txtHostname.TabIndex = 1;
@@ -120,7 +135,7 @@ namespace WixSharpSetup.Dialogs
             // 
             this.cmbProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbProtocol.FormattingEnabled = true;
-            this.cmbProtocol.Location = new System.Drawing.Point(3, 3);
+            this.cmbProtocol.Location = new System.Drawing.Point(3, 21);
             this.cmbProtocol.Name = "cmbProtocol";
             this.cmbProtocol.Size = new System.Drawing.Size(70, 21);
             this.cmbProtocol.TabIndex = 0;
@@ -306,5 +321,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TextBox txtHostname;
         private System.Windows.Forms.ComboBox cmbProtocol;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
+        private System.Windows.Forms.Label lblPublicKeyDescription;
     }
 }

@@ -83,7 +83,7 @@ System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExec
 The custom UI targets .NET Framework 4.5.1; which is available out-of-the-box on Windows. The provides compatiblity with Windows 8.1 and Windows Server 2012 R2, but it's an additional download on Windows 8 / Windows Server 2012.
 
 > [!IMPORTANT]  
-> The managed installer UI and actions are currently run as x86, meaning x64-only references cannot be used. Additionally, when querying the registry, it's important to ensure you don't check the WoW64 view.
+> The managed installer UI and actions are currently run as x86, meaning x64-only references cannot be used. Additionally, when querying the registry, it's important to ensure you don't check the WoW64 view. There is a [path](https://github.com/oleg-shilo/wixsharp/issues/1427) to work around this for custom actions only, if it becomes important to do so.
 
 The MSI project only targets the x64 architecture and the install won't execute on an x86 operating system. Behaviour on arm64 is currently undefined.
 

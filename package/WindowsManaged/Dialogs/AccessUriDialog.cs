@@ -28,6 +28,12 @@ namespace WixSharpSetup.Dialogs
             this.cmbProtocol.SelectedIndex = Protocols.FindIndex(properties.AccessUriScheme);
             this.txtHostname.Text = properties.AccessUriHost;
             this.txtPort.Text = properties.AccessUriPort.ToString();
+
+            if (properties.ConfigureWebApp && properties.GenerateCertificate &&
+                string.IsNullOrEmpty(properties.AccessUriHost))
+            {
+                this.txtHostname.Text = Environment.MachineName;
+            }
         }
 
         public override bool ToProperties()

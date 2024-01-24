@@ -131,21 +131,24 @@ public partial class CertificateDialog : GatewayDialog
             CertificateFindTypes.IndexOf(CertificateFindTypes.First(x => x.Key == properties.CertificateFindType));
         this.txtSearch.Text = properties.CertificateSearchText;
 
-        try
+        if (this.UseSystemCertificate)
         {
-            X509Certificate2Collection certificates = this.SearchCertificate(
-                (StoreLocation) this.cmbStoreLocation.SelectedIndex + 1,
-                Stores[this.cmbStore.SelectedIndex].Key,
-                CertificateFindType.Thumbprint,
-                properties.CertificateThumbprint);
-
-            if (certificates?.Count == 1)
+            try
             {
-                this.SetSelectedCertificate(certificates[0]);
+                X509Certificate2Collection certificates = this.SearchCertificate(
+                    (StoreLocation) this.cmbStoreLocation.SelectedIndex + 1,
+                    Stores[this.cmbStore.SelectedIndex].Key,
+                    CertificateFindType.Thumbprint,
+                    properties.CertificateThumbprint);
+
+                if (certificates?.Count == 1)
+                {
+                    this.SetSelectedCertificate(certificates[0]);
+                }
             }
-        }
-        catch // Failed to restore state, don't crash
-        {
+            catch // Failed to restore state, don't crash
+            {
+            }
         }
 
         this.SetControlStates();
@@ -155,7 +158,7 @@ public partial class CertificateDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session)
         {
-            CertificateMode = (Constants.CertificateMode)this.cmbCertificateSource.SelectedIndex
+            CertificateMode = (Constants.CertificateMode)this.cmbCertificateSource.SelectedIndex,
         };
 
         if (this.UseExternalCertificate)
@@ -279,7 +282,7 @@ public partial class CertificateDialog : GatewayDialog
         {
             this.gbExternal.Visible = false;
             this.gbSystem.Visible = true;
-
+            
             this.butSearchCertificate.Enabled = !string.IsNullOrWhiteSpace(this.txtSearch.Text);
         }
     }

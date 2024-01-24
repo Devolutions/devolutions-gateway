@@ -247,6 +247,30 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<bool> _GenerateCertificate = new()
+        {
+            Id = "P.GENERATECERTIFICATE",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public bool GenerateCertificate
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_GenerateCertificate.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_GenerateCertificate, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<Constants.CertificateFindType> _CertificateFindType = new()
         {
             Id = "P.CERTIFICATEFINDTYPE",
@@ -327,7 +351,7 @@ namespace DevolutionsGateway.Properties
             Hidden = false,
         };
 
-        /// `true` to configure the Gateway interactively
+        /// <summary>`true` to configure the Gateway interactively</summary>
         public bool ConfigureGateway
         {
             get
@@ -460,6 +484,54 @@ namespace DevolutionsGateway.Properties
                 if (this.runtimeSession is not null)
                 {
                     this.runtimeSession.Set(_PublicKeyFile, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _PrivateKeyFile = new()
+        {
+            Id = "P.PRIVATEKEYFILE",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string PrivateKeyFile
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_PrivateKeyFile.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_PrivateKeyFile, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<bool> _GenerateKeyPair = new()
+        {
+            Id = "P.GENERATEKEYPAIR",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public bool GenerateKeyPair
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_GenerateKeyPair.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_GenerateKeyPair, value); 
                 }
             }
         }
@@ -608,6 +680,127 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<bool> _ConfigureWebApp = new()
+        {
+            Id = "P.CONFIGUREWEBAPP",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        /// <summary>`true` to configure the standalone web application interactively</summary>
+        public bool ConfigureWebApp
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_ConfigureWebApp.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_ConfigureWebApp, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<Constants.AuthenticationMode> _AuthenticationMode = new()
+        {
+            Id = "P.AUTHENTICATIONMODE",
+            Default = Constants.AuthenticationMode.None,
+            Secure = true,
+            Hidden = true,
+        };
+
+        public Constants.AuthenticationMode AuthenticationMode
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_AuthenticationMode.Id);
+                return WixProperties.GetPropertyValue<Constants.AuthenticationMode>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_AuthenticationMode, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _WebUsername = new()
+        {
+            Id = "P.WEBUSERNAME",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string WebUsername
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_WebUsername.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_WebUsername, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _WebPassword = new()
+        {
+            Id = "P.WEBPASSWORD",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = true,
+        };
+
+        public string WebPassword
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_WebPassword.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_WebPassword, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<uint> _NetFx45Version = new()
+        {
+            Id = "P.NETFX45VERSION",
+            Default = 0,
+            Secure = false,
+            Hidden = false,
+        };
+
+        public uint NetFx45Version
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_NetFx45Version.Id);
+                return WixProperties.GetPropertyValue<uint>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_NetFx45Version, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<bool> _FirstInstall = new()
         {
             Id = "P.FIRSTINSTALL",
@@ -752,6 +945,8 @@ namespace DevolutionsGateway.Properties
  
             _CertificateName,
  
+            _GenerateCertificate,
+ 
             _CertificateFindType,
  
             _CertificateSearchText,
@@ -770,6 +965,10 @@ namespace DevolutionsGateway.Properties
  
             _PublicKeyFile,
  
+            _PrivateKeyFile,
+ 
+            _GenerateKeyPair,
+ 
             _PowerShellPath,
  
             _NoStartService,
@@ -781,6 +980,16 @@ namespace DevolutionsGateway.Properties
             _TcpListenerPort,
  
             _TcpListenerScheme,
+ 
+            _ConfigureWebApp,
+ 
+            _AuthenticationMode,
+ 
+            _WebUsername,
+ 
+            _WebPassword,
+ 
+            _NetFx45Version,
  
             _FirstInstall,
  

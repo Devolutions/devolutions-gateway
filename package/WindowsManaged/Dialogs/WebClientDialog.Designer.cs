@@ -3,7 +3,7 @@ using WixSharp.UI.Forms;
 
 namespace WixSharpSetup.Dialogs
 {
-    partial class CustomizeDialog
+    partial class WebClientDialog
     {
         /// <summary>
         /// Required designer variable.
@@ -36,16 +36,16 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.label3 = new System.Windows.Forms.Label();
-            this.rbConfigNow = new System.Windows.Forms.RadioButton();
-            this.rbConfigLater = new System.Windows.Forms.RadioButton();
-            this.groupBox1 = new System.Windows.Forms.GroupBox();
-            this.tableLayoutPanel3 = new System.Windows.Forms.TableLayoutPanel();
-            this.chkWebApp = new System.Windows.Forms.CheckBox();
-            this.chkGenerateCertificate = new System.Windows.Forms.CheckBox();
-            this.chkGenerateKeyPair = new System.Windows.Forms.CheckBox();
-            this.chkConfigureNgrok = new System.Windows.Forms.CheckBox();
-            this.pictureBox1 = new System.Windows.Forms.PictureBox();
+            this.lblPassword2 = new System.Windows.Forms.Label();
+            this.lblPassword = new System.Windows.Forms.Label();
+            this.txtUsername = new System.Windows.Forms.TextBox();
+            this.lblUsername = new System.Windows.Forms.Label();
+            this.lblDefaultUserDescription = new System.Windows.Forms.Label();
+            this.lblPublicKeyDescription = new System.Windows.Forms.Label();
+            this.lblAuthentication = new System.Windows.Forms.Label();
+            this.cmbAuthentication = new System.Windows.Forms.ComboBox();
+            this.txtPassword = new System.Windows.Forms.TextBox();
+            this.txtPassword2 = new System.Windows.Forms.TextBox();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -57,13 +57,9 @@ namespace WixSharpSetup.Dialogs
             this.next = new System.Windows.Forms.Button();
             this.cancel = new System.Windows.Forms.Button();
             this.border1 = new System.Windows.Forms.Panel();
-            this.toolTip1 = new System.Windows.Forms.ToolTip(this.components);
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
             this.tableLayoutPanel2.SuspendLayout();
-            this.groupBox1.SuspendLayout();
-            this.tableLayoutPanel3.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -72,7 +68,6 @@ namespace WixSharpSetup.Dialogs
             // 
             // contextMenuStrip1
             // 
-            this.contextMenuStrip1.ImageScalingSize = new System.Drawing.Size(32, 32);
             this.contextMenuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.copyToolStripMenuItem});
             this.contextMenuStrip1.Name = "contextMenuStrip1";
@@ -86,165 +81,154 @@ namespace WixSharpSetup.Dialogs
             // 
             // middlePanel
             // 
-            this.middlePanel.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
             this.middlePanel.Controls.Add(this.tableLayoutPanel2);
             this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
-            this.middlePanel.Size = new System.Drawing.Size(494, 254);
+            this.middlePanel.Size = new System.Drawing.Size(494, 261);
             this.middlePanel.TabIndex = 16;
             // 
             // tableLayoutPanel2
             // 
-            this.tableLayoutPanel2.ColumnCount = 1;
+            this.tableLayoutPanel2.ColumnCount = 3;
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 150F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Controls.Add(this.label3, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.rbConfigNow, 0, 2);
-            this.tableLayoutPanel2.Controls.Add(this.rbConfigLater, 0, 1);
-            this.tableLayoutPanel2.Controls.Add(this.groupBox1, 0, 3);
-            this.tableLayoutPanel2.Location = new System.Drawing.Point(12, 7);
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.Controls.Add(this.lblPassword2, 0, 5);
+            this.tableLayoutPanel2.Controls.Add(this.lblPassword, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.txtUsername, 1, 3);
+            this.tableLayoutPanel2.Controls.Add(this.lblUsername, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.lblDefaultUserDescription, 0, 2);
+            this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyDescription, 0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.lblAuthentication, 0, 1);
+            this.tableLayoutPanel2.Controls.Add(this.cmbAuthentication, 1, 1);
+            this.tableLayoutPanel2.Controls.Add(this.txtPassword, 1, 4);
+            this.tableLayoutPanel2.Controls.Add(this.txtPassword2, 1, 5);
+            this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 4;
+            this.tableLayoutPanel2.RowCount = 7;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(470, 241);
-            this.tableLayoutPanel2.TabIndex = 14;
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 216);
+            this.tableLayoutPanel2.TabIndex = 2;
             // 
-            // label3
+            // lblPassword2
             // 
-            this.label3.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.label3.BackColor = System.Drawing.Color.Transparent;
-            this.label3.Location = new System.Drawing.Point(3, 0);
-            this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(464, 43);
-            this.label3.TabIndex = 11;
-            this.label3.Text = "[CustomInstallDlgInfoLabel]";
+            this.lblPassword2.AutoSize = true;
+            this.lblPassword2.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPassword2.Location = new System.Drawing.Point(3, 131);
+            this.lblPassword2.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblPassword2.Name = "lblPassword2";
+            this.lblPassword2.Size = new System.Drawing.Size(144, 23);
+            this.lblPassword2.TabIndex = 8;
+            this.lblPassword2.Text = "Confirm Password";
+            this.lblPassword2.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
-            // rbConfigNow
+            // lblPassword
             // 
-            this.rbConfigNow.AutoSize = true;
-            this.rbConfigNow.Location = new System.Drawing.Point(3, 69);
-            this.rbConfigNow.Name = "rbConfigNow";
-            this.rbConfigNow.Size = new System.Drawing.Size(202, 17);
-            this.rbConfigNow.TabIndex = 1;
-            this.rbConfigNow.Text = "[CustomInstallDlgConfigureNowLabel]";
-            this.rbConfigNow.UseVisualStyleBackColor = true;
-            this.rbConfigNow.CheckedChanged += new System.EventHandler(this.rbConfigNow_CheckedChanged);
+            this.lblPassword.AutoSize = true;
+            this.lblPassword.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPassword.Location = new System.Drawing.Point(3, 103);
+            this.lblPassword.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblPassword.Name = "lblPassword";
+            this.lblPassword.Size = new System.Drawing.Size(144, 23);
+            this.lblPassword.TabIndex = 6;
+            this.lblPassword.Text = "Password";
+            this.lblPassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
-            // rbConfigLater
+            // txtUsername
             // 
-            this.rbConfigLater.AutoSize = true;
-            this.rbConfigLater.Checked = true;
-            this.rbConfigLater.Location = new System.Drawing.Point(3, 46);
-            this.rbConfigLater.Name = "rbConfigLater";
-            this.rbConfigLater.Size = new System.Drawing.Size(204, 17);
-            this.rbConfigLater.TabIndex = 0;
-            this.rbConfigLater.TabStop = true;
-            this.rbConfigLater.Text = "[CustomInstallDlgConfigureLaterLabel]";
-            this.rbConfigLater.UseVisualStyleBackColor = true;
-            this.rbConfigLater.CheckedChanged += new System.EventHandler(this.rbConfigLater_CheckedChanged);
+            this.txtUsername.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtUsername.Location = new System.Drawing.Point(153, 78);
+            this.txtUsername.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtUsername.MaxLength = 256;
+            this.txtUsername.Name = "txtUsername";
+            this.txtUsername.Size = new System.Drawing.Size(293, 20);
+            this.txtUsername.TabIndex = 4;
             // 
-            // groupBox1
+            // lblUsername
             // 
-            this.groupBox1.Controls.Add(this.tableLayoutPanel3);
-            this.groupBox1.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.groupBox1.Location = new System.Drawing.Point(3, 99);
-            this.groupBox1.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
-            this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Size = new System.Drawing.Size(464, 139);
-            this.groupBox1.TabIndex = 12;
-            this.groupBox1.TabStop = false;
-            this.groupBox1.Text = "Configuration Options";
+            this.lblUsername.AutoSize = true;
+            this.lblUsername.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblUsername.Location = new System.Drawing.Point(3, 75);
+            this.lblUsername.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblUsername.Name = "lblUsername";
+            this.lblUsername.Size = new System.Drawing.Size(144, 23);
+            this.lblUsername.TabIndex = 3;
+            this.lblUsername.Text = "Username";
+            this.lblUsername.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
-            // tableLayoutPanel3
+            // lblDefaultUserDescription
             // 
-            this.tableLayoutPanel3.ColumnCount = 2;
-            this.tableLayoutPanel3.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel3.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel3.Controls.Add(this.chkWebApp, 0, 0);
-            this.tableLayoutPanel3.Controls.Add(this.chkGenerateCertificate, 0, 1);
-            this.tableLayoutPanel3.Controls.Add(this.chkGenerateKeyPair, 0, 2);
-            this.tableLayoutPanel3.Controls.Add(this.chkConfigureNgrok, 0, 3);
-            this.tableLayoutPanel3.Controls.Add(this.pictureBox1, 1, 1);
-            this.tableLayoutPanel3.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tableLayoutPanel3.Location = new System.Drawing.Point(3, 16);
-            this.tableLayoutPanel3.Name = "tableLayoutPanel3";
-            this.tableLayoutPanel3.RowCount = 5;
-            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel3.Size = new System.Drawing.Size(458, 120);
-            this.tableLayoutPanel3.TabIndex = 0;
+            this.lblDefaultUserDescription.AutoSize = true;
+            this.tableLayoutPanel2.SetColumnSpan(this.lblDefaultUserDescription, 3);
+            this.lblDefaultUserDescription.Location = new System.Drawing.Point(3, 57);
+            this.lblDefaultUserDescription.Margin = new System.Windows.Forms.Padding(3, 10, 3, 5);
+            this.lblDefaultUserDescription.Name = "lblDefaultUserDescription";
+            this.lblDefaultUserDescription.Size = new System.Drawing.Size(249, 13);
+            this.lblDefaultUserDescription.TabIndex = 2;
+            this.lblDefaultUserDescription.Text = "Create a default user to access the web application";
             // 
-            // chkWebApp
+            // lblPublicKeyDescription
             // 
-            this.chkWebApp.AutoSize = true;
-            this.chkWebApp.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkWebApp.Enabled = false;
-            this.chkWebApp.Location = new System.Drawing.Point(10, 3);
-            this.chkWebApp.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
-            this.chkWebApp.Name = "chkWebApp";
-            this.chkWebApp.Size = new System.Drawing.Size(203, 17);
-            this.chkWebApp.TabIndex = 12;
-            this.chkWebApp.Text = "Configure standalone web application";
-            this.chkWebApp.UseVisualStyleBackColor = true;
-            this.chkWebApp.CheckedChanged += new System.EventHandler(this.chkWebApp_CheckedChanged);
+            this.lblPublicKeyDescription.AutoSize = true;
+            this.tableLayoutPanel2.SetColumnSpan(this.lblPublicKeyDescription, 3);
+            this.lblPublicKeyDescription.Location = new System.Drawing.Point(3, 0);
+            this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
+            this.lblPublicKeyDescription.Size = new System.Drawing.Size(370, 13);
+            this.lblPublicKeyDescription.TabIndex = 0;
+            this.lblPublicKeyDescription.Text = "Choose the authentication method used when accessing the web application";
             // 
-            // chkGenerateCertificate
+            // lblAuthentication
             // 
-            this.chkGenerateCertificate.AutoSize = true;
-            this.chkGenerateCertificate.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkGenerateCertificate.Enabled = false;
-            this.chkGenerateCertificate.Location = new System.Drawing.Point(30, 26);
-            this.chkGenerateCertificate.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
-            this.chkGenerateCertificate.Name = "chkGenerateCertificate";
-            this.chkGenerateCertificate.Size = new System.Drawing.Size(183, 17);
-            this.chkGenerateCertificate.TabIndex = 13;
-            this.chkGenerateCertificate.Text = "Generate a self-signed certificate";
-            this.chkGenerateCertificate.UseVisualStyleBackColor = true;
+            this.lblAuthentication.AutoSize = true;
+            this.lblAuthentication.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblAuthentication.Location = new System.Drawing.Point(3, 18);
+            this.lblAuthentication.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblAuthentication.Name = "lblAuthentication";
+            this.lblAuthentication.Size = new System.Drawing.Size(144, 24);
+            this.lblAuthentication.TabIndex = 1;
+            this.lblAuthentication.Text = "Authentication";
+            this.lblAuthentication.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
-            // chkGenerateKeyPair
+            // cmbAuthentication
             // 
-            this.chkGenerateKeyPair.AutoSize = true;
-            this.chkGenerateKeyPair.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkGenerateKeyPair.Enabled = false;
-            this.chkGenerateKeyPair.Location = new System.Drawing.Point(30, 49);
-            this.chkGenerateKeyPair.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
-            this.chkGenerateKeyPair.Name = "chkGenerateKeyPair";
-            this.chkGenerateKeyPair.Size = new System.Drawing.Size(183, 17);
-            this.chkGenerateKeyPair.TabIndex = 14;
-            this.chkGenerateKeyPair.Text = "Generate the provisioner key pair";
-            this.chkGenerateKeyPair.UseVisualStyleBackColor = true;
+            this.cmbAuthentication.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.cmbAuthentication.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbAuthentication.FormattingEnabled = true;
+            this.cmbAuthentication.Location = new System.Drawing.Point(153, 21);
+            this.cmbAuthentication.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.cmbAuthentication.Name = "cmbAuthentication";
+            this.cmbAuthentication.Size = new System.Drawing.Size(293, 21);
+            this.cmbAuthentication.TabIndex = 5;
+            this.cmbAuthentication.SelectedIndexChanged += new System.EventHandler(this.cmbAuthentication_SelectedIndexChanged);
             // 
-            // chkConfigureNgrok
+            // txtPassword
             // 
-            this.chkConfigureNgrok.AutoSize = true;
-            this.chkConfigureNgrok.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkConfigureNgrok.Enabled = false;
-            this.chkConfigureNgrok.Location = new System.Drawing.Point(10, 72);
-            this.chkConfigureNgrok.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
-            this.chkConfigureNgrok.Name = "chkConfigureNgrok";
-            this.chkConfigureNgrok.Size = new System.Drawing.Size(203, 17);
-            this.chkConfigureNgrok.TabIndex = 15;
-            this.chkConfigureNgrok.Text = "Configure ngrok";
-            this.chkConfigureNgrok.UseVisualStyleBackColor = true;
-            this.chkConfigureNgrok.Visible = false;
+            this.txtPassword.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtPassword.Location = new System.Drawing.Point(153, 106);
+            this.txtPassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtPassword.MaxLength = 256;
+            this.txtPassword.Name = "txtPassword";
+            this.txtPassword.Size = new System.Drawing.Size(293, 20);
+            this.txtPassword.TabIndex = 7;
+            this.txtPassword.UseSystemPasswordChar = true;
             // 
-            // pictureBox1
+            // txtPassword2
             // 
-            this.pictureBox1.Location = new System.Drawing.Point(219, 26);
-            this.pictureBox1.Name = "pictureBox1";
-            this.pictureBox1.Size = new System.Drawing.Size(16, 16);
-            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.StretchImage;
-            this.pictureBox1.TabIndex = 16;
-            this.pictureBox1.TabStop = false;
-            this.toolTip1.SetToolTip(this.pictureBox1, "Self-signed certificates are not trusted by default");
+            this.txtPassword2.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtPassword2.Location = new System.Drawing.Point(153, 134);
+            this.txtPassword2.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtPassword2.MaxLength = 256;
+            this.txtPassword2.Name = "txtPassword2";
+            this.txtPassword2.Size = new System.Drawing.Size(293, 20);
+            this.txtPassword2.TabIndex = 9;
+            this.txtPassword2.UseSystemPasswordChar = true;
             // 
             // topBorder
             // 
@@ -276,9 +260,9 @@ namespace WixSharpSetup.Dialogs
             this.label2.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label2.Location = new System.Drawing.Point(18, 31);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(130, 13);
+            this.label2.Size = new System.Drawing.Size(205, 13);
             this.label2.TabIndex = 1;
-            this.label2.Text = "[CustomizeDlgDescription]";
+            this.label2.Text = "Configure the standalone web application.";
             // 
             // label1
             // 
@@ -288,9 +272,9 @@ namespace WixSharpSetup.Dialogs
             this.label1.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label1.Location = new System.Drawing.Point(11, 8);
             this.label1.Name = "label1";
-            this.label1.Size = new System.Drawing.Size(116, 13);
+            this.label1.Size = new System.Drawing.Size(107, 13);
             this.label1.TabIndex = 1;
-            this.label1.Text = "[CustomizeDlgTitle]";
+            this.label1.Text = "[WebAppDlgTitle]";
             // 
             // banner
             // 
@@ -381,13 +365,7 @@ namespace WixSharpSetup.Dialogs
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
             // 
-            // toolTip1
-            // 
-            this.toolTip1.IsBalloon = true;
-            this.toolTip1.ToolTipIcon = System.Windows.Forms.ToolTipIcon.Info;
-            this.toolTip1.ToolTipTitle = "Self-Signed Certificate";
-            // 
-            // CustomizeDialog
+            // WebClientDialog
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.ClientSize = new System.Drawing.Size(494, 361);
@@ -395,17 +373,13 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topBorder);
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
-            this.Name = "CustomizeDialog";
-            this.Text = "[CustomizeDlg_Title]";
+            this.Name = "WebClientDialog";
+            this.Text = "[WebAppDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
-            this.groupBox1.ResumeLayout(false);
-            this.tableLayoutPanel3.ResumeLayout(false);
-            this.tableLayoutPanel3.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -425,7 +399,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Panel bottomPanel;
-        private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Panel border1;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
         private System.Windows.Forms.Button back;
@@ -433,16 +406,16 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Button cancel;
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
-        private System.Windows.Forms.RadioButton rbConfigNow;
-        private System.Windows.Forms.RadioButton rbConfigLater;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
-        private System.Windows.Forms.CheckBox chkWebApp;
-        private System.Windows.Forms.GroupBox groupBox1;
-        private System.Windows.Forms.TableLayoutPanel tableLayoutPanel3;
-        private System.Windows.Forms.CheckBox chkGenerateCertificate;
-        private System.Windows.Forms.CheckBox chkGenerateKeyPair;
-        private System.Windows.Forms.CheckBox chkConfigureNgrok;
-        private System.Windows.Forms.PictureBox pictureBox1;
-        private System.Windows.Forms.ToolTip toolTip1;
+        private System.Windows.Forms.TextBox txtUsername;
+        private System.Windows.Forms.Label lblUsername;
+        private System.Windows.Forms.Label lblDefaultUserDescription;
+        private System.Windows.Forms.Label lblPublicKeyDescription;
+        private System.Windows.Forms.Label lblAuthentication;
+        private System.Windows.Forms.ComboBox cmbAuthentication;
+        private System.Windows.Forms.Label lblPassword;
+        private System.Windows.Forms.TextBox txtPassword;
+        private System.Windows.Forms.Label lblPassword2;
+        private System.Windows.Forms.TextBox txtPassword2;
     }
 }

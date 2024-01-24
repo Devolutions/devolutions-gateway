@@ -20,6 +20,12 @@ namespace DevolutionsGateway.Properties
             SubjectName
         }
 
+        internal enum AuthenticationMode
+        {
+            None,
+            Custom,
+        }
+
         internal const string HttpProtocol = "http";
 
         internal const string HttpsProtocol = "https";
@@ -32,10 +38,16 @@ namespace DevolutionsGateway.Properties
 
         internal const string ImportDGatewayCertificateWithPasswordCommandFormat = "Import-DGatewayCertificate -CertificateFile '{0}' -Password '{1}'";
 
-        internal const string ImportDGatewayCertificateWithPrivateKeyCommandFormat = "Import-DGatewayCertificate -CertificateFile '{0} -PrivateKeyFile '{1}'";
+        internal const string ImportDGatewayCertificateWithPrivateKeyCommandFormat = "Import-DGatewayCertificate -CertificateFile '{0}' -PrivateKeyFile '{1}'";
 
         internal const string ImportDGatewayCertificateFromSystemFormat = "Set-DGatewayConfig -TlsCertificateSource {0} -TlsCertificateSubjectName {1} -TlsCertificateStoreName {2} -TlsCertificateStoreLocation {3}";
 
+        internal const string ImportDGatewayProvisionerKeyCommand = "Import-DGatewayProvisionerKey";
+
         internal const string ImportDGatewayProvisionerKeyCommandFormat = "Import-DGatewayProvisionerKey -PublicKeyFile '{0}'";
+
+        internal const string NewDGatewayCertificateCommand = "New-DGatewayCertificate";
+
+        internal const string NewDGatewayProvisionerKeyPairCommand = "New-DGatewayProvisionerKeyPair -Force";
     }
 }
