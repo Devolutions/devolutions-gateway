@@ -4,6 +4,7 @@ import {WebSession} from "@shared/models/web-session.model";
 import {SESSIONS_MENU_OFFSET, WebSessionService} from "@shared/services/web-session.service";
 import {noop} from "rxjs";
 import {takeUntil} from "rxjs/operators";
+import {error} from "@angular/compiler-cli/src/transformers/util";
 
 
 @Component({
@@ -31,22 +32,22 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.subscribeToWebSessionsActiveIndex();
   }
 
-  onMenuListItemClick(event: MouseEvent, index: number): void {
+  onMenuListItemClick(event: MouseEvent, webSession: WebSession<any, any>): void {
     if (this.selected || this.disabled) {
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-    this.selectedMenuIndex = index;
-    this.selectTab(index)
+    this.selectedMenuIndex = webSession.tabIndex;
+    this.selectTab(webSession.tabIndex)
   }
 
-  onCloseButtonClick(event: MouseEvent, index: number): void {
-    this.webSessionService.removeSession(this.adjustTabIndex(index)).then(noop);
+  onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
+    this.webSessionService.removeSession(webSession.tabIndex).then(noop);
   }
 
   private selectTab(tabIndex: any): void {
-    this.webSessionService.setWebSessionCurrentIndex(this.adjustTabIndex(tabIndex));
+    this.webSessionService.setWebSessionCurrentIndex(tabIndex);
   }
 
   private adjustTabIndex(index: number): number {
@@ -59,7 +60,9 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   private subscribeToWebSessionsUpdates(): void {
     this.webSessionService.getMenuWebSessions().pipe(takeUntil(this.destroyed$)).subscribe({
-      next: (tabs:WebSession<any, any>[]) => this.activeWebSessions = tabs,
+      next: (tabs:WebSession<any, any>[]) => {
+        this.activeWebSessions = tabs
+      },
       error: (e) => console.error(e)
     });
   }

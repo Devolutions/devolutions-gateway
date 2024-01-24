@@ -15,11 +15,11 @@ import { MenuListItemComponent } from './modules/base/menu/menu-list-item/menu-l
 import { MenuListActiveSessionsComponent } from "@gateway/modules/base/menu/menu-list-active-sessions/menu-list-active-sessions.component";
 import { MenuGroupListItemComponent } from './modules/base/menu/menu-group-list-item/menu-group-list-item.component';
 import { AppHeaderComponent } from './modules/base/header/app-header.component';
-import { GatewayMessageComponent } from "@shared/components/gateway-message/gateway-message.component";
+import {GatewayAlertMessageComponent} from "@shared/components/gateway-alert-message/gateway-alert-message.component";
 
 // Services
 import { MainMenuService } from "@shared/services/main-menu.service";
-import { GatewayMessageService } from "@shared/components/gateway-message/gateway-message.service";
+import { GatewayAlertMessageService } from "@shared/components/gateway-alert-message/gateway-alert-message.service";
 import { LoadingService} from "@shared/services/loading.service";
 import { WebSessionService } from "@shared/services/web-session.service";
 
@@ -41,7 +41,7 @@ import { TabView, TabViewModule } from "primeng/tabview";
     MenuListItemComponent,
     MenuListActiveSessionsComponent,
     MenuGroupListItemComponent,
-    GatewayMessageComponent
+    GatewayAlertMessageComponent
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
@@ -59,7 +59,7 @@ import { TabView, TabViewModule } from "primeng/tabview";
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
     { provide: APP_BASE_HREF, useValue: '/jet/webapp/client/' },
     MainMenuService,
-    GatewayMessageService,
+    GatewayAlertMessageService,
     LoadingService,
     WebSessionService,
     TabView

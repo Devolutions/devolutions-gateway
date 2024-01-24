@@ -2,45 +2,38 @@ import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import { ActivatedRoute, Params } from '@angular/router';
 import {WebClientQueryParams} from "@shared/services/web-client.service";
+import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
 
 @Directive()
 export abstract class WebClientBaseComponent extends BaseComponent {
 
-  progressionText: string;
+  hideSpinnerOnly: boolean = false;
   error: string;
 
-  protected constructor() {
+  protected constructor(protected gatewayAlertMessageService: GatewayAlertMessageService) {
     super();
-    this.setProgressionText('LoadingWebPage');
   }
 
   abstract removeWebClientGuiElement(): void ;
 
   protected webClientConnectionSuccess(message?:string): void {
+    this.hideSpinnerOnly = true;
+
     if (!message) {
-      //TODO var for translation 'ConnectionSuccessful'
-      console.log('TODO: Display to screen---> Connection successful')
-      return;
+      //For translation 'ConnectionSuccessful
+      message = 'Connection successful';
     }
-
-    console.log(message);
-  }
-
-  protected webClientConnecting() {
-    //TODO message to user connecting
+    this.gatewayAlertMessageService.addSuccess(message);
   }
 
   protected webClientConnectionFail(message?:string, trace?: string): void {
-
-    // TODO: Replace console.error with a more user-friendly error display mechanism
-    // For example, using a toast notification service or error dialog
-    // this.toastService.showError(errorMessage);
+    this.hideSpinnerOnly = true;
 
     if (!message) {
-      //TODO var for translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-      console.error('TODO: Display to screen---> Connection error: Please verify your connection settings.')
-      return;
+      //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+      message = 'Connection error: Please verify your connection settings.';
     }
+    this.gatewayAlertMessageService.addError(message);
     console.error(message);
 
     if (trace) {
@@ -49,29 +42,12 @@ export abstract class WebClientBaseComponent extends BaseComponent {
   }
 
   protected webClientConnectionClosed(message?:string): void {
-    //TODO message to user connection closed
     if (!message) {
-      //TODO var for translation 'connection closed'
-      console.log('TODO: Display to screen---> Connection Closed.')
-      return;
+      //For translation 'connection closed'
+      message = 'Connection error: Please verify your connection settings.';
     }
-
-    console.log(message);
-  }
-
-  protected webClientConnectionTimeout(message?:string): void {
-    //TODO message to user connection timeout
-    if (!message) {
-      //TODO var for translation 'connection time out'
-      console.log('TODO: Display to screen---> Connection timeout.')
-      return;
-    }
-
-    console.log(message);
-  }
-
-  protected setProgressionText(text: string) {
-    this.progressionText = text;
+    this.gatewayAlertMessageService.addInfo(message);
+    console.warn(message);
   }
 
   protected getProtocol(gatewayUrl: URL): string {
@@ -80,9 +56,5 @@ export abstract class WebClientBaseComponent extends BaseComponent {
 
   protected ensureEndWithSlash(path: string): string {
     return path.endsWith('/') ? path : path + '/';
-  }
-
-  protected isCredentialsEmpty(credential): boolean {
-    return credential.username === '' && credential.domain === '' && credential.safePassword === '';
   }
 }

@@ -4,42 +4,33 @@ import {
   ViewChild,
   ViewContainerRef,
   ComponentRef,
-  AfterContentInit,
   AfterViewInit,
   ChangeDetectorRef,
   Output, EventEmitter, OnDestroy
 } from '@angular/core';
-import {takeUntil} from "rxjs/operators";
 
 import {WebSession} from "@shared/models/web-session.model";
-import {SESSIONS_MENU_OFFSET, WebSessionService} from "@shared/services/web-session.service";
+import {WebSessionService} from "@shared/services/web-session.service";
 import {BaseComponent} from "@shared/bases/base.component";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 import {noop} from "rxjs";
-import {UserIronRdpError} from "@devolutions/iron-remote-gui";
+import {ComponentStatus} from "@shared/models/component-status.model";
 
 @Component({
   selector: 'web-client-dynamic-tab',
   templateUrl: './dynamic-tab.component.html',
   styleUrls: ['./dynamic-tab.component.scss']
 })
-export class DynamicTabComponent extends BaseComponent implements AfterContentInit, AfterViewInit, OnDestroy {
+export class DynamicTabComponent extends BaseComponent implements AfterViewInit, OnDestroy {
 
   @Input() webSessionTab: WebSession<any, any>;
   @ViewChild('dynamicComponentContainer', { read: ViewContainerRef }) container: ViewContainerRef;
   @Output() isDynamicTabInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
 
-  componentTabIndex: number = 0;
-  activeTabIndex: number = 0;
-
   constructor(private cdr: ChangeDetectorRef,
               private webSessionService: WebSessionService,
               private dynamicComponentService: DynamicComponentService) {
     super();
-  }
-
-  ngAfterContentInit(): void {
-    this.subscribeToActiveTabIndexChanges();
   }
 
   ngAfterViewInit(): void {
@@ -57,34 +48,24 @@ export class DynamicTabComponent extends BaseComponent implements AfterContentIn
     }
 
     const inputData: {formData: any} = { formData: this.webSessionTab.data };
-    const componentRef: ComponentRef<any> = this.dynamicComponentService.createComponent(this.webSessionTab.component, this.container, inputData);
+    const tabIndex: number = this.webSessionTab.tabIndex;
+    const componentRef: ComponentRef<any> = this.dynamicComponentService.createComponent(this.webSessionTab.component, this.container, inputData, tabIndex);
 
     if (this.webSessionTab?.data?.hostname) {
       componentRef["hostname"] = this.webSessionTab.data.hostname;
     }
+
     this.cdr.detectChanges();
 
     //TODO not sure if BOTH event emitters are needed anymore.
-    componentRef.instance.initializationMessage.subscribe((error: Error) => {
-      this.onComponentNotInitialized(this.activeTabIndex, componentRef);
-      this.webSessionService.setupNewWebSession();
-    });
-
-    componentRef.instance.isInitialized.pipe(takeUntil(this.destroyed$)).subscribe((isInitialized: boolean): void => {
-      console.log(componentRef["hostname"], 'isInitialized', isInitialized)
-    });
+    componentRef.instance.componentStatus.subscribe((status: ComponentStatus) => this.onComponentDisabled(status, componentRef));
 
     this.webSessionTab.componentRef = componentRef;
   }
 
-  private subscribeToActiveTabIndexChanges(): void {
-    this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe((webSessionActiveIndex: number): void => {
-      this.activeTabIndex = webSessionActiveIndex;
-      this.componentTabIndex = webSessionActiveIndex-SESSIONS_MENU_OFFSET;
-    })
-  }
-
-  private onComponentNotInitialized(index: number, componentRef: ComponentRef<any>): void {
-    this.webSessionService.removeSession(index).then(noop);
+  private onComponentDisabled(status: ComponentStatus, componentRef: ComponentRef<any>): void {
+    if (status.isDisabledByUser) {
+      this.webSessionService.removeSession(status.tabIndex).then(noop);
+    }
   }
 }

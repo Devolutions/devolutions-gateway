@@ -8,14 +8,17 @@ import {
   Output,
   ViewChild
 } from '@angular/core';
-import {Observable, of, Subject} from "rxjs";
+import {from, Observable, Subject} from "rxjs";
 import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
-import {UserInteraction, SessionEvent, UserIronRdpError, NewSessionInfo} from '@devolutions/iron-remote-gui';
+import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
 import { WebClientBaseComponent } from "@shared/bases/base-web-client.component";
 import {DefaultRDPPort, IronRDPConnectionParameters} from "@shared/services/web-client.service";
 import { ApiService } from "@shared/services/api.service";
-import {NavigationService} from "@shared/services/navigation.service";
+import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
+import {ComponentStatus} from "@shared/models/component-status.model";
+import {MessageService} from "primeng/api";
+import {WebSessionService} from "@shared/services/web-session.service";
 
 export enum SSPIType {
   Kerberos = 0,
@@ -43,32 +46,43 @@ enum UserIronRdpErrorKind {
 
 @Component({
   templateUrl: 'web-client-rdp.component.html',
-  styleUrls: ['web-client-rdp.component.scss']
+  styleUrls: ['web-client-rdp.component.scss'],
+  providers: [MessageService]
 })
 export class WebClientRdpComponent extends WebClientBaseComponent implements  OnInit,
                                                                               AfterViewInit,
                                                                               OnDestroy {
 
-  @Input() formData: any | undefined;
-  @Output() isInitialized: EventEmitter<boolean> = new EventEmitter<boolean>();
-  @Output() initializationMessage: EventEmitter<Error> = new EventEmitter<Error>();
-
+  @Input() tabIndex: number | undefined;
+  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
 
   JET_RDP_URL: string = '/jet/rdp';
   loading: boolean = true;
   screenScale = ScreenScale;
   fullScreen: boolean;
+  inputFormData: any;
+  status: ComponentStatus;
+  rdpError: string;
 
   protected removeElement: Subject<any> = new Subject();
   private remoteClient: UserInteraction;
 
-  constructor(private apiService: ApiService) {
-    super();
+  constructor(private apiService: ApiService,
+              protected gatewayAlertMessageService: GatewayAlertMessageService,
+              private webSessionService: WebSessionService) {
+    super(gatewayAlertMessageService);
   }
 
   ngOnInit(): void {
     this.removeWebClientGuiElement();
+
+    this.status = {
+      isInitialized: false,
+      isDisabled: false,
+      isDisabledByUser: false,
+      tabIndex: this.tabIndex
+    }
   }
 
   ngAfterViewInit(): void {
@@ -92,7 +106,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   sendTerminateSessionCmd(): void {
     // shutdowns the session, not the server
     this.remoteClient.shutdown();
-    this.isInitialized.emit(false);
+    this.status.isDisabledByUser = true;
   }
 
   scaleTo(scale: ScreenScale): void {
@@ -131,7 +145,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       .pipe(
         takeUntil(this.destroyed$),
         mergeMap(connectionParameters => this.callConnect(connectionParameters))
-      ).subscribe();
+      ).subscribe(
+        () => {},
+        (error) => {
+          this.notifyUserAboutError(error.message);
+        });
   }
 
   private getCredentials(): Observable<IronRDPConnectionParameters> {
@@ -144,31 +162,37 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     );
   }
 
-  private getFormData() : Observable<IronRDPConnectionParameters> {
-    const { hostname, username, password, desktopSize, preConnectionBlob } = this.formData;
-    const domain: string = '';
+  private getFormData(): Observable<IronRDPConnectionParameters> {
+    return from(this.webSessionService.getWebSession(this.tabIndex)).pipe(
+      map(currentWebSession => {
+        this.inputFormData = currentWebSession.data;
+        const { hostname, username, password, desktopSize, preConnectionBlob } = this.inputFormData;
+        const domain: string = '';
 
-    const gatewayHttpAddress: URL = new URL(this.JET_RDP_URL,window.location.href);
-    const websocketUrl: string = gatewayHttpAddress.toString().replace("http", "ws");
+        const gatewayHttpAddress: URL = new URL(this.JET_RDP_URL, window.location.href);
+        const websocketUrl: string = gatewayHttpAddress.toString().replace("http", "ws");
 
-    //TODO KDC Server URL
-    const kdcProxyUrl = undefined;
+        //TODO KDC Server URL
+        const kdcProxyUrl = undefined;
 
-    const connectionParameters: IronRDPConnectionParameters = {
-      username: username,
-      password: password,
-      host: hostname,
-      domain: domain,
-      gatewayAddress: websocketUrl,
-      screenSize: desktopSize,
-      preConnectionBlob: preConnectionBlob,
-      kdcProxyUrl: kdcProxyUrl
-    };
-    return of(connectionParameters);
+        const connectionParameters: IronRDPConnectionParameters = {
+          username: username,
+          password: password,
+          host: hostname,
+          domain: domain,
+          gatewayAddress: websocketUrl,
+          screenSize: desktopSize,
+          preConnectionBlob: preConnectionBlob,
+          kdcProxyUrl: kdcProxyUrl
+        };
+
+        return connectionParameters;
+      })
+    );
   }
 
   private callConnect(connectionParameters: IronRDPConnectionParameters): Observable<void> {
-
+    console.log('callconnect', connectionParameters)
     return this.remoteClient.connect(
       connectionParameters.username,
       connectionParameters.password,
@@ -182,13 +206,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     ).pipe(
       takeUntil(this.destroyed$),
       map(connectionData => {
-        //connectionData - NewSessionInfo may be useful in future.
+        //connectionData - NewSessionInfo may be useful in the future.
       })
     );
   }
 
   private fetchToken(connectionParameters: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
-
     //TODO create a proper model
     const data = {
       "content_type": "ASSOCIATION",
@@ -216,11 +239,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
         switch (event.type) {
           case SessionEventType.STARTED:
             this.handleIronRDPConnectStarted();
+            this.status.isInitialized = true;
             break;
           case SessionEventType.TERMINATED:
+            this.status.isDisabled = true;
             this.handleIronRDPTerminated(event.data);
             break;
           case SessionEventType.ERROR:
+            this.status.isDisabled = true;
             this.handleIronRDPError(event.data);
             break;
         }
@@ -234,52 +260,48 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private handleIronRDPTerminated(data: UserIronRdpError | string): void {
-    this.emitInitializationMessage(data);
     this.notifyUserAboutConnectionClosed(data);
-    this.isInitialized.emit(false);
+    this.status.isDisabled = true;
+    this.componentStatus.emit(this.status);
   }
 
   private handleIronRDPError(error: UserIronRdpError | string): void {
-    this.emitInitializationMessage(error);
     this.notifyUserAboutError(error);
-    this.isInitialized.emit(false);
-  }
-
-  private emitInitializationMessage(error: UserIronRdpError | string): void {
-    const errorMessage: string = typeof error === 'string' ? error : this.getMessage(error.kind());
-    this.initializationMessage.emit(new Error(errorMessage));
+    this.status.isDisabled = true;
+    this.componentStatus.emit(this.status);
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
+    this.tabIndex = this.status.tabIndex;
+
     if (typeof error === 'string') {
-      this.webClientConnectionFail(error);
+      this.rdpError = error;
     } else {
-      this.webClientConnectionFail(this.getMessage(error.kind()), error.backtrace());
+      this.rdpError = this.getMessage(error.kind());
     }
   }
 
   private notifyUserAboutConnectionClosed(error: UserIronRdpError | string): void {
-    const errorMessage: string = typeof error === 'string' ? error : this.getMessage(error.kind());
-    this.webClientConnectionClosed(errorMessage);
+    this.rdpError = typeof error === 'string' ? error : this.getMessage(error.kind());
   }
 
   private getMessage(type: UserIronRdpErrorKind): string {
     switch (type) {
       case UserIronRdpErrorKind.General:
-        //TODO var for translation 'UnknownError'
+        //For translation 'UnknownError'
         return 'Unknown Error';
         break;
       case UserIronRdpErrorKind.WrongPassword:
       case UserIronRdpErrorKind.LogonFailure:
-        //TODO var for translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+        //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
         return 'Connection error: Please verify your connection settings.';
         break;
       case UserIronRdpErrorKind.AccessDenied:
-        //TODO var for translation 'AccessDenied'
+        //For translation 'AccessDenied'
         return 'Access denied';
         break;
       default:
-        //TODO var for translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+        //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
         return 'Connection error: Please verify your connection settings.';
     }
   }

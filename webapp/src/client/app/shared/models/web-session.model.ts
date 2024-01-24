@@ -4,6 +4,7 @@ import {ComponentRef, Type} from "@angular/core";
 import { Guid } from 'guid-typescript';
 import {DesktopSize} from "@shared/models/desktop-size";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
+import {ComponentStatus} from "@shared/models/component-status.model";
 
 export type WebSessionComponentType = Type<RdpFormComponent> | Type<WebClientRdpComponent>;
 
@@ -13,9 +14,10 @@ export class WebSession<WebSessionComponentType, TData> {
   public name: string = '';
   public component: WebSessionComponentType;
   public componentRef: ComponentRef<any>;
+  public tabIndex?: number;
   public data?: TData;
   public icon?: string = '';
-  public active: boolean;
+  public status: ComponentStatus;
   public desktopSize!: DesktopSize;
 
   constructor(name: string, component: WebSessionComponentType, data?: TData, icon?: string) {

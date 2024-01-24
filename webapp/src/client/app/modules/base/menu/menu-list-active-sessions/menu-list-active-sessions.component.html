@@ -2,10 +2,10 @@
   <div class="menu-list-item-container">
     <div class="menu-list-item"
          [class.selected]="selectedMenuIndex === i"
-         (click)="onMenuListItemClick($event, i)">
+         (click)="onMenuListItemClick($event, activeWebSession)">
       <i *ngIf="activeWebSession.icon" class="dvl-icon" [ngClass]="activeWebSession.icon"></i>
       <span class="menu-list-item-label">{{activeWebSession.name}}</span>
-      <span class="close-button" (click)="onCloseButtonClick($event, i)"></span>
+      <span class="close-button" (click)="onCloseButtonClick($event, activeWebSession)"></span>
     </div>
   </div>
 </ng-container>

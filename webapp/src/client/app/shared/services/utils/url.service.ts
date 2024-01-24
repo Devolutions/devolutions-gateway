@@ -1,7 +1,4 @@
 import {UtilsService} from '../utils.service';
-import {noop} from 'rxjs';
-import {ConfirmationService} from 'primeng/api';
-import {GatewayMessageService} from "@shared/components/gateway-message/gateway-message.service";
 
 export class UrlService {
 
@@ -51,31 +48,6 @@ export class UrlService {
       return address + ':' + port;
     } else {
       return address;
-    }
-  }
-
-  openInNewTab(value: string, confirmationService: ConfirmationService, gatewayMessageService: GatewayMessageService, incognito: boolean = false) {
-    try {
-      let features = 'noreferrer'; // Noreferrer is a security setting to block XSS (via noopener).
-
-      if (incognito) {
-        features = 'incognito,' + features;
-      }
-
-      if (!value.includes('://')) {
-        window.open('https://' + value, '_blank', features);
-      } else if (value.includes('http://') || value.includes('https://')) {
-        window.open(value, '_blank', features);
-      } else {
-        confirmationService.confirm({
-          key: 'openDangerousWebsiteLink',
-          message: 'The URL doesn\'t start with http:// or https://. Do you want to continue?',
-          accept: () => window.open(value, '_blank', features),
-          reject: () => noop()
-        });
-      }
-    } catch (e) {
-      gatewayMessageService.addError('Invalid url');
     }
   }
 }
