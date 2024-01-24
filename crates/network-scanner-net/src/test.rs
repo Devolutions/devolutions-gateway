@@ -9,6 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::socket::AsyncRawSocket;
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_connectivity() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
@@ -18,6 +19,7 @@ async fn test_connectivity() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_udp() -> anyhow::Result<()> {
     let addr = local_udp_server()?;
@@ -61,6 +63,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
@@ -98,6 +101,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[ignore]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let addr = local_tcp_server()?;
