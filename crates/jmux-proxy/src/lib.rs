@@ -133,8 +133,8 @@ async fn run_proxy_impl(proxy: JmuxProxy, span: Span) -> anyhow::Result<()> {
     .spawn();
 
     match tokio::try_join!(scheduler_task_handle.join(), sender_task_handle.join()).context("task join failed")? {
-        (Ok(_), Err(e)) => debug!("Sender task failed: {}", e),
-        (Err(e), Ok(_)) => debug!("Scheduler task failed: {}", e),
+        (Ok(_), Err(e)) => debug!("Sender task failed: {e:#}"),
+        (Err(e), Ok(_)) => debug!("Scheduler task failed: {e:#}"),
         (Err(scheduler_e), Err(sender_e)) => {
             // Usually, it's only of interest when both tasks are failed.
             anyhow::bail!("both scheduler and sender tasks failed: {} & {}", scheduler_e, sender_e)
@@ -487,7 +487,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let peer_id = DistantChannelId::from(msg.sender_channel_id);
 
                         if let Err(error) = cfg.filtering.validate_destination(&msg.destination_url) {
-                            debug!(%error, %msg.destination_url, %peer_id, "Invalid destination requested");
+                            debug!(error = format!("{error:#}"), %msg.destination_url, %peer_id, "Invalid destination requested");
                             msg_to_send_tx
                                 .send(Message::open_failure(peer_id, ReasonCode::CONNECTION_NOT_ALLOWED_BY_RULESET, error.to_string()))
                                 .context("couldn’t send OPEN FAILURE message through mpsc channel")?;
@@ -716,7 +716,7 @@ impl DataReaderTask {
         let handle = tokio::spawn(
             async move {
                 if let Err(error) = self.run().await {
-                    debug!(%error, "Reader task failed");
+                    debug!(error = format!("{error:#}"), "Reader task failed");
                 }
             }
             .instrument(span),
@@ -845,7 +845,7 @@ impl StreamResolverTask {
         let handle = tokio::spawn(
             async move {
                 if let Err(error) = self.run().await {
-                    warn!(%error, "Resolver task failed");
+                    warn!(error = format!("{error:#}"), "Resolver task failed");
                 }
             }
             .instrument(span),
