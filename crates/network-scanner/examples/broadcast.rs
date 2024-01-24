@@ -1,6 +1,7 @@
 use futures::StreamExt;
 use network_scanner::broadcast::broadcast;
 use std::time::Duration;
+
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -36,8 +37,6 @@ pub async fn main() -> anyhow::Result<()> {
             }
         }
     } // drop socket
-
-    tokio::time::sleep(Duration::from_secs(3)).await;
 
     Ok(())
 }
