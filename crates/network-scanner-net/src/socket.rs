@@ -1,5 +1,5 @@
 use polling::Event;
-use std::{future::Future, mem::MaybeUninit, sync::Arc, usize};
+use std::{fmt::Debug, future::Future, mem::MaybeUninit, sync::Arc, usize};
 
 use socket2::{SockAddr, Socket};
 use std::result::Result::Ok;
@@ -13,12 +13,21 @@ pub struct AsyncRawSocket {
     id: usize,
 }
 
+impl Debug for AsyncRawSocket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncRawSocket")
+            .field("socket", &self.socket)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 impl Drop for AsyncRawSocket {
     fn drop(&mut self) {
         tracing::trace!(id = %self.id,socket = ?self.socket, "drop socket");
         let _ = self // We ignore errors here, avoid crashing the thread
             .runtime
-            .remove_socket(&self.socket)
+            .remove_socket(&self.socket, self.id)
             .map_err(|e| tracing::error!("failed to remove socket from poller: {:?}", e));
     }
 }
@@ -98,7 +107,6 @@ impl<'a> AsyncRawSocket {
             runtime: self.runtime.clone(),
             addr,
             id: self.id,
-            is_first_poll: true,
         }
     }
 
@@ -133,6 +141,9 @@ struct RecvFromFuture<'a> {
 impl Future for RecvFromFuture<'_> {
     type Output = std::io::Result<(usize, SockAddr)>;
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        // By checking event at every call, it removes excessive events excessive in the cache and the channel
+        self.runtime.check_event(Event::readable(self.id), true);
+
         let socket = &self.socket.clone(); // avoid borrow checker error
         match socket.recv_from(self.buf) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
@@ -153,6 +164,7 @@ impl<'a> Future for SendToFuture<'a> {
     type Output = std::io::Result<usize>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        self.runtime.check_event(Event::writable(self.id), true);
         match self.socket.send_to(self.data, self.addr) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
             Err(e) => resolve(e, &self.socket, &self.runtime, Event::writable(self.id), cx.waker()),
@@ -170,6 +182,7 @@ impl Future for AcceptFuture {
     type Output = std::io::Result<(AsyncRawSocket, SockAddr)>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        self.runtime.check_event(Event::readable(self.id), true);
         match self.socket.accept() {
             Ok((socket, addr)) => {
                 let socket = AsyncRawSocket::from_socket(socket, self.id, self.runtime.clone())?;
@@ -184,50 +197,53 @@ struct ConnectFuture<'a> {
     runtime: Arc<Socket2Runtime>,
     id: usize,
     addr: &'a socket2::SockAddr,
-    is_first_poll: bool,
 }
 
 impl<'a> Future for ConnectFuture<'a> {
     type Output = std::io::Result<()>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        if self.is_first_poll {
-            tracing::trace!("first poll connect future");
-            // cannot call connect twice
-            self.is_first_poll = false;
-            let err = match self.socket.connect(self.addr) {
-                Ok(a) => {
-                    return std::task::Poll::Ready(Ok(a));
-                }
-                Err(e) => e,
-            };
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        let events = self.runtime.check_event_with_id(self.id, true);
+        if events.iter().any(|e| e.is_connect_failed()) {
+            tracing::warn!(?self.socket, ?self.addr, "connect failed");
+            return std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "connect failed")));
+        };
 
-            // code 115, EINPROGRESS, only for linux
-            // reference: https://linux.die.net/man/2/connect
-            // it is the same as WouldBlock but for connect(2) only
-            #[cfg(target_os = "linux")]
-            let in_progress = err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(115);
+        if !events.is_empty() {
+            tracing::trace!(?events, "connect success");
+            return std::task::Poll::Ready(Ok(()));
+        }
 
-            #[cfg(not(target_os = "linux"))]
-            let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
+        let err = match self.socket.connect(self.addr) {
+            Ok(a) => {
+                return std::task::Poll::Ready(Ok(a));
+            }
+            Err(e) => e,
+        };
 
-            if in_progress {
-                tracing::trace!("connect should register");
-                if let Err(e) = self
-                    .runtime
-                    .register(&self.socket, Event::all(self.id), cx.waker().clone())
-                {
-                    tracing::warn!(?self.socket, ?self.addr, "failed to register socket to poller");
-                    return std::task::Poll::Ready(Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("failed to register socket to poller: {}", e),
-                    )));
-                }
-                return std::task::Poll::Pending;
+        // code 115, EINPROGRESS, only for linux
+        // reference: https://linux.die.net/man/2/connect
+        // it is the same as WouldBlock but for connect(2) only
+        #[cfg(target_os = "linux")]
+        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(115);
+
+        #[cfg(not(target_os = "linux"))]
+        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
+
+        if in_progress {
+            tracing::trace!("connect should register");
+            if let Err(e) = self
+                .runtime
+                .register(&self.socket, Event::all(self.id), cx.waker().clone())
+            {
+                tracing::warn!(?self.socket, ?self.addr, "failed to register socket to poller");
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("failed to register socket to poller: {}", e),
+                )));
             }
         }
-        tracing::trace!("second poll connect future");
-        std::task::Poll::Ready(Ok(()))
+        std::task::Poll::Pending
     }
 }
 
@@ -242,6 +258,7 @@ impl<'a> Future for SendFuture<'a> {
     type Output = std::io::Result<usize>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        self.runtime.check_event(Event::writable(self.id), true);
         match self.socket.send(self.data) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
             Err(e) => resolve(e, &self.socket, &self.runtime, Event::writable(self.id), cx.waker()),
@@ -260,6 +277,7 @@ impl<'a> Future for RecvFuture<'a> {
     type Output = std::io::Result<usize>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        self.runtime.check_event(Event::readable(self.id), true);
         let socket = &self.socket.clone(); // avoid borrow checker error
         match socket.recv(self.buf) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
