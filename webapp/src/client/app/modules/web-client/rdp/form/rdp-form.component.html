@@ -28,7 +28,7 @@
             <input pInputText
                    id="hostname"
                    type="text"
-                   autocomplete="off"
+                   autocomplete="on"
                    placeholder="Enter hostname"
                    formControlName="hostname"
                    required/>
@@ -45,7 +45,7 @@
             <input pInputText
                    id="username"
                    type="text"
-                   autocomplete="off"
+                   autocomplete="on"
                    placeholder="Enter username"
                    formControlName="username"
                    required/>
@@ -58,14 +58,18 @@
 
         <div class="col-12 gateway-form-group">
           <label for="password">Password</label>
-          <div class="gateway-form-input">
-            <input pInputText
+          <div class="gateway-form-input password-container">
+            <input pPassword
                    id="password"
-                   type="password"
-                   autocomplete="off"
+                   [type]=" showPassword ? 'text' : 'password' "
+                   autocomplete="on"
                    placeholder="Enter password"
                    formControlName="password"
+                   showPassword="showPassword"
                    required/>
+            <span>
+                  <i (click)="toggleShowPassword()" class="dvl-icon dvl-icon-view"></i>
+                </span>
           </div>
           <div class="form-helper-text"
                *ngIf="connectSessionForm.get('password').hasError('required') && connectSessionForm.get('password').touched">
@@ -84,7 +88,6 @@
           <div class="col-12 gateway-form-group">
             <label for="username">Screen Size</label>
             <div class="gateway-form-input">
-              <!--//TODO get full-width-dropdown to work properly -->
               <p-dropdown id="screenSize"
                           styleClass="full-width-dropdown"
                           appendTo="body"
@@ -103,7 +106,7 @@
                        id="customWidth"
                        type="number"
                        [min]="0" [max]="4096"
-                       autocomplete="off"
+                       autocomplete="on"
                        placeholder="Size in px"
                        formControlName="customWidth"
                        pKeyFilter="pint"/>
@@ -121,7 +124,7 @@
                        id="customHeight"
                        type="number"
                        [min]="0" [max]="2048"
-                       autocomplete="off"
+                       autocomplete="on"
                        placeholder="Size in px"
                        formControlName="customHeight"
                        pKeyFilter="pint"/>
@@ -140,7 +143,7 @@
               <input pInputText
                      id="preConnectionBlob"
                      type="text"
-                     autocomplete="off"
+                     autocomplete="on"
                      placeholder="Enter Blob"
                      formControlName="preConnectionBlob"/>
             </div>

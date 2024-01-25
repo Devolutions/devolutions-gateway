@@ -10,11 +10,21 @@ export class ApiService {
   private sessionTokenApiURL: string = '/jet/webapp/session-token';
   constructor(private http: HttpClient) {}
 
-  generateAppToken(username: string, password: string): Observable<any> {
-    const headers: HttpHeaders = new HttpHeaders({
-      'Authorization': `Basic ${btoa(username + ':' + password)}`,
-      'Content-Type': 'application/json'
+  generateAppToken(username?: string, password?: string): Observable<any> {
+    let headers = new HttpHeaders({
+      'Content-Type': 'application/json',
+      'x-requested-with': 'XMLHttpRequest'
     });
+
+    if (username && password) {
+      headers = new HttpHeaders({
+        'Authorization': `Basic ${btoa(username + ':' + password)}`,
+        'Content-Type': 'application/json',
+        'x-requested-with': 'XMLHttpRequest'
+      });
+    } else {
+      username = '';
+    }
 
     const body = {
       content_type: 'WEBAPP',

@@ -143,14 +143,17 @@ pub(crate) async fn sign_app_token(
         let Some(authorization) = headers.typed_get::<headers::Authorization<headers::authorization::Basic>>() else {
             trace!(covmark = "custom_auth_challenge");
 
+            let auth_header_key = headers
+                .get("x-requested-with")
+                .filter(|&header_value| header_value == "XMLHttpRequest")
+                .map(|_| "x-www-authenticate")
+                .unwrap_or(http::header::WWW_AUTHENTICATE.as_str());
+
             // If the Authorization header is missing, send a challenge to request it.
             return Ok(CustomAuthResult::SendChallenge(
                 (
                     http::StatusCode::UNAUTHORIZED,
-                    [(
-                        http::header::WWW_AUTHENTICATE,
-                        "Basic realm=\"DGW Custom Auth\", charset=\"UTF-8\"",
-                    )],
+                    [(auth_header_key, "Basic realm=\"DGW Custom Auth\", charset=\"UTF-8\"")],
                 )
                     .into_response(),
             ));

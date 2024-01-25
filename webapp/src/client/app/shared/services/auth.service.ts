@@ -52,9 +52,7 @@ export class AuthService extends BaseComponent {
       return of(true);
     }
 
-    const username = '';
-    const password = '';
-    return this.login(username, password).pipe(
+    return this.login().pipe(
       takeUntil(this.destroyed$),
       tap((success) => {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(success));
@@ -62,7 +60,6 @@ export class AuthService extends BaseComponent {
       }),
       catchError(error => {
         sessionStorage.setItem(AuthService.AUTO_LOGIN_KEY, JSON.stringify(false));
-        console.log('isAutoLoginOn', false)
         this.isAutoLoginOn.next(false);
         throw error
       }),
@@ -70,7 +67,7 @@ export class AuthService extends BaseComponent {
     );
   }
 
-  login(username: string, password: string): Observable<boolean> {
+  login(username?: string, password?: string): Observable<boolean> {
     return this.requestToken(username, password).pipe(
       takeUntil(this.destroyed$),
       tap(token => {
@@ -111,7 +108,7 @@ export class AuthService extends BaseComponent {
     }
   }
 
-  private requestToken(username: string, password: string): Observable<string> {
+  private requestToken(username?: string, password?: string): Observable<string> {
     return this.apiService.generateAppToken(username, password).pipe(
       catchError(error => {
         console.error('Error requesting token:', error);
@@ -122,7 +119,6 @@ export class AuthService extends BaseComponent {
 
   private initializeAutoLogonStorageData(): void {
     const storedAutoLogonFlag: string = sessionStorage.getItem(AuthService.AUTO_LOGIN_KEY);
-    console.log('storedAutoLogonFlag', storedAutoLogonFlag)
     const storedAutoLogon: boolean = (storedAutoLogonFlag) ? storedAutoLogonFlag !== 'false' : false;
     this.isAutoLoginOn.next(storedAutoLogon);
   }
@@ -180,7 +176,6 @@ export class AuthService extends BaseComponent {
 
     const now: number = new Date().getTime();
     const expiresTime: number = new Date(session.expires).getTime();
-    console.log('isAuthenticated - valid Session', now <= expiresTime)
 
     return now <= expiresTime;
   }

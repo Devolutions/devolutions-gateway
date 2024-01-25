@@ -24,7 +24,7 @@
       <div class="login-form__message">
         <p-messages *ngIf="messages.length > 0" [closable]="false" [value]="messages"></p-messages>
       </div>
-      <form name="login-form" [formGroup]="loginForm" autocomplete="off">
+      <form name="login-form" [formGroup]="loginForm" autocomplete="on">
         <div class="login-form-content grid nomargin nopad">
           <div class="col-12 gateway-form-group">
             <label for="username">Username</label>
@@ -32,7 +32,7 @@
               <input pInputText
                      id="username"
                      type="text"
-                     autocomplete="off"
+                     autocomplete="on"
                      placeholder="Enter username"
                      formControlName="username"
                      required/>
@@ -46,14 +46,18 @@
 
           <div class="col-12 gateway-form-group">
               <label for="password">Password</label>
-              <div class="login-form-input">
-                <input pInputText
+              <div class="login-form-input password-container">
+                <input pPassword
                        id="password"
-                       type="password"
-                       autocomplete="off"
+                       [type]=" showPassword ? 'text' : 'password' "
+                       autocomplete="on"
                        placeholder="Enter password"
                        formControlName="password"
+                       showPassword="showPassword"
                        required/>
+                <span>
+                  <i (click)="toggleShowPassword()" class="dvl-icon dvl-icon-view"></i>
+                </span>
               </div>
             <div class="form-helper-text"
                  *ngIf="loginForm.get('password').hasError('required') &&
@@ -75,17 +79,4 @@
 
     </div>
   </div>
-
-
-<!--  <div class="container">-->
-<!--    <div class="login-container gateway-form-group">-->
-<!--      <span>Login to Continue</span>-->
-<!--      <form name="login-form" [formGroup]="loginForm" (ngSubmit)="onSubmit()">-->
-<!--        <input type="text" placeholder="Username" name="username" formControlName="username" required>-->
-<!--        <input type="password" placeholder="Password" name="password" formControlName="password" required>-->
-<!--        <p-button type="submit">Continue</p-button>-->
-<!--      </form>-->
-<!--    </div>-->
-<!--  </div>-->
-
 </div>

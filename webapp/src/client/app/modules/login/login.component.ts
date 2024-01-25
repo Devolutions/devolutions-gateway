@@ -18,6 +18,8 @@ import {UtilsService} from "@shared/services/utils.service";
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
   messages: Message[] = [];
+  showPassword: boolean = false;
+  autoLoginAttempted: boolean = false;
 
   constructor(private authService: AuthService,
               private navigationService: NavigationService,
@@ -25,14 +27,8 @@ export class LoginComponent extends BaseComponent implements OnInit {
               private gatewayAlertMessageService: GatewayAlertMessageService) {
     super();
   }
-  autoLoginAttempted: boolean = false;
 
   ngOnInit(): void {
-
-
-    console.log(this.utils.string.extractDomain('user@example.com')); // Outputs: example.com
-    // console.log(extractDomain('http://example.com')); // Outputs: example.com
-    // console.log(extractDomain('example.com')); // Outputs: example.com
 
     this.authService.autoLogin().pipe(
       takeUntil(this.destroyed$),
@@ -64,6 +60,10 @@ export class LoginComponent extends BaseComponent implements OnInit {
           this.handleLoginError(error);
       }
     );
+  }
+
+  toggleShowPassword(): void {
+    this.showPassword = !this.showPassword;
   }
 
   private handleLoginResult(success: boolean): void {
