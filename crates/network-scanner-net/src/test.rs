@@ -3,6 +3,7 @@ use std::{
     mem::MaybeUninit,
     net::{SocketAddr, UdpSocket},
     sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
 use socket2::SockAddr;
@@ -59,7 +60,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
     ];
 
     for handle in handles {
-        handle.await?;
+        tokio::time::timeout(Duration::from_secs(10), handle).await??;
     }
 
     Ok(())
@@ -97,7 +98,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
     ];
 
     for handle in handles {
-        handle.await?;
+        tokio::time::timeout(Duration::from_secs(10), handle).await??;
     }
 
     kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -141,9 +142,8 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
         Ok::<(), anyhow::Error>(())
     });
 
-    let (a, b) = tokio::join!(handle, handle2);
-    a??;
-    b??;
+    tokio::time::timeout(Duration::from_secs(10), handle).await???;
+    tokio::time::timeout(Duration::from_secs(10), handle2).await???;
 
     kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
