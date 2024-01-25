@@ -36,6 +36,7 @@ namespace DevolutionsGateway.Helpers
         [DllImport("user32.dll")]
         private static extern bool DestroyIcon(IntPtr handle);
 
+        internal const uint SIID_HELP = 23;
         internal const uint SIID_SHIELD = 77;
         internal const uint SIID_WARNING = 78;
         internal const uint SIID_INFO = 79;

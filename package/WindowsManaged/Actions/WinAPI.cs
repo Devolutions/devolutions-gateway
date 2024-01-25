@@ -11,6 +11,8 @@ internal static class WinAPI
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
+    internal const int EM_SETCUEBANNER = 0x1501;
+
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
@@ -88,8 +90,7 @@ internal static class WinAPI
     {
         internal uint nLength;
         internal IntPtr lpSecurityDescriptor;
-        [MarshalAs(UnmanagedType.Bool)]
-        internal bool bInheritHandle;
+        [MarshalAs(UnmanagedType.Bool)] internal bool bInheritHandle;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -198,8 +199,7 @@ internal static class WinAPI
 
     [DllImport("kernel32", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern SafeFileHandle CreateFile(
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpFileName,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpFileName,
         uint dwDesiredAccess,
         uint dwShareMode,
         IntPtr lpSecurityAttributes,
@@ -210,10 +210,8 @@ internal static class WinAPI
 
     [DllImport("kernel32", EntryPoint = "CreateProcessW", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern bool CreateProcess(
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpApplicationName,
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpCommandLine,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpApplicationName,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpCommandLine,
         IntPtr lpProcessAttributes,
         IntPtr lpThreadAttributes,
         bool bInheritHandles,
@@ -226,8 +224,7 @@ internal static class WinAPI
     [DllImport("kernel32", EntryPoint = "DeleteFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DeleteFile(
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpFileName
+        [MarshalAs(UnmanagedType.LPWStr)] string lpFileName
     );
 
     [DllImport("kernel32", SetLastError = true)]
@@ -237,8 +234,7 @@ internal static class WinAPI
     [DllImport("Kernel32", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Auto, SetLastError = true)]
     internal static extern uint GetFinalPathNameByHandle(
         IntPtr hFile,
-        [MarshalAs(UnmanagedType.LPTStr)]
-        StringBuilder lpszFilePath,
+        [MarshalAs(UnmanagedType.LPTStr)] StringBuilder lpszFilePath,
         uint cchFilePath,
         uint dwFlags);
 
@@ -247,18 +243,15 @@ internal static class WinAPI
 
     [DllImport("kernel32", EntryPoint = "GetTempFileNameW", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern uint GetTempFileName(
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpPathName,
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpPrefixString,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpPathName,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpPrefixString,
         uint uUnique,
         [Out] StringBuilder lpTempFileName);
 
     [DllImport("kernel32", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool MoveFileEx(
-        [MarshalAs(UnmanagedType.LPWStr)]
-        string lpExistingFileName,
+        [MarshalAs(UnmanagedType.LPWStr)] string lpExistingFileName,
         IntPtr lpNewFileName,
         uint dwFlags
     );
@@ -278,7 +271,15 @@ internal static class WinAPI
 
     [DllImport("advapi32", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool QueryServiceStatusEx(IntPtr serviceHandle, uint infoLevel, IntPtr buffer, uint bufferSize, out uint bytesNeeded);
+    public static extern bool QueryServiceStatusEx(IntPtr serviceHandle, uint infoLevel, IntPtr buffer, uint bufferSize,
+        out uint bytesNeeded);
+
+    [DllImport("user32", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
+    internal static extern int SendMessage(
+        IntPtr hWnd,
+        int msg,
+        int wParam,
+        [MarshalAs(UnmanagedType.LPWStr)] string lParam);
 
     [DllImport("advapi32", EntryPoint = "StartServiceW", SetLastError = true)]
     internal static extern bool StartService(IntPtr hService, uint dwNumServiceArgs, IntPtr lpServiceArgVectors);

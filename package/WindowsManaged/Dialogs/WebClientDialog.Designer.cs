@@ -113,7 +113,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 216);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 169);
             this.tableLayoutPanel2.TabIndex = 2;
             // 
             // lblPassword2

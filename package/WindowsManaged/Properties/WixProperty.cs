@@ -1,6 +1,8 @@
 ﻿using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using WixSharp;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace DevolutionsGateway.Properties
 {
@@ -56,8 +58,7 @@ namespace DevolutionsGateway.Properties
                 return (T) Enum.Parse(typeof(T), propertyValue);
             }
 
-            var type = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
-            return (T)Convert.ChangeType(propertyValue, type);
+            return (T)TypeDescriptor.GetConverter(typeof(T)).ConvertFromInvariantString(propertyValue);
         }
     }
 

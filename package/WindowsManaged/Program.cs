@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Windows.Forms;
@@ -16,6 +17,7 @@ using WixSharp;
 using WixSharp.CommonTasks;
 using WixSharpSetup.Dialogs;
 using Assembly = System.Reflection.Assembly;
+using CompressionLevel = WixSharp.CompressionLevel;
 using File = WixSharp.File;
 
 namespace DevolutionsGateway;
@@ -224,7 +226,7 @@ internal class Program
                                 Protocol = FirewallExceptionProtocol.tcp,
                                 Profile = FirewallExceptionProfile.all,
                                 Scope = FirewallExceptionScope.any,
-                                IgnoreFailure = true
+                                IgnoreFailure = false
                             },
                             new()
                             {
@@ -233,7 +235,7 @@ internal class Program
                                 Protocol = FirewallExceptionProtocol.udp,
                                 Profile = FirewallExceptionProfile.all,
                                 Scope = FirewallExceptionScope.any,
-                                IgnoreFailure = true
+                                IgnoreFailure = false
                             },
                         },
                         ServiceInstaller = new ServiceInstaller()
@@ -285,6 +287,7 @@ internal class Program
         };
         project.ResolveWildCards(true);
 
+        project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
         project.Actions = GatewayActions.Actions;
         project.RegValues = new RegValue[]
         {
@@ -307,7 +310,7 @@ internal class Program
             .Add<ExitDialog>();
         
         project.UIInitialized += Project_UIInitialized;
-
+        
         if (SourceOnlyBuild)
         {
             project.Language = ProjectLangId;

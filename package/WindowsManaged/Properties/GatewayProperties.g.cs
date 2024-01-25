@@ -1,6 +1,7 @@
 ﻿
 using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
 using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
+using System;
 
 namespace DevolutionsGateway.Properties
 {
@@ -777,6 +778,175 @@ namespace DevolutionsGateway.Properties
             }
         }
  
+        internal static readonly WixProperty<bool> _ConfigureNgrok = new()
+        {
+            Id = "P.CONFIGURENGROK",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        /// <summary>`true` to use ngrok for ingress listeners</summary>
+        public bool ConfigureNgrok
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_ConfigureNgrok.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_ConfigureNgrok, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _NgrokAuthToken = new()
+        {
+            Id = "P.NGROKAUTHTOKEN",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string NgrokAuthToken
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_NgrokAuthToken.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_NgrokAuthToken, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _NgrokHttpDomain = new()
+        {
+            Id = "P.NGROKHTTPDOMAIN",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string NgrokHttpDomain
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_NgrokHttpDomain.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_NgrokHttpDomain, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<bool> _NgrokEnableTcp = new()
+        {
+            Id = "P.NGROKENABLETCP",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public bool NgrokEnableTcp
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_NgrokEnableTcp.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_NgrokEnableTcp, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<string> _NgrokRemoteAddress = new()
+        {
+            Id = "P.NGROKREMOTEADDRESS",
+            Default = string.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public string NgrokRemoteAddress
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_NgrokRemoteAddress.Id);
+                return WixProperties.GetPropertyValue<string>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_NgrokRemoteAddress, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<bool> _DebugPowerShell = new()
+        {
+            Id = "P.DEBUGPOWERSHELL",
+            Default = false,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public bool DebugPowerShell
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_DebugPowerShell.Id);
+                return WixProperties.GetPropertyValue<bool>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_DebugPowerShell, value); 
+                }
+            }
+        }
+ 
+        internal static readonly WixProperty<Guid> _InstallId = new()
+        {
+            Id = "P.INSTALLID",
+            Default = Guid.Empty,
+            Secure = true,
+            Hidden = false,
+        };
+
+        public Guid InstallId
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(_InstallId.Id);
+                return WixProperties.GetPropertyValue<Guid>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(_InstallId, value); 
+                }
+            }
+        }
+ 
         internal static readonly WixProperty<uint> _NetFx45Version = new()
         {
             Id = "P.NETFX45VERSION",
@@ -988,6 +1158,20 @@ namespace DevolutionsGateway.Properties
             _WebUsername,
  
             _WebPassword,
+ 
+            _ConfigureNgrok,
+ 
+            _NgrokAuthToken,
+ 
+            _NgrokHttpDomain,
+ 
+            _NgrokEnableTcp,
+ 
+            _NgrokRemoteAddress,
+ 
+            _DebugPowerShell,
+ 
+            _InstallId,
  
             _NetFx45Version,
  
