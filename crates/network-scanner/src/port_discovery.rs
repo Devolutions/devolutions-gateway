@@ -6,13 +6,14 @@ use std::{
 
 use network_scanner_net::runtime::Socket2Runtime;
 use socket2::SockAddr;
+use tokio::task::JoinHandle;
 
 pub async fn scan_ports(
     ip: IpAddr,
     port: &[u16],
     runtime: &Arc<Socket2Runtime>,
     timeout: Option<Duration>,
-) -> anyhow::Result<Vec<Result<SocketAddr, std::io::Error>>> {
+) -> anyhow::Result<Vec<std::io::Result<SockAddr>>> {
     let mut sockets = vec![];
     for p in port {
         let addr = SockAddr::from(SocketAddr::from((ip, *p)));
@@ -20,19 +21,25 @@ pub async fn scan_ports(
         sockets.push((socket, addr));
     }
 
-    let mut res_arr = vec![];
+    let mut handle_arr = vec![];
     for (socket, addr) in sockets {
-        tracing::debug!("scanning port: {:?}", addr.as_socket());
-        let future = socket.connect(&addr);
-        let timeout = timeout.unwrap_or(Duration::from_millis(300));
-        let timout_result = tokio::time::timeout(timeout, future).await;
-        tracing::debug!("timout_result: {:?}", timout_result);
-        let Ok(res) = timout_result else {
-            res_arr.push(Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")));
-            continue;
-        };
+        let handle: JoinHandle<std::io::Result<SockAddr>> = tokio::task::spawn(async move {
+            tracing::debug!("scanning port: {:?}", addr.as_socket());
+            let future = socket.connect(&addr);
+            let timeout = timeout.unwrap_or(Duration::from_millis(300));
+            tokio::time::timeout(timeout, future)
+                .await
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::TimedOut, e))??;
 
-        res_arr.push(res.map(|_| addr.as_socket().expect("unreachable: addr is not ipv4 or ipv6")));
+            Ok(addr)
+        });
+        handle_arr.push(handle);
+    }
+
+    let mut res_arr = vec![];
+    for handle in handle_arr {
+        let res = handle.await?;
+        res_arr.push(res);
     }
 
     Ok(res_arr)
