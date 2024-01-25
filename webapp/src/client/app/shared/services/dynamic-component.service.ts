@@ -21,7 +21,6 @@ export class DynamicComponentService {
   }
 
   destroyComponent(componentRef: ComponentRef<any>): void {
-    console.log('destroyComponent', componentRef.componentType.name);
     if (componentRef) {
      componentRef.destroy();
     }

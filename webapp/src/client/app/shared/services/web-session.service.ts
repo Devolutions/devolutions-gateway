@@ -45,7 +45,6 @@ export class WebSessionService {
   }
 
   async removeSession(tabIndexToRemove?: number): Promise<void> {
-    console.log('removeSession', tabIndexToRemove)
 
     await this.destroyWebSessionComponentRef(tabIndexToRemove);
 
@@ -85,7 +84,6 @@ export class WebSessionService {
   async destroyWebSessionComponentRef(indexToRemove: number): Promise<void> {
     try {
       const webSessionToDestroy = await this.getWebSession(indexToRemove);
-      console.log('webSessionToDestroy', webSessionToDestroy);
 
       if (this.isSessionValid(webSessionToDestroy)) {
         await this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);

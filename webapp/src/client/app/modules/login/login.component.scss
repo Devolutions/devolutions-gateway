@@ -111,6 +111,25 @@
   margin-bottom: 5px;
 }
 
+.password-container {
+  position: relative;
+  width: 100%;
+}
+
+.password-container input[type="password"] {
+  width: 100%;
+  padding-right: 40px;
+  box-sizing: border-box;
+}
+
+.password-container span {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
 :host ::ng-deep .p-message-summary {
   display: none !important;
 }

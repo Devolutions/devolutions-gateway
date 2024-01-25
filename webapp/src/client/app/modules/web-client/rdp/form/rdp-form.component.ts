@@ -34,6 +34,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   screenSizeOptions: SelectItem[];
   showMoreSettings: boolean = false;
   messages: Message[] = [];
+  showPassword: boolean = false;
 
   protocolSelectItems: SelectItem[] = [
     { label: 'RDP', value: '0' }
@@ -94,7 +95,6 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
 
   onConnectSession(): void {
     const submittedData = this.connectSessionForm.value;
-    console.log('this.connectSessionForm.value;', this.connectSessionForm.value)
 
     const newSessionTab: WebSession<Type<WebClientRdpComponent>, any> =  new WebSession(submittedData.hostname,
                                                               WebClientRdpComponent,
@@ -116,8 +116,9 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     const dropDownItems: SelectItem[] = [];
     const values: string[] = Object.keys(ScreenSize).filter(key => isNaN(Number(key)));
     for (const label of values) {
+      const noLetterRLabel: string = label.startsWith('R') ? label.substring(1) : label;
       const value = enums[label];
-      dropDownItems.push({label, value});
+      dropDownItems.push({label:noLetterRLabel, value});
     }
     return dropDownItems;
   }
@@ -142,7 +143,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
         screenSize: [this.inputFormData.screenSize],
         customWidth: [this.inputFormData.customWidth],
         customHeight: [this.inputFormData.customHeight],
-        preConnectionBlob: [this.inputFormData.preConnectionBlob]
+        preConnectionBlob: [this.inputFormData.preConnectionBlob],
+        kdcProxyUrl: [this.inputFormData.kdcProxyUrl]
       });
     } else {
       this.connectSessionForm = this.formBuilder.group({
@@ -157,6 +159,10 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
       });
     }
     this.setupScreenSizeDropdown();
+  }
+
+  toggleShowPassword(): void {
+    this.showPassword = !this.showPassword;
   }
 
   private setupScreenSizeDropdown(): void {

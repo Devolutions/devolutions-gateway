@@ -166,14 +166,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     return from(this.webSessionService.getWebSession(this.tabIndex)).pipe(
       map(currentWebSession => {
         this.inputFormData = currentWebSession.data;
-        const { hostname, username, password, desktopSize, preConnectionBlob } = this.inputFormData;
+        const { hostname, username, password, desktopSize, preConnectionBlob, kdcProxyUrl } = this.inputFormData;
         const domain: string = '';
 
         const gatewayHttpAddress: URL = new URL(this.JET_RDP_URL, window.location.href);
         const websocketUrl: string = gatewayHttpAddress.toString().replace("http", "ws");
-
-        //TODO KDC Server URL
-        const kdcProxyUrl = undefined;
 
         const connectionParameters: IronRDPConnectionParameters = {
           username: username,
@@ -192,7 +189,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private callConnect(connectionParameters: IronRDPConnectionParameters): Observable<void> {
-    console.log('callconnect', connectionParameters)
     return this.remoteClient.connect(
       connectionParameters.username,
       connectionParameters.password,
