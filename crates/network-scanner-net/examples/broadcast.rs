@@ -21,7 +21,7 @@ pub async fn main() -> anyhow::Result<()> {
         0x08, 0x00, 0x0c, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x65, 0xa9, 0x86, 0x20,
     ];
 
-    let addr = SocketAddr::from((std::net::Ipv4Addr::new(192, 168, 1, 255), 0));
+    let addr = SocketAddr::from((std::net::Ipv4Addr::new(192, 168, 50, 255), 0));
     socket.send_to(&echo_request, &SockAddr::from(addr)).await?;
 
     for i in 0..10 {

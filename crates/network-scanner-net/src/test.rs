@@ -2,6 +2,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     mem::MaybeUninit,
     net::{SocketAddr, UdpSocket},
+    sync::{atomic::AtomicBool, Arc},
 };
 
 use socket2::SockAddr;
@@ -11,10 +12,13 @@ use crate::socket::AsyncRawSocket;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_connectivity() -> anyhow::Result<()> {
-    let addr = local_tcp_server()?;
+    let kill_server = Arc::new(AtomicBool::new(false));
+    let addr = local_tcp_server(kill_server.clone())?;
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     socket.connect(&socket2::SockAddr::from(addr)).await?;
+
+    kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 
@@ -63,7 +67,8 @@ async fn multiple_udp() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_tcp() -> anyhow::Result<()> {
-    let addr = local_tcp_server()?;
+    let kill_server = Arc::new(AtomicBool::new(false));
+    let addr = local_tcp_server(kill_server.clone())?;
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket0 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket1 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
@@ -95,12 +100,15 @@ async fn multiple_tcp() -> anyhow::Result<()> {
         handle.await?;
     }
 
+    kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
+
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
-    let addr = local_tcp_server()?;
+    let kill_server = Arc::new(AtomicBool::new(false));
+    let addr = local_tcp_server(kill_server.clone())?;
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let mut socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
@@ -137,6 +145,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     a??;
     b??;
 
+    kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 
@@ -180,7 +189,17 @@ fn handle_client(mut stream: std::net::TcpStream) -> std::io::Result<()> {
     let mut buffer = [0; 1024];
     loop {
         // Read data from the stream
-        let size = stream.read(&mut buffer)?;
+        let size = match stream.read(&mut buffer) {
+            Ok(usize) => usize,
+            Err(e) => {
+                if e.kind() == ErrorKind::WouldBlock {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    continue;
+                } else {
+                    return Err(e);
+                }
+            }
+        };
         println!("Received {} bytes: {:?}", size, &buffer[..size]);
         std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
         stream.write_all(&buffer[..size])?; // Echo the data back to the client
@@ -188,11 +207,12 @@ fn handle_client(mut stream: std::net::TcpStream) -> std::io::Result<()> {
     }
 }
 
-fn local_tcp_server() -> anyhow::Result<SocketAddr> {
+fn local_tcp_server(awake: Arc<AtomicBool>) -> anyhow::Result<SocketAddr> {
     // Bind the TCP listener to a local address
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("Could not bind TCP listener");
     println!("TCP server listening on {}", listener.local_addr().unwrap());
     let res = listener.local_addr().unwrap();
+    listener.set_nonblocking(true)?; // Configure the listener to be non-blocking
     std::thread::spawn(move || {
         // Accept incoming connections
         for stream in listener.incoming() {
@@ -206,8 +226,15 @@ fn local_tcp_server() -> anyhow::Result<SocketAddr> {
                     });
                 }
                 Err(e) => {
-                    tracing::error!("Connection failed: {}", e);
-                    return;
+                    if e.kind() == ErrorKind::WouldBlock {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    } else {
+                        tracing::error!("Connection failed: {}", e);
+                        if awake.load(std::sync::atomic::Ordering::Relaxed) {
+                            return;
+                        }
+                        break;
+                    }
                 }
             }
         }
