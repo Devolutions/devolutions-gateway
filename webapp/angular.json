@@ -115,9 +115,6 @@
               "src/client/favicon.ico",
               "src/client/assets"
             ],
-            "styles": [
-              "src/styles.scss"
-            ],
             "scripts": []
           }
         }

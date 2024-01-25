@@ -17,3 +17,8 @@
 :host ::ng-deep .session-background {
   background: #F9F9F9 url('../../../../../assets/images/session_background.png');
 }
+
+
+:host ::ng-deep p-tabview .p-tabview-panels {
+  padding: 0;
+}

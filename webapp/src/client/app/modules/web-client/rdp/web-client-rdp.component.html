@@ -6,47 +6,56 @@
     [isEmbedded]="true"></web-client-rdp-form>
 </div>
 
-<div style="display: flex; flex-direction: column; height: 100%">
-  <div class="session-toolbar" *ngIf="!loading && !status.isDisabled">
+<div class="session-toolbar">
+  <div class="session-toolbar-left-group">
     <p-button
-      size="large"
-      icon="dvl-icon dvl-icon-fullscreen"
-      [title]="'Full Screen'"
-      (onClick)="scaleTo(screenScale.Full)"></p-button>
-
-    <p-button
-      size="large"
-      icon="dvl-icon dvl-icon-smallscreen"
-      [title]="'Fit to Screen'"
-      (onClick)="scaleTo(screenScale.Fit)"></p-button>
-
-    <p-button
-      size="large"
-      icon="dvl-icon dvl-icon-screen"
-      [title]="'Actual Size'"
-      (onClick)="scaleTo(screenScale.Real)"></p-button>
-
-    <p-button
-      size="large"
+      (onClick)="sendWindowsKey()"
+      label="Start"
       icon="dvl-icon dvl-icon-windows"
-      [title]="'Start'"
-      (onClick)="sendWindowsKey()"></p-button>
+      iconPos="left"></p-button>
+
+    <div class="separator"></div>
 
     <p-button
-      size="large"
+      (onClick)="sendCtrlAltDel()"
+      label="Ctrl+Alt+Del"
       icon="dvl-icon dvl-icon-admin"
-      [title]="'Ctrl+Alt+Del'"
-      (onClick)="sendCtrlAltDel()"></p-button>
+      iconPos="left"></p-button>
+  </div>
+
+  <div class="session-toolbar-middle-group">
+    <p-button
+      (onClick)="scaleTo(screenScale.Full)"
+      label="Full Screen"
+      icon="dvl-icon dvl-icon-fullscreen"
+      iconPos="left"></p-button>
+
+    <div class="separator"></div>
 
     <p-button
-      size="large"
-      icon="dvl-icon dvl-icon-close"
-      [title]="'Terminate Session'"
-      (onClick)="sendTerminateSessionCmd()"></p-button>
+      (onClick)="scaleTo(screenScale.Fit)"
+      label="Fit to Screen"
+      icon="dvl-icon dvl-icon-minimize"
+      iconPos="left"></p-button>
+
+    <div class="separator"></div>
+    <p-button
+      (onClick)="scaleTo(screenScale.Real)"
+      label="Actual Size"
+      icon="dvl-icon dvl-icon-screen"
+      iconPos="left"></p-button>
+  </div>
+
+  <div class="session-toolbar-right-group">
+    <p-button (onClick)="sendTerminateSessionCmd()"
+      styleClass="other"
+              label="Close Session"
+              icon="dvl-icon dvl-icon-close"
+              iconPos="left"></p-button>
   </div>
 </div>
 
-<div class="container" *ngIf="loading">
+<div class="loading-info-container" *ngIf="loading">
   <div class="loading-info">
     <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
   </div>
