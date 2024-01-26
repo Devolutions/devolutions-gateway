@@ -107,9 +107,9 @@ namespace WixSharpSetup.Dialogs
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.middlePanel.Controls.Add(this.gbExternal);
-            this.middlePanel.Controls.Add(this.gbSystem);
             this.middlePanel.Controls.Add(this.label5);
             this.middlePanel.Controls.Add(this.cmbCertificateSource);
+            this.middlePanel.Controls.Add(this.gbSystem);
             this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(494, 261);

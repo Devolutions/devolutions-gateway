@@ -7,16 +7,26 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
 using System.Text;
 using WixSharp;
+using File = System.IO.File;
 
 namespace DevolutionsGateway.Actions
 {
     public class CustomActions
     {
+        private static readonly string[] ConfigFiles = new[] {
+            "gateway.json", 
+            "server.crt", 
+            "server.key", 
+            "provisioner.pem",
+            "provisioner.key"
+        };
+
         private const int MAX_PATH = 260; // Defined in windows.h
 
         private static string ProgramDataDirectory => Path.Combine(
@@ -44,15 +54,114 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult CleanGatewayConfig(Session session)
+        {
+            if (!ConfigFiles.Any(x => File.Exists(Path.Combine(ProgramDataDirectory, x))))
+            {
+                return ActionResult.Success;
+            }
+
+            try
+            {
+                string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties._InstallId).ToString())}.zip";
+                using ZipArchive archive = ZipFile.Open(zipFile, ZipArchiveMode.Create);
+
+                WinAPI.MoveFileEx(zipFile, IntPtr.Zero, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
+
+                foreach (string configFile in ConfigFiles)
+                {
+                    string configFilePath = Path.Combine(ProgramDataDirectory, configFile);
+
+                    if (File.Exists(configFilePath))
+                    {
+                        archive.CreateEntryFromFile(configFilePath, configFile);
+                    }
+                }
+
+                foreach (string configFile in ConfigFiles)
+                {
+                    try
+                    {
+                        File.Delete(Path.Combine(ProgramDataDirectory, configFile));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to archive existing config: {e}");
+                return ActionResult.Failure;
+            }
+
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult CleanGatewayConfigRollback(Session session)
+        {
+            string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties._InstallId).ToString())}.zip";
+
+            if (!File.Exists(zipFile))
+            {
+                return ActionResult.Success;
+            }
+
+            try
+            {
+                foreach (string configFile in ConfigFiles)
+                {
+                    try
+                    {
+                        File.Delete(Path.Combine(ProgramDataDirectory, configFile));
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                using ZipArchive archive = ZipFile.Open(zipFile, ZipArchiveMode.Read);
+                archive.ExtractToDirectory(ProgramDataDirectory);
+
+                try
+                {
+                    File.Delete(zipFile);
+                }
+                catch
+                {
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to restore existing config: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ActionResult.Failure;
+        }
+
+        [CustomAction]
         public static ActionResult ConfigureAccessUri(Session session)
         {
             string command;
 
             try
             {
-                Uri uri = new(
-                    $"{session.Get(GatewayProperties._AccessUriScheme)}://{session.Get(GatewayProperties._AccessUriHost)}:{session.Get(GatewayProperties._AccessUriPort)}",
-                    UriKind.Absolute);
+                string scheme = session.Get(GatewayProperties._ConfigureNgrok)
+                    ? Constants.HttpsProtocol
+                    : session.Get(GatewayProperties._AccessUriScheme);
+
+                string host = session.Get(GatewayProperties._ConfigureNgrok)
+                    ? session.Get(GatewayProperties._NgrokHttpDomain)
+                    : session.Get(GatewayProperties._AccessUriHost);
+
+                uint port = session.Get(GatewayProperties._ConfigureNgrok)
+                    ? 443
+                    : session.Get(GatewayProperties._AccessUriPort);
+
+                Uri uri = new($"{scheme}://{host}:{port}", UriKind.Absolute);
 
                 command = string.Format(Constants.SetDGatewayHostnameCommandFormat, uri.Host);
                 command = FormatPowerShellCommand(session, command);
@@ -118,6 +227,25 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult ConfigureInit(Session session)
+        {
+            string command;
+
+            try
+            {
+                command = $"Set-DGatewayConfig -ConfigPath '{ProgramDataDirectory}' -Id '{Guid.NewGuid()}'";
+                command = FormatPowerShellCommand(session, command);
+            }
+            catch (Exception e)
+            {
+                session.Log($"command {nameof(ConfigureInit)} execution failure: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ExecuteCommand(session, command);
+        }
+
+        [CustomAction]
         public static ActionResult ConfigureListeners(Session session)
         {
             string command;
@@ -140,6 +268,38 @@ namespace DevolutionsGateway.Actions
             catch (Exception e)
             {
                 session.Log($"command {nameof(ConfigureListeners)} execution failure: {e}");
+                return ActionResult.Failure;
+            }
+
+            return ExecuteCommand(session, command);
+        }
+
+        [CustomAction]
+        public static ActionResult ConfigureNgrokListeners(Session session)
+        {
+            string command;
+
+            try
+            {
+                command = $"$Ngrok = New-DGatewayNgrokConfig -AuthToken '{session.Get(GatewayProperties._NgrokAuthToken)}'";
+                command += $"; $HttpTunnel = New-DGatewayNgrokTunnel -Http -AllowCidrs @('0.0.0.0/0') -Domain '{session.Get(GatewayProperties._NgrokHttpDomain)}'";
+
+                if (session.Get(GatewayProperties._NgrokEnableTcp))
+                {
+                    command += $"; $TcpTunnel = New-DGatewayNgrokTunnel -Tcp -AllowCidrs @('0.0.0.0/0') -RemoteAddr '{session.Get(GatewayProperties._NgrokRemoteAddress)}'";
+                    command += "; $Ngrok.Tunnels = [PSCustomObject]@{'http-endpoint' = $HttpTunnel; 'tcp-endpoint' = $TcpTunnel}";
+                }
+                else
+                {
+                    command += "; $Ngrok.Tunnels = [PSCustomObject]@{'http-endpoint' = $HttpTunnel}";
+                }
+
+                command += "; Set-DGatewayConfig -Ngrok $Ngrok";
+                command = FormatPowerShellCommand(session, command);
+            }
+            catch (Exception e)
+            {
+                session.Log($"command {nameof(ConfigureNgrokListeners)} execution failure: {e}");
                 return ActionResult.Failure;
             }
 
@@ -339,8 +499,31 @@ namespace DevolutionsGateway.Actions
             {
                 try
                 {
-                    Process.Start(
-                        $"{session.Get(GatewayProperties._HttpListenerScheme)}://{session.Get(GatewayProperties._AccessUriHost)}:{session.Get(GatewayProperties._HttpListenerPort)}");
+                    string scheme = session.Get(GatewayProperties._ConfigureNgrok)
+                        ? Constants.HttpsProtocol
+                        : session.Get(GatewayProperties._HttpListenerScheme);
+
+                    string host = session.Get(GatewayProperties._ConfigureNgrok)
+                        ? session.Get(GatewayProperties._NgrokHttpDomain)
+                        : session.Get(GatewayProperties._AccessUriHost);
+
+                    uint port = session.Get(GatewayProperties._ConfigureNgrok)
+                        ? 443
+                        : session.Get(GatewayProperties._HttpListenerPort);
+
+                    Uri target;
+
+                    if ((scheme == Constants.HttpProtocol && port == 80) ||
+                        (scheme == Constants.HttpsProtocol && port == 443))
+                    {
+                        target = new Uri($"{scheme}://{host}", UriKind.Absolute);
+                    }
+                    else
+                    {
+                        target = new Uri($"{scheme}://{host}:{port}", UriKind.Absolute);
+                    }
+
+                    Process.Start(target.ToString());
                 }
                 catch
                 {
@@ -395,26 +578,17 @@ namespace DevolutionsGateway.Actions
         public static ActionResult RollbackConfig(Session session)
         {
             string path = ProgramDataDirectory;
-            string[] configFiles =
-            {
-                "gateway.json", 
-                "server.crt", 
-                "server.key", 
-                "provisioner.pem",
-                "delegation.pem",
-                "delegation.key"
-            };
 
-            foreach (string configFile in configFiles.Select(x => Path.Combine(path, x)))
+            foreach (string configFile in ConfigFiles.Select(x => Path.Combine(path, x)))
             {
                 try
                 {
-                    if (!System.IO.File.Exists(configFile))
+                    if (!File.Exists(configFile))
                     {
                         continue;
                     }
 
-                    System.IO.File.Delete(configFile);
+                    File.Delete(configFile);
                 }
                 catch (Exception e)
                 {
@@ -450,6 +624,13 @@ namespace DevolutionsGateway.Actions
                 session.Log($"failed to set service startup type: {e}");
                 return ActionResult.Failure;
             }
+        }
+
+        [CustomAction]
+        public static ActionResult SetInstallId(Session session)
+        {
+            session.Set(GatewayProperties._InstallId, Guid.NewGuid());
+            return ActionResult.Success;
         }
 
         [CustomAction]
@@ -566,6 +747,11 @@ namespace DevolutionsGateway.Actions
 
             using Buffer pPi = new(Marshal.SizeOf<WinAPI.PROCESS_INFORMATION>());
             Marshal.StructureToPtr(pi, pPi, false);
+
+            if (session.Get(GatewayProperties._DebugPowerShell))
+            {
+                session.Log($"Executing command: {command}");
+            }
 
             if (!WinAPI.CreateProcess(null, command, IntPtr.Zero, IntPtr.Zero,
                     true, WinAPI.CREATE_NO_WINDOW, IntPtr.Zero, null, pSi, pPi))

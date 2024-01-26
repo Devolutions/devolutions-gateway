@@ -48,6 +48,13 @@ namespace DevolutionsGateway.Actions
             Execute = Execute.immediate,
         };
 
+        private static readonly ManagedAction setInstallId = new(
+            CustomActions.SetInstallId,
+            Return.ignore, When.After, Step.InstallInitialize, Condition.Always)
+        {
+            Execute = Execute.immediate
+        };
+
         /// <summary>
         /// Set the ARP installation location to the chosen install directory
         /// </summary>
@@ -141,6 +148,40 @@ namespace DevolutionsGateway.Actions
         };
 
         /// <summary>
+        /// </summary>
+        /// <remarks>
+        /// </remarks>
+        private static readonly ElevatedManagedAction cleanGatewayConfigIfNeeded = new(
+            new Id($"CA.{nameof(cleanGatewayConfigIfNeeded)}"),
+            CustomActions.CleanGatewayConfig,
+            Return.check,
+            When.Before, Step.StartServices,
+            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{true}\")",
+            Sequence.InstallExecuteSequence)
+        {
+            Execute = Execute.deferred,
+            Impersonate = false,
+            UsesProperties = UseProperties(new [] { GatewayProperties._InstallId })
+        };
+
+        /// <summary>
+        /// </summary>
+        /// <remarks>
+        /// </remarks>
+        private static readonly ElevatedManagedAction cleanGatewayConfigIfNeededRollback = new(
+            new Id($"CA.{nameof(cleanGatewayConfigIfNeededRollback)}"),
+            CustomActions.CleanGatewayConfigRollback,
+            Return.ignore,
+            When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
+            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{true}\")",
+            Sequence.InstallExecuteSequence)
+        {
+            Execute = Execute.rollback,
+            Impersonate = false,
+            UsesProperties = UseProperties(new[] { GatewayProperties._InstallId })
+        };
+
+        /// <summary>
         /// Execute the installed DevolutionsGateway with the --config-init-only argument
         /// </summary>
         /// <remarks>
@@ -151,8 +192,8 @@ namespace DevolutionsGateway.Actions
             $"[{GatewayProperties.InstallDir}]{Includes.EXECUTABLE_NAME}",
             "--config-init-only",
             Return.check,
-            When.Before, Step.StartServices,
-            new Condition(GatewayProperties._FirstInstall.Id, true.ToString()),
+            When.After, new Step(cleanGatewayConfigIfNeeded.Id),
+            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{false}\")",
             Sequence.InstallExecuteSequence)
         {
             Execute = Execute.deferred,
@@ -177,6 +218,8 @@ namespace DevolutionsGateway.Actions
                 GatewayProperties._HttpListenerScheme,
                 GatewayProperties._HttpListenerPort,
                 GatewayProperties._AccessUriHost,
+                GatewayProperties._ConfigureNgrok,
+                GatewayProperties._NgrokHttpDomain,
             })
         };
 
@@ -230,7 +273,7 @@ namespace DevolutionsGateway.Actions
         private static readonly ElevatedManagedAction rollbackConfig = new(
             CustomActions.RollbackConfig,
             Return.ignore,
-            When.Before, new Step(initGatewayConfigIfNeeded.Id),
+            When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
             new Condition(GatewayProperties._FirstInstall.Id, true.ToString()),
             Sequence.InstallExecuteSequence)
         {
@@ -238,17 +281,27 @@ namespace DevolutionsGateway.Actions
         };
 
         /// <summary>
+        /// </summary>
+        private static readonly ElevatedManagedAction configureInit = BuildConfigureAction(
+            $"CA.{nameof(configureInit)}",
+            CustomActions.ConfigureInit,
+            When.After, new Step(initGatewayConfigIfNeeded.Id),
+            Enumerable.Empty<IWixProperty>());
+
+        /// <summary>
         /// Configure the hostname using PowerShell
         /// </summary>
         private static readonly ElevatedManagedAction configureAccessUri = BuildConfigureAction(
             $"CA.{nameof(configureAccessUri)}",
             CustomActions.ConfigureAccessUri,
-            When.After, new Step(initGatewayConfigIfNeeded.Id),
+            When.After, new Step(configureInit.Id),
             new IWixProperty[]
             {
                     GatewayProperties._AccessUriScheme,
                     GatewayProperties._AccessUriHost,
                     GatewayProperties._AccessUriPort,
+                    GatewayProperties._ConfigureNgrok,
+                    GatewayProperties._NgrokHttpDomain,
             });
 
         /// <summary>
@@ -265,7 +318,24 @@ namespace DevolutionsGateway.Actions
                     GatewayProperties._HttpListenerScheme,
                     GatewayProperties._HttpListenerPort,
                     GatewayProperties._TcpListenerPort,
-            });
+            },
+            additionalCondition: $" AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{false}")})");
+
+        /// <summary>
+        /// Configure the ngrok listeners using PowerShell
+        /// </summary>
+        private static readonly ElevatedManagedAction configureNgrokListeners = BuildConfigureAction(
+            $"CA.{nameof(configureNgrokListeners)}",
+            CustomActions.ConfigureNgrokListeners,
+            When.After, new Step(configureListeners.Id),
+            new IWixProperty[]
+            {
+                GatewayProperties._NgrokAuthToken,
+                GatewayProperties._NgrokHttpDomain,
+                GatewayProperties._NgrokEnableTcp,
+                GatewayProperties._NgrokRemoteAddress,
+            },
+            additionalCondition: $" AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{true}")})");
 
         /// <summary>
         /// Configure the certificate using PowerShell
@@ -273,7 +343,7 @@ namespace DevolutionsGateway.Actions
         private static readonly ElevatedManagedAction configureCertificate = BuildConfigureAction(
             $"CA.{nameof(configureCertificate)}",
             CustomActions.ConfigureCertificate,
-            When.After, new Step(configureListeners.Id),
+            When.After, new Step(configureNgrokListeners.Id),
             new IWixProperty[]
             {
                     GatewayProperties._CertificateMode,
@@ -287,7 +357,7 @@ namespace DevolutionsGateway.Actions
                     GatewayProperties._GenerateCertificate,
             },
             attributesDefinition: "HideTarget=yes", // Don't print the custom action data to logs, it might contain a password
-            additionalCondition: $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)})"); // Only if the HTTP listener uses https
+            additionalCondition: $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)}) AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{false}")})"); // Only if the HTTP listener uses https
 
         /// <summary>
         /// Configure the public key using PowerShell
@@ -362,6 +432,7 @@ namespace DevolutionsGateway.Actions
         {
             List<IWixProperty> properties = usesProperties.Distinct().ToList();
             properties.Add(GatewayProperties._PowerShellPath);
+            properties.Add(GatewayProperties._DebugPowerShell);
 
             ElevatedManagedAction action = new ElevatedManagedAction(
                 new Id(id), method, Return.check, when, step,
@@ -391,6 +462,7 @@ namespace DevolutionsGateway.Actions
             isRemovingForUpgrade,
             isUninstalling,
             isMaintenance,
+            setInstallId,
             getNetFxInstalledVersion,
             checkNetFxInstalledVersion,
             getPowerShellPath,
@@ -399,6 +471,8 @@ namespace DevolutionsGateway.Actions
             createProgramDataDirectory,
             setProgramDataDirectoryPermissions,
             setUserDatabasePermissions,
+            cleanGatewayConfigIfNeeded,
+            cleanGatewayConfigIfNeededRollback,
             initGatewayConfigIfNeeded,
             openWebApp,
             queryGatewayStartupType,
@@ -406,9 +480,11 @@ namespace DevolutionsGateway.Actions
             startGatewayIfNeeded,
             restartGateway,
             rollbackConfig,
+            configureInit,
             configureAccessUri,
             configureListeners,
             configureCertificate,
+            configureNgrokListeners,
             configurePublicKey,
             configureWebApp,
             configureWebAppUser,

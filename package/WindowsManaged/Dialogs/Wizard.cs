@@ -1,11 +1,9 @@
-﻿using DevolutionsGateway.Properties;
+﻿using DevolutionsGateway.Helpers;
+using DevolutionsGateway.Properties;
 using Microsoft.Deployment.WindowsInstaller;
 using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.Linq;
-using System.Windows.Forms.VisualStyles;
-using DevolutionsGateway.Helpers;
 using WixSharp;
 using WixSharpSetup.Dialogs;
 
@@ -15,6 +13,7 @@ internal static class Wizard
 {
     private static readonly Type[] CustomizeSequence =
     {
+        typeof(NgrokListenersDialog),
         typeof(AccessUriDialog),
         typeof(ListenersDialog),
         typeof(CertificateDialog),
@@ -57,6 +56,22 @@ internal static class Wizard
             }
         }
 
+        if (dialog == typeof(NgrokListenersDialog))
+        {
+            if (!properties.ConfigureNgrok)
+            {
+                return true;
+            }
+        }
+
+        if (dialog == typeof(ListenersDialog) || dialog == typeof(AccessUriDialog))
+        {
+            if (properties.ConfigureNgrok)
+            {
+                return true;
+            }
+        }
+
         if (dialog == typeof(SummaryDialog))
         {
             return true;
@@ -65,6 +80,11 @@ internal static class Wizard
         if (dialog == typeof(CertificateDialog))
         {
             if (properties.HttpListenerScheme == Constants.HttpProtocol)
+            {
+                return true;
+            }
+
+            if (properties.ConfigureNgrok)
             {
                 return true;
             }
