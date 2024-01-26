@@ -181,7 +181,7 @@ impl Socket2Runtime {
         while let Ok(event) = self.event_receiver.try_recv() {
             event_cache.insert(event.into());
         }
-        let event_interested = vec![Event::readable(id), Event::writable(id), Event::all(id)];
+        let event_interested = vec![Event::readable(id), Event::writable(id), Event::all(id), Event::none(id) ];
         let mut res = vec![];
 
         if remove {

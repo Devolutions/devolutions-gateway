@@ -59,7 +59,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial]
 async fn test_connectivity() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
@@ -76,7 +76,7 @@ async fn test_connectivity() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 #[serial]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
