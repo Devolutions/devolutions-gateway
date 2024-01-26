@@ -1,5 +1,9 @@
 use std::{
-    io::ErrorKind, mem::MaybeUninit, net::{SocketAddr, UdpSocket}, sync::{atomic::AtomicBool, Arc}, time::Duration
+    io::ErrorKind,
+    mem::MaybeUninit,
+    net::{SocketAddr, UdpSocket},
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
 };
 
 use socket2::SockAddr;
@@ -100,7 +104,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
     ];
 
     for handle in handles {
-        tokio::time::timeout(Duration::from_secs(10), handle).await??;
+        tokio::time::timeout(Duration::from_secs(5), handle).await??;
     }
 
     // clean up
