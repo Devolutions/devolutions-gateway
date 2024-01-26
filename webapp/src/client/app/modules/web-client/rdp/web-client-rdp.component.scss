@@ -13,38 +13,6 @@
   margin: 0px 8px;
 }
 
-:host ::ng-deep .p-button {
-  border: none;
-  border-radius: 4px;
-  background-color: transparent;
-
-  &:hover {
-    background: #0068C31A !important;
-  }
-
-  .p-button-label {
-    color: #000000CC;
-    font-family: Open Sans;
-    font-size: 12px;
-    font-style: normal;
-    font-weight: 400;
-    line-height: normal;
-
-    &:hover {
-      color: #0068C3 !important;
-    }
-  }
-
-  .p-button-icon-left {
-    display: flex;
-    align-items: center;
-    color: #0068C3;
-    margin-right: 8px;
-    height: 16px;
-    width: 16px;
-  }
-}
-
 .loading-info-container {
   display: flex;
   justify-content: center;
@@ -74,3 +42,30 @@
   align-items: center;
 }
 
+.session-toolbar ::ng-deep .p-button {
+  border: none;
+  border-radius: 4px;
+  background-color: transparent;
+}
+
+.session-toolbar ::ng-deep .p-button:hover {
+  background: #0068C31A;
+}
+
+.session-toolbar ::ng-deep .p-button .p-button-label {
+  color: #000000CC;
+  font-family: Open Sans;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: normal;
+}
+
+.session-toolbar ::ng-deep .p-button .p-button-icon-left {
+  display: flex;
+  align-items: center;
+  color: #0068C3;
+  margin-right: 8px;
+  height: 16px;
+  width: 16px;
+}

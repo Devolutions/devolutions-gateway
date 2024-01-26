@@ -8,7 +8,7 @@ import {
   Output,
   ViewChild
 } from '@angular/core';
-import {from, Observable, Subject} from "rxjs";
+import {from, noop, Observable, Subject} from "rxjs";
 import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
 import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
@@ -275,10 +275,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     } else {
       this.rdpError = this.getMessage(error.kind());
     }
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
   }
 
   private notifyUserAboutConnectionClosed(error: UserIronRdpError | string): void {
     this.rdpError = typeof error === 'string' ? error : this.getMessage(error.kind());
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
   }
 
   private getMessage(type: UserIronRdpErrorKind): string {

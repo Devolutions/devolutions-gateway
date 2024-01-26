@@ -4,8 +4,6 @@ import {WebSession} from "@shared/models/web-session.model";
 import {SESSIONS_MENU_OFFSET, WebSessionService} from "@shared/services/web-session.service";
 import {noop} from "rxjs";
 import {takeUntil} from "rxjs/operators";
-import {error} from "@angular/compiler-cli/src/transformers/util";
-
 
 @Component({
   selector: 'gateway-menu-list-active-sessions',

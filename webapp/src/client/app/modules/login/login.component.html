@@ -21,8 +21,10 @@
       <span class="login-form-header login-form-title">
         Login to Continue
       </span>
-      <div class="login-form__message">
-        <p-messages *ngIf="messages.length > 0" [closable]="false" [value]="messages"></p-messages>
+      <div class="login-form-message">
+        <p-messages *ngIf="messages.length > 0"
+                    [closable]="false"
+                    [value]="messages"></p-messages>
       </div>
       <form name="login-form" [formGroup]="loginForm" autocomplete="on">
         <div class="login-form-content grid nomargin nopad">
