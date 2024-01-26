@@ -37,6 +37,17 @@
   margin-right: 0px;
 }
 
+:host ::ng-deep .p-message-summary {
+  display: none !important;
+}
+
+:host ::ng-deep .p-message {
+  //timescircleicon {
+  //  display: inline !important;
+  //}
+  text-align: left;
+}
+
 .container {
   display: flex;
   justify-content: center;
@@ -85,7 +96,6 @@
   //TODO error styles here. I think?
 }
 
-
 .password-container {
   position: relative;
   width: 100%;
@@ -104,7 +114,6 @@
   transform: translateY(-50%);
   cursor: pointer;
 }
-
 
 .col-pad-right-lg {
   padding-right: 15px !important;
@@ -159,18 +168,3 @@
 
   margin-bottom: 5px;
 }
-
-:host ::ng-deep .p-message-summary {
-  display: none !important;
-}
-
-:host ::ng-deep .p-message {
-  //timescircleicon {
-  //  display: inline !important;
-  //}
-  text-align: left;
-}
-
-//:host ::ng-deep .p-message-icon {
-//  font-size: 20px;
-//}
