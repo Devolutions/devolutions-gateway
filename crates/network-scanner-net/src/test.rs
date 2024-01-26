@@ -1,9 +1,5 @@
 use std::{
-    io::{ErrorKind, Read, Write},
-    mem::MaybeUninit,
-    net::{SocketAddr, UdpSocket},
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
+    io::ErrorKind, mem::MaybeUninit, net::{SocketAddr, UdpSocket}, sync::{atomic::AtomicBool, Arc}, time::Duration
 };
 
 use socket2::SockAddr;
@@ -16,11 +12,6 @@ use crate::socket::AsyncRawSocket;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn multiple_udp() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::SubscriberBuilder::default()
-        .with_max_level(tracing::Level::TRACE)
-        .with_thread_names(true)
-        .init();
-
     let addr = local_udp_server()?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
