@@ -13,7 +13,7 @@ pub async fn scan_ports(
     port: &[u16],
     runtime: &Arc<Socket2Runtime>,
     timeout: Option<Duration>,
-) -> anyhow::Result<Vec<std::io::Result<SockAddr>>> {
+) -> anyhow::Result<Vec<PortScanResult>> {
     let mut sockets = vec![];
     for p in port {
         let addr = SockAddr::from(SocketAddr::from((ip, *p)));
@@ -23,15 +23,19 @@ pub async fn scan_ports(
 
     let mut handle_arr = vec![];
     for (socket, addr) in sockets {
-        let handle: JoinHandle<std::io::Result<SockAddr>> = tokio::task::spawn(async move {
+        let handle: JoinHandle<PortScanResult> = tokio::task::spawn(async move {
             tracing::debug!("scanning port: {:?}", addr.as_socket());
             let future = socket.connect(&addr);
-            let timeout = timeout.unwrap_or(Duration::from_millis(300));
-            tokio::time::timeout(timeout, future)
-                .await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::TimedOut, e))??;
+            let timeout = timeout.unwrap_or(Duration::from_millis(500));
+            let Ok(result) = tokio::time::timeout(timeout, future).await else {
+                return PortScanResult::Timeout(addr);
+            };
 
-            Ok(addr)
+            let Ok(_) = result else {
+                return PortScanResult::Closed(addr);
+            };
+
+            PortScanResult::Open(addr)
         });
         handle_arr.push(handle);
     }
@@ -43,4 +47,11 @@ pub async fn scan_ports(
     }
 
     Ok(res_arr)
+}
+
+#[derive(Debug)]
+pub enum PortScanResult {
+    Open(SockAddr),
+    Closed(SockAddr),
+    Timeout(SockAddr),
 }

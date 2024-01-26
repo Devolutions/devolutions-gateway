@@ -15,5 +15,8 @@ pub async fn main() {
     let res = network_scanner::port_discovery::scan_ports(ip.into(), &port, &runtime, Some(Duration::from_secs(5)))
         .await
         .expect("Failed to scan ports");
-    tracing::info!("res: {:?}", res);
+
+    res.iter().for_each(|res| {
+        tracing::info!("result :: {:?}", res);
+    });
 }
