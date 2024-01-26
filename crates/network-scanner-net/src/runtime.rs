@@ -45,9 +45,12 @@ impl Socket2Runtime {
     /// Create a new runtime with a queue capacity, default is 1024.
     pub fn new(queue_capacity: Option<usize>) -> anyhow::Result<Arc<Self>> {
         let poller = polling::Poller::new()?;
+
         let (register_sender, register_receiver) =
             crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
+
         let (event_sender, event_receiver) = crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
+
         let runtime = Self {
             poller,
             next_socket_id: AtomicUsize::new(0),
@@ -155,7 +158,7 @@ impl Socket2Runtime {
         while let Ok(event) = self.event_receiver.try_recv() {
             event_cache.insert(event.into());
         }
-        tracing::debug!("checking event, event cache {:?}", event_cache);
+        tracing::debug!("checking event cache {:?}", event_cache);
 
         let event = if remove {
             event_cache.take(&event.into())
