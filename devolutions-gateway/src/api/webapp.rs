@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::env;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use axum::extract::{self, ConnectInfo, State};
@@ -440,7 +438,7 @@ where
     use tower_http::services::ServeDir;
 
     let conf = conf_handle.get_conf();
-    ensure_enabled!(conf);
+    let conf = extract_conf!(conf);
 
     let path = path.map(|path| path.0).unwrap_or_else(|| "/".to_owned());
 
@@ -451,9 +449,8 @@ where
         .build()
         .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
 
-    let webapp_root_path = find_webapp_root().map_err(HttpError::internal().err())?;
-    let client_root = webapp_root_path.join("client/");
-    let client_index = webapp_root_path.join("client/index.html");
+    let client_root = conf.static_root_path.join("client/");
+    let client_index = conf.static_root_path.join("client/index.html");
 
     match ServeDir::new(client_root)
         .fallback(ServeFile::new(client_index))
@@ -463,17 +460,6 @@ where
     {
         Ok(response) => Ok(response),
         Err(never) => match never {},
-    }
-}
-
-fn find_webapp_root() -> anyhow::Result<PathBuf> {
-    if let Ok(path) = env::var("DGATEWAY_WEBAPP_PATH") {
-        Ok(PathBuf::from(path))
-    } else {
-        let mut exe_path = std::env::current_exe()?;
-        exe_path.pop();
-        exe_path.push("webapp");
-        Ok(exe_path)
     }
 }
 

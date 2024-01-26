@@ -92,6 +92,7 @@ pub struct WebAppConf {
     pub authentication: WebAppAuth,
     pub app_token_maximum_lifetime: std::time::Duration,
     pub login_limit_rate: u8,
+    pub static_root_path: std::path::PathBuf,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -314,48 +315,64 @@ impl Conf {
 
 impl WebAppConf {
     fn from_dto(value: &dto::WebAppConf) -> anyhow::Result<Self> {
-        let conf = Self {
-            enabled: value.enabled,
-            authentication: match value.authentication {
-                dto::WebAppAuth::Custom => {
-                    let users_file = value
-                        .users_file
-                        .clone()
-                        .unwrap_or_else(|| Utf8PathBuf::from("users.txt"))
-                        .pipe_ref(|path| normalize_data_path(path, &get_data_dir()));
+        let authentication = match value.authentication {
+            dto::WebAppAuth::Custom => {
+                let users_file = value
+                    .users_file
+                    .clone()
+                    .unwrap_or_else(|| Utf8PathBuf::from("users.txt"))
+                    .pipe_ref(|path| normalize_data_path(path, &get_data_dir()));
 
-                    let users_contents = std::fs::read_to_string(&users_file)
-                        .with_context(|| format!("failed to read file at {users_file}"))?;
+                let users_contents = std::fs::read_to_string(&users_file)
+                    .with_context(|| format!("failed to read file at {users_file}"))?;
 
-                    let mut users = HashMap::new();
+                let mut users = HashMap::new();
 
-                    for line in users_contents.lines() {
-                        // Skip blank lines and commented lines.
-                        if line.trim().is_empty() || line.starts_with('#') {
-                            continue;
-                        }
-
-                        let (user, hash) = line.split_once(':').context("missing separator in users file")?;
-
-                        users.insert(
-                            user.to_owned(),
-                            WebAppUser {
-                                name: user.to_owned(),
-                                password_hash: hash.to_owned().into(),
-                            },
-                        );
+                for line in users_contents.lines() {
+                    // Skip blank lines and commented lines.
+                    if line.trim().is_empty() || line.starts_with('#') {
+                        continue;
                     }
 
-                    WebAppAuth::Custom(users)
+                    let (user, hash) = line.split_once(':').context("missing separator in users file")?;
+
+                    users.insert(
+                        user.to_owned(),
+                        WebAppUser {
+                            name: user.to_owned(),
+                            password_hash: hash.to_owned().into(),
+                        },
+                    );
                 }
-                dto::WebAppAuth::None => WebAppAuth::None,
-            },
-            app_token_maximum_lifetime: std::time::Duration::from_secs(
-                value
-                    .app_token_maximum_lifetime
-                    .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
-            ),
+
+                WebAppAuth::Custom(users)
+            }
+            dto::WebAppAuth::None => WebAppAuth::None,
+        };
+
+        let app_token_maximum_lifetime = std::time::Duration::from_secs(
+            value
+                .app_token_maximum_lifetime
+                .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
+        );
+
+        let static_root_path = if let Ok(path) = env::var("DGATEWAY_WEBAPP_PATH") {
+            std::path::PathBuf::from(path)
+        } else if let Some(path) = &value.static_root_path {
+            path.as_std_path().to_owned()
+        } else {
+            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+            exe_path.pop();
+            exe_path.push("webapp");
+            exe_path
+        };
+
+        let conf = Self {
+            enabled: value.enabled,
+            authentication,
+            app_token_maximum_lifetime,
             login_limit_rate: value.login_limit_rate.unwrap_or(WEB_APP_DEFAULT_LOGIN_LIMIT_RATE),
+            static_root_path,
         };
 
         Ok(conf)
@@ -1012,6 +1029,7 @@ pub mod dto {
         pub dump_tokens: bool,
 
         /// Ignore token signature and accept as-is (any signer is accepted), expired tokens and token
+        ///
         /// reuse is allowed, etc. Only restriction is to provide claims in the right format.
         #[serde(default)]
         pub disable_token_validation: bool,
@@ -1023,7 +1041,8 @@ pub mod dto {
         pub log_directives: Option<String>,
 
         /// Folder where pcap recordings should be stored
-        /// Providing this option will cause the PCAP interceptor to be attached to each stream
+        ///
+        /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         pub capture_path: Option<Utf8PathBuf>,
     }
 
@@ -1338,6 +1357,8 @@ pub mod dto {
         /// Path to the users file with <user>:<hash> lines
         #[serde(skip_serializing_if = "Option::is_none")]
         pub users_file: Option<Utf8PathBuf>,
+        /// Path to the static files for the standalone web application
+        pub static_root_path: Option<Utf8PathBuf>,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
