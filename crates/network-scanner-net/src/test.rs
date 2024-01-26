@@ -6,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use serial_test::serial;
 use socket2::SockAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,7 +15,6 @@ use tokio::{
 use crate::socket::AsyncRawSocket;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
 async fn multiple_udp() -> anyhow::Result<()> {
     let addr = local_udp_server()?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
@@ -26,21 +24,22 @@ async fn multiple_udp() -> anyhow::Result<()> {
     let socket2 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
     let socket3 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
 
-    fn send_to(mut socket: AsyncRawSocket, number: u8, addr: SocketAddr) -> tokio::task::JoinHandle<()> {
+    fn send_to(
+        mut socket: AsyncRawSocket,
+        number: u8,
+        addr: SocketAddr,
+    ) -> tokio::task::JoinHandle<Result<(), anyhow::Error>> {
         tokio::task::spawn(async move {
             let msg = format!("hello from socket {}", number);
-            socket
-                .send_to(msg.as_bytes(), &SockAddr::from(addr))
-                .await
-                .expect("send_to");
+            socket.send_to(msg.as_bytes(), &SockAddr::from(addr)).await?;
+
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
-            let (size, addr) = socket
-                .recv_from(&mut buf)
-                .await
-                .unwrap_or_else(|_| panic!("recv_from: {}", number));
+            let (size, addr) = socket.recv_from(&mut buf).await?;
+
             tracing::info!("size: {}, addr: {:?}", size, addr);
             let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, format!("hello from socket {}", number).as_bytes());
+            Ok::<(), anyhow::Error>(())
         })
     }
 
@@ -53,19 +52,20 @@ async fn multiple_udp() -> anyhow::Result<()> {
     ];
 
     for handle in handles {
-        tokio::time::timeout(Duration::from_secs(10), handle).await??;
+        tokio::time::timeout(Duration::from_secs(10), handle).await???;
     }
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
 async fn test_connectivity() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
+    let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
+
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
-    let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
     let addr: SockAddr = addr.into();
     socket.connect(&addr).await?;
 
@@ -77,26 +77,33 @@ async fn test_connectivity() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-#[serial]
+
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
+
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let socket0 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket1 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket2 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let socket3 = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
-    fn connect(mut socket: AsyncRawSocket, number: u8, addr: SocketAddr) -> tokio::task::JoinHandle<()> {
+    fn connect(
+        mut socket: AsyncRawSocket,
+        number: u8,
+        addr: SocketAddr,
+    ) -> tokio::task::JoinHandle<Result<(), anyhow::Error>> {
         tokio::task::spawn(async move {
-            socket.connect(&socket2::SockAddr::from(addr)).await.expect("connect");
+            socket.connect(&socket2::SockAddr::from(addr)).await?;
             let msg = format!("hello from socket {}", number);
-            socket.send(msg.as_bytes()).await.expect("send");
+            socket.send(msg.as_bytes()).await?;
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
-            let size = socket.recv(&mut buf).await.expect("recv");
+            let size = socket.recv(&mut buf).await?;
             tracing::info!("size: {}", size);
             let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, format!("hello from socket {}", number).as_bytes());
+            Ok::<(), anyhow::Error>(())
         })
     }
 
@@ -109,7 +116,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
     ];
 
     for handle in handles {
-        tokio::time::timeout(Duration::from_secs(5), handle).await??;
+        tokio::time::timeout(Duration::from_secs(5), handle).await???;
     }
 
     // clean up
@@ -120,10 +127,12 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial]
+
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, tcp_handle) = local_tcp_server(kill_server.clone()).await?;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
+
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
     let mut socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
@@ -156,8 +165,8 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
         Ok::<(), anyhow::Error>(())
     });
 
-    tokio::time::timeout(Duration::from_secs(10), handle).await???;
-    tokio::time::timeout(Duration::from_secs(10), handle2).await???;
+    tokio::time::timeout(Duration::from_secs(5), handle).await???;
+    tokio::time::timeout(Duration::from_secs(5), handle2).await???;
 
     // clean up
     kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -181,10 +190,11 @@ fn local_udp_server() -> anyhow::Result<SocketAddr> {
             match socket.recv_from(&mut buffer) {
                 Ok((size, src)) => {
                     tracing::trace!("Received {} bytes from {}", size, src);
-                    let socket_clone = socket.try_clone().expect("Failed to clone socket");
+                    let socket_clone = socket.try_clone()?;
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
-                        socket_clone.send_to(&buffer[..size], src).expect("Failed to send data")
+                        socket_clone.send_to(&buffer[..size], src)?;
+                        Ok::<(), anyhow::Error>(())
                     });
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
