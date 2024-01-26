@@ -19,9 +19,9 @@ use crate::{socket::AsyncRawSocket, ScannnerNetError};
 
 #[derive(Debug)]
 pub struct Socket2Runtime {
-    poller: polling::Poller,
+    poller: Arc<polling::Poller>,
     next_socket_id: AtomicUsize,
-    is_terminated: AtomicBool,
+    is_terminated: Arc<AtomicBool>,
     register_sender: Sender<RegisterEvent>,
     event_receiver: Receiver<Event>,
     event_cache: Mutex<HashSet<EventWrapper>>,
@@ -52,15 +52,15 @@ impl Socket2Runtime {
         let (event_sender, event_receiver) = crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
 
         let runtime = Self {
-            poller,
+            poller: Arc::new(poller),
             next_socket_id: AtomicUsize::new(0),
-            is_terminated: AtomicBool::new(false),
+            is_terminated: Arc::new(AtomicBool::new(false)),
             register_sender,
             event_receiver,
             event_cache: Mutex::new(HashSet::new()),
         };
         let runtime = Arc::new(runtime);
-        runtime.clone().start_loop(register_receiver, event_sender)?;
+        runtime.start_loop(register_receiver, event_sender)?;
         Ok(runtime)
     }
 
@@ -86,10 +86,14 @@ impl Socket2Runtime {
     }
 
     fn start_loop(
-        self: Arc<Self>,
+        &self,
         register_receiver: Receiver<RegisterEvent>,
         event_sender: Sender<Event>,
     ) -> anyhow::Result<()> {
+        // we make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread
+        // we cannot hold a Arc<Socket2Runtime> in the thread, because it will create a cycle reference and the runtime will never be dropped.
+        let is_terminated = self.is_terminated.clone();
+        let poller = self.poller.clone();
         std::thread::Builder::new()
             .name("[raw-socket]:io-event-loop".to_string())
             .spawn(move || {
@@ -102,14 +106,14 @@ impl Socket2Runtime {
                 let mut events_happened = HashMap::new();
 
                 loop {
-                    if self.is_terminated.load(Ordering::Acquire) {
+                    if is_terminated.load(Ordering::Acquire) {
                         break;
                     }
 
                     tracing::debug!("polling events");
-                    if let Err(e) = self.poller.wait(&mut events, None) {
+                    if let Err(e) = poller.wait(&mut events, None) {
                         tracing::error!(error = ?e, "failed to poll events");
-                        self.is_terminated.store(true, Ordering::SeqCst);
+                        is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
                     for event in events.iter() {
@@ -143,6 +147,7 @@ impl Socket2Runtime {
                         tracing::trace!(?event, "waking up waker");
                     });
                 }
+                tracing::info!("io event loop terminated");
             })
             .with_context(|| "failed to spawn io event loop thread")?;
 

@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use serial_test::serial;
 use socket2::SockAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,6 +16,7 @@ use tokio::{
 use crate::socket::AsyncRawSocket;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn multiple_udp() -> anyhow::Result<()> {
     let addr = local_udp_server()?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
@@ -58,6 +60,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+#[serial]
 async fn test_connectivity() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let runtime = crate::runtime::Socket2Runtime::new(None)?;
@@ -69,10 +72,12 @@ async fn test_connectivity() -> anyhow::Result<()> {
     // clean up
     kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
     handle.abort();
+
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
@@ -115,6 +120,7 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, tcp_handle) = local_tcp_server(kill_server.clone()).await?;
@@ -156,6 +162,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     // clean up
     kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
     tcp_handle.abort();
+
     Ok(())
 }
 
