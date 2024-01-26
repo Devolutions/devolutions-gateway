@@ -2690,8 +2690,7 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 [[package]]
 name = "polling"
 version = "3.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "545c980a3880efd47b2e262f6a4bb6daad6555cf3367aa9c4e52895f69537a41"
+source = "git+https://github.com/irvingoujAtDevolution/polling.git#159ab1b540b75a86f7735bcb57449b4b766e49cf"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
