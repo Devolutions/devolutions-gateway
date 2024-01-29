@@ -583,6 +583,9 @@ pub struct NetworkScanClaims {
 
     /// JWT "Expiration Time" claim.
     pub exp: i64,
+
+    // Gateway ID
+    pub jet_gw_id : Option<Uuid>,
 }
 
 // ----- cache clean up ----- //
