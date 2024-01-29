@@ -38,7 +38,7 @@ export class AuthService extends BaseComponent {
   }
 
   public get isAuthenticated(): boolean {
-    const sessionData: string = sessionStorage.getItem('session');
+    const sessionData: string = sessionStorage.getItem(AuthService.SESSION_STORAGE_KEY);
     if (!sessionData) {
       return false;
     }
@@ -77,7 +77,7 @@ export class AuthService extends BaseComponent {
       }),
       map(token => !!token),
       catchError(error => {
-        console.error('Login error:', error);
+        //console.error('Login error:', error);
         throw error
       })
     );
@@ -111,7 +111,7 @@ export class AuthService extends BaseComponent {
   private requestToken(username?: string, password?: string): Observable<string> {
     return this.apiService.generateAppToken(username, password).pipe(
       catchError(error => {
-        console.error('Error requesting token:', error);
+        //console.error('Error requesting token:', error);
         throw error;
       })
     );
@@ -183,6 +183,5 @@ export class AuthService extends BaseComponent {
   private handleTokenExpiration(): void {
     this.removeAllStorageData();
     this.navigationService.navigateToLogin();
-    //this.router.navigate(['/login'], { queryParams: { expired: true } });
   }
 }
