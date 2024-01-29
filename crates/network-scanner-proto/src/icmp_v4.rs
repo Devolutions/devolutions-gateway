@@ -17,6 +17,7 @@ pub enum Icmpv4MessageType {
     InformationReply = 16,
 }
 
+#[derive(Debug)]
 pub enum Icmpv4Message {
     EchoReply {
         //  type 0
@@ -213,6 +214,7 @@ impl Icmpv4Message {
         bytes
     }
 }
+#[derive(Debug)]
 pub struct Icmpv4Packet {
     pub code: u8,
     pub checksum: u16,
