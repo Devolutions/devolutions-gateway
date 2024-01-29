@@ -585,7 +585,7 @@ pub struct NetworkScanClaims {
     pub exp: i64,
 
     // Gateway ID
-    pub jet_gw_id : Option<Uuid>,
+    pub jet_gw_id: Option<Uuid>,
 }
 
 // ----- cache clean up ----- //
