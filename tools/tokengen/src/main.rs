@@ -159,6 +159,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("JRL", serde_json::to_value(&claims)?)
         }
+        SubCommand::NetScan { expire } => {
+            let exp = expire.unwrap_or_else(||{
+                i64::try_from((now + humantime::parse_duration("1h").expect("error parse duration")).as_secs()).unwrap()
+            });
+            let jti = Uuid::new_v4();
+            let nbf = i64::try_from(now.as_secs()).unwrap();
+
+            let claims = NetworkScanClaim {
+                jti,
+                iat: nbf,
+                nbf,
+                exp
+            };
+            ("NETWORKSCAN", serde_json::to_value(&claims)?)
+        }
     };
 
     let mut jwt_sig = CheckedJwtSig::new_with_cty(JwsAlg::RS256, cty, claims);
@@ -265,6 +280,10 @@ enum SubCommand {
         #[clap(long)]
         jti: Vec<Uuid>,
     },
+    NetScan {
+        #[clap(long)]
+        expire:Option<i64>
+    }
 }
 
 // --- claims --- //
@@ -346,6 +365,21 @@ struct JrlClaims<'a> {
     jrl: HashMap<&'a str, Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+struct NetworkScanClaim {
+     /// JWT "JWT ID" claim, the unique ID for this token
+     pub jti: Uuid,
+
+     /// JWT "Issued At" claim.
+     pub iat: i64,
+ 
+     /// JWT "Not Before" claim.
+     pub nbf: i64,
+ 
+     /// JWT "Expiration Time" claim.
+     pub exp: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
