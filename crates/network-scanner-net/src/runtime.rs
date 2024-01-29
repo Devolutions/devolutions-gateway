@@ -81,7 +81,7 @@ impl Socket2Runtime {
     pub(crate) fn remove_socket(&self, socket: &socket2::Socket, id: usize) -> anyhow::Result<()> {
         self.poller.delete(socket)?;
         // remove all events related to this socket
-        self.event_cache.lock().retain(|event| id == event.0.key);
+        self.event_cache.lock().retain(|event| id != event.0.key);
         Ok(())
     }
 
@@ -188,6 +188,7 @@ impl Socket2Runtime {
             Event::none(id),
         ];
         let mut res = vec![];
+        tracing::debug!("checking event cache {:?}", event_cache);
 
         if remove {
             event_interested.into_iter().for_each(|event| {
