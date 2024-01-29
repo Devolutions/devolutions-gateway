@@ -159,6 +159,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("JRL", serde_json::to_value(&claims)?)
         }
+        SubCommand::NetworkScan { } => {
+            let claims = NetworkScanClaim {
+                jti,
+                iat: nbf,
+                nbf,
+                exp,  
+                jet_gw_id: app.jet_gw_id,
+            };
+            ("NETWORK_SCAN", serde_json::to_value(&claims)?)
+        }
     };
 
     let mut jwt_sig = CheckedJwtSig::new_with_cty(JwsAlg::RS256, cty, claims);
@@ -265,6 +275,8 @@ enum SubCommand {
         #[clap(long)]
         jti: Vec<Uuid>,
     },
+    NetworkScan {
+    }
 }
 
 // --- claims --- //
@@ -346,6 +358,23 @@ struct JrlClaims<'a> {
     jrl: HashMap<&'a str, Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_gw_id: Option<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+struct NetworkScanClaim {
+     /// JWT "JWT ID" claim, the unique ID for this token
+     pub jti: Uuid,
+
+     /// JWT "Issued At" claim.
+     pub iat: i64,
+ 
+     /// JWT "Not Before" claim.
+     pub nbf: i64,
+ 
+     /// JWT "Expiration Time" claim.
+     pub exp: i64,
+
+     pub jet_gw_id : Option<Uuid>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
