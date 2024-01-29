@@ -34,7 +34,6 @@ export class WebSessionService {
     this.setWebSessionIndexToLastCreated();
   }
 
-
   updateSession(tabIndex: number, newSession: WebSession<any, any>): void {
     newSession.tabIndex = tabIndex;
 
@@ -53,22 +52,6 @@ export class WebSessionService {
     this.webSessionDataSubject.next(updatedSessions);
 
     this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
-    // if (typeof indexToRemove === 'undefined') {
-    //   indexToRemove = this.webSessionCurrentIndexSubject.getValue();
-    // }
-    // console.log('Checking again.... ', indexToRemove)
-    // this.destroyWebSessionComponentRef(indexToRemove);
-    // const currentWebSessions = this.webSessionDataSubject.getValue();
-    //
-    // if (indexToRemove >= 0) {
-    //   const updatedSessions = currentWebSessions.filter((_, index) => index !== indexToRemove);
-    //   this.webSessionDataSubject.next(updatedSessions);
-    //
-    //   //TODO Should I delay for a few seconds before moving to another tab?
-    //   this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
-    // } else {
-    //   throw new Error('Remove Session: Index is out of bounds.');
-    // }
   }
 
   //TODO Fix bc tabIndex is in Web Session
@@ -81,12 +64,26 @@ export class WebSessionService {
     // this.webSessionCurrentIndexSubject.next(0);
   }
 
+  async updateWebSessionIcon(tabIndex: number, icon: string): Promise<void> {
+    const currentSessions = this.webSessionDataSubject.value;
+    const index: number = currentSessions.findIndex(session => session.tabIndex === tabIndex);
+    const webSession: WebSession<any, any> = currentSessions[index];
+    webSession.icon = icon;
+
+    if (index !== -1) {
+      currentSessions[index] = webSession;
+      this.webSessionDataSubject.next(currentSessions);
+    } else {
+      console.error('Web Session not found.')
+    }
+  }
+
   async destroyWebSessionComponentRef(indexToRemove: number): Promise<void> {
     try {
       const webSessionToDestroy = await this.getWebSession(indexToRemove);
 
       if (this.isSessionValid(webSessionToDestroy)) {
-        await this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
+        this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
       } else {
         console.warn('Invalid or non-existent session to destroy:', indexToRemove);
       }

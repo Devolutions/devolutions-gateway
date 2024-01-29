@@ -8,7 +8,7 @@ import {
   Output,
   ViewChild
 } from '@angular/core';
-import {from, Observable, Subject} from "rxjs";
+import {from, noop, Observable, Subject} from "rxjs";
 import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
 import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
@@ -19,6 +19,7 @@ import {GatewayAlertMessageService} from "@shared/components/gateway-alert-messa
 import {ComponentStatus} from "@shared/models/component-status.model";
 import {MessageService} from "primeng/api";
 import {WebSessionService} from "@shared/services/web-session.service";
+import {UtilsService} from "@shared/services/utils.service";
 
 export enum SSPIType {
   Kerberos = 0,
@@ -55,6 +56,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   @Input() tabIndex: number | undefined;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
+  @ViewChild('session') sessionElement: ElementRef;
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
 
   JET_RDP_URL: string = '/jet/rdp';
@@ -69,6 +71,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   private remoteClient: UserInteraction;
 
   constructor(private apiService: ApiService,
+              protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService) {
     super(gatewayAlertMessageService);
@@ -110,6 +113,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   scaleTo(scale: ScreenScale): void {
+    //this.sessionElement.nativeElement.requestFullscreen();
     this.fullScreen = scale === ScreenScale.Full;
     this.remoteClient.setScale(scale);
   }
@@ -167,22 +171,21 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       map(currentWebSession => {
         this.inputFormData = currentWebSession.data;
         const { hostname, username, password, desktopSize, preConnectionBlob, kdcProxyUrl } = this.inputFormData;
-        const domain: string = '';
-
+        const extractedData = this.utils.string.extractDomain(username);
         const gatewayHttpAddress: URL = new URL(this.JET_RDP_URL, window.location.href);
         const websocketUrl: string = gatewayHttpAddress.toString().replace("http", "ws");
 
         const connectionParameters: IronRDPConnectionParameters = {
-          username: username,
+          username: extractedData.username,
           password: password,
           host: hostname,
-          domain: domain,
+          domain: extractedData.domain,
           gatewayAddress: websocketUrl,
           screenSize: desktopSize,
           preConnectionBlob: preConnectionBlob,
           kdcProxyUrl: kdcProxyUrl
         };
-
+        console.log('Debug: connectionParameters', connectionParameters)
         return connectionParameters;
       })
     );
@@ -275,10 +278,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     } else {
       this.rdpError = this.getMessage(error.kind());
     }
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
   }
 
   private notifyUserAboutConnectionClosed(error: UserIronRdpError | string): void {
     this.rdpError = typeof error === 'string' ? error : this.getMessage(error.kind());
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
   }
 
   private getMessage(type: UserIronRdpErrorKind): string {

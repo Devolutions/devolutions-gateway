@@ -3,49 +3,30 @@
 @import "../../../../../../assets/css/theme/theme-mode-variables";
 
 :host {
-  --status-rgb: var(--base-color-rgb);
-
-  --status-label-opacity: 0.6;
-  --status-text-opacity: 0.4;
-
   --box-background-color: white;
   --box-text-color: rgb(var(--base-color-rgb));
-
-  :host-context(.dark-theme) & {
-    --box-background-color: #252525 !important;
-  }
 }
 
-:host.has-warning,
-:host.has-danger,
-:host.has-success {
-
-  &.has-some {
-    --status-rgb: var(--entry-status-color-rgb);
-
-    --status-label-opacity: 1;
-    --status-text-opacity: 1;
-  }
-}
-
-:host ::ng-deep .protocol-dropdown {
+:host ::ng-deep .p-dropdown {
   width: 100%;
   min-width: 100% !important;
-}
-
-:host ::ng-deep .btn-connect-session {
-  margin-right: 0px;
 }
 
 :host ::ng-deep .p-message-summary {
   display: none !important;
 }
 
-:host ::ng-deep .p-message {
-  //timescircleicon {
-  //  display: inline !important;
-  //}
+:host ::ng-deep .p-message.p-message-error {
+  timescircleicon {
+    display: inline !important;
+  }
+  border: none;
   text-align: left;
+
+  &::before {
+    background: rgba(255, 26, 26, 0.1) none;
+    width: 0;
+  }
 }
 
 .container {
@@ -55,7 +36,10 @@
   height: 100vh;
 }
 
-///#1a1a1a
+.form-message {
+  margin-bottom: 10px;
+}
+
 .box {
   background-color: var(--box-background-color);
   width: 377px;
@@ -64,11 +48,10 @@
 }
 
 .centered-box {
-  margin: auto; /* for horizontal centering */
+  margin: auto;
 }
 
 .box-header {
-  //width: 329px;
   padding-bottom: 24px;
 }
 
@@ -93,7 +76,6 @@
 .gateway-form-input {
   display: flex;
   align-items: center;
-  //TODO error styles here. I think?
 }
 
 .password-container {
@@ -150,21 +132,4 @@
 
 .more-text {
   color: var(--security-box-action-color);
-}
-
-.form__message {
-  .p-messages {
-    padding: 15px 15px 15px 10px;
-  }
-
-  //TODO Set up icon as per figma
-  //.p-messages-icon {
-  //  font-size: 2em;
-  //}
-
-  .p-messages-summary {
-    display: none;
-  }
-
-  margin-bottom: 5px;
 }

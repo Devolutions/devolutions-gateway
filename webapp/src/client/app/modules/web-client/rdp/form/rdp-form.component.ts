@@ -5,7 +5,7 @@ import {
   OnInit,
   Output, SimpleChanges, Type
 } from '@angular/core';
-import {FormBuilder, FormGroup, Validators} from "@angular/forms";
+import {FormBuilder, FormControl, FormGroup, Validators} from "@angular/forms";
 import {Message, SelectItem} from "primeng/api";
 
 import {WebSessionService} from "@shared/services/web-session.service";
@@ -14,6 +14,10 @@ import {WebSession} from "@shared/models/web-session.model";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {ComponentStatus} from "@shared/models/component-status.model";
+
+interface AutoCompleteInput {
+  hostname: string;
+}
 
 @Component({
     selector: 'web-client-rdp-form',
@@ -35,6 +39,9 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   showMoreSettings: boolean = false;
   messages: Message[] = [];
   showPassword: boolean = false;
+
+  hostnames!: any[]
+  filteredHostnames!: any[];
 
   protocolSelectItems: SelectItem[] = [
     { label: 'RDP', value: '0' }
@@ -72,29 +79,13 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     }
   }
 
-  private initializeStatus(): void {
-    const status: ComponentStatus = {
-      isInitialized: true,
-      tabIndex: 0
-    }
-    this.componentStatus.emit(status);
-  }
-
-  private addMessages(messages: Message[]) {
-    this.messages = [];
-    if (messages?.length > 0) {
-      messages.forEach(message => {
-        this.messages.push(message);
-      })
-    }
-  }
-
   get showCustomSize(): boolean {
     return this.connectSessionForm.get('screenSize').value === ScreenSize.Custom;
   }
 
   onConnectSession(): void {
     const submittedData = this.connectSessionForm.value;
+    submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
     const newSessionTab: WebSession<Type<WebClientRdpComponent>, any> =  new WebSession(submittedData.hostname,
                                                               WebClientRdpComponent,
@@ -123,6 +114,10 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     return dropDownItems;
   }
 
+  toggleShowPassword(): void {
+    this.showPassword = !this.showPassword;
+  }
+
   toggleMoreSettings(event: Event): void {
     event.preventDefault();
     this.showMoreSettings = !this.showMoreSettings;
@@ -132,12 +127,77 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     return this.showMoreSettings;
   }
 
+  isHostnamesExists(): boolean {
+    return this.hostnames.length > 0;
+  }
+
+  filterHostname(event: any): void {
+    const query = event.query.toLowerCase();
+
+    this.filteredHostnames = this.hostnames.filter(hostnameObj =>
+      hostnameObj.hostname.toLowerCase().startsWith(query)
+    );
+  }
+
+  private isHostnameInArray(hostname: string, array: AutoCompleteInput[]): boolean {
+    return array.some(obj => obj.hostname === hostname);
+  }
+
+  private processHostname(autoCompleteInput: any): string {
+    this.addHostnameToLocalStorage(autoCompleteInput);
+
+    if (typeof autoCompleteInput === 'string') {
+      return autoCompleteInput;
+    }
+
+    return autoCompleteInput?.hostname || '';
+  }
+
+  private processAutoCompleteInput(input: string | AutoCompleteInput): AutoCompleteInput {
+    return typeof input === 'string' ? {'hostname': input} : input;
+  }
+
+  private addHostnameToLocalStorage(hostname: string | AutoCompleteInput): void {
+    try {
+      const hostnameObj: AutoCompleteInput = this.processAutoCompleteInput(hostname);
+
+      let hostnames = JSON.parse(localStorage.getItem('hostnames') || '[]');
+      if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
+        hostnames.push(hostnameObj);
+        localStorage.setItem('hostnames', JSON.stringify(hostnames));
+
+        this.populateAutoComplete();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  private initializeStatus(): void {
+    const status: ComponentStatus = {
+      isInitialized: true,
+      tabIndex: 0
+    }
+    this.componentStatus.emit(status);
+  }
+
+  private addMessages(messages: Message[]): void {
+    this.messages = [];
+    if (messages?.length > 0) {
+      messages.forEach(message => {
+        this.messages.push(message);
+      })
+    }
+  }
+
   private populateForm(): void {
+    this.populateAutoComplete();
 
     if (this.isEmbedded) {
       this.connectSessionForm = this.formBuilder.group({
         protocol: [this.inputFormData.protocol, Validators.required],
-        hostname: [this.inputFormData.hostname, Validators.required],
+        autoComplete: new FormControl('', Validators.required),
+        hostname: [''],
         username: [this.inputFormData.username, Validators.required],
         password: [this.inputFormData.password, Validators.required],
         screenSize: [this.inputFormData.screenSize],
@@ -149,7 +209,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     } else {
       this.connectSessionForm = this.formBuilder.group({
         protocol: [0, Validators.required],
-        hostname: ['', Validators.required],
+        autoComplete: new FormControl('', Validators.required),
+        hostname: [''],
         username: ['', Validators.required],
         password: ['', Validators.required],
         screenSize: [null],
@@ -161,8 +222,9 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     this.setupScreenSizeDropdown();
   }
 
-  toggleShowPassword(): void {
-    this.showPassword = !this.showPassword;
+  private populateAutoComplete(): void {
+    //localStorage.clear();
+    this.hostnames = JSON.parse(localStorage.getItem('hostnames') || '[]');
   }
 
   private setupScreenSizeDropdown(): void {

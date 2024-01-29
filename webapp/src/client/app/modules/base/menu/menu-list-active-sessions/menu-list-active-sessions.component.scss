@@ -19,6 +19,10 @@
       padding-right: 8px;
     }
 
+    .dvl-icon-warning {
+      color: var(--error-btn-bg-color);
+    }
+
     &:hover {
       color: var(--text-accent-color);
       background-color: rgba(255, 255, 255, 0.05);
@@ -74,8 +78,8 @@
 .close-button::after {
   content: '';
   position: absolute;
-  width: 1px; /* Adjust the thickness of the lines */
-  height: 15px; /* Adjust the length of the lines */
+  width: 1px;
+  height: 15px;
   background: #9E9E9E;
 }
 

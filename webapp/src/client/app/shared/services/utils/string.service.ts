@@ -1,5 +1,10 @@
 import {UtilsService} from '../utils.service';
 
+interface ExtractionUsernameDomain {
+  username: string,
+  domain: string
+}
+
 export class StringService {
 
   private utils: UtilsService;
@@ -8,15 +13,21 @@ export class StringService {
     this.utils = parent;
   }
 
-  extractDomain(host): string {
-    let domain: string;
+  //DOMAIN\username or username@DOMAIN
+  extractDomain(fullUsername: string): ExtractionUsernameDomain {
+    const extractionData: ExtractionUsernameDomain = {
+      username: fullUsername,
+      domain: ''
+    };
 
-    if (host.includes('/')) {
-      domain = host.split('/')[1];
-    } else if (host.includes('@')) {
-      domain = host.split('@')[1];
+    if (fullUsername.includes('\\')) {
+      extractionData.domain = fullUsername.split('\\')[0];
+      extractionData.username = fullUsername.split('\\')[1];
+    } else if (fullUsername.includes('@')) {
+      extractionData.domain = fullUsername.split('@')[1];
+      extractionData.username = fullUsername.split('@')[0];
     }
-    return domain;
+    return extractionData;
   }
 
 }

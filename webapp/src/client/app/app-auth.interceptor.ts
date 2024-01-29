@@ -19,11 +19,8 @@ export class AuthInterceptor implements HttpInterceptor {
     if (req.url.endsWith(this.appTokenUrl)) {
       return next.handle(req).pipe(
         catchError((error: HttpErrorResponse) => {
-          console.error('error', error)
-          // Handle 401/407 errors for the app token request
+          //console.error('error', error)
           if (error.status === 401 || error.status === 407) {
-            // Custom handling (e.g., redirect or display a message)
-            // prevent default browser login prompt
             this.navigationService.navigateToLogin();
           }
           return throwError(error);
@@ -38,28 +35,12 @@ export class AuthInterceptor implements HttpInterceptor {
 
     return next.handle(authReq).pipe(
       catchError((error: HttpErrorResponse) => {
-        console.error('error', error)
-        // Handle 401/407 errors for other requests
+        //console.error('error', error)
         if (error.status === 401 || error.status === 407) {
-          // Custom handling (e.g., redirect or display a message)
-          // prevent default browser login prompt
-          return throwError(error);
+          this.authService.logout();
         }
         return throwError(error);
       })
     );
   }
-
-  //   if (req.url.endsWith(this.appTokenUrl)) {
-  //     return next.handle(req);
-  //   }
-  //
-  //   const authToken: string = this.authService.sessionValue.token;
-  //
-  //   const authReq = authToken
-  //     ? req.clone({ headers: req.headers.set('Authorization', `Bearer ${authToken}`) })
-  //     : req;
-  //
-  //   return next.handle(authReq);
-  // }
 }

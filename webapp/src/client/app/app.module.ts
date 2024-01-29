@@ -30,6 +30,8 @@ import { AuthInterceptor } from "@gateway/app-auth.interceptor";
 import { SidebarModule } from "primeng/sidebar";
 import { ToastModule } from "primeng/toast";
 import { TabView, TabViewModule } from "primeng/tabview";
+import { AutoCompleteModule } from "primeng/autocomplete";
+
 
 @NgModule({
   declarations: [
@@ -54,6 +56,7 @@ import { TabView, TabViewModule } from "primeng/tabview";
     SidebarModule,
     ToastModule,
     TabViewModule,
+    AutoCompleteModule
   ],
   providers: [
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },

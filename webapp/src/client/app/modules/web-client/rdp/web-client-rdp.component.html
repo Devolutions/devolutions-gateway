@@ -1,65 +1,67 @@
-<div *ngIf="status.isDisabled" style="display: flex; flex-direction: column; height: 100%">
-  <web-client-rdp-form
-    [tabIndex]="tabIndex"
-    [inputFormData]="inputFormData"
-    [error]="rdpError"
-    [isEmbedded]="true"></web-client-rdp-form>
+<div #session class="session-webclient">
+  <div *ngIf="status.isDisabled" style="display: flex; flex-direction: column; height: 100%">
+    <web-client-rdp-form
+      [tabIndex]="tabIndex"
+      [inputFormData]="inputFormData"
+      [error]="rdpError"
+      [isEmbedded]="true"></web-client-rdp-form>
+  </div>
+
+  <div class="session-toolbar">
+    <div class="session-toolbar-left-group">
+      <p-button
+        (onClick)="sendWindowsKey()"
+        label="Start"
+        icon="dvl-icon dvl-icon-windows"
+        iconPos="left"></p-button>
+
+      <div class="separator"></div>
+
+      <p-button
+        (onClick)="sendCtrlAltDel()"
+        label="Ctrl+Alt+Del"
+        icon="dvl-icon dvl-icon-admin"
+        iconPos="left"></p-button>
+    </div>
+
+    <div class="session-toolbar-middle-group">
+      <p-button
+        (onClick)="scaleTo(screenScale.Full)"
+        label="Full Screen"
+        icon="dvl-icon dvl-icon-fullscreen"
+        iconPos="left"></p-button>
+
+      <div class="separator"></div>
+
+      <p-button
+        (onClick)="scaleTo(screenScale.Fit)"
+        label="Fit to Screen"
+        icon="dvl-icon dvl-icon-minimize"
+        iconPos="left"></p-button>
+
+      <div class="separator"></div>
+      <p-button
+        (onClick)="scaleTo(screenScale.Real)"
+        label="Actual Size"
+        icon="dvl-icon dvl-icon-screen"
+        iconPos="left"></p-button>
+    </div>
+
+    <div class="session-toolbar-right-group">
+      <p-button (onClick)="sendTerminateSessionCmd()"
+        styleClass="other"
+                label="Close Session"
+                icon="dvl-icon dvl-icon-close"
+                iconPos="left"></p-button>
+    </div>
+  </div>
+
+  <div class="loading-info-container" *ngIf="loading">
+    <div class="loading-info">
+      <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
+    </div>
+  </div>
+
+  <iron-remote-gui #ironGuiElement debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui>
+
 </div>
-
-<div class="session-toolbar">
-  <div class="session-toolbar-left-group">
-    <p-button
-      (onClick)="sendWindowsKey()"
-      label="Start"
-      icon="dvl-icon dvl-icon-windows"
-      iconPos="left"></p-button>
-
-    <div class="separator"></div>
-
-    <p-button
-      (onClick)="sendCtrlAltDel()"
-      label="Ctrl+Alt+Del"
-      icon="dvl-icon dvl-icon-admin"
-      iconPos="left"></p-button>
-  </div>
-
-  <div class="session-toolbar-middle-group">
-    <p-button
-      (onClick)="scaleTo(screenScale.Full)"
-      label="Full Screen"
-      icon="dvl-icon dvl-icon-fullscreen"
-      iconPos="left"></p-button>
-
-    <div class="separator"></div>
-
-    <p-button
-      (onClick)="scaleTo(screenScale.Fit)"
-      label="Fit to Screen"
-      icon="dvl-icon dvl-icon-minimize"
-      iconPos="left"></p-button>
-
-    <div class="separator"></div>
-    <p-button
-      (onClick)="scaleTo(screenScale.Real)"
-      label="Actual Size"
-      icon="dvl-icon dvl-icon-screen"
-      iconPos="left"></p-button>
-  </div>
-
-  <div class="session-toolbar-right-group">
-    <p-button (onClick)="sendTerminateSessionCmd()"
-      styleClass="other"
-              label="Close Session"
-              icon="dvl-icon dvl-icon-close"
-              iconPos="left"></p-button>
-  </div>
-</div>
-
-<div class="loading-info-container" *ngIf="loading">
-  <div class="loading-info">
-    <p-progressSpinner *ngIf="!hideSpinnerOnly"></p-progressSpinner>
-  </div>
-</div>
-
-<iron-remote-gui #ironGuiElement debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui>
-

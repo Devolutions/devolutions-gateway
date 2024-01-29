@@ -2,17 +2,8 @@
 @import '../../../../assets/css/style/variables';
 
 :host {
-  --status-rgb: var(--base-color-rgb);
-
-  --status-label-opacity: 0.6;
-  --status-text-opacity: 0.4;
-
   --box-background-color: white;
   --box-text-color: rgb(var(--base-color-rgb));
-
-  :host-context(.dark-theme) & {
-    --box-background-color: #252525 !important;
-  }
 }
 
 .login-background {
@@ -92,23 +83,27 @@
 .login-form-input {
   display: flex;
   align-items: center;
-  //TODO error styles here. I think?
 }
 
-.login-form__message {
-  .p-messages {
-    padding: 15px 15px 15px 10px;
-  }
+.login-form-message {
+  margin-bottom: 10px;
+}
 
-  .p-messages-icon {
-    font-size: 2em;
-  }
+:host ::ng-deep .p-message-summary {
+  display: none !important;
+}
 
-  .p-messages-summary {
-    display: none;
+:host ::ng-deep .p-message.p-message-error {
+  timescircleicon {
+    display: inline !important;
   }
+  border: none;
+  text-align: left;
 
-  margin-bottom: 5px;
+  &::before {
+    background: rgba(255, 26, 26, 0.1) none;
+    width: 0;
+  }
 }
 
 .password-container {

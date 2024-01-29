@@ -1,18 +1,5 @@
 @import "theme-mode-variables";
 
-/* Specific to p-messages in entry dashboard */
-.dashboard-content .p-inline-message {
-  margin-left: 10px;
-  margin-right: 10px;
-  margin-bottom: 10px;
-}
-
-// Specific to root only, will be removed when we redesign the dashboard boxes
-.root .dashboard-content .p-inline-message {
-  margin-top: 10px;
-  margin-bottom: 0;
-}
-
 .p-inline-message,
 .p-message {
   padding: 10px 15px;
