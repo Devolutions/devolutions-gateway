@@ -2086,6 +2086,7 @@ name = "network-scanner"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "futures",
  "network-scanner-net",
  "network-scanner-proto",
  "socket2",
