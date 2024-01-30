@@ -69,3 +69,18 @@
   height: 16px;
   width: 16px;
 }
+
+.session-toolbar-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.session-form {
+  display: flex;
+  flex-direction: column;
+  height: 100%
+}
