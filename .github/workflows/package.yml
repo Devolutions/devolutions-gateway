@@ -273,7 +273,7 @@ jobs:
           $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
           $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
-          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client"
+          $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
 
           Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
             Remove-Item $_.FullName -Force
