@@ -159,15 +159,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("JRL", serde_json::to_value(&claims)?)
         }
-        SubCommand::NetworkScan { } => {
-            let claims = NetworkScanClaim {
+        SubCommand::NetScan { } => {
+            let claims = NetScanClaim {
                 jti,
                 iat: nbf,
                 nbf,
                 exp,  
                 jet_gw_id: app.jet_gw_id,
             };
-            ("NETWORK_SCAN", serde_json::to_value(&claims)?)
+            ("NETSCAN", serde_json::to_value(&claims)?)
         }
     };
 
@@ -275,7 +275,7 @@ enum SubCommand {
         #[clap(long)]
         jti: Vec<Uuid>,
     },
-    NetworkScan {
+    NetScan {
     }
 }
 
@@ -361,7 +361,7 @@ struct JrlClaims<'a> {
 }
 
 #[derive(Clone, Serialize)]
-struct NetworkScanClaim {
+struct NetScanClaim {
      /// JWT "JWT ID" claim, the unique ID for this token
      pub jti: Uuid,
 

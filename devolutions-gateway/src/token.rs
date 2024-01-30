@@ -42,7 +42,7 @@ pub enum ContentType {
     Kdc,
     Jrl,
     WebApp,
-    NetworkScan,
+    NetScan,
 }
 
 impl FromStr for ContentType {
@@ -58,7 +58,7 @@ impl FromStr for ContentType {
             "KDC" => Ok(ContentType::Kdc),
             "JRL" => Ok(ContentType::Jrl),
             "WEBAPP" => Ok(ContentType::WebApp),
-            "NETWORK_SCAN" => Ok(ContentType::NetworkScan),
+            "NETSCAN" => Ok(ContentType::NetScan),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -77,7 +77,7 @@ impl fmt::Display for ContentType {
             ContentType::Kdc => write!(f, "KDC"),
             ContentType::Jrl => write!(f, "JRL"),
             ContentType::WebApp => write!(f, "WEBAPP"),
-            ContentType::NetworkScan => write!(f, "NETWORK_SCAN"),
+            ContentType::NetScan => write!(f, "NETSCAN"),
         }
     }
 }
@@ -109,7 +109,7 @@ pub enum AccessTokenClaims {
     Kdc(KdcTokenClaims),
     Jrl(JrlTokenClaims),
     WebApp(WebAppTokenClaims),
-    NetworkScan(NetworkScanClaims),
+    NetScan(NetScanClaims),
 }
 
 impl AccessTokenClaims {
@@ -123,7 +123,7 @@ impl AccessTokenClaims {
             AccessTokenClaims::Kdc(_) => false,
             AccessTokenClaims::Jrl(_) => false,
             AccessTokenClaims::WebApp(_) => false,
-            AccessTokenClaims::NetworkScan(_) => false,
+            AccessTokenClaims::NetScan(_) => false,
         }
     }
 }
@@ -571,7 +571,7 @@ pub struct WebAppTokenClaims {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetworkScanClaims {
+pub struct NetScanClaims {
     /// JWT "JWT ID" claim, the unique ID for this token
     pub jti: Uuid,
 
@@ -823,7 +823,7 @@ fn validate_token_impl(
             | ContentType::Jrec
             | ContentType::Kdc
             | ContentType::WebApp
-            | ContentType::NetworkScan => jwt.validate::<Value>(&strict_validator)?.state.claims,
+            | ContentType::NetScan => jwt.validate::<Value>(&strict_validator)?.state.claims,
             ContentType::Jrl => {
                 // NOTE: JRL tokens are not expected to expire.
                 // However, `iat` (Issued At) claim is required, and only more recent tokens will
@@ -906,7 +906,7 @@ fn validate_token_impl(
         ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
         ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
         ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
-        ContentType::NetworkScan => serde_json::from_value(claims).map(AccessTokenClaims::NetworkScan),
+        ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
     }
     .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
@@ -1036,7 +1036,7 @@ fn validate_token_impl(
         // Web application tokens are long-lived and reusing them is allowed
         AccessTokenClaims::WebApp(_) => {}
         // Network scan tokens are long-lived and reusing them is allowed
-        AccessTokenClaims::NetworkScan(_) => {}
+        AccessTokenClaims::NetScan(_) => {}
     }
 
     Ok(claims)
@@ -1113,7 +1113,7 @@ pub mod unsafe_debug {
             ContentType::Kdc => serde_json::from_value(claims).map(AccessTokenClaims::Kdc),
             ContentType::Jrl => serde_json::from_value(claims).map(AccessTokenClaims::Jrl),
             ContentType::WebApp => serde_json::from_value(claims).map(AccessTokenClaims::WebApp),
-            ContentType::NetworkScan => serde_json::from_value(claims).map(AccessTokenClaims::NetworkScan),
+            ContentType::NetScan => serde_json::from_value(claims).map(AccessTokenClaims::NetScan),
         }
         .map_err(|source| TokenError::InvalidClaimScheme { content_type, source })?;
 
