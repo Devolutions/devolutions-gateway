@@ -58,7 +58,7 @@ impl FromStr for ContentType {
             "KDC" => Ok(ContentType::Kdc),
             "JRL" => Ok(ContentType::Jrl),
             "WEBAPP" => Ok(ContentType::WebApp),
-            "NETWORK_SCAN" => Ok(ContentType::NetworkScan),
+            "NETSCAN" => Ok(ContentType::NetworkScan),
             unexpected => Err(BadContentType {
                 value: SmolStr::new(unexpected),
             }),
@@ -77,7 +77,7 @@ impl fmt::Display for ContentType {
             ContentType::Kdc => write!(f, "KDC"),
             ContentType::Jrl => write!(f, "JRL"),
             ContentType::WebApp => write!(f, "WEBAPP"),
-            ContentType::NetworkScan => write!(f, "NETWORK_SCAN"),
+            ContentType::NetworkScan => write!(f, "NETSCAN"),
         }
     }
 }

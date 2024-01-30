@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 exp,  
                 jet_gw_id: app.jet_gw_id,
             };
-            ("NETWORK_SCAN", serde_json::to_value(&claims)?)
+            ("NETSCAN", serde_json::to_value(&claims)?)
         }
     };
 

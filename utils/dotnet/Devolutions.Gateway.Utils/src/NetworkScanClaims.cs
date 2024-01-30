@@ -16,6 +16,6 @@ public class NetworkScanClaims : IGatewayClaims
 
     public string GetContentType()
     {
-        return "NETWORK_SCAN";
+        return "NETSCAN";
     }
 }
