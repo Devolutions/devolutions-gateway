@@ -6,488 +6,505 @@ using System.Linq;
 using WixSharp;
 using Action = WixSharp.Action;
 
-namespace DevolutionsGateway.Actions
+namespace DevolutionsGateway.Actions;
+
+internal static class GatewayActions
 {
-    internal static class GatewayActions
+    // Immediate sequence
+
+    // Set helper properties to determine what the installer is doing
+    private static readonly SetPropertyAction isFirstInstall = new(
+        new Id(nameof(isFirstInstall)), GatewayProperties.firstInstall.Id, $"{true}", Return.check, When.After, Step.FindRelatedProducts,
+        new Condition("NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT WIX_DOWNGRADE_DETECTED"));
+
+    private static readonly SetPropertyAction isUpgrading = new(
+        new Id(nameof(isUpgrading)), GatewayProperties.upgrading.Id, $"{true}", Return.check, When.After, new Step(isFirstInstall.Id),
+        new Condition("WIX_UPGRADE_DETECTED AND NOT(REMOVE= \"ALL\")"));
+
+    private static readonly SetPropertyAction isRemovingForUpgrade = new(
+        new Id(nameof(isRemovingForUpgrade)), GatewayProperties.removingForUpgrade.Id, Return.check, When.After, Step.RemoveExistingProducts,
+        new Condition("(REMOVE = \"ALL\") AND UPGRADINGPRODUCTCODE"));
+
+    private static readonly SetPropertyAction isUninstalling = new(
+        new Id(nameof(isUninstalling)), GatewayProperties.uninstalling.Id, $"{true}", Return.check, When.After, new Step(isUpgrading.Id),
+        new Condition("Installed AND REMOVE AND NOT(WIX_UPGRADE_DETECTED OR UPGRADINGPRODUCTCODE)"));
+
+    private static readonly SetPropertyAction isMaintenance = new(
+        new Id(nameof(isMaintenance)), GatewayProperties.maintenance.Id, $"{true}", Return.check, When.After, new Step(isUninstalling.Id),
+        new Condition($"Installed AND NOT {GatewayProperties.upgrading.Id} AND NOT {GatewayProperties.uninstalling.Id} AND NOT UPGRADINGPRODUCTCODE"));
+
+    private static readonly ManagedAction getNetFxInstalledVersion = new(
+        new Id($"CA.{nameof(getNetFxInstalledVersion)}"),
+        CustomActions.GetInstalledNetFx45Version,
+        Return.check, When.After, Step.LaunchConditions, Condition.Always)
     {
-        // Immediate sequence
+        Execute = Execute.immediate,
+    };
 
-        // Set helper properties to determine what the installer is doing
-        private static readonly SetPropertyAction isFirstInstall = new(
-            new Id(nameof(isFirstInstall)), GatewayProperties._FirstInstall.Id, $"{true}", Return.check, When.After, Step.FindRelatedProducts,
-            new Condition("NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT WIX_DOWNGRADE_DETECTED"));
+    private static readonly ManagedAction checkNetFxInstalledVersion = new(
+        CustomActions.CheckInstalledNetFx45Version,
+        Return.check, When.After, new Step(getNetFxInstalledVersion.Id), Condition.Always)
+    {
+        Execute = Execute.immediate,
+    };
 
-        private static readonly SetPropertyAction isUpgrading = new(
-            new Id(nameof(isUpgrading)), GatewayProperties._Upgrading.Id, $"{true}", Return.check, When.After, new Step(isFirstInstall.Id),
-            new Condition("WIX_UPGRADE_DETECTED AND NOT(REMOVE= \"ALL\")"));
+    private static readonly ManagedAction checkPowerShellVersion = new(
+        CustomActions.CheckPowerShellVersion,
+        Return.check, When.After, new Step(checkNetFxInstalledVersion.Id), Condition.Always)
+    {
+        Execute = Execute.immediate,
+    };
 
-        private static readonly SetPropertyAction isRemovingForUpgrade = new(
-            new Id(nameof(isRemovingForUpgrade)), GatewayProperties._RemovingForUpgrade.Id, Return.check, When.After, Step.RemoveExistingProducts,
-            new Condition("(REMOVE = \"ALL\") AND UPGRADINGPRODUCTCODE"));
+    /// <summary>
+    /// Get the path to Windows powershell.exe and read it into the `PowershellPath` property
+    /// </summary>
+    private static readonly ManagedAction getPowerShellPath = new(
+        CustomActions.GetPowerShellPathFromRegistry,
+        Return.check,
+        When.After, new Step(checkPowerShellVersion.Id),
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate
+    };
 
-        private static readonly SetPropertyAction isUninstalling = new(
-            new Id(nameof(isUninstalling)), GatewayProperties._Uninstalling.Id, $"{true}", Return.check, When.After, new Step(isUpgrading.Id),
-            new Condition("Installed AND REMOVE AND NOT(WIX_UPGRADE_DETECTED OR UPGRADINGPRODUCTCODE)"));
+    private static readonly ManagedAction setInstallId = new(
+        CustomActions.SetInstallId,
+        Return.ignore, When.After, Step.InstallInitialize, Condition.Always)
+    {
+        Execute = Execute.immediate
+    };
 
-        private static readonly SetPropertyAction isMaintenance = new(
-            new Id(nameof(isMaintenance)), GatewayProperties._Maintenance.Id, $"{true}", Return.check, When.After, new Step(isUninstalling.Id),
-            new Condition($"Installed AND NOT {GatewayProperties._Upgrading.Id} AND NOT {GatewayProperties._Uninstalling.Id} AND NOT UPGRADINGPRODUCTCODE"));
+    /// <summary>
+    /// Set the ARP installation location to the chosen install directory
+    /// </summary>
+    private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{GatewayProperties.InstallDir}]")
+    {
+        Condition = Condition.Always
+    };
 
-        private static readonly ManagedAction getNetFxInstalledVersion = new(
-            new Id($"CA.{nameof(getNetFxInstalledVersion)}"),
-            CustomActions.GetInstalledNetFx45Version,
-            Return.check, When.After, Step.LaunchConditions, Condition.Always)
+    /// <summary>
+    /// Read the previous installation directory from the registry into the `INSTALLDIR` property
+    /// </summary>
+    private static readonly ManagedAction getInstallDirFromRegistry = new(
+        CustomActions.GetInstallDirFromRegistry,
+        Return.ignore,
+        When.Before, Step.LaunchConditions,
+        new Condition(GatewayProperties.InstallDir, string.Empty), // If the property hasn't already been explicitly set
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
+    /// Query the start mode of any existing Devolutions Gateway service and read it into the `ServiceStart` property
+    /// </summary>
+    private static readonly ElevatedManagedAction queryGatewayStartupType = new(
+        CustomActions.QueryGatewayStartupType,
+        Return.ignore,
+        When.Before, Step.RemoveExistingProducts,
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+        Impersonate = false
+    };
+
+    // Deferred sequence
+
+    /// <summary>
+    /// Create the path %programdata%\Devolutions\Gateway if it does not exist
+    /// </summary>
+    /// <remarks>
+    /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
+    /// it's easy to create it with a custom action than workaround Windows Installer.
+    /// </remarks>
+    private static readonly ElevatedManagedAction createProgramDataDirectory = new(
+        new Id($"CA.{nameof(createProgramDataDirectory)}"),
+        CustomActions.CreateProgramDataDirectory,
+        Return.check,
+        When.After, Step.CreateFolders,
+        Condition.Always,
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
+    /// Set or reset the ACL on %programdata%\Devolutions\Gateway
+    /// </summary>
+    private static readonly WixQuietExecAction setProgramDataDirectoryPermissions = new(
+        "cmd.exe",
+        $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\" /S:{Includes.PROGRAM_DATA_SDDL} /C /t",
+        Return.ignore,
+        When.After, new Step(createProgramDataDirectory.Id),
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Set or reset the ACL on %programdata%\Devolutions\Gateway\users.txt
+    /// </summary>
+    private static readonly WixQuietExecAction setUserDatabasePermissions = new(
+        "cmd.exe",
+        $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\\users.txt\" /S:{Includes.USERS_FILE_SDDL} /C",
+        Return.ignore,
+        When.Before, Step.InstallFinalize,
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// </summary>
+    /// <remarks>
+    /// </remarks>
+    private static readonly ElevatedManagedAction cleanGatewayConfigIfNeeded = new(
+        new Id($"CA.{nameof(cleanGatewayConfigIfNeeded)}"),
+        CustomActions.CleanGatewayConfig,
+        Return.check,
+        When.Before, Step.StartServices,
+        GatewayProperties.firstInstall.Equal(true) & GatewayProperties.configureGateway.Equal(true),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new [] { GatewayProperties.installId })
+    };
+
+    /// <summary>
+    /// </summary>
+    /// <remarks>
+    /// </remarks>
+    private static readonly ElevatedManagedAction cleanGatewayConfigIfNeededRollback = new(
+        new Id($"CA.{nameof(cleanGatewayConfigIfNeededRollback)}"),
+        CustomActions.CleanGatewayConfigRollback,
+        Return.ignore,
+        When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
+        GatewayProperties.firstInstall.Equal(true) & GatewayProperties.configureGateway.Equal(true),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.rollback,
+        Impersonate = false,
+        UsesProperties = UseProperties(new[] { GatewayProperties.installId })
+    };
+
+    /// <summary>
+    /// Execute the installed DevolutionsGateway with the --config-init-only argument
+    /// </summary>
+    /// <remarks>
+    /// Ensures a default configuration file is created
+    /// </remarks>
+    private static readonly WixQuietExecAction initGatewayConfigIfNeeded = new(
+        new Id($"CA.{nameof(initGatewayConfigIfNeeded)}"),
+        $"[{GatewayProperties.InstallDir}]{Includes.EXECUTABLE_NAME}",
+        "--config-init-only",
+        Return.check,
+        When.After, new Step(cleanGatewayConfigIfNeeded.Id),
+        GatewayProperties.firstInstall.Equal(true) & GatewayProperties.configureGateway.Equal(false),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Open the installed web application in the user's system browser
+    /// </summary>
+    /// <remarks>
+    /// Shouldn't be done on silent installs, but we only support customization by UI currently
+    /// </remarks>
+    private static readonly ManagedAction openWebApp = new(
+        CustomActions.OpenWebApp,
+        Return.ignore, When.After,
+        Step.InstallFinalize,
+        GatewayProperties.firstInstall.Equal(true))
+    {
+        UsesProperties = UseProperties(new IWixProperty[]
         {
-            Execute = Execute.immediate,
-        };
+            GatewayProperties.configureWebApp,
+            GatewayProperties.httpListenerScheme,
+            GatewayProperties.httpListenerPort,
+            GatewayProperties.accessUriHost,
+            GatewayProperties.configureNgrok,
+            GatewayProperties.ngrokHttpDomain,
+        })
+    };
 
-        private static readonly ManagedAction checkNetFxInstalledVersion = new(
-            CustomActions.CheckInstalledNetFx45Version,
-            Return.check, When.After, new Step(getNetFxInstalledVersion.Id), Condition.Always)
+    /// <summary>
+    /// Set the start mode of the installed Devolutions Gateway service
+    /// </summary>
+    /// <remarks>
+    /// It's not possible to set this conditionally using WiX, so a custom action is used
+    /// </remarks>
+    private static readonly ElevatedManagedAction setGatewayStartupType = new(
+        CustomActions.SetGatewayStartupType,
+        Return.ignore,
+        When.Before, Step.StartServices,
+        Condition.Always,
+        Sequence.InstallExecuteSequence)
+    {
+        UsesProperties = UseProperties(new[] { GatewayProperties.serviceStart })
+    };
+
+    /// <summary>
+    /// Start the installed Devolutions Gateway service
+    /// </summary>
+    /// <remarks>
+    /// The service will be started if it's StartMode is "Automatic". May be overridden with the
+    /// public property `NoStartService`.
+    /// </remarks>
+    private static readonly ElevatedManagedAction startGatewayIfNeeded = new(
+        CustomActions.StartGatewayIfNeeded,
+        Return.ignore,
+        When.After, Step.StartServices,
+        Condition.NOT_BeingRemoved & GatewayProperties.noStartService.Equal(string.Empty),
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
+    /// Attempt to restart the Devolutions Gateway service (if it's running) on maintenance installs
+    /// </summary>
+    /// <remarks>
+    /// This was necessary in the old Wayk installer to reread configurations that may have been updated
+    /// by the installer. It's usefulness os questionable with Devolutions Gateway.
+    /// </remarks>
+    private static readonly ElevatedManagedAction restartGateway = new(
+        CustomActions.RestartGateway,
+        Return.ignore,
+        When.After, Step.StartServices,
+        GatewayProperties.maintenance.Equal(true),
+        Sequence.InstallExecuteSequence);
+
+    /// <summary>
+    /// Attempt to rollback any configuration files created
+    /// </summary>
+    private static readonly ElevatedManagedAction rollbackConfig = new(
+        CustomActions.RollbackConfig,
+        Return.ignore,
+        When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
+        GatewayProperties.firstInstall.Equal(true),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.rollback,
+    };
+
+    /// <summary>
+    /// </summary>
+    private static readonly ElevatedManagedAction configureInit = BuildConfigureAction(
+        $"CA.{nameof(configureInit)}",
+        CustomActions.ConfigureInit,
+        When.After, new Step(initGatewayConfigIfNeeded.Id),
+        Enumerable.Empty<IWixProperty>(),
+        Enumerable.Empty<Condition>());
+
+    /// <summary>
+    /// Configure the hostname using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureAccessUri = BuildConfigureAction(
+        $"CA.{nameof(configureAccessUri)}",
+        CustomActions.ConfigureAccessUri,
+        When.After, new Step(configureInit.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.immediate,
-        };
+            GatewayProperties.accessUriScheme,
+            GatewayProperties.accessUriHost,
+            GatewayProperties.accessUriPort,
+            GatewayProperties.configureNgrok,
+            GatewayProperties.ngrokHttpDomain,
+        },
+        Enumerable.Empty<Condition>());
 
-        private static readonly ManagedAction setInstallId = new(
-            CustomActions.SetInstallId,
-            Return.ignore, When.After, Step.InstallInitialize, Condition.Always)
+    /// <summary>
+    /// Configure the listeners using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureListeners = BuildConfigureAction(
+        $"CA.{nameof(configureListeners)}",
+        CustomActions.ConfigureListeners,
+        When.After, new Step(configureAccessUri.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.immediate
-        };
+            GatewayProperties.accessUriScheme,
+            GatewayProperties.accessUriPort,
+            GatewayProperties.httpListenerScheme,
+            GatewayProperties.httpListenerPort,
+            GatewayProperties.tcpListenerPort,
+        },
+        new [] { GatewayProperties.configureNgrok.Equal(false) } );
 
-        /// <summary>
-        /// Set the ARP installation location to the chosen install directory
-        /// </summary>
-        private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{GatewayProperties.InstallDir}]")
+    /// <summary>
+    /// Configure the ngrok listeners using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureNgrokListeners = BuildConfigureAction(
+        $"CA.{nameof(configureNgrokListeners)}",
+        CustomActions.ConfigureNgrokListeners,
+        When.After, new Step(configureListeners.Id),
+        new IWixProperty[]
         {
-            Condition = Condition.Always
-        };
+            GatewayProperties.ngrokAuthToken,
+            GatewayProperties.ngrokHttpDomain,
+            GatewayProperties.ngrokEnableTcp,
+            GatewayProperties.ngrokRemoteAddress,
+        },
+        new[] { GatewayProperties.configureNgrok.Equal(true) });
 
-        /// <summary>
-        /// Read the previous installation directory from the registry into the `INSTALLDIR` property
-        /// </summary>
-        private static readonly ManagedAction getInstallDirFromRegistry = new(
-            CustomActions.GetInstallDirFromRegistry,
-            Return.ignore,
-            When.Before, Step.LaunchConditions,
-            new Condition(GatewayProperties.InstallDir, string.Empty), // If the property hasn't already been explicitly set
-            Sequence.InstallExecuteSequence);
-
-        /// <summary>
-        /// Get the path to Windows powershell.exe and read it into the `PowershellPath` property
-        /// </summary>
-        private static readonly ManagedAction getPowerShellPath = new(
-            CustomActions.GetPowerShellPathFromRegistry,
-            Return.check,
-            When.Before, Step.LaunchConditions,
-            Condition.Always,
-            Sequence.InstallExecuteSequence)
+    /// <summary>
+    /// Configure the certificate using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureCertificate = BuildConfigureAction(
+        $"CA.{nameof(configureCertificate)}",
+        CustomActions.ConfigureCertificate,
+        When.After, new Step(configureNgrokListeners.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.immediate
-        };
-
-        /// <summary>
-        /// Query the start mode of any existing Devolutions Gateway service and read it into the `ServiceStart` property
-        /// </summary>
-        private static readonly ElevatedManagedAction queryGatewayStartupType = new(
-            CustomActions.QueryGatewayStartupType,
-            Return.ignore,
-            When.Before, Step.RemoveExistingProducts,
-            Condition.Always,
-            Sequence.InstallExecuteSequence)
+            GatewayProperties.certificateMode,
+            GatewayProperties.certificateFile,
+            GatewayProperties.certificatePassword,
+            GatewayProperties.certificatePrivateKeyFile,
+            GatewayProperties.certificateLocation,
+            GatewayProperties.certificateStore,
+            GatewayProperties.certificateName,
+            GatewayProperties.configureWebApp,
+            GatewayProperties.generateCertificate,
+        },
+        new[]
         {
-            Execute = Execute.immediate,
-            Impersonate = false
-        };
+            GatewayProperties.httpListenerScheme.Equal(Constants.HttpsProtocol),
+            GatewayProperties.configureNgrok.Equal(false)
+        },
+        hide: true // Don't print the custom action data to logs, it might contain a password
+    );
 
-        // Deferred sequence
-
-        /// <summary>
-        /// Create the path %programdata%\Devolutions\Gateway if it does not exist
-        /// </summary>
-        /// <remarks>
-        /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
-        /// it's easy to create it with a custom action than workaround Windows Installer.
-        /// </remarks>
-        private static readonly ElevatedManagedAction createProgramDataDirectory = new(
-            new Id($"CA.{nameof(createProgramDataDirectory)}"),
-            CustomActions.CreateProgramDataDirectory,
-            Return.check,
-            When.After, Step.CreateFolders,
-            Condition.Always,
-            Sequence.InstallExecuteSequence);
-
-        /// <summary>
-        /// Set or reset the ACL on %programdata%\Devolutions\Gateway
-        /// </summary>
-        private static readonly WixQuietExecAction setProgramDataDirectoryPermissions = new(
-            "cmd.exe",
-            $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\" /S:{Includes.PROGRAM_DATA_SDDL} /C /t",
-            Return.ignore,
-            When.After, new Step(createProgramDataDirectory.Id),
-            Condition.Always,
-            Sequence.InstallExecuteSequence)
+    /// <summary>
+    /// Configure the public key using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configurePublicKey = BuildConfigureAction(
+        $"CA.{nameof(configurePublicKey)}",
+        CustomActions.ConfigurePublicKey,
+        When.After, new Step(configureCertificate.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.deferred,
-            Impersonate = false,
-        };
+            GatewayProperties.publicKeyFile,
+            GatewayProperties.privateKeyFile,
+            GatewayProperties.configureWebApp,
+            GatewayProperties.generateKeyPair,
+        },
+        Enumerable.Empty<Condition>());
 
-        /// <summary>
-        /// Set or reset the ACL on %programdata%\Devolutions\Gateway\users.txt
-        /// </summary>
-        private static readonly WixQuietExecAction setUserDatabasePermissions = new(
-            "cmd.exe",
-            $"/c ECHO Y| \"%windir%\\System32\\cacls.exe\" \"%ProgramData%\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}\\users.txt\" /S:{Includes.USERS_FILE_SDDL} /C",
-            Return.ignore,
-            When.Before, Step.InstallFinalize,
-            Condition.Always,
-            Sequence.InstallExecuteSequence)
+
+    /// <summary>
+    /// Configure the standalone web application using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureWebApp = BuildConfigureAction(
+        $"CA.{nameof(configureWebApp)}",
+        CustomActions.ConfigureWebApp,
+        When.After, new Step(configurePublicKey.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.deferred,
-            Impersonate = false,
-        };
+            GatewayProperties.authenticationMode,
+        },
+        new[] { GatewayProperties.configureWebApp.Equal(true) }
+    );
 
-        /// <summary>
-        /// </summary>
-        /// <remarks>
-        /// </remarks>
-        private static readonly ElevatedManagedAction cleanGatewayConfigIfNeeded = new(
-            new Id($"CA.{nameof(cleanGatewayConfigIfNeeded)}"),
-            CustomActions.CleanGatewayConfig,
-            Return.check,
-            When.Before, Step.StartServices,
-            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{true}\")",
-            Sequence.InstallExecuteSequence)
+    /// <summary>
+    /// Configure the standalone web application default user using PowerShell
+    /// </summary>
+    private static readonly ElevatedManagedAction configureWebAppUser = BuildConfigureAction(
+        $"CA.{nameof(configureWebAppUser)}",
+        CustomActions.ConfigureWebAppUser,
+        When.After, new Step(configurePublicKey.Id),
+        new IWixProperty[]
         {
-            Execute = Execute.deferred,
-            Impersonate = false,
-            UsesProperties = UseProperties(new [] { GatewayProperties._InstallId })
-        };
-
-        /// <summary>
-        /// </summary>
-        /// <remarks>
-        /// </remarks>
-        private static readonly ElevatedManagedAction cleanGatewayConfigIfNeededRollback = new(
-            new Id($"CA.{nameof(cleanGatewayConfigIfNeededRollback)}"),
-            CustomActions.CleanGatewayConfigRollback,
-            Return.ignore,
-            When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
-            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{true}\")",
-            Sequence.InstallExecuteSequence)
+            GatewayProperties.webUsername,
+            GatewayProperties.webPassword,
+        },
+        new[]
         {
-            Execute = Execute.rollback,
-            Impersonate = false,
-            UsesProperties = UseProperties(new[] { GatewayProperties._InstallId })
-        };
+            GatewayProperties.configureWebApp.Equal(true),
+            GatewayProperties.authenticationMode.Equal(Constants.AuthenticationMode.Custom)
+        },
+        hide: true // Don't print the custom action data to logs, it contains a password
+    );
 
-        /// <summary>
-        /// Execute the installed DevolutionsGateway with the --config-init-only argument
-        /// </summary>
-        /// <remarks>
-        /// Ensures a default configuration file is created
-        /// </remarks>
-        private static readonly WixQuietExecAction initGatewayConfigIfNeeded = new(
-            new Id($"CA.{nameof(initGatewayConfigIfNeeded)}"),
-            $"[{GatewayProperties.InstallDir}]{Includes.EXECUTABLE_NAME}",
-            "--config-init-only",
-            Return.check,
-            When.After, new Step(cleanGatewayConfigIfNeeded.Id),
-            $"({GatewayProperties._FirstInstall.Id} = \"{true}\") AND ({GatewayProperties._ConfigureGateway.Id} = \"{false}\")",
-            Sequence.InstallExecuteSequence)
+    private static string UseProperties(IEnumerable<IWixProperty> properties)
+    {
+        if (!properties?.Any() ?? false)
         {
-            Execute = Execute.deferred,
-            Impersonate = false,
-        };
-
-        /// <summary>
-        /// Open the installed web application in the user's system browser
-        /// </summary>
-        /// <remarks>
-        /// Shouldn't be done on silent installs, but we only support customization by UI currently
-        /// </remarks>
-        private static readonly ManagedAction openWebApp = new(
-            CustomActions.OpenWebApp,
-            Return.ignore, When.After,
-            Step.InstallFinalize,
-            new Condition(GatewayProperties._FirstInstall.Id, true.ToString()))
-        {
-            UsesProperties = UseProperties(new IWixProperty[]
-            {
-                GatewayProperties._ConfigureWebApp,
-                GatewayProperties._HttpListenerScheme,
-                GatewayProperties._HttpListenerPort,
-                GatewayProperties._AccessUriHost,
-                GatewayProperties._ConfigureNgrok,
-                GatewayProperties._NgrokHttpDomain,
-            })
-        };
-
-        /// <summary>
-        /// Set the start mode of the installed Devolutions Gateway service
-        /// </summary>
-        /// <remarks>
-        /// It's not possible to set this conditionally using WiX, so a custom action is used
-        /// </remarks>
-        private static readonly ElevatedManagedAction setGatewayStartupType = new(
-            CustomActions.SetGatewayStartupType,
-            Return.ignore,
-            When.Before, Step.StartServices,
-            Condition.Always,
-            Sequence.InstallExecuteSequence)
-        {
-            UsesProperties = UseProperties(new[] { GatewayProperties._ServiceStart })
-        };
-
-        /// <summary>
-        /// Start the installed Devolutions Gateway service
-        /// </summary>
-        /// <remarks>
-        /// The service will be started if it's StartMode is "Automatic". May be overridden with the
-        /// user property `NoStartService`.
-        /// </remarks>
-        private static readonly ElevatedManagedAction startGatewayIfNeeded = new(
-            CustomActions.StartGatewayIfNeeded,
-            Return.ignore,
-            When.After, Step.StartServices,
-            $"{Condition.NOT_BeingRemoved} AND ({GatewayProperties._NoStartService.Id} = \"\")",
-            Sequence.InstallExecuteSequence);
-
-        /// <summary>
-        /// Attempt to restart the Devolutions Gateway service (if it's running) on maintenance installs
-        /// </summary>
-        /// <remarks>
-        /// This was necessary in the old Wayk installer to reread configurations that may have been updated
-        /// by the installer. It's usefulness os questionable with Devolutions Gateway.
-        /// </remarks>
-        private static readonly ElevatedManagedAction restartGateway = new(
-            CustomActions.RestartGateway,
-            Return.ignore,
-            When.After, Step.StartServices,
-            new Condition(GatewayProperties._Maintenance.Id, true.ToString()),
-            Sequence.InstallExecuteSequence);
-
-        /// <summary>
-        /// Attempt to rollback any configuration files created
-        /// </summary>
-        private static readonly ElevatedManagedAction rollbackConfig = new(
-            CustomActions.RollbackConfig,
-            Return.ignore,
-            When.Before, new Step(cleanGatewayConfigIfNeeded.Id),
-            new Condition(GatewayProperties._FirstInstall.Id, true.ToString()),
-            Sequence.InstallExecuteSequence)
-        {
-            Execute = Execute.rollback,
-        };
-
-        /// <summary>
-        /// </summary>
-        private static readonly ElevatedManagedAction configureInit = BuildConfigureAction(
-            $"CA.{nameof(configureInit)}",
-            CustomActions.ConfigureInit,
-            When.After, new Step(initGatewayConfigIfNeeded.Id),
-            Enumerable.Empty<IWixProperty>());
-
-        /// <summary>
-        /// Configure the hostname using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureAccessUri = BuildConfigureAction(
-            $"CA.{nameof(configureAccessUri)}",
-            CustomActions.ConfigureAccessUri,
-            When.After, new Step(configureInit.Id),
-            new IWixProperty[]
-            {
-                    GatewayProperties._AccessUriScheme,
-                    GatewayProperties._AccessUriHost,
-                    GatewayProperties._AccessUriPort,
-                    GatewayProperties._ConfigureNgrok,
-                    GatewayProperties._NgrokHttpDomain,
-            });
-
-        /// <summary>
-        /// Configure the listeners using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureListeners = BuildConfigureAction(
-            $"CA.{nameof(configureListeners)}",
-            CustomActions.ConfigureListeners,
-            When.After, new Step(configureAccessUri.Id),
-            new IWixProperty[]
-            {
-                    GatewayProperties._AccessUriScheme,
-                    GatewayProperties._AccessUriPort,
-                    GatewayProperties._HttpListenerScheme,
-                    GatewayProperties._HttpListenerPort,
-                    GatewayProperties._TcpListenerPort,
-            },
-            additionalCondition: $" AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{false}")})");
-
-        /// <summary>
-        /// Configure the ngrok listeners using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureNgrokListeners = BuildConfigureAction(
-            $"CA.{nameof(configureNgrokListeners)}",
-            CustomActions.ConfigureNgrokListeners,
-            When.After, new Step(configureListeners.Id),
-            new IWixProperty[]
-            {
-                GatewayProperties._NgrokAuthToken,
-                GatewayProperties._NgrokHttpDomain,
-                GatewayProperties._NgrokEnableTcp,
-                GatewayProperties._NgrokRemoteAddress,
-            },
-            additionalCondition: $" AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{true}")})");
-
-        /// <summary>
-        /// Configure the certificate using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureCertificate = BuildConfigureAction(
-            $"CA.{nameof(configureCertificate)}",
-            CustomActions.ConfigureCertificate,
-            When.After, new Step(configureNgrokListeners.Id),
-            new IWixProperty[]
-            {
-                    GatewayProperties._CertificateMode,
-                    GatewayProperties._CertificateFile,
-                    GatewayProperties._CertificatePassword,
-                    GatewayProperties._CertificatePrivateKeyFile,
-                    GatewayProperties._CertificateLocation,
-                    GatewayProperties._CertificateStore,
-                    GatewayProperties._CertificateName,
-                    GatewayProperties._ConfigureWebApp,
-                    GatewayProperties._GenerateCertificate,
-            },
-            attributesDefinition: "HideTarget=yes", // Don't print the custom action data to logs, it might contain a password
-            additionalCondition: $" AND ({new Condition(GatewayProperties._HttpListenerScheme.Id, Constants.HttpsProtocol)}) AND ({new Condition(GatewayProperties._ConfigureNgrok.Id, $"{false}")})"); // Only if the HTTP listener uses https
-
-        /// <summary>
-        /// Configure the public key using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configurePublicKey = BuildConfigureAction(
-            $"CA.{nameof(configurePublicKey)}",
-            CustomActions.ConfigurePublicKey,
-            When.After, new Step(configureCertificate.Id),
-            new IWixProperty[]
-            {
-                GatewayProperties._PublicKeyFile,
-                GatewayProperties._PrivateKeyFile,
-                GatewayProperties._ConfigureWebApp,
-                GatewayProperties._GenerateKeyPair,
-            });
-            
-
-        /// <summary>
-        /// Configure the standalone web application using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureWebApp = BuildConfigureAction(
-            $"CA.{nameof(configureWebApp)}",
-            CustomActions.ConfigureWebApp,
-            When.After, new Step(configurePublicKey.Id),
-            new IWixProperty[]
-            {
-                GatewayProperties._AuthenticationMode,
-            }, 
-            additionalCondition: $" AND ({GatewayProperties._ConfigureWebApp.Id} = \"{true}\")");
-
-        /// <summary>
-        /// Configure the standalone web application default user using PowerShell
-        /// </summary>
-        private static readonly ElevatedManagedAction configureWebAppUser = BuildConfigureAction(
-            $"CA.{nameof(configureWebAppUser)}",
-            CustomActions.ConfigureWebAppUser,
-            When.After, new Step(configurePublicKey.Id),
-            new IWixProperty[]
-            {
-                GatewayProperties._WebUsername,
-                GatewayProperties._WebPassword,
-            },
-            attributesDefinition: "HideTarget=yes", // Don't print the custom action data to logs, it contains a password
-            additionalCondition: $" AND ({GatewayProperties._ConfigureWebApp.Id} = \"{true}\") AND ({GatewayProperties._AuthenticationMode.Id} = \"{Constants.AuthenticationMode.Custom}\")");
-
-        private static string UseProperties(IEnumerable<IWixProperty> properties)
-        {
-            if (!properties?.Any() ?? false)
-            {
-                return null;
-            }
-
-            if (properties.Any(p => !p.Secure)) // Sanity check at project build time
-            {
-                throw new Exception($"property {properties.First(p => !p.Secure).Id} must be secure");
-            }
-
-            return string.Join(";", properties.Distinct().Select(x => $"{x.Id}=[{x.Id}]"));
+            return null;
         }
 
-        /// <summary>
-        /// Helper method to build "Configure*" actions
-        /// </summary>
-        private static ElevatedManagedAction BuildConfigureAction(
-            string id,
-            CustomActionMethod method,
-            When when,
-            Step step,
-            IEnumerable<IWixProperty> usesProperties,
-            string attributesDefinition = null,
-            Condition additionalCondition = null)
+        if (properties.Any(p => p.Public && !p.Secure)) // Sanity check at project build time
         {
-            List<IWixProperty> properties = usesProperties.Distinct().ToList();
-            properties.Add(GatewayProperties._PowerShellPath);
-            properties.Add(GatewayProperties._DebugPowerShell);
-
-            ElevatedManagedAction action = new ElevatedManagedAction(
-                new Id(id), method, Return.check, when, step,
-                $"(NOT Installed OR REINSTALL) AND ({GatewayProperties._ConfigureGateway.Id} = \"{true}\")",
-                Sequence.InstallExecuteSequence)
-            {
-                UsesProperties = UseProperties(properties),
-            };
-
-            if (!string.IsNullOrEmpty(attributesDefinition))
-            {
-                action.AttributesDefinition = attributesDefinition;
-            }
-
-            if (additionalCondition is not null)
-            {
-                action.Condition += additionalCondition;
-            }
-
-            return action;
+            throw new Exception($"property {properties.First(p => !p.Secure).Id} must be secure");
         }
 
-        internal static readonly Action[] Actions =
-        {
-            isFirstInstall,
-            isUpgrading,
-            isRemovingForUpgrade,
-            isUninstalling,
-            isMaintenance,
-            setInstallId,
-            getNetFxInstalledVersion,
-            checkNetFxInstalledVersion,
-            getPowerShellPath,
-            getInstallDirFromRegistry,
-            setArpInstallLocation,
-            createProgramDataDirectory,
-            setProgramDataDirectoryPermissions,
-            setUserDatabasePermissions,
-            cleanGatewayConfigIfNeeded,
-            cleanGatewayConfigIfNeededRollback,
-            initGatewayConfigIfNeeded,
-            openWebApp,
-            queryGatewayStartupType,
-            setGatewayStartupType,
-            startGatewayIfNeeded,
-            restartGateway,
-            rollbackConfig,
-            configureInit,
-            configureAccessUri,
-            configureListeners,
-            configureCertificate,
-            configureNgrokListeners,
-            configurePublicKey,
-            configureWebApp,
-            configureWebAppUser,
-        };
+        return string.Join(";", properties.Distinct().Select(x => $"{x.Id}=[{x.Id}]"));
     }
+
+    /// <summary>
+    /// Helper method to build "Configure*" actions
+    /// </summary>
+    private static ElevatedManagedAction BuildConfigureAction(
+        string id,
+        CustomActionMethod method,
+        When when,
+        Step step,
+        IEnumerable<IWixProperty> usesProperties,
+        IEnumerable<Condition> additionalConditions,
+        bool hide = false)
+    {
+        List<IWixProperty> properties = usesProperties.Distinct().ToList();
+        properties.Add(GatewayProperties.powerShellPath);
+        properties.Add(GatewayProperties.debugPowerShell);
+
+        List<Condition> conditions = additionalConditions.Distinct().ToList();
+        conditions.Add(new Condition("NOT Installed OR REINSTALL"));
+        conditions.Add(GatewayProperties.configureGateway.Equal(true));
+
+        Condition condition = new Condition(string.Join(" AND ", conditions.Select(x => $"({x})")));
+
+        ElevatedManagedAction action = new ElevatedManagedAction(
+            new Id(id), method, Return.check, when, step, condition, Sequence.InstallExecuteSequence)
+        {
+            UsesProperties = UseProperties(properties),
+        };
+
+        action.AttributesDefinition = $"HideTarget={(hide ? "yes" : "no")}";
+        
+        return action;
+    }
+
+    internal static readonly Action[] Actions =
+    {
+        isFirstInstall,
+        isUpgrading,
+        isRemovingForUpgrade,
+        isUninstalling,
+        isMaintenance,
+        setInstallId,
+        getNetFxInstalledVersion,
+        checkNetFxInstalledVersion,
+        checkPowerShellVersion,
+        getPowerShellPath,
+        getInstallDirFromRegistry,
+        setArpInstallLocation,
+        createProgramDataDirectory,
+        setProgramDataDirectoryPermissions,
+        setUserDatabasePermissions,
+        cleanGatewayConfigIfNeeded,
+        cleanGatewayConfigIfNeededRollback,
+        initGatewayConfigIfNeeded,
+        openWebApp,
+        queryGatewayStartupType,
+        setGatewayStartupType,
+        startGatewayIfNeeded,
+        restartGateway,
+        rollbackConfig,
+        configureInit,
+        configureAccessUri,
+        configureListeners,
+        configureCertificate,
+        configureNgrokListeners,
+        configurePublicKey,
+        configureWebApp,
+        configureWebAppUser,
+    };
 }

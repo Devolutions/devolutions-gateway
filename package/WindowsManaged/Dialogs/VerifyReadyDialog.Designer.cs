@@ -42,6 +42,7 @@ namespace WixSharpSetup.Dialogs
             this.label1 = new System.Windows.Forms.Label();
             this.banner = new System.Windows.Forms.PictureBox();
             this.bottomPanel = new System.Windows.Forms.Panel();
+            this.generateCli = new System.Windows.Forms.LinkLabel();
             this.tableLayoutPanel1 = new System.Windows.Forms.TableLayoutPanel();
             this.back = new System.Windows.Forms.Button();
             this.next = new DevolutionsGateway.Controls.ElevatedButton();
@@ -139,12 +140,27 @@ namespace WixSharpSetup.Dialogs
             this.bottomPanel.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.bottomPanel.BackColor = System.Drawing.SystemColors.Control;
+            this.bottomPanel.Controls.Add(this.generateCli);
             this.bottomPanel.Controls.Add(this.tableLayoutPanel1);
             this.bottomPanel.Controls.Add(this.border1);
             this.bottomPanel.Location = new System.Drawing.Point(0, 312);
             this.bottomPanel.Name = "bottomPanel";
             this.bottomPanel.Size = new System.Drawing.Size(494, 49);
             this.bottomPanel.TabIndex = 9;
+            // 
+            // generateCli
+            // 
+            this.generateCli.Anchor = System.Windows.Forms.AnchorStyles.Left;
+            this.generateCli.AutoSize = true;
+            this.generateCli.BackColor = System.Drawing.Color.Transparent;
+            this.generateCli.Location = new System.Drawing.Point(16, 17);
+            this.generateCli.Name = "generateCli";
+            this.generateCli.Size = new System.Drawing.Size(70, 13);
+            this.generateCli.TabIndex = 3;
+            this.generateCli.TabStop = true;
+            this.generateCli.Text = "Generate CLI";
+            this.generateCli.Visible = false;
+            this.generateCli.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.generateCli_LinkClicked);
             // 
             // tableLayoutPanel1
             // 
@@ -163,7 +179,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel1.RowCount = 1;
             this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel1.Size = new System.Drawing.Size(493, 43);
-            this.tableLayoutPanel1.TabIndex = 8;
+            this.tableLayoutPanel1.TabIndex = 0;
             // 
             // back
             // 
@@ -173,7 +189,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -187,7 +203,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(127, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[VerifyReadyDlgInstall]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);
@@ -231,6 +247,7 @@ namespace WixSharpSetup.Dialogs
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
             this.bottomPanel.ResumeLayout(false);
+            this.bottomPanel.PerformLayout();
             this.tableLayoutPanel1.ResumeLayout(false);
             this.tableLayoutPanel1.PerformLayout();
             this.ResumeLayout(false);
@@ -253,5 +270,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Button cancel;
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
+        private System.Windows.Forms.LinkLabel generateCli;
     }
 }

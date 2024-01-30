@@ -82,7 +82,7 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.Location = new System.Drawing.Point(22, 75);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(449, 139);
-            this.middlePanel.TabIndex = 16;
+            this.middlePanel.TabIndex = 0;
             // 
             // tableLayoutPanel2
             // 
@@ -99,7 +99,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 139);
-            this.tableLayoutPanel2.TabIndex = 14;
+            this.tableLayoutPanel2.TabIndex = 0;
             // 
             // change
             // 
@@ -227,7 +227,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -240,7 +240,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(77, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[WixUINext]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);

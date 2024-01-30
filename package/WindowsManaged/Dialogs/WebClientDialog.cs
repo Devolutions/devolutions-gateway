@@ -28,25 +28,25 @@ public partial class WebClientDialog : GatewayDialog
 
         if (string.IsNullOrWhiteSpace(this.txtUsername.Text))
         {
-            ShowValidationError("Error29996");
+            ShowValidationError("You must enter a username");
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(this.txtPassword.Text))
         {
-            ShowValidationError("Error29996");
+            ShowValidationError("You must enter a password");
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(this.txtPassword2.Text))
         {
-            ShowValidationError("Error29996");
+            ShowValidationError("You must confirm the password");
             return false;
         }
 
         if (!string.Equals(this.txtPassword.Text, this.txtPassword2.Text))
         {
-            ShowValidationError("Error29996");
+            ShowValidationError("Passwords do not match");
             return false;
         }
 
@@ -59,6 +59,7 @@ public partial class WebClientDialog : GatewayDialog
         this.cmbAuthentication.SelectedIndex = (int) properties.AuthenticationMode;
         this.txtUsername.Text = properties.WebUsername;
         this.txtPassword.Text = properties.WebPassword;
+        this.txtPassword2.Text = properties.WebPassword;
 
         this.SetControlStates();
     }
@@ -93,9 +94,7 @@ public partial class WebClientDialog : GatewayDialog
 
     private void SetControlStates()
     {
-        this.lblUsername.Enabled = this.txtUsername.Enabled = 
-            this.lblPassword.Enabled = this.txtPassword.Enabled =
-                this.lblPassword2.Enabled = this.txtPassword2.Enabled = this.CustomAuth;
+        this.gbUser.Visible = this.CustomAuth;
     }
 
     private void cmbAuthentication_SelectedIndexChanged(object sender, EventArgs e)

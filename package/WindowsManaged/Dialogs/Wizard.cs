@@ -72,11 +72,6 @@ internal static class Wizard
             }
         }
 
-        if (dialog == typeof(SummaryDialog))
-        {
-            return true;
-        }
-
         if (dialog == typeof(CertificateDialog))
         {
             if (properties.HttpListenerScheme == Constants.HttpProtocol)

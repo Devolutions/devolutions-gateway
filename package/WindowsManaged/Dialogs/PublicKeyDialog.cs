@@ -47,6 +47,15 @@ public partial class PublicKeyDialog : GatewayDialog
                 this.txtPrivateKeyFile.Visible =
                     this.butBrowsePrivateKeyFile.Visible = properties.ConfigureWebApp;
 
+        if (properties.ConfigureWebApp)
+        {
+            this.lblKeysDescription.Text = "Provide an encryption key pair for token generation and verification.";
+        }
+        else
+        {
+            this.lblKeysDescription.Text = "Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server).";
+        }
+
         this.SetControlStates();
     }
 
@@ -58,13 +67,13 @@ public partial class PublicKeyDialog : GatewayDialog
             PrivateKeyFile = this.txtPrivateKeyFile.Text.Trim(),
         };
 
-        if (properties.GenerateKeyPair)
+        if (properties.ConfigureWebApp && properties.GenerateKeyPair)
         {
             properties.PublicKeyFile = string.Empty;
             properties.PrivateKeyFile = string.Empty;
         }
 
-        if (properties.ConfigureWebApp)
+        if (!properties.ConfigureWebApp)
         {
             properties.PrivateKeyFile = string.Empty;
         }

@@ -1,26 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace DevolutionsGateway.Properties
+﻿namespace DevolutionsGateway.Properties
 {
-    internal class Constants
+    public class Constants
     {
-        internal enum CertificateMode
+        public enum CertificateMode
         {
             External,
             System
         }
 
-        internal enum CertificateFindType
+        public enum CertificateFindType
         {
             Thumbprint,
             SubjectName
         }
 
-        internal enum AuthenticationMode
+        public enum AuthenticationMode
         {
             None,
             Custom,
