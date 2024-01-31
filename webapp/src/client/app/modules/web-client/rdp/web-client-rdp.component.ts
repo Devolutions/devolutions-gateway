@@ -2,24 +2,27 @@ import {
   AfterViewInit,
   Component,
   ElementRef,
-  EventEmitter,
+  EventEmitter, HostListener,
   Input, OnDestroy,
   OnInit,
   Output,
-  ViewChild
+  ViewChild,
+  Renderer2
 } from '@angular/core';
 import {from, noop, Observable, Subject} from "rxjs";
 import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
-import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
-import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
+import {MessageService} from "primeng/api";
+
 import { WebClientBaseComponent } from "@shared/bases/base-web-client.component";
 import {DefaultRDPPort, IronRDPConnectionParameters} from "@shared/services/web-client.service";
 import { ApiService } from "@shared/services/api.service";
 import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
 import {ComponentStatus} from "@shared/models/component-status.model";
-import {MessageService} from "primeng/api";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {UtilsService} from "@shared/services/utils.service";
+
+import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
+import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
 
 export enum SSPIType {
   Kerberos = 0,
@@ -56,36 +59,43 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   @Input() tabIndex: number | undefined;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
-  @ViewChild('session') sessionElement: ElementRef;
+
+  @ViewChild('sessionContainer') sessionContainerElement: ElementRef;
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
 
   JET_RDP_URL: string = '/jet/rdp';
-  loading: boolean = true;
   screenScale = ScreenScale;
-  fullScreen: boolean;
+  currentStatus: ComponentStatus;
   inputFormData: any;
-  status: ComponentStatus;
   rdpError: string;
+  isFullScreenMode: boolean = false;
+  showToolbarDiv: boolean = true;
+  loading: boolean = true;
 
   protected removeElement: Subject<any> = new Subject();
   private remoteClient: UserInteraction;
 
-  constructor(private apiService: ApiService,
+  constructor(private renderer: Renderer2,
+              private apiService: ApiService,
               protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService) {
     super(gatewayAlertMessageService);
   }
 
+  @HostListener('document:mousemove', ['$event'])
+  onMouseMove(event: MouseEvent): void {
+    this.handleSessionToolbarDisplay(event);
+  }
+
+  @HostListener('document:fullscreenchange')
+  onFullScreenChange(): void {
+    this.handleOnFullScreenEvent();
+  }
+
   ngOnInit(): void {
     this.removeWebClientGuiElement();
-
-    this.status = {
-      isInitialized: false,
-      isDisabled: false,
-      isDisabledByUser: false,
-      tabIndex: this.tabIndex
-    }
+    this.initializeStatus();
   }
 
   ngAfterViewInit(): void {
@@ -109,13 +119,87 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   sendTerminateSessionCmd(): void {
     // shutdowns the session, not the server
     this.remoteClient.shutdown();
-    this.status.isDisabledByUser = true;
+    this.currentStatus.isDisabledByUser = true;
   }
 
   scaleTo(scale: ScreenScale): void {
-    //this.sessionElement.nativeElement.requestFullscreen();
-    this.fullScreen = scale === ScreenScale.Full;
-    this.remoteClient.setScale(scale);
+    if (scale === ScreenScale.Full) {
+        this.toggleFullscreen();
+    } else {
+      this.remoteClient.setScale(scale);
+    }
+  }
+
+  removeWebClientGuiElement(): void {
+    this.removeElement
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((): void => {
+        this.ironGuiElement.nativeElement.remove();
+      });
+  }
+
+  private initializeStatus(): void {
+    this.currentStatus = {
+      isInitialized: false,
+      isDisabled: false,
+      isDisabledByUser: false,
+      tabIndex: this.tabIndex
+    }
+  }
+
+  private handleOnFullScreenEvent(): void {
+    if (!document.fullscreenElement) {
+      this.exitFullScreenMode()
+    }
+  }
+
+  private handleSessionToolbarDisplay(event: MouseEvent): void {
+    if (!document.fullscreenElement) {
+      return;
+    }
+
+    if (event.clientY == 0) {
+      this.showToolbarDiv = true;
+    } else if (event.clientY > 44) {
+      this.showToolbarDiv = false;
+    }
+  }
+
+  private toggleFullscreen(): void {
+    this.isFullScreenMode = !this.isFullScreenMode;
+
+    if (!document.fullscreenElement) {
+      this.enterFullScreenMode();
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  private enterFullScreenMode(): void {
+    if (document.fullscreenElement) {
+      return;
+    }
+    const sessionContainerElement = this.sessionContainerElement.nativeElement;
+
+    sessionContainerElement.requestFullscreen().then(() => {
+      // using .Full screen scale causes scrollbars, Fit works better in this case. KAH Jan 2024
+      this.remoteClient.setScale(ScreenScale.Fit);
+    }).catch((err: any) => {
+      this.isFullScreenMode = false;
+      console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
+    });
+  }
+
+  private exitFullScreenMode(): void {
+    this.isFullScreenMode = false;
+    this.showToolbarDiv = true;
+
+    const sessionContainerElement = this.sessionContainerElement.nativeElement;
+    const sessionToolbarElement = sessionContainerElement.querySelector('#sessionToolbar');
+    if (sessionToolbarElement) {
+      this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
+    }
+    this.remoteClient.setScale(ScreenScale.Fit);
   }
 
   private initiateRemoteClientListener(): void {
@@ -126,14 +210,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     if (this.ironGuiElement && this.readyRemoteClientEventListener) {
       this.ironGuiElement.nativeElement.removeEventListener('ready', this.readyRemoteClientEventListener);
     }
-  }
-
-  removeWebClientGuiElement(): void {
-    this.removeElement
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe((): void => {
-        this.ironGuiElement.nativeElement.remove();
-      });
   }
 
   private readyRemoteClientEventListener(event: Event): void {
@@ -238,14 +314,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
         switch (event.type) {
           case SessionEventType.STARTED:
             this.handleIronRDPConnectStarted();
-            this.status.isInitialized = true;
+            this.currentStatus.isInitialized = true;
             break;
           case SessionEventType.TERMINATED:
-            this.status.isDisabled = true;
+            this.currentStatus.isDisabled = true;
             this.handleIronRDPTerminated(event.data);
             break;
           case SessionEventType.ERROR:
-            this.status.isDisabled = true;
+            this.currentStatus.isDisabled = true;
             this.handleIronRDPError(event.data);
             break;
         }
@@ -260,18 +336,18 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   private handleIronRDPTerminated(data: UserIronRdpError | string): void {
     this.notifyUserAboutConnectionClosed(data);
-    this.status.isDisabled = true;
-    this.componentStatus.emit(this.status);
+    this.currentStatus.isDisabled = true;
+    this.componentStatus.emit(this.currentStatus);
   }
 
   private handleIronRDPError(error: UserIronRdpError | string): void {
     this.notifyUserAboutError(error);
-    this.status.isDisabled = true;
-    this.componentStatus.emit(this.status);
+    this.currentStatus.isDisabled = true;
+    this.componentStatus.emit(this.currentStatus);
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    this.tabIndex = this.status.tabIndex;
+    this.tabIndex = this.currentStatus.tabIndex;
 
     if (typeof error === 'string') {
       this.rdpError = error;
@@ -286,24 +362,18 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
   }
 
-  private getMessage(type: UserIronRdpErrorKind): string {
-    switch (type) {
-      case UserIronRdpErrorKind.General:
-        //For translation 'UnknownError'
-        return 'Unknown Error';
-        break;
-      case UserIronRdpErrorKind.WrongPassword:
-      case UserIronRdpErrorKind.LogonFailure:
-        //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-        return 'Connection error: Please verify your connection settings.';
-        break;
-      case UserIronRdpErrorKind.AccessDenied:
-        //For translation 'AccessDenied'
-        return 'Access denied';
-        break;
-      default:
-        //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
-        return 'Connection error: Please verify your connection settings.';
-    }
+  private getMessage(errorKind: UserIronRdpErrorKind): string {
+    //For translation 'UnknownError'
+    //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+    //For translation 'AccessDenied'
+    //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
+
+    const errorMessages = {
+      [UserIronRdpErrorKind.General]: 'Unknown Error',
+      [UserIronRdpErrorKind.WrongPassword]: 'Connection error: Please verify your connection settings.',
+      [UserIronRdpErrorKind.LogonFailure]: 'Connection error: Please verify your connection settings.',
+      [UserIronRdpErrorKind.AccessDenied]: 'Access denied',
+    };
+    return errorMessages[errorKind] || 'Connection error: Please verify your connection settings.';
   }
 }

@@ -1,5 +1,5 @@
-<div #session class="session-webclient">
-  <div *ngIf="status.isDisabled" style="display: flex; flex-direction: column; height: 100%">
+<div #sessionContainer>
+  <div *ngIf="currentStatus.isDisabled" class="session-form">
     <web-client-rdp-form
       [tabIndex]="tabIndex"
       [inputFormData]="inputFormData"
@@ -7,7 +7,12 @@
       [isEmbedded]="true"></web-client-rdp-form>
   </div>
 
-  <div class="session-toolbar">
+  <div #sessionToolbar
+       id="sessionToolbar"
+       *ngIf="!isFullScreenMode || (isFullScreenMode && showToolbarDiv)"
+       [ngClass]="isFullScreenMode?'session-toolbar-layer':''"
+       class="session-toolbar">
+
     <div class="session-toolbar-left-group">
       <p-button
         (onClick)="sendWindowsKey()"
