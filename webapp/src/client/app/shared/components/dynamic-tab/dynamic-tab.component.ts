@@ -13,7 +13,6 @@ import {WebSession} from "@shared/models/web-session.model";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {BaseComponent} from "@shared/bases/base.component";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
-import {noop} from "rxjs";
 import {ComponentStatus} from "@shared/models/component-status.model";
 
 @Component({
@@ -65,7 +64,7 @@ export class DynamicTabComponent extends BaseComponent implements AfterViewInit,
 
   private onComponentDisabled(status: ComponentStatus, componentRef: ComponentRef<any>): void {
     if (status.isDisabledByUser) {
-      this.webSessionService.removeSession(status.tabIndex).then(noop);
+      this.webSessionService.removeSession(status.tabIndex);
     }
   }
 }

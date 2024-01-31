@@ -1,8 +1,7 @@
 import {Component, Input, OnInit} from '@angular/core';
 import {BaseComponent} from '@shared/bases/base.component';
 import {WebSession} from "@shared/models/web-session.model";
-import {SESSIONS_MENU_OFFSET, WebSessionService} from "@shared/services/web-session.service";
-import {noop} from "rxjs";
+import {WebSessionService} from "@shared/services/web-session.service";
 import {takeUntil} from "rxjs/operators";
 
 @Component({
@@ -19,7 +18,6 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   activeWebSessions: WebSession<any, any>[] = [];
   activeWebSessionIndex: number = 0;
-  selectedMenuIndex: number = 0;
 
   constructor(private webSessionService: WebSessionService) {
     super();
@@ -36,24 +34,17 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
       event.stopPropagation();
       return;
     }
-    this.selectedMenuIndex = webSession.tabIndex;
+    this.activeWebSessionIndex = webSession.tabIndex;
     this.selectTab(webSession.tabIndex)
   }
 
   onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
-    this.webSessionService.removeSession(webSession.tabIndex).then(noop);
+    event.stopPropagation();
+    this.webSessionService.removeSession(webSession.tabIndex);
   }
 
-  private selectTab(tabIndex: any): void {
+  private selectTab(tabIndex: number): void {
     this.webSessionService.setWebSessionCurrentIndex(tabIndex);
-  }
-
-  private adjustTabIndex(index: number): number {
-    return index + SESSIONS_MENU_OFFSET;
-  }
-
-  private adjustMenuIndex(index: number): number {
-    return index - SESSIONS_MENU_OFFSET;
   }
 
   private subscribeToWebSessionsUpdates(): void {
@@ -69,7 +60,6 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
     this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe({
       next: (activeIndex:number) => {
         this.activeWebSessionIndex = activeIndex;
-        this.selectedMenuIndex = this.adjustMenuIndex(activeIndex);
       },
       error: (e) => console.error(e)
     });
