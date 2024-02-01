@@ -1,7 +1,8 @@
 import {Injectable} from '@angular/core';
 import {BehaviorSubject, Observable} from 'rxjs';
-import {WebSession} from "@shared/models/web-session.model";
 import {map} from "rxjs/operators";
+
+import {WebSession} from "@shared/models/web-session.model";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
@@ -17,8 +18,8 @@ export class WebSessionService {
   private webSessionDataSubject: BehaviorSubject<WebSession<any, any>[]> = new BehaviorSubject<WebSession<any, any>[]>([]);
   private webSessionData$: Observable<WebSession<any, any>[]> = this.webSessionDataSubject.asObservable();
 
-  private webSessionCurrentIndexSubject: BehaviorSubject<number> = new BehaviorSubject(0);
-  private webSessionCurrentIndex$: Observable<number> = this.webSessionCurrentIndexSubject.asObservable();
+  private webSessionCurrentTabIndexSubject: BehaviorSubject<number> = new BehaviorSubject(0);
+  private webSessionCurrentTabIndex$: Observable<number> = this.webSessionCurrentTabIndexSubject.asObservable();
 
   constructor(private dynamicComponentService: DynamicComponentService) {}
 
@@ -31,7 +32,7 @@ export class WebSessionService {
     const currentSessions = this.webSessionDataSubject.value;
     const updatedSessions = [...currentSessions, newSession];
     this.webSessionDataSubject.next(updatedSessions);
-    this.setWebSessionIndexToLastCreated();
+    this.setWebSessionTabIndexToLastCreated(newSession.tabIndex);
   }
 
   updateSession(tabIndex: number, newSession: WebSession<any, any>): void {
@@ -44,24 +45,20 @@ export class WebSessionService {
   }
 
   async removeSession(tabIndexToRemove?: number): Promise<void> {
-
     await this.destroyWebSessionComponentRef(tabIndexToRemove);
 
     const currentSessions = this.webSessionDataSubject.value;
-    const updatedSessions = currentSessions.filter(session => session.tabIndex !== tabIndexToRemove);
+    const filteredSessions = currentSessions.filter(session => session.tabIndex !== tabIndexToRemove);
+
+    const updatedSessions = filteredSessions.map(session => {
+      if (session.tabIndex && session.tabIndex > tabIndexToRemove) {
+        return session.cloneWithUpdatedTabIndex(session.tabIndex - 1);
+      }
+      return session;
+    });
+
     this.webSessionDataSubject.next(updatedSessions);
-
     this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
-  }
-
-  //TODO Fix bc tabIndex is in Web Session
-  removeAllSessions(): void {
-    // const currentWebSessions = this.webSessionDataSubject.getValue();
-    // for (let i: number = currentWebSessions.length - 1; i >= 0; i--) {
-    //   this.destroyWebSessionComponentRef(i);
-    // }
-    // this.webSessionDataSubject.next([]);
-    // this.webSessionCurrentIndexSubject.next(0);
   }
 
   async updateWebSessionIcon(tabIndex: number, icon: string): Promise<void> {
@@ -117,29 +114,29 @@ export class WebSessionService {
   }
 
   setWebSessionCurrentIndex(index: number): void {
-    this.webSessionCurrentIndexSubject.next(index);
+    this.webSessionCurrentTabIndexSubject.next(index);
   }
 
   getWebSessionCurrentIndex(): Observable<number> {
-    return this.webSessionCurrentIndex$;
+    return this.webSessionCurrentTabIndex$;
   }
 
   getWebSessionCurrentIndexSnapshot(): number {
-    return this.webSessionCurrentIndexSubject.getValue();
+    return this.webSessionCurrentTabIndexSubject.getValue();
   }
 
   setupNewWebSession(): void {
-    this.webSessionCurrentIndexSubject.next(this.NEW_SESSION_IDX);
+    this.webSessionCurrentTabIndexSubject.next(this.NEW_SESSION_IDX);
   }
 
-  setWebSessionIndexToLastCreated(): void {
+  setWebSessionTabIndexToLastCreated(tabIndex?: number): void {
     if (this.webSessionDataSubject.getValue().length === 0) {
       this.setWebSessionCurrentIndex(0);
       return;
     }
 
-    const lastSessionIndex: number = this.webSessionDataSubject.getValue().length - 1;
-    this.setWebSessionCurrentIndex(lastSessionIndex);
+    const lastSessionTabIndex: number = tabIndex;
+    this.setWebSessionCurrentIndex(lastSessionTabIndex);
   }
 
   hasActiveWebSessions(): boolean {

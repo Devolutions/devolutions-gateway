@@ -7,7 +7,8 @@
 
   .menu-list-item {
     display: flex;
-    align-items: center; // Ensure vertical alignment of all items
+    align-items: center;
+    justify-content: space-between;
     border-radius: $borderRadius;
     padding: 8px;
     width: 100%;
@@ -25,27 +26,33 @@
 
     &:hover {
       color: var(--text-accent-color);
-      background-color: rgba(255, 255, 255, 0.05);
+      background-color: rgba(255, 255, 255, 0.04);
       cursor: pointer;
+
+      ::ng-deep .p-button {
+        display: inline-block;
+      }
     }
 
     &.selected {
       color: var(--text-accent-color);
-      background-color: #424242;
+      background-color: rgba(66, 66, 66, 1);
       cursor: pointer;
     }
 
-    .close-button {
-      display: none;
-      margin-left: auto;
-      align-self: center;
+    &.selected:hover {
+      background-color: rgba(66, 66, 66, 1);
     }
 
-    &:hover,
-    &.selected {
-      .close-button {
-        display: block; // Show on hover or when selected
-      }
+    ::ng-deep .p-button {
+      border: none;
+      border-radius: 4px;
+      background-color: transparent;
+      padding: 0;
+      margin-right: 0;
+      height: 16px;
+      width: 16px;
+      display: none;
     }
   }
 }
@@ -68,25 +75,7 @@
   }
 }
 
-.close-button {
-  width: 15px;
-  height: 15px;
-  cursor: pointer;
-}
-
-.close-button::before,
-.close-button::after {
-  content: '';
-  position: absolute;
-  width: 1px;
-  height: 15px;
-  background: #9E9E9E;
-}
-
-.close-button::before {
-  transform: rotate(45deg);
-}
-
-.close-button::after {
-  transform: rotate(-45deg);
+.left-group {
+  display: flex;
+  align-items: center;
 }

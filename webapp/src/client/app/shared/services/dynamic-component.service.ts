@@ -1,5 +1,4 @@
 import { Injectable, ViewContainerRef, ComponentRef, Type } from '@angular/core';
-import {Subject} from "rxjs";
 
 @Injectable({
     providedIn: 'root'

@@ -4,13 +4,13 @@ import {
   ViewChild,
   ChangeDetectorRef, Type, OnDestroy, HostListener
 } from '@angular/core';
+import {takeUntil} from "rxjs/operators";
+import {TabView} from "primeng/tabview";
+
 import {WebSession} from "@shared/models/web-session.model";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
-import {TabView, TabViewChangeEvent} from "primeng/tabview";
 import {BaseComponent} from "@shared/bases/base.component";
-import {noop} from "rxjs";
-import {takeUntil} from "rxjs/operators";
 
 @Component({
   selector: 'web-client-tab-view',
@@ -22,7 +22,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   @ViewChild('tabView') tabView: TabView;
 
   webSessionTabs: WebSession<any, any>[] = [];
-  tabCurrentIndex: number = 0;
+  currentTabIndex: number = 0;
 
   constructor(private webSessionService: WebSessionService,
               private readonly cdr: ChangeDetectorRef) {
@@ -47,25 +47,15 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
 
   ngOnDestroy(): void {
     super.ngOnDestroy();
-    this.webSessionService.removeAllSessions();
-  }
-
-  closeTab(webSessionTab: WebSession<any, any>, index: number): void {
-    this.webSessionTabs = this.webSessionTabs.filter(t => t !== webSessionTab);
-    this.webSessionService.removeSession(index).then(noop);
   }
 
   addBackgroundClass(): boolean {
-    return this.tabCurrentIndex > 0;
-  }
-
-  onTabChange(event:  TabViewChangeEvent): void {
-    this.webSessionService.setWebSessionCurrentIndex(event.index);
+    return this.currentTabIndex > 0;
   }
 
   private changeTabIndex(): void {
     if (!this.tabView) return;
-    this.tabView.activeIndex = this.tabCurrentIndex;
+    this.tabView.activeIndex = this.currentTabIndex;
   }
 
   private loadFormTab(): void {
@@ -88,7 +78,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
   private subscribeToTabActiveIndex(): void {
     this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe(
       (tabActiveIndex: number): void => {
-        this.tabCurrentIndex = tabActiveIndex;
+        this.currentTabIndex = tabActiveIndex;
         this.changeTabIndex();
     })
   }

@@ -28,10 +28,11 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
                                                                 AfterViewInit,
                                                                 OnChanges {
 
-  @Input() isEmbedded: boolean = false;
+  @Input() isFormExists: boolean = false;
   @Input() inputFormData: any | undefined;
   @Input() tabIndex: number | undefined;
   @Input() error: string;
+
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
 
   connectSessionForm: FormGroup;
@@ -90,13 +91,12 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     const newSessionTab: WebSession<Type<WebClientRdpComponent>, any> =  new WebSession(submittedData.hostname,
                                                               WebClientRdpComponent,
                                                               submittedData,
-                                                              'dvl-icon-entry-session-rdp');
+                                                              WebClientRdpComponent.DVL_RDP_ICON);
     newSessionTab.name = submittedData.hostname;
     newSessionTab.component = WebClientRdpComponent;
     newSessionTab.data = submittedData;
-    newSessionTab.icon = 'dvl-icon-entry-session-rdp';
 
-    if (this.isEmbedded) {
+    if (this.isFormExists) {
       this.webSessionService.updateSession(this.tabIndex, newSessionTab);
     } else {
       this.webSessionService.addSession(newSessionTab);
@@ -193,7 +193,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   private populateForm(): void {
     this.populateAutoComplete();
 
-    if (this.isEmbedded) {
+    if (this.isFormExists) {
       this.connectSessionForm = this.formBuilder.group({
         protocol: [this.inputFormData.protocol, Validators.required],
         autoComplete: new FormControl('', Validators.required),
@@ -203,8 +203,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
         screenSize: [this.inputFormData.screenSize],
         customWidth: [this.inputFormData.customWidth],
         customHeight: [this.inputFormData.customHeight],
-        preConnectionBlob: [this.inputFormData.preConnectionBlob],
-        kdcProxyUrl: [this.inputFormData.kdcProxyUrl]
+        kdcProxyUrl: [this.inputFormData.kdcProxyUrl],
+        preConnectionBlob: [this.inputFormData.preConnectionBlob]
       });
     } else {
       this.connectSessionForm = this.formBuilder.group({
@@ -216,6 +216,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
         screenSize: [null],
         customWidth: [{value: '', disabled: true}],
         customHeight: [{value: '', disabled: true}],
+        kdcProxyUrl: [''],
         preConnectionBlob: ['']
       });
     }

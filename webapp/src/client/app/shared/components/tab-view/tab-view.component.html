@@ -1,6 +1,6 @@
 <div class="tabview-container" [ngClass]="{'session-background': addBackgroundClass()}">
-    <p-tabView #tabView class="hidden-tab-headers" (onChange)="onTabChange($event)">
-        <p-tabPanel *ngFor="let tab of webSessionTabs; let i = index">
+    <p-tabView #tabView class="hidden-tab-headers">
+        <p-tabPanel *ngFor="let tab of webSessionTabs;">
             <web-client-dynamic-tab [webSessionTab]="tab"></web-client-dynamic-tab>
         </p-tabPanel>
     </p-tabView>

@@ -9,7 +9,7 @@ import {
   ViewChild,
   Renderer2
 } from '@angular/core';
-import {from, noop, Observable, Subject} from "rxjs";
+import {from, Observable, Subject} from "rxjs";
 import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
 import {MessageService} from "primeng/api";
 
@@ -62,6 +62,9 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   @ViewChild('sessionContainer') sessionContainerElement: ElementRef;
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
+
+  static DVL_RDP_ICON: string = 'dvl-icon-entry-session-rdp';
+  static DVL_WARNING_ICON: string = 'dvl-icon-warning';
 
   JET_RDP_URL: string = '/jet/rdp';
   screenScale = ScreenScale;
@@ -287,7 +290,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private fetchToken(connectionParameters: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
-    //TODO create a proper model
     const data = {
       "content_type": "ASSOCIATION",
       "protocol": "rdp",
@@ -331,6 +333,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   private handleIronRDPConnectStarted(): void {
     this.loading = false;
     this.remoteClient.setVisibility(true);
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, WebClientRdpComponent.DVL_RDP_ICON);
     this.webClientConnectionSuccess();
   }
 
@@ -354,12 +357,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     } else {
       this.rdpError = this.getMessage(error.kind());
     }
-    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, WebClientRdpComponent.DVL_WARNING_ICON);
   }
 
   private notifyUserAboutConnectionClosed(error: UserIronRdpError | string): void {
     this.rdpError = typeof error === 'string' ? error : this.getMessage(error.kind());
-    this.webSessionService.updateWebSessionIcon(this.tabIndex, 'dvl-icon-warning').then(noop);
+    this.webSessionService.updateWebSessionIcon(this.tabIndex, WebClientRdpComponent.DVL_WARNING_ICON);
   }
 
   private getMessage(errorKind: UserIronRdpErrorKind): string {
