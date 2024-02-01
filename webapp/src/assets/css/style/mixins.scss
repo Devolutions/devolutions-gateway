@@ -1,4 +1,4 @@
-@import "theme-mode-variables";
+@import 'theme-mode-variables';
 
 /* INPUTS */
 @mixin devolutions-dropdown-filter-icon-input() {
@@ -7,7 +7,7 @@
   font-size: 20px;
 
   &:before {
-    content: "filter_bold";
+    content: 'filter_bold';
   }
 }
 
@@ -24,6 +24,132 @@
   -o-transition: $transition;
   -webkit-transition: $transition;
   transition: $transition;
+}
+
+@mixin btn-color-design() {
+  &.primary {
+    background-color: var(--action-btn-outline-primary-bg-color);
+    border: 1px solid var(--action-btn-outline-primary-bg-color);
+    color: var(--action-btn-outline-primary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--action-btn-outline-primary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-primary-bg-hover-color),
+          var(--action-btn-outline-primary-bg-hover-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-primary-border-hover-color);
+      }
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-primary-bg-pressed-color),
+          var(--action-btn-outline-primary-bg-pressed-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-primary-border-pressed-color);
+      }
+    }
+  }
+
+  &.secondary {
+    background-color: var(--action-btn-outline-secondary-bg-color);
+    border: 1px solid var(--action-btn-outline-secondary-border-color);
+    color: var(--action-btn-outline-secondary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--action-btn-outline-secondary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-secondary-bg-hover-color),
+          var(--action-btn-outline-secondary-border-hover-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-secondary-border-hover-color);
+      }
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      @include btn-double-layer-background-color-effect(
+          var(--action-btn-outline-secondary-bg-pressed-color),
+          var(--action-btn-outline-secondary-border-pressed-color)
+      );
+
+      &.p-splitbutton-defaultbutton {
+        border-right-color: var(--action-btn-outline-secondary-border-pressed-color);
+      }
+    }
+  }
+
+  &.tertiary {
+    background-color: var(--action-btn-outline-tertiary-bg-color);
+    border: 1px solid var(--action-btn-outline-tertiary-border-color);
+    color: var(--action-btn-outline-tertiary-color);
+
+    &:not(.p-disabled):not([disabled]):hover {
+      background: var(--action-btn-outline-tertiary-bg-hover-color);
+      border-color: var(--action-btn-outline-tertiary-border-hover-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      background: var(--action-btn-outline-tertiary-bg-pressed-color);
+      border-color: var(--action-btn-outline-tertiary-border-pressed-color);
+    }
+  }
+
+  &.danger.primary {
+    background-color: var(--error-btn-outline-primary-bg-color);
+    border: 1px solid var(--error-btn-outline-primary-bg-color);
+    color: var(--error-btn-outline-primary-color);
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--error-btn-outline-primary-border-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):hover {
+      background: var(--error-btn-outline-primary-bg-hover-color);
+    }
+
+    &:not(.p-disabled):not([disabled]):active {
+      background: var(--error-btn-outline-primary-bg-pressed-color);
+    }
+  }
+
+  &.button-disabled {
+    background-color: var(--btn-outline-disabled-bg-color);
+    border-color: var(--btn-outline-disabled-border-color);
+    color: var(--btn-outline-disabled-color);
+    opacity: 1;
+
+    &.p-splitbutton-defaultbutton {
+      border-right-color: var(--btn-outline-disabled-border-color);
+    }
+  }
+}
+
+@mixin btn-double-layer-background-color-effect($background-color, $border-color) {
+  &:before {
+    background: $background-color;
+    border-color: $border-color;
+    content: '';
+    height: 100%;
+    left: 0;
+    mix-blend-mode: multiply;
+    position: absolute;
+    top: 0;
+    width: 100%;
+    z-index: 1;
+  }
 }
 
 @mixin btn-hover-active-transition($hover-background-color, $active-background-color) {
@@ -43,14 +169,14 @@
 
 // Mixing that styles scrollbar
 // ::-webkit-scrollbar already included globally in base.scss, not included here. Keeping it DRY
-@mixin custom-scrollbar($overlay: false ,$track-color: $scrollbar-background-color, $thumb-color: $scrollbar-color) {
+@mixin custom-scrollbar($overlay: false, $track-color: $scrollbar-background-color, $thumb-color: $scrollbar-color) {
   overflow: auto;
 
   // Makes scrollbar over content on webkit
   // ** Use with caution, creates a bug where the scrollbable area is over everything, even if there is popup over it
   // https://devolutions.atlassian.net/browse/HB-1925
   @if $overlay {
-    @supports(overflow: overlay) {
+    @supports (overflow: overlay) {
       overflow: overlay;
     }
   }
@@ -81,7 +207,7 @@
   white-space: pre;
   text-overflow: ellipsis;
 
-  @if($numberOfRow > 1) {
+  @if ($numberOfRow > 1) {
     @supports (-webkit-line-clamp: $numberOfRow) {
       overflow: hidden;
       text-overflow: ellipsis;
@@ -132,7 +258,6 @@
   }
 }
 
-
 @mixin _assert-ascending($map, $map-name) {
   $prev-key: null;
   $prev-num: null;
@@ -162,9 +287,9 @@ $grid-breakpoints: (
   sm: 576px,
   md: 768px,
   lg: 992px,
-  xl: 1200px
+  xl: 1200px,
 ) !default;
-@include _assert-ascending($grid-breakpoints, "$grid-breakpoints");
+@include _assert-ascending($grid-breakpoints, '$grid-breakpoints');
 @include _assert-starts-at-zero($grid-breakpoints);
 
 @function breakpoint-next($name, $breakpoints: $grid-breakpoints, $breakpoint-names: map-keys($breakpoints)) {
@@ -187,7 +312,7 @@ $grid-breakpoints: (
 @mixin dvl-icon-font() {
   font-family: 'devolutions-icons', 'Open Sans', serif;
   font-variant-ligatures: discretionary-ligatures;
-  font-feature-settings: "liga";
+  font-feature-settings: 'liga';
   font-kerning: auto;
   font-language-override: normal;
   font-size: inherit;
@@ -209,6 +334,6 @@ $grid-breakpoints: (
   @include dvl-icon-font();
 
   &:before {
-    content: $icon
+    content: $icon;
   }
 }

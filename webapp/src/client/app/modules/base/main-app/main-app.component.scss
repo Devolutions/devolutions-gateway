@@ -1,5 +1,5 @@
 @import 'mixins';
-@import "theme-mode-variables";
+@import 'theme-mode-variables';
 
 :host {
   width: 100%;
@@ -21,7 +21,8 @@
 }
 
 :host-context(.dark-theme) {
-  .layout-menu-container.dark { // TODO TO REMOVE, for now the dark is dirty with the "dark-theme". This hack is temporary
+  .layout-menu-container.dark {
+    // TODO TO REMOVE, for now the dark is dirty with the "dark-theme". This hack is temporary
     background-color: #101112;
   }
 }
@@ -38,7 +39,7 @@
   @include media-breakpoint-down(sm) {
     display: none;
 
-    .layout-mobile-active &{
+    .layout-mobile-active & {
       display: block;
       position: fixed;
       background-color: var(--overlay-mask-color);
@@ -59,7 +60,7 @@
   display: flex;
   flex-direction: column;
 
-  .layout-main-content{
+  .layout-main-content {
     background-color: var(--bg-secondary-color);
     flex-grow: 1;
     overflow: hidden;
@@ -75,7 +76,7 @@
   height: 40px;
   position: absolute;
   margin: 0 10px 15px 0;
-  border-bottom: none !important
+  border-bottom: none !important;
 }
 
 ::ng-deep .sidebar-message-container {

@@ -34,33 +34,34 @@
     <gateway-menu-list-item *ngFor="let menuKVP of mainMenus | keyvalue: asIsOrder"
                             [label]="menuKVP.value.label"
                             [icon]="menuKVP.value.icon"
-                            [selected]="menuKVP.value.selected"
-                            [blockClickSelected]="menuKVP.value.blockClickSelected"
-                            [iconOnly]="isMenuSlim"
-                            (action)="menuKVP.value.executeAction()"></gateway-menu-list-item>
+                            [iconOnly]="isMenuSlim"></gateway-menu-list-item>
 
-    <gateway-menu-list-active-sessions></gateway-menu-list-active-sessions>
+    <gateway-menu-list-active-sessions [isMenuSlim]="isMenuSlim">
+    </gateway-menu-list-active-sessions>
 
-    <p-button   styleClass="p-button-menu"
-                [type]="'button'"
-                [label]="'New Session'"
+    <div class="menu-list-item">
+      <p-button [type]="'button'"
+                [icon]="isMenuSlim ? 'dvl-icon dvl-icon-add' : ''"
+                [label]="!isMenuSlim ? 'New Session' : ''"
+                [pTooltip]="isMenuSlim ? 'New Session' : ''"
                 (click)="onClickGoToNewSessionTab()">
-    </p-button>
-
+      </p-button>
+    </div>
   </gateway-menu-group-list-item>
 
-  <hub-divider></hub-divider>
   <!-- Logout -->
   <gateway-menu-group-list-item
     *ngIf="!isAutoLoginOn"
     class="primary-menu-group-list"
     [accordion]="false">
 
-    <div class="menu-list-item-container menu-list-item-container-footer">
-      <div class="menu-list-item"
+    <div class="footer-group-list">
+      <div class="menu-list-item footer-menu-list"
+           [pTooltip]="isMenuSlim ? 'Logout' : ''"
+           [tooltipDisabled]="!isMenuSlim"
            (click)="logout()">
         <i class="dvl-icon dvl-icon-logout"></i>
-        <span class="menu-list-item-label">Logout</span>
+        <span *ngIf="!isMenuSlim" class="menu-list-item-label">Logout</span>
       </div>
     </div>
 

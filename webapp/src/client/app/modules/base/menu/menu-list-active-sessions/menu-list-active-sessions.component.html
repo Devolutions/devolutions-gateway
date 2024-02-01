@@ -1,6 +1,8 @@
 <ng-container *ngFor="let activeWebSession of activeWebSessions;">
   <div class="menu-list-item-container">
     <div class="menu-list-item"
+         [pTooltip]="isMenuSlim ? activeWebSession.name : ''"
+         [tooltipDisabled]="!isMenuSlim"
          [class.selected]="activeWebSessionIndex === activeWebSession.tabIndex"
          (click)="onMenuListItemClick($event, activeWebSession)">
       <div class="left-group">

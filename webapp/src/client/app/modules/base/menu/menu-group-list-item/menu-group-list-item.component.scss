@@ -1,24 +1,49 @@
 :host .menu-group-list-item {
-  padding: 8px;
+  padding: 8px 8px 0 8px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 
   .menu-group-list-header {
     color: var(--text-tertiary-color);
     padding: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    &--slim {
+      margin-left: 12px;
+      gap: 4px;
+    }
+
+    span {
+      user-select: none;
+    }
 
     i {
       font-size: 16px;
-      padding-right: 8px;
-
-      &:before {
-        display: inline-block;
-        transition: transform 100ms ease-in-out;
-        transform: rotate(0deg);
-      }
-
-      &.closed:before {
-        transform: rotate(-90deg);
-      }
     }
+  }
+
+  &.closed {
+    padding: 8px;
+
+    .dvl-icon-arrow-up {
+      transform: rotate(90deg);
+    }
+  }
+
+  .menu-group-list-body {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .menu-group-actions {
+    align-items: center;
+    display: flex;
+    margin-left: auto;
   }
 
   &.accordion {
@@ -32,6 +57,6 @@
 
 :host-context(.app-menu-container.layout-menu-slim) {
   .menu-group-list-item {
-    padding: 4px;
+    padding: 4px 4px 0 4px;
   }
 }

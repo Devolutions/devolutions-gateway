@@ -1,4 +1,4 @@
-import {Component, EventEmitter, Input, Output} from '@angular/core';
+import {Component, Input} from '@angular/core';
 import {BaseComponent} from '@shared/bases/base.component';
 
 
@@ -10,13 +10,7 @@ import {BaseComponent} from '@shared/bases/base.component';
 export class MenuListItemComponent extends BaseComponent {
   @Input() label: string = '';
   @Input() icon: string = '';
-  @Input() disabled: boolean = false;
-  @Input() id: string;
-  @Input() blockClickSelected: boolean = false;
   @Input() iconOnly: boolean = false;
-  @Input() selected: boolean = false;
-
-  @Output() action: EventEmitter<MouseEvent> = new EventEmitter<MouseEvent>();
 
   constructor() {
     super();
