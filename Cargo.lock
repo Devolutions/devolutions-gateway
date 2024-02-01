@@ -2689,7 +2689,7 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 [[package]]
 name = "polling"
 version = "3.3.2"
-source = "git+https://github.com/irvingoujAtDevolution/polling.git#159ab1b540b75a86f7735bcb57449b4b766e49cf"
+source = "git+https://github.com/smol-rs/polling?rev=62430fd56e668559d08ca7071ab13a0e116ba515#62430fd56e668559d08ca7071ab13a0e116ba515"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
