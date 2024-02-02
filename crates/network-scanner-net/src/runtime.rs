@@ -90,10 +90,11 @@ impl Socket2Runtime {
         register_receiver: Receiver<RegisterEvent>,
         event_sender: Sender<Event>,
     ) -> anyhow::Result<()> {
-        // we make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread
-        // we cannot hold a Arc<Socket2Runtime> in the thread, because it will create a cycle reference and the runtime will never be dropped.
-        let is_terminated = self.is_terminated.clone();
+        // To prevent an Arc cycle with the Arc<Socket2Runtime>, we added additional indirection.
+        // Otherwise, the reference in the new thread would prevent the runtime from being dropped and shutdown.
         let poller = self.poller.clone();
+        let is_terminated = self.is_terminated.clone();
+
         std::thread::Builder::new()
             .name("[raw-socket]:io-event-loop".to_string())
             .spawn(move || {
