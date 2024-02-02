@@ -1,0 +1,9 @@
+[package]
+name = "tracing-cov-mark"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2021"
+publish = false
+
+[dependencies]
+tracing = "0.1"

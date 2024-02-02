@@ -3,7 +3,7 @@ use std::mem::MaybeUninit;
 pub mod runtime;
 pub mod socket;
 #[cfg(test)]
-mod test;
+mod tests;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScannnerNetError {
