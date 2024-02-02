@@ -5,7 +5,7 @@ import {
   OnInit,
   Output, SimpleChanges, Type
 } from '@angular/core';
-import {FormBuilder, FormControl, FormGroup, Validators} from "@angular/forms";
+import {AbstractControl, FormBuilder, FormControl, FormGroup, ValidatorFn, Validators} from "@angular/forms";
 import {Message, SelectItem} from "primeng/api";
 
 import {WebSessionService} from "@shared/services/web-session.service";
@@ -139,6 +139,17 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     );
   }
 
+  kdcServerUrlValidator(): ValidatorFn {
+    return (control: AbstractControl): { [key: string]: any } | null => {
+      if (!control.value) {
+        return null;
+      }
+
+      const validTcpProtocol: boolean = /^(tcp|udp):\/\/.*$/.test(control.value);
+      return validTcpProtocol ? null : { 'invalidKdcProtocol': { value: control.value } };
+    };
+  }
+
   private isHostnameInArray(hostname: string, array: AutoCompleteInput[]): boolean {
     return array.some(obj => obj.hostname === hostname);
   }
@@ -203,7 +214,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
         screenSize: [this.inputFormData.screenSize],
         customWidth: [this.inputFormData.customWidth],
         customHeight: [this.inputFormData.customHeight],
-        kdcProxyUrl: [this.inputFormData.kdcProxyUrl],
+        kdcUrl: [this.inputFormData.kdcUrl, [this.kdcServerUrlValidator()]],
         preConnectionBlob: [this.inputFormData.preConnectionBlob]
       });
     } else {
@@ -216,7 +227,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
         screenSize: [null],
         customWidth: [{value: '', disabled: true}],
         customHeight: [{value: '', disabled: true}],
-        kdcProxyUrl: [''],
+        kdcUrl: ['', [this.kdcServerUrlValidator()]],
         preConnectionBlob: ['']
       });
     }

@@ -22,6 +22,7 @@ import { MainMenuService } from "@shared/services/main-menu.service";
 import { GatewayAlertMessageService } from "@shared/components/gateway-alert-message/gateway-alert-message.service";
 import { LoadingService} from "@shared/services/loading.service";
 import { WebSessionService } from "@shared/services/web-session.service";
+import { WebClientService } from "@shared/services/web-client.service";
 
 // Other
 import { routes } from './app.routes';
@@ -65,6 +66,7 @@ import { AutoCompleteModule } from "primeng/autocomplete";
     GatewayAlertMessageService,
     LoadingService,
     WebSessionService,
+    WebClientService,
     TabView
   ],
   exports: [

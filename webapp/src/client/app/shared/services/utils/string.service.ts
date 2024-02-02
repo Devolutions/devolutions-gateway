@@ -30,4 +30,19 @@ export class StringService {
     return extractionData;
   }
 
+  // const urlWithPort = ensurePort('http://example.com'); // Will add ':88'
+  // const urlWithExistingPort = ensurePort('http://example.com:1234'); // Will remain unchanged
+  ensurePort(url: string, defaultPort: string = ':88'): string {
+    if (!url) {
+      return '';
+    }
+    const portRegex = /:\d+$/;
+
+    if (portRegex.test(url)) {
+      return url;
+    } else {
+      return `${url}${defaultPort}`;
+    }
+  }
+
 }

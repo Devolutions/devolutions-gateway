@@ -137,7 +137,22 @@
                 Maximum value is 2048
               </div>
             </div>
+          </div>
 
+          <div class="col-12 gateway-form-group">
+            <label for="kdcUrl">KDC Server URL</label>
+            <div class="gateway-form-input">
+              <input pInputText
+                     id="kdcUrl"
+                     type="text"
+                     autocomplete="on"
+                     placeholder="Enter KDC Url"
+                     formControlName="kdcUrl"/>
+            </div>
+            <div class="form-helper-text"
+                 *ngIf="connectSessionForm.get('kdcUrl').hasError('invalidKdcProtocol') && connectSessionForm.get('kdcUrl').touched">
+                  Invalid URL - Must start with tcp:// or udp:// .
+            </div>
           </div>
 
           <div class="col-12 gateway-form-group">

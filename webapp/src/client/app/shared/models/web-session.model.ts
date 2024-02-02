@@ -1,16 +1,16 @@
 import {ComponentRef, Type} from "@angular/core";
-import { Guid } from 'guid-typescript';
+import { v4 as uuidv4 } from 'uuid';
 
 import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
-import {DesktopSize} from "@shared/models/desktop-size";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {ComponentStatus} from "@shared/models/component-status.model";
+import {DesktopSize, WebClientService} from "@shared/services/web-client.service";
 
 export type WebSessionComponentType = Type<RdpFormComponent> | Type<WebClientRdpComponent>;
 
 export class WebSession<WebSessionComponentType, TData> {
-  public id: Guid;
+  public id: string;
   public sessionId: number;
   public name: string = '';
   public component: WebSessionComponentType;
@@ -27,7 +27,7 @@ export class WebSession<WebSessionComponentType, TData> {
     data?: TData,
     icon: string = '',
     tabIndex?: number,
-    id: Guid = Guid.create(),
+    id: string = uuidv4(),
     sessionId?: number,
     status?: ComponentStatus,
     desktopSize?: DesktopSize
