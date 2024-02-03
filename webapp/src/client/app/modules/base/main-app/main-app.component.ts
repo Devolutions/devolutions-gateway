@@ -13,6 +13,7 @@ import { takeUntil } from "rxjs/operators";
 })
 export class MainAppComponent extends BaseComponent implements  OnInit {
 
+  staticMenuMobileActive: boolean = false;
   isMenuCollapsed: boolean = true;
   isMenuVisible: boolean = true;
   isWebClientSession: boolean = false;
@@ -27,25 +28,20 @@ export class MainAppComponent extends BaseComponent implements  OnInit {
     this.subscribeToMainMenu();
   }
 
-  private subscribeToMainMenu():void {
+  private subscribeToMainMenu(): void {
+    this.mainMenuService.isCollapsed
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe(isCollapsed => (this.isMenuCollapsed = isCollapsed));
 
-    this.mainMenuService.isCollapsed.pipe(
-      takeUntil(this.destroyed$))
-      .subscribe(isCollapsed => this.isMenuCollapsed = isCollapsed);
-
-    this.mainMenuService.isVisible.pipe(
-      takeUntil(this.destroyed$))
-      .subscribe(isVisible => this.isMenuVisible = isVisible);
+    this.mainMenuService.isVisible
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe(isVisible => (this.isMenuVisible = isVisible));
   }
 
-  private subscribeToWebClientSession() {
+  private subscribeToWebClientSession(): void {
     this.app.isWebClientSession.pipe(
       takeUntil(this.destroyed$))
       .subscribe(isWebClientSession => this.isWebClientSession = isWebClientSession);
   }
-
-  //TODO
-  // subscribeToWindowResize
-  // updateDeviceSize
 }
 

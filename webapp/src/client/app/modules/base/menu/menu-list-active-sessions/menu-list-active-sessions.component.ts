@@ -15,6 +15,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   // indicates user is currently on the screen for the menu item
   @Input() selected: boolean = false;
+  @Input() isMenuSlim = false;
 
   activeWebSessions: WebSession<any, any>[] = [];
   activeWebSessionIndex: number = 0;

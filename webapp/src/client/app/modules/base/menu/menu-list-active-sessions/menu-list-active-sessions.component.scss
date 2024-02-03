@@ -1,5 +1,10 @@
 @import "variables";
 
+:host {
+  display: block;
+  margin-bottom: 4px;
+}
+
 .menu-list-item-container {
   display: flex;
   align-items: center;
@@ -69,6 +74,10 @@
       }
 
       .menu-list-item-label {
+        display: none;
+      }
+
+      ::ng-deep .p-button {
         display: none;
       }
     }

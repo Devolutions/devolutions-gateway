@@ -11,5 +11,9 @@
     "target": "http://localhost:7171",
     "secure": false,
     "ws": true
+  },
+  "/jet/KdcProxy": {
+    "target": "http://localhost:7171",
+    "secure": false
   }
 }

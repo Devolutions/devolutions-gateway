@@ -1,43 +1,17 @@
-@import "variables";
-
-.menu-list-item-container {
-  display: flex;
-  align-items: center;
+:host {
+  display: block;
+  height: 25px;
   margin-bottom: 4px;
+}
 
-  .menu-list-item {
-    border-radius: $borderRadius;
-    padding: 8px;
-    width: 100%;
-    height: 100%;
-
-    i {
-      font-size: 16px;
-      padding-right: 8px;
-    }
-
-    &:hover, &.selected {
-      color: var(--text-accent-color);
-      background-color: rgba(255, 255, 255, 0.05);
-      cursor: pointer;
-    }
+:host-context(.menu-group-list-item.hasHeader) {
+  .menu-list-label .menu-label {
+    font-weight: 400;
   }
 }
 
 :host-context(.app-menu-container.layout-menu-slim) {
-  .menu-list-item-container {
-    justify-content: center;
-
-    .menu-list-item {
-      width: auto;
-
-      i {
-        padding-right: 0;
-      }
-
-      .menu-list-item-label {
-        display: none;
-      }
-    }
+  .menu-list-label {
+    display: none;
   }
 }
