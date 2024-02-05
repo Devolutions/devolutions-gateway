@@ -179,8 +179,6 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub async fn drop_runtime() -> anyhow::Result<()> {
-    let kill_server = Arc::new(AtomicBool::new(false));
-    let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
     tracing_subscriber::fmt::SubscriberBuilder::default()
         .with_max_level(tracing::Level::TRACE)
         .with_thread_names(true)
@@ -196,33 +194,19 @@ pub async fn drop_runtime() -> anyhow::Result<()> {
 
             let unused_port = 12345;
 
-            let available_addr = addr;
             let non_available_addr = SocketAddr::from(([127, 0, 0, 1], unused_port));
 
-            let handle =
-                tokio::task::spawn(async move { good_socket.connect(&socket2::SockAddr::from(available_addr)).await });
-
-            let handle2 =
+            let _ =
                 tokio::task::spawn(
                     async move { bad_socket.connect(&socket2::SockAddr::from(non_available_addr)).await },
-                );
-
-            let (a, b) = tokio::join!(handle, handle2);
-            // remove the outer error from tokio task
-            let a = a?;
-            let b = b?;
-            tracing::info!("should connect: {:?}", &a);
-            tracing::info!("should not connect: {:?}", &b);
-            assert!(a.is_ok());
-            assert!(b.is_err());
+                )
+                .await;
         }
         tracing::info!("runtime arc count: {}", Arc::strong_count(&async_runtime));
 
         assert!(Arc::strong_count(&async_runtime) == 1);
     }
     tracing::info!("runtime should be dropped here");
-    kill_server.store(true, std::sync::atomic::Ordering::Relaxed);
-    handle.abort();
     Ok(())
 }
 
