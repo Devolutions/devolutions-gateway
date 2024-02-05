@@ -6,7 +6,7 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
-    task::Waker,
+    task::Waker, time::Duration,
 };
 
 use anyhow::Context;
@@ -105,11 +105,16 @@ impl Socket2Runtime {
                         break;
                     }
 
-                    if let Err(e) = poller.wait(&mut events, None) {
+                    if let Err(e) = poller.wait(&mut events, Some(Duration::from_millis(200))) {
                         tracing::error!(error = ?e, "failed to poll events");
                         is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
+
+                    // yield the control back to check for registerred events
+                    if events.is_empty() {
+                        continue;
+                    }
 
                     for event in events.iter() {
                         tracing::trace!(?event, "event happened");
