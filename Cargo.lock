@@ -750,6 +750,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b750cb3417fd1b327431a470f388520309479ab0bf5e323505daf0290cd3850"
+dependencies = [
+ "darling_core",
+ "darling_macro",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "109c1ca6e6b7f82cc233a97004ea8ed7ca123a9af07a8230878fcfda9b158bf0"
+dependencies = [
+ "fnv",
+ "ident_case",
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "strsim",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4aab4dbc9f7611d8b55048a3a16d2d010c2c8334e46304b40ac1cc14bf3b48e"
+dependencies = [
+ "darling_core",
+ "quote 1.0.35",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if",
+ "hashbrown",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "data-encoding"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,6 +879,37 @@ checksum = "2c9d94d81e3819a7b06a8638f448bc6339371ca9b6076a99d4a43eece3c4c923"
 dependencies = [
  "proc-macro2 1.0.78",
  "quote 1.0.35",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "660047478bc508c0fde22c868991eec0c40a63e48d610befef466d48e2bee574"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b217e6dd1011a54d12f3b920a411b5abd44b1716ecfe94f5f2f2f7b52e08ab7"
+dependencies = [
+ "darling",
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a5f77d7e20ac9153428f7ca14a88aba652adfc7a0ef0a06d654386310ef663b"
+dependencies = [
+ "derive_builder_core",
  "syn 1.0.109",
 ]
 
@@ -1669,6 +1748,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ident_case"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
 name = "idna"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2082,13 +2167,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "network-interface"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d68759ef97fe9c9e46f79ea8736c19f1d28992e24c8dc8ce86752918bfeaae7"
+dependencies = [
+ "cc",
+ "libc",
+ "thiserror",
+ "winapi",
+]
+
+[[package]]
 name = "network-scanner"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "crossbeam",
+ "dashmap",
+ "derive_builder",
+ "futures",
+ "network-interface",
  "network-scanner-net",
  "network-scanner-proto",
+ "serde",
  "socket2",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2100,9 +2204,11 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "crossbeam",
+ "dashmap",
  "futures",
  "parking_lot",
  "polling",
+ "serial_test",
  "socket2",
  "thiserror",
  "tokio",
@@ -2689,7 +2795,7 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 [[package]]
 name = "polling"
 version = "3.3.2"
-source = "git+https://github.com/smol-rs/polling?rev=62430fd56e668559d08ca7071ab13a0e116ba515#62430fd56e668559d08ca7071ab13a0e116ba515"
+source = "git+https://github.com/irvingoujAtDevolution/polling.git#159ab1b540b75a86f7735bcb57449b4b766e49cf"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
@@ -3492,6 +3598,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "serial_test"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953ad9342b3aaca7cb43c45c097dd008d4907070394bd0751a0aa8817e5a018d"
+dependencies = [
+ "dashmap",
+ "futures",
+ "lazy_static",
+ "log",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b93fb4adc70021ac1b47f7d45e8cc4169baaa7ea58483bc5b721d19a26202212"
+dependencies = [
+ "proc-macro2 1.0.78",
+ "quote 1.0.35",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3664,6 +3795,12 @@ dependencies = [
  "winreg 0.51.0",
  "zeroize",
 ]
+
+[[package]]
+name = "strsim"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "subtle"
