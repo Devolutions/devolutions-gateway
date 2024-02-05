@@ -11,7 +11,7 @@ crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 dashmap = "5.5.3"
 futures = "0.3.30"
 parking_lot = "0.12.1"
-polling = { git = "https://github.com/smol-rs/polling", rev = "62430fd56e668559d08ca7071ab13a0e116ba515" }
+polling = { git = "https://github.com/irvingoujAtDevolution/polling.git", branch = "fix-linux-tcp-fail" }
 socket2 = { version = "0.5.5", features = ["all"] }
 thiserror = "1.0.56"
 tokio-stream = "0.1.14"

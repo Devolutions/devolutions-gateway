@@ -223,14 +223,22 @@ impl<'a> Future for ConnectFuture<'a> {
         for event in events {
             tracing::trace!(?event, "event found");
             if event
-                .is_connect_failed()
+                .is_connect_failed() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
                 .expect("your platform does not support connect failed")
-                || event.is_interrupt()
             {
                 return std::task::Poll::Ready(Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "connection failed",
                 )));
+            }
+
+            // This is a special case, this happens when using epoll to wait for a unconnected TCP socket.
+            // We clearly needs to call connect function, so we break the loop and call connect.
+            #[cfg(target_os = "linux")]
+            if event.is_out_with_hup() {
+                tracing::trace!("out and hup");
+                self.runtime.remove_events_with_id_from_history(self.id);
+                break;
             }
 
             if event.writable || event.readable {

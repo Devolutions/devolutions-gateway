@@ -116,6 +116,9 @@ impl Socket2Runtime {
 
                     for event in events.iter() {
                         tracing::trace!(?event, "event happened");
+                        // This is different from just insert, as the event wrapper will have the same hash, it actually does not replace the old one.
+                        // by removing the old one first, we can make sure the new one is inserted.
+                        event_history.remove(&event.into());
                         event_history.insert(event.into());
                     }
                     events.clear();
