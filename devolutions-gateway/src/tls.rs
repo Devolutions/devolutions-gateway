@@ -142,7 +142,7 @@ pub mod windows {
                 .server_name()
                 .context("server name missing from ClientHello")?;
 
-            if !crate::utils::wildcard_host_match(&self.subject_name, request_server_name) {
+            if !crate::utils::wildcard_host_match(&self.subject_name, &request_server_name) {
                 warn!(
                     request_server_name,
                     expected_server_name = self.subject_name,
