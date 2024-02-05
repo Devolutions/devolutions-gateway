@@ -256,10 +256,11 @@ impl<'a> Future for ConnectFuture<'a> {
         #[cfg(not(target_os = "linux"))]
         let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
 
+        let events_interested = [Event::readable(self.id), Event::writable(self.id), Event::all(self.id)];
         if in_progress {
             if let Err(e) = self
                 .runtime
-                .register(&self.socket, Event::writable(self.id), cx.waker().clone())
+                .register_events(&self.socket, &events_interested, cx.waker().clone())
             {
                 tracing::warn!(?self.socket, ?self.addr, "failed to register socket to poller, error: {}", e);
                 return std::task::Poll::Ready(Err(std::io::Error::new(

@@ -6,7 +6,8 @@ use std::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
-    task::Waker, time::Duration,
+    task::Waker,
+    time::Duration,
 };
 
 use anyhow::Context;
@@ -111,11 +112,6 @@ impl Socket2Runtime {
                         break;
                     };
 
-                    // yield the control back to check for registerred events
-                    if events.is_empty() {
-                        continue;
-                    }
-
                     for event in events.iter() {
                         tracing::trace!(?event, "event happened");
                         event_history.insert(event.into());
@@ -195,6 +191,25 @@ impl Socket2Runtime {
         self.register_sender
             .try_send(RegisterEvent::Register { event, waker })
             .with_context(|| "failed to send register event to register loop")
+    }
+
+    pub(crate) fn register_events(&self, socket: &Socket, events: &[Event], waker: Waker) -> anyhow::Result<()> {
+        if self.is_terminated.load(Ordering::Acquire) {
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+        }
+
+        for event in events {
+            tracing::trace!(?event, ?socket, "registering event");
+            self.poller.modify(socket, *event)?;
+            self.register_sender
+                .try_send(RegisterEvent::Register {
+                    event: *event,
+                    waker: waker.clone(),
+                })
+                .with_context(|| "failed to send register event to register loop")?;
+        }
+
+        Ok(())
     }
 
     pub(crate) fn unregister(&self, event: Event) -> anyhow::Result<()> {
