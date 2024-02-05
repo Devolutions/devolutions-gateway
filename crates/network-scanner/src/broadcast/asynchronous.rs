@@ -10,7 +10,7 @@ use network_scanner_net::runtime;
 use network_scanner_proto::icmp_v4;
 use socket2::SockAddr;
 
-use crate::{create_echo_request, Ok};
+use crate::create_echo_request;
 
 /// Broadcasts a ping to the given ip address
 /// caller need to make sure that the ip address is a broadcast address
@@ -37,7 +37,7 @@ pub async fn broadcast(
             .send_to(&packet.to_bytes(true), &SockAddr::from(SocketAddr::new(ip.into(), 0)))
             .await?;
         tokio::time::timeout(read_time_out, loop_receive(socket, sender)).await??;
-        Ok!()
+        anyhow::Ok(())
     });
 
     async fn loop_receive(

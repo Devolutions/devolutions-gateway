@@ -10,7 +10,7 @@ use network_scanner_net::{runtime::Socket2Runtime, socket::AsyncRawSocket};
 use network_scanner_proto::icmp_v4;
 use tokio::time::timeout;
 
-use crate::{create_echo_request, ip_utils::IpAddrRange, Ok};
+use crate::{create_echo_request, ip_utils::IpAddrRange};
 
 pub fn ping_range(
     runtime: Arc<Socket2Runtime>,
@@ -32,13 +32,13 @@ pub fn ping_range(
         let should_ping = should_ping.clone();
         let ping_future = async move {
             if !should_ping(ip) {
-                return Ok!();
+                return anyhow::Ok(());
             }
             tracing::trace!("pinging {}", ip);
             if let Ok(Ok(_)) = timeout(ping_wait_time, try_ping(addr.into(), socket)).await {
                 sender.send(ip).await?;
             }
-            Ok!()
+            anyhow::Ok(())
         };
 
         futures.push(ping_future);

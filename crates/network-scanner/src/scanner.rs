@@ -3,8 +3,6 @@ use crate::{
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
-    task_utils::{clone2, clone3, clone4, clone5},
-    Ok,
 };
 
 use serde::{Deserialize, Serialize};
@@ -65,8 +63,8 @@ impl NetworkScanner {
                     ip_cache.insert(ip, host);
                 }
 
-                let (runtime, ports, port_scan_timeout, port_sender, ip_cache) =
-                    clone5(&runtime, &ports, &port_scan_timeout, &port_sender, &ip_cache);
+                let (runtime, ports, port_sender, ip_cache) =
+                    (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
 
                 spawn(async move {
                     let mut port_scan_receiver = scan_ports(ip, &ports, runtime, port_scan_timeout).await?;
@@ -77,11 +75,11 @@ impl NetworkScanner {
                             port_sender.send((ip, dns, socket_addr.port())).await?;
                         }
                     }
-                    Ok!()
+                    anyhow::Ok(())
                 });
             }
 
-            Ok!()
+            anyhow::Ok(())
         });
 
         task_executor.run(move |context| async move {
@@ -95,18 +93,18 @@ impl NetworkScanner {
             } = context;
 
             for subnet in subnets {
-                let (runtime, ip_sender) = clone2(&runtime, &ip_sender);
+                let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
                 let handler = spawn(async move {
                     let mut receiver = broadcast(subnet.broadcast, broadcast_timeout, runtime).await?;
                     while let Some(ip) = receiver.recv().await {
                         ip_sender.send((ip.into(), None)).await?;
                     }
-                    Ok!()
+                    anyhow::Ok(())
                 });
 
                 handles_sender.send(handler)?;
             }
-            Ok!()
+            anyhow::Ok(())
         });
 
         task_executor.run(move |context| async move {
@@ -121,14 +119,13 @@ impl NetworkScanner {
             let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
 
             for ip_range in ip_ranges {
-                // let (runtime,netbios_timeout) = clone2(&runtime, &netbios_timeout);
-                let (runtime, netbios_timeout, ip_sender) = clone3(&runtime, &netbios_timeout, &ip_sender);
+                let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
                 let mut receiver = netbios_query_scan(runtime, ip_range, netbios_timeout, Duration::from_millis(20))?;
                 while let Some((ip, name)) = receiver.recv().await {
                     ip_sender.send((ip.into(), Some(name))).await?;
                 }
             }
-            Ok!()
+            anyhow::Ok(())
         });
 
         task_executor.run(move |context| async move {
@@ -147,8 +144,7 @@ impl NetworkScanner {
             let should_ping = move |ip: IpAddr| -> bool { !ip_cache.contains_key(&ip) };
 
             for ip_range in ip_ranges {
-                let (runtime, ping_interval, ping_timeout, ip_sender) =
-                    clone4(&runtime, &ping_interval, &ping_timeout, &ip_sender);
+                let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
                 let should_ping = should_ping.clone();
                 let mut receiver = ping_range(runtime, ip_range, ping_interval, ping_timeout, should_ping)?;
 
@@ -156,7 +152,7 @@ impl NetworkScanner {
                     ip_sender.send((ip, None)).await?;
                 }
             }
-            Ok!()
+            anyhow::Ok(())
         });
 
         let TaskExecutionRunner {

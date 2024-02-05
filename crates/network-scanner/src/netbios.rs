@@ -9,7 +9,7 @@ use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
 use tokio::time::timeout;
 
-use crate::{assume_init, ip_utils::IpAddrRange, Ok, ScannerError};
+use crate::{assume_init, ip_utils::IpAddrRange, ScannerError};
 
 const MESSAGE: [u8; 50] = [
     0xA2, 0x48, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x43, 0x4b, 0x41, 0x41, 0x41, 0x41,
@@ -37,7 +37,7 @@ pub fn netbios_query_scan(
             netbios_query_one(ip, socket, sender, single_query_duration);
             tokio::time::sleep(netbios_scan_interval).await;
         }
-        Ok!()
+        anyhow::Ok(())
     });
 
     Ok(receiver)
