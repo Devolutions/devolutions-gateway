@@ -5,12 +5,14 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 anyhow = "1.0.79"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+dashmap = "5.5.3"
 futures = "0.3.30"
 parking_lot = "0.12.1"
-polling = { git = "https://github.com/smol-rs/polling", rev = "62430fd56e668559d08ca7071ab13a0e116ba515" }
+polling = {git = "https://github.com/irvingoujAtDevolution/polling.git"}
 socket2 = { version = "0.5.5", features = ["all"] }
 thiserror = "1.0.56"
 tokio-stream = "0.1.14"
@@ -18,6 +20,7 @@ tracing = "0.1.40"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
+serial_test = "3.0.0"
 tokio = { version = "1.35.1", features = [
     "rt",
     "sync",
