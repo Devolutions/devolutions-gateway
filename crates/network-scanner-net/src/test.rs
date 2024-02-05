@@ -15,7 +15,6 @@ use tokio::{
 use crate::socket::AsyncRawSocket;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "TODO"]
 async fn multiple_udp() -> anyhow::Result<()> {
     let addr = local_udp_server()?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await; // wait for the other socket to start
@@ -60,7 +59,6 @@ async fn multiple_udp() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "TODO"]
 async fn test_connectivity() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
@@ -79,7 +77,6 @@ async fn test_connectivity() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-#[ignore = "TODO"]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, handle) = local_tcp_server(kill_server.clone()).await?;
@@ -129,7 +126,6 @@ async fn multiple_tcp() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "TODO"]
 async fn work_with_tokio_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
     let (addr, tcp_handle) = local_tcp_server(kill_server.clone()).await?;
@@ -179,10 +175,6 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub async fn drop_runtime() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::SubscriberBuilder::default()
-        .with_max_level(tracing::Level::TRACE)
-        .with_thread_names(true)
-        .init();
     {
         let async_runtime = crate::runtime::Socket2Runtime::new(None)?;
         {

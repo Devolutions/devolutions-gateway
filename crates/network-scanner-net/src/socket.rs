@@ -220,7 +220,6 @@ impl<'a> Future for ConnectFuture<'a> {
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         let events = self.runtime.check_event_with_id(self.id);
-        tracing::trace!(?events, "events found");
         for event in events {
             tracing::trace!(?event, "event found");
             if event

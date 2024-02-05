@@ -119,7 +119,6 @@ impl Socket2Runtime {
                         event_history.insert(event.into());
                     }
                     events.clear();
-
                     while let Ok(event) = register_receiver.try_recv() {
                         match event {
                             RegisterEvent::Register { event, waker } => {
