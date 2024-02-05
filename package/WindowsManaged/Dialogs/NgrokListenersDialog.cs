@@ -4,6 +4,7 @@ using DevolutionsGateway.Properties;
 using System;
 using DevolutionsGateway.Actions;
 using WixSharp;
+using System.Windows.Forms;
 
 namespace WixSharpSetup.Dialogs;
 
@@ -14,6 +15,17 @@ public partial class NgrokListenersDialog : GatewayDialog
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
+
+        this.lnkAuthToken.Text = "Provide your authentication token";
+        this.lnkAuthToken.LinkArea = new LinkArea(13, 20);
+
+        this.lnkDomain.Text = "The domain for web client access";
+        this.lnkDomain.LinkArea = new LinkArea(4, 6);
+
+        this.lnkRemoteAddr.Text = "The TCP address for native client access";
+        this.lnkRemoteAddr.LinkArea = new LinkArea(4, 11);
+
+        this.cmbNativeClient.DataSource = new[] {"Now", "Later"};
     }
 
     public override bool DoValidate()
@@ -31,7 +43,7 @@ public partial class NgrokListenersDialog : GatewayDialog
             return false;
         }
 
-        if (this.chkEnableTcp.Checked)
+        if (this.cmbNativeClient.SelectedIndex == 0)
         {
             if (string.IsNullOrWhiteSpace(this.txtRemoteAddress.Text.Trim()))
             {
@@ -56,7 +68,7 @@ public partial class NgrokListenersDialog : GatewayDialog
 
         this.txtAuthToken.Text = properties.NgrokAuthToken;
         this.txtDomain.Text = properties.NgrokHttpDomain;
-        this.chkEnableTcp.Checked = properties.NgrokEnableTcp;
+        this.cmbNativeClient.SelectedIndex = properties.NgrokEnableTcp ? 0 : 1;
         this.txtRemoteAddress.Text = properties.NgrokRemoteAddress;
 
         this.SetControlStates();
@@ -71,7 +83,7 @@ public partial class NgrokListenersDialog : GatewayDialog
             NgrokRemoteAddress = this.txtRemoteAddress.Text.Trim(),
         };
 
-        properties.NgrokEnableTcp = this.chkEnableTcp.Checked || !properties.ConfigureWebApp;
+        properties.NgrokEnableTcp = this.cmbNativeClient.SelectedIndex == 0 || !properties.ConfigureWebApp;
 
         return true;
     }
@@ -100,18 +112,18 @@ public partial class NgrokListenersDialog : GatewayDialog
     {
         if (new GatewayProperties(this.Session()).ConfigureWebApp)
         {
-            this.chkEnableTcp.Enabled = true;
+            this.cmbNativeClient.Enabled = true;
         }
         else
         {
-            this.chkEnableTcp.Enabled = false;
-            this.chkEnableTcp.Checked = true;
+            this.cmbNativeClient.Enabled = false;
+            this.cmbNativeClient.SelectedIndex = 0;
         }
         
-        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled = this.chkEnableTcp.Checked;
+        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled = this.lnkRemoteAddr.Enabled = this.cmbNativeClient.SelectedIndex == 0;
     }
-
-    private void chkEnableTcp_CheckedChanged(object sender, EventArgs e)
+    
+    private void cmbNativeClient_SelectedIndexChanged(object sender, EventArgs e)
     {
         this.SetControlStates();
     }

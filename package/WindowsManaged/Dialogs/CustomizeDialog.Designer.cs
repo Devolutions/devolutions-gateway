@@ -36,17 +36,16 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.label3 = new System.Windows.Forms.Label();
-            this.rbConfigNow = new System.Windows.Forms.RadioButton();
-            this.rbConfigLater = new System.Windows.Forms.RadioButton();
-            this.groupBox1 = new System.Windows.Forms.GroupBox();
+            this.gbConfigure = new System.Windows.Forms.GroupBox();
             this.tableLayoutPanel3 = new System.Windows.Forms.TableLayoutPanel();
             this.chkWebApp = new System.Windows.Forms.CheckBox();
             this.chkGenerateCertificate = new System.Windows.Forms.CheckBox();
             this.chkGenerateKeyPair = new System.Windows.Forms.CheckBox();
             this.chkConfigureNgrok = new System.Windows.Forms.CheckBox();
-            this.pictureBox1 = new System.Windows.Forms.PictureBox();
             this.lnkNgrok = new System.Windows.Forms.LinkLabel();
+            this.cmbConfigure = new System.Windows.Forms.ComboBox();
+            this.label3 = new System.Windows.Forms.Label();
+            this.lblConfigureDescription = new System.Windows.Forms.Label();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -58,13 +57,11 @@ namespace WixSharpSetup.Dialogs
             this.next = new System.Windows.Forms.Button();
             this.cancel = new System.Windows.Forms.Button();
             this.border1 = new System.Windows.Forms.Panel();
-            this.toolTip1 = new System.Windows.Forms.ToolTip(this.components);
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
             this.tableLayoutPanel2.SuspendLayout();
-            this.groupBox1.SuspendLayout();
+            this.gbConfigure.SuspendLayout();
             this.tableLayoutPanel3.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -94,72 +91,39 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(494, 254);
-            this.middlePanel.TabIndex = 16;
+            this.middlePanel.TabIndex = 0;
             // 
             // tableLayoutPanel2
             // 
-            this.tableLayoutPanel2.ColumnCount = 1;
+            this.tableLayoutPanel2.ColumnCount = 2;
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.tableLayoutPanel2.Controls.Add(this.gbConfigure, 0, 2);
+            this.tableLayoutPanel2.Controls.Add(this.cmbConfigure, 1, 0);
             this.tableLayoutPanel2.Controls.Add(this.label3, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.rbConfigNow, 0, 2);
-            this.tableLayoutPanel2.Controls.Add(this.rbConfigLater, 0, 1);
-            this.tableLayoutPanel2.Controls.Add(this.groupBox1, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.lblConfigureDescription, 0, 1);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(12, 7);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.RowCount = 4;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.Size = new System.Drawing.Size(470, 241);
             this.tableLayoutPanel2.TabIndex = 14;
             // 
-            // label3
+            // gbConfigure
             // 
-            this.label3.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.label3.BackColor = System.Drawing.Color.Transparent;
-            this.label3.Location = new System.Drawing.Point(3, 0);
-            this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(464, 43);
-            this.label3.TabIndex = 11;
-            this.label3.Text = "[CustomInstallDlgInfoLabel]";
-            // 
-            // rbConfigNow
-            // 
-            this.rbConfigNow.AutoSize = true;
-            this.rbConfigNow.Location = new System.Drawing.Point(3, 69);
-            this.rbConfigNow.Name = "rbConfigNow";
-            this.rbConfigNow.Size = new System.Drawing.Size(202, 17);
-            this.rbConfigNow.TabIndex = 1;
-            this.rbConfigNow.Text = "[CustomInstallDlgConfigureNowLabel]";
-            this.rbConfigNow.UseVisualStyleBackColor = true;
-            this.rbConfigNow.CheckedChanged += new System.EventHandler(this.rbConfigNow_CheckedChanged);
-            // 
-            // rbConfigLater
-            // 
-            this.rbConfigLater.AutoSize = true;
-            this.rbConfigLater.Checked = true;
-            this.rbConfigLater.Location = new System.Drawing.Point(3, 46);
-            this.rbConfigLater.Name = "rbConfigLater";
-            this.rbConfigLater.Size = new System.Drawing.Size(204, 17);
-            this.rbConfigLater.TabIndex = 0;
-            this.rbConfigLater.TabStop = true;
-            this.rbConfigLater.Text = "[CustomInstallDlgConfigureLaterLabel]";
-            this.rbConfigLater.UseVisualStyleBackColor = true;
-            this.rbConfigLater.CheckedChanged += new System.EventHandler(this.rbConfigLater_CheckedChanged);
-            // 
-            // groupBox1
-            // 
-            this.groupBox1.Controls.Add(this.tableLayoutPanel3);
-            this.groupBox1.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.groupBox1.Location = new System.Drawing.Point(3, 99);
-            this.groupBox1.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
-            this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Size = new System.Drawing.Size(464, 139);
-            this.groupBox1.TabIndex = 12;
-            this.groupBox1.TabStop = false;
-            this.groupBox1.Text = "Configuration Options";
+            this.tableLayoutPanel2.SetColumnSpan(this.gbConfigure, 2);
+            this.gbConfigure.Controls.Add(this.tableLayoutPanel3);
+            this.gbConfigure.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.gbConfigure.Location = new System.Drawing.Point(3, 77);
+            this.gbConfigure.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
+            this.gbConfigure.Name = "gbConfigure";
+            this.gbConfigure.Size = new System.Drawing.Size(464, 165);
+            this.gbConfigure.TabIndex = 12;
+            this.gbConfigure.TabStop = false;
+            this.gbConfigure.Text = "Configuration Options";
             // 
             // tableLayoutPanel3
             // 
@@ -170,8 +134,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.Controls.Add(this.chkGenerateCertificate, 0, 3);
             this.tableLayoutPanel3.Controls.Add(this.chkGenerateKeyPair, 0, 4);
             this.tableLayoutPanel3.Controls.Add(this.chkConfigureNgrok, 0, 0);
-            this.tableLayoutPanel3.Controls.Add(this.pictureBox1, 1, 3);
-            this.tableLayoutPanel3.Controls.Add(this.lnkNgrok, 0, 1);
+            this.tableLayoutPanel3.Controls.Add(this.lnkNgrok, 1, 0);
             this.tableLayoutPanel3.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableLayoutPanel3.Location = new System.Drawing.Point(3, 16);
             this.tableLayoutPanel3.Name = "tableLayoutPanel3";
@@ -182,46 +145,49 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel3.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel3.Size = new System.Drawing.Size(458, 120);
+            this.tableLayoutPanel3.Size = new System.Drawing.Size(458, 146);
             this.tableLayoutPanel3.TabIndex = 0;
             // 
             // chkWebApp
             // 
             this.chkWebApp.AutoSize = true;
+            this.tableLayoutPanel3.SetColumnSpan(this.chkWebApp, 2);
             this.chkWebApp.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkWebApp.Enabled = false;
-            this.chkWebApp.Location = new System.Drawing.Point(10, 45);
+            this.chkWebApp.Location = new System.Drawing.Point(10, 26);
             this.chkWebApp.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
             this.chkWebApp.Name = "chkWebApp";
-            this.chkWebApp.Size = new System.Drawing.Size(203, 17);
-            this.chkWebApp.TabIndex = 12;
-            this.chkWebApp.Text = "Configure standalone web application";
+            this.chkWebApp.Size = new System.Drawing.Size(445, 17);
+            this.chkWebApp.TabIndex = 2;
+            this.chkWebApp.Text = "Enable the Gateway web interface";
             this.chkWebApp.UseVisualStyleBackColor = true;
             this.chkWebApp.CheckedChanged += new System.EventHandler(this.chkWebApp_CheckedChanged);
             // 
             // chkGenerateCertificate
             // 
             this.chkGenerateCertificate.AutoSize = true;
+            this.tableLayoutPanel3.SetColumnSpan(this.chkGenerateCertificate, 2);
             this.chkGenerateCertificate.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkGenerateCertificate.Enabled = false;
-            this.chkGenerateCertificate.Location = new System.Drawing.Point(30, 68);
+            this.chkGenerateCertificate.Location = new System.Drawing.Point(30, 49);
             this.chkGenerateCertificate.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
             this.chkGenerateCertificate.Name = "chkGenerateCertificate";
-            this.chkGenerateCertificate.Size = new System.Drawing.Size(183, 17);
-            this.chkGenerateCertificate.TabIndex = 13;
-            this.chkGenerateCertificate.Text = "Generate a self-signed certificate";
+            this.chkGenerateCertificate.Size = new System.Drawing.Size(425, 17);
+            this.chkGenerateCertificate.TabIndex = 3;
+            this.chkGenerateCertificate.Text = "Generate a self-signed HTTPS certificate";
             this.chkGenerateCertificate.UseVisualStyleBackColor = true;
             // 
             // chkGenerateKeyPair
             // 
             this.chkGenerateKeyPair.AutoSize = true;
+            this.tableLayoutPanel3.SetColumnSpan(this.chkGenerateKeyPair, 2);
             this.chkGenerateKeyPair.Dock = System.Windows.Forms.DockStyle.Fill;
             this.chkGenerateKeyPair.Enabled = false;
-            this.chkGenerateKeyPair.Location = new System.Drawing.Point(30, 91);
+            this.chkGenerateKeyPair.Location = new System.Drawing.Point(30, 72);
             this.chkGenerateKeyPair.Margin = new System.Windows.Forms.Padding(30, 3, 3, 3);
             this.chkGenerateKeyPair.Name = "chkGenerateKeyPair";
-            this.chkGenerateKeyPair.Size = new System.Drawing.Size(183, 17);
-            this.chkGenerateKeyPair.TabIndex = 14;
+            this.chkGenerateKeyPair.Size = new System.Drawing.Size(425, 17);
+            this.chkGenerateKeyPair.TabIndex = 4;
             this.chkGenerateKeyPair.Text = "Generate encryption keys";
             this.chkGenerateKeyPair.UseVisualStyleBackColor = true;
             // 
@@ -232,35 +198,59 @@ namespace WixSharpSetup.Dialogs
             this.chkConfigureNgrok.Location = new System.Drawing.Point(10, 3);
             this.chkConfigureNgrok.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
             this.chkConfigureNgrok.Name = "chkConfigureNgrok";
-            this.chkConfigureNgrok.Size = new System.Drawing.Size(203, 17);
-            this.chkConfigureNgrok.TabIndex = 15;
-            this.chkConfigureNgrok.Text = "Use ngrok";
+            this.chkConfigureNgrok.Size = new System.Drawing.Size(234, 17);
+            this.chkConfigureNgrok.TabIndex = 0;
+            this.chkConfigureNgrok.Text = "Enable access over the internet using ngrok";
             this.chkConfigureNgrok.UseVisualStyleBackColor = true;
             this.chkConfigureNgrok.CheckedChanged += new System.EventHandler(this.chkConfigureNgrok_CheckedChanged);
-            // 
-            // pictureBox1
-            // 
-            this.pictureBox1.Location = new System.Drawing.Point(219, 68);
-            this.pictureBox1.Name = "pictureBox1";
-            this.pictureBox1.Size = new System.Drawing.Size(16, 16);
-            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.StretchImage;
-            this.pictureBox1.TabIndex = 16;
-            this.pictureBox1.TabStop = false;
-            this.toolTip1.SetToolTip(this.pictureBox1, "Self-signed certificates are not trusted by default");
             // 
             // lnkNgrok
             // 
             this.lnkNgrok.AutoSize = true;
             this.lnkNgrok.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lnkNgrok.Location = new System.Drawing.Point(10, 26);
+            this.lnkNgrok.Location = new System.Drawing.Point(257, 3);
             this.lnkNgrok.Margin = new System.Windows.Forms.Padding(10, 3, 3, 3);
             this.lnkNgrok.Name = "lnkNgrok";
-            this.lnkNgrok.Size = new System.Drawing.Size(203, 13);
-            this.lnkNgrok.TabIndex = 17;
+            this.lnkNgrok.Size = new System.Drawing.Size(198, 17);
+            this.lnkNgrok.TabIndex = 1;
             this.lnkNgrok.TabStop = true;
             this.lnkNgrok.Text = "Visit ngrok.com";
-            this.lnkNgrok.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lnkNgrok.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             this.lnkNgrok.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.lnkNgrok_LinkClicked);
+            // 
+            // cmbConfigure
+            // 
+            this.cmbConfigure.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.cmbConfigure.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbConfigure.FormattingEnabled = true;
+            this.cmbConfigure.Location = new System.Drawing.Point(176, 3);
+            this.cmbConfigure.Name = "cmbConfigure";
+            this.cmbConfigure.Size = new System.Drawing.Size(291, 21);
+            this.cmbConfigure.TabIndex = 0;
+            this.cmbConfigure.SelectedIndexChanged += new System.EventHandler(this.cmbConfigure_SelectedIndexChanged);
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.label3.Location = new System.Drawing.Point(3, 0);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(167, 27);
+            this.label3.TabIndex = 14;
+            this.label3.Text = "Configure the Gateway installation";
+            this.label3.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // lblConfigureDescription
+            // 
+            this.tableLayoutPanel2.SetColumnSpan(this.lblConfigureDescription, 2);
+            this.lblConfigureDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblConfigureDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblConfigureDescription.Location = new System.Drawing.Point(3, 30);
+            this.lblConfigureDescription.Margin = new System.Windows.Forms.Padding(3, 3, 3, 0);
+            this.lblConfigureDescription.Name = "lblConfigureDescription";
+            this.lblConfigureDescription.Size = new System.Drawing.Size(464, 37);
+            this.lblConfigureDescription.TabIndex = 15;
+            this.lblConfigureDescription.Text = "label4";
             // 
             // topBorder
             // 
@@ -357,7 +347,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -370,7 +360,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(77, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[WixUINext]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);
@@ -397,12 +387,6 @@ namespace WixSharpSetup.Dialogs
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
             // 
-            // toolTip1
-            // 
-            this.toolTip1.IsBalloon = true;
-            this.toolTip1.ToolTipIcon = System.Windows.Forms.ToolTipIcon.Info;
-            this.toolTip1.ToolTipTitle = "Self-Signed Certificate";
-            // 
             // CustomizeDialog
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -418,10 +402,9 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.ResumeLayout(false);
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
-            this.groupBox1.ResumeLayout(false);
+            this.gbConfigure.ResumeLayout(false);
             this.tableLayoutPanel3.ResumeLayout(false);
             this.tableLayoutPanel3.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -441,7 +424,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Panel bottomPanel;
-        private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Panel border1;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
         private System.Windows.Forms.Button back;
@@ -449,17 +431,16 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Button cancel;
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
-        private System.Windows.Forms.RadioButton rbConfigNow;
-        private System.Windows.Forms.RadioButton rbConfigLater;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
         private System.Windows.Forms.CheckBox chkWebApp;
-        private System.Windows.Forms.GroupBox groupBox1;
+        private System.Windows.Forms.GroupBox gbConfigure;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel3;
         private System.Windows.Forms.CheckBox chkGenerateCertificate;
         private System.Windows.Forms.CheckBox chkGenerateKeyPair;
         private System.Windows.Forms.CheckBox chkConfigureNgrok;
-        private System.Windows.Forms.PictureBox pictureBox1;
-        private System.Windows.Forms.ToolTip toolTip1;
         private System.Windows.Forms.LinkLabel lnkNgrok;
+        private System.Windows.Forms.ComboBox cmbConfigure;
+        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.Label lblConfigureDescription;
     }
 }

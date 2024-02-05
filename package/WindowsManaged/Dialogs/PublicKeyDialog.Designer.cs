@@ -36,6 +36,7 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
+            this.lblKeysDescription = new System.Windows.Forms.Label();
             this.butBrowsePrivateKeyFile = new System.Windows.Forms.Button();
             this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
             this.lblPrivateKeyFile = new System.Windows.Forms.Label();
@@ -83,7 +84,7 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(494, 261);
-            this.middlePanel.TabIndex = 16;
+            this.middlePanel.TabIndex = 0;
             // 
             // tableLayoutPanel2
             // 
@@ -91,31 +92,45 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 150F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.Controls.Add(this.lblKeysDescription, 0, 0);
             this.tableLayoutPanel2.Controls.Add(this.butBrowsePrivateKeyFile, 2, 3);
             this.tableLayoutPanel2.Controls.Add(this.txtPrivateKeyFile, 1, 3);
             this.tableLayoutPanel2.Controls.Add(this.lblPrivateKeyFile, 0, 3);
-            this.tableLayoutPanel2.Controls.Add(this.lblPrivateKeyDescription, 0, 2);
-            this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyDescription, 0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.lblPrivateKeyDescription, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyDescription, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.butBrowsePublicKeyFile, 2, 1);
             this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyFile, 0, 1);
             this.tableLayoutPanel2.Controls.Add(this.txtPublicKeyFile, 1, 1);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 5;
+            this.tableLayoutPanel2.RowCount = 6;
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 130);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 192);
             this.tableLayoutPanel2.TabIndex = 2;
+            // 
+            // lblKeysDescription
+            // 
+            this.tableLayoutPanel2.SetColumnSpan(this.lblKeysDescription, 3);
+            this.lblKeysDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblKeysDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblKeysDescription.Location = new System.Drawing.Point(3, 0);
+            this.lblKeysDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblKeysDescription.Name = "lblKeysDescription";
+            this.lblKeysDescription.Size = new System.Drawing.Size(443, 35);
+            this.lblKeysDescription.TabIndex = 15;
+            this.lblKeysDescription.Text = "Provide an encryption key pair for token verification.";
             // 
             // butBrowsePrivateKeyFile
             // 
-            this.butBrowsePrivateKeyFile.Location = new System.Drawing.Point(419, 77);
+            this.butBrowsePrivateKeyFile.Location = new System.Drawing.Point(419, 111);
             this.butBrowsePrivateKeyFile.Name = "butBrowsePrivateKeyFile";
             this.butBrowsePrivateKeyFile.Size = new System.Drawing.Size(27, 20);
-            this.butBrowsePrivateKeyFile.TabIndex = 5;
+            this.butBrowsePrivateKeyFile.TabIndex = 3;
             this.butBrowsePrivateKeyFile.Text = "...";
             this.butBrowsePrivateKeyFile.UseVisualStyleBackColor = true;
             this.butBrowsePrivateKeyFile.Click += new System.EventHandler(this.butBrowsePrivateKeyFile_Click);
@@ -123,17 +138,17 @@ namespace WixSharpSetup.Dialogs
             // txtPrivateKeyFile
             // 
             this.txtPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtPrivateKeyFile.Location = new System.Drawing.Point(153, 77);
+            this.txtPrivateKeyFile.Location = new System.Drawing.Point(153, 111);
             this.txtPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtPrivateKeyFile.Name = "txtPrivateKeyFile";
             this.txtPrivateKeyFile.Size = new System.Drawing.Size(260, 20);
-            this.txtPrivateKeyFile.TabIndex = 4;
+            this.txtPrivateKeyFile.TabIndex = 2;
             // 
             // lblPrivateKeyFile
             // 
             this.lblPrivateKeyFile.AutoSize = true;
             this.lblPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblPrivateKeyFile.Location = new System.Drawing.Point(3, 74);
+            this.lblPrivateKeyFile.Location = new System.Drawing.Point(3, 108);
             this.lblPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblPrivateKeyFile.Name = "lblPrivateKeyFile";
             this.lblPrivateKeyFile.Size = new System.Drawing.Size(144, 23);
@@ -143,30 +158,32 @@ namespace WixSharpSetup.Dialogs
             // 
             // lblPrivateKeyDescription
             // 
-            this.lblPrivateKeyDescription.AutoSize = true;
             this.tableLayoutPanel2.SetColumnSpan(this.lblPrivateKeyDescription, 3);
-            this.lblPrivateKeyDescription.Location = new System.Drawing.Point(3, 56);
-            this.lblPrivateKeyDescription.Margin = new System.Windows.Forms.Padding(3, 10, 3, 5);
+            this.lblPrivateKeyDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPrivateKeyDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblPrivateKeyDescription.Location = new System.Drawing.Point(3, 139);
+            this.lblPrivateKeyDescription.Margin = new System.Windows.Forms.Padding(3);
             this.lblPrivateKeyDescription.Name = "lblPrivateKeyDescription";
-            this.lblPrivateKeyDescription.Size = new System.Drawing.Size(412, 13);
+            this.lblPrivateKeyDescription.Size = new System.Drawing.Size(443, 34);
             this.lblPrivateKeyDescription.TabIndex = 2;
             this.lblPrivateKeyDescription.Text = "The private key is used to generate session tokens for the standalone web applica" +
     "tion";
             // 
             // lblPublicKeyDescription
             // 
-            this.lblPublicKeyDescription.AutoSize = true;
             this.tableLayoutPanel2.SetColumnSpan(this.lblPublicKeyDescription, 3);
-            this.lblPublicKeyDescription.Location = new System.Drawing.Point(3, 0);
-            this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblPublicKeyDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPublicKeyDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblPublicKeyDescription.Location = new System.Drawing.Point(3, 71);
+            this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3);
             this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
-            this.lblPublicKeyDescription.Size = new System.Drawing.Size(317, 13);
+            this.lblPublicKeyDescription.Size = new System.Drawing.Size(443, 34);
             this.lblPublicKeyDescription.TabIndex = 0;
             this.lblPublicKeyDescription.Text = "The public key is used to verify tokens without specific restrictions";
             // 
             // butBrowsePublicKeyFile
             // 
-            this.butBrowsePublicKeyFile.Location = new System.Drawing.Point(419, 21);
+            this.butBrowsePublicKeyFile.Location = new System.Drawing.Point(419, 43);
             this.butBrowsePublicKeyFile.Name = "butBrowsePublicKeyFile";
             this.butBrowsePublicKeyFile.Size = new System.Drawing.Size(27, 20);
             this.butBrowsePublicKeyFile.TabIndex = 1;
@@ -178,7 +195,7 @@ namespace WixSharpSetup.Dialogs
             // 
             this.lblPublicKeyFile.AutoSize = true;
             this.lblPublicKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblPublicKeyFile.Location = new System.Drawing.Point(3, 18);
+            this.lblPublicKeyFile.Location = new System.Drawing.Point(3, 40);
             this.lblPublicKeyFile.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblPublicKeyFile.Name = "lblPublicKeyFile";
             this.lblPublicKeyFile.Size = new System.Drawing.Size(144, 23);
@@ -189,7 +206,7 @@ namespace WixSharpSetup.Dialogs
             // txtPublicKeyFile
             // 
             this.txtPublicKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtPublicKeyFile.Location = new System.Drawing.Point(153, 21);
+            this.txtPublicKeyFile.Location = new System.Drawing.Point(153, 43);
             this.txtPublicKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtPublicKeyFile.Name = "txtPublicKeyFile";
             this.txtPublicKeyFile.Size = new System.Drawing.Size(260, 20);
@@ -290,7 +307,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -303,7 +320,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(77, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[WixUINext]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);
@@ -380,5 +397,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label lblPrivateKeyDescription;
         private System.Windows.Forms.Label lblPublicKeyDescription;
         private System.Windows.Forms.Label lblPublicKeyFile;
+        private System.Windows.Forms.Label lblKeysDescription;
     }
 }

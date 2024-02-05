@@ -130,6 +130,10 @@
 	<String Id="ServiceDlgStartManualLabel">Manually</String>
 	<String Id="ServiceDlgStartAutoLabel">Automatically</String>
 
+	<String Id="WebAppDlg_Title">[ProductName] Setup</String>
+	<String Id="WebAppDlgTitle">{\MyWixUI_Font_Title}Web Application Options</String>
+	<String Id="WebAppDlgDescription">{\MyWixUI_Font_Description}Configuration for the embedded web application.</String>
+
 	<String Id="SummaryDlg_Title">[ProductName] Setup</String>
 	<String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Summary</String>
 	<String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Click Next to use this configuration or click Back to make changes.</String>

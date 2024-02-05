@@ -142,7 +142,11 @@
   <String Id="ServiceDlgStartManualLabel">Manuel</String>
   <String Id="ServiceDlgStartAutoLabel">Automatique</String>
 
-  <String Id="SummaryDlg_Title">Installation de [ProductName]</String>
+   <String Id="WebAppDlg_Title">[ProductName] Setup</String>
+   <String Id="WebAppDlgTitle">{\MyWixUI_Font_Title}Web Application Options</String>
+   <String Id="WebAppDlgDescription">{\MyWixUI_Font_Description}Configuration for the embedded web application.</String>
+   
+   <String Id="SummaryDlg_Title">Installation de [ProductName]</String>
   <String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Résumé</String>
   <String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
   <String Id="SummaryDlgAccessUriLabel">URI d'accès:</String>

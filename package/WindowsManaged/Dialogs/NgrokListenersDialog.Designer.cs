@@ -36,16 +36,19 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
+            this.label6 = new System.Windows.Forms.Label();
+            this.lnkRemoteAddr = new System.Windows.Forms.LinkLabel();
+            this.label4 = new System.Windows.Forms.Label();
+            this.lnkDomain = new System.Windows.Forms.LinkLabel();
             this.label11 = new System.Windows.Forms.Label();
             this.lblRemoteAddress = new System.Windows.Forms.Label();
-            this.label7 = new System.Windows.Forms.Label();
             this.txtAuthToken = new System.Windows.Forms.TextBox();
             this.label5 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.txtDomain = new System.Windows.Forms.TextBox();
-            this.label4 = new System.Windows.Forms.Label();
             this.txtRemoteAddress = new System.Windows.Forms.TextBox();
-            this.chkEnableTcp = new System.Windows.Forms.CheckBox();
+            this.lnkAuthToken = new System.Windows.Forms.LinkLabel();
+            this.cmbNativeClient = new System.Windows.Forms.ComboBox();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -86,32 +89,34 @@ namespace WixSharpSetup.Dialogs
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.middlePanel.Controls.Add(this.tableLayoutPanel2);
-            this.middlePanel.Location = new System.Drawing.Point(22, 75);
+            this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
-            this.middlePanel.Size = new System.Drawing.Size(449, 234);
-            this.middlePanel.TabIndex = 16;
+            this.middlePanel.Size = new System.Drawing.Size(493, 261);
+            this.middlePanel.TabIndex = 0;
             // 
             // tableLayoutPanel2
             // 
-            this.tableLayoutPanel2.ColumnCount = 3;
+            this.tableLayoutPanel2.ColumnCount = 2;
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel2.Controls.Add(this.label11, 1, 10);
-            this.tableLayoutPanel2.Controls.Add(this.lblRemoteAddress, 0, 9);
-            this.tableLayoutPanel2.Controls.Add(this.label7, 0, 5);
-            this.tableLayoutPanel2.Controls.Add(this.txtAuthToken, 1, 3);
-            this.tableLayoutPanel2.Controls.Add(this.label5, 0, 3);
-            this.tableLayoutPanel2.Controls.Add(this.label3, 0, 6);
-            this.tableLayoutPanel2.Controls.Add(this.txtDomain, 1, 6);
-            this.tableLayoutPanel2.Controls.Add(this.label4, 0, 7);
-            this.tableLayoutPanel2.Controls.Add(this.txtRemoteAddress, 1, 9);
-            this.tableLayoutPanel2.Controls.Add(this.chkEnableTcp, 0, 8);
-            this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 20F));
+            this.tableLayoutPanel2.Controls.Add(this.label6, 0, 5);
+            this.tableLayoutPanel2.Controls.Add(this.lnkRemoteAddr, 1, 8);
+            this.tableLayoutPanel2.Controls.Add(this.label4, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.lnkDomain, 1, 4);
+            this.tableLayoutPanel2.Controls.Add(this.label11, 0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.lblRemoteAddress, 0, 7);
+            this.tableLayoutPanel2.Controls.Add(this.txtAuthToken, 1, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label5, 0, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label3, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.txtDomain, 1, 3);
+            this.tableLayoutPanel2.Controls.Add(this.txtRemoteAddress, 1, 7);
+            this.tableLayoutPanel2.Controls.Add(this.lnkAuthToken, 1, 2);
+            this.tableLayoutPanel2.Controls.Add(this.cmbNativeClient, 1, 6);
+            this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.RowCount = 11;
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
@@ -122,27 +127,79 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
             this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 234);
             this.tableLayoutPanel2.TabIndex = 17;
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.tableLayoutPanel2.SetColumnSpan(this.label6, 2);
+            this.label6.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.label6.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.label6.Location = new System.Drawing.Point(3, 135);
+            this.label6.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(443, 13);
+            this.label6.TabIndex = 26;
+            this.label6.Text = "Native Client Access";
+            this.label6.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
+            // lnkRemoteAddr
+            // 
+            this.lnkRemoteAddr.AutoSize = true;
+            this.lnkRemoteAddr.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lnkRemoteAddr.Location = new System.Drawing.Point(94, 209);
+            this.lnkRemoteAddr.Margin = new System.Windows.Forms.Padding(3);
+            this.lnkRemoteAddr.Name = "lnkRemoteAddr";
+            this.lnkRemoteAddr.Size = new System.Drawing.Size(352, 13);
+            this.lnkRemoteAddr.TabIndex = 25;
+            this.lnkRemoteAddr.TabStop = true;
+            this.lnkRemoteAddr.Text = "linkLabel1";
+            // 
+            // label4
+            // 
+            this.label4.AutoSize = true;
+            this.label4.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.label4.Location = new System.Drawing.Point(3, 156);
+            this.label4.Margin = new System.Windows.Forms.Padding(3);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(85, 21);
+            this.label4.TabIndex = 23;
+            this.label4.Text = "Configure";
+            this.label4.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // lnkDomain
+            // 
+            this.lnkDomain.AutoSize = true;
+            this.lnkDomain.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lnkDomain.Location = new System.Drawing.Point(94, 114);
+            this.lnkDomain.Margin = new System.Windows.Forms.Padding(3);
+            this.lnkDomain.Name = "lnkDomain";
+            this.lnkDomain.Size = new System.Drawing.Size(352, 13);
+            this.lnkDomain.TabIndex = 22;
+            this.lnkDomain.TabStop = true;
+            this.lnkDomain.Text = "linkLabel1";
             // 
             // label11
             // 
             this.label11.AutoSize = true;
-            this.label11.ForeColor = System.Drawing.Color.Blue;
-            this.label11.Location = new System.Drawing.Point(94, 163);
-            this.label11.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
+            this.tableLayoutPanel2.SetColumnSpan(this.label11, 2);
+            this.label11.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.label11.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.label11.Location = new System.Drawing.Point(3, 3);
+            this.label11.Margin = new System.Windows.Forms.Padding(3);
             this.label11.Name = "label11";
-            this.label11.Size = new System.Drawing.Size(196, 13);
+            this.label11.Size = new System.Drawing.Size(443, 34);
             this.label11.TabIndex = 19;
-            this.label11.Text = "Listeners allow a default 0.0.0.0/0 CIDR";
+            this.label11.Text = "Use ngrok for simplified remote access from the Internet. Gateway listeners allow" +
+    " access from any IP address by default.";
             // 
             // lblRemoteAddress
             // 
             this.lblRemoteAddress.AutoSize = true;
             this.lblRemoteAddress.Dock = System.Windows.Forms.DockStyle.Fill;
             this.lblRemoteAddress.Enabled = false;
-            this.lblRemoteAddress.Location = new System.Drawing.Point(3, 130);
+            this.lblRemoteAddress.Location = new System.Drawing.Point(3, 183);
             this.lblRemoteAddress.Margin = new System.Windows.Forms.Padding(3);
             this.lblRemoteAddress.Name = "lblRemoteAddress";
             this.lblRemoteAddress.Size = new System.Drawing.Size(85, 20);
@@ -150,31 +207,19 @@ namespace WixSharpSetup.Dialogs
             this.lblRemoteAddress.Text = "Remote Address";
             this.lblRemoteAddress.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
-            // label7
-            // 
-            this.label7.AutoSize = true;
-            this.tableLayoutPanel2.SetColumnSpan(this.label7, 3);
-            this.label7.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label7.Location = new System.Drawing.Point(3, 36);
-            this.label7.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
-            this.label7.Name = "label7";
-            this.label7.Size = new System.Drawing.Size(114, 13);
-            this.label7.TabIndex = 12;
-            this.label7.Text = "Web Client Access";
-            // 
             // txtAuthToken
             // 
             this.txtAuthToken.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtAuthToken.Location = new System.Drawing.Point(94, 3);
+            this.txtAuthToken.Location = new System.Drawing.Point(94, 43);
             this.txtAuthToken.Name = "txtAuthToken";
             this.txtAuthToken.Size = new System.Drawing.Size(352, 20);
-            this.txtAuthToken.TabIndex = 9;
+            this.txtAuthToken.TabIndex = 0;
             // 
             // label5
             // 
             this.label5.AutoSize = true;
             this.label5.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label5.Location = new System.Drawing.Point(3, 3);
+            this.label5.Location = new System.Drawing.Point(3, 43);
             this.label5.Margin = new System.Windows.Forms.Padding(3);
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(85, 20);
@@ -186,7 +231,7 @@ namespace WixSharpSetup.Dialogs
             // 
             this.label3.AutoSize = true;
             this.label3.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.label3.Location = new System.Drawing.Point(3, 55);
+            this.label3.Location = new System.Drawing.Point(3, 88);
             this.label3.Margin = new System.Windows.Forms.Padding(3);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(85, 20);
@@ -197,44 +242,42 @@ namespace WixSharpSetup.Dialogs
             // txtDomain
             // 
             this.txtDomain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtDomain.Location = new System.Drawing.Point(94, 55);
+            this.txtDomain.Location = new System.Drawing.Point(94, 88);
             this.txtDomain.Name = "txtDomain";
             this.txtDomain.Size = new System.Drawing.Size(352, 20);
             this.txtDomain.TabIndex = 1;
-            // 
-            // label4
-            // 
-            this.label4.AutoSize = true;
-            this.tableLayoutPanel2.SetColumnSpan(this.label4, 3);
-            this.label4.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.label4.Location = new System.Drawing.Point(3, 88);
-            this.label4.Margin = new System.Windows.Forms.Padding(3, 10, 3, 3);
-            this.label4.Name = "label4";
-            this.label4.Size = new System.Drawing.Size(125, 13);
-            this.label4.TabIndex = 7;
-            this.label4.Text = "Native Client Access";
             // 
             // txtRemoteAddress
             // 
             this.txtRemoteAddress.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtRemoteAddress.Enabled = false;
-            this.txtRemoteAddress.Location = new System.Drawing.Point(94, 130);
+            this.txtRemoteAddress.Location = new System.Drawing.Point(94, 183);
             this.txtRemoteAddress.Name = "txtRemoteAddress";
             this.txtRemoteAddress.Size = new System.Drawing.Size(352, 20);
-            this.txtRemoteAddress.TabIndex = 4;
+            this.txtRemoteAddress.TabIndex = 3;
             // 
-            // chkEnableTcp
+            // lnkAuthToken
             // 
-            this.chkEnableTcp.AutoSize = true;
-            this.tableLayoutPanel2.SetColumnSpan(this.chkEnableTcp, 2);
-            this.chkEnableTcp.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.chkEnableTcp.Location = new System.Drawing.Point(3, 107);
-            this.chkEnableTcp.Name = "chkEnableTcp";
-            this.chkEnableTcp.Size = new System.Drawing.Size(443, 17);
-            this.chkEnableTcp.TabIndex = 20;
-            this.chkEnableTcp.Text = "Enable native client access";
-            this.chkEnableTcp.UseVisualStyleBackColor = true;
-            this.chkEnableTcp.CheckedChanged += new System.EventHandler(this.chkEnableTcp_CheckedChanged);
+            this.lnkAuthToken.AutoSize = true;
+            this.lnkAuthToken.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lnkAuthToken.Location = new System.Drawing.Point(94, 69);
+            this.lnkAuthToken.Margin = new System.Windows.Forms.Padding(3);
+            this.lnkAuthToken.Name = "lnkAuthToken";
+            this.lnkAuthToken.Size = new System.Drawing.Size(352, 13);
+            this.lnkAuthToken.TabIndex = 21;
+            this.lnkAuthToken.TabStop = true;
+            this.lnkAuthToken.Text = "linkLabel1";
+            // 
+            // cmbNativeClient
+            // 
+            this.cmbNativeClient.Dock = System.Windows.Forms.DockStyle.Left;
+            this.cmbNativeClient.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbNativeClient.FormattingEnabled = true;
+            this.cmbNativeClient.Location = new System.Drawing.Point(94, 156);
+            this.cmbNativeClient.Name = "cmbNativeClient";
+            this.cmbNativeClient.Size = new System.Drawing.Size(121, 21);
+            this.cmbNativeClient.TabIndex = 2;
+            this.cmbNativeClient.SelectedIndexChanged += new System.EventHandler(this.cmbNativeClient_SelectedIndexChanged);
             // 
             // topBorder
             // 
@@ -331,7 +374,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -344,7 +387,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(77, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[WixUINext]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);
@@ -413,15 +456,18 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Panel topBorder;
         private System.Windows.Forms.Panel middlePanel;
         private System.Windows.Forms.TextBox txtDomain;
-        private System.Windows.Forms.Label label4;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.TextBox txtAuthToken;
         private System.Windows.Forms.TextBox txtRemoteAddress;
-        private System.Windows.Forms.Label label7;
         private System.Windows.Forms.Label lblRemoteAddress;
         private System.Windows.Forms.Label label11;
-        private System.Windows.Forms.CheckBox chkEnableTcp;
+        private System.Windows.Forms.LinkLabel lnkAuthToken;
+        private System.Windows.Forms.LinkLabel lnkDomain;
+        private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.ComboBox cmbNativeClient;
+        private System.Windows.Forms.LinkLabel lnkRemoteAddr;
+        private System.Windows.Forms.Label label6;
     }
 }
