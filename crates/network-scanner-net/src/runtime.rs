@@ -110,7 +110,9 @@ impl Socket2Runtime {
                         is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
+
                     for event in events.iter() {
+                        tracing::trace!(?event, "event happened");
                         event_history.insert(event.into());
                     }
                     events.clear();
