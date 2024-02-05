@@ -230,9 +230,9 @@ impl TryFrom<&[u8]> for Icmpv4Packet {
     }
 }
 
-impl Into<Vec<u8>> for Icmpv4Packet {
-    fn into(self) -> Vec<u8> {
-        self.to_bytes(true)
+impl From<Icmpv4Packet> for Vec<u8> {
+    fn from(val: Icmpv4Packet) -> Self {
+        val.to_bytes(true)
     }
 }
 
@@ -312,11 +312,11 @@ impl Icmpv4Packet {
                 return Err(PacketParseError::UnrecognizedICMPType(t));
             }
         };
-        return Ok(Icmpv4Packet {
-            code: code,
-            checksum: checksum,
-            message: message,
-        });
+        Ok(Icmpv4Packet {
+            code,
+            checksum,
+            message,
+        })
     }
 
     /// Get this packet serialized to bytes suitable for sending on the wire.
@@ -328,7 +328,7 @@ impl Icmpv4Packet {
         BigEndian::write_u16(&mut buf, if with_checksum { self.checksum } else { 0 });
         bytes.append(&mut buf);
         bytes.append(&mut self.message.get_bytes());
-        return bytes;
+        bytes
     }
 
     pub fn calculate_checksum(&self) -> u16 {
@@ -352,7 +352,7 @@ impl Icmpv4Packet {
         Self {
             code: 0,
             checksum: 0,
-            message: message,
+            message,
         }
         .with_checksum()
     }
@@ -380,12 +380,12 @@ impl std::fmt::Display for PacketParseError {
 impl std::error::Error for PacketParseError {}
 
 fn sum_big_endian_words(bs: &[u8]) -> u32 {
-    if bs.len() == 0 {
+    if bs.is_empty() {
         return 0;
     }
 
     let len = bs.len();
-    let mut data = &bs[..];
+    let mut data = bs;
     let mut sum = 0u32;
     // Iterate by word which is two bytes.
     while data.len() >= 2 {
@@ -398,5 +398,5 @@ fn sum_big_endian_words(bs: &[u8]) -> u32 {
         // If odd then checksum the last byte
         sum += (data[0] as u32) << 8;
     }
-    return sum;
+    sum
 }

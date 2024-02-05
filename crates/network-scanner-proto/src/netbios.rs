@@ -15,10 +15,8 @@ pub struct NetBiosPacket<'a> {
 impl<'a> Display for NetBiosPacket<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut values = String::new();
-        let mut elem = 1; // print 4 values in a row
         for byte in self.data.iter() {
             values.push_str(&format!("0x{:01$X}, ", byte, 2));
-            elem = elem + 1;
         }
         write!(f, "[{}]", values)
     }
@@ -67,11 +65,11 @@ impl<'a> NetBiosPacket<'a> {
     }
 
     pub fn mac_address(&self) -> String {
-        let name_count = (&self.data[RESPONSE_BASE_LEN - 1] & 0xFF) as usize;
+        let name_count = self.data[RESPONSE_BASE_LEN - 1] as usize;
         let mut name_bytes: [u8; 6] = [0; 6];
-        for n in 0..6 {
+        for (n, byte) in name_bytes.iter_mut().enumerate() {
             let offset = RESPONSE_BASE_LEN + RESPONSE_NAME_BLOCK_LEN * name_count + n;
-            name_bytes[n] = &self.data[offset] & 0xFF;
+            *byte = self.data[offset];
         }
         format!(
             "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
