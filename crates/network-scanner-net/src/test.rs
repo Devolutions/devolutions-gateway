@@ -186,10 +186,8 @@ pub async fn drop_runtime() -> anyhow::Result<()> {
     {
         let async_runtime = crate::runtime::Socket2Runtime::new(None)?;
         {
-            let good_socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
             let bad_socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
-            tracing::info!("good_socket: {:?}", good_socket);
             tracing::info!("bad_socket: {:?}", bad_socket);
 
             let unused_port = 12345;
