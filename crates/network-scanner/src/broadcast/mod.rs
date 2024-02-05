@@ -3,7 +3,7 @@ use std::{mem::MaybeUninit, net::Ipv4Addr};
 use anyhow::Context;
 
 pub mod asynchronous;
-pub mod block;
+pub mod blocking;
 
 #[derive(Debug)]
 pub struct BroadcastResponseEntry {

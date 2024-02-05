@@ -89,8 +89,8 @@ impl Socket2Runtime {
         register_receiver: Receiver<RegisterEvent>,
         event_history: Arc<DashSet<EventWrapper>>,
     ) -> anyhow::Result<()> {
-        // we make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread
-        // we cannot hold a Arc<Socket2Runtime> in the thread, because it will create a cycle reference and the runtime will never be dropped.
+        // We make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread.
+        // The reason why we cannot hold a Arc<Socket2Runtime> in the thread is because it will create a cycle reference and the runtime will never be dropped.
         let is_terminated = self.is_terminated.clone();
         let poller = self.poller.clone();
         std::thread::Builder::new()
@@ -106,6 +106,8 @@ impl Socket2Runtime {
                         break;
                     }
 
+                    // The timeout 200ms is critical, sometimes the event might be registered after the event happened
+                    // the timeout limit will allow the events to be checked periodically.
                     if let Err(e) = poller.wait(&mut events, Some(Duration::from_millis(200))) {
                         tracing::error!(error = ?e, "failed to poll events");
                         is_terminated.store(true, Ordering::SeqCst);
