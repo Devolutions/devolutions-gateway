@@ -93,7 +93,7 @@ impl TaskExecutionRunner {
         F: Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         let context = self.context.clone();
-        let handle = tokio::task::spawn(async move { task(context).await });
+        let handle = tokio::task::spawn(task(context));
         let _ = self.handles_sender.send(handle);
     }
 

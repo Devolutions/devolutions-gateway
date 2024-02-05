@@ -47,7 +47,7 @@ impl NetworkScanner {
             let ip_cache = ip_cache.clone();
             while let Some((ip, host)) = ip_receiver.lock().await.recv().await {
                 if let Some(existed_host) = ip_cache.get(&ip).as_deref() {
-                    tracing::info!("IP: {:?} already in cache", ip);
+                    tracing::debug!("IP: {:?} already in cache", ip);
                     // if ip is already in the cache and dns name is resolved, skip
                     if existed_host.is_some() {
                         continue;
@@ -68,8 +68,8 @@ impl NetworkScanner {
 
                 spawn(async move {
                     let mut port_scan_receiver = scan_ports(ip, &ports, runtime, port_scan_timeout).await?;
-                    tracing::debug!("Scanning ports for ip: {:?}", ip);
                     while let Some(res) = port_scan_receiver.recv().await {
+                        tracing::trace!("Port scan result: {:?}", res);
                         if let PortScanResult::Open(socket_addr) = res {
                             let dns = ip_cache.get(&ip).as_deref().cloned().flatten();
                             port_sender.send((ip, dns, socket_addr.port())).await?;
@@ -97,6 +97,7 @@ impl NetworkScanner {
                 let handler = spawn(async move {
                     let mut receiver = broadcast(subnet.broadcast, broadcast_timeout, runtime).await?;
                     while let Some(ip) = receiver.recv().await {
+                        tracing::trace!("Broadcast received: {:?}", ip);
                         ip_sender.send((ip.into(), None)).await?;
                     }
                     anyhow::Ok(())
@@ -122,6 +123,7 @@ impl NetworkScanner {
                 let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
                 let mut receiver = netbios_query_scan(runtime, ip_range, netbios_timeout, Duration::from_millis(20))?;
                 while let Some((ip, name)) = receiver.recv().await {
+                    tracing::trace!("Netbios received: {:?} {:?}", ip, name);
                     ip_sender.send((ip.into(), Some(name))).await?;
                 }
             }
@@ -149,6 +151,7 @@ impl NetworkScanner {
                 let mut receiver = ping_range(runtime, ip_range, ping_interval, ping_timeout, should_ping)?;
 
                 while let Some(ip) = receiver.recv().await {
+                    tracing::trace!("Ping received: {:?}", ip);
                     ip_sender.send((ip, None)).await?;
                 }
             }
