@@ -379,6 +379,14 @@ internal class Program
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
         }
+
+        if (!CustomActions.CheckPowerShellVersion())
+        {
+            MessageBox.Show("This product requires at least Windows PowerShell 5.1", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+            e.ManagedUI.Shell.ErrorDetected = true;
+            e.Result = ActionResult.UserExit;
+        }
         
         if (!CustomActions.TryGetInstalledNetFx45Version(out uint netfx45Version) || netfx45Version < 394802)
         {
@@ -391,6 +399,8 @@ internal class Program
         {
             MessageBox.Show(".NET Framework 4.8 is strongly recommended.", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+
+        e.Session.Set(GatewayProperties.configureGateway, true);
 
         e.ManagedUI.OnCurrentDialogChanged += Wizard.DialogChanged;
     }

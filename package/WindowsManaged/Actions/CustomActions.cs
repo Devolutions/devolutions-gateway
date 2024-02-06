@@ -36,7 +36,7 @@ namespace DevolutionsGateway.Actions
         [CustomAction]
         public static ActionResult CheckInstalledNetFx45Version(Session session)
         {
-            uint version = session.Get(GatewayProperties._NetFx45Version);
+            uint version = session.Get(GatewayProperties.netFx45Version);
 
             if (version < 394802) //4.6.2
             {
@@ -63,7 +63,7 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties._InstallId).ToString())}.zip";
+                string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties.installId).ToString())}.zip";
                 using ZipArchive archive = ZipFile.Open(zipFile, ZipArchiveMode.Create);
 
                 WinAPI.MoveFileEx(zipFile, IntPtr.Zero, WinAPI.MOVEFILE_DELAY_UNTIL_REBOOT);
@@ -102,7 +102,7 @@ namespace DevolutionsGateway.Actions
         [CustomAction]
         public static ActionResult CleanGatewayConfigRollback(Session session)
         {
-            string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties._InstallId).ToString())}.zip";
+            string zipFile = $"{Path.Combine(Path.GetTempPath(), session.Get(GatewayProperties.installId).ToString())}.zip";
 
             if (!File.Exists(zipFile))
             {
@@ -149,17 +149,17 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                string scheme = session.Get(GatewayProperties._ConfigureNgrok)
+                string scheme = session.Get(GatewayProperties.configureNgrok)
                     ? Constants.HttpsProtocol
-                    : session.Get(GatewayProperties._AccessUriScheme);
+                    : session.Get(GatewayProperties.accessUriScheme);
 
-                string host = session.Get(GatewayProperties._ConfigureNgrok)
-                    ? session.Get(GatewayProperties._NgrokHttpDomain)
-                    : session.Get(GatewayProperties._AccessUriHost);
+                string host = session.Get(GatewayProperties.configureNgrok)
+                    ? session.Get(GatewayProperties.ngrokHttpDomain)
+                    : session.Get(GatewayProperties.accessUriHost);
 
-                uint port = session.Get(GatewayProperties._ConfigureNgrok)
+                uint port = session.Get(GatewayProperties.configureNgrok)
                     ? 443
-                    : session.Get(GatewayProperties._AccessUriPort);
+                    : session.Get(GatewayProperties.accessUriPort);
 
                 Uri uri = new($"{scheme}://{host}:{port}", UriKind.Absolute);
 
@@ -182,37 +182,37 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                Constants.CertificateMode mode = session.Get(GatewayProperties._CertificateMode);
+                Constants.CertificateMode mode = session.Get(GatewayProperties.certificateMode);
 
-                if (session.Get(GatewayProperties._ConfigureWebApp) && session.Get(GatewayProperties._GenerateCertificate))
+                if (session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateCertificate))
                 {
                     command = Constants.NewDGatewayCertificateCommand;
                 }
                 else if (mode == Constants.CertificateMode.External)
                 {
-                    if (string.IsNullOrEmpty(session.Get(GatewayProperties._CertificatePassword)))
+                    if (string.IsNullOrEmpty(session.Get(GatewayProperties.certificatePassword)))
                     {
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPrivateKeyCommandFormat,
-                            session.Get(GatewayProperties._CertificateFile),
-                            session.Get(GatewayProperties._CertificatePrivateKeyFile));
+                            session.Get(GatewayProperties.certificateFile),
+                            session.Get(GatewayProperties.certificatePrivateKeyFile));
                     }
                     else
                     {
                         command = string.Format(
                             Constants.ImportDGatewayCertificateWithPasswordCommandFormat,
-                            session.Get(GatewayProperties._CertificateFile),
-                            session.Get(GatewayProperties._CertificatePassword));
+                            session.Get(GatewayProperties.certificateFile),
+                            session.Get(GatewayProperties.certificatePassword));
                     }
                 }
                 else
                 {
                     command = string.Format(
                         Constants.ImportDGatewayCertificateFromSystemFormat,
-                        session.Get(GatewayProperties._CertificateMode),
-                        session.Get(GatewayProperties._CertificateName),
-                        session.Get(GatewayProperties._CertificateStore),
-                        session.Get(GatewayProperties._CertificateLocation));
+                        session.Get(GatewayProperties.certificateMode),
+                        session.Get(GatewayProperties.certificateName),
+                        session.Get(GatewayProperties.certificateStore),
+                        session.Get(GatewayProperties.certificateLocation));
                 }
                 
                 command = FormatPowerShellCommand(session, command);
@@ -253,16 +253,16 @@ namespace DevolutionsGateway.Actions
             try
             {
                 string internalUrl = FormatHttpUrl(
-                    session.Get(GatewayProperties._HttpListenerScheme),
-                    session.Get(GatewayProperties._HttpListenerPort));
+                    session.Get(GatewayProperties.httpListenerScheme),
+                    session.Get(GatewayProperties.httpListenerPort));
                 string externalUrl = FormatHttpUrl(
-                    session.Get(GatewayProperties._AccessUriScheme),
-                    session.Get(GatewayProperties._AccessUriPort));
+                    session.Get(GatewayProperties.accessUriScheme),
+                    session.Get(GatewayProperties.accessUriPort));
 
                 command = string.Format(Constants.SetDGatewayListenersCommandFormat,
                     internalUrl, externalUrl,
-                    session.Get(GatewayProperties._TcpListenerPort),
-                    session.Get(GatewayProperties._TcpListenerPort));
+                    session.Get(GatewayProperties.tcpListenerPort),
+                    session.Get(GatewayProperties.tcpListenerPort));
                 command = FormatPowerShellCommand(session, command);
             }
             catch (Exception e)
@@ -281,12 +281,12 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                command = $"$Ngrok = New-DGatewayNgrokConfig -AuthToken '{session.Get(GatewayProperties._NgrokAuthToken)}'";
-                command += $"; $HttpTunnel = New-DGatewayNgrokTunnel -Http -AllowCidrs @('0.0.0.0/0') -Domain '{session.Get(GatewayProperties._NgrokHttpDomain)}'";
+                command = $"$Ngrok = New-DGatewayNgrokConfig -AuthToken '{session.Get(GatewayProperties.ngrokAuthToken)}'";
+                command += $"; $HttpTunnel = New-DGatewayNgrokTunnel -Http -AllowCidrs @('0.0.0.0/0') -Domain '{session.Get(GatewayProperties.ngrokHttpDomain)}'";
 
-                if (session.Get(GatewayProperties._NgrokEnableTcp))
+                if (session.Get(GatewayProperties.ngrokEnableTcp))
                 {
-                    command += $"; $TcpTunnel = New-DGatewayNgrokTunnel -Tcp -AllowCidrs @('0.0.0.0/0') -RemoteAddr '{session.Get(GatewayProperties._NgrokRemoteAddress)}'";
+                    command += $"; $TcpTunnel = New-DGatewayNgrokTunnel -Tcp -AllowCidrs @('0.0.0.0/0') -RemoteAddr '{session.Get(GatewayProperties.ngrokRemoteAddress)}'";
                     command += "; $Ngrok.Tunnels = [PSCustomObject]@{'http-endpoint' = $HttpTunnel; 'tcp-endpoint' = $TcpTunnel}";
                 }
                 else
@@ -313,7 +313,7 @@ namespace DevolutionsGateway.Actions
 
             try
             {
-                if (session.Get(GatewayProperties._ConfigureWebApp) && session.Get(GatewayProperties._GenerateKeyPair))
+                if (session.Get(GatewayProperties.configureWebApp) && session.Get(GatewayProperties.generateKeyPair))
                 {
                     command = Constants.NewDGatewayProvisionerKeyPairCommand;
                 }
@@ -321,14 +321,14 @@ namespace DevolutionsGateway.Actions
                 {
                     command = Constants.ImportDGatewayProvisionerKeyCommand;
 
-                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties._PublicKeyFile)))
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties.publicKeyFile)))
                     {
-                        command += $" -PublicKeyFile '{session.Get(GatewayProperties._PublicKeyFile)}'";
+                        command += $" -PublicKeyFile '{session.Get(GatewayProperties.publicKeyFile)}'";
                     }
 
-                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties._PrivateKeyFile)))
+                    if (!string.IsNullOrEmpty(session.Get(GatewayProperties.privateKeyFile)))
                     {
-                        command += $" -PrivateKeyFile '{session.Get(GatewayProperties._PrivateKeyFile)}'";
+                        command += $" -PrivateKeyFile '{session.Get(GatewayProperties.privateKeyFile)}'";
                     }
                 }
                 
@@ -353,7 +353,7 @@ namespace DevolutionsGateway.Actions
                 // TODO: constants
                 command = "$WebApp = New-DGatewayWebAppConfig -Enabled $true";
 
-                switch (session.Get(GatewayProperties._AuthenticationMode))
+                switch (session.Get(GatewayProperties.authenticationMode))
                 {
                     case Constants.AuthenticationMode.None:
                     {
@@ -389,7 +389,7 @@ namespace DevolutionsGateway.Actions
             try
             {
                 // TODO: constants
-                command = $"Set-DGatewayUser -Username '{session.Get(GatewayProperties._WebUsername)}' -Password '{session.Get(GatewayProperties._WebPassword)}'";
+                command = $"Set-DGatewayUser -Username '{session.Get(GatewayProperties.webUsername)}' -Password '{session.Get(GatewayProperties.webPassword)}'";
                 command = FormatPowerShellCommand(session, command);
             }
             catch (Exception e)
@@ -458,7 +458,7 @@ namespace DevolutionsGateway.Actions
             }
 
             session.Log($"read netFxRelease path from registry: {version}");
-            session.Set(GatewayProperties._NetFx45Version, version);
+            session.Set(GatewayProperties.netFx45Version, version);
 
             return ActionResult.Success;
         }
@@ -479,7 +479,7 @@ namespace DevolutionsGateway.Actions
                 }
 
                 session.Log($"read powershell.exe path from registry: {powershellPath}");
-                session.Set(GatewayProperties._PowerShellPath, powershellPath);
+                session.Set(GatewayProperties.powerShellPath, powershellPath);
 
 
                 return ActionResult.Success;
@@ -495,21 +495,21 @@ namespace DevolutionsGateway.Actions
         [CustomAction]
         public static ActionResult OpenWebApp(Session session)
         {
-            if (session.Get(GatewayProperties._ConfigureWebApp))
+            if (session.Get(GatewayProperties.configureWebApp))
             {
                 try
                 {
-                    string scheme = session.Get(GatewayProperties._ConfigureNgrok)
+                    string scheme = session.Get(GatewayProperties.configureNgrok)
                         ? Constants.HttpsProtocol
-                        : session.Get(GatewayProperties._HttpListenerScheme);
+                        : session.Get(GatewayProperties.httpListenerScheme);
 
-                    string host = session.Get(GatewayProperties._ConfigureNgrok)
-                        ? session.Get(GatewayProperties._NgrokHttpDomain)
-                        : session.Get(GatewayProperties._AccessUriHost);
+                    string host = session.Get(GatewayProperties.configureNgrok)
+                        ? session.Get(GatewayProperties.ngrokHttpDomain)
+                        : session.Get(GatewayProperties.accessUriHost);
 
-                    uint port = session.Get(GatewayProperties._ConfigureNgrok)
+                    uint port = session.Get(GatewayProperties.configureNgrok)
                         ? 443
-                        : session.Get(GatewayProperties._HttpListenerPort);
+                        : session.Get(GatewayProperties.httpListenerPort);
 
                     Uri target;
 
@@ -541,7 +541,7 @@ namespace DevolutionsGateway.Actions
                 return ActionResult.Failure;
             }
 
-            session.Set(GatewayProperties._ServiceStart, (int)startMode);
+            session.Set(GatewayProperties.serviceStart, startMode);
             return ActionResult.Success;
         }
 
@@ -614,7 +614,7 @@ namespace DevolutionsGateway.Actions
 
                 using (service)
                 {
-                    service.SetStartupType((ServiceStartMode)session.Get(GatewayProperties._ServiceStart));
+                    service.SetStartupType((ServiceStartMode)session.Get(GatewayProperties.serviceStart));
                 }
 
                 return ActionResult.Success;
@@ -629,7 +629,7 @@ namespace DevolutionsGateway.Actions
         [CustomAction]
         public static ActionResult SetInstallId(Session session)
         {
-            session.Set(GatewayProperties._InstallId, Guid.NewGuid());
+            session.Set(GatewayProperties.installId, Guid.NewGuid());
             return ActionResult.Success;
         }
 
@@ -695,7 +695,7 @@ namespace DevolutionsGateway.Actions
             Marshal.StructureToPtr(sa, pSa, false);
 
             SafeFileHandle handle = WinAPI.CreateFile(tempFilePath,
-                WinAPI.GENERIC_WRITE, WinAPI.FILE_SHARE_WRITE, pSa, WinAPI.CREATE_ALWAYS,
+                WinAPI.GENERIC_WRITE, WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE, pSa, WinAPI.CREATE_ALWAYS,
                 WinAPI.FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
 
             if (handle.IsInvalid)
@@ -748,7 +748,7 @@ namespace DevolutionsGateway.Actions
             using Buffer pPi = new(Marshal.SizeOf<WinAPI.PROCESS_INFORMATION>());
             Marshal.StructureToPtr(pi, pPi, false);
 
-            if (session.Get(GatewayProperties._DebugPowerShell))
+            if (session.Get(GatewayProperties.debugPowerShell))
             {
                 session.Log($"Executing command: {command}");
             }
@@ -824,11 +824,26 @@ namespace DevolutionsGateway.Actions
 
             if (exitCode != 0)
             {
-                StringBuilder tempFilePath = new(MAX_PATH);
-                uint pathLength = WinAPI.GetFinalPathNameByHandle(hTempFile.DangerousGetHandle(), tempFilePath, MAX_PATH, 0);
+                StringBuilder tempFilePathBuilder = new(MAX_PATH);
+                uint pathLength = WinAPI.GetFinalPathNameByHandle(hTempFile.DangerousGetHandle(), tempFilePathBuilder, MAX_PATH, 0);
+                string result = "unknown";
 
-                string finalPath = pathLength is < 1 or > MAX_PATH ? "unknown" : tempFilePath.ToString();
+                try
+                {
+                    if (pathLength is > 0 and < MAX_PATH)
+                    {
+                        string tempFilePath = tempFilePathBuilder.ToString().TrimStart('\\', '?');
 
+                        using FileStream fileStream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using StreamReader streamReader = new StreamReader(fileStream);
+                        result = streamReader.ReadToEnd();
+                    }
+                }
+                catch (Exception e)
+                {
+                    session.Log($"error reading error from temp file: {e}");
+                }
+                
                 using Record record = new(3)
                 {
                     FormatString = "Command execution failure: [1]",
@@ -836,7 +851,7 @@ namespace DevolutionsGateway.Actions
 
                 hTempFile.Close();
                 
-                record.SetString(1, finalPath);
+                record.SetString(1, result);
                 session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
 
                 return ActionResult.Failure;
@@ -859,7 +874,7 @@ namespace DevolutionsGateway.Actions
 
         private static string FormatPowerShellCommand(Session session, string command)
         {
-            return $"\"{session.Property(GatewayProperties._PowerShellPath.Id)}\" -ep Bypass -Command \"& Import-Module '{session.Property(GatewayProperties.InstallDir)}PowerShell\\Modules\\DevolutionsGateway'; {command}\"";
+            return $"\"{session.Property(GatewayProperties.powerShellPath.Id)}\" -ep Bypass -Command \"& Import-Module '{session.Property(GatewayProperties.InstallDir)}PowerShell\\Modules\\DevolutionsGateway'; {command}\"";
         }
 
         private static bool TryGetGatewayStartupType(Session session, out ServiceStartMode startMode)
@@ -931,12 +946,7 @@ namespace DevolutionsGateway.Actions
                 return false;
             }
 
-            if (!Version.TryParse(version, out powerShellVersion))
-            {
-                return false;
-            }
-
-            return true;
+            return Version.TryParse(version, out powerShellVersion);
         }
     }
 }

@@ -1,5 +1,5 @@
 using System;
-
+using DevolutionsGateway.Actions;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
@@ -10,6 +10,8 @@ namespace WixSharpSetup.Dialogs
 {
     public partial class AccessUriDialog : GatewayDialog
     {
+        private static readonly string MachineName = Environment.MachineName;
+
         private static readonly string[] Protocols = { Constants.HttpProtocol, Constants.HttpsProtocol };
 
         public AccessUriDialog()
@@ -28,11 +30,12 @@ namespace WixSharpSetup.Dialogs
             this.cmbProtocol.SelectedIndex = Protocols.FindIndex(properties.AccessUriScheme);
             this.txtHostname.Text = properties.AccessUriHost;
             this.txtPort.Text = properties.AccessUriPort.ToString();
-
-            if (properties.ConfigureWebApp && properties.GenerateCertificate &&
-                string.IsNullOrEmpty(properties.AccessUriHost))
+            
+            if (string.IsNullOrEmpty(properties.AccessUriHost))
             {
-                this.txtHostname.Text = Environment.MachineName;
+                this.txtHostname.Text = 
+                    this.cmbProtocol.SelectedValue.ToString() == Constants.HttpsProtocol ? 
+                    Environment.MachineName : "localhost";
             }
         }
 
@@ -82,6 +85,8 @@ namespace WixSharpSetup.Dialogs
         {
             banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
+            WinAPI.SendMessage(this.txtHostname.Handle, WinAPI.EM_SETCUEBANNER, 0, "dev.devolutions.net");
+
             base.OnLoad(sender, e);
         }
 
@@ -93,5 +98,33 @@ namespace WixSharpSetup.Dialogs
 
         // ReSharper disable once RedundantOverriddenMember
         protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);
+
+        private void cmbProtocol_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (this.cmbProtocol.SelectedValue.ToString() == Constants.HttpsProtocol)
+            {
+                if (this.txtHostname.Text.Trim() == "localhost")
+                {
+                    this.txtHostname.Text = MachineName;
+                }
+
+                if (this.txtPort.Text.Trim() == "80")
+                {
+                    this.txtPort.Text = "443";
+                }
+            }
+            else if (this.cmbProtocol.SelectedValue.ToString() == Constants.HttpProtocol)
+            {
+                if (this.txtHostname.Text.Trim() == MachineName)
+                {
+                    this.txtHostname.Text = "localhost";
+                }
+
+                if (this.txtPort.Text.Trim() == "443")
+                {
+                    this.txtPort.Text = "80";
+                }
+            }
+        }
     }
 }

@@ -16,10 +16,14 @@ namespace WixSharpSetup.Dialogs
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
+            this.httpPortDebouncer?.Dispose();
+            this.tcpPortDebouncer?.Dispose();
+
             if (disposing && (components != null))
             {
                 components.Dispose();
             }
+
             base.Dispose(disposing);
         }
 
@@ -36,6 +40,13 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
+            this.lblHttpsDescription = new System.Windows.Forms.Label();
+            this.label8 = new System.Windows.Forms.Label();
+            this.label9 = new System.Windows.Forms.Label();
+            this.label10 = new System.Windows.Forms.Label();
+            this.label5 = new System.Windows.Forms.Label();
+            this.label6 = new System.Windows.Forms.Label();
+            this.label7 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.txtHttpPort = new System.Windows.Forms.TextBox();
             this.cmbHttpProtocol = new System.Windows.Forms.ComboBox();
@@ -55,6 +66,7 @@ namespace WixSharpSetup.Dialogs
             this.next = new System.Windows.Forms.Button();
             this.cancel = new System.Windows.Forms.Button();
             this.border1 = new System.Windows.Forms.Panel();
+            this.ttPortCheck = new System.Windows.Forms.ToolTip(this.components);
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
             this.tableLayoutPanel2.SuspendLayout();
@@ -84,41 +96,122 @@ namespace WixSharpSetup.Dialogs
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
             this.middlePanel.Controls.Add(this.tableLayoutPanel2);
-            this.middlePanel.Location = new System.Drawing.Point(22, 75);
+            this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
-            this.middlePanel.Size = new System.Drawing.Size(449, 139);
+            this.middlePanel.Size = new System.Drawing.Size(493, 261);
             this.middlePanel.TabIndex = 16;
             // 
             // tableLayoutPanel2
             // 
             this.tableLayoutPanel2.ColumnCount = 3;
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.Controls.Add(this.lblHttpsDescription, 0, 3);
+            this.tableLayoutPanel2.Controls.Add(this.label8, 2, 5);
+            this.tableLayoutPanel2.Controls.Add(this.label9, 0, 5);
+            this.tableLayoutPanel2.Controls.Add(this.label10, 1, 5);
+            this.tableLayoutPanel2.Controls.Add(this.label5, 2, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label6, 0, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label7, 1, 1);
             this.tableLayoutPanel2.Controls.Add(this.label3, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.txtHttpPort, 2, 1);
-            this.tableLayoutPanel2.Controls.Add(this.cmbHttpProtocol, 0, 1);
-            this.tableLayoutPanel2.Controls.Add(this.txtHttpHostname, 1, 1);
-            this.tableLayoutPanel2.Controls.Add(this.label4, 0, 3);
-            this.tableLayoutPanel2.Controls.Add(this.txtTcpPort, 2, 4);
-            this.tableLayoutPanel2.Controls.Add(this.txtTcpHostname, 1, 4);
-            this.tableLayoutPanel2.Controls.Add(this.cmbTcpProtocol, 0, 4);
-            this.tableLayoutPanel2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tableLayoutPanel2.Location = new System.Drawing.Point(0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.txtHttpPort, 2, 2);
+            this.tableLayoutPanel2.Controls.Add(this.cmbHttpProtocol, 0, 2);
+            this.tableLayoutPanel2.Controls.Add(this.txtHttpHostname, 1, 2);
+            this.tableLayoutPanel2.Controls.Add(this.label4, 0, 4);
+            this.tableLayoutPanel2.Controls.Add(this.txtTcpPort, 2, 6);
+            this.tableLayoutPanel2.Controls.Add(this.txtTcpHostname, 1, 6);
+            this.tableLayoutPanel2.Controls.Add(this.cmbTcpProtocol, 0, 6);
+            this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 5;
+            this.tableLayoutPanel2.RowCount = 7;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 139);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 231);
             this.tableLayoutPanel2.TabIndex = 17;
+            // 
+            // lblHttpsDescription
+            // 
+            this.tableLayoutPanel2.SetColumnSpan(this.lblHttpsDescription, 3);
+            this.lblHttpsDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblHttpsDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblHttpsDescription.Location = new System.Drawing.Point(3, 69);
+            this.lblHttpsDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblHttpsDescription.Name = "lblHttpsDescription";
+            this.lblHttpsDescription.Size = new System.Drawing.Size(443, 35);
+            this.lblHttpsDescription.TabIndex = 14;
+            this.lblHttpsDescription.Text = "An HTTPS listener requires a certificate.";
+            // 
+            // label8
+            // 
+            this.label8.AutoSize = true;
+            this.label8.Location = new System.Drawing.Point(406, 133);
+            this.label8.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label8.Name = "label8";
+            this.label8.Size = new System.Drawing.Size(26, 13);
+            this.label8.TabIndex = 13;
+            this.label8.Text = "Port";
+            // 
+            // label9
+            // 
+            this.label9.AutoSize = true;
+            this.label9.Location = new System.Drawing.Point(3, 133);
+            this.label9.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label9.Name = "label9";
+            this.label9.Size = new System.Drawing.Size(46, 13);
+            this.label9.TabIndex = 12;
+            this.label9.Text = "Protocol";
+            // 
+            // label10
+            // 
+            this.label10.AutoSize = true;
+            this.label10.Location = new System.Drawing.Point(79, 133);
+            this.label10.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label10.Name = "label10";
+            this.label10.Size = new System.Drawing.Size(29, 13);
+            this.label10.TabIndex = 11;
+            this.label10.Text = "Host";
+            // 
+            // label5
+            // 
+            this.label5.AutoSize = true;
+            this.label5.Location = new System.Drawing.Point(406, 24);
+            this.label5.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label5.Name = "label5";
+            this.label5.Size = new System.Drawing.Size(26, 13);
+            this.label5.TabIndex = 10;
+            this.label5.Text = "Port";
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Location = new System.Drawing.Point(3, 24);
+            this.label6.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(46, 13);
+            this.label6.TabIndex = 9;
+            this.label6.Text = "Protocol";
+            // 
+            // label7
+            // 
+            this.label7.AutoSize = true;
+            this.label7.Location = new System.Drawing.Point(79, 24);
+            this.label7.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label7.Name = "label7";
+            this.label7.Size = new System.Drawing.Size(29, 13);
+            this.label7.TabIndex = 8;
+            this.label7.Text = "Host";
             // 
             // label3
             // 
             this.label3.AutoSize = true;
             this.tableLayoutPanel2.SetColumnSpan(this.label3, 3);
+            this.label3.ForeColor = System.Drawing.SystemColors.GrayText;
             this.label3.Location = new System.Drawing.Point(3, 3);
             this.label3.Margin = new System.Windows.Forms.Padding(3);
             this.label3.Name = "label3";
@@ -128,33 +221,37 @@ namespace WixSharpSetup.Dialogs
             // 
             // txtHttpPort
             // 
-            this.txtHttpPort.Location = new System.Drawing.Point(362, 22);
+            this.txtHttpPort.Location = new System.Drawing.Point(406, 45);
             this.txtHttpPort.Name = "txtHttpPort";
             this.txtHttpPort.Size = new System.Drawing.Size(40, 20);
             this.txtHttpPort.TabIndex = 2;
+            this.txtHttpPort.TextChanged += new System.EventHandler(this.txtHttpPort_TextChanged);
             // 
             // cmbHttpProtocol
             // 
             this.cmbHttpProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbHttpProtocol.FormattingEnabled = true;
-            this.cmbHttpProtocol.Location = new System.Drawing.Point(3, 22);
+            this.cmbHttpProtocol.Location = new System.Drawing.Point(3, 45);
             this.cmbHttpProtocol.Name = "cmbHttpProtocol";
             this.cmbHttpProtocol.Size = new System.Drawing.Size(70, 21);
             this.cmbHttpProtocol.TabIndex = 0;
+            this.cmbHttpProtocol.SelectedIndexChanged += new System.EventHandler(this.cmbHttpProtocol_SelectedIndexChanged);
             // 
             // txtHttpHostname
             // 
+            this.txtHttpHostname.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtHttpHostname.Enabled = false;
-            this.txtHttpHostname.Location = new System.Drawing.Point(79, 22);
+            this.txtHttpHostname.Location = new System.Drawing.Point(79, 45);
             this.txtHttpHostname.Name = "txtHttpHostname";
-            this.txtHttpHostname.Size = new System.Drawing.Size(277, 20);
+            this.txtHttpHostname.Size = new System.Drawing.Size(321, 20);
             this.txtHttpHostname.TabIndex = 1;
             // 
             // label4
             // 
             this.label4.AutoSize = true;
             this.tableLayoutPanel2.SetColumnSpan(this.label4, 3);
-            this.label4.Location = new System.Drawing.Point(3, 49);
+            this.label4.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.label4.Location = new System.Drawing.Point(3, 112);
             this.label4.Margin = new System.Windows.Forms.Padding(3);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(118, 13);
@@ -163,17 +260,19 @@ namespace WixSharpSetup.Dialogs
             // 
             // txtTcpPort
             // 
-            this.txtTcpPort.Location = new System.Drawing.Point(362, 68);
+            this.txtTcpPort.Location = new System.Drawing.Point(406, 154);
             this.txtTcpPort.Name = "txtTcpPort";
             this.txtTcpPort.Size = new System.Drawing.Size(40, 20);
             this.txtTcpPort.TabIndex = 5;
+            this.txtTcpPort.TextChanged += new System.EventHandler(this.txtTcpPort_TextChanged);
             // 
             // txtTcpHostname
             // 
+            this.txtTcpHostname.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtTcpHostname.Enabled = false;
-            this.txtTcpHostname.Location = new System.Drawing.Point(79, 68);
+            this.txtTcpHostname.Location = new System.Drawing.Point(79, 154);
             this.txtTcpHostname.Name = "txtTcpHostname";
-            this.txtTcpHostname.Size = new System.Drawing.Size(277, 20);
+            this.txtTcpHostname.Size = new System.Drawing.Size(321, 20);
             this.txtTcpHostname.TabIndex = 4;
             // 
             // cmbTcpProtocol
@@ -181,7 +280,7 @@ namespace WixSharpSetup.Dialogs
             this.cmbTcpProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbTcpProtocol.Enabled = false;
             this.cmbTcpProtocol.FormattingEnabled = true;
-            this.cmbTcpProtocol.Location = new System.Drawing.Point(3, 68);
+            this.cmbTcpProtocol.Location = new System.Drawing.Point(3, 154);
             this.cmbTcpProtocol.Name = "cmbTcpProtocol";
             this.cmbTcpProtocol.Size = new System.Drawing.Size(70, 21);
             this.cmbTcpProtocol.TabIndex = 3;
@@ -321,6 +420,12 @@ namespace WixSharpSetup.Dialogs
             this.border1.Size = new System.Drawing.Size(494, 1);
             this.border1.TabIndex = 14;
             // 
+            // ttPortCheck
+            // 
+            this.ttPortCheck.AutoPopDelay = 5000;
+            this.ttPortCheck.InitialDelay = 250;
+            this.ttPortCheck.ReshowDelay = 100;
+            // 
             // ListenersDialog
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -371,5 +476,13 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TextBox txtTcpHostname;
         private System.Windows.Forms.ComboBox cmbTcpProtocol;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
+        private System.Windows.Forms.Label label8;
+        private System.Windows.Forms.Label label9;
+        private System.Windows.Forms.Label label10;
+        private System.Windows.Forms.Label label5;
+        private System.Windows.Forms.Label label6;
+        private System.Windows.Forms.Label label7;
+        private System.Windows.Forms.Label lblHttpsDescription;
+        private System.Windows.Forms.ToolTip ttPortCheck;
     }
 }

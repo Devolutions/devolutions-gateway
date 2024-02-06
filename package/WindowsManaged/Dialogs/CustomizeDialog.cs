@@ -13,17 +13,20 @@ namespace WixSharpSetup.Dialogs;
 
 public partial class CustomizeDialog : GatewayDialog
 {
-    private static Icon warningIcon;
+    private bool ConfigureNow => this.cmbConfigure.SelectedIndex == 0;
 
-    public static Icon WarningSmall => warningIcon ??= StockIcon.GetStockIcon(StockIcon.SIID_INFO, StockIcon.SHGSI_SMALLICON);
-    
+    private bool ConfigureLater => this.cmbConfigure.SelectedIndex == 1;
+
     public CustomizeDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-
-        pictureBox1.Image = WarningSmall.ToBitmap();
+        
+        this.cmbConfigure.DataSource = new[]
+        {
+            "Now", "Later"
+        };
 
         this.lnkNgrok.Text = "Read more at ngrok.com";
         this.lnkNgrok.LinkArea = new LinkArea(13, 9);
@@ -32,8 +35,7 @@ public partial class CustomizeDialog : GatewayDialog
     public override void FromProperties()
     {
         GatewayProperties properties = new(this.Runtime.Session);
-        this.rbConfigLater.Checked = !properties.ConfigureGateway;
-        this.rbConfigNow.Checked = properties.ConfigureGateway;
+        this.cmbConfigure.SelectedIndex = properties.ConfigureGateway ? 0 : 1;
         this.chkConfigureNgrok.Checked = properties.ConfigureNgrok;
         this.chkWebApp.Checked = properties.ConfigureWebApp;
         this.chkGenerateCertificate.Checked = properties.GenerateCertificate;
@@ -46,12 +48,12 @@ public partial class CustomizeDialog : GatewayDialog
     {
         new GatewayProperties(this.Runtime.Session)
         {
-            ConfigureGateway = this.rbConfigNow.Checked,
+            ConfigureGateway = this.ConfigureNow,
             ConfigureNgrok = this.chkConfigureNgrok.Checked,
             ConfigureWebApp = this.chkWebApp.Checked,
             GenerateCertificate = this.chkGenerateCertificate.Checked && !this.chkConfigureNgrok.Checked,
             GenerateKeyPair = this.chkGenerateKeyPair.Checked,
-            ServiceStart = this.rbConfigNow.Checked ? (int)ServiceStartMode.Automatic : (int)ServiceStartMode.Manual,
+            ServiceStart = this.ConfigureNow ? ServiceStartMode.Automatic : ServiceStartMode.Manual,
         };
 
         return true;
@@ -60,11 +62,6 @@ public partial class CustomizeDialog : GatewayDialog
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
-
-        if (!CustomActions.CheckPowerShellVersion())
-        {
-            this.rbConfigNow.Enabled = false;
-        }
 
         this.FromProperties();
 
@@ -82,11 +79,22 @@ public partial class CustomizeDialog : GatewayDialog
 
     private void SetControlStates()
     {
-        this.chkConfigureNgrok.Enabled = this.rbConfigNow.Checked;
-        this.chkWebApp.Enabled = this.rbConfigNow.Checked;
+        this.chkConfigureNgrok.Enabled = this.ConfigureNow;
+        this.chkWebApp.Enabled = this.ConfigureNow;
 
         this.chkGenerateCertificate.Enabled = this.chkWebApp.Checked && this.chkWebApp.Enabled && !this.chkConfigureNgrok.Checked;
         this.chkGenerateKeyPair.Enabled = this.chkWebApp.Checked && this.chkWebApp.Enabled;
+
+        if (this.ConfigureNow)
+        { 
+            this.gbConfigure.Visible = true;
+            this.lblConfigureDescription.Text = "Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.";
+        }
+        else
+        {
+            this.gbConfigure.Visible = false;
+            this.lblConfigureDescription.Text = "Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.";
+        }
     }
 
     private void rbConfigLater_CheckedChanged(object sender, EventArgs e)
@@ -102,6 +110,12 @@ public partial class CustomizeDialog : GatewayDialog
     private void chkWebApp_CheckedChanged(object sender, EventArgs e)
     {
         this.SetControlStates();
+
+        if (this.chkWebApp.Checked)
+        {
+            this.chkGenerateCertificate.Checked = this.chkGenerateCertificate.Enabled;
+            this.chkGenerateKeyPair.Checked = this.chkGenerateKeyPair.Enabled;
+        }
     }
 
     private void lnkNgrok_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
@@ -111,6 +125,16 @@ public partial class CustomizeDialog : GatewayDialog
     }
 
     private void chkConfigureNgrok_CheckedChanged(object sender, EventArgs e)
+    {
+        this.SetControlStates();
+
+        if (this.chkConfigureNgrok.Checked)
+        {
+            this.chkGenerateCertificate.Checked = false;
+        }
+    }
+
+    private void cmbConfigure_SelectedIndexChanged(object sender, EventArgs e)
     {
         this.SetControlStates();
     }

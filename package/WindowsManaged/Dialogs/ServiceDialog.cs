@@ -18,15 +18,15 @@ public partial class ServiceDialog : GatewayDialog
     public override void FromProperties()
     {
         GatewayProperties properties = new(this.Runtime.Session);
-        this.rbServiceManualStart.Checked = properties.ServiceStart == (int)ServiceStartMode.Manual;
-        this.rbServiceAutoStart.Checked = properties.ServiceStart == (int)ServiceStartMode.Automatic;
+        this.rbServiceManualStart.Checked = properties.ServiceStart == ServiceStartMode.Manual;
+        this.rbServiceAutoStart.Checked = properties.ServiceStart == ServiceStartMode.Automatic;
     }
 
     public override bool ToProperties()
     {
         GatewayProperties _ = new(this.Runtime.Session)
         {
-            ServiceStart = this.rbServiceManualStart.Checked ? (int)ServiceStartMode.Manual : (int)ServiceStartMode.Automatic,
+            ServiceStart = this.rbServiceManualStart.Checked ? ServiceStartMode.Manual : ServiceStartMode.Automatic,
         };
 
         return true;

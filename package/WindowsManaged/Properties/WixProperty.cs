@@ -2,7 +2,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using WixSharp;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace DevolutionsGateway.Properties
 {
@@ -62,6 +61,21 @@ namespace DevolutionsGateway.Properties
         }
     }
 
+    internal static class WixPropertyExtensions
+    {
+        // https://www.firegiant.com/docs/wix/v3/tutorial/com-expression-syntax-miscellanea/expression-syntax/
+
+        internal static Condition Equal<T>(this WixProperty<T> property, T value)
+        {
+            return new Condition($"{property.Id}=\"{value}\"");
+        }
+
+        internal static Condition NotEqual<T>(this WixProperty<T> property, T value)
+        {
+            return new Condition($"{property.Id}<>\"{value}\"");
+        }
+    }
+
     internal interface IWixProperty
     {
         public string DefaultValue { get; }
@@ -71,6 +85,10 @@ namespace DevolutionsGateway.Properties
         public string Id { get; }
 
         public bool Secure { get; }
+
+        public bool Public { get; }
+
+        public string Summary { get; }
     }
 
     internal class WixProperty<T> : IWixProperty
@@ -84,5 +102,9 @@ namespace DevolutionsGateway.Properties
         public string Id { get; set; }
 
         public bool Secure { get; set; } = false;
+
+        public bool Public { get; set; }
+
+        public string Summary { get; set; }
     }
 }

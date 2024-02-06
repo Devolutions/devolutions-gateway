@@ -15,6 +15,8 @@ internal static class WinAPI
 
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
 
+    internal static uint FILE_SHARE_READ = 0x00000001;
+
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
     internal static uint GENERIC_WRITE = 0x40000000;

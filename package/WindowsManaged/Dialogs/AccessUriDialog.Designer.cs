@@ -36,10 +36,13 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
-            this.lblPublicKeyDescription = new System.Windows.Forms.Label();
+            this.label5 = new System.Windows.Forms.Label();
+            this.label4 = new System.Windows.Forms.Label();
+            this.lblDescription = new System.Windows.Forms.Label();
             this.txtPort = new System.Windows.Forms.TextBox();
             this.txtHostname = new System.Windows.Forms.TextBox();
             this.cmbProtocol = new System.Windows.Forms.ComboBox();
+            this.label3 = new System.Windows.Forms.Label();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -83,62 +86,102 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.Location = new System.Drawing.Point(0, 58);
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(493, 261);
-            this.middlePanel.TabIndex = 16;
+            this.middlePanel.TabIndex = 0;
             // 
             // tableLayoutPanel2
             // 
             this.tableLayoutPanel2.ColumnCount = 3;
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyDescription, 0, 0);
-            this.tableLayoutPanel2.Controls.Add(this.txtPort, 2, 1);
-            this.tableLayoutPanel2.Controls.Add(this.txtHostname, 1, 1);
-            this.tableLayoutPanel2.Controls.Add(this.cmbProtocol, 0, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label5, 2, 1);
+            this.tableLayoutPanel2.Controls.Add(this.label4, 0, 1);
+            this.tableLayoutPanel2.Controls.Add(this.lblDescription, 0, 0);
+            this.tableLayoutPanel2.Controls.Add(this.txtPort, 2, 2);
+            this.tableLayoutPanel2.Controls.Add(this.txtHostname, 1, 2);
+            this.tableLayoutPanel2.Controls.Add(this.cmbProtocol, 0, 2);
+            this.tableLayoutPanel2.Controls.Add(this.label3, 1, 1);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
-            this.tableLayoutPanel2.RowCount = 2;
+            this.tableLayoutPanel2.RowCount = 5;
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 60F));
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 20F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 130);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 154);
             this.tableLayoutPanel2.TabIndex = 0;
             // 
-            // lblPublicKeyDescription
+            // label5
             // 
-            this.lblPublicKeyDescription.AutoSize = true;
-            this.tableLayoutPanel2.SetColumnSpan(this.lblPublicKeyDescription, 3);
-            this.lblPublicKeyDescription.Location = new System.Drawing.Point(3, 0);
-            this.lblPublicKeyDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
-            this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
-            this.lblPublicKeyDescription.Size = new System.Drawing.Size(262, 13);
-            this.lblPublicKeyDescription.TabIndex = 3;
-            this.lblPublicKeyDescription.Text = "The external access URI for the Devolutions Gateway";
+            this.label5.AutoSize = true;
+            this.label5.Location = new System.Drawing.Point(406, 65);
+            this.label5.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label5.Name = "label5";
+            this.label5.Size = new System.Drawing.Size(26, 13);
+            this.label5.TabIndex = 5;
+            this.label5.Text = "Port";
+            // 
+            // label4
+            // 
+            this.label4.AutoSize = true;
+            this.label4.Location = new System.Drawing.Point(3, 65);
+            this.label4.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(46, 13);
+            this.label4.TabIndex = 4;
+            this.label4.Text = "Protocol";
+            // 
+            // lblDescription
+            // 
+            this.tableLayoutPanel2.SetColumnSpan(this.lblDescription, 3);
+            this.lblDescription.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblDescription.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblDescription.Location = new System.Drawing.Point(3, 0);
+            this.lblDescription.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
+            this.lblDescription.Name = "lblDescription";
+            this.lblDescription.Size = new System.Drawing.Size(443, 55);
+            this.lblDescription.TabIndex = 0;
+            this.lblDescription.Text = "The URI to reach the Gateway externally for HTTP operations. This may differ from" +
+    " the HTTP listener address in certain cases (for example, when using a reverse p" +
+    "roxy such as IIS).";
             // 
             // txtPort
             // 
             this.txtPort.CausesValidation = false;
-            this.txtPort.Location = new System.Drawing.Point(362, 21);
+            this.txtPort.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtPort.Location = new System.Drawing.Point(406, 86);
             this.txtPort.Name = "txtPort";
             this.txtPort.Size = new System.Drawing.Size(40, 20);
-            this.txtPort.TabIndex = 2;
+            this.txtPort.TabIndex = 3;
             // 
             // txtHostname
             // 
-            this.txtHostname.Location = new System.Drawing.Point(79, 21);
+            this.txtHostname.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtHostname.Location = new System.Drawing.Point(79, 86);
             this.txtHostname.Name = "txtHostname";
-            this.txtHostname.Size = new System.Drawing.Size(277, 20);
-            this.txtHostname.TabIndex = 1;
+            this.txtHostname.Size = new System.Drawing.Size(321, 20);
+            this.txtHostname.TabIndex = 2;
             // 
             // cmbProtocol
             // 
             this.cmbProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbProtocol.FormattingEnabled = true;
-            this.cmbProtocol.Location = new System.Drawing.Point(3, 21);
+            this.cmbProtocol.Location = new System.Drawing.Point(3, 86);
             this.cmbProtocol.Name = "cmbProtocol";
             this.cmbProtocol.Size = new System.Drawing.Size(70, 21);
-            this.cmbProtocol.TabIndex = 0;
+            this.cmbProtocol.TabIndex = 1;
+            this.cmbProtocol.SelectedIndexChanged += new System.EventHandler(this.cmbProtocol_SelectedIndexChanged);
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(79, 65);
+            this.label3.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(29, 13);
+            this.label3.TabIndex = 1;
+            this.label3.Text = "Host";
             // 
             // topBorder
             // 
@@ -235,7 +278,7 @@ namespace WixSharpSetup.Dialogs
             this.back.MinimumSize = new System.Drawing.Size(75, 0);
             this.back.Name = "back";
             this.back.Size = new System.Drawing.Size(77, 23);
-            this.back.TabIndex = 0;
+            this.back.TabIndex = 1;
             this.back.Text = "[WixUIBack]";
             this.back.UseVisualStyleBackColor = true;
             this.back.Click += new System.EventHandler(this.Back_Click);
@@ -248,7 +291,7 @@ namespace WixSharpSetup.Dialogs
             this.next.MinimumSize = new System.Drawing.Size(75, 0);
             this.next.Name = "next";
             this.next.Size = new System.Drawing.Size(77, 23);
-            this.next.TabIndex = 1;
+            this.next.TabIndex = 0;
             this.next.Text = "[WixUINext]";
             this.next.UseVisualStyleBackColor = true;
             this.next.Click += new System.EventHandler(this.Next_Click);
@@ -321,6 +364,9 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TextBox txtHostname;
         private System.Windows.Forms.ComboBox cmbProtocol;
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel2;
-        private System.Windows.Forms.Label lblPublicKeyDescription;
+        private System.Windows.Forms.Label lblDescription;
+        private System.Windows.Forms.Label label5;
+        private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.Label label3;
     }
 }
