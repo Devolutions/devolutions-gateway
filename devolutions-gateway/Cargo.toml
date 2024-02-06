@@ -61,7 +61,7 @@ tracing-appender = "0.2"
 # TODO: consider `tracing-error` crate
 
 # Async, futures…
-tokio = { version = "1.35", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio = { version = "1.36", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12"] }
 reqwest = { version = "0.11", features = ["json"] } # TODO: directly use hyper in subscriber module
 futures = "0.3"
