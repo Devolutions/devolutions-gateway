@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::Hash,
     num::NonZeroUsize,
     sync::{
@@ -12,8 +12,8 @@ use std::{
 
 use anyhow::Context;
 use crossbeam::channel::{Receiver, Sender};
-use dashmap::DashSet;
 
+use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
@@ -25,7 +25,7 @@ pub struct Socket2Runtime {
     next_socket_id: AtomicUsize,
     is_terminated: Arc<AtomicBool>,
     register_sender: Sender<RegisterEvent>,
-    event_history: Arc<DashSet<EventWrapper>>,
+    event_history: Arc<Mutex<HashSet<EventWrapper>>>,
 }
 
 impl Drop for Socket2Runtime {
@@ -50,7 +50,7 @@ impl Socket2Runtime {
         let (register_sender, register_receiver) =
             crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
 
-        let event_history = Arc::new(DashSet::new());
+        let event_history = Arc::new(Mutex::new(HashSet::new()));
         let runtime = Self {
             poller: Arc::new(poller),
             next_socket_id: AtomicUsize::new(0),
@@ -87,7 +87,7 @@ impl Socket2Runtime {
     fn start_loop(
         &self,
         register_receiver: Receiver<RegisterEvent>,
-        event_history: Arc<DashSet<EventWrapper>>,
+        event_history: Arc<Mutex<HashSet<EventWrapper>>>,
     ) -> anyhow::Result<()> {
         // We make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread.
         // The reason why we cannot hold a Arc<Socket2Runtime> in the thread is because it will create a cycle reference and the runtime will never be dropped.
@@ -118,8 +118,8 @@ impl Socket2Runtime {
                         tracing::trace!(?event, "event happened");
                         // This is different from just insert, as the event wrapper will have the same hash, it actually does not replace the old one.
                         // by removing the old one first, we can make sure the new one is inserted.
-                        event_history.remove(&event.into());
-                        event_history.insert(event.into());
+                        event_history.lock().remove(&event.into());
+                        event_history.lock().insert(event.into());
                     }
                     events.clear();
                     while let Ok(event) = register_receiver.try_recv() {
@@ -134,7 +134,7 @@ impl Socket2Runtime {
                     }
 
                     for (event, waker) in events_registered.iter() {
-                        if event_history.get(event).is_some() {
+                        if event_history.lock().get(event).is_some() {
                             waker.wake_by_ref();
                         }
                     }
@@ -156,7 +156,7 @@ impl Socket2Runtime {
 
         let mut res = Vec::new();
         for event in event_interested {
-            if let Some(event) = self.event_history.get(&event.into()) {
+            if let Some(event) = self.event_history.lock().get(&event.into()) {
                 res.push(event.0);
             }
         }
@@ -165,7 +165,7 @@ impl Socket2Runtime {
     }
 
     pub(crate) fn remove_event_from_history(&self, event: Event) {
-        self.event_history.remove(&event.into());
+        self.event_history.lock().remove(&event.into());
     }
 
     pub(crate) fn remove_events_with_id_from_history(&self, id: usize) {
@@ -177,7 +177,7 @@ impl Socket2Runtime {
         ];
 
         for event in event_interested {
-            self.event_history.remove(&event.into());
+            self.event_history.lock().remove(&event.into());
         }
     }
 

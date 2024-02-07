@@ -104,7 +104,6 @@ impl TaskExecutionRunner {
     }
 }
 
-
 /// A task manager that can spawn tasks and stop them.
 /// Collects all the handles of the spawned tasks and stops them when the stop method is called.
 /// Helps to manage the lifetime of the spawned tasks.
