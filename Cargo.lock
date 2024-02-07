@@ -2797,8 +2797,8 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 
 [[package]]
 name = "polling"
-version = "3.3.2"
-source = "git+https://github.com/irvingoujAtDevolution/polling.git?branch=fix-linux-tcp-fail#cff89838c9f4ddd4cbfb43699d447dbf689c3773"
+version = "3.4.0"
+source = "git+https://github.com/irvingoujAtDevolution/polling.git?branch=fix-detect-connection-fail#c04e8ee40415cad551fe044457270f4a2d7c491d"
 dependencies = [
  "cfg-if",
  "concurrent-queue",

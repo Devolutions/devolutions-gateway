@@ -223,7 +223,7 @@ impl<'a> Future for ConnectFuture<'a> {
         for event in events {
             tracing::trace!(?event, "event found");
             if event
-                .is_connect_failed() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
+                .is_err() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
                 .expect("your platform does not support connect failed")
             {
                 return std::task::Poll::Ready(Err(std::io::Error::new(
