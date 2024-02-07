@@ -12,6 +12,7 @@ crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 dashmap = "5.5.3"
 derive_builder = "0.13.0"
 futures = { version = "0.3.30" }
+lazy_static = "1.4.0"
 network-interface = "1.1.1"
 network-scanner-net ={ path = "../network-scanner-net" }
 network-scanner-proto ={ path = "../network-scanner-proto" }

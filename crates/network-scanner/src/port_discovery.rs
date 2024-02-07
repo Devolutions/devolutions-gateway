@@ -8,11 +8,14 @@ use anyhow::Context;
 use network_scanner_net::runtime::Socket2Runtime;
 use socket2::SockAddr;
 
+use crate::task_utils::TaskManager;
+
 pub async fn scan_ports(
     ip: impl Into<IpAddr>,
     port: &[u16],
     runtime: Arc<Socket2Runtime>,
     timeout: Duration,
+    task_manager: TaskManager,
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<PortScanResult>> {
     let ip = ip.into();
     let mut sockets = vec![];
@@ -25,7 +28,7 @@ pub async fn scan_ports(
     let (sender, receiver) = tokio::sync::mpsc::channel(port.len());
     for (socket, addr) in sockets {
         let sender = sender.clone();
-        tokio::task::spawn(async move {
+        task_manager.spawn_no_sub_task(async move {
             let connect_future = socket.connect(&addr);
             let addr = addr
                 .as_socket()

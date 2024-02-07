@@ -18,6 +18,7 @@ pub fn ping_range(
     ping_interval: Duration,
     ping_wait_time: Duration,
     should_ping: impl Fn(IpAddr) -> bool + Send + Sync + 'static + Clone,
+    task_manager: crate::task_utils::TaskManager,
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<IpAddr>> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     let mut futures = vec![];
@@ -34,8 +35,7 @@ pub fn ping_range(
             if !should_ping(ip) {
                 return anyhow::Ok(());
             }
-            tracing::trace!("pinging {}", ip);
-            if let Ok(Ok(_)) = timeout(ping_wait_time, try_ping(addr.into(), socket)).await {
+            if try_ping(addr.into(), socket).await.is_ok() {
                 sender.send(ip).await?;
             }
             anyhow::Ok(())
@@ -44,11 +44,15 @@ pub fn ping_range(
         futures.push(ping_future);
     }
 
-    tokio::task::spawn(async move {
+    task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
         for future in futures {
-            tokio::spawn(future);
+            task_manager.spawn_no_sub_task(async move {
+                timeout(ping_wait_time, future).await??;
+                anyhow::Ok(())
+            });
             tokio::time::sleep(ping_interval).await;
         }
+        anyhow::Ok(())
     });
 
     Ok(receiver)

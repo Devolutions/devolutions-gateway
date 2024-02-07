@@ -1,8 +1,10 @@
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 
 use futures::Future;
+
 use tokio::sync::Mutex;
 
 use crate::{
@@ -10,13 +12,12 @@ use crate::{
     scanner::NetworkScanner,
 };
 
-type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
-type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
-type PortSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>, u16)>;
-type PortReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
+pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
+pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
+pub(crate) type PortSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>, u16)>;
+pub(crate) type PortReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
 #[derive(Debug, Clone)]
 pub(crate) struct TaskExecutionContext {
-    pub handles_sender: HandlesSender,
     pub ip_sender: IpSender,
     pub ip_receiver: Arc<Mutex<IpReceiver>>,
 
@@ -37,15 +38,15 @@ pub(crate) struct TaskExecutionContext {
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 type HandlesSender = crossbeam::channel::Sender<tokio::task::JoinHandle<anyhow::Result<()>>>;
+
 #[derive(Debug)]
 pub(crate) struct TaskExecutionRunner {
     pub(crate) context: TaskExecutionContext,
-    pub(crate) handles_receiver: HandlesReceiver,
-    pub(crate) handles_sender: HandlesSender,
+    pub(crate) task_manager: TaskManager,
 }
 
 impl TaskExecutionContext {
-    pub(crate) fn new(network_scanner: NetworkScanner, handles_sender: HandlesSender) -> anyhow::Result<Self> {
+    pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
         let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(1024);
         let ip_receiver = Arc::new(Mutex::new(ip_receiver));
 
@@ -65,7 +66,6 @@ impl TaskExecutionContext {
         } = network_scanner;
 
         let res = Self {
-            handles_sender,
             ip_sender,
             ip_receiver,
             port_sender,
@@ -86,23 +86,106 @@ impl TaskExecutionContext {
 }
 
 impl TaskExecutionRunner {
-    // Move the generic parameters to the method level.
     pub(crate) fn run<T, F>(&mut self, task: T)
     where
-        T: FnOnce(TaskExecutionContext) -> F + Send + 'static,
+        T: FnOnce(TaskExecutionContext, TaskManager) -> F + Send + 'static,
         F: Future<Output = anyhow::Result<()>> + Send + 'static,
     {
         let context = self.context.clone();
-        let handle = tokio::task::spawn(task(context));
-        let _ = self.handles_sender.send(handle);
+        self.task_manager
+            .spawn_no_sub_task(task(context, self.task_manager.clone()));
     }
 
     pub(crate) fn new(scanner: NetworkScanner) -> anyhow::Result<Self> {
-        let (handles_sender, handles_receiver) = crossbeam::channel::unbounded();
         Ok(Self {
-            context: TaskExecutionContext::new(scanner, handles_sender.clone())?,
-            handles_receiver,
-            handles_sender,
+            context: TaskExecutionContext::new(scanner)?,
+            task_manager: TaskManager::new(),
         })
+    }
+}
+
+
+/// A task manager that can spawn tasks and stop them.
+/// Collects all the handles of the spawned tasks and stops them when the stop method is called.
+/// Helps to manage the lifetime of the spawned tasks.
+#[derive(Debug, Clone)]
+pub struct TaskManager {
+    handles_sender: HandlesSender,
+    handles_receiver: Arc<HandlesReceiver>,
+    should_stop: Arc<AtomicBool>,
+    count: Arc<AtomicUsize>,
+}
+
+impl Default for TaskManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskManager {
+    pub fn new() -> Self {
+        let (handles_sender, handles_receiver) = crossbeam::channel::unbounded();
+        Self {
+            handles_sender,
+            handles_receiver: Arc::new(handles_receiver),
+            should_stop: Arc::new(AtomicBool::new(false)),
+            count: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    pub(crate) fn spawn<T, F>(&self, task: T)
+    where
+        T: FnOnce(Self) -> F + Send + 'static,
+        F: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        if self.should_stop.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        tracing::trace!("Spawning a new task");
+        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let clone = self.clone();
+        let handle = tokio::task::spawn(task(clone));
+        let _ = self.handles_sender.send(handle);
+    }
+
+    pub(crate) fn spawn_no_sub_task<F>(&self, task: F)
+    where
+        F: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        self.spawn(|_| task);
+    }
+
+    pub(crate) fn stop(&self) {
+        self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let handles = self.handles_receiver.clone();
+        tracing::debug!("Stop all tasks");
+        let mut count = 0;
+        while let Ok(handle) = handles.try_recv() {
+            count += 1;
+            handle.abort();
+        }
+
+        tracing::debug!(
+            "Stopped {count} task, should stop {} tasks",
+            self.count.load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+
+    pub(crate) fn stop_timeout(&self, timeout: Duration) {
+        // This is useful for debugging purposes. knowing how long the program has been running.
+        #[cfg(debug_assertions)]
+        self.spawn_no_sub_task(async move {
+            let now = tokio::time::Instant::now();
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                tracing::debug!("time elapsed: {:?}", now.elapsed());
+            }
+        });
+
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+            self_clone.stop();
+        });
     }
 }

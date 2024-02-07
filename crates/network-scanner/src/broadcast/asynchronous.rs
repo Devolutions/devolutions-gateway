@@ -19,6 +19,7 @@ pub async fn broadcast(
     ip: Ipv4Addr,
     read_time_out: Duration,
     runtime: Arc<runtime::Socket2Runtime>,
+    task_manager: crate::task_utils::TaskManager,
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<Ipv4Addr>> {
     let socket = runtime.new_socket(
         socket2::Domain::IPV4,
@@ -32,11 +33,13 @@ pub async fn broadcast(
     let (packet, _) = create_echo_request()?;
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
 
-    tokio::task::spawn(async move {
+    task_manager.spawn_no_sub_task(async move {
         socket
             .send_to(&packet.to_bytes(true), &SockAddr::from(SocketAddr::new(ip.into(), 0)))
             .await?;
+
         tokio::time::timeout(read_time_out, loop_receive(socket, sender)).await??;
+        tracing::debug!("broadcast future dropped");
         anyhow::Ok(())
     });
 

@@ -2185,6 +2185,7 @@ dependencies = [
  "dashmap",
  "derive_builder",
  "futures",
+ "lazy_static",
  "network-interface",
  "network-scanner-net",
  "network-scanner-proto",

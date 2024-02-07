@@ -3,12 +3,14 @@ use crate::{
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
+    task_utils::TaskManager,
 };
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, net::IpAddr, sync::Arc, time::Duration};
 
-use tokio::{spawn, sync::Mutex, task::spawn_blocking};
+use tokio::sync::Mutex;
 
 use crate::{
     broadcast::asynchronous::broadcast,
@@ -34,7 +36,7 @@ impl NetworkScanner {
     pub fn start(&self) -> anyhow::Result<Arc<NetworkScannerStream>> {
         let mut task_executor = TaskExecutionRunner::new(self.clone())?;
 
-        task_executor.run(move |context| async move {
+        task_executor.run(move |context, task_manager| async move {
             let TaskExecutionContext {
                 ip_cache,
                 ip_receiver,
@@ -66,8 +68,12 @@ impl NetworkScanner {
                 let (runtime, ports, port_sender, ip_cache) =
                     (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
 
-                spawn(async move {
-                    let mut port_scan_receiver = scan_ports(ip, &ports, runtime, port_scan_timeout).await?;
+                task_manager.spawn(move |task_manager| async move {
+                    tracing::info!("Scanning ports for: {:?}", ip);
+
+                    let mut port_scan_receiver =
+                        scan_ports(ip, &ports, runtime, port_scan_timeout, task_manager).await?;
+
                     while let Some(res) = port_scan_receiver.recv().await {
                         tracing::trace!("Port scan result: {:?}", res);
                         if let PortScanResult::Open(socket_addr) = res {
@@ -75,6 +81,7 @@ impl NetworkScanner {
                             port_sender.send((ip, dns, socket_addr.port())).await?;
                         }
                     }
+                    tracing::info!("Port scan finished for: {:?}", ip);
                     anyhow::Ok(())
                 });
             }
@@ -82,33 +89,30 @@ impl NetworkScanner {
             anyhow::Ok(())
         });
 
-        task_executor.run(move |context| async move {
+        task_executor.run(move |context, task_manager| async move {
             let TaskExecutionContext {
                 subnets,
                 broadcast_timeout,
                 runtime,
-                handles_sender,
                 ip_sender,
                 ..
             } = context;
 
             for subnet in subnets {
                 let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
-                let handler = spawn(async move {
-                    let mut receiver = broadcast(subnet.broadcast, broadcast_timeout, runtime).await?;
+                task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
+                    let mut receiver = broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                     while let Some(ip) = receiver.recv().await {
                         tracing::trace!("Broadcast received: {:?}", ip);
                         ip_sender.send((ip.into(), None)).await?;
                     }
                     anyhow::Ok(())
                 });
-
-                handles_sender.send(handler)?;
             }
             anyhow::Ok(())
         });
 
-        task_executor.run(move |context| async move {
+        task_executor.run(move |context, task_manager| async move {
             let TaskExecutionContext {
                 subnets,
                 netbios_timeout,
@@ -120,17 +124,22 @@ impl NetworkScanner {
             let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
 
             for ip_range in ip_ranges {
-                let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
-                let mut receiver = netbios_query_scan(runtime, ip_range, netbios_timeout, Duration::from_millis(20))?;
-                while let Some((ip, name)) = receiver.recv().await {
-                    tracing::trace!("Netbios received: {:?} {:?}", ip, name);
-                    ip_sender.send((ip.into(), Some(name))).await?;
+                let (runtime, ip_sender, task_manager) = (runtime.clone(), ip_sender.clone(), task_manager.clone());
+                let mut receiver = netbios_query_scan(
+                    runtime,
+                    ip_range,
+                    netbios_timeout,
+                    Duration::from_millis(20),
+                    task_manager,
+                )?;
+                while let Some(res) = receiver.recv().await {
+                    ip_sender.send(res).await?;
                 }
             }
             anyhow::Ok(())
         });
 
-        task_executor.run(move |context| async move {
+        task_executor.run(move |context, task_manager| async move {
             let TaskExecutionContext {
                 ping_interval,
                 ping_timeout,
@@ -146,9 +155,16 @@ impl NetworkScanner {
             let should_ping = move |ip: IpAddr| -> bool { !ip_cache.contains_key(&ip) };
 
             for ip_range in ip_ranges {
-                let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
+                let (task_manager, runtime, ip_sender) = (task_manager.clone(), runtime.clone(), ip_sender.clone());
                 let should_ping = should_ping.clone();
-                let mut receiver = ping_range(runtime, ip_range, ping_interval, ping_timeout, should_ping)?;
+                let mut receiver = ping_range(
+                    runtime,
+                    ip_range,
+                    ping_interval,
+                    ping_timeout,
+                    should_ping,
+                    task_manager,
+                )?;
 
                 while let Some(ip) = receiver.recv().await {
                     tracing::trace!("Ping received: {:?}", ip);
@@ -159,24 +175,16 @@ impl NetworkScanner {
         });
 
         let TaskExecutionRunner {
-            handles_receiver,
             context: TaskExecutionContext { port_receiver, .. },
-            ..
+            task_manager,
         } = task_executor;
 
-        let max_wait_time = self.max_wait_time;
-        let handles_receiver_clone = handles_receiver.clone();
-        spawn_blocking(move || {
-            std::thread::sleep(max_wait_time);
-            while let Ok(handle) = handles_receiver_clone.recv() {
-                handle.abort();
-            }
-        });
+        task_manager.stop_timeout(self.max_wait_time);
 
         Ok({
             Arc::new(NetworkScannerStream {
                 result_receiver: port_receiver,
-                task_handles: handles_receiver,
+                task_manager,
             })
         })
     }
@@ -215,10 +223,9 @@ impl NetworkScanner {
 }
 
 type ResultReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
-type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ResultReceiver>>,
-    task_handles: HandlesReceiver,
+    task_manager: TaskManager,
 }
 
 impl NetworkScannerStream {
@@ -226,11 +233,17 @@ impl NetworkScannerStream {
         // the caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver
         self.result_receiver.lock().await.recv().await
     }
+    pub async fn recv_timeout(
+        self: &Arc<Self>,
+        duration: Duration,
+    ) -> anyhow::Result<Option<(IpAddr, Option<String>, u16)>> {
+        tokio::time::timeout(duration, self.result_receiver.lock().await.recv())
+            .await
+            .context("recv_timeout timed out")
+    }
 
     pub fn stop(self: Arc<Self>) {
-        while let Ok(handle) = self.task_handles.try_recv() {
-            handle.abort();
-        }
+        self.task_manager.stop();
     }
 }
 
