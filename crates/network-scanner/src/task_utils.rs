@@ -157,10 +157,11 @@ impl TaskManager {
     pub(crate) fn stop(&self) {
         self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let handles = self.handles_receiver.clone();
-        tracing::debug!("Stop all tasks");
+        tracing::debug!("Stopping all tasks");
         while let Ok(handle) = handles.try_recv() {
             handle.abort();
         }
+        tracing::debug!("All tasks stopped");
     }
 
     pub(crate) fn stop_timeout(&self, timeout: Duration) {
