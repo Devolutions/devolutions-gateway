@@ -13,7 +13,7 @@ fn main() -> anyhow::Result<()> {
 
     let params = NetworkScannerParams {
         ports: vec![22, 80, 443, 389, 636],
-        max_wait_time: Some(10 * 1000),
+        max_wait_time: Some(20 * 1000),
         ping_interval: Some(20),
         ..default::Default::default()
     };

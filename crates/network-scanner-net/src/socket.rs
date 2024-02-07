@@ -235,7 +235,7 @@ impl<'a> Future for ConnectFuture<'a> {
             // This is a special case, this happens when using epoll to wait for a unconnected TCP socket.
             // We clearly needs to call connect function, so we break the loop and call connect.
             #[cfg(target_os = "linux")]
-            if event.is_hup() && !event.is_err() {
+            if event.is_hup() && !event.is_err().expect("your platform does not support connect failed") {
                 tracing::trace!("out and hup");
                 self.runtime.remove_events_with_id_from_history(self.id);
                 break;
