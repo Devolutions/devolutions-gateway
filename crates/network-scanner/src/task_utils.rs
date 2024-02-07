@@ -112,7 +112,6 @@ pub struct TaskManager {
     handles_sender: HandlesSender,
     handles_receiver: Arc<HandlesReceiver>,
     should_stop: Arc<AtomicBool>,
-    count: Arc<AtomicUsize>,
 }
 
 impl Default for TaskManager {
@@ -123,12 +122,13 @@ impl Default for TaskManager {
 
 impl TaskManager {
     pub fn new() -> Self {
+        // This channel needs to be unbounded. Because we only clear out the channel once when we stop the tasks.
+        // If the channel is bounded, all tokio workers will be blocked forever and eventually the program will hang.
         let (handles_sender, handles_receiver) = crossbeam::channel::unbounded();
         Self {
             handles_sender,
             handles_receiver: Arc::new(handles_receiver),
             should_stop: Arc::new(AtomicBool::new(false)),
-            count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -137,13 +137,13 @@ impl TaskManager {
         T: FnOnce(Self) -> F + Send + 'static,
         F: Future<Output = anyhow::Result<()>> + Send + 'static,
     {
+        // Avoid race condition when stopping the tasks.
+        // If the stop method is called, we should not spawn any more tasks.
         if self.should_stop.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
-        tracing::trace!("Spawning a new task");
-        self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let clone = self.clone();
-        let handle = tokio::task::spawn(task(clone));
+        let handle = tokio::spawn(task(clone));
         let _ = self.handles_sender.send(handle);
     }
 
@@ -158,29 +158,12 @@ impl TaskManager {
         self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let handles = self.handles_receiver.clone();
         tracing::debug!("Stop all tasks");
-        let mut count = 0;
         while let Ok(handle) = handles.try_recv() {
-            count += 1;
             handle.abort();
         }
-
-        tracing::debug!(
-            "Stopped {count} task, should stop {} tasks",
-            self.count.load(std::sync::atomic::Ordering::SeqCst)
-        );
     }
 
     pub(crate) fn stop_timeout(&self, timeout: Duration) {
-        // This is useful for debugging purposes. knowing how long the program has been running.
-        #[cfg(debug_assertions)]
-        self.spawn_no_sub_task(async move {
-            let now = tokio::time::Instant::now();
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                tracing::debug!("time elapsed: {:?}", now.elapsed());
-            }
-        });
-
         let self_clone = self.clone();
         tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
