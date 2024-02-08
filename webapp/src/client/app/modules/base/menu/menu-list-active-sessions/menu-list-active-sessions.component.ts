@@ -15,7 +15,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   // indicates user is currently on the screen for the menu item
   @Input() selected: boolean = false;
-  @Input() isMenuSlim = false;
+  @Input() isMenuSlim: boolean = false;
 
   activeWebSessions: WebSession<any, any>[] = [];
   activeWebSessionIndex: number = 0;
@@ -41,7 +41,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
 
   onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
     event.stopPropagation();
-    this.webSessionService.removeSession(webSession.tabIndex);
+    this.webSessionService.removeSession(webSession.id);
   }
 
   private selectTab(tabIndex: number): void {

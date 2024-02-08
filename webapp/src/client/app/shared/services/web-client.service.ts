@@ -3,15 +3,23 @@ import {Observable, of, throwError} from "rxjs";
 import {catchError, map, takeUntil} from "rxjs/operators";
 import { v4 as uuidv4 } from 'uuid';
 
-import { ApiService } from "@shared/services/api.service";
+import {ApiService} from "@shared/services/api.service";
 import {UtilsService} from "@shared/services/utils.service";
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
+import {ScreenSize} from "@shared/enums/screen-size.enum";
+import {DesktopSize} from "@devolutions/iron-remote-gui";
+import {WebSession} from "@shared/models/web-session.model";
+import {SelectItem} from "primeng/api";
 
 export enum DefaultPowerShellPort {
   SSL = 5986,
   NON_SSL = 5985
 }
+
+export const PROTOCOL_SELECT_ITEMS: SelectItem[] = [
+  { label: 'RDP', value: '0' }
+];
 
 export const DefaultRDPPort: number = 3389;
 export const DefaultSshPort: number = 22;
@@ -22,29 +30,6 @@ export const DefaultTelnetPort: number = 23;
 //   ConnectionType.PowerShellRemoteConsole,
 //   ConnectionType.Telnet
 // ];
-
-export interface WebClientQueryParams {
-  sessionId: string;
-  gatewayUrl: URL;
-  gatewayToken: string;
-  comment?: string;
-  ticketNumber?: string;
-}
-
-export interface WebClientCredentials {
-  queryParams?: WebClientQueryParams;
-  token?: string;
-  host?: string;
-  port?: number;
-  username?: string;
-  safePassword?: string;
-  password?: string;
-  domain?: string;
-  url?: string;
-  useSSL?: boolean;
-  isConnected?: boolean;
-  hasError?: boolean;
-}
 
 export interface IronRDPConnectionParameters {
   host: string;
@@ -60,20 +45,52 @@ export interface IronRDPConnectionParameters {
   preConnectionBlob?:string
 }
 
-export interface DesktopSize {
-  width: number;
-  height: number;
+export interface HostnameObject {
+  hostname: string;
+}
+
+export interface AutoCompleteInput {
+  hostname: string;
+}
+
+export interface RdpFormDataInput {
+  autoComplete: AutoCompleteInput,
+  hostname: string,
+  username: string,
+  password: string,
+  kdcUrl: string,
+  preConnectionBlob: string,
+  protocol: number,
+  screenSize: ScreenSize,
+  customWidth?: number,
+  customHeight?: number
 }
 
 @Injectable()
 export class WebClientService extends BaseComponent {
 
-  static JET_RDP_URL: string = '/jet/rdp';
-  static JET_KDC_PROXY_URL: string = '/jet/KdcProxy';
-
   constructor( private apiService: ApiService,
                protected utils: UtilsService) {
     super();
+  }
+
+  getDesktopSize(submittedFormData: any ): DesktopSize | null {
+    if (!submittedFormData?.screenSize) {
+      return;
+    }
+
+    const screenSizeStr: string = ScreenSize.getEnumKey(submittedFormData.screenSize);
+    console.log('screenSizeStr', screenSizeStr)
+    if (submittedFormData.screenSize >= 2 && submittedFormData.screenSize <= 20) {
+      const rawSize: string[] = screenSizeStr?.split('x');
+      console.log('rawSize', rawSize)
+      return rawSize.length > 1 ? { width: parseInt(rawSize[0]), height: (parseInt(rawSize[1])-WebSession.TOOLBAR_SIZE) } : null;
+
+    } else if (submittedFormData.screenSize === ScreenSize.Custom) {
+      return submittedFormData.customWidth && submittedFormData.customHeight ?
+        { width: submittedFormData.customWidth, height: (submittedFormData.customHeight-WebSession.TOOLBAR_SIZE) } :
+        null;
+    }
   }
 
   fetchToken(sessionParameters: any): Observable<string> {

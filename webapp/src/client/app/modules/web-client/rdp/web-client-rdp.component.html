@@ -1,7 +1,7 @@
-<div #sessionContainer>
+<div #sessionRdpContainer>
   <div *ngIf="currentStatus.isDisabled" class="session-form">
     <web-client-rdp-form
-      [tabIndex]="tabIndex"
+      [webSessionId]="webSessionId"
       [inputFormData]="inputFormData"
       [error]="rdpError"
       [isFormExists]="true"></web-client-rdp-form>

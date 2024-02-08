@@ -9,8 +9,8 @@ import {
   ViewChild,
   Renderer2
 } from '@angular/core';
-import {from, Observable, Subject} from "rxjs";
-import {catchError, map, mergeMap, switchMap, takeUntil, tap} from 'rxjs/operators';
+import {EMPTY, from, Observable, of, Subject} from "rxjs";
+import {catchError, finalize, map, switchMap, takeUntil} from 'rxjs/operators';
 import {MessageService} from "primeng/api";
 
 import { WebClientBaseComponent } from "@shared/bases/base-web-client.component";
@@ -19,9 +19,10 @@ import {GatewayAlertMessageService} from "@shared/components/gateway-alert-messa
 import {ComponentStatus} from "@shared/models/component-status.model";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {UtilsService} from "@shared/services/utils.service";
-import {WebClientService} from "@shared/services/web-client.service";
-
-import {UserInteraction, SessionEvent, UserIronRdpError} from '@devolutions/iron-remote-gui';
+import {RdpFormDataInput, WebClientService} from "@shared/services/web-client.service";
+import {ScreenSize} from "@shared/enums/screen-size.enum";
+import {ExtractedUsernameDomain} from "@shared/services/utils/string.service";
+import {UserInteraction, SessionEvent, UserIronRdpError, DesktopSize} from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
 
 export enum SSPIType {
@@ -56,11 +57,11 @@ enum UserIronRdpErrorKind {
 export class WebClientRdpComponent extends WebClientBaseComponent implements  OnInit,
                                                                               AfterViewInit,
                                                                               OnDestroy {
-
-  @Input() tabIndex: number | undefined;
+  @Input() webSessionId: string;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
+  @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
-  @ViewChild('sessionContainer') sessionContainerElement: ElementRef;
+  @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
   @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
 
   static DVL_RDP_ICON: string = 'dvl-icon-entry-session-rdp';
@@ -70,7 +71,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
-  inputFormData: any;
+  inputFormData: RdpFormDataInput;
   rdpError: string;
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
@@ -122,7 +123,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   sendTerminateSessionCmd(): void {
-    // shutdowns the session, not the server
+    // shutdowns the session, not the server. Jan 2024 KAH.
     this.remoteClient.shutdown();
     this.currentStatus.isDisabledByUser = true;
   }
@@ -148,16 +149,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   private initializeStatus(): void {
     this.currentStatus = {
+      id: this.webSessionId,
       isInitialized: false,
       isDisabled: false,
       isDisabledByUser: false,
-      tabIndex: this.tabIndex
     }
   }
 
   private handleOnFullScreenEvent(): void {
     if (!document.fullscreenElement) {
-      this.exitFullScreenMode()
+      this.handleExitFullScreenEvent()
     }
   }
 
@@ -175,27 +176,32 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   private toggleFullscreen(): void {
     this.isFullScreenMode = !this.isFullScreenMode;
-    !document.fullscreenElement ? this.enterFullScreenMode() : document.exitFullscreen();
+    !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
   }
 
-  private async enterFullScreenMode(): Promise<void>  {
+  private async enterFullScreen(): Promise<void>  {
     if (document.fullscreenElement) {
       return;
     }
+
     try {
       const sessionContainerElement = this.sessionContainerElement.nativeElement;
       await sessionContainerElement.requestFullscreen();
-
-      // using .Full screen scale causes scrollbars, Fit works better in this case. KAH Jan 2024
-      this.remoteClient.setScale(ScreenScale.Fit);
-
     } catch (err: any) {
       this.isFullScreenMode = false;
       console.error(`Error attempting to enable fullscreen mode: ${err.message} (${err.name})`);
     }
   }
 
-  private exitFullScreenMode(): void {
+  private exitFullScreen(): void {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(err => {
+        console.error(`Error attempting to exit fullscreen: ${err}`);
+      });
+    }
+  }
+
+  private handleExitFullScreenEvent(): void {
     this.isFullScreenMode = false;
     this.showToolbarDiv = true;
 
@@ -205,6 +211,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     if (sessionToolbarElement) {
       this.renderer.removeClass(sessionToolbarElement, 'session-toolbar-layer');
     }
+
     this.remoteClient.setScale(ScreenScale.Fit);
   }
 
@@ -215,12 +222,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   private removeRemoteClientListener(): void {
     if (this.ironGuiElement && this.remoteClientEventListener) {
-      this.renderer.destroy(); // Make sure to destroy the listener properly
+      this.renderer.destroy();
     }
   }
 
   private readyRemoteClientEventListener(event: Event): void {
-    const customEvent = event as CustomEvent;
+    const customEvent: CustomEvent<any> = event as CustomEvent;
     this.remoteClient = customEvent.detail.irgUserInteraction;
 
     this.initSessionEventHandler();
@@ -230,41 +237,64 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   private startConnectionProcess(): void {
     this.getFormData().pipe(
       takeUntil(this.destroyed$),
-      switchMap((connectionParameters)=> this.webClientService.fetchRdpToken(connectionParameters)),
-      switchMap((connectionParameters)=> this.webClientService.fetchKdcToken(connectionParameters)),
-      switchMap((connectionParameters)=> this.webClientService.generateKdcProxyUrl(connectionParameters)),
-      mergeMap(connectionParameters => this.callConnect(connectionParameters))
-    ).subscribe(
-      () => {},
-      (error) => {
-          console.error(error.message);
-          this.handleIronRDPError(error.message);
-      });
+      switchMap(()=> this.setScreenSizeScale(this.inputFormData.screenSize)),
+      switchMap(()=> this.fetchParameters(this.inputFormData)),
+      switchMap((params)=> this.fetchTokens(params)),
+      switchMap((params)=> this.webClientService.generateKdcProxyUrl(params)),
+      switchMap(params => this.callConnect(params)),
+      catchError(error => {
+        console.error(error.message);
+        this.handleIronRDPError(error.message);
+        return EMPTY;
+      }),
+      finalize(() => console.log('Connection process completed or stopped. Clean up?'))
+    ).subscribe();
   }
 
-  private getFormData(): Observable<IronRDPConnectionParameters> {
-    return from(this.webSessionService.getWebSession(this.tabIndex)).pipe(
-      tap(currentWebSession => this.inputFormData = currentWebSession.data),
-      map(() => {
-        const { hostname, username, password, desktopSize, preConnectionBlob, kdcUrl } = this.inputFormData;
-        const extractedData = this.utils.string.extractDomain(username);
-        const gatewayHttpAddress: URL = new URL(WebClientRdpComponent.JET_RDP_URL, window.location.href);
-        const websocketUrl: string = gatewayHttpAddress.toString().replace("http", "ws");
-
-        const connectionParameters: IronRDPConnectionParameters = {
-          username: extractedData.username,
-          password: password,
-          host: hostname,
-          domain: extractedData.domain,
-          gatewayAddress: websocketUrl,
-          screenSize: desktopSize,
-          preConnectionBlob: preConnectionBlob,
-          kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88')
-        };
-        console.log('Debug: connectionParameters', connectionParameters)
-        return connectionParameters;
-      })
+  private getFormData(): Observable<void> {
+    return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
+      map(currentWebSession => this.inputFormData = currentWebSession.data)
     );
+  }
+
+  private fetchParameters(formData: RdpFormDataInput): Observable<IronRDPConnectionParameters> {
+    const { hostname, password, preConnectionBlob, kdcUrl } = formData;
+
+    const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.inputFormData.username);
+
+    const desktopScreenSize: DesktopSize = this.webClientService.getDesktopSize(this.inputFormData) ??
+                                          this.webSessionService.getWebSessionScreenSizeSnapshot();
+
+    const connectionParameters: IronRDPConnectionParameters = {
+      username: extractedData.username,
+      password: password,
+      host: hostname,
+      domain: extractedData.domain,
+      gatewayAddress: this.getWebSocketUrl(),
+      screenSize: desktopScreenSize,
+      preConnectionBlob: preConnectionBlob,
+      kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88')
+    };
+    console.log('Debug: connectionParameters', connectionParameters)
+    return of(connectionParameters);
+  }
+
+  fetchTokens(params: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
+    return this.webClientService.fetchRdpToken(params).pipe(
+      switchMap(updatedParams => this.webClientService.fetchKdcToken(updatedParams))
+    );
+  }
+
+  private getWebSocketUrl(): string {
+    const gatewayHttpAddress: URL = new URL(WebClientRdpComponent.JET_RDP_URL, window.location.href);
+    return gatewayHttpAddress.toString().replace("http", "ws");
+  }
+
+  private setScreenSizeScale(screenSize: ScreenSize): Observable<void> {
+    if (screenSize === ScreenSize.FullScreen) {
+      this.scaleTo(this.screenScale.Full);
+    }
+    return of(undefined);
   }
 
   private callConnect(connectionParameters: IronRDPConnectionParameters): Observable<void> {
@@ -314,6 +344,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private handleSessionEndedOrError(event: SessionEvent): void {
+
+    if (document.fullscreenElement) {
+      this.exitFullScreen();
+    }
+
     this.currentStatus.isDisabled = true;
     this.notifyUser(event.type, event.data);
     this.componentStatus.emit(this.currentStatus);
@@ -322,16 +357,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   private handleIronRDPConnectStarted(): void {
     this.loading = false;
     this.remoteClient.setVisibility(true);
-    this.webSessionService.updateWebSessionIcon(this.tabIndex, WebClientRdpComponent.DVL_RDP_ICON);
+    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_RDP_ICON);
     this.webClientConnectionSuccess();
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.tabIndex = this.currentStatus.tabIndex;
+    this.webSessionId = this.currentStatus.id;
     this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
 
-    const icon = eventType === SessionEventType.TERMINATED ? WebClientRdpComponent.DVL_WARNING_ICON : WebClientRdpComponent.DVL_RDP_ICON;
-    this.webSessionService.updateWebSessionIcon(this.tabIndex, icon);
+    const icon: string = eventType === SessionEventType.TERMINATED ? WebClientRdpComponent.DVL_WARNING_ICON : WebClientRdpComponent.DVL_RDP_ICON;
+    this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
   private handleSubscriptionError(error: any): void {
@@ -345,14 +380,14 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    this.tabIndex = this.currentStatus.tabIndex;
+    this.webSessionId = this.currentStatus.id;
 
     if (typeof error === 'string') {
       this.rdpError = error;
     } else {
       this.rdpError = this.getMessage(error.kind());
     }
-    this.webSessionService.updateWebSessionIcon(this.tabIndex, WebClientRdpComponent.DVL_WARNING_ICON);
+    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_WARNING_ICON);
   }
 
   private getMessage(errorKind: UserIronRdpErrorKind): string {
