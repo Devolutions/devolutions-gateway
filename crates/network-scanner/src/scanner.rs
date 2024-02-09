@@ -64,8 +64,14 @@ impl NetworkScanner {
                 task_manager.spawn(move |task_manager| async move {
                     tracing::debug!(scanning_ip = ?ip);
 
+                    let dns_look_up_res = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip).ok());
+
                     let mut port_scan_receiver =
                         scan_ports(ip, &ports, runtime, port_scan_timeout, task_manager).await?;
+
+                    let dns = dns_look_up_res.await?;
+
+                    ip_cache.write().insert(ip, dns.clone());
 
                     while let Some(res) = port_scan_receiver.recv().await {
                         tracing::trace!(port_scan_result = ?res);
