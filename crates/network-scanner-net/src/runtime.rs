@@ -7,10 +7,12 @@ use std::{
         Arc,
     },
     task::Waker,
+    time::Duration,
 };
 
 use anyhow::Context;
 use crossbeam::channel::{Receiver, Sender};
+
 use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
@@ -23,8 +25,7 @@ pub struct Socket2Runtime {
     next_socket_id: AtomicUsize,
     is_terminated: Arc<AtomicBool>,
     register_sender: Sender<RegisterEvent>,
-    event_receiver: Receiver<Event>,
-    event_cache: Mutex<HashSet<EventWrapper>>,
+    event_history: Arc<Mutex<HashSet<EventWrapper>>>,
 }
 
 impl Drop for Socket2Runtime {
@@ -43,27 +44,25 @@ impl Drop for Socket2Runtime {
     }
 }
 
-const QUEUE_CAPACITY: usize = 1024;
+const QUEUE_CAPACITY: usize = 8024;
 impl Socket2Runtime {
-    /// Create a new runtime with a queue capacity, default is 1024.
+    /// Create a new runtime with a queue capacity, default is 8024.
     pub fn new(queue_capacity: Option<usize>) -> anyhow::Result<Arc<Self>> {
         let poller = polling::Poller::new()?;
 
         let (register_sender, register_receiver) =
             crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
 
-        let (event_sender, event_receiver) = crossbeam::channel::bounded(queue_capacity.unwrap_or(QUEUE_CAPACITY));
-
+        let event_history = Arc::new(Mutex::new(HashSet::new()));
         let runtime = Self {
             poller: Arc::new(poller),
             next_socket_id: AtomicUsize::new(0),
             is_terminated: Arc::new(AtomicBool::new(false)),
             register_sender,
-            event_receiver,
-            event_cache: Mutex::new(HashSet::new()),
+            event_history: event_history.clone(),
         };
         let runtime = Arc::new(runtime);
-        runtime.start_loop(register_receiver, event_sender)?;
+        runtime.start_loop(register_receiver, event_history)?;
         Ok(runtime)
     }
 
@@ -84,130 +83,105 @@ impl Socket2Runtime {
     pub(crate) fn remove_socket(&self, socket: &socket2::Socket, id: usize) -> anyhow::Result<()> {
         self.poller.delete(socket)?;
         // remove all events related to this socket
-        self.event_cache.lock().retain(|event| id == event.0.key);
+        self.remove_events_with_id_from_history(id);
         Ok(())
     }
 
     fn start_loop(
         &self,
         register_receiver: Receiver<RegisterEvent>,
-        event_sender: Sender<Event>,
+        event_history: Arc<Mutex<HashSet<EventWrapper>>>,
     ) -> anyhow::Result<()> {
-        // To prevent an Arc cycle with the Arc<Socket2Runtime>, we added additional indirection.
-        // Otherwise, the reference in the new thread would prevent the runtime from being dropped and shutdown.
-        let poller = self.poller.clone();
+        // We make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread.
+        // The reason why we cannot hold a Arc<Socket2Runtime> in the thread is because it will create a cycle reference and the runtime will never be dropped.
         let is_terminated = self.is_terminated.clone();
-
+        let poller = self.poller.clone();
         std::thread::Builder::new()
             .name("[raw-socket]:io-event-loop".to_string())
             .spawn(move || {
-                let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
+                let mut events = Events::with_capacity(NonZeroUsize::new(QUEUE_CAPACITY).unwrap());
                 tracing::debug!("starting io event loop");
                 // events registered but not happened yet
-                let mut events_registered = HashMap::new();
-
-                // events happened but not registered yet
-                let mut events_happened = HashMap::new();
+                let mut events_registered: HashMap<EventWrapper, Waker> = HashMap::new();
 
                 loop {
                     if is_terminated.load(Ordering::Acquire) {
                         break;
                     }
 
-                    tracing::debug!("polling events");
-                    if let Err(e) = poller.wait(&mut events, None) {
+                    // The timeout 200ms is critical, sometimes the event might be registered after the event happened
+                    // the timeout limit will allow the events to be checked periodically.
+                    if let Err(e) = poller.wait(&mut events, Some(Duration::from_millis(200))) {
                         tracing::error!(error = ?e, "failed to poll events");
                         is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
+
                     for event in events.iter() {
                         tracing::trace!(?event, "event happened");
-                        events_happened.insert(event.key, event);
+                        // This is different from just insert, as the event wrapper will have the same hash, it actually does not replace the old one.
+                        // by removing the old one first, we can make sure the new one is inserted.
+                        event_history.lock().remove(&event.into());
+                        event_history.lock().insert(event.into());
                     }
                     events.clear();
-
                     while let Ok(event) = register_receiver.try_recv() {
                         match event {
-                            RegisterEvent::Register { id, waker } => {
-                                events_registered.insert(id, waker);
+                            RegisterEvent::Register { event, waker } => {
+                                events_registered.insert(event.into(), waker);
                             }
-                            RegisterEvent::Unregister { id } => {
-                                events_registered.remove(&id);
+                            RegisterEvent::Unregister { event } => {
+                                events_registered.remove(&event.into());
                             }
                         }
                     }
 
-                    let intersection = events_happened
-                        .keys()
-                        .filter(|key| events_registered.contains_key(key))
-                        .cloned()
-                        .collect::<Vec<_>>();
-
-                    intersection.into_iter().for_each(|ref key| {
-                        let event = events_happened.remove(key).unwrap();
-                        let waker = events_registered.remove(key).unwrap();
-                        let _ = event_sender.try_send(event);
-                        waker.wake_by_ref();
-                        tracing::trace!(?event, "waking up waker");
-                    });
+                    for (event, waker) in events_registered.iter() {
+                        if event_history.lock().get(event).is_some() {
+                            waker.wake_by_ref();
+                        }
+                    }
                 }
-                tracing::info!("io event loop terminated");
+                tracing::debug!("io event loop terminated");
             })
             .with_context(|| "failed to spawn io event loop thread")?;
 
         Ok(())
     }
 
-    /// Ideally, we should have a dedicated thread to handle events we received, but we don't really want to spawn a second thread
-    /// Alternatively, we can have all socket futures call this function to check if there is any event for them.
-    /// The number of times the socket futures is polled is almost guaranteed to be more than the number of registration we received.
-    /// hence the event receiver will not be blocked.
-    pub(crate) fn check_event(&self, event: Event, remove: bool) -> Option<Event> {
-        let mut event_cache = self.event_cache.lock();
-        while let Ok(event) = self.event_receiver.try_recv() {
-            event_cache.insert(event.into());
-        }
-        tracing::debug!("checking event cache {:?}", event_cache);
-
-        let event = if remove {
-            event_cache.take(&event.into())
-        } else if event_cache.contains(&event.into()) {
-            Some(event.into())
-        } else {
-            None
-        };
-
-        event.map(|event| event.into_inner())
-    }
-
-    pub(crate) fn check_event_with_id(&self, id: usize, remove: bool) -> Vec<Event> {
-        let mut event_cache = self.event_cache.lock();
-        while let Ok(event) = self.event_receiver.try_recv() {
-            event_cache.insert(event.into());
-        }
+    pub(crate) fn check_event_with_id(&self, id: usize) -> Vec<Event> {
         let event_interested = vec![
             Event::readable(id),
             Event::writable(id),
             Event::all(id),
             Event::none(id),
         ];
-        let mut res = vec![];
 
-        if remove {
-            event_interested.into_iter().for_each(|event| {
-                if let Some(event) = event_cache.take(&event.into()) {
-                    res.push(event.into_inner());
-                }
-            });
-        } else {
-            event_interested.into_iter().for_each(|event| {
-                if event_cache.contains(&event.into()) {
-                    res.push(event);
-                }
-            });
+        let mut res = Vec::new();
+        for event in event_interested {
+            if let Some(event) = self.event_history.lock().get(&event.into()) {
+                res.push(event.0);
+            }
         }
 
         res
+    }
+
+    pub(crate) fn remove_event_from_history(&self, event: Event) {
+        self.event_history.lock().remove(&event.into());
+    }
+
+    pub(crate) fn remove_events_with_id_from_history(&self, id: usize) {
+        let event_interested = vec![
+            Event::readable(id),
+            Event::writable(id),
+            Event::all(id),
+            Event::none(id),
+        ];
+
+        for event in event_interested {
+            self.event_history.lock().remove(&event.into());
+        }
     }
 
     pub(crate) fn register(&self, socket: &Socket, event: Event, waker: Waker) -> anyhow::Result<()> {
@@ -222,24 +196,45 @@ impl Socket2Runtime {
         // it would be better to drop the register event then block the worker thread or main thread.
         // as the worker thread is shared for the entire application.
         self.register_sender
-            .try_send(RegisterEvent::Register { id: event.key, waker })
+            .try_send(RegisterEvent::Register { event, waker })
             .with_context(|| "failed to send register event to register loop")
     }
 
-    pub(crate) fn unregister(&self, id: usize) -> anyhow::Result<()> {
+    pub(crate) fn register_events(&self, socket: &Socket, events: &[Event], waker: Waker) -> anyhow::Result<()> {
+        if self.is_terminated.load(Ordering::Acquire) {
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+        }
+
+        for event in events {
+            tracing::trace!(?event, ?socket, "registering event");
+            self.poller.modify(socket, *event)?;
+            self.register_sender
+                .try_send(RegisterEvent::Register {
+                    event: *event,
+                    waker: waker.clone(),
+                })
+                .with_context(|| "failed to send register event to register loop")?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn unregister(&self, event: Event) -> anyhow::Result<()> {
         if self.is_terminated.load(Ordering::Acquire) {
             Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
         }
         self.register_sender
-            .try_send(RegisterEvent::Unregister { id })
-            .with_context(|| "failed to send unregister event to register loop")
+            .try_send(RegisterEvent::Unregister { event })
+            .with_context(|| "failed to send unregister event to register loop")?;
+
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 enum RegisterEvent {
-    Register { id: usize, waker: Waker },
-    Unregister { id: usize },
+    Register { event: Event, waker: Waker },
+    Unregister { event: Event },
 }
 
 #[derive(Debug)]
@@ -267,8 +262,8 @@ impl From<Event> for EventWrapper {
     }
 }
 
-impl EventWrapper {
-    pub(crate) fn into_inner(self) -> Event {
-        self.0
+impl From<&Event> for EventWrapper {
+    fn from(event: &Event) -> Self {
+        Self(*event)
     }
 }

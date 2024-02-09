@@ -17,6 +17,7 @@ pub enum Icmpv4MessageType {
     InformationReply = 16,
 }
 
+#[derive(Debug)]
 pub enum Icmpv4Message {
     EchoReply {
         //  type 0
@@ -213,6 +214,8 @@ impl Icmpv4Message {
         bytes
     }
 }
+
+#[derive(Debug)]
 pub struct Icmpv4Packet {
     pub code: u8,
     pub checksum: u16,
@@ -228,8 +231,8 @@ impl TryFrom<&[u8]> for Icmpv4Packet {
 }
 
 impl From<Icmpv4Packet> for Vec<u8> {
-    fn from(value: Icmpv4Packet) -> Self {
-        value.to_bytes(true)
+    fn from(val: Icmpv4Packet) -> Self {
+        val.to_bytes(true)
     }
 }
 
@@ -309,7 +312,6 @@ impl Icmpv4Packet {
                 return Err(PacketParseError::UnrecognizedICMPType(t));
             }
         };
-
         Ok(Icmpv4Packet {
             code,
             checksum,
@@ -385,7 +387,6 @@ fn sum_big_endian_words(bs: &[u8]) -> u32 {
     let len = bs.len();
     let mut data = bs;
     let mut sum = 0u32;
-
     // Iterate by word which is two bytes.
     while data.len() >= 2 {
         sum += BigEndian::read_u16(&data[0..2]) as u32;
@@ -397,6 +398,5 @@ fn sum_big_endian_words(bs: &[u8]) -> u32 {
         // If odd then checksum the last byte
         sum += (data[0] as u32) << 8;
     }
-
     sum
 }
