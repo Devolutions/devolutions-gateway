@@ -343,7 +343,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "MaintenanceTypeDialog";
-            this.Text = "[MaintenanceTypeDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();

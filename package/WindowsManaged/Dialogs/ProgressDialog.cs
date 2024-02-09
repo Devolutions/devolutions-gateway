@@ -32,7 +32,7 @@ public partial class ProgressDialog : GatewayDialog, IProgressDialog
         };
     }
 
-    private System.Windows.Forms.Timer showWaitPromptTimer;
+    private readonly System.Windows.Forms.Timer showWaitPromptTimer;
 
     public override void OnLoad(object sender, EventArgs e)
     {

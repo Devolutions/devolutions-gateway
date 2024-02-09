@@ -1,35 +1,24 @@
-using DevolutionsGateway.Actions;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
 
 using System;
-using System.Drawing;
 using System.ServiceProcess;
 using System.Windows.Forms;
+using DevolutionsGateway.Resources;
 using WixSharp;
 
 namespace WixSharpSetup.Dialogs;
 
 public partial class CustomizeDialog : GatewayDialog
 {
-    private bool ConfigureNow => this.cmbConfigure.SelectedIndex == 0;
-
-    private bool ConfigureLater => this.cmbConfigure.SelectedIndex == 1;
+    private bool ConfigureNow => this.cmbConfigure.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now;
 
     public CustomizeDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-        
-        this.cmbConfigure.DataSource = new[]
-        {
-            "Now", "Later"
-        };
-
-        this.lnkNgrok.Text = "Read more at ngrok.com";
-        this.lnkNgrok.LinkArea = new LinkArea(13, 9);
     }
 
     public override void FromProperties()
@@ -63,6 +52,10 @@ public partial class CustomizeDialog : GatewayDialog
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
+        this.cmbConfigure.Source<Constants.CustomizeMode>(this.MsiRuntime);
+
+        this.lnkNgrok.SetLink(this.MsiRuntime, Strings.NgrokReadMoreAtX, Strings.NgrokReadMoreLink);
+
         this.FromProperties();
 
         base.OnLoad(sender, e);
@@ -88,23 +81,13 @@ public partial class CustomizeDialog : GatewayDialog
         if (this.ConfigureNow)
         { 
             this.gbConfigure.Visible = true;
-            this.lblConfigureDescription.Text = "Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.";
+            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForStandaloneInstallations);
         }
         else
         {
             this.gbConfigure.Visible = false;
-            this.lblConfigureDescription.Text = "Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.";
+            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForCompanionInstallations);
         }
-    }
-
-    private void rbConfigLater_CheckedChanged(object sender, EventArgs e)
-    {
-        this.SetControlStates();
-    }
-
-    private void rbConfigNow_CheckedChanged(object sender, EventArgs e)
-    {
-        this.SetControlStates();
     }
 
     private void chkWebApp_CheckedChanged(object sender, EventArgs e)
@@ -121,7 +104,7 @@ public partial class CustomizeDialog : GatewayDialog
     private void lnkNgrok_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
         this.lnkNgrok.Links[lnkNgrok.Links.IndexOf(e.Link)].Visited = true; 
-        System.Diagnostics.Process.Start("www.ngrok.com");
+        System.Diagnostics.Process.Start(Constants.NgrokUrl);
     }
 
     private void chkConfigureNgrok_CheckedChanged(object sender, EventArgs e)

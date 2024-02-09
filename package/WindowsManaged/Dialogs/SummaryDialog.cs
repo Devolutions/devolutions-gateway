@@ -1,5 +1,6 @@
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
+using DevolutionsGateway.Resources;
 using System;
 using System.Linq;
 using System.Text;
@@ -47,21 +48,37 @@ public partial class SummaryDialog : GatewayDialog
 
     private class InstallerProperty : SummaryProperty
     {
-        private IWixProperty wixProperty;
+        private readonly MsiRuntime runtime;
 
-        public override string Name => this.wixProperty.Summary;
+        private readonly IWixProperty wixProperty;
 
-        public override string Value(ISession session) => wixProperty.Hidden ? string.Concat(Enumerable.Repeat("*", session[this.wixProperty.Id].Length)) : session[this.wixProperty.Id];
+        public override string Name => $"Property_{this.wixProperty.Name}";
 
-        public InstallerProperty(IWixProperty wixProperty)
+        public override string Value(ISession session)
         {
+            if (this.wixProperty.Hidden)
+            {
+                return string.Concat(Enumerable.Repeat("*", session[this.wixProperty.Id].Length));
+            }
+
+            if (this.wixProperty.PropertyType.IsEnum)
+            {
+                return $"[{this.wixProperty.PropertyType.Name}_{session[this.wixProperty.Id]}]".LocalizeWith(runtime.Localize);
+            }
+            
+            return session[this.wixProperty.Id];
+        }
+
+        public InstallerProperty(MsiRuntime runtime, IWixProperty wixProperty)
+        {
+            this.runtime = runtime;
             this.wixProperty = wixProperty;
         }
     }
 
     private class MetaProperty : SummaryProperty
     {
-        private Func<ISession, string> fnValue;
+        private readonly Func<ISession, string> fnValue;
 
         public override string Name { get; }
 
@@ -76,52 +93,54 @@ public partial class SummaryDialog : GatewayDialog
 
     private class StringProperty : SummaryProperty
     {
-        private string value;
+        private readonly string value;
 
         public override string Name => throw new NotSupportedException();
 
         public override string Value(ISession session) => this.value;
 
-        public StringProperty(string value)
+        public StringProperty(MsiRuntime runtime, string value)
         {
-            this.value = value;
+            this.value = $"[{value}]".LocalizeWith(runtime.Localize);
         }
     }
 
-    private static Func<GatewayProperties, bool> Always = p => true;    
+    private static readonly Func<GatewayProperties, bool> Always = p => true;    
 
-    private PropertyGroup[] Groups = new[]
+    private PropertyGroup[] Groups;
+        
+    private void Init() => this.Groups = new[]
     {
         new PropertyGroup()
         {
-            Name = "Install Location",
+            Name = Strings.Group_InstallLocation,
             If = p => !p.ConfigureNgrok,
             Properties = new IProperty[]
             {
-                new MetaProperty("Directory", session => session[GatewayProperties.InstallDir])
+                new MetaProperty(Strings.Property_Directory, session => session[GatewayProperties.InstallDir])
             }
         },
 
         new PropertyGroup()
         {
-            Name = "Service",
+            Name = Strings.Group_Service,
             If = Always,
             Properties = new IProperty[]
             {
-                new InstallerProperty(GatewayProperties.serviceStart)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.serviceStart)
             }
         },
 
         new PropertyGroup()
         {
-            Name = "ngrok",
+            Name = Strings.Group_Ngrok,
             If = p => p.ConfigureNgrok,
             Properties = new IProperty[]
             {
-                new InstallerProperty(GatewayProperties.ngrokAuthToken),
-                new InstallerProperty(GatewayProperties.ngrokHttpDomain),
-                new InstallerProperty(GatewayProperties.ngrokEnableTcp),
-                new InstallerProperty(GatewayProperties.ngrokRemoteAddress)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.ngrokAuthToken),
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.ngrokHttpDomain),
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.ngrokEnableTcp),
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.ngrokRemoteAddress)
                 {
                     If = p => p.NgrokEnableTcp
                 },
@@ -130,40 +149,40 @@ public partial class SummaryDialog : GatewayDialog
 
         new PropertyGroup()
         {
-            Name = "External Access",
+            Name = Strings.Group_ExternalAccess,
             If = p => !p.ConfigureNgrok,
             Properties = new IProperty[]
             {
-                new MetaProperty("Access URI", session => $"{session[GatewayProperties.accessUriScheme.Id]}://{session[GatewayProperties.accessUriHost.Id]}:{session[GatewayProperties.accessUriPort.Id]}")
+                new MetaProperty(Strings.Property_AccessUri, session => $"{session[GatewayProperties.accessUriScheme.Id]}://{session[GatewayProperties.accessUriHost.Id]}:{session[GatewayProperties.accessUriPort.Id]}")
             }
         },
 
         new PropertyGroup()
         {
-            Name = "Listeners",
+            Name = Strings.Group_Listeners,
             If = p => !p.ConfigureNgrok,
             Properties = new IProperty[]
             {
-                new MetaProperty("HTTP Listener", session => $"{session[GatewayProperties.httpListenerScheme.Id]}://*:{session[GatewayProperties.httpListenerPort.Id]}"),
-                new MetaProperty("TCP Listener", session => $"{session[GatewayProperties.tcpListenerScheme.Id]}://*:{session[GatewayProperties.tcpListenerPort.Id]}"),
+                new MetaProperty(Strings.Property_HttpListener, session => $"{session[GatewayProperties.httpListenerScheme.Id]}://*:{session[GatewayProperties.httpListenerPort.Id]}"),
+                new MetaProperty(Strings.Property_TcpListener, session => $"{session[GatewayProperties.tcpListenerScheme.Id]}://*:{session[GatewayProperties.tcpListenerPort.Id]}"),
             }
         },
 
         new PropertyGroup()
         {
-            Name = "Encryption Keys",
+            Name = Strings.Group_EncryptionKeys,
             If = Always,
             Properties = new IProperty[]
             {
-                new StringProperty("A new key pair will be generated")
+                new StringProperty(this.MsiRuntime, Strings.Property_NewKeyPair)
                 {
                     If = p => p.ConfigureWebApp && p.GenerateKeyPair
                 },
-                new InstallerProperty(GatewayProperties.publicKeyFile)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.publicKeyFile)
                 {
                     If = p => !p.GenerateKeyPair
                 },
-                new InstallerProperty(GatewayProperties.privateKeyFile)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.privateKeyFile)
                 {
                     If = p => p.ConfigureWebApp && !p.GenerateKeyPair
                 },
@@ -172,16 +191,16 @@ public partial class SummaryDialog : GatewayDialog
 
         new PropertyGroup()
         {
-            Name = "Web App",
+            Name = Strings.Group_WebApp,
             If = p => p.ConfigureWebApp,
             Properties = new IProperty[]
             {
-                new InstallerProperty(GatewayProperties.authenticationMode),
-                new InstallerProperty(GatewayProperties.webUsername)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.authenticationMode),
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.webUsername)
                 {
                     If = p => p.AuthenticationMode == Constants.AuthenticationMode.Custom
                 },
-                new InstallerProperty(GatewayProperties.webPassword)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.webPassword)
                 {
                     If = p => p.AuthenticationMode == Constants.AuthenticationMode.Custom
                 },
@@ -190,39 +209,39 @@ public partial class SummaryDialog : GatewayDialog
 
         new PropertyGroup()
         {
-            Name = "Certificate",
+            Name = Strings.Group_Certificate,
             If = p => !p.ConfigureNgrok && p.HttpListenerScheme == Constants.HttpsProtocol,
             Properties = new IProperty[]
             {
-                new InstallerProperty(GatewayProperties.certificateMode)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificateMode)
                 {
                     If = p => !p.GenerateCertificate
                 },
-                new InstallerProperty(GatewayProperties.certificateFile)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificateFile)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.External
                 },
-                new InstallerProperty(GatewayProperties.certificatePrivateKeyFile)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificatePrivateKeyFile)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.External && !string.IsNullOrEmpty(p.CertificatePrivateKeyFile)
                 },
-                new InstallerProperty(GatewayProperties.certificatePassword)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificatePassword)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.External && !string.IsNullOrEmpty(p.CertificatePassword)
                 },
-                new InstallerProperty(GatewayProperties.certificateLocation)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificateLocation)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.System
                 },
-                new InstallerProperty(GatewayProperties.certificateStore)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificateStore)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.System
                 },
-                new InstallerProperty(GatewayProperties.certificateName)
+                new InstallerProperty(this.MsiRuntime, GatewayProperties.certificateName)
                 {
                     If = p => !p.GenerateCertificate && p.CertificateMode == Constants.CertificateMode.System
                 },
-                new StringProperty("A new self-signed certificate will be generated")
+                new StringProperty(this.MsiRuntime, Strings.Property_NewCertificate)
                 {
                     If = p => p.GenerateCertificate
                 }
@@ -236,7 +255,7 @@ public partial class SummaryDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session);
 
-        StringBuilder builder = new StringBuilder();
+        StringBuilder builder = new();
         builder.Append(@"{\rtf1\ansi");
         builder.Append(@" \line ");
 
@@ -247,7 +266,7 @@ public partial class SummaryDialog : GatewayDialog
                 continue;
             }
 
-            builder.Append(@$" \ul {group.Name}\ul0");
+            builder.Append(@$" \ul {I18n($"{group.Name}")}\ul0");
             builder.Append(@" \line \line ");
 
             foreach (var property in group.Properties)
@@ -263,7 +282,7 @@ public partial class SummaryDialog : GatewayDialog
                 }
                 else
                 {
-                    builder.AppendLine(@$" \tab \b {property.Name}: \b0 {RtfEscape(property.Value(Runtime.Session))}");
+                    builder.AppendLine(@$" \tab \b {I18n($"{property.Name}")} \b0 {RtfEscape(property.Value(Runtime.Session))}");
                 }
                 builder.Append(@" \line ");
             }
@@ -279,6 +298,8 @@ public partial class SummaryDialog : GatewayDialog
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+
+        this.Init();
 
         base.OnLoad(sender, e);
     }

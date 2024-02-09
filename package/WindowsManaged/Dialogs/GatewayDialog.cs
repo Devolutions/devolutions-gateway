@@ -1,6 +1,6 @@
 ﻿using System;
-using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using DevolutionsGateway.Resources;
 using WixSharp;
 using WixSharp.UI.Forms;
 
@@ -23,6 +23,8 @@ public class GatewayDialog : ManagedForm
 
     public virtual void OnLoad(object sender, EventArgs e)
     {
+        this.Text = "[GatewayDlg_Title]".LocalizeWith(this.MsiRuntime.Localize);
+
         this.FromProperties();
     }
 
@@ -50,8 +52,8 @@ public class GatewayDialog : ManagedForm
     protected virtual void Cancel_Click(object sender, EventArgs e)
     {
         if (MessageBox.Show(
-                this.Localize("CancelDlgText"),
-                this.Localize("CancelDlg_Title"),
+                this.Localize("[CancelDlgText]"),
+                this.Localize("[CancelDlg_Title]"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning) == DialogResult.Yes)
         {
@@ -59,9 +61,11 @@ public class GatewayDialog : ManagedForm
         }
     }
 
+    protected string I18n(string key) => MsiRuntime.I18n(key);
+
     protected void ShowValidationError(string message = null)
     {
-        string errorMessage = this.Localize(string.IsNullOrEmpty(message) ? "InvalidConfigurationDlgInfoLabel" : message);
+        string errorMessage = string.IsNullOrEmpty(message) ? MsiRuntime.I18n(Strings.ThereIsAProblemWithTheEnteredData) : message;
 
         this.ShowValidationErrorString(errorMessage);
     }
@@ -70,21 +74,10 @@ public class GatewayDialog : ManagedForm
     {
         MessageBox.Show(
             message,
-            this.Localize("InvalidConfigurationDlg_Title"),
+            this.Localize("[GatewayDlg_Title]"),
             MessageBoxButtons.OK,
             MessageBoxIcon.Warning);
     }
 
-    protected string Localize(string message) => ResolveVariables(MsiRuntime.Localize(message));
-
-    private string ResolveVariables(string message)
-    {
-        return Regex.Replace(message, @"\[(.*?)]", (match) =>
-        {
-            string property = match.Groups[1].Value;
-            string value = this.Session()[property];
-
-            return string.IsNullOrEmpty(value) ? property : value;
-        });
-    }
+    protected string Localize(string message) => message.LocalizeWith(MsiRuntime.Localize);
 }

@@ -38,7 +38,7 @@ public partial class VerifyReadyDialog : GatewayDialog
 
     private void generateCli_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
     {
-        StringBuilder builder = new StringBuilder();
+        StringBuilder builder = new();
         builder.Append("msiexec /i DevolutionsGateway.msi /qb /l*v install.log");
 
         foreach (IWixProperty property in GatewayProperties.Properties.Where(p => p.Public))

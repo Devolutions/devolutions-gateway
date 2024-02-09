@@ -11,6 +11,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Xml;
 using WixSharp;
@@ -318,7 +319,7 @@ internal class Program
 
             if (ProjectLangId != enUS.Key)
             {
-                project.OutDir = System.IO.Path.Combine(project.OutDir, ProjectLangId);
+                project.OutDir = Path.Combine(project.OutDir, ProjectLangId);
             }
 
             project.BuildMsiCmd();
@@ -351,7 +352,7 @@ internal class Program
         using Stream stream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream($"DevolutionsGateway.Resources.{Languages[lcid]}");
 
-        XmlDocument xml = new XmlDocument();
+        XmlDocument xml = new();
         xml.Load(stream);
 
         Dictionary<string, string> strings = new();
@@ -361,9 +362,25 @@ internal class Program
             strings.Add(s.Attributes["Id"].Value, s.InnerText);
         }
 
+        string I18n(string key)
+        {
+            if (!strings.TryGetValue(key, out string result))
+            {
+                return key;
+            }
+
+            return Regex.Replace(result, @"\[(.*?)]", (match) =>
+            {
+                string property = match.Groups[1].Value;
+                string value = e.Session[property];
+
+                return string.IsNullOrEmpty(value) ? property : value;
+            });
+        }
+
         if (!Environment.Is64BitOperatingSystem)
         {
-            MessageBox.Show($"{strings["x86VersionRequired"]}");
+            MessageBox.Show(I18n(Strings.x86VersionRequired), I18n(Strings.GatewayDlg_Title));
 
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
@@ -374,7 +391,7 @@ internal class Program
 
         if (thisVersion < installedVersion)
         {
-            MessageBox.Show($"{strings["NewerInstalled"]} ({installedVersion})");
+            MessageBox.Show($"{I18n(Strings.NewerInstalled)} ({installedVersion})");
 
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
@@ -382,7 +399,7 @@ internal class Program
 
         if (!CustomActions.CheckPowerShellVersion())
         {
-            MessageBox.Show("This product requires at least Windows PowerShell 5.1", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(I18n(Strings.WindowsPowerShell51IsRequired), I18n(Strings.GatewayDlg_Title));
 
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
@@ -390,14 +407,23 @@ internal class Program
         
         if (!CustomActions.TryGetInstalledNetFx45Version(out uint netfx45Version) || netfx45Version < 394802)
         {
-            MessageBox.Show("This product requires at least .NET Framework 4.6.2. .NET Framework 4.8 is strongly recommended.", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (MessageBox.Show(I18n(Strings.Dotnet462IsRequired), I18n(Strings.GatewayDlg_Title),
+                    MessageBoxButtons.YesNo) == DialogResult.Yes)
+            {
+                Process.Start("https://go.microsoft.com/fwlink/?LinkId=2085155");
+            }
+
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
         }
-
+        
         if (netfx45Version < 528040)
         {
-            MessageBox.Show(".NET Framework 4.8 is strongly recommended.", "Devolutions Gateway Setup", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            if (MessageBox.Show(I18n(Strings.DotNet48IsStrongRecommendedDownloadNow), I18n(Strings.GatewayDlg_Title),
+                    MessageBoxButtons.YesNo) == DialogResult.Yes)
+            {
+                Process.Start("https://go.microsoft.com/fwlink/?LinkId=2085155");
+            }
         }
 
         e.Session.Set(GatewayProperties.configureGateway, true);

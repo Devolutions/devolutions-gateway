@@ -123,7 +123,7 @@ namespace WixSharpSetup.Dialogs
             this.lblKeysDescription.Name = "lblKeysDescription";
             this.lblKeysDescription.Size = new System.Drawing.Size(443, 35);
             this.lblKeysDescription.TabIndex = 15;
-            this.lblKeysDescription.Text = "Provide an encryption key pair for token verification.";
+            this.lblKeysDescription.Text = "[ProvideAnEncryptionKeyPairForTokenVerification]";
             // 
             // butBrowsePrivateKeyFile
             // 
@@ -153,7 +153,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPrivateKeyFile.Name = "lblPrivateKeyFile";
             this.lblPrivateKeyFile.Size = new System.Drawing.Size(144, 23);
             this.lblPrivateKeyFile.TabIndex = 3;
-            this.lblPrivateKeyFile.Text = "Private Key File";
+            this.lblPrivateKeyFile.Text = "[PrivateKeyFile]";
             this.lblPrivateKeyFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // lblPrivateKeyDescription
@@ -166,8 +166,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPrivateKeyDescription.Name = "lblPrivateKeyDescription";
             this.lblPrivateKeyDescription.Size = new System.Drawing.Size(443, 34);
             this.lblPrivateKeyDescription.TabIndex = 2;
-            this.lblPrivateKeyDescription.Text = "The private key is used to generate session tokens for the standalone web applica" +
-    "tion";
+            this.lblPrivateKeyDescription.Text = "[ThePrivateKeyIsUsedTo]";
             // 
             // lblPublicKeyDescription
             // 
@@ -179,7 +178,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
             this.lblPublicKeyDescription.Size = new System.Drawing.Size(443, 34);
             this.lblPublicKeyDescription.TabIndex = 0;
-            this.lblPublicKeyDescription.Text = "The public key is used to verify tokens without specific restrictions";
+            this.lblPublicKeyDescription.Text = "[ThePublicKeyIsUsedTo]";
             // 
             // butBrowsePublicKeyFile
             // 
@@ -200,7 +199,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPublicKeyFile.Name = "lblPublicKeyFile";
             this.lblPublicKeyFile.Size = new System.Drawing.Size(144, 23);
             this.lblPublicKeyFile.TabIndex = 1;
-            this.lblPublicKeyFile.Text = "Public Key File";
+            this.lblPublicKeyFile.Text = "[PublicKeyFile]";
             this.lblPublicKeyFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // txtPublicKeyFile
@@ -242,9 +241,9 @@ namespace WixSharpSetup.Dialogs
             this.label2.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label2.Location = new System.Drawing.Point(18, 31);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(194, 13);
+            this.label2.Size = new System.Drawing.Size(129, 13);
             this.label2.TabIndex = 1;
-            this.label2.Text = "Keys for token creation and verification.";
+            this.label2.Text = "[PublicKeyDlgDescription]";
             // 
             // label1
             // 
@@ -356,7 +355,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "PublicKeyDialog";
-            this.Text = "[PublicKeyDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);

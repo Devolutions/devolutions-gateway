@@ -1,6 +1,7 @@
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
 using System;
+using DevolutionsGateway.Resources;
 using WixSharp;
 
 namespace WixSharpSetup.Dialogs;
@@ -28,25 +29,25 @@ public partial class WebClientDialog : GatewayDialog
 
         if (string.IsNullOrWhiteSpace(this.txtUsername.Text))
         {
-            ShowValidationError("You must enter a username");
+            ShowValidationError(I18n(Strings.YouMustEnterAUsername));
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(this.txtPassword.Text))
         {
-            ShowValidationError("You must enter a password");
+            ShowValidationError(I18n(Strings.YouMustEnterAPassword));
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(this.txtPassword2.Text))
         {
-            ShowValidationError("You must confirm the password");
+            ShowValidationError(I18n(Strings.YouMustConfirmThePassword));
             return false;
         }
 
         if (!string.Equals(this.txtPassword.Text, this.txtPassword2.Text))
         {
-            ShowValidationError("Passwords do not match");
+            ShowValidationError(I18n(Strings.PasswordsDoNotMatch));
             return false;
         }
 

@@ -126,10 +126,10 @@ namespace WixSharpSetup.Dialogs
             this.viewLog.BackColor = System.Drawing.Color.Transparent;
             this.viewLog.Location = new System.Drawing.Point(16, 17);
             this.viewLog.Name = "viewLog";
-            this.viewLog.Size = new System.Drawing.Size(54, 13);
+            this.viewLog.Size = new System.Drawing.Size(85, 13);
             this.viewLog.TabIndex = 1;
             this.viewLog.TabStop = true;
-            this.viewLog.Text = "[ViewLog]";
+            this.viewLog.Text = "[ViewLogButton]";
             this.viewLog.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.viewLog_LinkClicked);
             // 
             // tableLayoutPanel1
