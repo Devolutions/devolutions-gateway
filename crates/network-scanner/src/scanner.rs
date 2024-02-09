@@ -46,16 +46,16 @@ impl NetworkScanner {
                 port_sender,
                 ..
             } = context;
+            let ip_cache = ip_cache.clone();
             while let Some((ip, host)) = ip_receiver.lock().await.recv().await {
-                tracing::debug!(received_ip = ?ip, received_host = ?host);
-                if ip_cache.lock().get(&ip).is_some() {
+                if ip_cache.read().get(&ip).is_some() {
                     if host.is_some() {
-                        ip_cache.lock().insert(ip, host);
+                        ip_cache.write().insert(ip, host);
                     }
                     continue;
                 }
 
-                ip_cache.lock().insert(ip, host);
+                ip_cache.write().insert(ip, host);
 
                 let (runtime, ports, port_sender, ip_cache) =
                     (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
@@ -69,7 +69,7 @@ impl NetworkScanner {
                     while let Some(res) = port_scan_receiver.recv().await {
                         tracing::trace!(port_scan_result = ?res);
                         if let PortScanResult::Open(socket_addr) = res {
-                            let dns = ip_cache.lock().get(&ip).cloned().flatten();
+                            let dns = ip_cache.read().get(&ip).cloned().flatten();
                             port_sender.send((ip, dns, socket_addr.port())).await?;
                         }
                     }
@@ -144,7 +144,7 @@ impl NetworkScanner {
 
             let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
 
-            let should_ping = move |ip: IpAddr| -> bool { !ip_cache.lock().contains_key(&ip) };
+            let should_ping = move |ip: IpAddr| -> bool { !ip_cache.read().contains_key(&ip) };
 
             for ip_range in ip_ranges {
                 let (task_manager, runtime, ip_sender) = (task_manager.clone(), runtime.clone(), ip_sender.clone());

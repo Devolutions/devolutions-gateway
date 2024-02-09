@@ -24,7 +24,7 @@ pub(crate) struct TaskExecutionContext {
     pub port_sender: PortSender,
     pub port_receiver: Arc<Mutex<PortReceiver>>,
 
-    pub ip_cache: Arc<parking_lot::Mutex<HashMap<IpAddr, Option<String>>>>,
+    pub ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
     pub ports: Vec<u16>,
 
@@ -71,7 +71,7 @@ impl TaskExecutionContext {
             ip_receiver,
             port_sender,
             port_receiver,
-            ip_cache: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+            ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             ports,
             runtime,
             ping_interval,
