@@ -8,12 +8,10 @@ publish = false
 [dependencies]
 anyhow = "1.0.79"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
-futures = "0.3.30"
 parking_lot = "0.12.1"
 polling = { git = "https://github.com/devolutions/polling.git", branch = "fix-detect-connection-fail" }
 socket2 = { version = "0.5.5", features = ["all"] }
 thiserror = "1.0.56"
-tokio-stream = "0.1.14"
 tracing = "0.1.40"
 
 [dev-dependencies]
