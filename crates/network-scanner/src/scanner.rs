@@ -29,6 +29,7 @@ pub struct NetworkScanner {
     pub broadcast_timeout: Duration, // in milliseconds
     pub port_scan_timeout: Duration, // in milliseconds
     pub netbios_timeout: Duration,   // in milliseconds
+    pub netbios_interval: Duration,  // in milliseconds
     pub max_wait_time: Duration,     // max_wait for entire scan duration in milliseconds, suggested!
 }
 
@@ -107,6 +108,7 @@ impl NetworkScanner {
             let TaskExecutionContext {
                 subnets,
                 netbios_timeout,
+                netbios_interval,
                 runtime,
                 ip_sender,
                 ..
@@ -116,13 +118,8 @@ impl NetworkScanner {
 
             for ip_range in ip_ranges {
                 let (runtime, ip_sender, task_manager) = (runtime.clone(), ip_sender.clone(), task_manager.clone());
-                let mut receiver = netbios_query_scan(
-                    runtime,
-                    ip_range,
-                    netbios_timeout,
-                    Duration::from_millis(20),
-                    task_manager,
-                )?;
+                let mut receiver =
+                    netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
                 while let Some(res) = receiver.recv().await {
                     tracing::debug!(netbios_query_sent_ip = ?res.0);
                     ip_sender.send(res).await?;
@@ -190,16 +187,18 @@ impl NetworkScanner {
             broadcast_timeout,
             port_scan_timeout,
             netbios_timeout,
+            netbios_interval,
         } = params;
 
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
 
-        let ping_timeout = Duration::from_millis(ping_timeout.unwrap_or(100));
-        let ping_interval = Duration::from_millis(ping_interval.unwrap_or(500));
-        let broadcast_timeout = Duration::from_millis(broadcast_timeout.unwrap_or(1000));
-        let port_scan_timeout = Duration::from_millis(port_scan_timeout.unwrap_or(1000));
-        let netbios_timeout = Duration::from_millis(netbios_timeout.unwrap_or(1000));
-        let max_wait = Duration::from_millis(max_wait.unwrap_or(10 * 1000)); //10 seconds
+        let ping_timeout = Duration::from_millis(ping_timeout);
+        let ping_interval = Duration::from_millis(ping_interval);
+        let broadcast_timeout = Duration::from_millis(broadcast_timeout);
+        let port_scan_timeout = Duration::from_millis(port_scan_timeout);
+        let netbios_timeout = Duration::from_millis(netbios_timeout);
+        let netbios_interval = Duration::from_millis(netbios_interval);
+        let max_wait = Duration::from_millis(max_wait);
 
         Ok(Self {
             runtime,
@@ -209,6 +208,7 @@ impl NetworkScanner {
             broadcast_timeout,
             port_scan_timeout,
             netbios_timeout,
+            netbios_interval,
             max_wait_time: max_wait,
         })
     }
@@ -293,10 +293,11 @@ impl Display for ScanMethod {
 #[derive(Debug, Clone, TypedBuilder, Default)]
 pub struct NetworkScannerParams {
     pub ports: Vec<u16>,
-    pub ping_interval: Option<u64>,     // in milliseconds
-    pub ping_timeout: Option<u64>,      // in milliseconds
-    pub broadcast_timeout: Option<u64>, // in milliseconds
-    pub port_scan_timeout: Option<u64>, // in milliseconds
-    pub netbios_timeout: Option<u64>,   // in milliseconds
-    pub max_wait_time: Option<u64>,     // max_wait for entire scan duration in milliseconds, suggested!
+    pub ping_interval: u64,     // in milliseconds
+    pub ping_timeout: u64,      // in milliseconds
+    pub broadcast_timeout: u64, // in milliseconds
+    pub port_scan_timeout: u64, // in milliseconds
+    pub netbios_timeout: u64,   // in milliseconds
+    pub netbios_interval: u64,  // in milliseconds
+    pub max_wait_time: u64,     // max_wait for entire scan duration in milliseconds, suggested!
 }

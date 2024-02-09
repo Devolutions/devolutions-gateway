@@ -34,6 +34,8 @@ pub(crate) struct TaskExecutionContext {
     pub broadcast_timeout: Duration, // in milliseconds
     pub port_scan_timeout: Duration, // in milliseconds
     pub netbios_timeout: Duration,   // in milliseconds
+    pub netbios_interval: Duration,  // in milliseconds
+
     pub subnets: Vec<Subnet>,
 }
 
@@ -63,6 +65,7 @@ impl TaskExecutionContext {
             port_scan_timeout,
             netbios_timeout,
             runtime,
+            netbios_interval,
             ..
         } = network_scanner;
 
@@ -79,6 +82,7 @@ impl TaskExecutionContext {
             broadcast_timeout,
             port_scan_timeout,
             netbios_timeout,
+            netbios_interval,
             subnets,
         };
 
@@ -158,7 +162,6 @@ impl TaskManager {
     pub(crate) fn stop(&self) {
         self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let handles = self.handles_receiver.clone();
-        tracing::debug!("Stopping all tasks");
         while let Ok(handle) = handles.try_recv() {
             handle.abort();
         }

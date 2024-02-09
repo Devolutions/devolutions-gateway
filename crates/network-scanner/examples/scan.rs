@@ -1,4 +1,4 @@
-use std::{default, time::Duration};
+use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
@@ -13,9 +13,17 @@ fn main() -> anyhow::Result<()> {
 
     let params = NetworkScannerParams {
         ports: vec![22, 80, 443, 389, 636],
-        max_wait_time: Some(20 * 1000),
-        ping_interval: Some(20),
-        ..default::Default::default()
+        ping_interval: 20,
+        ping_timeout: 1000,
+
+        broadcast_timeout: 2000,
+
+        port_scan_timeout: 2000,
+
+        netbios_timeout: 1000,
+        netbios_interval: 20,
+
+        max_wait_time: 120 * 1000,
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
@@ -24,7 +32,7 @@ fn main() -> anyhow::Result<()> {
         let stream_clone = stream.clone();
         let now = std::time::Instant::now();
         while let Ok(Some(res)) = stream_clone
-            .recv_timeout(Duration::from_secs(20))
+            .recv_timeout(Duration::from_secs(120))
             .await
             .with_context(|| {
                 tracing::error!("Failed to receive from stream");
