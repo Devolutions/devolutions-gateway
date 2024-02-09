@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::AtomicBool;
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;

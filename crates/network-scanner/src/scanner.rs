@@ -7,7 +7,6 @@ use crate::{
 };
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
 use std::{fmt::Display, net::IpAddr, sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
@@ -267,7 +266,7 @@ impl TryFrom<NetworkScannerParams> for NetworkScanner {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ScanMethod {
     Ping,
     Broadcast,
@@ -298,7 +297,7 @@ impl Display for ScanMethod {
     }
 }
 
-#[derive(Debug, Clone, derive_builder::Builder, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, derive_builder::Builder, Default)]
 pub struct NetworkScannerParams {
     pub ports: Vec<u16>,
     pub ping_interval: Option<u64>,     // in milliseconds
