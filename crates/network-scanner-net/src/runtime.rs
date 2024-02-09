@@ -43,7 +43,7 @@ impl Drop for Socket2Runtime {
 
 const QUEUE_CAPACITY: usize = 8024;
 impl Socket2Runtime {
-    /// Create a new runtime with a queue capacity, default is 1024.
+    /// Create a new runtime with a queue capacity, default is 8024.
     pub fn new(queue_capacity: Option<usize>) -> anyhow::Result<Arc<Self>> {
         let poller = polling::Poller::new()?;
 
