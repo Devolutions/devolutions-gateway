@@ -2722,7 +2722,7 @@ checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 [[package]]
 name = "polling"
 version = "3.4.0"
-source = "git+https://github.com/devolutions/polling.git?branch=fix-detect-connection-fail#c04e8ee40415cad551fe044457270f4a2d7c491d"
+source = "git+https://github.com/devolutions/polling.git?rev=c04e8ee40415cad551fe044457270f4a2d7c491d#c04e8ee40415cad551fe044457270f4a2d7c491d"
 dependencies = [
  "cfg-if",
  "concurrent-queue",
