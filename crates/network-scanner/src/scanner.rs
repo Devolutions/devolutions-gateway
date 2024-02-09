@@ -48,40 +48,31 @@ impl NetworkScanner {
             } = context;
             let ip_cache = ip_cache.clone();
             while let Some((ip, host)) = ip_receiver.lock().await.recv().await {
-                if let Some(existed_host) = ip_cache.get(&ip).as_deref() {
-                    tracing::debug!("IP: {:?} already in cache", ip);
-                    // if ip is already in the cache and dns name is resolved, skip
-                    if existed_host.is_some() {
-                        continue;
+                if ip_cache.get(&ip).as_deref().is_some() {
+                    if host.is_some() {
+                        ip_cache.insert(ip, host);
                     }
-
-                    if host.is_none() {
-                        continue;
-                    }
-                    // if ip is already in the cache and dns name is not resolved, update the cache and continue
-                    ip_cache.insert(ip, host);
-                } else {
-                    // if ip is not in the cache, add it to the cache and continue
-                    ip_cache.insert(ip, host);
+                    continue;
                 }
+
+                ip_cache.insert(ip, host);
 
                 let (runtime, ports, port_sender, ip_cache) =
                     (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
 
                 task_manager.spawn(move |task_manager| async move {
-                    tracing::info!("Scanning ports for: {:?}", ip);
+                    tracing::debug!(scanning_ip = ?ip);
 
                     let mut port_scan_receiver =
                         scan_ports(ip, &ports, runtime, port_scan_timeout, task_manager).await?;
 
                     while let Some(res) = port_scan_receiver.recv().await {
-                        tracing::trace!("Port scan result: {:?}", res);
+                        tracing::trace!(port_scan_result = ?res);
                         if let PortScanResult::Open(socket_addr) = res {
                             let dns = ip_cache.get(&ip).as_deref().cloned().flatten();
                             port_sender.send((ip, dns, socket_addr.port())).await?;
                         }
                     }
-                    tracing::info!("Port scan finished for: {:?}", ip);
                     anyhow::Ok(())
                 });
             }
@@ -103,7 +94,7 @@ impl NetworkScanner {
                 task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
                     let mut receiver = broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                     while let Some(ip) = receiver.recv().await {
-                        tracing::trace!("Broadcast received: {:?}", ip);
+                        tracing::trace!(broadcast_sent_ip = ?ip);
                         ip_sender.send((ip.into(), None)).await?;
                     }
                     anyhow::Ok(())
@@ -133,6 +124,7 @@ impl NetworkScanner {
                     task_manager,
                 )?;
                 while let Some(res) = receiver.recv().await {
+                    tracing::debug!(netbios_query_sent_ip = ?res.0);
                     ip_sender.send(res).await?;
                 }
             }
@@ -167,7 +159,7 @@ impl NetworkScanner {
                 )?;
 
                 while let Some(ip) = receiver.recv().await {
-                    tracing::trace!("Ping received: {:?}", ip);
+                    tracing::debug!(ping_sent_ip = ?ip);
                     ip_sender.send((ip, None)).await?;
                 }
             }
