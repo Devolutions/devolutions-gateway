@@ -48,10 +48,10 @@ pub(crate) struct TaskExecutionRunner {
 
 impl TaskExecutionContext {
     pub(crate) fn new(network_scanner: NetworkScanner) -> anyhow::Result<Self> {
-        let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(1024);
+        let (ip_sender, ip_receiver) = tokio::sync::mpsc::channel(5);
         let ip_receiver = Arc::new(Mutex::new(ip_receiver));
 
-        let (port_sender, port_receiver) = tokio::sync::mpsc::channel(1024);
+        let (port_sender, port_receiver) = tokio::sync::mpsc::channel(100);
         let port_receiver = Arc::new(Mutex::new(port_receiver));
 
         let subnets = get_subnets()?;
