@@ -3,7 +3,7 @@ use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 
-use futures::Future;
+use std::future::Future;
 
 use tokio::sync::Mutex;
 
