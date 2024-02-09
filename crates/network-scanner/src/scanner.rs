@@ -8,6 +8,7 @@ use crate::{
 
 use anyhow::Context;
 use std::{fmt::Display, net::IpAddr, sync::Arc, time::Duration};
+use typed_builder::TypedBuilder;
 
 use tokio::sync::Mutex;
 
@@ -297,7 +298,7 @@ impl Display for ScanMethod {
     }
 }
 
-#[derive(Debug, Clone, derive_builder::Builder, Default)]
+#[derive(Debug, Clone, TypedBuilder, Default)]
 pub struct NetworkScannerParams {
     pub ports: Vec<u16>,
     pub ping_interval: Option<u64>,     // in milliseconds
