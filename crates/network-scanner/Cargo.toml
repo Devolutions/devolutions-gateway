@@ -9,10 +9,10 @@ publish = false
 [dependencies]
 anyhow = "1.0.79"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
-dashmap = "5.5.3"
 network-interface = "1.1.1"
 network-scanner-net ={ path = "../network-scanner-net" }
 network-scanner-proto ={ path = "../network-scanner-proto" }
+parking_lot = "0.12.1"
 socket2 = "0.5.5"
 thiserror = "1.0.56"
 tokio = { version = "1.35.1" , features = ["rt"]}

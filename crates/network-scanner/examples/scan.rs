@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
         let stream_clone = stream.clone();
         let now = std::time::Instant::now();
         while let Ok(Some(res)) = stream_clone
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(20))
             .await
             .with_context(|| {
                 tracing::error!("Failed to receive from stream");

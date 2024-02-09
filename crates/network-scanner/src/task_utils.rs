@@ -1,7 +1,6 @@
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::{net::IpAddr, sync::Arc, time::Duration};
-
-use dashmap::DashMap;
 
 use std::future::Future;
 
@@ -25,7 +24,8 @@ pub(crate) struct TaskExecutionContext {
     pub port_sender: PortSender,
     pub port_receiver: Arc<Mutex<PortReceiver>>,
 
-    pub ip_cache: Arc<DashMap<IpAddr, Option<String>>>,
+    pub ip_cache: Arc<parking_lot::Mutex<HashMap<IpAddr, Option<String>>>>,
+
     pub ports: Vec<u16>,
 
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
@@ -71,7 +71,7 @@ impl TaskExecutionContext {
             ip_receiver,
             port_sender,
             port_receiver,
-            ip_cache: Arc::new(DashMap::new()),
+            ip_cache: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             ports,
             runtime,
             ping_interval,
