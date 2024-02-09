@@ -18,7 +18,7 @@ const MESSAGE: [u8; 50] = [
 ];
 
 const NET_BIOS_PORT: u16 = 137;
-pub(crate) fn netbios_query_scan(
+pub fn netbios_query_scan(
     runtime: Arc<Socket2Runtime>,
     ip_range: IpAddrRange,
     single_query_duration: std::time::Duration,
