@@ -2,7 +2,7 @@ import {
   Component,
   OnInit,
   ViewChild,
-  ChangeDetectorRef, Type, OnDestroy, HostListener
+  ChangeDetectorRef, Type, OnDestroy, HostListener, ElementRef, AfterViewInit
 } from '@angular/core';
 import {takeUntil} from "rxjs/operators";
 import {TabView} from "primeng/tabview";
@@ -11,15 +11,17 @@ import {WebSession} from "@shared/models/web-session.model";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
 import {BaseComponent} from "@shared/bases/base.component";
+import {DesktopSize} from "@devolutions/iron-remote-gui";
 
 @Component({
   selector: 'web-client-tab-view',
   templateUrl: './tab-view.component.html',
   styleUrls: ['./tab-view.component.scss']
 })
-export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy {
+export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy, AfterViewInit {
 
   @ViewChild('tabView') tabView: TabView;
+  @ViewChild('sessionsContainer') sessionsContainer: ElementRef;
 
   webSessionTabs: WebSession<any, any>[] = [];
   currentTabIndex: number = 0;
@@ -45,12 +47,22 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
     this.subscribeToTabActiveIndex();
   }
 
+  ngAfterViewInit(): void {
+    this.measureSize();
+  }
+
   ngOnDestroy(): void {
     super.ngOnDestroy();
   }
 
   addBackgroundClass(): boolean {
     return this.currentTabIndex > 0;
+  }
+
+  measureSize(): void {
+    const width: number = this.sessionsContainer.nativeElement.offsetWidth;
+    const height: number = this.sessionsContainer.nativeElement.offsetHeight-WebSession.TOOLBAR_SIZE;
+    this.webSessionService.setWebSessionScreenSize({ width, height });
   }
 
   private changeTabIndex(): void {

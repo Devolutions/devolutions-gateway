@@ -1,6 +1,6 @@
 import {UtilsService} from '../utils.service';
 
-interface ExtractionUsernameDomain {
+export interface ExtractedUsernameDomain {
   username: string,
   domain: string
 }
@@ -14,8 +14,8 @@ export class StringService {
   }
 
   //DOMAIN\username or username@DOMAIN
-  extractDomain(fullUsername: string): ExtractionUsernameDomain {
-    const extractionData: ExtractionUsernameDomain = {
+  extractDomain(fullUsername: string): ExtractedUsernameDomain {
+    const extractionData: ExtractedUsernameDomain = {
       username: fullUsername,
       domain: ''
     };

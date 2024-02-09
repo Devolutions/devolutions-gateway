@@ -1,9 +1,10 @@
-import {Injectable} from '@angular/core';
+import {ComponentRef, Injectable} from '@angular/core';
 import {BehaviorSubject, Observable} from 'rxjs';
 import {map} from "rxjs/operators";
 
 import {WebSession} from "@shared/models/web-session.model";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
+import {DesktopSize} from "@devolutions/iron-remote-gui";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -15,15 +16,20 @@ export const SESSIONS_MENU_OFFSET: number = 1;
 export class WebSessionService {
 
   private NEW_SESSION_IDX: number = 0;
-  private webSessionDataSubject: BehaviorSubject<WebSession<any, any>[]> = new BehaviorSubject<WebSession<any, any>[]>([]);
-  private webSessionData$: Observable<WebSession<any, any>[]> = this.webSessionDataSubject.asObservable();
+  private webSessionDataSubject: BehaviorSubject<WebSession<any, any>[]>;
+  private webSessionData$: Observable<WebSession<any, any>[]>;
 
-  private webSessionCurrentTabIndexSubject: BehaviorSubject<number> = new BehaviorSubject(0);
-  private webSessionCurrentTabIndex$: Observable<number> = this.webSessionCurrentTabIndexSubject.asObservable();
+  private webSessionCurrentTabIndexSubject: BehaviorSubject<number>;
+  private webSessionCurrentTabIndex$: Observable<number>;
 
-  constructor(private dynamicComponentService: DynamicComponentService) {}
+  private webSessionScreenSizeSubject: BehaviorSubject<DesktopSize>;
+  private webSessionScreenSizeIndex$: Observable<DesktopSize>;
 
-  public get numberOfActiveSessions() {
+  constructor(private dynamicComponentService: DynamicComponentService) {
+    this.initializeWebSessionService();
+  }
+
+  public get numberOfActiveSessions(): number {
     return this.webSessionDataSubject.getValue().length - SESSIONS_MENU_OFFSET;
   }
 
@@ -35,24 +41,32 @@ export class WebSessionService {
     this.setWebSessionTabIndexToLastCreated(newSession.tabIndex);
   }
 
-  updateSession(tabIndex: number, newSession: WebSession<any, any>): void {
-    newSession.tabIndex = tabIndex;
+  updateSession(updatedWebSession: WebSession<any, any>): void {
+    const currentSessions = this.webSessionDataSubject.value;
+    const index: number = currentSessions.findIndex(webSession => webSession.id === updatedWebSession.id);
 
-    this.removeSession(tabIndex).then(() => {
-      this.addSession(newSession);
-      }
-    )
+    if (index !== -1) {
+      updatedWebSession.tabIndex = currentSessions[index].tabIndex;
+      currentSessions[index] = updatedWebSession;
+
+      this.webSessionDataSubject.next(currentSessions);
+      this.setWebSessionTabIndexToLastCreated(updatedWebSession.tabIndex);
+    } else {
+      console.error('Web Session not found.')
+    }
   }
 
-  async removeSession(tabIndexToRemove?: number): Promise<void> {
-    await this.destroyWebSessionComponentRef(tabIndexToRemove);
+  async removeSession(webSessionIdToRemove: string): Promise<void> {
+    await this.destroyWebSessionComponentRef(webSessionIdToRemove);
 
     const currentSessions = this.webSessionDataSubject.value;
-    const filteredSessions = currentSessions.filter(session => session.tabIndex !== tabIndexToRemove);
+    const filteredSessions = currentSessions.
+      filter(webSession => webSession.id !== webSessionIdToRemove);
 
+    const sessionToRemove = await this.getWebSession(webSessionIdToRemove);
     const updatedSessions = filteredSessions.map(session => {
-      if (session.tabIndex && session.tabIndex > tabIndexToRemove) {
-        return session.cloneWithUpdatedTabIndex(session.tabIndex - 1);
+      if (session.tabIndex && session.tabIndex > sessionToRemove.tabIndex) {
+        return session.updatedTabIndex(session.tabIndex - 1);
       }
       return session;
     });
@@ -61,9 +75,9 @@ export class WebSessionService {
     this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
   }
 
-  async updateWebSessionIcon(tabIndex: number, icon: string): Promise<void> {
+  async updateWebSessionIcon(updateWebSessionId: string, icon: string): Promise<void> {
     const currentSessions = this.webSessionDataSubject.value;
-    const index: number = currentSessions.findIndex(session => session.tabIndex === tabIndex);
+    const index: number = currentSessions.findIndex(session => session.id === updateWebSessionId);
     const webSession: WebSession<any, any> = currentSessions[index];
     webSession.icon = icon;
 
@@ -75,18 +89,32 @@ export class WebSessionService {
     }
   }
 
-  async destroyWebSessionComponentRef(indexToRemove: number): Promise<void> {
+  async destroyWebSessionComponentRef(webSessionId: string): Promise<void> {
     try {
-      const webSessionToDestroy = await this.getWebSession(indexToRemove);
+      const webSessionToDestroy = await this.getWebSession(webSessionId);
 
-      if (this.isSessionValid(webSessionToDestroy)) {
+      if (this.isWebSessionValid(webSessionToDestroy)) {
         this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
       } else {
-        console.warn('Invalid or non-existent session to destroy:', indexToRemove);
+        console.warn('Invalid or non-existent session to destroy:', webSessionId);
       }
     } catch (error) {
       console.error('Error destroying web session:', error);
     }
+  }
+
+  cleanupWebSessionService(): void {
+    this.webSessionDataSubject.getValue().forEach(session => {
+      if (session.componentRef) {
+        this.dynamicComponentService.destroyComponent(session.componentRef);
+      }
+    });
+
+    this.webSessionDataSubject.complete();
+    this.webSessionCurrentTabIndexSubject.complete();
+    this.webSessionScreenSizeSubject.complete();
+
+    this.initializeWebSessionService();
   }
 
   getAllWebSessions(): Observable<WebSession<any, any>[]> {
@@ -99,14 +127,15 @@ export class WebSessionService {
     );
   }
 
-  async getWebSession(indexOfWebSession: number): Promise<WebSession<any, any>> {
+  async getWebSession(webSessionId: string): Promise<WebSession<any, any>> {
     const currentWebSessions = this.webSessionDataSubject.value;
-    const session = currentWebSessions.filter(session => session.tabIndex === indexOfWebSession);
+    const webSession = currentWebSessions.
+      filter(webSession => webSession.id === webSessionId);
 
-    if (session.length === 0) {
+    if (webSession.length === 0) {
       return null
     }
-    return session[0];
+    return webSession[0];
   }
 
   getWebSessionSnapshot(): WebSession<any, any>[] {
@@ -129,21 +158,43 @@ export class WebSessionService {
     this.webSessionCurrentTabIndexSubject.next(this.NEW_SESSION_IDX);
   }
 
+  setWebSessionScreenSize(desktopSize: DesktopSize): void {
+    this.webSessionScreenSizeSubject.next(desktopSize);
+  }
+
+  getWebSessionScreenSize(): Observable<DesktopSize> {
+    return this.webSessionScreenSizeIndex$;
+  }
+
+  getWebSessionScreenSizeSnapshot(): DesktopSize {
+    return this.webSessionScreenSizeSubject.getValue();
+  }
+
   setWebSessionTabIndexToLastCreated(tabIndex?: number): void {
     if (this.webSessionDataSubject.getValue().length === 0) {
       this.setWebSessionCurrentIndex(0);
       return;
     }
 
-    const lastSessionTabIndex: number = tabIndex;
-    this.setWebSessionCurrentIndex(lastSessionTabIndex);
+    this.setWebSessionCurrentIndex(tabIndex);
   }
 
   hasActiveWebSessions(): boolean {
     return this.numberOfActiveSessions > 0;
   }
 
-  private isSessionValid(session) {
-    return session && session.componentRef
+  private initializeWebSessionService(): void {
+    this.webSessionDataSubject = new BehaviorSubject<WebSession<any, any>[]>([]);
+    this.webSessionData$ = this.webSessionDataSubject.asObservable();
+
+    this.webSessionCurrentTabIndexSubject = new BehaviorSubject(0);
+    this.webSessionCurrentTabIndex$ = this.webSessionCurrentTabIndexSubject.asObservable();
+
+    this.webSessionScreenSizeSubject = new BehaviorSubject(undefined);
+    this.webSessionScreenSizeIndex$ = this.webSessionScreenSizeSubject.asObservable();
+  }
+
+  private isWebSessionValid(WebSession: WebSession<any, any>):ComponentRef<any> {
+    return WebSession && WebSession.componentRef
   }
 }

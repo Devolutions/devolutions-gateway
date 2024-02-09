@@ -6,6 +6,7 @@ import {BaseComponent} from "@shared/bases/base.component";
 import {ApiService} from "@shared/services/api.service";
 import {Session} from "@shared/models/session";
 import {NavigationService} from "@shared/services/navigation.service";
+import {WebSessionService} from "@shared/services/web-session.service";
 
 @Injectable({
   providedIn: 'root',
@@ -23,9 +24,9 @@ export class AuthService extends BaseComponent {
 
   isAutoLoginOn: BehaviorSubject<boolean> = new BehaviorSubject(false);
 
-  constructor(
-    private apiService: ApiService,
-    private navigationService: NavigationService
+  constructor(private apiService: ApiService,
+              private webSessionService: WebSessionService,
+              private navigationService: NavigationService
   ) {
     super();
 
@@ -84,6 +85,7 @@ export class AuthService extends BaseComponent {
   }
 
   public logout(): void {
+    this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
     this.sessionSubject.next(null);
     this.isAutoLoginOn.next(false);
@@ -111,7 +113,6 @@ export class AuthService extends BaseComponent {
   private requestToken(username?: string, password?: string): Observable<string> {
     return this.apiService.generateAppToken(username, password).pipe(
       catchError(error => {
-        //console.error('Error requesting token:', error);
         throw error;
       })
     );
@@ -181,6 +182,7 @@ export class AuthService extends BaseComponent {
   }
 
   private handleTokenExpiration(): void {
+    this.webSessionService.cleanupWebSessionService();
     this.removeAllStorageData();
     this.navigationService.navigateToLogin();
   }

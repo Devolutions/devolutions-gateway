@@ -17,7 +17,7 @@ import {AuthService} from "@shared/services/auth.service";
 })
 export class AppMenuComponent extends BaseComponent implements  OnInit {
 
-  isAutoLoginOn = false;
+  isAutoLoginOn: boolean = false;
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
 

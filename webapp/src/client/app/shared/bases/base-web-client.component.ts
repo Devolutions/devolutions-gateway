@@ -1,7 +1,5 @@
 import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
-import { ActivatedRoute, Params } from '@angular/router';
-import {WebClientQueryParams} from "@shared/services/web-client.service";
 import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
 
 @Directive()

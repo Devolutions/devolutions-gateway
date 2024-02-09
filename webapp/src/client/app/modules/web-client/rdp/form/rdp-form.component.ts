@@ -14,10 +14,15 @@ import {WebSession} from "@shared/models/web-session.model";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {ComponentStatus} from "@shared/models/component-status.model";
-
-interface AutoCompleteInput {
-  hostname: string;
-}
+import {
+  HostnameObject,
+  RdpFormDataInput,
+  AutoCompleteInput,
+  PROTOCOL_SELECT_ITEMS
+} from "@shared/services/web-client.service";
+import {EMPTY, Observable, of} from "rxjs";
+import {catchError, map, switchMap, takeUntil} from "rxjs/operators";
+import {StorageService} from "@shared/services/utils/storage.service";
 
 @Component({
     selector: 'web-client-rdp-form',
@@ -25,15 +30,15 @@ interface AutoCompleteInput {
     styleUrls: ['rdp-form.component.scss']
 })
 export class RdpFormComponent extends BaseComponent implements  OnInit,
-                                                                AfterViewInit,
                                                                 OnChanges {
 
   @Input() isFormExists: boolean = false;
-  @Input() inputFormData: any | undefined;
-  @Input() tabIndex: number | undefined;
+  @Input() webSessionId: string | undefined;
+  @Input() inputFormData: RdpFormDataInput | undefined;
   @Input() error: string;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
+  @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   connectSessionForm: FormGroup;
   screenSizeOptions: SelectItem[];
@@ -41,25 +46,20 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   messages: Message[] = [];
   showPassword: boolean = false;
 
-  hostnames!: any[]
-  filteredHostnames!: any[];
+  hostnames!: HostnameObject[];
+  filteredHostnames!: HostnameObject[];
 
-  protocolSelectItems: SelectItem[] = [
-    { label: 'RDP', value: '0' }
-  ];
+  protocolSelectItems: SelectItem[];
 
   constructor(private webSessionService: WebSessionService,
+              private storageService: StorageService,
               private formBuilder: FormBuilder) {
-
     super();
+    this.protocolSelectItems = PROTOCOL_SELECT_ITEMS;
   }
 
   ngOnInit(): void {
     this.populateForm()
-  }
-
-  ngAfterViewInit(): void {
-    this.initializeStatus();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -68,15 +68,13 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     if (changes.error && this.error) {
       let message: string = this.error;
 
-      if (changes.error && this.error) {
-        setTimeout(() => {
-          this.addMessages([{
-            severity: 'error',
-            summary: 'Error', //For translation lblError
-            detail: message
-          }]);
-        }, 500);
-      }
+      setTimeout(() => {
+        this.addMessages([{
+          severity: 'error',
+          summary: 'Error', //For translation lblError
+          detail: message
+        }]);
+      }, 500);
     }
   }
 
@@ -85,33 +83,26 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   }
 
   onConnectSession(): void {
-    const submittedData = this.connectSessionForm.value;
+
+    const submittedData: RdpFormDataInput = this.connectSessionForm.value;
+    this.manageScreenSize(submittedData.screenSize);
+
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
-    const newSessionTab: WebSession<Type<WebClientRdpComponent>, any> =  new WebSession(submittedData.hostname,
+    const webSession: WebSession<Type<WebClientRdpComponent>, RdpFormDataInput> =  new WebSession(submittedData.hostname,
                                                               WebClientRdpComponent,
                                                               submittedData,
                                                               WebClientRdpComponent.DVL_RDP_ICON);
-    newSessionTab.name = submittedData.hostname;
-    newSessionTab.component = WebClientRdpComponent;
-    newSessionTab.data = submittedData;
+    webSession.name = submittedData.hostname;
+    webSession.component = WebClientRdpComponent;
+    webSession.data = submittedData;
 
     if (this.isFormExists) {
-      this.webSessionService.updateSession(this.tabIndex, newSessionTab);
+      webSession.id = this.webSessionId;
+      this.webSessionService.updateSession(webSession);
     } else {
-      this.webSessionService.addSession(newSessionTab);
+      this.webSessionService.addSession(webSession);
     }
-  }
-
-  initComboEnum(enums: any): SelectItem[] {
-    const dropDownItems: SelectItem[] = [];
-    const values: string[] = Object.keys(ScreenSize).filter(key => isNaN(Number(key)));
-    for (const label of values) {
-      const noLetterRLabel: string = label.startsWith('R') ? label.substring(1) : label;
-      const value = enums[label];
-      dropDownItems.push({label:noLetterRLabel, value});
-    }
-    return dropDownItems;
   }
 
   toggleShowPassword(): void {
@@ -150,12 +141,22 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     };
   }
 
+  private manageScreenSize(formScreenSize): void {
+    if (formScreenSize === ScreenSize.FullScreen) {
+      const width: number = window.screen.width;
+      const height: number = window.screen.height;
+      this.webSessionService.setWebSessionScreenSize({ width, height });
+    } else {
+      this.sizeChange.emit();
+    }
+  }
+
   private isHostnameInArray(hostname: string, array: AutoCompleteInput[]): boolean {
     return array.some(obj => obj.hostname === hostname);
   }
 
-  private processHostname(autoCompleteInput: any): string {
-    this.addHostnameToLocalStorage(autoCompleteInput);
+  private processHostname(autoCompleteInput: AutoCompleteInput): string {
+    this.addHostnameToStorage(autoCompleteInput);
 
     if (typeof autoCompleteInput === 'string') {
       return autoCompleteInput;
@@ -168,86 +169,96 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     return typeof input === 'string' ? {'hostname': input} : input;
   }
 
-  private addHostnameToLocalStorage(hostname: string | AutoCompleteInput): void {
+  private addHostnameToStorage(hostname: string | AutoCompleteInput): void {
     try {
       const hostnameObj: AutoCompleteInput = this.processAutoCompleteInput(hostname);
+      const hostnames: AutoCompleteInput[] | null = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
 
-      let hostnames = JSON.parse(localStorage.getItem('hostnames') || '[]');
       if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
         hostnames.push(hostnameObj);
-        localStorage.setItem('hostnames', JSON.stringify(hostnames));
 
-        this.populateAutoComplete();
+        this.storageService.setItem('hostnames', hostnames);
+
+        this.populateAutoCompleteLists();
       }
     } catch (e) {
       console.error(e);
     }
   }
 
-  private initializeStatus(): void {
-    const status: ComponentStatus = {
-      isInitialized: true,
-      tabIndex: 0
+  private addMessages(newMessages: Message[]): void {
+
+    const areThereNewMessages: boolean = newMessages.some(newMsg =>
+      !this.messages.some(existingMsg => existingMsg.summary === newMsg.summary &&
+                                                  existingMsg.detail === newMsg.detail));
+
+    if (areThereNewMessages) {
+      this.messages = [...this.messages, ...newMessages];
     }
-    this.componentStatus.emit(status);
   }
 
-  private addMessages(messages: Message[]): void {
-    this.messages = [];
-    if (messages?.length > 0) {
-      messages.forEach(message => {
-        this.messages.push(message);
-      })
+  private buildForm(): Observable<FormGroup> {
+    const formControls = {
+      protocol: [0, Validators.required],
+      autoComplete: new FormControl('', Validators.required),
+      hostname: [''],
+      username: ['', Validators.required],
+      password: ['', Validators.required],
+      screenSize: [null],
+      customWidth: [{value: '', disabled: true}],
+      customHeight: [{value: '', disabled: true}],
+      kdcUrl: ['', [this.kdcServerUrlValidator()]],
+      preConnectionBlob: ['']
+    };
+
+    if (this.isFormExists && this.inputFormData) {
+      return of(
+        this.formBuilder.group({
+          ...formControls,
+          protocol: [this.inputFormData.protocol, Validators.required],
+          username: [this.inputFormData.username, Validators.required],
+          password: [this.inputFormData.password, Validators.required],
+          screenSize: [this.inputFormData.screenSize],
+          customWidth: [this.inputFormData.customWidth],
+          customHeight: [this.inputFormData.customHeight],
+          kdcUrl: [this.inputFormData.kdcUrl, [this.kdcServerUrlValidator()]],
+          preConnectionBlob: [this.inputFormData.preConnectionBlob]
+        })
+      );
+
+    } else {
+      return of(this.formBuilder.group(formControls));
     }
   }
 
   private populateForm(): void {
-    this.populateAutoComplete();
-
-    if (this.isFormExists) {
-      this.connectSessionForm = this.formBuilder.group({
-        protocol: [this.inputFormData.protocol, Validators.required],
-        autoComplete: new FormControl('', Validators.required),
-        hostname: [''],
-        username: [this.inputFormData.username, Validators.required],
-        password: [this.inputFormData.password, Validators.required],
-        screenSize: [this.inputFormData.screenSize],
-        customWidth: [this.inputFormData.customWidth],
-        customHeight: [this.inputFormData.customHeight],
-        kdcUrl: [this.inputFormData.kdcUrl, [this.kdcServerUrlValidator()]],
-        preConnectionBlob: [this.inputFormData.preConnectionBlob]
-      });
-    } else {
-      this.connectSessionForm = this.formBuilder.group({
-        protocol: [0, Validators.required],
-        autoComplete: new FormControl('', Validators.required),
-        hostname: [''],
-        username: ['', Validators.required],
-        password: ['', Validators.required],
-        screenSize: [null],
-        customWidth: [{value: '', disabled: true}],
-        customHeight: [{value: '', disabled: true}],
-        kdcUrl: ['', [this.kdcServerUrlValidator()]],
-        preConnectionBlob: ['']
-      });
-    }
-    this.setupScreenSizeDropdown();
+    this.populateAutoCompleteLists().pipe(
+      takeUntil(this.destroyed$),
+      switchMap(() => this.buildForm()),
+      map((connectSessionForm) => this.connectSessionForm = connectSessionForm),
+      map(() => this.setupScreenSizeDropdown()),
+      catchError(error => {
+        console.error(error.message);
+        return EMPTY;
+      }),
+    ).subscribe();
   }
 
-  private populateAutoComplete(): void {
-    //localStorage.clear();
-    this.hostnames = JSON.parse(localStorage.getItem('hostnames') || '[]');
+  private populateAutoCompleteLists(): Observable<void> {
+    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+    return of(undefined);
   }
 
-  private setupScreenSizeDropdown(): void {
-    //TODO take into account the form data if embedded
-    this.screenSizeOptions = this.initComboEnum(ScreenSize);
+  private setupScreenSizeDropdown(): Observable<void> {
+    this.screenSizeOptions = ScreenSize.getSelectItems();
     this.subscribeToFormScreenSize();
+    return of(undefined);
   }
 
   private subscribeToFormScreenSize(): void {
-    this.connectSessionForm.get('screenSize').valueChanges
-      .subscribe(value => {
+    this.connectSessionForm.get('screenSize').valueChanges.pipe(
+      takeUntil(this.destroyed$),
+    ).subscribe(value => {
         if (value === ScreenSize.Custom) {
           this.connectSessionForm.get('customWidth').enable();
           this.connectSessionForm.get('customHeight').enable();
