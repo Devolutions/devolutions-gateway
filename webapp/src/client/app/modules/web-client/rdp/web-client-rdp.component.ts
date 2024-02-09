@@ -10,7 +10,7 @@ import {
   Renderer2
 } from '@angular/core';
 import {EMPTY, from, Observable, of, Subject} from "rxjs";
-import {catchError, finalize, map, switchMap, takeUntil} from 'rxjs/operators';
+import {catchError, map, switchMap, takeUntil} from 'rxjs/operators';
 import {MessageService} from "primeng/api";
 
 import { WebClientBaseComponent } from "@shared/bases/base-web-client.component";
@@ -122,10 +122,15 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     this.remoteClient.ctrlAltDel();
   }
 
+  startTerminationProcess(): void {
+    this.sendTerminateSessionCmd();
+    this.currentStatus.isDisabledByUser = true;
+    this.disableComponentStatus();
+  }
+
   sendTerminateSessionCmd(): void {
     // shutdowns the session, not the server. Jan 2024 KAH.
     this.remoteClient.shutdown();
-    this.currentStatus.isDisabledByUser = true;
   }
 
   scaleTo(scale: ScreenScale): void {
@@ -154,6 +159,11 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       isDisabled: false,
       isDisabledByUser: false,
     }
+  }
+
+  private disableComponentStatus(): void {
+    this.currentStatus.isDisabled = true;
+    this.componentStatus.emit(this.currentStatus);
   }
 
   private handleOnFullScreenEvent(): void {
@@ -246,8 +256,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
         console.error(error.message);
         this.handleIronRDPError(error.message);
         return EMPTY;
-      }),
-      finalize(() => console.log('Connection process completed or stopped. Clean up?'))
+      })
     ).subscribe();
   }
 
@@ -344,14 +353,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private handleSessionEndedOrError(event: SessionEvent): void {
-
     if (document.fullscreenElement) {
       this.exitFullScreen();
     }
 
-    this.currentStatus.isDisabled = true;
     this.notifyUser(event.type, event.data);
-    this.componentStatus.emit(this.currentStatus);
+    this.disableComponentStatus();
   }
 
   private handleIronRDPConnectStarted(): void {
@@ -362,10 +369,12 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.webSessionId = this.currentStatus.id;
     this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
 
-    const icon: string = eventType === SessionEventType.TERMINATED ? WebClientRdpComponent.DVL_WARNING_ICON : WebClientRdpComponent.DVL_RDP_ICON;
+    const icon: string = eventType === SessionEventType.TERMINATED ?
+                                        WebClientRdpComponent.DVL_WARNING_ICON :
+                                        WebClientRdpComponent.DVL_RDP_ICON;
+
     this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
 
@@ -375,18 +384,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
   private handleIronRDPError(error: UserIronRdpError | string): void {
     this.notifyUserAboutError(error);
-    this.currentStatus.isDisabled = true;
-    this.componentStatus.emit(this.currentStatus);
+    this.disableComponentStatus();
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    this.webSessionId = this.currentStatus.id;
-
     if (typeof error === 'string') {
       this.rdpError = error;
     } else {
       this.rdpError = this.getMessage(error.kind());
     }
+
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_WARNING_ICON);
   }
 

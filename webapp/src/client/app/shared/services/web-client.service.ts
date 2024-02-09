@@ -80,10 +80,8 @@ export class WebClientService extends BaseComponent {
     }
 
     const screenSizeStr: string = ScreenSize.getEnumKey(submittedFormData.screenSize);
-    console.log('screenSizeStr', screenSizeStr)
     if (submittedFormData.screenSize >= 2 && submittedFormData.screenSize <= 20) {
       const rawSize: string[] = screenSizeStr?.split('x');
-      console.log('rawSize', rawSize)
       return rawSize.length > 1 ? { width: parseInt(rawSize[0]), height: (parseInt(rawSize[1])-WebSession.TOOLBAR_SIZE) } : null;
 
     } else if (submittedFormData.screenSize === ScreenSize.Custom) {
