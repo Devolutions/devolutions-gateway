@@ -30,14 +30,17 @@ pub struct Socket2Runtime {
 
 impl Drop for Socket2Runtime {
     fn drop(&mut self) {
-        tracing::debug!("dropping runtime");
+        tracing::trace!(covmark = "socket2_runtime_drop");
+
         self.is_terminated.store(true, Ordering::SeqCst);
+
         let _ = self // ignore errors, cannot handle it here
             .poller
             .notify()
             .map_err(|e| tracing::error!("failed to notify poller: {:?}", e));
-        // event loop will terminate after this
-        // register loop will terminate because of sender is dropped after this.
+
+        // Event loop will terminate after this.
+        // The register loop will also terminate because of sender is dropped.
     }
 }
 

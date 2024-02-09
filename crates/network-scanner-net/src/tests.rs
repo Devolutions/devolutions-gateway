@@ -176,9 +176,10 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 pub async fn drop_runtime() -> anyhow::Result<()> {
     {
-        let async_runtime = crate::runtime::Socket2Runtime::new(None)?;
+        let runtime = crate::runtime::Socket2Runtime::new(None)?;
+
         {
-            let bad_socket = async_runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+            let bad_socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
 
             tracing::info!("bad_socket: {:?}", bad_socket);
 
@@ -192,10 +193,11 @@ pub async fn drop_runtime() -> anyhow::Result<()> {
                 )
                 .await;
         }
-        tracing::info!("runtime arc count: {}", Arc::strong_count(&async_runtime));
 
-        assert!(Arc::strong_count(&async_runtime) == 1);
+        tracing::info!("runtime arc count: {}", Arc::strong_count(&runtime));
+        assert!(Arc::strong_count(&runtime) == 1);
     }
+
     tracing::info!("runtime should be dropped here");
     Ok(())
 }

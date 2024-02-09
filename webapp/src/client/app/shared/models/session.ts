@@ -1,3 +1,4 @@
+// Class for Web App login session
 export class Session {
   username?: string;
   token?: string;

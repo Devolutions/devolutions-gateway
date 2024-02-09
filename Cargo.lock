@@ -913,6 +913,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-appender",
+ "tracing-cov-mark",
  "tracing-subscriber",
  "transport",
  "tungstenite",
@@ -2136,6 +2137,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "tracing-cov-mark",
  "tracing-subscriber",
 ]
 
@@ -4213,6 +4215,13 @@ checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
  "valuable",
+]
+
+[[package]]
+name = "tracing-cov-mark"
+version = "0.0.0"
+dependencies = [
+ "tracing",
 ]
 
 [[package]]
