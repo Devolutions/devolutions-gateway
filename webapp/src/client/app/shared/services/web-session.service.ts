@@ -5,6 +5,7 @@ import {map} from "rxjs/operators";
 import {WebSession} from "@shared/models/web-session.model";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 import {DesktopSize} from "@devolutions/iron-remote-gui";
+import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -31,6 +32,10 @@ export class WebSessionService {
 
   public get numberOfActiveSessions(): number {
     return this.webSessionDataSubject.getValue().length - SESSIONS_MENU_OFFSET;
+  }
+
+  public get numberOfAllSessions(): number {
+    return this.webSessionDataSubject.getValue().length;
   }
 
   addSession(newSession: WebSession<any, any>): void {
@@ -106,14 +111,12 @@ export class WebSessionService {
   cleanupWebSessionService(): void {
     this.webSessionDataSubject.getValue().forEach(session => {
       if (session.componentRef) {
+        this.terminateSession(session);
         this.dynamicComponentService.destroyComponent(session.componentRef);
       }
     });
 
-    this.webSessionDataSubject.complete();
-    this.webSessionCurrentTabIndexSubject.complete();
-    this.webSessionScreenSizeSubject.complete();
-
+    this.completeSubjects();
     this.initializeWebSessionService();
   }
 
@@ -181,6 +184,21 @@ export class WebSessionService {
 
   hasActiveWebSessions(): boolean {
     return this.numberOfActiveSessions > 0;
+  }
+
+  private completeSubjects(): void {
+    this.webSessionDataSubject.complete();
+    this.webSessionCurrentTabIndexSubject.complete();
+    this.webSessionScreenSizeSubject.complete();
+  }
+
+  private terminateSession(session: WebSession<any, any>): void {
+    if (typeof session.componentRef.instance.sendTerminateSessionCmd === 'function') {
+      session.componentRef.instance.sendTerminateSessionCmd();
+      console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} terminated.`);
+    } else if (session.componentRef.componentType !== RdpFormComponent) {
+      console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} has no terminate command.`);
+    }
   }
 
   private initializeWebSessionService(): void {
