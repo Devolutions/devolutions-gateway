@@ -7,6 +7,7 @@ pub mod jmux;
 pub mod jrec;
 pub mod jrl;
 pub mod kdc_proxy;
+pub mod network_scan;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
@@ -25,7 +26,8 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .route("/jet/jmux", axum::routing::get(jmux::handler))
         .route("/jet/rdp", axum::routing::get(rdp::handler))
         .nest("/jet/fwd", fwd::make_router(state.clone()))
-        .nest("/jet/webapp", webapp::make_router(state.clone()));
+        .nest("/jet/webapp", webapp::make_router(state.clone()))
+        .route("/jet/network-scan", axum::routing::get(network_scan::handler));
 
     if state.conf_handle.get_conf().webapp_is_enabled() {
         router = router.route(

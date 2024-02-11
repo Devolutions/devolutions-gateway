@@ -94,6 +94,7 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 
 # For KDC proxy
 portpicker = "0.1"
+network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = "0.3"
