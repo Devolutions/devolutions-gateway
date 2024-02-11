@@ -965,6 +965,7 @@ fn validate_token_impl(
         | AccessTokenClaims::Association(AssociationTokenClaims { jet_aid: id, exp, .. })
         | AccessTokenClaims::Scope(ScopeTokenClaims { jti: Some(id), exp, .. })
         | AccessTokenClaims::Bridge(BridgeTokenClaims { jti: id, exp, .. })
+        | AccessTokenClaims::NetScan(NetScanClaims { jti: id, exp, .. })
         | AccessTokenClaims::Jmux(JmuxTokenClaims { jti: id, exp, .. }) => match token_cache.lock().entry(id) {
             Entry::Occupied(_) => {
                 warn!("A replay attack may have been attempted");
@@ -1035,8 +1036,6 @@ fn validate_token_impl(
 
         // Web application tokens are long-lived and reusing them is allowed
         AccessTokenClaims::WebApp(_) => {}
-        // Network scan tokens are long-lived and reusing them is allowed
-        AccessTokenClaims::NetScan(_) => {}
     }
 
     Ok(claims)
