@@ -8,10 +8,9 @@ use axum::{
 use network_scanner::scanner::NetworkScannerParams;
 use serde::Serialize;
 
-use crate::{http::HttpError, DgwState};
+use crate::{http::HttpError, token::{ApplicationProtocol, Protocol}};
 
 pub async fn handler(
-    _: State<DgwState>,
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
 ) -> Result<Response, HttpError> {
@@ -63,20 +62,27 @@ pub async fn handler(
 
 #[derive(Debug, Deserialize)]
 pub struct NetworkScanQueryParams {
-    pub ping_interval: Option<u64>,     // in milliseconds,default 200
-    pub ping_timeout: Option<u64>,      // in milliseconds,default 500
-    pub broadcast_timeout: Option<u64>, // in milliseconds,default 1000
-    pub port_scan_timeout: Option<u64>, // in milliseconds,default 1000
-    pub netbios_timeout: Option<u64>,   // in milliseconds,default 1000
-    pub netbios_interval: Option<u64>,  // in milliseconds,default 200
-    pub max_wait: Option<u64>,          // max_wait for entire scan duration in milliseconds, suggested!
+    /// in milliseconds,default 200
+    pub ping_interval: Option<u64>,
+    /// in milliseconds,default 500
+    pub ping_timeout: Option<u64>,
+    /// in milliseconds,default 1000
+    pub broadcast_timeout: Option<u64>,
+    /// in milliseconds,default 1000
+    pub port_scan_timeout: Option<u64>,
+    /// in milliseconds,default 1000
+    pub netbios_timeout: Option<u64>,
+    /// in milliseconds,default 200
+    pub netbios_interval: Option<u64>,
+    /// max_wait for entire scan duration in milliseconds, suggested!
+    pub max_wait: Option<u64>,
 }
 
-const FAMOUS_PORTS: [u16; 10] = [22, 23, 80, 443, 389, 636, 3389, 5900, 5985, 5986];
+const COMMON_PORTS: [u16; 10] = [22, 23, 80, 443, 389, 636, 3389, 5900, 5985, 5986];
 impl From<NetworkScanQueryParams> for NetworkScannerParams {
     fn from(val: NetworkScanQueryParams) -> Self {
         NetworkScannerParams {
-            ports: FAMOUS_PORTS.to_vec(),
+            ports: COMMON_PORTS.to_vec(),
             ping_interval: val.ping_interval.unwrap_or(200),
             ping_timeout: val.ping_timeout.unwrap_or(500),
             broadcast_timeout: val.broadcast_timeout.unwrap_or(1000),
@@ -90,34 +96,33 @@ impl From<NetworkScanQueryParams> for NetworkScannerParams {
 
 #[derive(Debug, Serialize)]
 pub struct NetworkScanResponse {
-    pub ip: String,
+    pub ip: IpAddr,
     pub hostname: Option<String>,
     #[serde(rename = "type")]
-    pub type_: String,
+    pub ty: ApplicationProtocol,
 }
 
 impl NetworkScanResponse {
     fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
         let hostname = dns;
-        // match famouse ports, ssh,telnet,http,https,ldap,ldaps,rdp,vnc,winrm
-        let type_ = match port {
-            22 => "SSH",
-            23 => "Telnet",
-            80 => "HTTP",
-            443 => "HTTPS",
-            389 => "LDAP",
-            636 => "LDAPS",
-            3389 => "RDP",
-            5900 => "VNC",
-            5985 | 5986 => "WinRM", // WinRM typically runs on ports 5985 (HTTP) and 5986 (HTTPS)
-            _ => "Unknown",
-        }
-        .to_string();
+        let ty = match port {
+            22=> ApplicationProtocol::Known(Protocol::Ssh),
+            23=> ApplicationProtocol::Known(Protocol::Telnet),
+            80=> ApplicationProtocol::Known(Protocol::Http),
+            443=> ApplicationProtocol::Known(Protocol::Https),
+            389=> ApplicationProtocol::Known(Protocol::Ldap),
+            636=> ApplicationProtocol::Known(Protocol::Ldaps),
+            3389=> ApplicationProtocol::Known(Protocol::Rdp),
+            5900=> ApplicationProtocol::Known(Protocol::Vnc),
+            5985=> ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
+            5986=> ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
+            _ => ApplicationProtocol::unknown()
+        };
 
         Self {
-            ip: ip.to_string(),
+            ip,
             hostname,
-            type_,
+            ty,
         }
     }
 }

@@ -23,6 +23,7 @@ ironrdp-pdu = { version = "0.1", git = "https://github.com/Devolutions/IronRDP",
 ironrdp-rdcleanpath = { version = "0.1", git = "https://github.com/Devolutions/IronRDP", rev = "4844e77b7f65024d85ba74b1824013eda6eb32b2" }
 ceviche = "0.5"
 picky-krb = "0.8"
+network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
 
 # Serialization
 serde = "1.0"
@@ -94,7 +95,6 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 
 # For KDC proxy
 portpicker = "0.1"
-network-scanner = { version = "0.0.0", path = "../crates/network-scanner" }
 
 [target.'cfg(windows)'.dependencies]
 rustls-cng = "0.3"
