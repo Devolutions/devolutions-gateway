@@ -31,11 +31,11 @@ pub struct NetworkScanner {
     pub netbios_timeout: Duration,   // in milliseconds
     pub netbios_interval: Duration,  // in milliseconds
     /// the duration to wait for the entire scan to finish
-    pub mdns_meta_query_timeout: Duration, 
+    pub mdns_meta_query_timeout: Duration,
     /// the duration to wait for each mdns query
-    pub mdns_single_query_timeout: Duration, 
+    pub mdns_single_query_timeout: Duration,
     /// the duration to wait for the entire scan to finish
-    pub max_wait_time: Duration,     
+    pub max_wait_time: Duration,
 }
 
 impl NetworkScanner {
@@ -230,7 +230,7 @@ impl NetworkScanner {
             netbios_timeout,
             netbios_interval,
             mdns_meta_query_timeout,
-            mdns_single_query_timeout
+            mdns_single_query_timeout,
         } = params;
 
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
@@ -261,7 +261,6 @@ impl NetworkScanner {
         })
     }
 }
-
 
 type ResultReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
 pub struct NetworkScannerStream {
@@ -342,13 +341,13 @@ impl Display for ScanMethod {
 #[derive(Debug, Clone, TypedBuilder, Default)]
 pub struct NetworkScannerParams {
     pub ports: Vec<u16>,
-    pub ping_interval: u64,     // in milliseconds
-    pub ping_timeout: u64,      // in milliseconds
-    pub broadcast_timeout: u64, // in milliseconds
-    pub port_scan_timeout: u64, // in milliseconds
-    pub netbios_timeout: u64,   // in milliseconds
-    pub netbios_interval: u64,  // in milliseconds
-    pub mdns_meta_query_timeout: u64, // in milliseconds
+    pub ping_interval: u64,             // in milliseconds
+    pub ping_timeout: u64,              // in milliseconds
+    pub broadcast_timeout: u64,         // in milliseconds
+    pub port_scan_timeout: u64,         // in milliseconds
+    pub netbios_timeout: u64,           // in milliseconds
+    pub netbios_interval: u64,          // in milliseconds
+    pub mdns_meta_query_timeout: u64,   // in milliseconds
     pub mdns_single_query_timeout: u64, // in milliseconds
-    pub max_wait_time: u64,     // max_wait for entire scan duration in milliseconds, suggested!
+    pub max_wait_time: u64,             // max_wait for entire scan duration in milliseconds, suggested!
 }

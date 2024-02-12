@@ -162,7 +162,7 @@ impl TaskManager {
         self.spawn(|_| task);
     }
 
-    pub(crate) fn with_timeout(&self,duration: Duration) -> TimeoutManager {
+    pub(crate) fn with_timeout(&self, duration: Duration) -> TimeoutManager {
         TimeoutManager {
             task_manager: self.clone(),
             duration,
@@ -200,9 +200,7 @@ impl TimeoutManager {
         F: FnOnce() + Send + 'static,
     {
         let Self {
-            task_manager,
-            duration,
-            ..
+            task_manager, duration, ..
         } = self;
 
         let when_finish = Some(Box::new(f) as Box<dyn FnOnce() + Send + 'static>);

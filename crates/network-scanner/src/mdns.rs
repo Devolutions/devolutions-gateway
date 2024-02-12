@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use mdns_sd::ServiceEvent;
 
 use crate::{
