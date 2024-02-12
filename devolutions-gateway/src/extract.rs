@@ -153,9 +153,10 @@ where
     type Rejection = HttpError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
-            AccessScope::NetScanRead => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        if let AccessTokenClaims::NetScan(_) = AccessToken::from_request_parts(parts, state).await?.0 {
+            Ok(Self)
+        } else {
+            Err(HttpError::forbidden().msg("token not allowed (expected cty:NetScan)"))
         }
     }
 }

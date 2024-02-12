@@ -408,8 +408,6 @@ pub enum AccessScope {
     HeartbeatRead,
     #[serde(rename = "gateway.recordings.read")]
     RecordingsRead,
-    #[serde(rename = "gateway.net-scan.read")]
-    NetScanRead,
 }
 
 #[derive(Clone, Deserialize)]
