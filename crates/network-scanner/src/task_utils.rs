@@ -162,6 +162,14 @@ impl TaskManager {
         self.spawn(|_| task);
     }
 
+    pub(crate) fn with_timeout(&self,duration: Duration) -> TimeoutManager {
+        TimeoutManager {
+            task_manager: self.clone(),
+            duration,
+            when_finish: None,
+        }
+    }
+
     pub(crate) fn stop(&self) {
         self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let handles = self.handles_receiver.clone();
@@ -176,6 +184,54 @@ impl TaskManager {
         tokio::spawn(async move {
             tokio::time::sleep(timeout).await;
             self_clone.stop();
+        });
+    }
+}
+
+pub(crate) struct TimeoutManager {
+    task_manager: TaskManager,
+    duration: Duration,
+    when_finish: Option<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl TimeoutManager {
+    pub(crate) fn when_finished<F>(self, f: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let Self {
+            task_manager,
+            duration,
+            ..
+        } = self;
+
+        let when_finish = Some(Box::new(f) as Box<dyn FnOnce() + Send + 'static>);
+
+        Self {
+            task_manager,
+            duration,
+            when_finish,
+        }
+    }
+
+    pub(crate) fn spawn<T, F>(self, task: T)
+    where
+        T: FnOnce(TaskManager) -> F + Send + 'static,
+        F: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let Self {
+            task_manager,
+            duration,
+            when_finish,
+        } = self;
+
+        task_manager.spawn(move |task_manager| async move {
+            let future = task(task_manager);
+            let _ = tokio::time::timeout(duration, future).await;
+            if let Some(when_finish) = when_finish {
+                when_finish();
+            }
+            anyhow::Ok(())
         });
     }
 }

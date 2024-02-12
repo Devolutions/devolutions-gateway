@@ -6,12 +6,12 @@ use network_scanner_proto::icmp_v4;
 
 pub mod broadcast;
 pub mod ip_utils;
+pub mod mdns;
 pub mod netbios;
 pub mod ping;
 pub mod port_discovery;
 pub mod scanner;
 pub mod task_utils;
-pub mod mdns;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScannerError {

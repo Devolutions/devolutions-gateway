@@ -23,6 +23,9 @@ fn main() -> anyhow::Result<()> {
         netbios_timeout: 1000,
         netbios_interval: 20,
 
+        mdns_meta_query_timeout: 20 * 1000,
+        mdns_single_query_timeout: 5 * 1000,
+
         max_wait_time: 120 * 1000,
     };
     let rt = tokio::runtime::Runtime::new()?;
