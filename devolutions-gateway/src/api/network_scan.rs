@@ -1,29 +1,39 @@
 use std::net::IpAddr;
 
 use axum::{
-    extract::{ws::Message, State, WebSocketUpgrade},
+    extract::{ws::Message, WebSocketUpgrade},
     response::Response,
 };
 
 use network_scanner::scanner::NetworkScannerParams;
 use serde::Serialize;
 
-use crate::{http::HttpError, token::{ApplicationProtocol, Protocol}};
+use crate::{
+    http::HttpError,
+    token::{ApplicationProtocol, Protocol},
+};
 
 pub async fn handler(
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
+    _scope: crate::extract::NetScanScope,
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
     let scanner = network_scanner::scanner::NetworkScanner::new(scanner_params).map_err(|e| {
-        tracing::error!("Failed to create network scanner: {:?}", e);
+        tracing::error!("failed to create network scanner: {:?}", e);
         HttpError::internal().build(e)
     })?;
 
     let res = ws.on_upgrade(move |mut websocket| async move {
-        let stream = scanner.start().expect("Failed to start network scanner");
-        tracing::info!("Network scan started");
+        let stream = match scanner.start() {
+            Ok(stream) => stream,
+            Err(e) => {
+                tracing::error!("failed to start network scan: {:?}", e);
+                return;
+            }
+        };
+        info!("network scan started");
         loop {
             tokio::select! {
                 result = stream.recv() => {
@@ -37,7 +47,7 @@ pub async fn handler(
                     };
 
                     if let Err(e) = websocket.send(Message::Text(response)).await {
-                        tracing::info!("Failed to send message: {:?}", e);
+                        warn!("Failed to send message: {:?}", e);
                         break;
                     }
 
@@ -106,23 +116,19 @@ impl NetworkScanResponse {
     fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
         let hostname = dns;
         let ty = match port {
-            22=> ApplicationProtocol::Known(Protocol::Ssh),
-            23=> ApplicationProtocol::Known(Protocol::Telnet),
-            80=> ApplicationProtocol::Known(Protocol::Http),
-            443=> ApplicationProtocol::Known(Protocol::Https),
-            389=> ApplicationProtocol::Known(Protocol::Ldap),
-            636=> ApplicationProtocol::Known(Protocol::Ldaps),
-            3389=> ApplicationProtocol::Known(Protocol::Rdp),
-            5900=> ApplicationProtocol::Known(Protocol::Vnc),
-            5985=> ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-            5986=> ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-            _ => ApplicationProtocol::unknown()
+            22 => ApplicationProtocol::Known(Protocol::Ssh),
+            23 => ApplicationProtocol::Known(Protocol::Telnet),
+            80 => ApplicationProtocol::Known(Protocol::Http),
+            443 => ApplicationProtocol::Known(Protocol::Https),
+            389 => ApplicationProtocol::Known(Protocol::Ldap),
+            636 => ApplicationProtocol::Known(Protocol::Ldaps),
+            3389 => ApplicationProtocol::Known(Protocol::Rdp),
+            5900 => ApplicationProtocol::Known(Protocol::Vnc),
+            5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
+            5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
+            _ => ApplicationProtocol::unknown(),
         };
 
-        Self {
-            ip,
-            hostname,
-            ty,
-        }
+        Self { ip, hostname, ty }
     }
 }

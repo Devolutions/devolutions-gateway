@@ -143,6 +143,24 @@ where
 }
 
 #[derive(Clone, Copy)]
+pub struct NetScanScope;
+
+#[async_trait]
+impl<S> FromRequestParts<S> for NetScanScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::NetScanRead => Ok(Self),
+            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct SessionTerminateScope;
 
 #[async_trait]
