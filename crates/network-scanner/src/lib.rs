@@ -11,6 +11,7 @@ pub mod ping;
 pub mod port_discovery;
 pub mod scanner;
 pub mod task_utils;
+pub mod mdns;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScannerError {
@@ -22,6 +23,9 @@ pub enum ScannerError {
 
     #[error("Network interface does not have a netmask")]
     InterfaceDoesNotHaveNetmask(Addr),
+
+    #[error("Network interface does not have a broadcast address")]
+    MdnsError(#[from] mdns_sd::Error),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),

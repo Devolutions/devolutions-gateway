@@ -16,7 +16,7 @@ pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>
 pub(crate) type PortSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>, u16)>;
 pub(crate) type PortReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
     pub ip_sender: IpSender,
     pub ip_receiver: Arc<Mutex<IpReceiver>>,
@@ -29,6 +29,8 @@ pub(crate) struct TaskExecutionContext {
     pub ports: Vec<u16>,
 
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
+    pub mdns_deamon: mdns_sd::ServiceDaemon,
+
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds
     pub broadcast_timeout: Duration, // in milliseconds
@@ -42,7 +44,6 @@ pub(crate) struct TaskExecutionContext {
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
 type HandlesSender = crossbeam::channel::Sender<tokio::task::JoinHandle<anyhow::Result<()>>>;
 
-#[derive(Debug)]
 pub(crate) struct TaskExecutionRunner {
     pub(crate) context: TaskExecutionContext,
     pub(crate) task_manager: TaskManager,
@@ -66,6 +67,7 @@ impl TaskExecutionContext {
             netbios_timeout,
             runtime,
             netbios_interval,
+            mdns_deamon,
             ..
         } = network_scanner;
 
@@ -77,6 +79,7 @@ impl TaskExecutionContext {
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             ports,
             runtime,
+            mdns_deamon,
             ping_interval,
             ping_timeout,
             broadcast_timeout,

@@ -1,5 +1,6 @@
 use crate::{
     ip_utils::IpAddrRange,
+    mdns,
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
@@ -17,11 +18,12 @@ use crate::{
     task_utils::{TaskExecutionContext, TaskExecutionRunner},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NetworkScanner {
     pub ports: Vec<u16>,
 
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
+    pub(crate) mdns_deamon: mdns_sd::ServiceDaemon,
     // TODO: use this
     // scan_method: Vec<ScanMethod>,
     pub ping_interval: Duration,     // in milliseconds
@@ -169,6 +171,28 @@ impl NetworkScanner {
             anyhow::Ok(())
         });
 
+        task_executor.run(
+            move |TaskExecutionContext {
+                      mdns_deamon,
+                      port_sender,
+                      ip_cache,
+                      ..
+                  },
+                  task_manager| async move {
+                let mut receiver = mdns::mdns_query_scan(mdns_deamon, task_manager)?;
+
+                while let Some((ip, server, port)) = receiver.recv().await {
+                    if ip_cache.read().get(&ip).is_none() {
+                        ip_cache.write().insert(ip, server.clone());
+                    }
+                    let dns_name = ip_cache.read().get(&ip).cloned().flatten();
+                    port_sender.send((ip, dns_name, port)).await?;
+                }
+
+                anyhow::Ok(())
+            },
+        );
+
         let TaskExecutionRunner {
             context: TaskExecutionContext { port_receiver, .. },
             task_manager,
@@ -216,6 +240,7 @@ impl NetworkScanner {
             netbios_timeout,
             netbios_interval,
             max_wait_time: max_wait,
+            mdns_deamon: mdns_sd::ServiceDaemon::new()?,
         })
     }
 }
