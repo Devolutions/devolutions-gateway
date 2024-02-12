@@ -1,10 +1,6 @@
 use anyhow::Context;
 use crate::interfaces::NetworkInterface;
 
-pub fn get_adapters() -> anyhow::Result<Vec<ipconfig::Adapter>> {
-    ipconfig::get_adapters().context("Failed to get network adapters")
-}
-
 pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     ipconfig::get_adapters().context("Failed to get network interfaces")?.into_iter().map(|adapter| {
         Ok(adapter.into())
@@ -16,6 +12,7 @@ impl From<ipconfig::Adapter> for NetworkInterface {
     fn from(adapter: ipconfig::Adapter) -> Self {
         NetworkInterface {
             name: adapter.adapter_name().to_string(),
+            description: Some(adapter.description().to_string()),
             mac_address: adapter.physical_address().into_iter().map(|b| {
                 b.to_vec()
             }).collect(),

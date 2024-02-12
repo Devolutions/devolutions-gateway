@@ -1,7 +1,13 @@
 #[cfg(target_os = "windows")]
-pub mod windows;
+mod windows;
 #[cfg(target_os = "linux")]
-pub mod linux;
+mod linux;
+
+#[cfg(target_os = "windows")]
+pub use windows::get_network_interfaces;
+
+#[cfg(target_os = "linux")]
+pub use linux::get_network_interfaces;
 
 use std::net::IpAddr;
 
@@ -10,6 +16,7 @@ use serde::{Serialize, Deserialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInterface {
     name: String,
+    description: Option<String>,
     mac_address: Vec<Vec<u8>>,
     ipv4_address: Option<IpAddr>,
     ipv6_address: Option<IpAddr>,
