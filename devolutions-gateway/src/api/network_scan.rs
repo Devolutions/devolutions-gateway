@@ -55,7 +55,7 @@ pub async fn handler(
                 }
             }
         }
-        tracing::info!("Network scan finished");
+        info!("Network scan finished");
         stream.stop();
     });
     Ok(res)
