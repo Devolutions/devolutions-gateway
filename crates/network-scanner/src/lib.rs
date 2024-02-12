@@ -11,6 +11,7 @@ pub mod ping;
 pub mod port_discovery;
 pub mod scanner;
 pub mod task_utils;
+pub mod interfaces;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScannerError {
