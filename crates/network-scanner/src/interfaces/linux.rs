@@ -24,13 +24,13 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     }
 
     let dns_servers = parse_dns_servers_from_resolv_conf("/etc/resolv.conf")?;
-    for interface in &mut res {
-        for dns_server in &dns_servers {
-            if interface.ip_accessible(dns_server) {
-                interface.dns_servers.push(dns_server.clone());
-            }
-        }
-    }
+    // for interface in &mut res {
+    //     for dns_server in &dns_servers {
+    //         if interface.ip_accessible(dns_server) {
+    //             interface.dns_servers.push(dns_server.clone());
+    //         }
+    //     }
+    // }
 
     Ok(res)
 }
@@ -46,34 +46,32 @@ impl NetworkInterface {
         }
 
         self.default_gateway.push(route.gateway.into());
-        self.prefixes.push((route.destination.into(), route.mask.into()));
+        self.prefixes.push((route.destination.into(), route.mask));
         Ok(())
     }
 
-    fn ip_accessible(&self, ip: &IpAddr) -> bool {
-        if let IpAddr::V4(ipv4) = ip {
-            for (subnet, prefix) in &self.prefixes {
-                if let IpAddr::V4(subnet) = subnet {
-                    if is_ip_in_subnet(*ipv4, *subnet, *prefix) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
+    // fn ip_accessible(&self, ip: &IpAddr) -> bool {
+    //     if let IpAddr::V4(ipv4) = ip {
+    //         for (subnet, prefix) in &self.prefixes {
+    //             if let IpAddr::V4(subnet) = subnet {
+    //                 if is_ip_in_subnet(*ipv4, *subnet, *prefix) {
+    //                     return true;
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     return false;
+    // }
 }
 
-fn is_ip_in_subnet(ip: Ipv4Addr, subnet_ip: Ipv4Addr, prefix: u32) -> bool {
-    // Convert the prefix to a subnet mask
-    let mask = !0u32 >> prefix.leading_zeros();
+// fn is_ip_in_subnet(ip: Ipv4Addr, subnet_ip: Ipv4Addr, prefix: u32) -> bool {
+//     println!("ip: {:?}, subnet_ip: {:?}, prefix: {:?}", ip, subnet_ip, prefix);
+//     let ip_u32 = u32::from(ip);
+//     let subnet_ip_u32 = u32::from(subnet_ip);
+//     let mask = !0u32.checked_shl(32 - prefix).unwrap_or(0);
 
-    // Calculate the network address by ANDing the subnet IP with the mask
-    let subnet_network = u32::from(subnet_ip) & mask;
-
-    // Check if the given IP, when ANDed with the mask, equals the subnet's network address
-    u32::from(ip) & mask == subnet_network
-}
+//     (ip_u32 & mask) == (subnet_ip_u32 & mask)
+// }
 
 impl From<pnet::datalink::NetworkInterface> for NetworkInterface {
     fn from(interface: pnet::datalink::NetworkInterface) -> Self {
@@ -124,7 +122,7 @@ struct Route {
     iface: String,
     destination: Ipv4Addr,
     gateway: Ipv4Addr,
-    mask: Ipv4Addr,
+    mask: u32,
 }
 
 fn read_proc_net_route() -> Vec<Route> {
@@ -147,7 +145,7 @@ fn parse_route_line(line: &str) -> anyhow::Result<Route> {
     let iface = parts[0].to_string();
     let destination = parse_hex_ip(parts[1])?;
     let gateway = parse_hex_ip(parts[2])?;
-    let mask = parse_hex_ip(parts[7])?;
+    let mask = u32::from_str_radix(parts[7], 16)?.leading_ones() as u32;
 
     Ok(Route {
         iface,
