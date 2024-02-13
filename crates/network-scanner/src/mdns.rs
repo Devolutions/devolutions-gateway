@@ -25,7 +25,6 @@ pub fn mdns_query_scan(
     entire_duration: std::time::Duration,
     single_query_duration: std::time::Duration,
 ) -> Result<PortReceiver, ScannerError> {
-
     let service_deamon = service_deamon.service_deamon;
 
     let receiver = service_deamon.browse(META_QUERY)?;
