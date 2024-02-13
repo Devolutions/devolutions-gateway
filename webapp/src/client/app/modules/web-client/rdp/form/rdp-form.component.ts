@@ -214,6 +214,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
       return of(
         this.formBuilder.group({
           ...formControls,
+          autoComplete: new FormControl('', Validators.required),
+          hostname: [''],
           protocol: [this.inputFormData.protocol, Validators.required],
           username: [this.inputFormData.username, Validators.required],
           password: [this.inputFormData.password, Validators.required],
@@ -235,7 +237,8 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
       takeUntil(this.destroyed$),
       switchMap(() => this.buildForm()),
       map((connectSessionForm) => this.connectSessionForm = connectSessionForm),
-      map(() => this.setupScreenSizeDropdown()),
+      switchMap(() => this.setHostnameDropdown()),
+      switchMap(() => this.setupScreenSizeDropdown()),
       catchError(error => {
         console.error(error.message);
         return EMPTY;
@@ -248,6 +251,17 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     return of(undefined);
   }
 
+  private setHostnameDropdown(): Observable<void> {
+    if (!this.isFormExists && !this.inputFormData) {
+      return of(undefined);
+    }
+
+    this.connectSessionForm.get('autoComplete').setValue(
+      this.hostnames.find(hostnames =>
+      hostnames.hostname === this.inputFormData?.autoComplete?.hostname));
+
+    return of(undefined);
+  }
   private setupScreenSizeDropdown(): Observable<void> {
     this.screenSizeOptions = ScreenSize.getSelectItems();
     this.subscribeToFormScreenSize();
