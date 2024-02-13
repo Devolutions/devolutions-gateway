@@ -5,13 +5,13 @@ use network_interface::Addr;
 use network_scanner_proto::icmp_v4;
 
 pub mod broadcast;
+pub mod interfaces;
 pub mod ip_utils;
 pub mod netbios;
 pub mod ping;
 pub mod port_discovery;
 pub mod scanner;
 pub mod task_utils;
-pub mod interfaces;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScannerError {
