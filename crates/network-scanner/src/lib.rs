@@ -24,7 +24,7 @@ pub enum ScannerError {
     #[error("Network interface does not have a netmask")]
     InterfaceDoesNotHaveNetmask(Addr),
 
-    #[error("Network interface does not have a broadcast address")]
+    #[error("Mdns scan error: {0}")]
     MdnsError(#[from] mdns_sd::Error),
 
     #[error("Other error: {0}")]

@@ -6,6 +6,7 @@ use std::future::Future;
 
 use tokio::sync::Mutex;
 
+use crate::mdns::MdnsDeamon;
 use crate::{
     ip_utils::{get_subnets, Subnet},
     scanner::NetworkScanner,
@@ -29,7 +30,7 @@ pub(crate) struct TaskExecutionContext {
     pub ports: Vec<u16>,
 
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub mdns_deamon: mdns_sd::ServiceDaemon,
+    pub mdns_deamon: MdnsDeamon,
 
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds

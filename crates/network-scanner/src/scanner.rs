@@ -1,6 +1,6 @@
 use crate::{
     ip_utils::IpAddrRange,
-    mdns,
+    mdns::{self, MdnsDeamon},
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
@@ -23,7 +23,7 @@ pub struct NetworkScanner {
     pub ports: Vec<u16>,
 
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub(crate) mdns_deamon: mdns_sd::ServiceDaemon,
+    pub(crate) mdns_deamon: MdnsDeamon,
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds
     pub broadcast_timeout: Duration, // in milliseconds
@@ -257,7 +257,7 @@ impl NetworkScanner {
             mdns_meta_query_timeout,
             mdns_single_query_timeout,
             max_wait_time: max_wait,
-            mdns_deamon: mdns_sd::ServiceDaemon::new()?,
+            mdns_deamon: MdnsDeamon::new()?,
         })
     }
 }

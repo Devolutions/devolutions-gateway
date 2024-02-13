@@ -7,12 +7,27 @@ use crate::{
 
 const META_QUERY: &str = "_services._dns-sd._udp.local.";
 
-pub fn mdns_query_scan(
+#[derive(Clone)]
+pub struct MdnsDeamon {
     service_deamon: mdns_sd::ServiceDaemon,
+}
+
+impl MdnsDeamon {
+    pub fn new() -> Result<Self, ScannerError> {
+        let service_deamon = mdns_sd::ServiceDaemon::new()?;
+        Ok(Self { service_deamon })
+    }
+}
+
+pub fn mdns_query_scan(
+    service_deamon: MdnsDeamon,
     task_manager: TaskManager,
     entire_duration: std::time::Duration,
     single_query_duration: std::time::Duration,
 ) -> Result<PortReceiver, ScannerError> {
+
+    let service_deamon = service_deamon.service_deamon;
+
     let receiver = service_deamon.browse(META_QUERY)?;
     let service_deamon_clone = service_deamon.clone();
 
@@ -59,11 +74,16 @@ pub fn mdns_query_scan(
                     .with_timeout(single_query_duration)
                     .when_finished(move || {
                         tracing::debug!("mdns query finished for {}", fullname_clone);
-                        while let Err(e) = service_deamon_clone.stop_browse(&fullname_clone) {
-                            if let mdns_sd::Error::Again = e {
-                                continue;
+                        while let Err(e) = service_deamon_clone.stop_browse(META_QUERY) {
+                            match e {
+                                mdns_sd::Error::Again => {
+                                    tracing::trace!("mdns stop_browse transient error, trying again");
+                                }
+                                fatal => {
+                                    tracing::error!(error = %fatal, "mdns stop_browse fatal error");
+                                    break;
+                                }
                             }
-                            tracing::error!("mdns stop browse error: {}", e);
                         }
                     })
                     .spawn(move |_| async move {

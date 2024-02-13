@@ -9,10 +9,9 @@ pub async fn main() -> anyhow::Result<()> {
         .with_thread_names(true)
         .init();
 
-    let deamon = mdns_sd::ServiceDaemon::new()?;
 
     let mut receiver = mdns::mdns_query_scan(
-        deamon,
+        mdns::MdnsDeamon::new()?,
         TaskManager::new(),
         Duration::from_secs(20),
         Duration::from_secs(5),
