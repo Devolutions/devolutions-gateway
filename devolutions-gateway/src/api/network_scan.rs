@@ -1,22 +1,18 @@
 use std::net::IpAddr;
 
-use axum::{
-    extract::{ws::Message, WebSocketUpgrade},
-    response::Response,
-};
-
+use axum::extract::ws::Message;
+use axum::extract::WebSocketUpgrade;
+use axum::response::Response;
 use network_scanner::scanner::NetworkScannerParams;
 use serde::Serialize;
 
-use crate::{
-    http::HttpError,
-    token::{ApplicationProtocol, Protocol},
-};
+use crate::http::HttpError;
+use crate::token::{ApplicationProtocol, Protocol};
 
 pub async fn handler(
+    _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
-    _scope: crate::extract::NetScanScope,
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
@@ -72,23 +68,24 @@ pub async fn handler(
 
 #[derive(Debug, Deserialize)]
 pub struct NetworkScanQueryParams {
-    /// in milliseconds,default 200
+    /// Interval in milliseconds (default is 200)
     pub ping_interval: Option<u64>,
-    /// in milliseconds,default 500
+    /// Timeout in milliseconds (default is 500)
     pub ping_timeout: Option<u64>,
-    /// in milliseconds,default 1000
+    /// Timeout in milliseconds (default is 1000)
     pub broadcast_timeout: Option<u64>,
-    /// in milliseconds,default 1000
+    /// Timeout in milliseconds (default is 1000)
     pub port_scan_timeout: Option<u64>,
-    /// in milliseconds,default 1000
+    /// Timeout in milliseconds (default is 1000)
     pub netbios_timeout: Option<u64>,
-    /// in milliseconds,default 200
+    /// Interval in milliseconds (default is 200)
     pub netbios_interval: Option<u64>,
-    /// max_wait for entire scan duration in milliseconds, suggested!
+    /// The maximum duration for whole networking scan in milliseconds. Highly suggested!
     pub max_wait: Option<u64>,
 }
 
 const COMMON_PORTS: [u16; 10] = [22, 23, 80, 443, 389, 636, 3389, 5900, 5985, 5986];
+
 impl From<NetworkScanQueryParams> for NetworkScannerParams {
     fn from(val: NetworkScanQueryParams) -> Self {
         NetworkScannerParams {
@@ -115,6 +112,7 @@ pub struct NetworkScanResponse {
 impl NetworkScanResponse {
     fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
         let hostname = dns;
+
         let ty = match port {
             22 => ApplicationProtocol::Known(Protocol::Ssh),
             23 => ApplicationProtocol::Known(Protocol::Telnet),

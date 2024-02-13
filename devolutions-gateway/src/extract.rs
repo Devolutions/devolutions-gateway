@@ -143,25 +143,6 @@ where
 }
 
 #[derive(Clone, Copy)]
-pub struct NetScanScope;
-
-#[async_trait]
-impl<S> FromRequestParts<S> for NetScanScope
-where
-    S: Send + Sync,
-{
-    type Rejection = HttpError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        if let AccessTokenClaims::NetScan(_) = AccessToken::from_request_parts(parts, state).await?.0 {
-            Ok(Self)
-        } else {
-            Err(HttpError::forbidden().msg("token not allowed (expected cty:NetScan)"))
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
 pub struct SessionTerminateScope;
 
 #[async_trait]
@@ -309,6 +290,25 @@ where
             Ok(Self(claims))
         } else {
             Err(HttpError::forbidden().msg("token not allowed (expected WEBAPP)"))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct NetScanToken;
+
+#[async_trait]
+impl<S> FromRequestParts<S> for NetScanToken
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        if let AccessTokenClaims::NetScan(_) = AccessToken::from_request_parts(parts, state).await?.0 {
+            Ok(Self)
+        } else {
+            Err(HttpError::forbidden().msg("token not allowed (expected NETSCAN)"))
         }
     }
 }
