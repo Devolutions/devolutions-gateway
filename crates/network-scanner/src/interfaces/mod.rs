@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub struct NetworkInterface {
     name: String,
     description: Option<String>,
-    mac_address: Vec<Vec<u8>>,
+    mac_address: Vec<[u8;6]>,
     ipv4_address: Vec<Ipv4Addr>,
     ipv6_address: Vec<Ipv6Addr>,
     prefixes: Vec<(IpAddr, u32)>,

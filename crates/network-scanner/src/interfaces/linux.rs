@@ -1,204 +1,318 @@
 use std::{
-    fs::File,
-    io::{self, BufRead, BufReader},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    default, net::{IpAddr, Ipv4Addr}, ops::Index, vec
 };
 
+use anyhow::Context;
+use futures::stream::TryStreamExt;
+use serde::de;
+use tokio::sync::mpsc::Receiver;
+
 use crate::interfaces::NetworkInterface;
-use pnet::datalink;
+use netlink_packet_route::{
+    address::{AddressAttribute, AddressHeaderFlag, AddressMessage},
+    link::{self, LinkAttribute, LinkFlag},
+    route::{RouteAddress, RouteAttribute, RouteMessage},
+};
+use rtnetlink::{new_connection, Handle};
 
 pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
-    let mut res = vec![];
-    for interface in datalink::interfaces() {
-        let interface: crate::interfaces::NetworkInterface = interface.into();
-        res.push(interface);
+    let (connection, handle, _) = new_connection()?;
+    tokio::spawn(connection);
+
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(5);
+    let handle_clone = handle.clone();
+    tokio::spawn(async move {
+        let mut receiver = get_all_links(handle.clone()).await?;
+        let handle = handle.clone();
+        while let Some(link) = receiver.recv().await {
+            let handle = handle.clone();
+            let addresses = get_address(handle, link.clone()).await?;
+            sender.send((addresses, link)).await?;
+        }
+        anyhow::Ok(())
+    });
+
+    let (link_sender, link_receiver) = crossbeam::channel::bounded(10);
+    tokio::spawn(async move {
+        while let Some((addr, mut link)) = receiver.recv().await {
+            link.addresses = addr
+                .iter()
+                .map(|addr| AddressInfo::try_from(addr.clone()).unwrap())
+                .collect();
+            link_sender.send(link).unwrap();
+        }
+    });
+
+    let (router_sender, router_receiver) = crossbeam::channel::unbounded();
+    tokio::spawn(async move {
+        let mut routes_v4 = handle_clone.route().get(rtnetlink::IpVersion::V4).execute();
+        let route_sender_v4 = router_sender.clone();
+        while let Some(route) = routes_v4.try_next().await? {
+            let route_info = RouteInfo::try_from(route)?;
+            route_sender_v4.send(route_info)?;
+        }
+        let mut routes_v6 = handle_clone.route().get(rtnetlink::IpVersion::V6).execute();
+        while let Some(route) = routes_v6.try_next().await? {
+            let route_info = RouteInfo::try_from(route)?;
+            router_sender.send(route_info)?;
+        }
+        anyhow::Ok(())
+    });
+
+    let mut link_infos = vec![];
+    let mut route_infos = vec![];
+
+    while let Ok(link_info) = link_receiver.recv() {
+        link_infos.push(link_info);
     }
 
-    let file_routes = read_proc_net_route();
-    for ref routes in file_routes {
-        for interface in &mut res {
-            if routes.iface == interface.name {
-                interface.complete_from_route(routes)?;
+    while let Ok(route_info) = router_receiver.recv() {
+        route_infos.push(route_info);
+    }
+
+    for link_info in &mut link_infos {
+        for route_info in &route_infos {
+            if route_info.index == link_info.index {
+                link_info.routes.push(route_info.clone());
             }
         }
     }
 
-    let dns_servers = parse_dns_servers_from_resolv_conf("/etc/resolv.conf")?;
-    // for interface in &mut res {
-    //     for dns_server in &dns_servers {
-    //         if interface.ip_accessible(dns_server) {
-    //             interface.dns_servers.push(dns_server.clone());
-    //         }
-    //     }
-    // }
-
-    Ok(res)
+    anyhow::Ok(link_infos.iter().map(|link_info| link_info.into()).collect())
 }
 
-impl NetworkInterface {
-    fn complete_from_route(&mut self, route: &Route) -> anyhow::Result<()> {
-        if self.name != route.iface {
-            anyhow::bail!(
-                "Route interface {} does not match interface name {}",
-                route.iface,
-                self.name
-            );
-        }
+impl From<&LinkInfo> for NetworkInterface {
+    fn from(link_info: &LinkInfo) -> NetworkInterface {
+        convert_link_info_to_network_interface(&link_info)
+    }
+}
 
-        self.default_gateway.push(route.gateway.into());
-        self.prefixes.push((route.destination.into(), route.mask));
-        Ok(())
+fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> NetworkInterface {
+    let mut ipv4_address = Vec::new();
+    let mut ipv6_address = Vec::new();
+    let mut prefixes = Vec::new();
+
+    for address_info in &link_info.addresses {
+        match address_info.address {
+            IpAddr::V4(addr) => ipv4_address.push(addr),
+            IpAddr::V6(addr) => ipv6_address.push(addr),
+        }
+        prefixes.push((address_info.address, address_info.prefix_len as u32));
     }
 
-    // fn ip_accessible(&self, ip: &IpAddr) -> bool {
-    //     if let IpAddr::V4(ipv4) = ip {
-    //         for (subnet, prefix) in &self.prefixes {
-    //             if let IpAddr::V4(subnet) = subnet {
-    //                 if is_ip_in_subnet(*ipv4, *subnet, *prefix) {
-    //                     return true;
-    //                 }
-    //             }
-    //         }
-    //     }
-    //     return false;
-    // }
+    let default_gateway = link_info
+        .routes
+        .iter()
+        .filter_map(|route_info| route_info.gateway)
+        .collect();
+
+    NetworkInterface {
+        name: link_info.name.clone(),
+        description: None,
+        mac_address: vec![link_info.mac],
+        ipv4_address,
+        ipv6_address,
+        prefixes,
+        operational_status: link_info.flags.contains(&LinkFlag::Up),
+        default_gateway,
+        dns_servers: vec![],     // TODO: Implement DNS server lookup
+    }
 }
 
-// fn is_ip_in_subnet(ip: Ipv4Addr, subnet_ip: Ipv4Addr, prefix: u32) -> bool {
-//     println!("ip: {:?}, subnet_ip: {:?}, prefix: {:?}", ip, subnet_ip, prefix);
-//     let ip_u32 = u32::from(ip);
-//     let subnet_ip_u32 = u32::from(subnet_ip);
-//     let mask = !0u32.checked_shl(32 - prefix).unwrap_or(0);
+#[derive(Debug, Clone, Default)]
+struct LinkInfo {
+    mac: [u8; 6],
+    broadcast: Option<Vec<u8>>,
+    flags: Vec<LinkFlag>,
+    name: String,
+    index: u32,
+    addresses: Vec<AddressInfo>,
+    routes: Vec<RouteInfo>,
+}
 
-//     (ip_u32 & mask) == (subnet_ip_u32 & mask)
-// }
+#[derive(Debug, Clone)]
+struct AddressInfo {
+    address: IpAddr,
+    prefix_len: u8,
+    broadcast: Option<Ipv4Addr>,
+    flags: Vec<AddressHeaderFlag>,
+    index: u32,
+}
 
-impl From<pnet::datalink::NetworkInterface> for NetworkInterface {
-    fn from(interface: pnet::datalink::NetworkInterface) -> Self {
-        let operational_status = interface.is_up();
+#[derive(Debug, Clone)]
+struct RouteInfo {
+    gateway: Option<IpAddr>,
+    index: u32,
+    destination: RouteAddress,
+    destination_prefix_len: u8,
+}
 
-        let pnet::datalink::NetworkInterface {
-            name,
-            description,
-            mac,
-            ips,
-            ..
-        } = interface;
+impl TryFrom<RouteMessage> for RouteInfo {
+    type Error = anyhow::Error;
 
-        let ip_v4_addr: Vec<Ipv4Addr> = ips
+    fn try_from(value: RouteMessage) -> Result<Self, Self::Error> {
+        let gateway = value
+            .attributes
             .iter()
-            .filter_map(|ip| match ip {
-                pnet::ipnetwork::IpNetwork::V4(ipv4) => Some(ipv4.ip()),
-                _ => None,
-            })
-            .collect();
-
-        let ip_v6_addr: Vec<Ipv6Addr> = ips
-            .iter()
-            .filter_map(|ip| match ip {
-                pnet::ipnetwork::IpNetwork::V6(ipv6) => Some(ipv6.ip()),
-                _ => None,
-            })
-            .collect();
-
-        Self {
-            name,
-            description: Some(description),
-            mac_address: vec![mac
-                .map(|mac| vec![mac.0, mac.1, mac.2, mac.3, mac.4, mac.5])
-                .unwrap_or_default()],
-            default_gateway: vec![],
-            dns_servers: vec![],
-            ipv4_address: ip_v4_addr,
-            ipv6_address: ip_v6_addr,
-            operational_status,
-            prefixes: vec![],
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Route {
-    iface: String,
-    destination: Ipv4Addr,
-    gateway: Ipv4Addr,
-    mask: u32,
-}
-
-fn read_proc_net_route() -> Vec<Route> {
-    let file_path = "/proc/net/route";
-    match parse_routes_from_file(file_path) {
-        Ok(routes) => routes,
-        Err(e) => {
-            tracing::warn!("Failed to read route file: {}", e);
-            Vec::new()
-        }
-    }
-}
-
-fn parse_route_line(line: &str) -> anyhow::Result<Route> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() < 4 {
-        anyhow::bail!("Invalid route line: {}", line);
-    }
-
-    let iface = parts[0].to_string();
-    let destination = parse_hex_ip(parts[1])?;
-    let gateway = parse_hex_ip(parts[2])?;
-    let mask = u32::from_str_radix(parts[7], 16)?.leading_ones() as u32;
-
-    Ok(Route {
-        iface,
-        destination,
-        gateway,
-        mask,
-    })
-}
-
-fn parse_hex_ip(hex_str: &str) -> anyhow::Result<Ipv4Addr> {
-    let ip = u32::from_str_radix(hex_str, 16)?;
-    Ok(Ipv4Addr::new(
-        (ip & 0xff) as u8,
-        ((ip >> 8) & 0xff) as u8,
-        ((ip >> 16) & 0xff) as u8,
-        ((ip >> 24) & 0xff) as u8,
-    ))
-}
-
-fn parse_routes_from_file(file_path: &str) -> io::Result<Vec<Route>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-    let mut routes = Vec::new();
-
-    for line in reader.lines() {
-        let line = line?;
-        if let Ok(route) = parse_route_line(&line) {
-            routes.push(route);
-        }
-    }
-
-    Ok(routes)
-}
-
-fn parse_dns_servers_from_resolv_conf(file_path: &str) -> anyhow::Result<Vec<IpAddr>> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-    let mut dns_servers = Vec::new();
-
-    for line in reader.lines() {
-        let line = line?;
-        if line.starts_with("nameserver") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() > 1 {
-                match parts[1].parse::<IpAddr>() {
-                    Ok(ip_addr) => dns_servers.push(ip_addr),
-                    Err(e) => anyhow::bail!("Failed to parse IP address: {}, error: {}", parts[1], e),
+            .find_map(|attr| {
+                if let RouteAttribute::Gateway(gateway) = attr {
+                    Some(gateway)
+                } else {
+                    None
                 }
+            })
+            .map(|route_addr| match route_addr {
+                RouteAddress::Inet(v4) => Some(IpAddr::from(v4.clone())),
+                RouteAddress::Inet6(v6) => Some(IpAddr::from(v6.clone())),
+                _ => None,
+            })
+            .flatten();
+
+        let index = value
+            .attributes
+            .iter()
+            .find_map(|attr| {
+                if let RouteAttribute::Oif(index) = attr {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .context("No index found")?
+            .clone();
+
+        let destination = value
+            .attributes
+            .iter()
+            .find_map(|attr| {
+                if let RouteAttribute::Destination(destination) = attr {
+                    Some(destination)
+                } else {
+                    None
+                }
+            })
+            .context("No destination found")?;
+
+        let destination_prefix_len = value.header.destination_prefix_length;
+
+        let route_info = RouteInfo {
+            gateway,
+            index,
+            destination: destination.clone(),
+            destination_prefix_len,
+        };
+
+        Ok(route_info)
+    }
+}
+
+impl TryFrom<AddressMessage> for AddressInfo {
+    type Error = anyhow::Error;
+
+    fn try_from(value: AddressMessage) -> Result<Self, Self::Error> {
+        let addr = value
+            .attributes
+            .iter()
+            .find_map(|attr| {
+                if let AddressAttribute::Address(addr) = attr {
+                    Some(addr)
+                } else {
+                    None
+                }
+            })
+            .context("No address found")?;
+
+        let prefix_len = value.header.prefix_len;
+
+        let broadcast = value
+            .attributes
+            .iter()
+            .find_map(|attr| {
+                if let AddressAttribute::Broadcast(broadcast) = attr {
+                    Some(broadcast)
+                } else {
+                    None
+                }
+            })
+            .copied();
+
+        let flags = value.header.flags;
+        let index = value.header.index;
+
+        let address_info = AddressInfo {
+            address: addr.clone(),
+            prefix_len,
+            broadcast,
+            flags,
+            index,
+        };
+
+        Ok(address_info)
+    }
+}
+
+async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
+    let (sender, receiver) = tokio::sync::mpsc::channel(5);
+    let mut links = handle.link().get().execute();
+    while let Some(msg) = links.try_next().await? {
+        let name = msg.attributes.iter().find_map(|attr| {
+            if let LinkAttribute::IfName(name) = attr {
+                Some(name.clone())
+            } else {
+                None
             }
-        }else{
-            anyhow::bail!("Invalid line in resolv.conf: {}", line);
-        }
+        });
+
+        let Some(name) = name else {
+            continue;
+        };
+
+        let mac = msg
+            .attributes
+            .iter()
+            .find_map(|attr| {
+                if let LinkAttribute::Address(mac) = attr {
+                    Some([mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]])
+                } else {
+                    None
+                }
+            })
+            .context("No mac address found")?;
+
+        let broadcast = msg.attributes.iter().find_map(|attr| {
+            if let LinkAttribute::Broadcast(broadcast) = attr {
+                Some(broadcast)
+            } else {
+                None
+            }
+        });
+
+        let index = msg.header.index;
+        let flags = msg.header.flags;
+
+        let link_info = LinkInfo {
+            mac,
+            broadcast: broadcast.map(|broadcast| broadcast.to_vec()),
+            flags: flags,
+            name: name,
+            index,
+            ..Default::default()
+        };
+
+        sender.send(link_info).await;
     }
 
-    Ok(dns_servers)
+    anyhow::Ok(receiver)
+}
+
+async fn get_address(handle: Handle, link_info: LinkInfo) -> anyhow::Result<Vec<AddressMessage>> {
+    let mut res = vec![];
+
+    let mut addr_stream = handle.address().get().set_link_index_filter(link_info.index).execute();
+
+    while let Some(msg) = addr_stream.try_next().await? {
+        res.push(msg);
+    }
+
+    anyhow::Ok(res)
 }
