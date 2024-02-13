@@ -40,12 +40,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
-            ("ASSOCIATION", serde_json::to_value(&claims)?)
+            ("ASSOCIATION", serde_json::to_value(claims)?)
         }
         SubCommand::RdpTls {
             dst_hst,
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
-                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: Some(CredsClaims {
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     dst_pwd: &dst_pwd,
                 }),
             };
-            ("ASSOCIATION", serde_json::to_value(&claims)?)
+            ("ASSOCIATION", serde_json::to_value(claims)?)
         }
         SubCommand::Rendezvous { jet_ap, jet_aid } => {
             let claims = AssociationClaims {
@@ -82,12 +82,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: None,
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
                 creds: None,
             };
-            ("ASSOCIATION", serde_json::to_value(&claims)?)
+            ("ASSOCIATION", serde_json::to_value(claims)?)
         }
         SubCommand::Scope { scope } => {
             let claims = ScopeClaims {
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 scope: &scope,
                 jet_gw_id: app.jet_gw_id,
             };
-            ("SCOPE", serde_json::to_value(&claims)?)
+            ("SCOPE", serde_json::to_value(claims)?)
         }
         SubCommand::Jmux {
             jet_ap,
@@ -110,24 +110,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: &dst_hst,
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
-                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
                 exp,
                 nbf,
                 jti,
             };
-            ("JMUX", serde_json::to_value(&claims)?)
+            ("JMUX", serde_json::to_value(claims)?)
         }
         SubCommand::Jrec { jet_rop, jet_aid } => {
             let claims = JrecClaims {
-                jet_aid: jet_aid.unwrap_or_else(|| Uuid::new_v4()),
+                jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_rop,
                 exp,
                 nbf,
                 jti,
             };
-            ("JREC", serde_json::to_value(&claims)?)
+            ("JREC", serde_json::to_value(claims)?)
         }
         SubCommand::Kdc { krb_realm, krb_kdc } => {
             let claims = KdcClaims {
@@ -138,7 +138,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_gw_id: app.jet_gw_id,
                 jti,
             };
-            ("KDC", serde_json::to_value(&claims)?)
+            ("KDC", serde_json::to_value(claims)?)
         }
         SubCommand::Jrl { jti: revoked_jti_list } => {
             let claims = JrlClaims {
@@ -157,17 +157,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 },
                 jet_gw_id: app.jet_gw_id,
             };
-            ("JRL", serde_json::to_value(&claims)?)
+            ("JRL", serde_json::to_value(claims)?)
         }
-        SubCommand::NetScan { } => {
+        SubCommand::NetScan {} => {
             let claims = NetScanClaim {
                 jti,
                 iat: nbf,
                 nbf,
-                exp,  
+                exp,
                 jet_gw_id: app.jet_gw_id,
             };
-            ("NETSCAN", serde_json::to_value(&claims)?)
+            ("NETSCAN", serde_json::to_value(claims)?)
         }
     };
 
@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let signed = jwt_sig.encode(&provisioner_key)?;
 
     let result = if let Some(delegation_key) = app.delegation_key {
-        let public_key = std::fs::read_to_string(&delegation_key)?;
+        let public_key = std::fs::read_to_string(delegation_key)?;
         let public_key = PublicKey::from_pem_str(&public_key)?;
         Jwe::new(JweAlg::RsaOaep256, JweEnc::Aes256Gcm, signed.into_bytes()).encode(&public_key)?
     } else {
@@ -275,8 +275,7 @@ enum SubCommand {
         #[clap(long)]
         jti: Vec<Uuid>,
     },
-    NetScan {
-    }
+    NetScan {},
 }
 
 // --- claims --- //
@@ -362,19 +361,19 @@ struct JrlClaims<'a> {
 
 #[derive(Clone, Serialize)]
 struct NetScanClaim {
-     /// JWT "JWT ID" claim, the unique ID for this token
-     pub jti: Uuid,
+    /// JWT "JWT ID" claim, the unique ID for this token
+    pub jti: Uuid,
 
-     /// JWT "Issued At" claim.
-     pub iat: i64,
- 
-     /// JWT "Not Before" claim.
-     pub nbf: i64,
- 
-     /// JWT "Expiration Time" claim.
-     pub exp: i64,
+    /// JWT "Issued At" claim.
+    pub iat: i64,
 
-     pub jet_gw_id : Option<Uuid>,
+    /// JWT "Not Before" claim.
+    pub nbf: i64,
+
+    /// JWT "Expiration Time" claim.
+    pub exp: i64,
+
+    pub jet_gw_id: Option<Uuid>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
