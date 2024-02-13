@@ -84,11 +84,13 @@ namespace DevolutionsGateway.Properties
 
         public string Id { get; }
 
+        public string Name { get; }
+
         public bool Secure { get; }
 
         public bool Public { get; }
 
-        public string Summary { get; }
+        public Type PropertyType { get; }
     }
 
     internal class WixProperty<T> : IWixProperty
@@ -101,10 +103,12 @@ namespace DevolutionsGateway.Properties
 
         public string Id { get; set; }
 
+        public string Name { get; set; }
+
         public bool Secure { get; set; } = false;
 
         public bool Public { get; set; }
-
-        public string Summary { get; set; }
+        
+        public Type PropertyType => typeof(T);
     }
 }

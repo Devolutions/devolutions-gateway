@@ -14,8 +14,8 @@ internal static class Wizard
     private static readonly Type[] CustomizeSequence =
     {
         typeof(NgrokListenersDialog),
-        typeof(AccessUriDialog),
         typeof(ListenersDialog),
+        typeof(AccessUriDialog),
         typeof(CertificateDialog),
         typeof(PublicKeyDialog),
         typeof(WebClientDialog),

@@ -1,0 +1,779 @@
+{
+  "WixLocalization": {
+    "strings": {
+      "metadata": [
+        {
+          "id": "Language",
+          "text": "1033"
+        },
+        {
+          "id": "VendorName",
+          "text": "Devolutions"
+        },
+        {
+          "id": "VendorFullName",
+          "text": "Devolutions Inc."
+        },
+        {
+          "id": "ProductDescription",
+          "text": "A blazing fast relay server adaptable to different protocols and desired levels of traffic inspection."
+        }
+      ],
+      "messages": [
+        {
+          "id": "ThereIsAProblemWithTheEnteredData",
+          "text": "There is a problem with the entered data. Please correct the issue and try again."
+        },
+        {
+          "id": "YouMustEnterAValidPort",
+          "text": "You must enter a valid port"
+        },
+        {
+          "id": "YouMustProvideAValidHostname",
+          "text": "You must provide a valid hostname"
+        },
+        {
+          "id": "YouMustSelectACertificateFromTheSystemCertificateStore",
+          "text": "You must select a certificate from the system certificate store"
+        },
+        {
+          "id": "YouMustProvideAValidCertificateAndPasswordOrKey",
+          "text": "You must provide a valid certificate file and either a password or private key file"
+        },
+        {
+          "id": "TheSpecifiedFileWasInvalidOrNotAccessible",
+          "text": "The specified file was invalid or not accessible"
+        },
+        {
+          "id": "NoMatchingCertificatesFound",
+          "text": "No matching certificates found"
+        },
+        {
+          "id": "AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX",
+          "text": "An unexpected error occurred accessing the system certificate store: {0}"
+        },
+        {
+          "id": "AuthenticationTokenIsRequired",
+          "text": "The authentication token is required"
+        },
+        {
+          "id": "DomainIsRequiredAndMustBeValid",
+          "text": "The domain is required and must be a valid hostname"
+        },
+        {
+          "id": "RemoteAddressIsRequired",
+          "text": "The remote address is required"
+        },
+        {
+          "id": "RemoteAddressMustBeInTheFormat",
+          "text": "The remote address must be a valid host and port in the format {host}:{port}"
+        },
+        {
+          "id": "YouMustEnterAUsername",
+          "text": "You must enter a username"
+        },
+        {
+          "id": "YouMustEnterAPassword",
+          "text": "You must enter a password"
+        },
+        {
+          "id": "YouMustConfirmThePassword",
+          "text": "You must confirm the password"
+        },
+        {
+          "id": "PasswordsDoNotMatch",
+          "text": "Passwords do not match"
+        },
+        {
+          "id": "OS2Old",
+          "text": "This product requires at least Windows 8 / Windows Server 2012 R2"
+        },
+        {
+          "id": "NewerInstalled",
+          "text": "A newer version of this product is already installed."
+        },
+        {
+          "id": "x64VersionRequired",
+          "text": "You need to install the 64-bit version of this product on 64-bit Windows."
+        },
+        {
+          "id": "x86VersionRequired",
+          "text": "You need to install the 32-bit version of this product on 32-bit Windows."
+        },
+        {
+          "id": "DotNet48IsStrongRecommendedDownloadNow",
+          "text": "Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+        },
+        {
+          "id": "Dotnet462IsRequired",
+          "text": "The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+        },
+        {
+          "id": "WindowsPowerShell51IsRequired",
+          "text": "This product requires Windows PowerShell 5.1"
+        }
+      ],
+      "links": [
+        {
+          "id": "NgrokReadMoreAtX",
+          "text": "Read more at {0}"
+        },
+        {
+          "id": "NgrokReadMoreLink",
+          "text": "ngrok.com"
+        },
+        {
+          "id": "NgrokProvideYourX",
+          "text": "Provide your {0}"
+        },
+        {
+          "id": "NgrokAuthTokenLink",
+          "text": "authentication token"
+        },
+        {
+          "id": "NgrokXForWebClientAccess",
+          "text": "The {0} for web client access"
+        },
+        {
+          "id": "NgrokDomainLink",
+          "text": "domain"
+        },
+        {
+          "id": "NgroXForNativeClientAccess",
+          "text": "The {0} for native client access"
+        },
+        {
+          "id": "NgrokTcpAddressLink",
+          "text": "TCP address"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "ViewButton",
+          "text": "View"
+        },
+        {
+          "id": "SearchButton",
+          "text": "Search"
+        },
+        {
+          "id": "ViewLogButton",
+          "text": "View Log"
+        }
+      ],
+      "propertyGroups": [
+        {
+          "id": "Group_InstallLocation",
+          "text": "Install Location"
+        },
+        {
+          "id": "Group_Service",
+          "text": "Service"
+        },
+        {
+          "id": "Group_Ngrok",
+          "text": "ngrok"
+        },
+        {
+          "id": "Group_ExternalAccess",
+          "text": "External Access"
+        },
+        {
+          "id": "Group_Listeners",
+          "text": "Listeners"
+        },
+        {
+          "id": "Group_EncryptionKeys",
+          "text": "Encryption Keys"
+        },
+        {
+          "id": "Group_WebApp",
+          "text": "Web App"
+        },
+        {
+          "id": "Group_Certificate",
+          "text": "Certificate"
+        }
+      ],
+      "enums": [
+        {
+          "id": "CustomizeMode_Now",
+          "text": "Now"
+        },
+        {
+          "id": "CustomizeMode_Later",
+          "text": "Later"
+        },
+        {
+          "id": "CertificateMode_External",
+          "text": "External"
+        },
+        {
+          "id": "CertificateMode_System",
+          "text": "System"
+        },
+        {
+          "id": "CertificateFindType_Thumbprint",
+          "text": "Thumbprint"
+        },
+        {
+          "id": "CertificateFindType_SubjectName",
+          "text": "Subject Name"
+        },
+        {
+          "id": "AuthenticationMode_None",
+          "text": "None"
+        },
+        {
+          "id": "AuthenticationMode_Custom",
+          "text": "Custom"
+        },
+        {
+          "id": "StoreLocation_CurrentUser",
+          "text": "Current User"
+        },
+        {
+          "id": "StoreLocation_LocalMachine",
+          "text": "Local Machine"
+        },
+        {
+          "id": "StoreName_My",
+          "text": "Personal"
+        },
+        {
+          "id": "StoreName_Root",
+          "text": "Trusted Root Certification Authorities"
+        },
+        {
+          "id": "StoreName_CertificateAuthority",
+          "text": "Intermediate Certification Authorities"
+        },
+        {
+          "id": "StoreName_TrustedPublisher",
+          "text": "Trusted Publishers"
+        },
+        {
+          "id": "StoreName_Disallowed",
+          "text": "Untrusted Certificates"
+        },
+        {
+          "id": "StoreName_AuthRoot",
+          "text": "Third-Party Root Certification Authorities"
+        },
+        {
+          "id": "StoreName_TrustedPeople",
+          "text": "Trusted People"
+        },
+        {
+          "id": "StoreName_AddressBook",
+          "text": "Other People"
+        }
+      ],
+      "properties": [
+        {
+          "id": "Property_CertificateMode",
+          "text": "Certificate Source"
+        },
+        {
+          "id": "Property_CertificateFile",
+          "text": "Certificate File"
+        },
+        {
+          "id": "Property_CertificatePassword",
+          "text": "Certificate Password"
+        },
+        {
+          "id": "Property_CertificatePrivateKeyFile",
+          "text": "Certificate Private Key"
+        },
+        {
+          "id": "Property_CertificateLocation",
+          "text": "Certificate Location"
+        },
+        {
+          "id": "Property_CertificateStore",
+          "text": "Certificate Store"
+        },
+        {
+          "id": "Property_CertificateName",
+          "text": "Certificate Name"
+        },
+        {
+          "id": "Property_PublicKeyFile",
+          "text": "Public Key File"
+        },
+        {
+          "id": "Property_PrivateKeyFile",
+          "text": "Private Key File"
+        },
+        {
+          "id": "Property_ServiceStart",
+          "text": "Service Start Mode"
+        },
+        {
+          "id": "Property_AuthenticationMode",
+          "text": "Authentication Mode"
+        },
+        {
+          "id": "Property_WebUsername",
+          "text": "Default Username"
+        },
+        {
+          "id": "Property_WebPassword",
+          "text": "Default Password"
+        },
+        {
+          "id": "Property_NgrokAuthToken",
+          "text": "Authentication Token"
+        },
+        {
+          "id": "Property_NgrokHttpDomain",
+          "text": "Domain"
+        },
+        {
+          "id": "Property_NgrokRemoteAddress",
+          "text": "TCP Address"
+        },
+        {
+          "id": "Property_Directory",
+          "text": "Directory"
+        },
+        {
+          "id": "Property_AccessUri",
+          "text": "Access URI"
+        },
+        {
+          "id": "Property_HttpListener",
+          "text": "HTTP Listener"
+        },
+        {
+          "id": "Property_TcpListener",
+          "text": "TCP Listener"
+        },
+        {
+          "id": "Property_NewKeyPair",
+          "text": "A new key pair will be generated"
+        },
+        {
+          "id": "Property_NewCertificate",
+          "text": "A new self-signed certificate will be generated"
+        }
+      ],
+      "static": [
+        {
+          "id": "Protocol",
+          "text": "Protocol"
+        },
+        {
+          "id": "Host",
+          "text": "Host"
+        },
+        {
+          "id": "Port",
+          "text": "Port"
+        },
+        {
+          "id": "UACPromptLabel",
+          "text": "Please wait for UAC prompt to appear.\n\nIf it appears minimized then active it from the taskbar."
+        }
+      ],
+      "filters": [
+        {
+          "id": "Filter_PublicKeyFiles",
+          "text": "Public Key Files (*.pem)"
+        },
+        {
+          "id": "Filter_PrivateKeyFiles",
+          "text": "Private Key Files (*.key)"
+        },
+        {
+          "id": "Filter_PfxFiles",
+          "text": "PFX Files (*.pfx, *.p12)"
+        },
+        {
+          "id": "Filter_CertificateFiles",
+          "text": "Certificate Files (*.pem, *.crt, *.cer)"
+        },
+        {
+          "id": "Filter_AllFiles",
+          "text": "All Files"
+        }
+      ],
+      "dialogs": {
+        "static": [
+          {
+            "id": "GatewayDlg_Title",
+            "text": "[ProductName] Setup"
+          }
+        ],
+        "browse": [
+          {
+            "id": "BrowseDlgTitle",
+            "text": "Change destination folder"
+          },
+          {
+            "id": "BrowseDlgDescription",
+            "text": "Browse to the destination folder"
+          }
+        ],
+        "installDir": [
+          {
+            "id": "InstallDirDlgTitle",
+            "text": "Destination Folder"
+          },
+          {
+            "id": "InstallDirDlgDescription",
+            "text": "Click Next to install to the default folder or click Change to choose another."
+          }
+        ],
+        "progress": [
+          {
+            "id": "ProgressDlgTitleInstalling",
+            "text": "Installing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleChanging",
+            "text": "Changing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRepairing",
+            "text": "Repairing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRemoving",
+            "text": "Removing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleUpdating",
+            "text": "Updating [ProductName]"
+          }
+        ],
+        "verifyReady": [
+          {
+            "id": "VerifyReadyDlgInstallTitle",
+            "text": "Ready to install [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgChangeTitle",
+            "text": "Ready to change [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRepairTitle",
+            "text": "Ready to repair [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRemoveTitle",
+            "text": "Ready to remove [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgUpdateTitle",
+            "text": "Ready to update [ProductName]"
+          }
+        ],
+        "welcome": [
+          {
+            "id": "WelcomeDlgTitle",
+            "overridable": "yes",
+            "text": "Welcome to the [ProductName] 20[ProductVersion] Setup Wizard"
+          }
+        ],
+        "customize": [
+          {
+            "id": "CustomInstallDlgTitle",
+            "text": "Configuration"
+          },
+          {
+            "id": "CustomInstallDlgDescription",
+            "text": "Choose how to configure [ProductName]."
+          },
+          {
+            "id": "CustomInstallDlgInfoLabel",
+            "text": "The Setup Wizard will generate a configuration which you can update later; or you can provide configuration information now."
+          },
+          {
+            "id": "RecommendedForStandaloneInstallations",
+            "text": "Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically."
+          },
+          {
+            "id": "RecommendedForCompanionInstallations",
+            "text": "Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation."
+          },
+          {
+            "id": "ConfigureTheGatewayInstallation",
+            "text": "Configure the Gateway installation"
+          },
+          {
+            "id": "ConfigurationOptions",
+            "text": "Configuration Options"
+          },
+          {
+            "id": "EnableAccessOverTheInternetUsingNgrok",
+            "text": "Enable access over the internet using ngrok"
+          },
+          {
+            "id": "EnableTheGatewayWebInterface",
+            "text": "Enable the Gateway web interface"
+          },
+          {
+            "id": "GenerateASelfSignedHttpsCertificate",
+            "text": "Generate a self-signed HTTPS certificate"
+          },
+          {
+            "id": "GenerateEncryptionKeys",
+            "text": "Generate encryption keys"
+          }
+        ],
+        "accessUri": [
+          {
+            "id": "AccessUriDlgTitle",
+            "text": "External URL"
+          },
+          {
+            "id": "AccessUriDlgDescription",
+            "text": "URL to reach [ProductName]."
+          },
+          {
+            "id": "AccessUriDlgExplanation",
+            "text": "The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS)."
+          },
+          {
+            "id": "AccessUriDlgHttpWarn",
+            "text": "An insecure external URI is not recommended for production environments"
+          }
+        ],
+        "certificate": [
+          {
+            "id": "CertificateDlgTitle",
+            "text": "Certificate"
+          },
+          {
+            "id": "CertificateDlgDescription",
+            "text": "A certificate is required when using an HTTPS listener."
+          },
+          {
+            "id": "CertificateDlgCertConfigLabel",
+            "text": "Certificate Configuration"
+          },
+          {
+            "id": "CertificateDlgCertFileLabel",
+            "text": "Certificate File"
+          },
+          {
+            "id": "CertificateDlgCertPasswordLabel",
+            "text": "Certificate Password"
+          },
+          {
+            "id": "CertificateDlgCertKeyFileLabel",
+            "text": "Private Key File"
+          },
+          {
+            "id": "CertificateSource",
+            "text": "Certificate Source"
+          },
+          {
+            "id": "SearchForACertificateToUse",
+            "text": "Search for a certificate to use"
+          },
+          {
+            "id": "StoreLocation",
+            "text": "Store Location"
+          },
+          {
+            "id": "CertificateStore",
+            "text": "Certificate Store"
+          },
+          {
+            "id": "SearchBy",
+            "text": "Search By"
+          },
+          {
+            "id": "Search",
+            "text": "Search"
+          },
+          {
+            "id": "SelectedCertificate",
+            "text": "Selected Certificate"
+          },
+          {
+            "id": "BrowseForACertificateToUse",
+            "text": "Browse for a certificate to use"
+          },
+          {
+            "id": "EncryptedPrivateKeysAreNotSupported",
+            "text": "Encrypted private keys are not supported"
+          },
+          {
+            "id": "SelectTheCertificateToUse",
+            "text": "Select the certificate to use"
+          }
+        ],
+        "listeners": [
+          {
+            "id": "ListenersDlgTitle",
+            "text": "Listeners"
+          },
+          {
+            "id": "ListenersDlgDescription",
+            "text": "HTTP(S) and TCP port listeners."
+          },
+          {
+            "id": "ListenersDlgListenersLabel",
+            "text": "Listeners"
+          },
+          {
+            "id": "ListenersDlgHTTPLabel",
+            "text": "HTTP Listener"
+          },
+          {
+            "id": "ListenersDlgTCPLabel",
+            "text": "TCP Listener"
+          },
+          {
+            "id": "AnHttpListenerDoesNotRequireACert",
+            "text": "An HTTP listener does not require a certificate."
+          },
+          {
+            "id": "AnHttpsListenerRequiresACertSelfSigned",
+            "text": "An HTTPS listener requires a certificate. The self-signed certificate generated by this installer is not trusted by default."
+          },
+          {
+            "id": "AnHttpsListenerRequiresACert",
+            "text": "An HTTPS listener requires a certificate. You will be prompted to configure one."
+          },
+          {
+            "id": "InvalidPort",
+            "text": "Invalid port"
+          },
+          {
+            "id": "ChosenPortAvailable",
+            "text": "The chosen port is available"
+          },
+          {
+            "id": "ChosenPortNotAvailable",
+            "text": "The chosen port might not be available"
+          },
+          {
+            "id": "ChosenPortCouldNotBeChecked",
+            "text": "The chosen port could not be checked"
+          }
+        ],
+        "ngrok": [
+          {
+            "id": "NgrokListenersDlgTitle",
+            "text": "ngrok"
+          },
+          {
+            "id": "NgrokListenersDlgDescription",
+            "text": "ngrok listener configuration."
+          },
+          {
+            "id": "UseNgrokForSimplifiedRemoteAccess",
+            "text": "Use ngrok for simplified remote access from the Internet. Gateway listeners allow access from any IP address by default."
+          },
+          {
+            "id": "AuthToken",
+            "text": "Auth Token"
+          },
+          {
+            "id": "Domain",
+            "text": "Domain"
+          },
+          {
+            "id": "NativeClientAccess",
+            "text": "Native Client Access"
+          },
+          {
+            "id": "Configure",
+            "text": "Configure"
+          },
+          {
+            "id": "RemoteAddress",
+            "text": "Remote Address"
+          }
+        ],
+        "keys": [
+          {
+            "id": "PublicKeyDlgTitle",
+            "text": "Encryption Keys"
+          },
+          {
+            "id": "PublicKeyDlgDescription",
+            "text": "Keys for token creation and verification."
+          },
+          {
+            "id": "ProvideAnEncryptionKeyPairForTokenVerification",
+            "text": "Provide an encryption key for token verification."
+          },
+          {
+            "id": "ProvideAnEncryptionKeyPairForTokenCreationVerification",
+            "text": "Provide an encryption key pair for token generation and verification."
+          },
+          {
+            "id": "PublicKeyFile",
+            "text": "Public Key File"
+          },
+          {
+            "id": "ThePublicKeyIsUsedTo",
+            "text": "The public key is used to verify tokens without specific restrictions"
+          },
+          {
+            "id": "PrivateKeyFile",
+            "text": "Private Key File"
+          },
+          {
+            "id": "ThePrivateKeyIsUsedTo",
+            "text": "The private key is used to generate session tokens for the standalone web application"
+          },
+          {
+            "id": "ProvideAPublicKeyForTokenVerification",
+            "text": "Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server)."
+          }
+        ],
+        "webApp": [
+          {
+            "id": "WebAppDlgTitle",
+            "text": "Web Application Options"
+          },
+          {
+            "id": "WebAppDlgDescription",
+            "text": "Configuration for the embedded web application."
+          },
+          {
+            "id": "ChooseTheAuthenticationMethod",
+            "text": "Choose the authentication method used when accessing the web application"
+          },
+          {
+            "id": "Authentication",
+            "text": "Authentication"
+          },
+          {
+            "id": "DefaultUser",
+            "text": "Default User"
+          },
+          {
+            "id": "Username",
+            "text": "Username"
+          },
+          {
+            "id": "Password",
+            "text": "Password"
+          },
+          {
+            "id": "ConfirmPassword",
+            "text": "Confirm Password"
+          }
+        ],
+        "summary": [
+          {
+            "id": "SummaryDlgTitle",
+            "text": "Summary"
+          },
+          {
+            "id": "SummaryDlgDescription",
+            "text": "Click Next to use this configuration or click Back to make changes."
+          }
+        ]
+      }
+    }
+  }
+}

@@ -12,9 +12,29 @@ using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocatio
 using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
 using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 using System;
+using static DevolutionsGateway.Properties.Constants;
 
 namespace DevolutionsGateway.Properties
 {
+    /// <summary>
+    /// do not modify the contents of this class with the code editor.
+    /// </summary>
+    public partial class Constants
+    {
+<# for (int idx = 0; idx < this.StaticStrings.GetLength(0); idx++) { #> 
+        public const string <#=this.StaticStrings[idx, 0]#> = "<#=this.StaticStrings[idx, 1]#>";
+<# } #>
+
+<# for (int idx = 0; idx < this.Enums.GetLength(0); idx++) { #> 
+        public enum <#=this.Enums[idx].Name #> 
+        {
+    <# foreach (var value in Enum.GetValues(this.Enums[idx])) { #>
+        <#=value#>,
+    <# } #>
+    }
+<# } #>
+    }
+
     /// <summary>
     /// do not modify the contents of this class with the code editor.
     /// </summary>
@@ -26,16 +46,17 @@ namespace DevolutionsGateway.Properties
 <# string id = string.IsNullOrEmpty(this.properties[idx].Id) ? this.properties[idx].Name : this.properties[idx].Id; #>
 <# if (this.properties[idx].Public) { id = id.ToUpper(); } #>
             Id = "P.<#=id#>",
-<# if (this.properties[idx].PropType == typeof(string) && this.properties[idx].DefaultValue != "string.Empty" && !this.properties[idx].DefaultValue.StartsWith("Constants.")) { #>
-            Default = "<#= this.properties[idx].DefaultValue #>",
+<# if (this.properties[idx].PropertyType == typeof(string)) { #>
+            Default = "<#= this.properties[idx].Default #>",
+<# } else if (this.properties[idx].PropertyType == typeof(Guid)) { #>
+            Default = new Guid("<#= this.properties[idx].Default.ToString() #>"),
 <# } else { #>
-            Default = <#= this.properties[idx].DefaultValue #>,
+            Default = <#= this.properties[idx].Default #>,
 <# } #>
+            Name = "<#= this.properties[idx].Name #>",
             Secure = <#= this.properties[idx].Secure.ToString().ToLower() #>,
             Hidden = <#= this.properties[idx].Hidden.ToString().ToLower() #>,
-            Public = <#= this.properties[idx].Public.ToString().ToLower() #>,
-<# string summary = string.IsNullOrEmpty(this.properties[idx].Summary) ? this.properties[idx].Name : this.properties[idx].Summary; #>
-            Summary = "<#= summary #>",
+            Public = <#= this.properties[idx].Public.ToString().ToLower() #>
         };
 
 <# if (!string.IsNullOrEmpty(this.properties[idx].Comment)) { #>
@@ -68,22 +89,82 @@ namespace DevolutionsGateway.Properties
 }
 
 <#+
-  public class PropertyDefinition
-  {
-    public Type PropType { get; set; }
-    public string Name { get; set; }
-    public string DefaultValue { get; set; }
-    public bool Public { get; set; }
-    public bool Secure { get; set; }
-    public bool Hidden { get; set; }
-    public string Id { get; set; }
-    public string Comment { get; set; }
-    public bool Private => !this.Public;
-    public string Summary { get; set; } 
-
-    public PropertyDefinition(Type propType, string name, string defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null, string summary = null)
+    public class Statics
     {
-        this.PropType = propType;
+        internal const string HttpProtocol = "http";
+
+        internal const string HttpsProtocol = "https";
+
+        internal const string TcpProtocol = "tcp";
+
+        public enum AuthenticationMode
+        {
+            None,
+            Custom,
+        }
+
+        public enum CertificateMode
+        {
+            External,
+            System
+        }
+
+        public enum CertificateFindType
+        {
+            Thumbprint,
+            SubjectName
+        }
+
+        public enum CustomizeMode
+        {
+            Now,
+            Later,
+        }
+    }
+
+    public string[,] StaticStrings = new[,]
+    {
+        {nameof(Statics.HttpProtocol), Statics.HttpProtocol}, 
+        {nameof(Statics.HttpsProtocol), Statics.HttpsProtocol}, 
+        {nameof(Statics.TcpProtocol), Statics.TcpProtocol}, 
+    };
+
+    public Type[] Enums = new[]
+    {
+        typeof(Statics.AuthenticationMode),
+        typeof(Statics.CertificateMode),
+        typeof(Statics.CertificateFindType),
+        typeof(Statics.CustomizeMode),
+    };
+
+    public abstract class BasePropertyDefinition
+    {
+        public abstract string Comment { get; set; }
+        public abstract bool Hidden { get; set; }
+        public abstract string Id { get; set; }        
+        public abstract string Name { get; set; }
+        public abstract string PrivateName { get; }
+        public abstract bool Public { get; set; }
+        public abstract bool Secure { get; set; }
+        public abstract string TypeName { get; }
+
+        public abstract string Default { get; }
+        public abstract Type PropertyType { get; }
+    }
+
+  public class PropertyDefinition<T> : BasePropertyDefinition
+  {
+    public override string Name { get; set; }
+    public T DefaultValue { get; set; }
+    public override bool Public { get; set; }
+    public override bool Secure { get; set; }
+    public override bool Hidden { get; set; }
+    public override string Id { get; set; }
+    public override string Comment { get; set; }
+    public bool Private => !this.Public;
+
+    public PropertyDefinition(string name, T defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null)
+    {
         this.Name = name;
         this.DefaultValue = defaultValue;
         this.Public = isPublic;
@@ -91,85 +172,94 @@ namespace DevolutionsGateway.Properties
         this.Hidden = hidden;
         this.Id = id;
         this.Comment = comment;
-        this.Summary = summary;
     }
 
-    public string PrivateName => char.ToLower(this.Name[0]) + this.Name.Substring(1);
-
-    public virtual string TypeName => this.PropType.ToString();
-  }
-
-  public class EnumPropertyDefinition : PropertyDefinition
-  {
-    private string PropTypeString { get; set; }
-
-    public EnumPropertyDefinition(string propType, string name, string defaultValue, bool isPublic = true, bool secure = true, bool hidden = false, string id = null, string comment = null, string summary = null) : base(typeof(string), name, defaultValue, isPublic, secure, hidden, id, comment, summary)
+    public override string Default
     {
-        this.PropTypeString = propType;
+        get
+        {
+            if (PropertyType == typeof(bool))
+            {
+                return this.DefaultValue.ToString().ToLower();
+            }
+
+            if (PropertyType.IsEnum)
+            {
+                return $"{TypeName}.{this.DefaultValue.ToString()}";
+            }
+
+            return this.DefaultValue.ToString();
+        }
     }
 
-    public override string TypeName => this.PropTypeString;
+    public override string PrivateName => char.ToLower(this.Name[0]) + this.Name.Substring(1);
+
+    public override Type PropertyType => typeof(T);
+
+    public override string TypeName => typeof(T).Name;
   }
 
-  PropertyDefinition[] properties = {
-    new PropertyDefinition(typeof(string), "AccessUriHost", "string.Empty"),
-    new PropertyDefinition(typeof(uint), "AccessUriPort", "443"),
-    new PropertyDefinition(typeof(string), "AccessUriScheme", "Constants.HttpsProtocol"),
-    new EnumPropertyDefinition("Constants.CertificateMode", "CertificateMode", "Constants.CertificateMode.External", summary: "Certificate Origin"),
+  private static uint DefaultHttpPort = 7171;
+
+  BasePropertyDefinition[] properties = {
+    new PropertyDefinition<string>("AccessUriHost", ""),
+    new PropertyDefinition<uint>("AccessUriPort", DefaultHttpPort),
+    new PropertyDefinition<string>("AccessUriScheme", Statics.HttpsProtocol),
+    new PropertyDefinition<Statics.CertificateMode>("CertificateMode", Statics.CertificateMode.External),
 
     // External certificate mode
-    new PropertyDefinition(typeof(string), "CertificateFile", "string.Empty", summary: "Certificate File"),
-    new PropertyDefinition(typeof(string), "CertificatePassword", "string.Empty", hidden: true, summary: "Certificate Password"),
-    new PropertyDefinition(typeof(string), "CertificatePrivateKeyFile", "string.Empty", summary: "Certificate Private Key File"),
+    new PropertyDefinition<string>("CertificateFile", ""),
+    new PropertyDefinition<string>("CertificatePassword", "", hidden: true),
+    new PropertyDefinition<string>("CertificatePrivateKeyFile", ""),
 
     // System certificate mode
-    new PropertyDefinition(typeof(StoreLocation), "CertificateLocation", "StoreLocation.CurrentUser", summary: "Certificate Location"),
-    new PropertyDefinition(typeof(StoreName), "CertificateStore", "StoreName.My", summary: "Certificate Store"),
-    new PropertyDefinition(typeof(string), "CertificateName", "string.Empty", summary: "Certificate Name"),
-    new PropertyDefinition(typeof(bool), "GenerateCertificate", "false"),
+    new PropertyDefinition<StoreLocation>("CertificateLocation", StoreLocation.CurrentUser),
+    new PropertyDefinition<StoreName>("CertificateStore", StoreName.My),
+    new PropertyDefinition<string>("CertificateName", ""),
+    new PropertyDefinition<bool>("GenerateCertificate", false),
 
     // UI Helpers
-    new EnumPropertyDefinition("Constants.CertificateFindType", "CertificateFindType", "Constants.CertificateFindType.Thumbprint", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(string), "CertificateSearchText", "string.Empty", isPublic: false, hidden: true, secure: false),
-    new PropertyDefinition(typeof(string), "CertificateThumbprint", "string.Empty", isPublic: false, hidden: true, secure: false),
+    new PropertyDefinition<Statics.CertificateFindType>("CertificateFindType", Statics.CertificateFindType.Thumbprint, isPublic: false, secure: false),
+    new PropertyDefinition<string>("CertificateSearchText", "", isPublic: false, hidden: true, secure: false),
+    new PropertyDefinition<string>("CertificateThumbprint", "", isPublic: false, hidden: true, secure: false),
 
-    new PropertyDefinition(typeof(bool), "ConfigureGateway", "false", secure: false, comment: "`true` to configure the Gateway interactively"),    
-    new PropertyDefinition(typeof(bool), "HasPowerShell", "false", isPublic: false, secure: false),
+    new PropertyDefinition<bool>("ConfigureGateway", false, secure: false, comment: "`true` to configure the Gateway interactively"),    
+    new PropertyDefinition<bool>("HasPowerShell", false, isPublic: false, secure: false),
 
-    new PropertyDefinition(typeof(string), "HttpListenerHost", "0.0.0.0"),
-    new PropertyDefinition(typeof(uint), "HttpListenerPort", "7171"),
-    new PropertyDefinition(typeof(string), "HttpListenerScheme", "Constants.HttpsProtocol"),
+    new PropertyDefinition<string>("HttpListenerHost", "0.0.0.0"),
+    new PropertyDefinition<uint>("HttpListenerPort", DefaultHttpPort),
+    new PropertyDefinition<string>("HttpListenerScheme", Statics.HttpsProtocol),
 
-    new PropertyDefinition(typeof(string), "PublicKeyFile", "string.Empty", summary: "Public Key File"),
-    new PropertyDefinition(typeof(string), "PrivateKeyFile","string.Empty", summary: "Private Key File"),
-    new PropertyDefinition(typeof(bool), "GenerateKeyPair", "false"),
+    new PropertyDefinition<string>("PublicKeyFile", ""),
+    new PropertyDefinition<string>("PrivateKeyFile", ""),
+    new PropertyDefinition<bool>("GenerateKeyPair", false),
 
-    new PropertyDefinition(typeof(string), "PowerShellPath", "string.Empty", hidden: true, secure: false, isPublic: false),
-    new PropertyDefinition(typeof(string), "NoStartService", "string.Empty", id: "dgw.no_start_service"),
-    new PropertyDefinition(typeof(ServiceStartMode), "ServiceStart", "ServiceStartMode.Manual", summary: "Service Start Mode"),
+    new PropertyDefinition<string>("PowerShellPath", "", hidden: true, secure: false, isPublic: false),
+    new PropertyDefinition<string>("NoStartService", "", id: "dgw.no_start_service"),
+    new PropertyDefinition<ServiceStartMode>("ServiceStart", ServiceStartMode.Manual),
 
-    new PropertyDefinition(typeof(string), "TcpListenerHost", "0.0.0.0"),
-    new PropertyDefinition(typeof(uint), "TcpListenerPort", "8181"),
-    new PropertyDefinition(typeof(string), "TcpListenerScheme", "Constants.TcpProtocol"),
+    new PropertyDefinition<string>("TcpListenerHost", "0.0.0.0"),
+    new PropertyDefinition<uint>("TcpListenerPort", 8181),
+    new PropertyDefinition<string>("TcpListenerScheme", Statics.TcpProtocol),
 
-    new PropertyDefinition(typeof(bool), "ConfigureWebApp", "false", comment: "`true` to configure the standalone web application interactively"),
-    new EnumPropertyDefinition("Constants.AuthenticationMode", "AuthenticationMode", "Constants.AuthenticationMode.None", summary: "Authentication Mode"),
-    new PropertyDefinition(typeof(string), "WebUsername", "string.Empty", summary: "Default User"),
-    new PropertyDefinition(typeof(string), "WebPassword", "string.Empty", hidden: true, summary: "Default Password"),
+    new PropertyDefinition<bool>("ConfigureWebApp", false, comment: "`true` to configure the standalone web application interactively"),
+    new PropertyDefinition<Statics.AuthenticationMode>("AuthenticationMode", Statics.AuthenticationMode.None),
+    new PropertyDefinition<string>("WebUsername", ""),
+    new PropertyDefinition<string>("WebPassword", "", hidden: true),
 
-    new PropertyDefinition(typeof(bool), "ConfigureNgrok", "false", comment: "`true` to use ngrok for ingress listeners"),
-    new PropertyDefinition(typeof(string), "NgrokAuthToken", "string.Empty", summary: "Authentication Token"),
-    new PropertyDefinition(typeof(string), "NgrokHttpDomain", "string.Empty", summary: "Domain"),
-    new PropertyDefinition(typeof(bool), "NgrokEnableTcp", "false", summary: "Native Client Access"),
-    new PropertyDefinition(typeof(string), "NgrokRemoteAddress", "string.Empty", summary: "Remote Address"),
+    new PropertyDefinition<bool>("ConfigureNgrok", false, comment: "`true` to use ngrok for ingress listeners"),
+    new PropertyDefinition<string>("NgrokAuthToken", ""),
+    new PropertyDefinition<string>("NgrokHttpDomain", ""),
+    new PropertyDefinition<bool>("NgrokEnableTcp", false),
+    new PropertyDefinition<string>("NgrokRemoteAddress", ""),
 
-    new PropertyDefinition(typeof(bool), "DebugPowerShell", "false"),
-    new PropertyDefinition(typeof(Guid), "InstallId", "Guid.Empty", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(uint), "NetFx45Version", "0", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(bool), "FirstInstall", "false", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(bool), "Upgrading", "false", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(bool), "RemovingForUpgrade", "false", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(bool), "Uninstalling", "false", isPublic: false, secure: false),
-    new PropertyDefinition(typeof(bool), "Maintenance", "false", isPublic: false, secure: false),
+    new PropertyDefinition<bool>("DebugPowerShell", false),
+    new PropertyDefinition<Guid>("InstallId", Guid.Empty, isPublic: false, secure: false),
+    new PropertyDefinition<uint>("NetFx45Version", 0, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("FirstInstall", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Upgrading", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("RemovingForUpgrade", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Uninstalling", false, isPublic: false, secure: false),
+    new PropertyDefinition<bool>("Maintenance", false, isPublic: false, secure: false),
   };             
 #>

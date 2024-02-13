@@ -1,178 +1,224 @@
 <?xml version="1.0" encoding="utf-8"?>
 <WixLocalization Culture="fr-fr" Codepage="1252" Language="1036" xmlns="http://schemas.microsoft.com/wix/2006/localization">
-   <String Id="Language">1036</String>
-   <!-- Supported language and codepage codes can be found here: http://www.tramontana.co.hu/wix/lesson2.php#2.4 -->
-   <String Id="VendorName">Devolutions</String>
-   <String Id="VendorFullName">Devolutions inc.</String>
-   <String Id="ProductDescription">Accès et soutien à distance instantanés</String>
-   <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum</String>
-   <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
-   <String Id="x64VersionRequired">Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows.</String>
-   <String Id="x86VersionRequired">Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows.</String>
-   <String Id="ShortcutSelectionDlgTitle">Configurer les raccourcis</String>
-   <String Id="ShortcutSelectionDlgDescription">Créer des raccourcis de l'application</String>
-   <String Id="ShortcutSelectionDlgLabel">Créer des raccourcis de [ProductName] aux endroits suivants:</String>
-   <String Id="DesktopShortcutChoice">Bureau</String>
-   <String Id="StartMenuShortcutChoice">Dossier Programmes du menu Démarrer</String>
-   <String Id="ProgramSettingsDlgTitle">Configuration des paramètres</String>
-   <String Id="ProgramSettingsDlgDescription">Configurer les paramètres avancés</String>
-   <String Id="ProgramSettingsDlgAnalyticsLabel">Partager des données d'utilisation anonymisées afin de contribue</String>
-   <String Id="ProgramSettingsDlgAnalyticsLabel2">à l'amélioration de [ProductName]</String>
-   <String Id="ProgramSettingsDlgAnalyticsCheckbox">Partager des données de télémétrie</String>
-   <String Id="ProgramSettingsDlgCrashReportsLabel">Soumettre des rapports d'incidents anonymisés afin de contribuer</String>
-   <String Id="ProgramSettingsDlgCrashReportsLabel2">à l'amélioration de la stabilité et de la sécurité:</String>
-   <String Id="ProgramSettingsDlgCrashReportsCheckbox">Activer le rapporteur d'incidents</String>
+        <!-- metadata -->
+                <String Id="Language">1036</String>
+                <String Id="ProductDescription">Accès et soutien à distance instantanés.</String>
+                <String Id="VendorFullName">Devolutions Inc.</String>
+                <String Id="VendorName">Devolutions</String>
+                    <!-- messages -->
+                <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
+                <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum.</String>
+                <String Id="ThereIsAProblemWithTheEnteredData">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau.</String>
+                <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">Le chemin de fichier spécifié est invalide ou inaccessible</String>
+                <String Id="x64VersionRequired">Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows.</String>
+                <String Id="x86VersionRequired">Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows.</String>
+                <String Id="YouMustEnterAValidPort">Vous devez entrer un numéro de port valide</String>
+                <String Id="YouMustProvideAValidCertificateAndPasswordOrKey">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
+                <String Id="YouMustProvideAValidHostname">Vous devez fournir un nom d'hôte valide</String>
+                    <!-- properties -->
+                <String Id="Property_AccessUri">URI d'accès</String>
+                <String Id="Property_CertificateFile">Fichier de certificat</String>
+                <String Id="Property_CertificatePassword">Mot de passe du certificat</String>
+                <String Id="Property_CertificatePrivateKeyFile">Fichier de clée privée</String>
+                <String Id="Property_HttpListener">Écouteur HTTP</String>
+                <String Id="Property_TcpListener">Écouteur TCP</String>
+                    <!-- dialogs.static -->
+                <String Id="GatewayDlg_Title">Installation de [ProductName]</String>
+                    <!-- dialogs.browse -->
+                <String Id="BrowseDlgDescription">Sélectionnez le dossier de destination</String>
+                <String Id="BrowseDlgTitle">Modifier le dossier de destination</String>
+                    <!-- dialogs.installDir -->
+                <String Id="InstallDirDlgDescription">Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier.</String>
+                <String Id="InstallDirDlgTitle">Dossier de destination</String>
+                    <!-- dialogs.progress -->
+                <String Id="ProgressDlgTitleChanging">Modification de [ProductName]</String>
+                <String Id="ProgressDlgTitleInstalling">Installation de [ProductName]</String>
+                <String Id="ProgressDlgTitleRemoving">Suppression de [ProductName]</String>
+                <String Id="ProgressDlgTitleRepairing">Réparation de [ProductName]</String>
+                <String Id="ProgressDlgTitleUpdating">Mise à jour de [ProductName]</String>
+                    <!-- dialogs.verifyReady -->
+                <String Id="VerifyReadyDlgChangeTitle">Prêt pour la modification de [ProductName]</String>
+                <String Id="VerifyReadyDlgInstallTitle">Prêt pour l'installation de [ProductName]</String>
+                <String Id="VerifyReadyDlgRemoveTitle">Prêt pour la suppression de [ProductName]</String>
+                <String Id="VerifyReadyDlgRepairTitle">Prêt pour la réparation de [ProductName]</String>
+                <String Id="VerifyReadyDlgUpdateTitle">Prêt pour la mise à jour de [ProductName]</String>
+                    <!-- dialogs.welcome -->
+                <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
+                    <!-- dialogs.customize -->
+                <String Id="CustomInstallDlgDescription">Veuillez choisir comment configurer [ProductName].</String>
+                <String Id="CustomInstallDlgInfoLabel">L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant.</String>
+                <String Id="CustomInstallDlgTitle">Configuration</String>
+                    <!-- dialogs.accessUri -->
+                <String Id="AccessUriDlgDescription">URL pour rejoindre [ProductName].</String>
+                <String Id="AccessUriDlgTitle">URL Externe</String>
+                    <!-- dialogs.certificate -->
+                <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
+                <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
+                <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>
+                <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
+                <String Id="CertificateDlgDescription">Un certificat est nécessaire pour utiliser HTTPS.</String>
+                <String Id="CertificateDlgTitle">Certificat</String>
+                    <!-- dialogs.listeners -->
+                <String Id="ListenersDlgDescription">Écouteurs HTTP(S) et TCP.</String>
+                <String Id="ListenersDlgHTTPLabel">Écouteur HTTP</String>
+                <String Id="ListenersDlgListenersLabel">Écouteurs</String>
+                <String Id="ListenersDlgTCPLabel">Écouteur TCP</String>
+                <String Id="ListenersDlgTitle">Écouteurs</String>
+                    <!-- dialogs.keys -->
+                <String Id="PublicKeyDlgTitle">Paire de clés</String>
+                    <!-- dialogs.summary -->
+                <String Id="SummaryDlgDescription">Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
+                <String Id="SummaryDlgTitle">Résumé</String>
+                    <!-- dialogs.firewall -->
+                <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
+                <String Id="WixExecFirewallExceptionsInstall">Installation de la configuration du Pare-feu Windows</String>
+                <String Id="WixExecFirewallExceptionsUninstall">Désinstallation de la configuration du Pare-feu Windows</String>
+                <String Id="WixRollbackFirewallExceptionsInstall">Restauration de la configuration du Pare-feu Windows</String>
+                <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
+                <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
+                <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
+                    <!-- links.- -->
+                <String Id="NgrokAuthTokenLink">authentication token</String>
+                <String Id="NgrokDomainLink">domain</String>
+                <String Id="NgrokProvideYourX">Provide your {0}</String>
+                <String Id="NgrokReadMoreAtX">Read more at {0}</String>
+                <String Id="NgrokReadMoreLink">ngrok.com</String>
+                <String Id="NgrokTcpAddressLink">TCP address</String>
+                <String Id="NgrokXForWebClientAccess">The {0} for web client access</String>
+                <String Id="NgroXForNativeClientAccess">The {0} for native client access</String>
+                    <!-- buttons.- -->
+                <String Id="SearchButton">Search</String>
+                <String Id="ViewButton">View</String>
+                <String Id="ViewLogButton">View Log</String>
+                    <!-- propertyGroups.- -->
+                <String Id="Group_Certificate">Certificate</String>
+                <String Id="Group_EncryptionKeys">Encryption Keys</String>
+                <String Id="Group_ExternalAccess">External Access</String>
+                <String Id="Group_InstallLocation">Install Location</String>
+                <String Id="Group_Listeners">Listeners</String>
+                <String Id="Group_Ngrok">ngrok</String>
+                <String Id="Group_Service">Service</String>
+                <String Id="Group_WebApp">Web App</String>
+                    <!-- enums.- -->
+                <String Id="AuthenticationMode_Custom">Custom</String>
+                <String Id="AuthenticationMode_None">None</String>
+                <String Id="CertificateFindType_SubjectName">Subject Name</String>
+                <String Id="CertificateFindType_Thumbprint">Thumbprint</String>
+                <String Id="CertificateMode_External">External</String>
+                <String Id="CertificateMode_System">System</String>
+                <String Id="CustomizeMode_Later">Later</String>
+                <String Id="CustomizeMode_Now">Now</String>
+                <String Id="StoreLocation_CurrentUser">Current User</String>
+                <String Id="StoreLocation_LocalMachine">Local Machine</String>
+                <String Id="StoreName_AddressBook">Other People</String>
+                <String Id="StoreName_AuthRoot">Third-Party Root Certification Authorities</String>
+                <String Id="StoreName_CertificateAuthority">Intermediate Certification Authorities</String>
+                <String Id="StoreName_Disallowed">Untrusted Certificates</String>
+                <String Id="StoreName_My">Personal</String>
+                <String Id="StoreName_Root">Trusted Root Certification Authorities</String>
+                <String Id="StoreName_TrustedPeople">Trusted People</String>
+                <String Id="StoreName_TrustedPublisher">Trusted Publishers</String>
+                    <!-- static.- -->
+                <String Id="Host">Host</String>
+                <String Id="Port">Port</String>
+                <String Id="Protocol">Protocol</String>
+                <String Id="UACPromptLabel">Please wait for UAC prompt to appear.
 
-   <String Id="UACPromptLabel">Please wait for UAC prompt to appear.&#13;&#10;&#13;&#10;If it appears minimized then active it from the taskbar.</String>
-
-  <!--All following strings should be copied from Wix directly. The only goal to have those strings here is to change the 
-      font color for white. No other way has been found to change that.-->
-  <String Id="AdvancedWelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
-  
-  <String Id="BrowseDlgTitle">{\MyWixUI_Font_Title}Modifier le dossier de destination</String>
-  <String Id="BrowseDlgDescription">{\MyWixUI_Font_Description}Sélectionnez le dossier de destination</String>
-  
-  <String Id="CustomizeInstallDlgTitle">{\MyWixUI_Font_Title}Configuration personnalisée</String>
-  <String Id="CustomizeInstallDlgDescription">{\MyWixUI_Font_Description}Sélectionnez la méthode d'installation des fonctionnalités</String>
-  
-  <String Id="DiskCostDlgTitle">{\MyWixUI_Font_Title}Espace disque nécessaire</String>
-  <String Id="DiskCostDlgDescription">{\MyWixUI_Font_Description}L'espace de disque dur nécessaire pour l'installation des fonctionnalités sélectionnées.</String>
-  
-  <String Id="FeaturesDlgTitle">{\MyWixUI_Font_Title}Fonctionnalités du produit</String>
-  <String Id="FeaturesDlgDescription">{\MyWixUI_Font_Description}Sélectionnez la méthode d'installation des fonctionnalités.</String>
-  
-  <String Id="FilesInUseTitle">{\MyWixUI_Font_Title}Fichiers en cours d'utilisation</String>
-  <String Id="FilesInUseDescription">{\MyWixUI_Font_Description}Certains fichiers à mettre à jour sont en cours d'utilisation.</String>
-  
-  <String Id="InstallDirDlgTitle">{\MyWixUI_Font_Title}Dossier de destination</String>
-  <String Id="InstallDirDlgDescription">{\MyWixUI_Font_Description}Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier.</String>
-  
-  <String Id="InstallScopeDlgTitle">{\MyWixUI_Font_Title}Type d'installation</String>
-  <String Id="InstallScopeDlgDescription">{\MyWixUI_Font_Description}Choisissez le type d'installation ainsi que le dossier de destination</String>
-  
-  <String Id="LicenseAgreementDlgTitle">{\MyWixUI_Font_Title}Convention de licence d'utilisation</String>
-  <String Id="LicenseAgreementDlgDescription">{\MyWixUI_Font_Description}Veuillez lire attentivement la Convention de licence suivante</String>
-  
-  <String Id="MaintenanceTypeDlgTitle">{\MyWixUI_Font_Title}Modifier, réparer ou supprimer l'installation</String>
-  <String Id="MaintenanceTypeDlgDescription">{\MyWixUI_Font_Description}Sélectionnez l'opération à effectuer.</String>
-  
-  <String Id="MsiRMFilesInUseTitle">{\MyWixUI_Font_Title}Fichiers en cours d'utilisation</String>
-  <String Id="MsiRMFilesInUseDescription">{\MyWixUI_Font_Description}Certains fichiers à mettre à jour sont en cours d'utilisation.</String>
-  
-  <String Id="OutOfDiskDlgTitle">{\MyWixUI_Font_Title}Espace de disque insuffisant</String>
-  <String Id="OutOfDiskDlgDescription">{\MyWixUI_Font_Description}L'espace disque disponible est insuffisant pour l'installation.</String>
-  
-  <String Id="OutOfRbDiskDlgTitle">{\MyWixUI_Font_Title}Espace de disque insuffisant</String>
-  <String Id="OutOfRbDiskDlgDescription">{\MyWixUI_Font_Description}L'espace disque disponible est insuffisant pour l'installation.</String>
-  
-  <String Id="ProgressDlgTitleInstalling">{\MyWixUI_Font_Title}Installation de [ProductName]</String>
-  <String Id="ProgressDlgTitleChanging">{\MyWixUI_Font_Title}Modification de [ProductName]</String>
-  <String Id="ProgressDlgTitleRepairing">{\MyWixUI_Font_Title}Réparation de [ProductName]</String>
-  <String Id="ProgressDlgTitleRemoving">{\MyWixUI_Font_Title}Suppression de [ProductName]</String>
-  <String Id="ProgressDlgTitleUpdating">{\MyWixUI_Font_Title}Mise à jour de [ProductName]</String>
-  
-  <String Id="SetupTypeDlgTitle">{\MyWixUI_Font_Title}Choisir le type de configuration</String>
-  <String Id="SetupTypeDlgDescription">{\MyWixUI_Font_Description}Choisissez le type de configuration qui correspond le mieux à vos besoins</String>
-  
-  <String Id="VerifyReadyDlgInstallTitle">{\MyWixUI_Font_Title}Prêt pour l'installation de [ProductName]</String>
-  <String Id="VerifyReadyDlgChangeTitle">{\MyWixUI_Font_Title}Prêt pour la modification de [ProductName]</String>
-  <String Id="VerifyReadyDlgRepairTitle">{\MyWixUI_Font_Title}Prêt pour la réparation de [ProductName]</String>
-  <String Id="VerifyReadyDlgRemoveTitle">{\MyWixUI_Font_Title}Prêt pour la suppression de [ProductName]</String>
-  <String Id="VerifyReadyDlgUpdateTitle">{\MyWixUI_Font_Title}Prêt pour la mise à jour de [ProductName]</String>
-
-  <!--All following strings come from firewall extension. There is no french translation in that extension.-->
-  <String Id="msierrFirewallCannotConnect" Overridable="yes">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
-  <String Id="WixSchedFirewallExceptionsInstall" Overridable="yes">Configuration du Pare-feu Windows</String>
-  <String Id="WixSchedFirewallExceptionsUninstall" Overridable="yes">Configuration du Pare-feu Windows</String>
-  <String Id="WixRollbackFirewallExceptionsInstall" Overridable="yes">Restauration de la configuration du Pare-feu Windows</String>
-  <String Id="WixExecFirewallExceptionsInstall" Overridable="yes">Installation de la configuration du Pare-feu Windows</String>
-  <String Id="WixRollbackFirewallExceptionsUninstall" Overridable="yes">Restauration de la configuration du Pare-feu Windows</String>
-  <String Id="WixExecFirewallExceptionsUninstall" Overridable="yes">Désinstallation de la configuration du Pare-feu Windows</String>
-
-  <!--All following strings come from user privileges extension. There is no french translation in that extension.-->
-  <String Id="CreatingLocalUsers">Création des utilisateurs locaux</String>
-  <String Id="CreatingLocalGroups">Création des groupes locaux</String>
-  <String Id="AddingLocalGroupMembers">Ajouter des membres au groupe local</String>
-  <String Id="DeletingLocalUsers">Suppression des utilisateurs locaux</String>
-  <String Id="DeletingLocalGroups">Suppression des groupes locaux</String>
-  <String Id="RemovingLocalGroupMembers">Suppression des membres du groupe local</String>
-
-  <!-- Custom UI -->
-  <String Id="AccessUriDlg_Title">Installation de [ProductName]</String>
-  <String Id="AccessUriDlgTitle">{\MyWixUI_Font_Title}URL Externe</String>
-  <String Id="AccessUriDlgDescription">{\MyWixUI_Font_Description}URL pour rejoindre Devolutions Gateway.</String>
-  <String Id="AccessUriDlgAccessUriLabel">URI d'accès</String>
-
-  <String Id="CertificateDlg_Title">Installation de [ProductName]</String>
-  <String Id="CertificateDlgTitle">{\MyWixUI_Font_Title}Certificat</String>
-  <String Id="CertificateDlgDescription">{\MyWixUI_Font_Description}Un certificat est nécessaire pour utiliser HTTPS</String>
-  <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
-  <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
-  <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
-  <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>
-
-  <String Id="CustomInstallDlg_Title">Installation de [ProductName]</String>
-  <String Id="CustomInstallDlgTitle">{\MyWixUI_Font_Title}Configuration</String>
-  <String Id="CustomInstallDlgDescription">{\MyWixUI_Font_Description}Veuillez choisir comment configurer Devolutions Gateway</String>
-  <String Id="CustomInstallDlgInfoLabel">L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant.</String>
-  <String Id="CustomInstallDlgConfigureNowLabel">Configurer maintenant</String>
-  <String Id="CustomInstallDlgConfigureLaterLabel">Configurer plus tard</String>
-
-  <String Id="InvalidConfigurationDlg_Title">Installation de [ProductName]</String>
-  <String Id="InvalidConfigurationDlgInfoLabel">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau</String>
-
-  <String Id="ListenersDlg_Title">Installation de [ProductName]</String>
-  <String Id="ListenersDlgTitle">{\MyWixUI_Font_Title}Écouteurs</String>
-  <String Id="ListenersDlgDescription">{\MyWixUI_Font_Description}Écouteurs HTTP(S) et TCP</String>
-  <String Id="ListenersDlgListenersLabel">Écouteurs</String>
-  <String Id="ListenersDlgHTTPLabel">Écouteur HTTP</String>
-  <String Id="ListenersDlgTCPLabel">Écouteur TCP</String>
-
-  <String Id="PublicKeyDlg_Title">Installation de [ProductName]</String>
-  <String Id="PublicKeyDlgTitle">{\MyWixUI_Font_Title}Paire de clés</String>
-  <String Id="PublicKeyDlgDescription">{\MyWixUI_Font_Description}Clé publique du fournisseur pour vérification de jetons</String>
-  <String Id="PublicKeyDlgInfoLabel">Clé publique du fournisseur</String>
-  <String Id="PublicKeyDlgFromFileLabel">À partir d'un fichier</String>
-
-  <String Id="ServiceDlg_Title">Installation de [ProductName]</String>
-  <String Id="ServiceDlgTitle">{\MyWixUI_Font_Title}Service Options</String>
-  <String Id="ServiceDlgDescription">{\MyWixUI_Font_Description}Configuration for the Devolutions Gateway service.</String>
-  <String Id="ServiceDlgInfoLabel">Service Startup</String>
-  <String Id="ServiceDlgStartTypeLabel">Lancement du service Devolutions Gateway:</String>
-  <String Id="ServiceDlgStartManualLabel">Manuel</String>
-  <String Id="ServiceDlgStartAutoLabel">Automatique</String>
-
-   <String Id="WebAppDlg_Title">[ProductName] Setup</String>
-   <String Id="WebAppDlgTitle">{\MyWixUI_Font_Title}Web Application Options</String>
-   <String Id="WebAppDlgDescription">{\MyWixUI_Font_Description}Configuration for the embedded web application.</String>
-   
-   <String Id="SummaryDlg_Title">Installation de [ProductName]</String>
-  <String Id="SummaryDlgTitle">{\MyWixUI_Font_Title}Résumé</String>
-  <String Id="SummaryDlgDescription">{\MyWixUI_Font_Description}Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
-  <String Id="SummaryDlgAccessUriLabel">URI d'accès:</String>
-  <String Id="SummaryDlgHTTPLabel">Écouteur HTTP:</String>
-  <String Id="SummaryDlgTCPLabel">Écouteur TCP:</String>
-  <String Id="SummaryDlgListenersLabel">Écouteurs Devolutions Gateway</String>
-  <String Id="SummaryDlgKeyPairLabel">Configuration de paire de clés Devolutions Gateway</String>
-  <String Id="SummaryDlgPublicKeyLabel">Clé publique du fournisseur:</String>
-  <String Id="SummaryDlgCertificateLabel">Configuration de certificat Devolutions Gateway</String>
-  <String Id="SummaryDlgCertificateFileLabel">Fichier de certificat:</String>
-  <String Id="SummaryDlgCertificatePasswordLabel">Mot de passe du certificat:</String>
-  <String Id="SummaryDlgCertificateKeyLabel">Fichier de clée privée:</String>
-
-  <String Id="WelcomeEulaDlgTitle">{\MyWixUI_Font_Title}Veuillez lire la Convention de licence de [ProductName]</String>
-  <String Id="WelcomeDlgTitleX" Overridable="yes">{\WixUI_Font_Bigger}Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
-
-  <String Id="Error29989">Échec de la configuration de la clé publique du fournisseur.&#xa;&#xa;Détails: [2]</String>
-  <String Id="Error29990">Échec de la configuration du certificat.&#xa;&#xa;Détails: [2]</String>
-  <String Id="Error29991">Échec de la configuration des écouteurs.&#xa;&#xa;Détails: [2]</String>
-  <String Id="Error29992">Échec de la configuration des URI d'accès.&#xa;&#xa;Détails: [2]</String>
-  <String Id="Error29993">L'exécution d'une commande de configuration a échoué.&#xa;&#xa;Détails: [2]</String>
-  <String Id="Error29994">Échec de lecture de la configuration existante du service</String> 
-  <String Id="Error29995">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
-  <String Id="Error29996">Le chemin de fichier spécifié est invalide ou inaccessible</String>
-  <String Id="Error29997">Vous devez entrer un nom de fichier</String>
-  <String Id="Error29998">Vous devez entrer un nom de protocole valide</String>
-  <String Id="Error29999">Vous devez entrer un numéro de port valide</String>
-  <String Id="Error30000">Vous devez fournir un nom d'hôte valide</String>
-</WixLocalization>
+If it appears minimized then active it from the taskbar.</String>
+                    <!-- filters.- -->
+                <String Id="Filter_AllFiles">All Files</String>
+                <String Id="Filter_CertificateFiles">Certificate Files (*.pem, *.crt, *.cer)</String>
+                <String Id="Filter_PfxFiles">PFX Files (*.pfx, *.p12)</String>
+                <String Id="Filter_PrivateKeyFiles">Private Key Files (*.key)</String>
+                <String Id="Filter_PublicKeyFiles">Public Key Files (*.pem)</String>
+                    <!-- messages.- -->
+                <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">An unexpected error occurred accessing the system certificate store: {0}</String>
+                <String Id="AuthenticationTokenIsRequired">The authentication token is required</String>
+                <String Id="DomainIsRequiredAndMustBeValid">The domain is required and must be a valid hostname</String>
+                <String Id="Dotnet462IsRequired">The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
+                <String Id="NoMatchingCertificatesFound">No matching certificates found</String>
+                <String Id="PasswordsDoNotMatch">Passwords do not match</String>
+                <String Id="RemoteAddressIsRequired">The remote address is required</String>
+                <String Id="RemoteAddressMustBeInTheFormat">The remote address must be a valid host and port in the format {host}:{port}</String>
+                <String Id="WindowsPowerShell51IsRequired">This product requires Windows PowerShell 5.1</String>
+                <String Id="YouMustConfirmThePassword">You must confirm the password</String>
+                <String Id="YouMustEnterAPassword">You must enter a password</String>
+                <String Id="YouMustEnterAUsername">You must enter a username</String>
+                <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">You must select a certificate from the system certificate store</String>
+                    <!-- properties.- -->
+                <String Id="Property_AuthenticationMode">Authentication Mode</String>
+                <String Id="Property_CertificateLocation">Certificate Location</String>
+                <String Id="Property_CertificateMode">Certificate Source</String>
+                <String Id="Property_CertificateName">Certificate Name</String>
+                <String Id="Property_CertificateStore">Certificate Store</String>
+                <String Id="Property_Directory">Directory</String>
+                <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
+                <String Id="Property_NewKeyPair">A new key pair will be generated</String>
+                <String Id="Property_NgrokAuthToken">Authentication Token</String>
+                <String Id="Property_NgrokHttpDomain">Domain</String>
+                <String Id="Property_NgrokRemoteAddress">TCP Address</String>
+                <String Id="Property_PrivateKeyFile">Private Key File</String>
+                <String Id="Property_PublicKeyFile">Public Key File</String>
+                <String Id="Property_ServiceStart">Service Start Mode</String>
+                <String Id="Property_WebPassword">Default Password</String>
+                <String Id="Property_WebUsername">Default Username</String>
+                    <!-- dialogs.ngrok.- -->
+                <String Id="AuthToken">Auth Token</String>
+                <String Id="Configure">Configure</String>
+                <String Id="Domain">Domain</String>
+                <String Id="NativeClientAccess">Native Client Access</String>
+                <String Id="NgrokListenersDlgDescription">ngrok listener configuration.</String>
+                <String Id="NgrokListenersDlgTitle">ngrok</String>
+                <String Id="RemoteAddress">Remote Address</String>
+                <String Id="UseNgrokForSimplifiedRemoteAccess">Use ngrok for simplified remote access from the Internet. Gateway listeners allow access from any IP address by default.</String>
+                    <!-- dialogs.webApp.- -->
+                <String Id="Authentication">Authentication</String>
+                <String Id="ChooseTheAuthenticationMethod">Choose the authentication method used when accessing the web application</String>
+                <String Id="ConfirmPassword">Confirm Password</String>
+                <String Id="DefaultUser">Default User</String>
+                <String Id="Password">Password</String>
+                <String Id="Username">Username</String>
+                <String Id="WebAppDlgDescription">Configuration for the embedded web application.</String>
+                <String Id="WebAppDlgTitle">Web Application Options</String>
+                    <!-- dialogs.customize.- -->
+                <String Id="ConfigurationOptions">Configuration Options</String>
+                <String Id="ConfigureTheGatewayInstallation">Configure the Gateway installation</String>
+                <String Id="EnableAccessOverTheInternetUsingNgrok">Enable access over the internet using ngrok</String>
+                <String Id="EnableTheGatewayWebInterface">Enable the Gateway web interface</String>
+                <String Id="GenerateASelfSignedHttpsCertificate">Generate a self-signed HTTPS certificate</String>
+                <String Id="GenerateEncryptionKeys">Generate encryption keys</String>
+                <String Id="RecommendedForCompanionInstallations">Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.</String>
+                <String Id="RecommendedForStandaloneInstallations">Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.</String>
+                    <!-- dialogs.accessUri.- -->
+                <String Id="AccessUriDlgExplanation">The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS).</String>
+                <String Id="AccessUriDlgHttpWarn">An insecure external URI is not recommended for production environments</String>
+                    <!-- dialogs.certificate.- -->
+                <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
+                <String Id="CertificateSource">Certificate Source</String>
+                <String Id="CertificateStore">Certificate Store</String>
+                <String Id="EncryptedPrivateKeysAreNotSupported">Encrypted private keys are not supported</String>
+                <String Id="Search">Search</String>
+                <String Id="SearchBy">Search By</String>
+                <String Id="SearchForACertificateToUse">Search for a certificate to use</String>
+                <String Id="SelectedCertificate">Selected Certificate</String>
+                <String Id="SelectTheCertificateToUse">Select the certificate to use</String>
+                <String Id="StoreLocation">Store Location</String>
+                    <!-- dialogs.listeners.- -->
+                <String Id="AnHttpListenerDoesNotRequireACert">An HTTP listener does not require a certificate.</String>
+                <String Id="AnHttpsListenerRequiresACert">An HTTPS listener requires a certificate. You will be prompted to configure one.</String>
+                <String Id="AnHttpsListenerRequiresACertSelfSigned">An HTTPS listener requires a certificate. The self-signed certificate generated by this installer is not trusted by default.</String>
+                <String Id="ChosenPortAvailable">The chosen port is available</String>
+                <String Id="ChosenPortCouldNotBeChecked">The chosen port could not be checked</String>
+                <String Id="ChosenPortNotAvailable">The chosen port might not be available</String>
+                <String Id="InvalidPort">Invalid port</String>
+                    <!-- dialogs.keys.- -->
+                <String Id="PrivateKeyFile">Private Key File</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Provide an encryption key pair for token generation and verification.</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenVerification">Provide an encryption key for token verification.</String>
+                <String Id="ProvideAPublicKeyForTokenVerification">Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server).</String>
+                <String Id="PublicKeyDlgDescription">Keys for token creation and verification.</String>
+                <String Id="PublicKeyFile">Public Key File</String>
+                <String Id="ThePrivateKeyIsUsedTo">The private key is used to generate session tokens for the standalone web application</String>
+                <String Id="ThePublicKeyIsUsedTo">The public key is used to verify tokens without specific restrictions</String>
+                    </WixLocalization>

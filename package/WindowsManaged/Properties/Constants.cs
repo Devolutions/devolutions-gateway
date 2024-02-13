@@ -1,31 +1,7 @@
 ﻿namespace DevolutionsGateway.Properties
 {
-    public class Constants
+    public partial class Constants
     {
-        public enum CertificateMode
-        {
-            External,
-            System
-        }
-
-        public enum CertificateFindType
-        {
-            Thumbprint,
-            SubjectName
-        }
-
-        public enum AuthenticationMode
-        {
-            None,
-            Custom,
-        }
-
-        internal const string HttpProtocol = "http";
-
-        internal const string HttpsProtocol = "https";
-
-        internal const string TcpProtocol = "tcp";
-
         internal const string SetDGatewayHostnameCommandFormat = "Set-DGatewayHostname {0}";
 
         internal const string SetDGatewayListenersCommandFormat = "$httpListener = New-DGatewayListener '{0}' '{1}'; $tcpListener = New-DGatewayListener 'tcp://*:{2}' 'tcp://*:{3}'; $listeners = $httpListener, $tcpListener; Set-DGatewayListeners $listeners";
@@ -43,5 +19,13 @@
         internal const string NewDGatewayCertificateCommand = "New-DGatewayCertificate";
 
         internal const string NewDGatewayProvisionerKeyPairCommand = "New-DGatewayProvisionerKeyPair -Force";
+
+        internal const string NgrokUrl = "www.ngrok.com";
+
+        internal const string NgrokAuthTokenUrl = "https://dashboard.ngrok.com/get-started/your-authtoken";
+
+        internal const string NgrokDomainsUrl = "https://dashboard.ngrok.com/cloud-edge/domains";
+
+        internal const string NgrokTcpAddressesUrl = "https://dashboard.ngrok.com/cloud-edge/tcp-addresses";
     }
 }

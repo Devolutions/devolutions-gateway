@@ -1,0 +1,286 @@
+{
+  "WixLocalization": {
+    "strings": {
+      "metadata": [
+        {
+          "id": "Language",
+          "text": "1036"
+        },
+        {
+          "id": "VendorName",
+          "text": "Devolutions"
+        },
+        {
+          "id": "VendorFullName",
+          "text": "Devolutions Inc."
+        },
+        {
+          "id": "ProductDescription",
+          "text": "Accès et soutien à distance instantanés."
+        }
+      ],
+
+      "messages": [
+        {
+          "id": "ThereIsAProblemWithTheEnteredData",
+          "text": "Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau."
+        },
+        {
+          "id": "YouMustEnterAValidPort",
+          "text": "Vous devez entrer un numéro de port valide"
+        },
+        {
+          "id": "YouMustProvideAValidHostname",
+          "text": "Vous devez fournir un nom d'hôte valide"
+        },
+        {
+          "id": "YouMustProvideAValidCertificateAndPasswordOrKey",
+          "text": "Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée"
+        },
+        {
+          "id": "TheSpecifiedFileWasInvalidOrNotAccessible",
+          "text": "Le chemin de fichier spécifié est invalide ou inaccessible"
+        },
+      {
+          "id": "OS2Old",
+          "text": "Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum."
+        },
+        {
+          "id": "NewerInstalled",
+          "text": "Une version plus récente de ce produit est déjà installée."
+        },
+        {
+          "id": "x64VersionRequired",
+          "text": "Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows."
+        },
+        {
+          "id": "x86VersionRequired",
+          "text": "Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows."
+        }
+      ],
+      "properties": [
+        {
+          "id": "Property_CertificateFile",
+          "text": "Fichier de certificat"
+        },
+        {
+          "id": "Property_CertificatePassword",
+          "text": "Mot de passe du certificat"
+        },
+        {
+          "id": "Property_CertificatePrivateKeyFile",
+          "text": "Fichier de clée privée"
+        },
+        {
+          "id": "Property_AccessUri",
+          "text": "URI d'accès"
+        },
+        {
+          "id": "Property_HttpListener",
+          "text": "Écouteur HTTP"
+        },
+        {
+          "id": "Property_TcpListener",
+          "text": "Écouteur TCP"
+        }
+      ],
+      "dialogs": {
+        "static": [
+          {
+            "id": "GatewayDlg_Title",
+            "text": "Installation de [ProductName]"
+          }
+        ],
+        "browse": [
+          {
+            "id": "BrowseDlgTitle",
+            "text": "Modifier le dossier de destination"
+          },
+          {
+            "id": "BrowseDlgDescription",
+            "text": "Sélectionnez le dossier de destination"
+          }
+        ],
+        "installDir": [
+          {
+            "id": "InstallDirDlgTitle",
+            "text": "Dossier de destination"
+          },
+          {
+            "id": "InstallDirDlgDescription",
+            "text": "Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier."
+          }
+        ],
+        "progress": [
+          {
+            "id": "ProgressDlgTitleInstalling",
+            "text": "Installation de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleChanging",
+            "text": "Modification de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRepairing",
+            "text": "Réparation de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRemoving",
+            "text": "Suppression de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleUpdating",
+            "text": "Mise à jour de [ProductName]"
+          }
+        ],
+        "verifyReady": [
+          {
+            "id": "VerifyReadyDlgInstallTitle",
+            "text": "Prêt pour l'installation de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgChangeTitle",
+            "text": "Prêt pour la modification de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRepairTitle",
+            "text": "Prêt pour la réparation de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRemoveTitle",
+            "text": "Prêt pour la suppression de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgUpdateTitle",
+            "text": "Prêt pour la mise à jour de [ProductName]"
+          }
+        ],
+        "welcome": [
+          {
+            "id": "WelcomeDlgTitle",
+            "overridable": "yes",
+            "text": "Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]"
+          }
+        ],
+        "customize": [
+          {
+            "id": "CustomInstallDlgTitle",
+            "text": "Configuration"
+          },
+          {
+            "id": "CustomInstallDlgDescription",
+            "text": "Veuillez choisir comment configurer [ProductName]."
+          },
+          {
+            "id": "CustomInstallDlgInfoLabel",
+            "text": "L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant."
+          }
+        ],
+        "accessUri": [
+          {
+            "id": "AccessUriDlgTitle",
+            "text": "URL Externe"
+          },
+          {
+            "id": "AccessUriDlgDescription",
+            "text": "URL pour rejoindre [ProductName]."
+          }
+        ],
+        "certificate": [
+          {
+            "id": "CertificateDlgTitle",
+            "text": "Certificat"
+          },
+          {
+            "id": "CertificateDlgDescription",
+            "text": "Un certificat est nécessaire pour utiliser HTTPS."
+          },
+          {
+            "id": "CertificateDlgCertConfigLabel",
+            "text": "Configuration de certificat"
+          },
+          {
+            "id": "CertificateDlgCertFileLabel",
+            "text": "Fichier de certificat"
+          },
+          {
+            "id": "CertificateDlgCertPasswordLabel",
+            "text": "Mot de passe du certificat"
+          },
+          {
+            "id": "CertificateDlgCertKeyFileLabel",
+            "text": "Fichier de clé privée"
+          }
+        ],
+        "listeners": [
+          {
+            "id": "ListenersDlgTitle",
+            "text": "Écouteurs"
+          },
+          {
+            "id": "ListenersDlgDescription",
+            "text": "Écouteurs HTTP(S) et TCP."
+          },
+          {
+            "id": "ListenersDlgListenersLabel",
+            "text": "Écouteurs"
+          },
+          {
+            "id": "ListenersDlgHTTPLabel",
+            "text": "Écouteur HTTP"
+          },
+          {
+            "id": "ListenersDlgTCPLabel",
+            "text": "Écouteur TCP"
+          }
+        ],
+        "keys": [
+          {
+            "id": "PublicKeyDlgTitle",
+            "text": "Paire de clés"
+          }
+        ],
+        "summary": [
+          {
+            "id": "SummaryDlgTitle",
+            "text": "Résumé"
+          },
+          {
+            "id": "SummaryDlgDescription",
+            "text": "Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière."
+          }
+        ],
+        "firewall": [
+          {
+            "id": "msierrFirewallCannotConnect",
+            "text": "Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsInstall",
+            "text": "Configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsUninstall",
+            "text": "Configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsInstall",
+            "text": "Restauration de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixExecFirewallExceptionsInstall",
+            "text": "Installation de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsUninstall",
+            "text": "Restauration de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixExecFirewallExceptionsUninstall",
+            "text": "Désinstallation de la configuration du Pare-feu Windows"
+          }
+        ]
+      }
+    }
+  }
+}

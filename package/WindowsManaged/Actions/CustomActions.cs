@@ -834,8 +834,8 @@ namespace DevolutionsGateway.Actions
                     {
                         string tempFilePath = tempFilePathBuilder.ToString().TrimStart('\\', '?');
 
-                        using FileStream fileStream = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                        using StreamReader streamReader = new StreamReader(fileStream);
+                        using FileStream fileStream = new(tempFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        using StreamReader streamReader = new(fileStream);
                         result = streamReader.ReadToEnd();
                     }
                 }

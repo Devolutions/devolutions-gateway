@@ -2,6 +2,7 @@ using System;
 using System.Windows.Forms;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
+using DevolutionsGateway.Resources;
 using WixSharp;
 using File = System.IO.File;
 
@@ -20,7 +21,7 @@ public partial class PublicKeyDialog : GatewayDialog
     {
         if (string.IsNullOrWhiteSpace(this.txtPublicKeyFile.Text) || !File.Exists(this.txtPublicKeyFile.Text.Trim()))
         {
-            ShowValidationError("Error29996");
+            ShowValidationError(I18n(Strings.TheSpecifiedFileWasInvalidOrNotAccessible));
             return false;
         }
 
@@ -28,7 +29,7 @@ public partial class PublicKeyDialog : GatewayDialog
         {
             if (string.IsNullOrWhiteSpace(this.txtPrivateKeyFile.Text) || !File.Exists(this.txtPrivateKeyFile.Text.Trim()))
             {
-                ShowValidationError("Error29996");
+                ShowValidationError(I18n(Strings.TheSpecifiedFileWasInvalidOrNotAccessible));
                 return false;
             }
         }
@@ -49,11 +50,11 @@ public partial class PublicKeyDialog : GatewayDialog
 
         if (properties.ConfigureWebApp)
         {
-            this.lblKeysDescription.Text = "Provide an encryption key pair for token generation and verification.";
+            this.lblKeysDescription.Text = I18n(Strings.ProvideAnEncryptionKeyPairForTokenCreationVerification);
         }
         else
         {
-            this.lblKeysDescription.Text = "Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server).";
+            this.lblKeysDescription.Text = I18n(Strings.ProvideAPublicKeyForTokenVerification);
         }
 
         this.SetControlStates();
@@ -101,11 +102,10 @@ public partial class PublicKeyDialog : GatewayDialog
     {
 
     }
-
+    
     private void butBrowsePublicKeyFile_Click(object sender, EventArgs e)
     {
-        // TODO: (rmarkiewicz) localization
-        const string filter = "Public Key Files (*.pem)|*.pem|Private Key Files (*.key)|*.key|All Files|*.*";
+        string filter = $"{I18n(Strings.Filter_PublicKeyFiles)}|*.pem|{I18n(Strings.Filter_PrivateKeyFiles)}|*.key|{I18n(Strings.Filter_AllFiles)}|*.*";
         string file = this.BrowseForFile(filter);
 
         if (!string.IsNullOrEmpty(file))
@@ -116,8 +116,7 @@ public partial class PublicKeyDialog : GatewayDialog
 
     private void butBrowsePrivateKeyFile_Click(object sender, EventArgs e)
     {
-        // TODO: (rmarkiewicz) localization
-        const string filter = "Public Key Files (*.pem)|*.pem|Private Key Files (*.key)|*.key|All Files|*.*";
+        string filter = $"{I18n(Strings.Filter_PublicKeyFiles)}|*.pem|{I18n(Strings.Filter_PrivateKeyFiles)}|*.key|{I18n(Strings.Filter_AllFiles)}|*.*";
         string file = this.BrowseForFile(filter);
 
         if (!string.IsNullOrEmpty(file))
@@ -131,7 +130,7 @@ public partial class PublicKeyDialog : GatewayDialog
         using OpenFileDialog ofd = new();
         ofd.CheckFileExists = true;
         ofd.Multiselect = false;
-        ofd.Title = base.Localize("BrowseDlg_Title");
+        ofd.Title = I18n("[BrowseDlg_Title]");
         ofd.Filter = filter;
 
         return ofd.ShowDialog(this) == DialogResult.OK ? ofd.FileName : null;

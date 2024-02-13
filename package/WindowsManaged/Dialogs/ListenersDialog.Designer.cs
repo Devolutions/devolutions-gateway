@@ -116,12 +116,12 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.Controls.Add(this.label7, 1, 1);
             this.tableLayoutPanel2.Controls.Add(this.label3, 0, 0);
             this.tableLayoutPanel2.Controls.Add(this.txtHttpPort, 2, 2);
-            this.tableLayoutPanel2.Controls.Add(this.cmbHttpProtocol, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.txtHttpHostname, 1, 2);
             this.tableLayoutPanel2.Controls.Add(this.label4, 0, 4);
             this.tableLayoutPanel2.Controls.Add(this.txtTcpPort, 2, 6);
             this.tableLayoutPanel2.Controls.Add(this.txtTcpHostname, 1, 6);
             this.tableLayoutPanel2.Controls.Add(this.cmbTcpProtocol, 0, 6);
+            this.tableLayoutPanel2.Controls.Add(this.cmbHttpProtocol, 0, 2);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.RowCount = 7;
@@ -145,7 +145,7 @@ namespace WixSharpSetup.Dialogs
             this.lblHttpsDescription.Name = "lblHttpsDescription";
             this.lblHttpsDescription.Size = new System.Drawing.Size(443, 35);
             this.lblHttpsDescription.TabIndex = 14;
-            this.lblHttpsDescription.Text = "An HTTPS listener requires a certificate.";
+            this.lblHttpsDescription.Text = "[AnHttpsListenerRequiresACert]";
             // 
             // label8
             // 
@@ -153,9 +153,9 @@ namespace WixSharpSetup.Dialogs
             this.label8.Location = new System.Drawing.Point(406, 133);
             this.label8.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label8.Name = "label8";
-            this.label8.Size = new System.Drawing.Size(26, 13);
+            this.label8.Size = new System.Drawing.Size(32, 13);
             this.label8.TabIndex = 13;
-            this.label8.Text = "Port";
+            this.label8.Text = "[Port]";
             // 
             // label9
             // 
@@ -163,9 +163,9 @@ namespace WixSharpSetup.Dialogs
             this.label9.Location = new System.Drawing.Point(3, 133);
             this.label9.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label9.Name = "label9";
-            this.label9.Size = new System.Drawing.Size(46, 13);
+            this.label9.Size = new System.Drawing.Size(52, 13);
             this.label9.TabIndex = 12;
-            this.label9.Text = "Protocol";
+            this.label9.Text = "[Protocol]";
             // 
             // label10
             // 
@@ -173,9 +173,9 @@ namespace WixSharpSetup.Dialogs
             this.label10.Location = new System.Drawing.Point(79, 133);
             this.label10.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label10.Name = "label10";
-            this.label10.Size = new System.Drawing.Size(29, 13);
+            this.label10.Size = new System.Drawing.Size(35, 13);
             this.label10.TabIndex = 11;
-            this.label10.Text = "Host";
+            this.label10.Text = "[Host]";
             // 
             // label5
             // 
@@ -183,9 +183,9 @@ namespace WixSharpSetup.Dialogs
             this.label5.Location = new System.Drawing.Point(406, 24);
             this.label5.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(26, 13);
+            this.label5.Size = new System.Drawing.Size(32, 13);
             this.label5.TabIndex = 10;
-            this.label5.Text = "Port";
+            this.label5.Text = "[Port]";
             // 
             // label6
             // 
@@ -193,9 +193,9 @@ namespace WixSharpSetup.Dialogs
             this.label6.Location = new System.Drawing.Point(3, 24);
             this.label6.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label6.Name = "label6";
-            this.label6.Size = new System.Drawing.Size(46, 13);
+            this.label6.Size = new System.Drawing.Size(52, 13);
             this.label6.TabIndex = 9;
-            this.label6.Text = "Protocol";
+            this.label6.Text = "[Protocol]";
             // 
             // label7
             // 
@@ -203,9 +203,9 @@ namespace WixSharpSetup.Dialogs
             this.label7.Location = new System.Drawing.Point(79, 24);
             this.label7.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label7.Name = "label7";
-            this.label7.Size = new System.Drawing.Size(29, 13);
+            this.label7.Size = new System.Drawing.Size(35, 13);
             this.label7.TabIndex = 8;
-            this.label7.Text = "Host";
+            this.label7.Text = "[Host]";
             // 
             // label3
             // 
@@ -435,7 +435,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "ListenersDialog";
-            this.Text = "[ListenersDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);

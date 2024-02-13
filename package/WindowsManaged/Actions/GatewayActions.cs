@@ -459,16 +459,15 @@ internal static class GatewayActions
         conditions.Add(new Condition("NOT Installed OR REINSTALL"));
         conditions.Add(GatewayProperties.configureGateway.Equal(true));
 
-        Condition condition = new Condition(string.Join(" AND ", conditions.Select(x => $"({x})")));
+        Condition condition = new(string.Join(" AND ", conditions.Select(x => $"({x})")));
 
-        ElevatedManagedAction action = new ElevatedManagedAction(
+        ElevatedManagedAction action = new(
             new Id(id), method, Return.check, when, step, condition, Sequence.InstallExecuteSequence)
         {
             UsesProperties = UseProperties(properties),
+            AttributesDefinition = $"HideTarget={(hide ? "yes" : "no")}"
         };
 
-        action.AttributesDefinition = $"HideTarget={(hide ? "yes" : "no")}";
-        
         return action;
     }
 
