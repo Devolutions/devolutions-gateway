@@ -23,10 +23,15 @@ pub fn mdns_query_scan(
         .when_finished(move || {
             tracing::debug!("mdns meta query finished");
             while let Err(e) = service_deamon_clone.stop_browse(META_QUERY) {
-                if let mdns_sd::Error::Again = e {
-                    continue;
+                match e {
+                    mdns_sd::Error::Again => {
+                        tracing::trace!("mdns stop_browse transient error, trying again");
+                    }
+                    fatal => {
+                        tracing::error!(error = %fatal, "mdns stop_browse fatal error");
+                        break;
+                    }
                 }
-                tracing::error!("mdns stop browse error: {}", e);
             }
         })
         .spawn(move |task_manager| async move {
