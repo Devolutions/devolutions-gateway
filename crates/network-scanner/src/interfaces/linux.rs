@@ -188,8 +188,6 @@ impl TryFrom<RouteMessage> for RouteInfo {
             })
             .context("No index found")?;
 
-        let _destination_prefix_len = value.header.destination_prefix_length;
-
         let route_info = RouteInfo { gateway, index };
 
         Ok(route_info)
@@ -213,21 +211,6 @@ impl TryFrom<AddressMessage> for AddressInfo {
             .context("No address found")?;
 
         let prefix_len = value.header.prefix_len;
-
-        let _broadcast = value
-            .attributes
-            .iter()
-            .find_map(|attr| {
-                if let AddressAttribute::Broadcast(broadcast) = attr {
-                    Some(broadcast)
-                } else {
-                    None
-                }
-            })
-            .copied();
-
-        let _flags = value.header.flags;
-        let _index = value.header.index;
 
         let address_info = AddressInfo {
             address: *addr,
@@ -265,14 +248,6 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
                 }
             })
             .context("No mac address found")?;
-
-        let _broadcast = msg.attributes.iter().find_map(|attr| {
-            if let LinkAttribute::Broadcast(broadcast) = attr {
-                Some(broadcast)
-            } else {
-                None
-            }
-        });
 
         let index = msg.header.index;
         let flags = msg.header.flags;
