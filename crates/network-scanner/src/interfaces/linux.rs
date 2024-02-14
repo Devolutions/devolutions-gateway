@@ -28,7 +28,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             let addresses = match get_address(handle, link.clone()).await {
                 Ok(res) => res,
                 Err(e) => {
-                    tracing::error!("Error getting address: {:?}", e);
+                    tracing::error!("error getting address: {:?}", e);
                     continue;
                 }
             };
@@ -40,14 +40,14 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
                 .collect::<Result<Vec<_>, _>>();
 
             let Ok(address) = address else {
-                tracing::error!("Error parsing address: {:?}", address);
+                tracing::error!("error parsing address: {:?}", address);
                 continue;
             };
 
             link.addresses = address;
 
             if let Err(e) = link_sender.send(link) {
-                tracing::error!("Error sending link: {:?}", e);
+                tracing::error!("error sending link: {:?}", e);
                 break;
             }
         }
@@ -62,7 +62,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
-                    tracing::error!("Error parsing route: {:?}", e);
+                    tracing::error!("error parsing route: {:?}", e);
                     continue;
                 }
             };
@@ -73,7 +73,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
-                    tracing::error!("Error parsing route: {:?}", e);
+                    tracing::error!("error parsing route: {:?}", e);
                     continue;
                 }
             };
