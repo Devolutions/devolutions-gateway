@@ -3,7 +3,7 @@ using DevolutionsGateway.Actions;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Properties;
-
+using DevolutionsGateway.Resources;
 using WixSharp;
 
 namespace WixSharpSetup.Dialogs
@@ -20,6 +20,9 @@ namespace WixSharpSetup.Dialogs
 
             label1.MakeTransparentOn(banner);
             label2.MakeTransparentOn(banner);
+
+            this.pictureBox1.Image =
+                StockIcon.GetStockIcon(StockIcon.SIID_WARNING, StockIcon.SHGSI_SMALLICON).ToBitmap();
 
             this.cmbProtocol.DataSource = Protocols;
         }
@@ -41,17 +44,12 @@ namespace WixSharpSetup.Dialogs
 
         public override bool ToProperties()
         {
-            GatewayProperties properties = new(this.Runtime.Session)
+            GatewayProperties _ = new(this.Runtime.Session)
             {
                 AccessUriScheme = this.cmbProtocol.SelectedValue.ToString(),
                 AccessUriHost = this.txtHostname.Text.Trim(),
                 AccessUriPort = Convert.ToUInt32(this.txtPort.Text.Trim())
             };
-
-            if (properties.AccessUriScheme == Constants.HttpProtocol)
-            {
-                properties.HttpListenerScheme = Constants.HttpProtocol;
-            }
 
             return true;
         }
@@ -60,13 +58,13 @@ namespace WixSharpSetup.Dialogs
         {
             if (string.IsNullOrWhiteSpace(this.txtHostname.Text))
             {
-                ShowValidationError("Error30000");
+                ShowValidationError(I18n(Strings.YouMustProvideAValidHostname));
                 return false;
             }
 
             if (string.IsNullOrWhiteSpace(this.txtPort.Text) || !Validation.IsValidPort(this.txtPort.Text, out uint _))
             {
-                ShowValidationError("Error29999");
+                ShowValidationError(I18n(Strings.YouMustEnterAValidPort));
                 return false;
             }
 
@@ -87,6 +85,8 @@ namespace WixSharpSetup.Dialogs
 
             WinAPI.SendMessage(this.txtHostname.Handle, WinAPI.EM_SETCUEBANNER, 0, "dev.devolutions.net");
 
+            this.SetControlStates();
+
             base.OnLoad(sender, e);
         }
 
@@ -98,6 +98,12 @@ namespace WixSharpSetup.Dialogs
 
         // ReSharper disable once RedundantOverriddenMember
         protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);
+
+        private void SetControlStates()
+        {
+            this.pictureBox1.Visible = this.lblHttpWarn.Visible =
+                this.cmbProtocol.SelectedValue.ToString() == Constants.HttpProtocol;
+        }
 
         private void cmbProtocol_SelectedIndexChanged(object sender, EventArgs e)
         {
@@ -125,6 +131,8 @@ namespace WixSharpSetup.Dialogs
                     this.txtPort.Text = "80";
                 }
             }
+
+            this.SetControlStates();
         }
     }
 }

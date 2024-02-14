@@ -123,7 +123,7 @@ namespace WixSharpSetup.Dialogs
             this.lblPublicKeyDescription.Name = "lblPublicKeyDescription";
             this.lblPublicKeyDescription.Size = new System.Drawing.Size(443, 35);
             this.lblPublicKeyDescription.TabIndex = 0;
-            this.lblPublicKeyDescription.Text = "Choose the authentication method used when accessing the web application";
+            this.lblPublicKeyDescription.Text = "[ChooseTheAuthenticationMethod]";
             // 
             // lblAuthentication
             // 
@@ -132,9 +132,9 @@ namespace WixSharpSetup.Dialogs
             this.lblAuthentication.Location = new System.Drawing.Point(3, 40);
             this.lblAuthentication.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblAuthentication.Name = "lblAuthentication";
-            this.lblAuthentication.Size = new System.Drawing.Size(75, 24);
+            this.lblAuthentication.Size = new System.Drawing.Size(81, 24);
             this.lblAuthentication.TabIndex = 1;
-            this.lblAuthentication.Text = "Authentication";
+            this.lblAuthentication.Text = "[Authentication]";
             this.lblAuthentication.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // cmbAuthentication
@@ -142,10 +142,10 @@ namespace WixSharpSetup.Dialogs
             this.cmbAuthentication.Dock = System.Windows.Forms.DockStyle.Fill;
             this.cmbAuthentication.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbAuthentication.FormattingEnabled = true;
-            this.cmbAuthentication.Location = new System.Drawing.Point(84, 43);
+            this.cmbAuthentication.Location = new System.Drawing.Point(90, 43);
             this.cmbAuthentication.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.cmbAuthentication.Name = "cmbAuthentication";
-            this.cmbAuthentication.Size = new System.Drawing.Size(362, 21);
+            this.cmbAuthentication.Size = new System.Drawing.Size(356, 21);
             this.cmbAuthentication.TabIndex = 0;
             this.cmbAuthentication.SelectedIndexChanged += new System.EventHandler(this.cmbAuthentication_SelectedIndexChanged);
             // 
@@ -159,7 +159,7 @@ namespace WixSharpSetup.Dialogs
             this.gbUser.Size = new System.Drawing.Size(443, 100);
             this.gbUser.TabIndex = 10;
             this.gbUser.TabStop = false;
-            this.gbUser.Text = "Default User";
+            this.gbUser.Text = "[DefaultUser]";
             // 
             // tableLayoutPanel3
             // 
@@ -190,19 +190,19 @@ namespace WixSharpSetup.Dialogs
             this.lblUsername.Location = new System.Drawing.Point(3, 0);
             this.lblUsername.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblUsername.Name = "lblUsername";
-            this.lblUsername.Size = new System.Drawing.Size(91, 23);
+            this.lblUsername.Size = new System.Drawing.Size(94, 23);
             this.lblUsername.TabIndex = 3;
-            this.lblUsername.Text = "Username";
+            this.lblUsername.Text = "[Username]";
             this.lblUsername.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // txtUsername
             // 
             this.txtUsername.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtUsername.Location = new System.Drawing.Point(100, 3);
+            this.txtUsername.Location = new System.Drawing.Point(103, 3);
             this.txtUsername.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtUsername.MaxLength = 256;
             this.txtUsername.Name = "txtUsername";
-            this.txtUsername.Size = new System.Drawing.Size(334, 20);
+            this.txtUsername.Size = new System.Drawing.Size(331, 20);
             this.txtUsername.TabIndex = 0;
             // 
             // lblPassword
@@ -212,19 +212,19 @@ namespace WixSharpSetup.Dialogs
             this.lblPassword.Location = new System.Drawing.Point(3, 28);
             this.lblPassword.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblPassword.Name = "lblPassword";
-            this.lblPassword.Size = new System.Drawing.Size(91, 23);
+            this.lblPassword.Size = new System.Drawing.Size(94, 23);
             this.lblPassword.TabIndex = 6;
-            this.lblPassword.Text = "Password";
+            this.lblPassword.Text = "[Password]";
             this.lblPassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // txtPassword
             // 
             this.txtPassword.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtPassword.Location = new System.Drawing.Point(100, 31);
+            this.txtPassword.Location = new System.Drawing.Point(103, 31);
             this.txtPassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtPassword.MaxLength = 256;
             this.txtPassword.Name = "txtPassword";
-            this.txtPassword.Size = new System.Drawing.Size(334, 20);
+            this.txtPassword.Size = new System.Drawing.Size(331, 20);
             this.txtPassword.TabIndex = 1;
             this.txtPassword.UseSystemPasswordChar = true;
             // 
@@ -235,19 +235,19 @@ namespace WixSharpSetup.Dialogs
             this.lblPassword2.Location = new System.Drawing.Point(3, 56);
             this.lblPassword2.Margin = new System.Windows.Forms.Padding(3, 0, 3, 5);
             this.lblPassword2.Name = "lblPassword2";
-            this.lblPassword2.Size = new System.Drawing.Size(91, 23);
+            this.lblPassword2.Size = new System.Drawing.Size(94, 23);
             this.lblPassword2.TabIndex = 8;
-            this.lblPassword2.Text = "Confirm Password";
+            this.lblPassword2.Text = "[ConfirmPassword]";
             this.lblPassword2.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // txtPassword2
             // 
             this.txtPassword2.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtPassword2.Location = new System.Drawing.Point(100, 59);
+            this.txtPassword2.Location = new System.Drawing.Point(103, 59);
             this.txtPassword2.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
             this.txtPassword2.MaxLength = 256;
             this.txtPassword2.Name = "txtPassword2";
-            this.txtPassword2.Size = new System.Drawing.Size(334, 20);
+            this.txtPassword2.Size = new System.Drawing.Size(331, 20);
             this.txtPassword2.TabIndex = 2;
             this.txtPassword2.UseSystemPasswordChar = true;
             // 
@@ -395,7 +395,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "WebClientDialog";
-            this.Text = "[WebAppDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);

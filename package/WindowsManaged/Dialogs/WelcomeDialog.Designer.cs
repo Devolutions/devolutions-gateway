@@ -84,7 +84,7 @@ namespace WixSharpSetup.Dialogs
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(317, 61);
             this.label1.TabIndex = 2;
-            this.label1.Text = "[WelcomeDlgTitleX]";
+            this.label1.Text = "[WelcomeDlgTitle]";
             // 
             // label2
             // 

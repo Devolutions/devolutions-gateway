@@ -157,12 +157,12 @@ namespace WixSharpSetup.Dialogs
             // 
             // label2
             // 
-            this.label2.AutoSize = true;
+            this.label2.AutoEllipsis = true;
             this.label2.BackColor = System.Drawing.Color.Transparent;
             this.label2.ForeColor = System.Drawing.SystemColors.HighlightText;
             this.label2.Location = new System.Drawing.Point(18, 31);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(122, 13);
+            this.label2.Size = new System.Drawing.Size(409, 24);
             this.label2.TabIndex = 1;
             this.label2.Text = "[InstallDirDlgDescription]";
             // 
@@ -276,7 +276,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "InstallDirDialog";
-            this.Text = "[InstallDirDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);

@@ -5,6 +5,8 @@ using System;
 using DevolutionsGateway.Actions;
 using WixSharp;
 using System.Windows.Forms;
+using DevolutionsGateway.Helpers;
+using DevolutionsGateway.Resources;
 
 namespace WixSharpSetup.Dialogs;
 
@@ -15,31 +17,20 @@ public partial class NgrokListenersDialog : GatewayDialog
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-
-        this.lnkAuthToken.Text = "Provide your authentication token";
-        this.lnkAuthToken.LinkArea = new LinkArea(13, 20);
-
-        this.lnkDomain.Text = "The domain for web client access";
-        this.lnkDomain.LinkArea = new LinkArea(4, 6);
-
-        this.lnkRemoteAddr.Text = "The TCP address for native client access";
-        this.lnkRemoteAddr.LinkArea = new LinkArea(4, 11);
-
-        this.cmbNativeClient.DataSource = new[] {"Now", "Later"};
     }
 
     public override bool DoValidate()
     {
         if (string.IsNullOrWhiteSpace(this.txtAuthToken.Text.Trim()))
         {
-            ShowValidationErrorString("The auth token is required");
+            ShowValidationErrorString(I18n(Strings.AuthenticationTokenIsRequired));
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(this.txtDomain.Text.Trim()) || 
             Uri.CheckHostName(this.txtDomain.Text.Trim()) == UriHostNameType.Unknown)
         {
-            ShowValidationErrorString("The domain is required and must be a valid hostname");
+            ShowValidationErrorString(I18n(Strings.DomainIsRequiredAndMustBeValid));
             return false;
         }
 
@@ -47,14 +38,14 @@ public partial class NgrokListenersDialog : GatewayDialog
         {
             if (string.IsNullOrWhiteSpace(this.txtRemoteAddress.Text.Trim()))
             {
-                ShowValidationErrorString("The remote address is required");
+                ShowValidationErrorString(I18n(Strings.RemoteAddressIsRequired));
                 return false;
             }
 
             if (!Uri.TryCreate($"tcp://{this.txtRemoteAddress.Text.Trim()}", UriKind.Absolute, out Uri uri) ||
                 !uri.Authority.Contains(":"))
             {
-                ShowValidationErrorString("The remote address must be a valid host and port in the format {host}:{port}");
+                ShowValidationErrorString(I18n(Strings.RemoteAddressMustBeInTheFormat));
                 return false;
             }
         }
@@ -68,7 +59,7 @@ public partial class NgrokListenersDialog : GatewayDialog
 
         this.txtAuthToken.Text = properties.NgrokAuthToken;
         this.txtDomain.Text = properties.NgrokHttpDomain;
-        this.cmbNativeClient.SelectedIndex = properties.NgrokEnableTcp ? 0 : 1;
+        this.cmbNativeClient.SetSelected(properties.NgrokEnableTcp ? Constants.CustomizeMode.Now : Constants.CustomizeMode.Later);
         this.txtRemoteAddress.Text = properties.NgrokRemoteAddress;
 
         this.SetControlStates();
@@ -83,7 +74,7 @@ public partial class NgrokListenersDialog : GatewayDialog
             NgrokRemoteAddress = this.txtRemoteAddress.Text.Trim(),
         };
 
-        properties.NgrokEnableTcp = this.cmbNativeClient.SelectedIndex == 0 || !properties.ConfigureWebApp;
+        properties.NgrokEnableTcp = this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now || !properties.ConfigureWebApp;
 
         return true;
     }
@@ -91,6 +82,12 @@ public partial class NgrokListenersDialog : GatewayDialog
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+        
+        this.lnkAuthToken.SetLink(this.MsiRuntime, Strings.NgrokProvideYourX, Strings.NgrokAuthTokenLink);
+        this.lnkDomain.SetLink(this.MsiRuntime, Strings.NgrokXForWebClientAccess, Strings.NgrokDomainLink);
+        this.lnkRemoteAddr.SetLink(this.MsiRuntime, Strings.NgroXForNativeClientAccess, Strings.NgrokTcpAddressLink);
+
+        this.cmbNativeClient.Source<Constants.CustomizeMode>(this.MsiRuntime);
 
         WinAPI.SendMessage(this.txtAuthToken.Handle, WinAPI.EM_SETCUEBANNER, 0, "4nq9771bPxe8ctg7LKr_2ClH7Y15Zqe4bWLWF9p");
         WinAPI.SendMessage(this.txtDomain.Handle, WinAPI.EM_SETCUEBANNER, 0, "demo.devolutions.net");
@@ -117,14 +114,38 @@ public partial class NgrokListenersDialog : GatewayDialog
         else
         {
             this.cmbNativeClient.Enabled = false;
-            this.cmbNativeClient.SelectedIndex = 0;
+            this.cmbNativeClient.SetSelected(Constants.CustomizeMode.Now);
         }
         
-        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled = this.lnkRemoteAddr.Enabled = this.cmbNativeClient.SelectedIndex == 0;
+        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled = this.lnkRemoteAddr.Enabled = 
+            this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now;
     }
     
     private void cmbNativeClient_SelectedIndexChanged(object sender, EventArgs e)
     {
         this.SetControlStates();
+    }
+
+    private void lnk_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+    {
+        string address = null;
+
+        if (sender == this.lnkAuthToken)
+        {
+            address = Constants.NgrokAuthTokenUrl;
+        }
+        else if (sender == this.lnkDomain)
+        {
+            address = Constants.NgrokDomainsUrl;
+        }
+        else if (sender == this.lnkRemoteAddr)
+        {
+            address = Constants.NgrokTcpAddressesUrl;
+        }
+
+        if (!string.IsNullOrEmpty(address))
+        {
+            System.Diagnostics.Process.Start(address);
+        }
     }
 }

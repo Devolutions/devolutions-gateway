@@ -36,12 +36,8 @@
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Update="Dialogs\NgrokListenersDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Update="Dialogs\WebClientDialog.cs">
-      <SubType>Form</SubType>
-    </Compile>
+    <Compile Update="Dialogs\NgrokListenersDialog.cs" />
+    <Compile Update="Dialogs\WebClientDialog.cs" />
     <Compile Update="Dialogs\SummaryDialog.cs" />
     <Compile Update="Dialogs\ServiceDialog.cs" />
     <Compile Update="Dialogs\PublicKeyDialog.cs" />
@@ -55,12 +51,22 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>GatewayProperties.g.tt</DependentUpon>
     </Compile>
+    <Compile Update="Resources\Strings.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.g.tt</DependentUpon>
+    </Compile>
     <None Include="Properties\GatewayProperties.g.cs">
       <DesignTime>True</DesignTime>
       <AutoGen>True</AutoGen>
       <DependentUpon>GatewayProperties.g.tt</DependentUpon>
     </None>
     <None Remove="wix\DevolutionsGateway.g.wxs" />
+    <None Include="Resources\Strings.g.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Strings.g.tt</DependentUpon>
+    </None>
     <None Include="wix\$(ProjectName).g.wxs" />
   </ItemGroup>
   <ItemGroup>
@@ -70,6 +76,10 @@
     <None Update="Properties\GatewayProperties.g.tt">
       <Generator>TextTemplatingFileGenerator</Generator>
       <LastGenOutput>GatewayProperties.g.cs</LastGenOutput>
+    </None>
+    <None Update="Resources\Strings.g.tt">
+      <Generator>TextTemplatingFileGenerator</Generator>
+      <LastGenOutput>Strings.g.cs</LastGenOutput>
     </None>
   </ItemGroup>
 </Project>

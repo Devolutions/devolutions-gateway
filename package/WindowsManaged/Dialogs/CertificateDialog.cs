@@ -1,12 +1,13 @@
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using DevolutionsGateway.Helpers;
+using DevolutionsGateway.Resources;
 using WixSharp;
 using static DevolutionsGateway.Properties.Constants;
 using File = System.IO.File;
@@ -17,37 +18,9 @@ namespace WixSharpSetup.Dialogs;
 
 public partial class CertificateDialog : GatewayDialog
 {
-    private static readonly string[] Locations =
-    {
-        "Current User", // StoreLocation.currentUser
-        "Local Machine", // StoreLocation.localMachine
-    };
+    private bool UseExternalCertificate => this.cmbCertificateSource.Selected<CertificateMode>() == CertificateMode.External;
 
-    private static readonly List<KeyValuePair<StoreName, string>> Stores = new()
-    {
-        new KeyValuePair<StoreName, string>(StoreName.My, "Personal"),
-        new KeyValuePair<StoreName, string>(StoreName.Root, "Trusted Root Certification Authorities"),
-        new KeyValuePair<StoreName, string>(StoreName.CertificateAuthority, "Intermediate Certification Authorities"),
-        new KeyValuePair<StoreName, string>(StoreName.TrustedPublisher, "Trusted Publishers"),
-        new KeyValuePair<StoreName, string>(StoreName.Disallowed, "Untrusted Certificates"),
-        new KeyValuePair<StoreName, string>(StoreName.AuthRoot, "Third-Party Root Certification Authorities"),
-        new KeyValuePair<StoreName, string>(StoreName.TrustedPeople, "Trusted People"),
-        new KeyValuePair<StoreName, string>(StoreName.AddressBook, "Other People")
-    };
-
-    private static string[] StoreNames => Stores.Select(x => x.Value).ToArray();
-
-    private static readonly List<KeyValuePair<Constants.CertificateFindType, string>> CertificateFindTypes = new()
-    {
-        new KeyValuePair<CertificateFindType, string>(CertificateFindType.Thumbprint, "Thumbprint"),
-        new KeyValuePair<CertificateFindType, string>(CertificateFindType.SubjectName, "Subject Name")
-    };
-
-    private static readonly string[] FindTypes = CertificateFindTypes.Select(x => x.Value).ToArray();
-    
-    private bool UseExternalCertificate => (Constants.CertificateMode)this.cmbCertificateSource.SelectedIndex == Constants.CertificateMode.External;
-
-    private bool UseSystemCertificate => (Constants.CertificateMode)this.cmbCertificateSource.SelectedIndex == Constants.CertificateMode.System;
+    private bool UseSystemCertificate => this.cmbCertificateSource.Selected<CertificateMode>() == CertificateMode.System;
 
     private X509Certificate2 SelectedCertificate
     {
@@ -60,18 +33,6 @@ public partial class CertificateDialog : GatewayDialog
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-
-        this.cmbCertificateSource.DataSource = Enum.GetValues(typeof(Constants.CertificateMode));
-        this.cmbCertificateSource.SelectedIndex = 0;
-
-        this.cmbStoreLocation.DataSource = Locations;
-        this.cmbCertificateSource.SelectedIndex = 0;
-
-        this.cmbStore.DataSource = StoreNames;
-        this.cmbStore.SelectedIndex = 0;
-
-        this.cmbSearchBy.DataSource = FindTypes;
-        this.cmbSearchBy.SelectedIndex = 0;
     }
 
     public override bool DoValidate()
@@ -81,7 +42,7 @@ public partial class CertificateDialog : GatewayDialog
             if (string.IsNullOrWhiteSpace(this.txtCertificateFile.Text) ||
                 !File.Exists(this.txtCertificateFile.Text.Trim()))
             {
-                ShowValidationError("Error29995");
+                ShowValidationError(I18n(Strings.YouMustProvideAValidCertificateAndPasswordOrKey));
                 return false;
             }
 
@@ -91,7 +52,7 @@ public partial class CertificateDialog : GatewayDialog
                 // Empty password might be valid
                 if (string.IsNullOrEmpty(this.txtCertificatePassword.Text))
                 {
-                    ShowValidationError("Error29995");
+                    ShowValidationError(I18n(Strings.YouMustProvideAValidCertificateAndPasswordOrKey));
                     return false;
                 }
             }
@@ -100,7 +61,7 @@ public partial class CertificateDialog : GatewayDialog
                 if (string.IsNullOrWhiteSpace(this.txtPrivateKeyFile.Text) ||
                     !File.Exists(this.txtPrivateKeyFile.Text.Trim()))
                 {
-                    ShowValidationError("Error29995");
+                    ShowValidationError(I18n(Strings.YouMustProvideAValidCertificateAndPasswordOrKey));
                     return false;
                 }
             }
@@ -109,7 +70,7 @@ public partial class CertificateDialog : GatewayDialog
         {
             if (this.SelectedCertificate is null)
             {
-                ShowValidationError("You must select a certificate from the system certificate store");
+                ShowValidationError(I18n(Strings.YouMustSelectACertificateFromTheSystemCertificateStore));
                 return false;
             }
         }
@@ -121,14 +82,13 @@ public partial class CertificateDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session);
 
-        this.cmbCertificateSource.SelectedIndex = (int) properties.CertificateMode;
+        this.cmbCertificateSource.SetSelected(properties.CertificateMode);
         this.txtCertificateFile.Text = properties.CertificateFile;
         this.txtPrivateKeyFile.Text = properties.CertificatePrivateKeyFile;
         this.txtCertificatePassword.Text = properties.CertificatePassword;
-        this.cmbStoreLocation.SelectedIndex = (int)properties.CertificateLocation - 1;
-        this.cmbStore.SelectedIndex = Stores.IndexOf(Stores.First(x => x.Key == properties.CertificateStore));
-        this.cmbSearchBy.SelectedIndex =
-            CertificateFindTypes.IndexOf(CertificateFindTypes.First(x => x.Key == properties.CertificateFindType));
+        this.cmbStoreLocation.SetSelected(properties.CertificateLocation);
+        this.cmbStore.SetSelected(properties.CertificateStore);
+        this.cmbSearchBy.SetSelected(properties.CertificateFindType);
         this.txtSearch.Text = properties.CertificateSearchText;
 
         if (this.UseSystemCertificate)
@@ -137,7 +97,7 @@ public partial class CertificateDialog : GatewayDialog
             {
                 X509Certificate2Collection certificates = this.SearchCertificate(
                     (StoreLocation) this.cmbStoreLocation.SelectedIndex + 1,
-                    Stores[this.cmbStore.SelectedIndex].Key,
+                    this.cmbStore.Selected<StoreName>(),
                     CertificateFindType.Thumbprint,
                     properties.CertificateThumbprint);
 
@@ -158,7 +118,7 @@ public partial class CertificateDialog : GatewayDialog
     {
         GatewayProperties properties = new(this.Runtime.Session)
         {
-            CertificateMode = (Constants.CertificateMode)this.cmbCertificateSource.SelectedIndex,
+            CertificateMode = this.cmbCertificateSource.Selected<CertificateMode>(),
         };
 
         if (this.UseExternalCertificate)
@@ -178,13 +138,13 @@ public partial class CertificateDialog : GatewayDialog
         }
         else
         {
-            properties.CertificateLocation = (StoreLocation)(this.cmbStoreLocation.SelectedIndex + 1);
-            properties.CertificateStore = Stores[this.cmbStore.SelectedIndex].Key;
+            properties.CertificateLocation = this.cmbStoreLocation.Selected<StoreLocation>();
+            properties.CertificateStore = this.cmbStore.Selected<StoreName>();
             properties.CertificateName = this.SelectedCertificate?.GetNameInfo(X509NameType.SimpleName, false);
             properties.CertificateThumbprint = this.SelectedCertificate?.Thumbprint;
         }
 
-        properties.CertificateFindType = CertificateFindTypes[this.cmbSearchBy.SelectedIndex].Key;
+        properties.CertificateFindType = this.cmbSearchBy.Selected<CertificateFindType>();
         properties.CertificateSearchText = this.txtSearch.Text;
 
         return true;
@@ -193,6 +153,18 @@ public partial class CertificateDialog : GatewayDialog
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+        
+        this.cmbCertificateSource.Source<CertificateMode>(this.MsiRuntime);
+        this.cmbCertificateSource.SetSelected(CertificateMode.External);
+
+        this.cmbStoreLocation.Source<StoreLocation>(this.MsiRuntime);
+        this.cmbStoreLocation.SetSelected(StoreLocation.LocalMachine);
+
+        this.cmbStore.Source<StoreName>(this.MsiRuntime);
+        this.cmbStore.SetSelected(StoreName.My);
+
+        this.cmbSearchBy.Source<CertificateFindType>(this.MsiRuntime);
+        this.cmbSearchBy.SetSelected(CertificateFindType.Thumbprint);
 
         base.OnLoad(sender, e);
     }
@@ -205,11 +177,10 @@ public partial class CertificateDialog : GatewayDialog
 
     // ReSharper disable once RedundantOverriddenMember
     protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);
-
+    
     private void butBrowseCertificateFile_Click(object sender, EventArgs e)
     {
-        const string filter =
-            "PFX Files (*.pfx, *.p12)|*.pfx;*.p12|Certificate Files (*.pem, *.crt, *.cer)|*.pem;*.crt;*.cer|All Files|*.*";
+        string filter = $"{I18n(Strings.Filter_PfxFiles)}|*.pfx; *.p12|{I18n(Strings.Filter_CertificateFiles)}|*.pem; *.crt; *.cer|{I18n(Strings.Filter_AllFiles)}|*.*";
         string file = this.BrowseForFile(filter);
 
         if (!string.IsNullOrEmpty(file))
@@ -222,7 +193,7 @@ public partial class CertificateDialog : GatewayDialog
 
     private void butBrowsePrivateKeyFile_Click(object sender, EventArgs e)
     {
-        const string filter = "Private Key Files (*.key)|*.key|All Files|*.*";
+        string filter = $"{I18n(Strings.Filter_PrivateKeyFiles)}|*.key|{I18n(Strings.Filter_AllFiles)}|*.*";
         string file = this.BrowseForFile(filter);
 
         if (!string.IsNullOrEmpty(file))
@@ -236,7 +207,7 @@ public partial class CertificateDialog : GatewayDialog
         using OpenFileDialog ofd = new();
         ofd.CheckFileExists = true;
         ofd.Multiselect = false;
-        ofd.Title = base.Localize("BrowseDlg_Title");
+        ofd.Title = I18n("BrowseDlg_Title");
         ofd.Filter = filter;
 
         if (ofd.ShowDialog(this) == DialogResult.OK)
@@ -275,7 +246,7 @@ public partial class CertificateDialog : GatewayDialog
             this.lblPrivateKeyFile.Visible = this.txtPrivateKeyFile.Visible = this.butBrowsePrivateKeyFile.Visible = !needsPassword;
             this.lblHint.Text = needsPassword ? 
                 string.Empty : 
-                "Encrypted private keys are not supported";
+                I18n(Strings.EncryptedPrivateKeysAreNotSupported);
         }
 
         else
@@ -335,15 +306,15 @@ public partial class CertificateDialog : GatewayDialog
         {
             X509Certificate2Collection certificates = SearchCertificate(
                 (StoreLocation) this.cmbStoreLocation.SelectedIndex + 1,
-                Stores[this.cmbStore.SelectedIndex].Key,
-                CertificateFindTypes[this.cmbSearchBy.SelectedIndex].Key,
+                this.cmbStore.Selected<StoreName>(),
+                this.cmbSearchBy.Selected<CertificateFindType>(),
                 this.txtSearch.Text);
             
             if (certificates.Count == 0)
             {
                 this.SetSelectedCertificate(null);
 
-                MessageBox.Show("No matching certificates found", base.Localize("CertificateDlg_Title"));
+                MessageBox.Show(I18n(Strings.NoMatchingCertificatesFound), I18n("GatewayDlg_Title"));
             }
             else if (certificates.Count == 1)
             {
@@ -352,8 +323,8 @@ public partial class CertificateDialog : GatewayDialog
             else
             {
                 X509Certificate2Collection selection = X509Certificate2UI.SelectFromCollection(certificates,
-                    base.Localize("CertificateDlg_Title"),
-                    "Select the certificate to use", X509SelectionFlag.SingleSelection, this.Handle);
+                    I18n("GatewayDlg_Title"),
+                    I18n(Strings.SelectTheCertificateToUse), X509SelectionFlag.SingleSelection, this.Handle);
 
                 if (selection.Count > 0)
                 {
@@ -363,13 +334,12 @@ public partial class CertificateDialog : GatewayDialog
         }
         catch (Exception exception)
         {
-            ShowValidationErrorString($"An unexpected error occurred accessing the system certificate store: {exception}");
+            ShowValidationErrorString(string.Format(I18n(Strings.AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX), exception));
         }
     }
 
     private void SetSelectedCertificate(X509Certificate2 certificate)
     {
-        // this.SelectedCertificate?.Dispose(); TODO: .net48
         this.SelectedCertificate = certificate;
 
         this.lblCertificateDescription.Text = string.Empty;

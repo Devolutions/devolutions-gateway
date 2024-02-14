@@ -873,6 +873,7 @@ dependencies = [
  "jmux-proxy",
  "lazy_static",
  "multibase",
+ "network-scanner",
  "ngrok",
  "nonempty",
  "packet",

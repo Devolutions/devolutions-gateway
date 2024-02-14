@@ -123,7 +123,7 @@ namespace WixSharpSetup.Dialogs
             this.gbConfigure.Size = new System.Drawing.Size(464, 165);
             this.gbConfigure.TabIndex = 12;
             this.gbConfigure.TabStop = false;
-            this.gbConfigure.Text = "Configuration Options";
+            this.gbConfigure.Text = "[ConfigurationOptions]";
             // 
             // tableLayoutPanel3
             // 
@@ -159,7 +159,7 @@ namespace WixSharpSetup.Dialogs
             this.chkWebApp.Name = "chkWebApp";
             this.chkWebApp.Size = new System.Drawing.Size(445, 17);
             this.chkWebApp.TabIndex = 2;
-            this.chkWebApp.Text = "Enable the Gateway web interface";
+            this.chkWebApp.Text = "[EnableTheGatewayWebInterface]";
             this.chkWebApp.UseVisualStyleBackColor = true;
             this.chkWebApp.CheckedChanged += new System.EventHandler(this.chkWebApp_CheckedChanged);
             // 
@@ -174,7 +174,7 @@ namespace WixSharpSetup.Dialogs
             this.chkGenerateCertificate.Name = "chkGenerateCertificate";
             this.chkGenerateCertificate.Size = new System.Drawing.Size(425, 17);
             this.chkGenerateCertificate.TabIndex = 3;
-            this.chkGenerateCertificate.Text = "Generate a self-signed HTTPS certificate";
+            this.chkGenerateCertificate.Text = "[GenerateASelfSignedHttpsCertificate]";
             this.chkGenerateCertificate.UseVisualStyleBackColor = true;
             // 
             // chkGenerateKeyPair
@@ -188,7 +188,7 @@ namespace WixSharpSetup.Dialogs
             this.chkGenerateKeyPair.Name = "chkGenerateKeyPair";
             this.chkGenerateKeyPair.Size = new System.Drawing.Size(425, 17);
             this.chkGenerateKeyPair.TabIndex = 4;
-            this.chkGenerateKeyPair.Text = "Generate encryption keys";
+            this.chkGenerateKeyPair.Text = "[GenerateEncryptionKeys]";
             this.chkGenerateKeyPair.UseVisualStyleBackColor = true;
             // 
             // chkConfigureNgrok
@@ -200,7 +200,7 @@ namespace WixSharpSetup.Dialogs
             this.chkConfigureNgrok.Name = "chkConfigureNgrok";
             this.chkConfigureNgrok.Size = new System.Drawing.Size(234, 17);
             this.chkConfigureNgrok.TabIndex = 0;
-            this.chkConfigureNgrok.Text = "Enable access over the internet using ngrok";
+            this.chkConfigureNgrok.Text = "[EnableAccessOverTheInternetUsingNgrok]";
             this.chkConfigureNgrok.UseVisualStyleBackColor = true;
             this.chkConfigureNgrok.CheckedChanged += new System.EventHandler(this.chkConfigureNgrok_CheckedChanged);
             // 
@@ -223,9 +223,9 @@ namespace WixSharpSetup.Dialogs
             this.cmbConfigure.Dock = System.Windows.Forms.DockStyle.Fill;
             this.cmbConfigure.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbConfigure.FormattingEnabled = true;
-            this.cmbConfigure.Location = new System.Drawing.Point(176, 3);
+            this.cmbConfigure.Location = new System.Drawing.Point(178, 3);
             this.cmbConfigure.Name = "cmbConfigure";
-            this.cmbConfigure.Size = new System.Drawing.Size(291, 21);
+            this.cmbConfigure.Size = new System.Drawing.Size(289, 21);
             this.cmbConfigure.TabIndex = 0;
             this.cmbConfigure.SelectedIndexChanged += new System.EventHandler(this.cmbConfigure_SelectedIndexChanged);
             // 
@@ -235,9 +235,9 @@ namespace WixSharpSetup.Dialogs
             this.label3.Dock = System.Windows.Forms.DockStyle.Fill;
             this.label3.Location = new System.Drawing.Point(3, 0);
             this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(167, 27);
+            this.label3.Size = new System.Drawing.Size(169, 27);
             this.label3.TabIndex = 14;
-            this.label3.Text = "Configure the Gateway installation";
+            this.label3.Text = "[ConfigureTheGatewayInstallation]";
             this.label3.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
             // 
             // lblConfigureDescription
@@ -250,7 +250,7 @@ namespace WixSharpSetup.Dialogs
             this.lblConfigureDescription.Name = "lblConfigureDescription";
             this.lblConfigureDescription.Size = new System.Drawing.Size(464, 37);
             this.lblConfigureDescription.TabIndex = 15;
-            this.lblConfigureDescription.Text = "label4";
+            this.lblConfigureDescription.Text = "[RecommendedForStandaloneInstallations]";
             // 
             // topBorder
             // 
@@ -396,7 +396,6 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "CustomizeDialog";
-            this.Text = "[CustomizeDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);

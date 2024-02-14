@@ -3,31 +3,70 @@ using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocatio
 using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
 using ServiceStartMode = System.ServiceProcess.ServiceStartMode;
 using System;
+using static DevolutionsGateway.Properties.Constants;
 
 namespace DevolutionsGateway.Properties
 {
     /// <summary>
     /// do not modify the contents of this class with the code editor.
     /// </summary>
+    public partial class Constants
+    {
+ 
+        public const string HttpProtocol = "http";
+ 
+        public const string HttpsProtocol = "https";
+ 
+        public const string TcpProtocol = "tcp";
+
+ 
+        public enum AuthenticationMode 
+        {
+            None,
+            Custom,
+        }
+ 
+        public enum CertificateMode 
+        {
+            External,
+            System,
+        }
+ 
+        public enum CertificateFindType 
+        {
+            Thumbprint,
+            SubjectName,
+        }
+ 
+        public enum CustomizeMode 
+        {
+            Now,
+            Later,
+        }
+    }
+
+    /// <summary>
+    /// do not modify the contents of this class with the code editor.
+    /// </summary>
     internal partial class GatewayProperties
     {
  
-        internal static readonly WixProperty<System.String> accessUriHost = new()
+        internal static readonly WixProperty<String> accessUriHost = new()
         {
             Id = "P.ACCESSURIHOST",
-            Default = string.Empty,
+            Default = "",
+            Name = "AccessUriHost",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "AccessUriHost",
+            Public = true
         };
 
-        public System.String AccessUriHost
+        public String AccessUriHost
         {
             get
             {
                 string stringValue = this.FnGetPropValue(accessUriHost.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -38,22 +77,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.UInt32> accessUriPort = new()
+        internal static readonly WixProperty<UInt32> accessUriPort = new()
         {
             Id = "P.ACCESSURIPORT",
-            Default = 443,
+            Default = 7171,
+            Name = "AccessUriPort",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "AccessUriPort",
+            Public = true
         };
 
-        public System.UInt32 AccessUriPort
+        public UInt32 AccessUriPort
         {
             get
             {
                 string stringValue = this.FnGetPropValue(accessUriPort.Id);
-                return WixProperties.GetPropertyValue<System.UInt32>(stringValue);
+                return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
             set 
             { 
@@ -64,22 +103,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> accessUriScheme = new()
+        internal static readonly WixProperty<String> accessUriScheme = new()
         {
             Id = "P.ACCESSURISCHEME",
-            Default = Constants.HttpsProtocol,
+            Default = "https",
+            Name = "AccessUriScheme",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "AccessUriScheme",
+            Public = true
         };
 
-        public System.String AccessUriScheme
+        public String AccessUriScheme
         {
             get
             {
                 string stringValue = this.FnGetPropValue(accessUriScheme.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -90,22 +129,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<Constants.CertificateMode> certificateMode = new()
+        internal static readonly WixProperty<CertificateMode> certificateMode = new()
         {
             Id = "P.CERTIFICATEMODE",
-            Default = Constants.CertificateMode.External,
+            Default = CertificateMode.External,
+            Name = "CertificateMode",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate Origin",
+            Public = true
         };
 
-        public Constants.CertificateMode CertificateMode
+        public CertificateMode CertificateMode
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateMode.Id);
-                return WixProperties.GetPropertyValue<Constants.CertificateMode>(stringValue);
+                return WixProperties.GetPropertyValue<CertificateMode>(stringValue);
             }
             set 
             { 
@@ -116,22 +155,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificateFile = new()
+        internal static readonly WixProperty<String> certificateFile = new()
         {
             Id = "P.CERTIFICATEFILE",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificateFile",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate File",
+            Public = true
         };
 
-        public System.String CertificateFile
+        public String CertificateFile
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateFile.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -142,22 +181,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificatePassword = new()
+        internal static readonly WixProperty<String> certificatePassword = new()
         {
             Id = "P.CERTIFICATEPASSWORD",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificatePassword",
             Secure = true,
             Hidden = true,
-            Public = true,
-            Summary = "Certificate Password",
+            Public = true
         };
 
-        public System.String CertificatePassword
+        public String CertificatePassword
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificatePassword.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -168,22 +207,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificatePrivateKeyFile = new()
+        internal static readonly WixProperty<String> certificatePrivateKeyFile = new()
         {
             Id = "P.CERTIFICATEPRIVATEKEYFILE",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificatePrivateKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate Private Key File",
+            Public = true
         };
 
-        public System.String CertificatePrivateKeyFile
+        public String CertificatePrivateKeyFile
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificatePrivateKeyFile.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -194,22 +233,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Security.Cryptography.X509Certificates.StoreLocation> certificateLocation = new()
+        internal static readonly WixProperty<StoreLocation> certificateLocation = new()
         {
             Id = "P.CERTIFICATELOCATION",
             Default = StoreLocation.CurrentUser,
+            Name = "CertificateLocation",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate Location",
+            Public = true
         };
 
-        public System.Security.Cryptography.X509Certificates.StoreLocation CertificateLocation
+        public StoreLocation CertificateLocation
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateLocation.Id);
-                return WixProperties.GetPropertyValue<System.Security.Cryptography.X509Certificates.StoreLocation>(stringValue);
+                return WixProperties.GetPropertyValue<StoreLocation>(stringValue);
             }
             set 
             { 
@@ -220,22 +259,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Security.Cryptography.X509Certificates.StoreName> certificateStore = new()
+        internal static readonly WixProperty<StoreName> certificateStore = new()
         {
             Id = "P.CERTIFICATESTORE",
             Default = StoreName.My,
+            Name = "CertificateStore",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate Store",
+            Public = true
         };
 
-        public System.Security.Cryptography.X509Certificates.StoreName CertificateStore
+        public StoreName CertificateStore
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateStore.Id);
-                return WixProperties.GetPropertyValue<System.Security.Cryptography.X509Certificates.StoreName>(stringValue);
+                return WixProperties.GetPropertyValue<StoreName>(stringValue);
             }
             set 
             { 
@@ -246,22 +285,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificateName = new()
+        internal static readonly WixProperty<String> certificateName = new()
         {
             Id = "P.CERTIFICATENAME",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificateName",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Certificate Name",
+            Public = true
         };
 
-        public System.String CertificateName
+        public String CertificateName
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateName.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -272,22 +311,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> generateCertificate = new()
+        internal static readonly WixProperty<Boolean> generateCertificate = new()
         {
             Id = "P.GENERATECERTIFICATE",
             Default = false,
+            Name = "GenerateCertificate",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "GenerateCertificate",
+            Public = true
         };
 
-        public System.Boolean GenerateCertificate
+        public Boolean GenerateCertificate
         {
             get
             {
                 string stringValue = this.FnGetPropValue(generateCertificate.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -298,22 +337,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<Constants.CertificateFindType> certificateFindType = new()
+        internal static readonly WixProperty<CertificateFindType> certificateFindType = new()
         {
             Id = "P.CertificateFindType",
-            Default = Constants.CertificateFindType.Thumbprint,
+            Default = CertificateFindType.Thumbprint,
+            Name = "CertificateFindType",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "CertificateFindType",
+            Public = false
         };
 
-        public Constants.CertificateFindType CertificateFindType
+        public CertificateFindType CertificateFindType
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateFindType.Id);
-                return WixProperties.GetPropertyValue<Constants.CertificateFindType>(stringValue);
+                return WixProperties.GetPropertyValue<CertificateFindType>(stringValue);
             }
             set 
             { 
@@ -324,22 +363,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificateSearchText = new()
+        internal static readonly WixProperty<String> certificateSearchText = new()
         {
             Id = "P.CertificateSearchText",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificateSearchText",
             Secure = false,
             Hidden = true,
-            Public = false,
-            Summary = "CertificateSearchText",
+            Public = false
         };
 
-        public System.String CertificateSearchText
+        public String CertificateSearchText
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateSearchText.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -350,22 +389,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> certificateThumbprint = new()
+        internal static readonly WixProperty<String> certificateThumbprint = new()
         {
             Id = "P.CertificateThumbprint",
-            Default = string.Empty,
+            Default = "",
+            Name = "CertificateThumbprint",
             Secure = false,
             Hidden = true,
-            Public = false,
-            Summary = "CertificateThumbprint",
+            Public = false
         };
 
-        public System.String CertificateThumbprint
+        public String CertificateThumbprint
         {
             get
             {
                 string stringValue = this.FnGetPropValue(certificateThumbprint.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -376,23 +415,23 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> configureGateway = new()
+        internal static readonly WixProperty<Boolean> configureGateway = new()
         {
             Id = "P.CONFIGUREGATEWAY",
             Default = false,
+            Name = "ConfigureGateway",
             Secure = false,
             Hidden = false,
-            Public = true,
-            Summary = "ConfigureGateway",
+            Public = true
         };
 
         /// <summary>`true` to configure the Gateway interactively</summary>
-        public System.Boolean ConfigureGateway
+        public Boolean ConfigureGateway
         {
             get
             {
                 string stringValue = this.FnGetPropValue(configureGateway.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -403,22 +442,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> hasPowerShell = new()
+        internal static readonly WixProperty<Boolean> hasPowerShell = new()
         {
             Id = "P.HasPowerShell",
             Default = false,
+            Name = "HasPowerShell",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "HasPowerShell",
+            Public = false
         };
 
-        public System.Boolean HasPowerShell
+        public Boolean HasPowerShell
         {
             get
             {
                 string stringValue = this.FnGetPropValue(hasPowerShell.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -429,22 +468,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> httpListenerHost = new()
+        internal static readonly WixProperty<String> httpListenerHost = new()
         {
             Id = "P.HTTPLISTENERHOST",
             Default = "0.0.0.0",
+            Name = "HttpListenerHost",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "HttpListenerHost",
+            Public = true
         };
 
-        public System.String HttpListenerHost
+        public String HttpListenerHost
         {
             get
             {
                 string stringValue = this.FnGetPropValue(httpListenerHost.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -455,22 +494,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.UInt32> httpListenerPort = new()
+        internal static readonly WixProperty<UInt32> httpListenerPort = new()
         {
             Id = "P.HTTPLISTENERPORT",
             Default = 7171,
+            Name = "HttpListenerPort",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "HttpListenerPort",
+            Public = true
         };
 
-        public System.UInt32 HttpListenerPort
+        public UInt32 HttpListenerPort
         {
             get
             {
                 string stringValue = this.FnGetPropValue(httpListenerPort.Id);
-                return WixProperties.GetPropertyValue<System.UInt32>(stringValue);
+                return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
             set 
             { 
@@ -481,22 +520,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> httpListenerScheme = new()
+        internal static readonly WixProperty<String> httpListenerScheme = new()
         {
             Id = "P.HTTPLISTENERSCHEME",
-            Default = Constants.HttpsProtocol,
+            Default = "https",
+            Name = "HttpListenerScheme",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "HttpListenerScheme",
+            Public = true
         };
 
-        public System.String HttpListenerScheme
+        public String HttpListenerScheme
         {
             get
             {
                 string stringValue = this.FnGetPropValue(httpListenerScheme.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -507,22 +546,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> publicKeyFile = new()
+        internal static readonly WixProperty<String> publicKeyFile = new()
         {
             Id = "P.PUBLICKEYFILE",
-            Default = string.Empty,
+            Default = "",
+            Name = "PublicKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Public Key File",
+            Public = true
         };
 
-        public System.String PublicKeyFile
+        public String PublicKeyFile
         {
             get
             {
                 string stringValue = this.FnGetPropValue(publicKeyFile.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -533,22 +572,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> privateKeyFile = new()
+        internal static readonly WixProperty<String> privateKeyFile = new()
         {
             Id = "P.PRIVATEKEYFILE",
-            Default = string.Empty,
+            Default = "",
+            Name = "PrivateKeyFile",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Private Key File",
+            Public = true
         };
 
-        public System.String PrivateKeyFile
+        public String PrivateKeyFile
         {
             get
             {
                 string stringValue = this.FnGetPropValue(privateKeyFile.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -559,22 +598,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> generateKeyPair = new()
+        internal static readonly WixProperty<Boolean> generateKeyPair = new()
         {
             Id = "P.GENERATEKEYPAIR",
             Default = false,
+            Name = "GenerateKeyPair",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "GenerateKeyPair",
+            Public = true
         };
 
-        public System.Boolean GenerateKeyPair
+        public Boolean GenerateKeyPair
         {
             get
             {
                 string stringValue = this.FnGetPropValue(generateKeyPair.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -585,22 +624,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> powerShellPath = new()
+        internal static readonly WixProperty<String> powerShellPath = new()
         {
             Id = "P.PowerShellPath",
-            Default = string.Empty,
+            Default = "",
+            Name = "PowerShellPath",
             Secure = false,
             Hidden = true,
-            Public = false,
-            Summary = "PowerShellPath",
+            Public = false
         };
 
-        public System.String PowerShellPath
+        public String PowerShellPath
         {
             get
             {
                 string stringValue = this.FnGetPropValue(powerShellPath.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -611,22 +650,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> noStartService = new()
+        internal static readonly WixProperty<String> noStartService = new()
         {
             Id = "P.DGW.NO_START_SERVICE",
-            Default = string.Empty,
+            Default = "",
+            Name = "NoStartService",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "NoStartService",
+            Public = true
         };
 
-        public System.String NoStartService
+        public String NoStartService
         {
             get
             {
                 string stringValue = this.FnGetPropValue(noStartService.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -637,22 +676,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.ServiceProcess.ServiceStartMode> serviceStart = new()
+        internal static readonly WixProperty<ServiceStartMode> serviceStart = new()
         {
             Id = "P.SERVICESTART",
             Default = ServiceStartMode.Manual,
+            Name = "ServiceStart",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Service Start Mode",
+            Public = true
         };
 
-        public System.ServiceProcess.ServiceStartMode ServiceStart
+        public ServiceStartMode ServiceStart
         {
             get
             {
                 string stringValue = this.FnGetPropValue(serviceStart.Id);
-                return WixProperties.GetPropertyValue<System.ServiceProcess.ServiceStartMode>(stringValue);
+                return WixProperties.GetPropertyValue<ServiceStartMode>(stringValue);
             }
             set 
             { 
@@ -663,22 +702,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> tcpListenerHost = new()
+        internal static readonly WixProperty<String> tcpListenerHost = new()
         {
             Id = "P.TCPLISTENERHOST",
             Default = "0.0.0.0",
+            Name = "TcpListenerHost",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "TcpListenerHost",
+            Public = true
         };
 
-        public System.String TcpListenerHost
+        public String TcpListenerHost
         {
             get
             {
                 string stringValue = this.FnGetPropValue(tcpListenerHost.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -689,22 +728,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.UInt32> tcpListenerPort = new()
+        internal static readonly WixProperty<UInt32> tcpListenerPort = new()
         {
             Id = "P.TCPLISTENERPORT",
             Default = 8181,
+            Name = "TcpListenerPort",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "TcpListenerPort",
+            Public = true
         };
 
-        public System.UInt32 TcpListenerPort
+        public UInt32 TcpListenerPort
         {
             get
             {
                 string stringValue = this.FnGetPropValue(tcpListenerPort.Id);
-                return WixProperties.GetPropertyValue<System.UInt32>(stringValue);
+                return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
             set 
             { 
@@ -715,22 +754,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> tcpListenerScheme = new()
+        internal static readonly WixProperty<String> tcpListenerScheme = new()
         {
             Id = "P.TCPLISTENERSCHEME",
-            Default = Constants.TcpProtocol,
+            Default = "tcp",
+            Name = "TcpListenerScheme",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "TcpListenerScheme",
+            Public = true
         };
 
-        public System.String TcpListenerScheme
+        public String TcpListenerScheme
         {
             get
             {
                 string stringValue = this.FnGetPropValue(tcpListenerScheme.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -741,23 +780,23 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> configureWebApp = new()
+        internal static readonly WixProperty<Boolean> configureWebApp = new()
         {
             Id = "P.CONFIGUREWEBAPP",
             Default = false,
+            Name = "ConfigureWebApp",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "ConfigureWebApp",
+            Public = true
         };
 
         /// <summary>`true` to configure the standalone web application interactively</summary>
-        public System.Boolean ConfigureWebApp
+        public Boolean ConfigureWebApp
         {
             get
             {
                 string stringValue = this.FnGetPropValue(configureWebApp.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -768,22 +807,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<Constants.AuthenticationMode> authenticationMode = new()
+        internal static readonly WixProperty<AuthenticationMode> authenticationMode = new()
         {
             Id = "P.AUTHENTICATIONMODE",
-            Default = Constants.AuthenticationMode.None,
+            Default = AuthenticationMode.None,
+            Name = "AuthenticationMode",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Authentication Mode",
+            Public = true
         };
 
-        public Constants.AuthenticationMode AuthenticationMode
+        public AuthenticationMode AuthenticationMode
         {
             get
             {
                 string stringValue = this.FnGetPropValue(authenticationMode.Id);
-                return WixProperties.GetPropertyValue<Constants.AuthenticationMode>(stringValue);
+                return WixProperties.GetPropertyValue<AuthenticationMode>(stringValue);
             }
             set 
             { 
@@ -794,22 +833,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> webUsername = new()
+        internal static readonly WixProperty<String> webUsername = new()
         {
             Id = "P.WEBUSERNAME",
-            Default = string.Empty,
+            Default = "",
+            Name = "WebUsername",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Default User",
+            Public = true
         };
 
-        public System.String WebUsername
+        public String WebUsername
         {
             get
             {
                 string stringValue = this.FnGetPropValue(webUsername.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -820,22 +859,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> webPassword = new()
+        internal static readonly WixProperty<String> webPassword = new()
         {
             Id = "P.WEBPASSWORD",
-            Default = string.Empty,
+            Default = "",
+            Name = "WebPassword",
             Secure = true,
             Hidden = true,
-            Public = true,
-            Summary = "Default Password",
+            Public = true
         };
 
-        public System.String WebPassword
+        public String WebPassword
         {
             get
             {
                 string stringValue = this.FnGetPropValue(webPassword.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -846,23 +885,23 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> configureNgrok = new()
+        internal static readonly WixProperty<Boolean> configureNgrok = new()
         {
             Id = "P.CONFIGURENGROK",
             Default = false,
+            Name = "ConfigureNgrok",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "ConfigureNgrok",
+            Public = true
         };
 
         /// <summary>`true` to use ngrok for ingress listeners</summary>
-        public System.Boolean ConfigureNgrok
+        public Boolean ConfigureNgrok
         {
             get
             {
                 string stringValue = this.FnGetPropValue(configureNgrok.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -873,22 +912,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> ngrokAuthToken = new()
+        internal static readonly WixProperty<String> ngrokAuthToken = new()
         {
             Id = "P.NGROKAUTHTOKEN",
-            Default = string.Empty,
+            Default = "",
+            Name = "NgrokAuthToken",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Authentication Token",
+            Public = true
         };
 
-        public System.String NgrokAuthToken
+        public String NgrokAuthToken
         {
             get
             {
                 string stringValue = this.FnGetPropValue(ngrokAuthToken.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -899,22 +938,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> ngrokHttpDomain = new()
+        internal static readonly WixProperty<String> ngrokHttpDomain = new()
         {
             Id = "P.NGROKHTTPDOMAIN",
-            Default = string.Empty,
+            Default = "",
+            Name = "NgrokHttpDomain",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Domain",
+            Public = true
         };
 
-        public System.String NgrokHttpDomain
+        public String NgrokHttpDomain
         {
             get
             {
                 string stringValue = this.FnGetPropValue(ngrokHttpDomain.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -925,22 +964,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> ngrokEnableTcp = new()
+        internal static readonly WixProperty<Boolean> ngrokEnableTcp = new()
         {
             Id = "P.NGROKENABLETCP",
             Default = false,
+            Name = "NgrokEnableTcp",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Native Client Access",
+            Public = true
         };
 
-        public System.Boolean NgrokEnableTcp
+        public Boolean NgrokEnableTcp
         {
             get
             {
                 string stringValue = this.FnGetPropValue(ngrokEnableTcp.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -951,22 +990,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.String> ngrokRemoteAddress = new()
+        internal static readonly WixProperty<String> ngrokRemoteAddress = new()
         {
             Id = "P.NGROKREMOTEADDRESS",
-            Default = string.Empty,
+            Default = "",
+            Name = "NgrokRemoteAddress",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "Remote Address",
+            Public = true
         };
 
-        public System.String NgrokRemoteAddress
+        public String NgrokRemoteAddress
         {
             get
             {
                 string stringValue = this.FnGetPropValue(ngrokRemoteAddress.Id);
-                return WixProperties.GetPropertyValue<System.String>(stringValue);
+                return WixProperties.GetPropertyValue<String>(stringValue);
             }
             set 
             { 
@@ -977,22 +1016,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> debugPowerShell = new()
+        internal static readonly WixProperty<Boolean> debugPowerShell = new()
         {
             Id = "P.DEBUGPOWERSHELL",
             Default = false,
+            Name = "DebugPowerShell",
             Secure = true,
             Hidden = false,
-            Public = true,
-            Summary = "DebugPowerShell",
+            Public = true
         };
 
-        public System.Boolean DebugPowerShell
+        public Boolean DebugPowerShell
         {
             get
             {
                 string stringValue = this.FnGetPropValue(debugPowerShell.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -1003,22 +1042,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Guid> installId = new()
+        internal static readonly WixProperty<Guid> installId = new()
         {
             Id = "P.InstallId",
-            Default = Guid.Empty,
+            Default = new Guid("00000000-0000-0000-0000-000000000000"),
+            Name = "InstallId",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "InstallId",
+            Public = false
         };
 
-        public System.Guid InstallId
+        public Guid InstallId
         {
             get
             {
                 string stringValue = this.FnGetPropValue(installId.Id);
-                return WixProperties.GetPropertyValue<System.Guid>(stringValue);
+                return WixProperties.GetPropertyValue<Guid>(stringValue);
             }
             set 
             { 
@@ -1029,22 +1068,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.UInt32> netFx45Version = new()
+        internal static readonly WixProperty<UInt32> netFx45Version = new()
         {
             Id = "P.NetFx45Version",
             Default = 0,
+            Name = "NetFx45Version",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "NetFx45Version",
+            Public = false
         };
 
-        public System.UInt32 NetFx45Version
+        public UInt32 NetFx45Version
         {
             get
             {
                 string stringValue = this.FnGetPropValue(netFx45Version.Id);
-                return WixProperties.GetPropertyValue<System.UInt32>(stringValue);
+                return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
             set 
             { 
@@ -1055,22 +1094,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> firstInstall = new()
+        internal static readonly WixProperty<Boolean> firstInstall = new()
         {
             Id = "P.FirstInstall",
             Default = false,
+            Name = "FirstInstall",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "FirstInstall",
+            Public = false
         };
 
-        public System.Boolean FirstInstall
+        public Boolean FirstInstall
         {
             get
             {
                 string stringValue = this.FnGetPropValue(firstInstall.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -1081,22 +1120,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> upgrading = new()
+        internal static readonly WixProperty<Boolean> upgrading = new()
         {
             Id = "P.Upgrading",
             Default = false,
+            Name = "Upgrading",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "Upgrading",
+            Public = false
         };
 
-        public System.Boolean Upgrading
+        public Boolean Upgrading
         {
             get
             {
                 string stringValue = this.FnGetPropValue(upgrading.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -1107,22 +1146,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> removingForUpgrade = new()
+        internal static readonly WixProperty<Boolean> removingForUpgrade = new()
         {
             Id = "P.RemovingForUpgrade",
             Default = false,
+            Name = "RemovingForUpgrade",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "RemovingForUpgrade",
+            Public = false
         };
 
-        public System.Boolean RemovingForUpgrade
+        public Boolean RemovingForUpgrade
         {
             get
             {
                 string stringValue = this.FnGetPropValue(removingForUpgrade.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -1133,22 +1172,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> uninstalling = new()
+        internal static readonly WixProperty<Boolean> uninstalling = new()
         {
             Id = "P.Uninstalling",
             Default = false,
+            Name = "Uninstalling",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "Uninstalling",
+            Public = false
         };
 
-        public System.Boolean Uninstalling
+        public Boolean Uninstalling
         {
             get
             {
                 string stringValue = this.FnGetPropValue(uninstalling.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 
@@ -1159,22 +1198,22 @@ namespace DevolutionsGateway.Properties
             }
         }
  
-        internal static readonly WixProperty<System.Boolean> maintenance = new()
+        internal static readonly WixProperty<Boolean> maintenance = new()
         {
             Id = "P.Maintenance",
             Default = false,
+            Name = "Maintenance",
             Secure = false,
             Hidden = false,
-            Public = false,
-            Summary = "Maintenance",
+            Public = false
         };
 
-        public System.Boolean Maintenance
+        public Boolean Maintenance
         {
             get
             {
                 string stringValue = this.FnGetPropValue(maintenance.Id);
-                return WixProperties.GetPropertyValue<System.Boolean>(stringValue);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
             set 
             { 

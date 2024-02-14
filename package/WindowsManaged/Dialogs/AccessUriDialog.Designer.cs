@@ -36,6 +36,7 @@ namespace WixSharpSetup.Dialogs
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
             this.tableLayoutPanel2 = new System.Windows.Forms.TableLayoutPanel();
+            this.lblHttpWarn = new System.Windows.Forms.Label();
             this.label5 = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
             this.lblDescription = new System.Windows.Forms.Label();
@@ -43,6 +44,7 @@ namespace WixSharpSetup.Dialogs
             this.txtHostname = new System.Windows.Forms.TextBox();
             this.cmbProtocol = new System.Windows.Forms.ComboBox();
             this.label3 = new System.Windows.Forms.Label();
+            this.pictureBox1 = new System.Windows.Forms.PictureBox();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -57,6 +59,7 @@ namespace WixSharpSetup.Dialogs
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
             this.tableLayoutPanel2.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -94,6 +97,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.tableLayoutPanel2.Controls.Add(this.lblHttpWarn, 1, 3);
             this.tableLayoutPanel2.Controls.Add(this.label5, 2, 1);
             this.tableLayoutPanel2.Controls.Add(this.label4, 0, 1);
             this.tableLayoutPanel2.Controls.Add(this.lblDescription, 0, 0);
@@ -101,16 +105,29 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.Controls.Add(this.txtHostname, 1, 2);
             this.tableLayoutPanel2.Controls.Add(this.cmbProtocol, 0, 2);
             this.tableLayoutPanel2.Controls.Add(this.label3, 1, 1);
+            this.tableLayoutPanel2.Controls.Add(this.pictureBox1, 0, 3);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.RowCount = 5;
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 60F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
             this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 154);
             this.tableLayoutPanel2.TabIndex = 0;
+            // 
+            // lblHttpWarn
+            // 
+            this.lblHttpWarn.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblHttpWarn.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblHttpWarn.Location = new System.Drawing.Point(79, 110);
+            this.lblHttpWarn.Name = "lblHttpWarn";
+            this.lblHttpWarn.Size = new System.Drawing.Size(321, 40);
+            this.lblHttpWarn.TabIndex = 1;
+            this.lblHttpWarn.Text = "[AccessUriDlgHttpWarn]";
+            this.lblHttpWarn.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lblHttpWarn.Visible = false;
             // 
             // label5
             // 
@@ -118,9 +135,9 @@ namespace WixSharpSetup.Dialogs
             this.label5.Location = new System.Drawing.Point(406, 65);
             this.label5.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(26, 13);
+            this.label5.Size = new System.Drawing.Size(32, 13);
             this.label5.TabIndex = 5;
-            this.label5.Text = "Port";
+            this.label5.Text = "[Port]";
             // 
             // label4
             // 
@@ -128,9 +145,9 @@ namespace WixSharpSetup.Dialogs
             this.label4.Location = new System.Drawing.Point(3, 65);
             this.label4.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label4.Name = "label4";
-            this.label4.Size = new System.Drawing.Size(46, 13);
+            this.label4.Size = new System.Drawing.Size(52, 13);
             this.label4.TabIndex = 4;
-            this.label4.Text = "Protocol";
+            this.label4.Text = "[Protocol]";
             // 
             // lblDescription
             // 
@@ -142,9 +159,7 @@ namespace WixSharpSetup.Dialogs
             this.lblDescription.Name = "lblDescription";
             this.lblDescription.Size = new System.Drawing.Size(443, 55);
             this.lblDescription.TabIndex = 0;
-            this.lblDescription.Text = "The URI to reach the Gateway externally for HTTP operations. This may differ from" +
-    " the HTTP listener address in certain cases (for example, when using a reverse p" +
-    "roxy such as IIS).";
+            this.lblDescription.Text = "[AccessUriDlgExplanation]";
             // 
             // txtPort
             // 
@@ -179,9 +194,20 @@ namespace WixSharpSetup.Dialogs
             this.label3.Location = new System.Drawing.Point(79, 65);
             this.label3.Margin = new System.Windows.Forms.Padding(3, 5, 3, 5);
             this.label3.Name = "label3";
-            this.label3.Size = new System.Drawing.Size(29, 13);
+            this.label3.Size = new System.Drawing.Size(35, 13);
             this.label3.TabIndex = 1;
-            this.label3.Text = "Host";
+            this.label3.Text = "[Host]";
+            // 
+            // pictureBox1
+            // 
+            this.pictureBox1.Dock = System.Windows.Forms.DockStyle.Right;
+            this.pictureBox1.Location = new System.Drawing.Point(49, 113);
+            this.pictureBox1.Name = "pictureBox1";
+            this.pictureBox1.Size = new System.Drawing.Size(24, 34);
+            this.pictureBox1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.CenterImage;
+            this.pictureBox1.TabIndex = 6;
+            this.pictureBox1.TabStop = false;
+            this.pictureBox1.Visible = false;
             // 
             // topBorder
             // 
@@ -328,12 +354,12 @@ namespace WixSharpSetup.Dialogs
             this.Controls.Add(this.topPanel);
             this.Controls.Add(this.bottomPanel);
             this.Name = "AccessUriDialog";
-            this.Text = "[AccessUriDlg_Title]";
             this.Load += new System.EventHandler(this.OnLoad);
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);
             this.tableLayoutPanel2.ResumeLayout(false);
             this.tableLayoutPanel2.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).EndInit();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -368,5 +394,7 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label label5;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.PictureBox pictureBox1;
+        private System.Windows.Forms.Label lblHttpWarn;
     }
 }
