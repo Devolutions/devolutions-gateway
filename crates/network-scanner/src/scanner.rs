@@ -82,7 +82,7 @@ impl NetworkScanner {
                         tracing::trace!(port_scan_result = ?res);
                         if let PortScanResult::Open(socket_addr) = res {
                             let dns = ip_cache.read().get(&ip).cloned().flatten();
-                            port_sender.send((ip, dns, socket_addr.port())).await?;
+                            port_sender.send((ip, dns, socket_addr.port(), None)).await?;
                         }
                     }
                     anyhow::Ok(())
@@ -190,13 +190,13 @@ impl NetworkScanner {
                     Duration::from_secs(3),
                 )?;
 
-                while let Some((ip, server, port)) = receiver.recv().await {
+                while let Some((ip, server, port, protocol)) = receiver.recv().await {
                     if ip_cache.read().get(&ip).is_none() {
                         ip_cache.write().insert(ip, server.clone());
                     }
                     let dns_name = ip_cache.read().get(&ip).cloned().flatten();
-                    if ports.contains(&port) {
-                        port_sender.send((ip, dns_name, port)).await?;
+                    if ports.contains(&port) || protocol.is_some() {
+                        port_sender.send((ip, dns_name, port, protocol)).await?;
                     }
                 }
 
@@ -262,21 +262,19 @@ impl NetworkScanner {
     }
 }
 
-type ResultReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
+pub type ScanEntry = (IpAddr, Option<String>, u16, Option<Protocol>);
+type ResultReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ResultReceiver>>,
     task_manager: TaskManager,
 }
 
 impl NetworkScannerStream {
-    pub async fn recv(self: &Arc<Self>) -> Option<(IpAddr, Option<String>, u16)> {
+    pub async fn recv(self: &Arc<Self>) -> Option<ScanEntry> {
         // the caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver
         self.result_receiver.lock().await.recv().await
     }
-    pub async fn recv_timeout(
-        self: &Arc<Self>,
-        duration: Duration,
-    ) -> anyhow::Result<Option<(IpAddr, Option<String>, u16)>> {
+    pub async fn recv_timeout(self: &Arc<Self>, duration: Duration) -> anyhow::Result<Option<ScanEntry>> {
         tokio::time::timeout(duration, self.result_receiver.lock().await.recv())
             .await
             .context("recv_timeout timed out")
@@ -350,4 +348,40 @@ pub struct NetworkScannerParams {
     pub mdns_meta_query_timeout: u64,   // in milliseconds
     pub mdns_single_query_timeout: u64, // in milliseconds
     pub max_wait_time: u64,             // max_wait for entire scan duration in milliseconds, suggested!
+}
+
+#[derive(Debug, Clone)]
+pub enum Protocol {
+    /// Wayk Remote Desktop Protocol
+    Wayk,
+    /// Remote Desktop Protocol
+    Rdp,
+    /// Apple Remote Desktop
+    Ard,
+    /// Virtual Network Computing
+    Vnc,
+    /// Secure Shell
+    Ssh,
+    /// PowerShell over SSH transport
+    SshPwsh,
+    /// SSH File Transfer Protocol
+    Sftp,
+    /// Secure Copy Protocol
+    Scp,
+    /// Telnet
+    Telnet,
+    /// PowerShell over WinRM via HTTP transport
+    WinrmHttpPwsh,
+    /// PowerShell over WinRM via HTTPS transport
+    WinrmHttpsPwsh,
+    /// Hypertext Transfer Protocol
+    Http,
+    /// Hypertext Transfer Protocol Secure
+    Https,
+    /// LDAP Protocol
+    Ldap,
+    /// Secure LDAP Protocol
+    Ldaps,
+    /// Devolutions Gateway Tunnel (generic JMUX tunnel)
+    Tunnel,
 }

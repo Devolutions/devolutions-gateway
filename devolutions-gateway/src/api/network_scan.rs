@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-use network_scanner::scanner::NetworkScannerParams;
+use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
 
 use crate::http::HttpError;
@@ -33,10 +33,10 @@ pub async fn handler(
         loop {
             tokio::select! {
                 result = stream.recv() => {
-                    let Some((ip, dns, port)) = result else{
+                    let Some((ip, dns, port,protocol)) = result else{
                         break;
                     };
-                    let response = NetworkScanResponse::new(ip, port, dns);
+                    let response = NetworkScanResponse::new(ip, port, dns,protocol);
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
                         continue;
@@ -115,23 +115,49 @@ pub struct NetworkScanResponse {
 }
 
 impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
+    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::Protocol>) -> Self {
         let hostname = dns;
 
-        let protocol = match port {
-            22 => ApplicationProtocol::Known(Protocol::Ssh),
-            23 => ApplicationProtocol::Known(Protocol::Telnet),
-            80 => ApplicationProtocol::Known(Protocol::Http),
-            443 => ApplicationProtocol::Known(Protocol::Https),
-            389 => ApplicationProtocol::Known(Protocol::Ldap),
-            636 => ApplicationProtocol::Known(Protocol::Ldaps),
-            3389 => ApplicationProtocol::Known(Protocol::Rdp),
-            5900 => ApplicationProtocol::Known(Protocol::Vnc),
-            5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-            5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-            _ => ApplicationProtocol::unknown(),
+        let protocol = if service.is_some() {
+            network_scanner_protocol_to_gateway_protocol(service)
+        } else {
+            match port {
+                22 => ApplicationProtocol::Known(Protocol::Ssh),
+                23 => ApplicationProtocol::Known(Protocol::Telnet),
+                80 => ApplicationProtocol::Known(Protocol::Http),
+                443 => ApplicationProtocol::Known(Protocol::Https),
+                389 => ApplicationProtocol::Known(Protocol::Ldap),
+                636 => ApplicationProtocol::Known(Protocol::Ldaps),
+                3389 => ApplicationProtocol::Known(Protocol::Rdp),
+                5900 => ApplicationProtocol::Known(Protocol::Vnc),
+                5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
+                5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
+                _ => ApplicationProtocol::unknown(),
+            }
         };
 
         Self { ip, hostname, protocol }
+    }
+}
+
+fn network_scanner_protocol_to_gateway_protocol(protocol: Option<scanner::Protocol>) -> ApplicationProtocol {
+    match protocol {
+        None => ApplicationProtocol::unknown(),
+        Some(scanner::Protocol::Ssh) => ApplicationProtocol::Known(Protocol::Ssh),
+        Some(scanner::Protocol::Telnet) => ApplicationProtocol::Known(Protocol::Telnet),
+        Some(scanner::Protocol::Http) => ApplicationProtocol::Known(Protocol::Http),
+        Some(scanner::Protocol::Https) => ApplicationProtocol::Known(Protocol::Https),
+        Some(scanner::Protocol::Ldap) => ApplicationProtocol::Known(Protocol::Ldap),
+        Some(scanner::Protocol::Ldaps) => ApplicationProtocol::Known(Protocol::Ldaps),
+        Some(scanner::Protocol::Rdp) => ApplicationProtocol::Known(Protocol::Rdp),
+        Some(scanner::Protocol::Vnc) => ApplicationProtocol::Known(Protocol::Vnc),
+        Some(scanner::Protocol::WinrmHttpPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
+        Some(scanner::Protocol::WinrmHttpsPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
+        Some(scanner::Protocol::Ard) => ApplicationProtocol::Known(Protocol::Ard),
+        Some(scanner::Protocol::Sftp) => ApplicationProtocol::Known(Protocol::Sftp),
+        Some(scanner::Protocol::Scp) => ApplicationProtocol::Known(Protocol::Scp),
+        Some(scanner::Protocol::Wayk) => ApplicationProtocol::Known(Protocol::Wayk),
+        Some(scanner::Protocol::SshPwsh) => ApplicationProtocol::Known(Protocol::SshPwsh),
+        Some(scanner::Protocol::Tunnel) => ApplicationProtocol::Known(Protocol::Tunnel),
     }
 }
