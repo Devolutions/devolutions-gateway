@@ -97,8 +97,9 @@ pub fn mdns_query_scan(
                                 for ip in ip {
                                     let ip = *ip;
                                     let server = server.to_string();
-                                    let _ = result_sender.send((ip, Some(server), port)).await;
-                                    break 'outer;
+                                    if let Err(_) = result_sender.send((ip, Some(server), port)).await {
+                                        break 'outer;
+                                    }
                                 }
                             }
                         }
