@@ -389,6 +389,11 @@ internal class Program
         Version thisVersion = e.Session.QueryProductVersion();
         Version installedVersion = Helpers.AppSearch.InstalledVersion;
 
+        if (installedVersion is null)
+        {
+            e.Session.Set(GatewayProperties.configureGateway, true);
+        }
+
         if (thisVersion < installedVersion)
         {
             MessageBox.Show($"{I18n(Strings.NewerInstalled)} ({installedVersion})");
@@ -425,8 +430,6 @@ internal class Program
                 Process.Start("https://go.microsoft.com/fwlink/?LinkId=2085155");
             }
         }
-
-        e.Session.Set(GatewayProperties.configureGateway, true);
 
         e.ManagedUI.OnCurrentDialogChanged += Wizard.DialogChanged;
     }

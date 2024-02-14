@@ -38,6 +38,18 @@ namespace WixSharpSetup.Dialogs
             this.contextMenuStrip1 = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.copyToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.middlePanel = new System.Windows.Forms.Panel();
+            this.gbExternal = new System.Windows.Forms.GroupBox();
+            this.pnlExternal = new System.Windows.Forms.TableLayoutPanel();
+            this.butBrowsePrivateKeyFile = new System.Windows.Forms.Button();
+            this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
+            this.txtCertificatePassword = new System.Windows.Forms.TextBox();
+            this.lblPrivateKeyFile = new System.Windows.Forms.Label();
+            this.lblCertificatePassword = new System.Windows.Forms.Label();
+            this.lblCertificateFile = new System.Windows.Forms.Label();
+            this.txtCertificateFile = new System.Windows.Forms.TextBox();
+            this.butBrowseCertificateFile = new System.Windows.Forms.Button();
+            this.lblHint = new System.Windows.Forms.Label();
+            this.lblCertificateFormats = new System.Windows.Forms.Label();
             this.gbSystem = new System.Windows.Forms.GroupBox();
             this.pnlSystem = new System.Windows.Forms.TableLayoutPanel();
             this.lblCertificateDescription = new System.Windows.Forms.Label();
@@ -52,17 +64,6 @@ namespace WixSharpSetup.Dialogs
             this.txtSearch = new System.Windows.Forms.TextBox();
             this.butSearchCertificate = new System.Windows.Forms.Button();
             this.butViewCertificate = new System.Windows.Forms.Button();
-            this.gbExternal = new System.Windows.Forms.GroupBox();
-            this.pnlExternal = new System.Windows.Forms.TableLayoutPanel();
-            this.butBrowsePrivateKeyFile = new System.Windows.Forms.Button();
-            this.txtPrivateKeyFile = new System.Windows.Forms.TextBox();
-            this.txtCertificatePassword = new System.Windows.Forms.TextBox();
-            this.lblPrivateKeyFile = new System.Windows.Forms.Label();
-            this.lblCertificatePassword = new System.Windows.Forms.Label();
-            this.lblCertificateFile = new System.Windows.Forms.Label();
-            this.txtCertificateFile = new System.Windows.Forms.TextBox();
-            this.butBrowseCertificateFile = new System.Windows.Forms.Button();
-            this.lblHint = new System.Windows.Forms.Label();
             this.label5 = new System.Windows.Forms.Label();
             this.cmbCertificateSource = new System.Windows.Forms.ComboBox();
             this.topBorder = new System.Windows.Forms.Panel();
@@ -78,10 +79,10 @@ namespace WixSharpSetup.Dialogs
             this.border1 = new System.Windows.Forms.Panel();
             this.contextMenuStrip1.SuspendLayout();
             this.middlePanel.SuspendLayout();
-            this.gbSystem.SuspendLayout();
-            this.pnlSystem.SuspendLayout();
             this.gbExternal.SuspendLayout();
             this.pnlExternal.SuspendLayout();
+            this.gbSystem.SuspendLayout();
+            this.pnlSystem.SuspendLayout();
             this.topPanel.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).BeginInit();
             this.bottomPanel.SuspendLayout();
@@ -114,6 +115,160 @@ namespace WixSharpSetup.Dialogs
             this.middlePanel.Name = "middlePanel";
             this.middlePanel.Size = new System.Drawing.Size(494, 261);
             this.middlePanel.TabIndex = 0;
+            // 
+            // gbExternal
+            // 
+            this.gbExternal.Controls.Add(this.pnlExternal);
+            this.gbExternal.Location = new System.Drawing.Point(12, 34);
+            this.gbExternal.Name = "gbExternal";
+            this.gbExternal.Size = new System.Drawing.Size(470, 164);
+            this.gbExternal.TabIndex = 1;
+            this.gbExternal.TabStop = false;
+            this.gbExternal.Text = "[BrowseForACertificateToUse]";
+            // 
+            // pnlExternal
+            // 
+            this.pnlExternal.ColumnCount = 3;
+            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 150F));
+            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
+            this.pnlExternal.Controls.Add(this.butBrowsePrivateKeyFile, 2, 5);
+            this.pnlExternal.Controls.Add(this.txtPrivateKeyFile, 1, 5);
+            this.pnlExternal.Controls.Add(this.txtCertificatePassword, 1, 3);
+            this.pnlExternal.Controls.Add(this.lblPrivateKeyFile, 0, 5);
+            this.pnlExternal.Controls.Add(this.lblCertificatePassword, 0, 3);
+            this.pnlExternal.Controls.Add(this.lblCertificateFile, 0, 1);
+            this.pnlExternal.Controls.Add(this.txtCertificateFile, 1, 1);
+            this.pnlExternal.Controls.Add(this.butBrowseCertificateFile, 2, 1);
+            this.pnlExternal.Controls.Add(this.lblHint, 1, 6);
+            this.pnlExternal.Controls.Add(this.lblCertificateFormats, 1, 2);
+            this.pnlExternal.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pnlExternal.Location = new System.Drawing.Point(3, 16);
+            this.pnlExternal.Name = "pnlExternal";
+            this.pnlExternal.RowCount = 7;
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
+            this.pnlExternal.Size = new System.Drawing.Size(464, 145);
+            this.pnlExternal.TabIndex = 8;
+            // 
+            // butBrowsePrivateKeyFile
+            // 
+            this.butBrowsePrivateKeyFile.Location = new System.Drawing.Point(434, 105);
+            this.butBrowsePrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.butBrowsePrivateKeyFile.Name = "butBrowsePrivateKeyFile";
+            this.butBrowsePrivateKeyFile.Size = new System.Drawing.Size(27, 20);
+            this.butBrowsePrivateKeyFile.TabIndex = 4;
+            this.butBrowsePrivateKeyFile.Text = "...";
+            this.butBrowsePrivateKeyFile.UseVisualStyleBackColor = true;
+            this.butBrowsePrivateKeyFile.Click += new System.EventHandler(this.butBrowsePrivateKeyFile_Click);
+            // 
+            // txtPrivateKeyFile
+            // 
+            this.txtPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtPrivateKeyFile.Location = new System.Drawing.Point(153, 105);
+            this.txtPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtPrivateKeyFile.Name = "txtPrivateKeyFile";
+            this.txtPrivateKeyFile.Size = new System.Drawing.Size(275, 20);
+            this.txtPrivateKeyFile.TabIndex = 3;
+            // 
+            // txtCertificatePassword
+            // 
+            this.pnlExternal.SetColumnSpan(this.txtCertificatePassword, 2);
+            this.txtCertificatePassword.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtCertificatePassword.Location = new System.Drawing.Point(153, 71);
+            this.txtCertificatePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtCertificatePassword.Name = "txtCertificatePassword";
+            this.txtCertificatePassword.Size = new System.Drawing.Size(308, 20);
+            this.txtCertificatePassword.TabIndex = 2;
+            this.txtCertificatePassword.UseSystemPasswordChar = true;
+            this.txtCertificatePassword.Visible = false;
+            // 
+            // lblPrivateKeyFile
+            // 
+            this.lblPrivateKeyFile.AutoSize = true;
+            this.lblPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblPrivateKeyFile.Location = new System.Drawing.Point(3, 105);
+            this.lblPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.lblPrivateKeyFile.Name = "lblPrivateKeyFile";
+            this.lblPrivateKeyFile.Size = new System.Drawing.Size(144, 26);
+            this.lblPrivateKeyFile.TabIndex = 4;
+            this.lblPrivateKeyFile.Text = "[CertificateDlgCertKeyFileLabel]";
+            this.lblPrivateKeyFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // lblCertificatePassword
+            // 
+            this.lblCertificatePassword.AutoSize = true;
+            this.lblCertificatePassword.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCertificatePassword.Location = new System.Drawing.Point(3, 71);
+            this.lblCertificatePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.lblCertificatePassword.Name = "lblCertificatePassword";
+            this.lblCertificatePassword.Size = new System.Drawing.Size(144, 26);
+            this.lblCertificatePassword.TabIndex = 7;
+            this.lblCertificatePassword.Text = "[CertificateDlgCertPasswordLabel]";
+            this.lblCertificatePassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblCertificatePassword.Visible = false;
+            // 
+            // lblCertificateFile
+            // 
+            this.lblCertificateFile.AutoSize = true;
+            this.lblCertificateFile.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCertificateFile.Location = new System.Drawing.Point(3, 3);
+            this.lblCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.lblCertificateFile.Name = "lblCertificateFile";
+            this.lblCertificateFile.Size = new System.Drawing.Size(144, 20);
+            this.lblCertificateFile.TabIndex = 1;
+            this.lblCertificateFile.Text = "[CertificateDlgCertFileLabel]";
+            this.lblCertificateFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            // 
+            // txtCertificateFile
+            // 
+            this.txtCertificateFile.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtCertificateFile.Location = new System.Drawing.Point(153, 3);
+            this.txtCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.txtCertificateFile.Name = "txtCertificateFile";
+            this.txtCertificateFile.Size = new System.Drawing.Size(275, 20);
+            this.txtCertificateFile.TabIndex = 0;
+            this.txtCertificateFile.TextChanged += new System.EventHandler(this.txtCertificateFile_TextChanged);
+            // 
+            // butBrowseCertificateFile
+            // 
+            this.butBrowseCertificateFile.Location = new System.Drawing.Point(434, 3);
+            this.butBrowseCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
+            this.butBrowseCertificateFile.Name = "butBrowseCertificateFile";
+            this.butBrowseCertificateFile.Size = new System.Drawing.Size(27, 20);
+            this.butBrowseCertificateFile.TabIndex = 1;
+            this.butBrowseCertificateFile.Text = "...";
+            this.butBrowseCertificateFile.UseVisualStyleBackColor = true;
+            this.butBrowseCertificateFile.Click += new System.EventHandler(this.butBrowseCertificateFile_Click);
+            // 
+            // lblHint
+            // 
+            this.lblHint.AutoSize = true;
+            this.pnlExternal.SetColumnSpan(this.lblHint, 2);
+            this.lblHint.Dock = System.Windows.Forms.DockStyle.Top;
+            this.lblHint.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblHint.Location = new System.Drawing.Point(153, 136);
+            this.lblHint.Name = "lblHint";
+            this.lblHint.Size = new System.Drawing.Size(308, 13);
+            this.lblHint.TabIndex = 8;
+            // 
+            // lblCertificateFormats
+            // 
+            this.pnlExternal.SetColumnSpan(this.lblCertificateFormats, 2);
+            this.lblCertificateFormats.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lblCertificateFormats.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblCertificateFormats.ForeColor = System.Drawing.SystemColors.GrayText;
+            this.lblCertificateFormats.Location = new System.Drawing.Point(153, 28);
+            this.lblCertificateFormats.Name = "lblCertificateFormats";
+            this.lblCertificateFormats.Size = new System.Drawing.Size(308, 40);
+            this.lblCertificateFormats.TabIndex = 9;
+            this.lblCertificateFormats.Text = "[AnX509CertificateInBinaryOrPemEncoded]";
             // 
             // gbSystem
             // 
@@ -302,148 +457,6 @@ namespace WixSharpSetup.Dialogs
             this.butViewCertificate.Visible = false;
             this.butViewCertificate.Click += new System.EventHandler(this.butViewCertificate_Click);
             // 
-            // gbExternal
-            // 
-            this.gbExternal.Controls.Add(this.pnlExternal);
-            this.gbExternal.Location = new System.Drawing.Point(12, 34);
-            this.gbExternal.Name = "gbExternal";
-            this.gbExternal.Size = new System.Drawing.Size(470, 128);
-            this.gbExternal.TabIndex = 1;
-            this.gbExternal.TabStop = false;
-            this.gbExternal.Text = "[BrowseForACertificateToUse]";
-            // 
-            // pnlExternal
-            // 
-            this.pnlExternal.ColumnCount = 3;
-            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 150F));
-            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.pnlExternal.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle());
-            this.pnlExternal.Controls.Add(this.butBrowsePrivateKeyFile, 2, 5);
-            this.pnlExternal.Controls.Add(this.txtPrivateKeyFile, 1, 5);
-            this.pnlExternal.Controls.Add(this.txtCertificatePassword, 1, 3);
-            this.pnlExternal.Controls.Add(this.lblPrivateKeyFile, 0, 5);
-            this.pnlExternal.Controls.Add(this.lblCertificatePassword, 0, 3);
-            this.pnlExternal.Controls.Add(this.lblCertificateFile, 0, 1);
-            this.pnlExternal.Controls.Add(this.txtCertificateFile, 1, 1);
-            this.pnlExternal.Controls.Add(this.butBrowseCertificateFile, 2, 1);
-            this.pnlExternal.Controls.Add(this.lblHint, 1, 6);
-            this.pnlExternal.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.pnlExternal.Location = new System.Drawing.Point(3, 16);
-            this.pnlExternal.Name = "pnlExternal";
-            this.pnlExternal.RowCount = 6;
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle());
-            this.pnlExternal.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.pnlExternal.Size = new System.Drawing.Size(464, 109);
-            this.pnlExternal.TabIndex = 8;
-            // 
-            // butBrowsePrivateKeyFile
-            // 
-            this.butBrowsePrivateKeyFile.Location = new System.Drawing.Point(434, 65);
-            this.butBrowsePrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.butBrowsePrivateKeyFile.Name = "butBrowsePrivateKeyFile";
-            this.butBrowsePrivateKeyFile.Size = new System.Drawing.Size(27, 20);
-            this.butBrowsePrivateKeyFile.TabIndex = 4;
-            this.butBrowsePrivateKeyFile.Text = "...";
-            this.butBrowsePrivateKeyFile.UseVisualStyleBackColor = true;
-            this.butBrowsePrivateKeyFile.Click += new System.EventHandler(this.butBrowsePrivateKeyFile_Click);
-            // 
-            // txtPrivateKeyFile
-            // 
-            this.txtPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtPrivateKeyFile.Location = new System.Drawing.Point(153, 65);
-            this.txtPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.txtPrivateKeyFile.Name = "txtPrivateKeyFile";
-            this.txtPrivateKeyFile.Size = new System.Drawing.Size(275, 20);
-            this.txtPrivateKeyFile.TabIndex = 3;
-            // 
-            // txtCertificatePassword
-            // 
-            this.pnlExternal.SetColumnSpan(this.txtCertificatePassword, 2);
-            this.txtCertificatePassword.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtCertificatePassword.Location = new System.Drawing.Point(153, 31);
-            this.txtCertificatePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.txtCertificatePassword.Name = "txtCertificatePassword";
-            this.txtCertificatePassword.Size = new System.Drawing.Size(308, 20);
-            this.txtCertificatePassword.TabIndex = 2;
-            this.txtCertificatePassword.UseSystemPasswordChar = true;
-            this.txtCertificatePassword.Visible = false;
-            // 
-            // lblPrivateKeyFile
-            // 
-            this.lblPrivateKeyFile.AutoSize = true;
-            this.lblPrivateKeyFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblPrivateKeyFile.Location = new System.Drawing.Point(3, 65);
-            this.lblPrivateKeyFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.lblPrivateKeyFile.Name = "lblPrivateKeyFile";
-            this.lblPrivateKeyFile.Size = new System.Drawing.Size(144, 26);
-            this.lblPrivateKeyFile.TabIndex = 4;
-            this.lblPrivateKeyFile.Text = "[CertificateDlgCertKeyFileLabel]";
-            this.lblPrivateKeyFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            // 
-            // lblCertificatePassword
-            // 
-            this.lblCertificatePassword.AutoSize = true;
-            this.lblCertificatePassword.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblCertificatePassword.Location = new System.Drawing.Point(3, 31);
-            this.lblCertificatePassword.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.lblCertificatePassword.Name = "lblCertificatePassword";
-            this.lblCertificatePassword.Size = new System.Drawing.Size(144, 26);
-            this.lblCertificatePassword.TabIndex = 7;
-            this.lblCertificatePassword.Text = "[CertificateDlgCertPasswordLabel]";
-            this.lblCertificatePassword.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            this.lblCertificatePassword.Visible = false;
-            // 
-            // lblCertificateFile
-            // 
-            this.lblCertificateFile.AutoSize = true;
-            this.lblCertificateFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.lblCertificateFile.Location = new System.Drawing.Point(3, 3);
-            this.lblCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.lblCertificateFile.Name = "lblCertificateFile";
-            this.lblCertificateFile.Size = new System.Drawing.Size(144, 20);
-            this.lblCertificateFile.TabIndex = 1;
-            this.lblCertificateFile.Text = "[CertificateDlgCertFileLabel]";
-            this.lblCertificateFile.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
-            // 
-            // txtCertificateFile
-            // 
-            this.txtCertificateFile.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtCertificateFile.Location = new System.Drawing.Point(153, 3);
-            this.txtCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.txtCertificateFile.Name = "txtCertificateFile";
-            this.txtCertificateFile.Size = new System.Drawing.Size(275, 20);
-            this.txtCertificateFile.TabIndex = 0;
-            this.txtCertificateFile.TextChanged += new System.EventHandler(this.txtCertificateFile_TextChanged);
-            // 
-            // butBrowseCertificateFile
-            // 
-            this.butBrowseCertificateFile.Location = new System.Drawing.Point(434, 3);
-            this.butBrowseCertificateFile.Margin = new System.Windows.Forms.Padding(3, 3, 3, 5);
-            this.butBrowseCertificateFile.Name = "butBrowseCertificateFile";
-            this.butBrowseCertificateFile.Size = new System.Drawing.Size(27, 20);
-            this.butBrowseCertificateFile.TabIndex = 1;
-            this.butBrowseCertificateFile.Text = "...";
-            this.butBrowseCertificateFile.UseVisualStyleBackColor = true;
-            this.butBrowseCertificateFile.Click += new System.EventHandler(this.butBrowseCertificateFile_Click);
-            // 
-            // lblHint
-            // 
-            this.lblHint.AutoSize = true;
-            this.pnlExternal.SetColumnSpan(this.lblHint, 2);
-            this.lblHint.Dock = System.Windows.Forms.DockStyle.Top;
-            this.lblHint.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.lblHint.ForeColor = System.Drawing.SystemColors.GrayText;
-            this.lblHint.Location = new System.Drawing.Point(153, 96);
-            this.lblHint.Name = "lblHint";
-            this.lblHint.Size = new System.Drawing.Size(308, 13);
-            this.lblHint.TabIndex = 8;
-            // 
             // label5
             // 
             this.label5.AutoSize = true;
@@ -611,12 +624,12 @@ namespace WixSharpSetup.Dialogs
             this.contextMenuStrip1.ResumeLayout(false);
             this.middlePanel.ResumeLayout(false);
             this.middlePanel.PerformLayout();
-            this.gbSystem.ResumeLayout(false);
-            this.pnlSystem.ResumeLayout(false);
-            this.pnlSystem.PerformLayout();
             this.gbExternal.ResumeLayout(false);
             this.pnlExternal.ResumeLayout(false);
             this.pnlExternal.PerformLayout();
+            this.gbSystem.ResumeLayout(false);
+            this.pnlSystem.ResumeLayout(false);
+            this.pnlSystem.PerformLayout();
             this.topPanel.ResumeLayout(false);
             this.topPanel.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.banner)).EndInit();
@@ -670,5 +683,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.TextBox txtCertificatePassword;
         private System.Windows.Forms.Label lblPrivateKeyFile;
         private System.Windows.Forms.Label lblCertificatePassword;
+        private System.Windows.Forms.Label lblCertificateFormats;
     }
 }

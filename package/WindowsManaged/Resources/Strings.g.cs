@@ -117,6 +117,18 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string WindowsPowerShell51IsRequired = "WindowsPowerShell51IsRequired";		
 		/// <summary>
+		/// Find your public key for {0} or {1}
+		/// </summary>
+		public const string FindYourPublicKeyForXorX = "FindYourPublicKeyForXorX";		
+		/// <summary>
+		/// Devolutions Server
+		/// </summary>
+		public const string FindYourPublicKeyDevolutionsServerLink = "FindYourPublicKeyDevolutionsServerLink";		
+		/// <summary>
+		/// Devolutions Hub
+		/// </summary>
+		public const string FindYourPublicKeyDevolutionsHubLink = "FindYourPublicKeyDevolutionsHubLink";		
+		/// <summary>
 		/// Read more at {0}
 		/// </summary>
 		public const string NgrokReadMoreAtX = "NgrokReadMoreAtX";		
@@ -541,6 +553,10 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string CertificateSource = "CertificateSource";		
 		/// <summary>
+		/// Enter text to search
+		/// </summary>
+		public const string EnterTextToSearch = "EnterTextToSearch";		
+		/// <summary>
 		/// Search for a certificate to use
 		/// </summary>
 		public const string SearchForACertificateToUse = "SearchForACertificateToUse";		
@@ -576,6 +592,10 @@ namespace DevolutionsGateway.Resources
 		/// Select the certificate to use
 		/// </summary>
 		public const string SelectTheCertificateToUse = "SelectTheCertificateToUse";		
+		/// <summary>
+		/// An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded
+		/// </summary>
+		public const string AnX509CertificateInBinaryOrPemEncoded = "AnX509CertificateInBinaryOrPemEncoded";		
 		/// <summary>
 		/// Listeners
 		/// </summary>

@@ -30,6 +30,9 @@
                 <String Id="YouMustProvideAValidHostname">You must provide a valid hostname</String>
                 <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">You must select a certificate from the system certificate store</String>
                     <!-- links -->
+                <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
+                <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
+                <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
                 <String Id="NgrokAuthTokenLink">authentication token</String>
                 <String Id="NgrokDomainLink">domain</String>
                 <String Id="NgrokProvideYourX">Provide your {0}</String>
@@ -146,6 +149,7 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="AccessUriDlgHttpWarn">An insecure external URI is not recommended for production environments</String>
                 <String Id="AccessUriDlgTitle">External URL</String>
                     <!-- dialogs.certificate -->
+                <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                 <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
                 <String Id="CertificateDlgCertConfigLabel">Certificate Configuration</String>
                 <String Id="CertificateDlgCertFileLabel">Certificate File</String>
@@ -156,6 +160,7 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="CertificateSource">Certificate Source</String>
                 <String Id="CertificateStore">Certificate Store</String>
                 <String Id="EncryptedPrivateKeysAreNotSupported">Encrypted private keys are not supported</String>
+                <String Id="EnterTextToSearch">Enter text to search</String>
                 <String Id="Search">Search</String>
                 <String Id="SearchBy">Search By</String>
                 <String Id="SearchForACertificateToUse">Search for a certificate to use</String>
