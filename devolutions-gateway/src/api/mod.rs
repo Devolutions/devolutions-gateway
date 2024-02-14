@@ -21,7 +21,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/jrec", jrec::make_router(state.clone()))
         .nest("/jet/config", config::make_router(state.clone()))
         .nest("/jet/session", session::make_router(state.clone()))
-        .nest("/jet/sessions", session::make_router(state.clone()))
+        .nest("/jet/sessions", sessions::make_router(state.clone()))
         .nest("/jet/diagnostics", diagnostics::make_router(state.clone()))
         .route("/jet/jmux", axum::routing::get(jmux::handler))
         .route("/jet/rdp", axum::routing::get(rdp::handler))

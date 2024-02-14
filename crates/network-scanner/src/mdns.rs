@@ -87,7 +87,7 @@ pub fn mdns_query_scan(
                     })
                     .spawn(move |_| async move {
                         let receiver = service_deamon.browse(&fullname)?;
-                        while let Ok(response) = receiver.recv_async().await {
+                        'outer: while let Ok(response) = receiver.recv_async().await {
                             tracing::debug!(sub_service_event=?response);
                             if let ServiceEvent::ServiceResolved(info) = response {
                                 let server = info.get_fullname();
@@ -98,6 +98,7 @@ pub fn mdns_query_scan(
                                     let ip = *ip;
                                     let server = server.to_string();
                                     let _ = result_sender.send((ip, Some(server), port)).await;
+                                    break 'outer;
                                 }
                             }
                         }
