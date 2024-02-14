@@ -6,6 +6,7 @@ use network_scanner_proto::icmp_v4;
 
 pub mod broadcast;
 pub mod ip_utils;
+pub mod mdns;
 pub mod netbios;
 pub mod ping;
 pub mod port_discovery;
@@ -22,6 +23,9 @@ pub enum ScannerError {
 
     #[error("Network interface does not have a netmask")]
     InterfaceDoesNotHaveNetmask(Addr),
+
+    #[error("mDNS scan error: {0}")]
+    MdnsError(#[from] mdns_sd::Error),
 
     #[error("Other error: {0}")]
     Other(#[from] anyhow::Error),

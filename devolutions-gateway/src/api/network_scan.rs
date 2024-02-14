@@ -80,6 +80,10 @@ pub struct NetworkScanQueryParams {
     pub netbios_timeout: Option<u64>,
     /// Interval in milliseconds (default is 200)
     pub netbios_interval: Option<u64>,
+    /// The maximum duration for mdns scan in milliseconds. Highly suggested! (default is 20 * 1000)
+    pub mdns_meta_query_timeout: Option<u64>,
+    /// The maximum time for each mdns query in milliseconds. (default is 5 * 1000)
+    pub mdns_single_query_timeout: Option<u64>,
     /// The maximum duration for whole networking scan in milliseconds. Highly suggested!
     pub max_wait: Option<u64>,
 }
@@ -97,6 +101,8 @@ impl From<NetworkScanQueryParams> for NetworkScannerParams {
             netbios_timeout: val.netbios_timeout.unwrap_or(1000),
             max_wait_time: val.max_wait.unwrap_or(120 * 1000),
             netbios_interval: val.netbios_interval.unwrap_or(200),
+            mdns_meta_query_timeout: val.mdns_meta_query_timeout.unwrap_or(20 * 1000), // in milliseconds
+            mdns_single_query_timeout: val.mdns_single_query_timeout.unwrap_or(5 * 1000), // in milliseconds
         }
     }
 }

@@ -10,6 +10,7 @@ publish = false
 anyhow = "1.0.79"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 dns-lookup = "2.0.4"
+mdns-sd = "0.10.4"
 network-interface = "1.1.1"
 network-scanner-net ={ path = "../network-scanner-net" }
 network-scanner-proto ={ path = "../network-scanner-proto" }

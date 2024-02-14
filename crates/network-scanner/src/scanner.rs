@@ -1,5 +1,6 @@
 use crate::{
     ip_utils::IpAddrRange,
+    mdns::{self, MdnsDeamon},
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
@@ -17,20 +18,24 @@ use crate::{
     task_utils::{TaskExecutionContext, TaskExecutionRunner},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NetworkScanner {
     pub ports: Vec<u16>,
 
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    // TODO: use this
-    // scan_method: Vec<ScanMethod>,
+    pub(crate) mdns_deamon: MdnsDeamon,
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds
     pub broadcast_timeout: Duration, // in milliseconds
     pub port_scan_timeout: Duration, // in milliseconds
     pub netbios_timeout: Duration,   // in milliseconds
     pub netbios_interval: Duration,  // in milliseconds
-    pub max_wait_time: Duration,     // max_wait for entire scan duration in milliseconds, suggested!
+    /// the duration to wait for the entire scan to finish
+    pub mdns_meta_query_timeout: Duration,
+    /// the duration to wait for each mdns query
+    pub mdns_single_query_timeout: Duration,
+    /// the duration to wait for the entire scan to finish
+    pub max_wait_time: Duration,
 }
 
 impl NetworkScanner {
@@ -169,6 +174,36 @@ impl NetworkScanner {
             anyhow::Ok(())
         });
 
+        task_executor.run(
+            move |TaskExecutionContext {
+                      mdns_deamon,
+                      port_sender,
+                      ip_cache,
+                      ports,
+                      ..
+                  },
+                  task_manager| async move {
+                let mut receiver = mdns::mdns_query_scan(
+                    mdns_deamon,
+                    task_manager,
+                    Duration::from_secs(10),
+                    Duration::from_secs(3),
+                )?;
+
+                while let Some((ip, server, port)) = receiver.recv().await {
+                    if ip_cache.read().get(&ip).is_none() {
+                        ip_cache.write().insert(ip, server.clone());
+                    }
+                    let dns_name = ip_cache.read().get(&ip).cloned().flatten();
+                    if ports.contains(&port) {
+                        port_sender.send((ip, dns_name, port)).await?;
+                    }
+                }
+
+                anyhow::Ok(())
+            },
+        );
+
         let TaskExecutionRunner {
             context: TaskExecutionContext { port_receiver, .. },
             task_manager,
@@ -194,6 +229,8 @@ impl NetworkScanner {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
+            mdns_meta_query_timeout,
+            mdns_single_query_timeout,
         } = params;
 
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
@@ -204,6 +241,8 @@ impl NetworkScanner {
         let port_scan_timeout = Duration::from_millis(port_scan_timeout);
         let netbios_timeout = Duration::from_millis(netbios_timeout);
         let netbios_interval = Duration::from_millis(netbios_interval);
+        let mdns_meta_query_timeout = Duration::from_millis(mdns_meta_query_timeout);
+        let mdns_single_query_timeout = Duration::from_millis(mdns_single_query_timeout);
         let max_wait = Duration::from_millis(max_wait);
 
         Ok(Self {
@@ -215,7 +254,10 @@ impl NetworkScanner {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
+            mdns_meta_query_timeout,
+            mdns_single_query_timeout,
             max_wait_time: max_wait,
+            mdns_deamon: MdnsDeamon::new()?,
         })
     }
 }
@@ -299,11 +341,13 @@ impl Display for ScanMethod {
 #[derive(Debug, Clone, TypedBuilder, Default)]
 pub struct NetworkScannerParams {
     pub ports: Vec<u16>,
-    pub ping_interval: u64,     // in milliseconds
-    pub ping_timeout: u64,      // in milliseconds
-    pub broadcast_timeout: u64, // in milliseconds
-    pub port_scan_timeout: u64, // in milliseconds
-    pub netbios_timeout: u64,   // in milliseconds
-    pub netbios_interval: u64,  // in milliseconds
-    pub max_wait_time: u64,     // max_wait for entire scan duration in milliseconds, suggested!
+    pub ping_interval: u64,             // in milliseconds
+    pub ping_timeout: u64,              // in milliseconds
+    pub broadcast_timeout: u64,         // in milliseconds
+    pub port_scan_timeout: u64,         // in milliseconds
+    pub netbios_timeout: u64,           // in milliseconds
+    pub netbios_interval: u64,          // in milliseconds
+    pub mdns_meta_query_timeout: u64,   // in milliseconds
+    pub mdns_single_query_timeout: u64, // in milliseconds
+    pub max_wait_time: u64,             // max_wait for entire scan duration in milliseconds, suggested!
 }

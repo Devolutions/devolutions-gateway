@@ -5,7 +5,7 @@ use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .with_file(true)
         .with_line_number(true)
         .with_thread_names(true)
@@ -22,6 +22,9 @@ fn main() -> anyhow::Result<()> {
 
         netbios_timeout: 1000,
         netbios_interval: 20,
+
+        mdns_meta_query_timeout: 20 * 1000,
+        mdns_single_query_timeout: 5 * 1000,
 
         max_wait_time: 120 * 1000,
     };
