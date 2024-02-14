@@ -196,7 +196,7 @@ pub(crate) struct TimeoutManager {
 }
 
 impl TimeoutManager {
-    pub(crate) fn when_finished<F>(self, f: F) -> Self
+    pub(crate) fn when_timed_out<F>(self, f: F) -> Self
     where
         F: FnOnce() + Send + 'static,
     {
