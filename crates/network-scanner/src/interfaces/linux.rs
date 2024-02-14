@@ -19,23 +19,22 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
     let (link_sender, link_receiver) = crossbeam::channel::unbounded();
     let handle_clone = handle.clone();
+    // Retrieve all links, and find the addresses associated with each link
     tokio::spawn(async move {
         let mut receiver = get_all_links(handle.clone()).await?;
         let handle = handle.clone();
         while let Some(mut link) = receiver.recv().await {
             tracing::debug!(raw_link = ?link);
             let handle = handle.clone();
-            
+
             let mut result = get_address(handle.clone(), link.clone()).await;
 
-            if let Err(ref e) = result {
-                if let rtnetlink::Error::NetlinkError(msg) = e {
-                    if msg.code.map_or(0, NonZeroI32::get) == -16 {
-                        // Linux EBUSY, retry only once
-                        tracing::warn!("retrying link address fetch");
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        result = get_address(handle, link.clone()).await;
-                    }
+            if let Err(rtnetlink::Error::NetlinkError(ref msg)) = result {
+                if msg.code.map_or(0, NonZeroI32::get) == -16 {
+                    // Linux EBUSY, retry only once
+                    tracing::warn!("retrying link address fetch");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    result = get_address(handle, link.clone()).await;
                 }
             }
 
@@ -69,6 +68,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     });
 
     let (router_sender, router_receiver) = crossbeam::channel::unbounded();
+    // find all routes
     tokio::spawn(async move {
         let mut routes_v4 = handle_clone.route().get(rtnetlink::IpVersion::V4).execute();
         let route_sender_v4 = router_sender.clone();
@@ -96,8 +96,19 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         anyhow::Ok(())
     });
 
+    let (dns_sender, dns_receiver) = crossbeam::channel::unbounded();
+    // find all nameservers
+    tokio::spawn(async move {
+        let dns_servers = read_resolve_conf().await?;
+        for dns_server in dns_servers {
+            dns_sender.send(dns_server)?;
+        }
+        anyhow::Ok(())
+    });
+
     let mut link_infos = vec![];
     let mut route_infos = vec![];
+    let mut dns_servers = vec![];
 
     while let Ok(link_info) = link_receiver.recv() {
         tracing::debug!(link = ?link_info);
@@ -109,15 +120,29 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         route_infos.push(route_info);
     }
 
+    while let Ok(dns_server) = dns_receiver.recv() {
+        tracing::debug!(dns_server = ?dns_server);
+        dns_servers.push(dns_server);
+    }
+
     for link_info in &mut link_infos {
-        for route_info in &route_infos {
-            if route_info.index == link_info.index {
-                link_info.routes.push(route_info.clone());
+        link_info.routes = route_infos
+            .iter()
+            .filter(|route_info| route_info.index == link_info.index)
+            .cloned()
+            .collect();
+    }
+
+    // if a dns server is in the same network as the link, add it to the link
+    for link_info in &mut link_infos {
+        for dns_server in &dns_servers {
+            if link_info.can_access(*dns_server) {
+                link_info.dns_servers.push(*dns_server);
             }
         }
     }
 
-    let result = link_infos
+    let result: Vec<NetworkInterface> = link_infos
         .iter()
         .map(|link_info| link_info.try_into())
         .collect::<Result<Vec<_>, _>>()?;
@@ -158,7 +183,7 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         prefixes,
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         gateways,
-        dns_servers: vec![], // TODO: Implement DNS server lookup
+        dns_servers: link_info.dns_servers.clone(),
     })
 }
 
@@ -170,6 +195,13 @@ struct LinkInfo {
     index: u32,
     addresses: Vec<AddressInfo>,
     routes: Vec<RouteInfo>,
+    dns_servers: Vec<IpAddr>,
+}
+
+impl LinkInfo {
+    fn can_access(&self, ip: IpAddr) -> bool {
+        self.routes.iter().any(|route| route.is_accessible(ip))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +213,18 @@ struct AddressInfo {
 #[derive(Debug, Clone)]
 struct RouteInfo {
     gateway: Option<IpAddr>,
+    destination: Option<IpAddr>,
+    destination_prefix: u8,
     index: u32,
+}
+
+impl RouteInfo {
+    fn is_accessible(&self, ip: IpAddr) -> bool {
+        self.destination
+            .map(|destination| is_ip_covered((destination, self.destination_prefix), ip))
+            .unwrap_or(false)
+            || self.destination_prefix == 0 // default route
+    }
 }
 
 impl TryFrom<RouteMessage> for RouteInfo {
@@ -216,7 +259,29 @@ impl TryFrom<RouteMessage> for RouteInfo {
             })
             .context("no index found")?;
 
-        let route_info = RouteInfo { gateway, index };
+        let destination_prefix = value.header.destination_prefix_length;
+        let destination = value
+            .attributes
+            .iter()
+            .find(|attr| matches!(attr, RouteAttribute::Destination(_)))
+            .and_then(|attr| {
+                if let RouteAttribute::Destination(destination) = attr {
+                    match destination {
+                        RouteAddress::Inet(v4) => Some(IpAddr::from(*v4)),
+                        RouteAddress::Inet6(v6) => Some(IpAddr::from(*v6)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            });
+
+        let route_info = RouteInfo {
+            gateway,
+            index,
+            destination,
+            destination_prefix,
+        };
 
         Ok(route_info)
     }
@@ -304,4 +369,43 @@ async fn get_address(handle: Handle, link_info: LinkInfo) -> Result<Vec<AddressM
     }
 
     Ok(res)
+}
+
+async fn read_resolve_conf() -> anyhow::Result<Vec<IpAddr>> {
+    let mut dns_servers = vec![];
+    let file = tokio::fs::read_to_string("/etc/resolv.conf").await?;
+    for line in file.lines() {
+        if line.starts_with("nameserver") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if let Some(ip) = parts.get(1) {
+                if let Ok(ip) = ip.parse() {
+                    dns_servers.push(ip);
+                }
+            }
+        }
+    }
+    Ok(dns_servers)
+}
+
+fn is_ip_covered((prefix_ip, prefix_len): (IpAddr, u8), ip: IpAddr) -> bool {
+    match (prefix_ip, ip) {
+        (IpAddr::V4(prefix_v4), IpAddr::V4(ipv4)) => {
+            let prefix_int = u32::from_be_bytes(prefix_v4.octets());
+            let ip_int = u32::from_be_bytes(ipv4.octets());
+            let mask = !0u32 << (32 - prefix_len);
+            let masked_prefix = prefix_int & mask;
+            let masked_ip = ip_int & mask;
+
+            masked_prefix == masked_ip
+        }
+        (IpAddr::V6(prefix_v6), IpAddr::V6(ipv6)) => {
+            let prefix_int = u128::from_be_bytes(prefix_v6.octets());
+            let ip_int = u128::from_be_bytes(ipv6.octets());
+            let mask = !0u128 << (128 - prefix_len);
+            let masked_prefix = prefix_int & mask;
+            let masked_ip = ip_int & mask;
+            masked_prefix == masked_ip
+        }
+        _ => false,
+    }
 }

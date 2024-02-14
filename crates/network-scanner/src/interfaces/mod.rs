@@ -11,7 +11,6 @@ pub use linux::get_network_interfaces;
 
 use std::net::IpAddr;
 
-
 #[derive(Debug, Clone)]
 pub enum MacAddr {
     Eui64([u8; 8]),
@@ -37,7 +36,6 @@ impl TryFrom<&[u8]> for MacAddr {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct NetworkInterface {
