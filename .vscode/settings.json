@@ -13,10 +13,4 @@
     "powershell.codeFormatting.whitespaceBeforeOpenBrace": true,
     "powershell.codeFormatting.whitespaceBeforeOpenParen": true,
     "powershell.codeFormatting.whitespaceBetweenParameters": true,
-    "rust-analyzer.linkedProjects": [
-        ".\\crates\\network-scanner\\Cargo.toml",
-        ".\\crates\\network-scanner\\Cargo.toml",
-        ".\\crates\\network-scanner\\Cargo.toml",
-        ".\\crates\\network-scanner\\Cargo.toml"
-    ],
 }
