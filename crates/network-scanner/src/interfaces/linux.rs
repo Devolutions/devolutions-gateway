@@ -25,7 +25,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         while let Some(mut link) = receiver.recv().await {
             tracing::debug!(raw_link = ?link);
             let handle = handle.clone();
-            
+
             let mut result = get_address(handle.clone(), link.clone()).await;
 
             if let Err(ref e) = result {
