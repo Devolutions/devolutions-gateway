@@ -24,7 +24,7 @@ impl From<ipconfig::Adapter> for NetworkInterface {
                 .ip_addresses()
                 .iter()
                 .filter_map(|ip| match ip {
-                    IpAddr::V4(ipv4) => Some(ipv4.clone()),
+                    IpAddr::V4(ipv4) => Some(*ipv4),
                     _ => None,
                 })
                 .collect(),
@@ -32,7 +32,7 @@ impl From<ipconfig::Adapter> for NetworkInterface {
                 .ip_addresses()
                 .iter()
                 .filter_map(|ip| match ip {
-                    IpAddr::V6(ipv6) => Some(ipv6.clone()),
+                    IpAddr::V6(ipv6) => Some(*ipv6),
                     _ => None,
                 })
                 .collect(),
