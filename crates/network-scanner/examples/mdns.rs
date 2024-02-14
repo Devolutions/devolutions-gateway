@@ -12,8 +12,8 @@ pub async fn main() -> anyhow::Result<()> {
     let mut receiver = mdns::mdns_query_scan(
         mdns::MdnsDeamon::new()?,
         TaskManager::new(),
-        Duration::from_secs(50),
-        Duration::from_secs(10),
+        Duration::from_secs(20),
+        Duration::from_secs(5),
     )?;
 
     while let Some((ip, server, port, protocol)) = receiver.recv().await {
