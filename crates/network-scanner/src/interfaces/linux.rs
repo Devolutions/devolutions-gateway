@@ -34,12 +34,22 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             };
 
             tracing::debug!(addresses= ?addresses);
-            link.addresses = addresses
+            let address = addresses
                 .iter()
-                .map(|addr| AddressInfo::try_from(addr.clone()).unwrap())
-                .collect();
+                .map(|addr| AddressInfo::try_from(addr.clone()))
+                .collect::<Result<Vec<_>, _>>();
 
-            link_sender.send(link).unwrap();
+            let Ok(address) = address else {
+                tracing::error!("Error parsing address: {:?}", address);
+                continue;
+            };
+
+            link.addresses = address;
+
+            if let Err(e) = link_sender.send(link) {
+                tracing::error!("Error sending link: {:?}", e);
+                break;
+            }
         }
         anyhow::Ok(())
     });
