@@ -118,13 +118,13 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   }
 
   isHostnamesExists(): boolean {
-    return this.hostnames.length > 0;
+    return this.hostnames?.length > 0;
   }
 
   filterHostname(event: any): void {
     const query = event.query.toLowerCase();
 
-    this.filteredHostnames = this.hostnames.filter(hostnameObj =>
+    this.filteredHostnames = this.hostnames?.filter(hostnameObj =>
       hostnameObj.hostname.toLowerCase().startsWith(query)
     );
   }
@@ -150,7 +150,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     }
   }
 
-  private isHostnameInArray(hostname: string, array: AutoCompleteInput[]): boolean {
+  private isHostnameInArray(hostname: string, array: AutoCompleteInput[] = []): boolean {
     return array.some(obj => obj.hostname === hostname);
   }
 
@@ -171,7 +171,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
   private addHostnameToStorage(hostname: string | AutoCompleteInput): void {
     try {
       const hostnameObj: AutoCompleteInput = this.processAutoCompleteInput(hostname);
-      const hostnames: AutoCompleteInput[] | null = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+      const hostnames: AutoCompleteInput[] = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
 
       if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
         hostnames.push(hostnameObj);
@@ -257,7 +257,7 @@ export class RdpFormComponent extends BaseComponent implements  OnInit,
     }
 
     this.connectSessionForm.get('autoComplete').setValue(
-      this.hostnames.find(hostnames =>
+      this.hostnames?.find(hostnames =>
       hostnames.hostname === this.inputFormData?.autoComplete?.hostname));
 
     return of(undefined);
