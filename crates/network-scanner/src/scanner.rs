@@ -1,6 +1,6 @@
 use crate::{
     ip_utils::IpAddrRange,
-    mdns::{self, MdnsDeamon},
+    mdns::{self, MdnsDaemon},
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
@@ -25,7 +25,7 @@ pub struct NetworkScanner {
     /// The runtime environment for socket operations, wrapped in an `Arc` for thread-safe sharing.
     pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
     /// A daemon for Multicast DNS (mDNS) operations, handling service discovery.
-    pub(crate) mdns_deamon: MdnsDeamon,
+    pub(crate) mdns_daemon: MdnsDaemon,
     /// The interval between ping operations.
     pub ping_interval: Duration,
     /// The maximum amount of time to wait for a ping response.
@@ -190,7 +190,7 @@ impl NetworkScanner {
 
         task_executor.run(
             move |TaskExecutionContext {
-                      mdns_deamon,
+                      mdns_daemon,
                       port_sender,
                       ip_cache,
                       ports,
@@ -198,7 +198,7 @@ impl NetworkScanner {
                   },
                   task_manager| async move {
                 let mut receiver = mdns::mdns_query_scan(
-                    mdns_deamon,
+                    mdns_daemon,
                     task_manager,
                     Duration::from_secs(10),
                     Duration::from_secs(3),
@@ -271,7 +271,7 @@ impl NetworkScanner {
             mdns_meta_query_timeout,
             mdns_single_query_timeout,
             max_wait_time: max_wait,
-            mdns_deamon: MdnsDeamon::new()?,
+            mdns_daemon: MdnsDaemon::new()?,
         })
     }
 }

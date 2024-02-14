@@ -8,31 +8,31 @@ use crate::{
 const META_QUERY: &str = "_services._dns-sd._udp.local.";
 
 #[derive(Clone)]
-pub struct MdnsDeamon {
-    service_deamon: mdns_sd::ServiceDaemon,
+pub struct MdnsDaemon {
+    service_daemon: mdns_sd::ServiceDaemon,
 }
 
-impl MdnsDeamon {
+impl MdnsDaemon {
     pub fn new() -> Result<Self, ScannerError> {
-        let service_deamon = mdns_sd::ServiceDaemon::new()?;
-        Ok(Self { service_deamon })
+        let service_daemon = mdns_sd::ServiceDaemon::new()?;
+        Ok(Self { service_daemon })
     }
 
-    pub fn get_service_deamon(&self) -> mdns_sd::ServiceDaemon {
-        self.service_deamon.clone()
+    pub fn get_service_daemon(&self) -> mdns_sd::ServiceDaemon {
+        self.service_daemon.clone()
     }
 }
 
 pub fn mdns_query_scan(
-    service_deamon: MdnsDeamon,
+    service_daemon: MdnsDaemon,
     task_manager: TaskManager,
     entire_duration: std::time::Duration,
     single_query_duration: std::time::Duration,
 ) -> Result<PortReceiver, ScannerError> {
-    let service_deamon = service_deamon.get_service_deamon();
+    let service_daemon = service_daemon.get_service_daemon();
 
-    let receiver = service_deamon.browse(META_QUERY)?;
-    let service_deamon_clone = service_deamon.clone();
+    let receiver = service_daemon.browse(META_QUERY)?;
+    let service_daemon_clone = service_daemon.clone();
 
     let (result_sender, result_receiver) = tokio::sync::mpsc::channel(255);
 
@@ -40,7 +40,7 @@ pub fn mdns_query_scan(
         .with_timeout(entire_duration)
         .when_timed_out(move || {
             tracing::debug!("mdns meta query finished");
-            while let Err(e) = service_deamon_clone.stop_browse(META_QUERY) {
+            while let Err(e) = service_daemon_clone.stop_browse(META_QUERY) {
                 match e {
                     mdns_sd::Error::Again => {
                         tracing::trace!("mdns stop_browse transient error, trying again");
@@ -68,8 +68,8 @@ pub fn mdns_query_scan(
                     continue;
                 };
 
-                let service_deamon = service_deamon.clone();
-                let service_deamon_clone = service_deamon.clone();
+                let service_daemon = service_daemon.clone();
+                let service_daemon_clone = service_daemon.clone();
                 let fullname_clone = fullname.clone();
                 let result_sender = result_sender.clone();
 
@@ -77,7 +77,7 @@ pub fn mdns_query_scan(
                     .with_timeout(single_query_duration)
                     .when_timed_out(move || {
                         tracing::debug!("mdns query finished for {}", fullname_clone);
-                        while let Err(e) = service_deamon_clone.stop_browse(&fullname_clone) {
+                        while let Err(e) = service_daemon_clone.stop_browse(&fullname_clone) {
                             match e {
                                 mdns_sd::Error::Again => {
                                     tracing::trace!("mdns stop_browse transient error, trying again");
@@ -90,7 +90,7 @@ pub fn mdns_query_scan(
                         }
                     })
                     .spawn(move |_| async move {
-                        let receiver = service_deamon.browse(&fullname)?;
+                        let receiver = service_daemon.browse(&fullname)?;
                         'outer: while let Ok(response) = receiver.recv_async().await {
                             tracing::debug!(sub_service_event=?response);
                             if let ServiceEvent::ServiceResolved(info) = response {
