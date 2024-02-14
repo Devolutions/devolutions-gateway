@@ -7,7 +7,7 @@ async fn main() -> anyhow::Result<()> {
 
     let interfaces = network_scanner::interfaces::get_network_interfaces()?;
     for interface in interfaces {
-        println!("{:#?}", interface)
+        tracing::info!("{:?}", interface)
     }
     Ok(())
 }

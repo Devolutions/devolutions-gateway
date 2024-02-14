@@ -17,7 +17,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
 
-    let (link_sender, link_receiver) = crossbeam::channel::bounded(10);
+    let (link_sender, link_receiver) = crossbeam::channel::unbounded();
     let handle_clone = handle.clone();
     tokio::spawn(async move {
         let mut receiver = get_all_links(handle.clone()).await?;
@@ -25,7 +25,13 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         while let Some(mut link) = receiver.recv().await {
             tracing::debug!(raw_link = ?link);
             let handle = handle.clone();
-            let addresses = get_address(handle, link.clone()).await?;
+            let addresses = match get_address(handle, link.clone()).await {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!("Error getting address: {:?}", e);
+                    continue;
+                }
+            };
 
             tracing::debug!(addresses= ?addresses);
             link.addresses = addresses
@@ -42,7 +48,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     tokio::spawn(async move {
         let mut routes_v4 = handle_clone.route().get(rtnetlink::IpVersion::V4).execute();
         let route_sender_v4 = router_sender.clone();
-        while let Some(route) = routes_v4.try_next().await? {
+        while let Ok(Some(route)) = routes_v4.try_next().await {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
@@ -53,7 +59,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             route_sender_v4.send(route_info)?;
         }
         let mut routes_v6 = handle_clone.route().get(rtnetlink::IpVersion::V6).execute();
-        while let Some(route) = routes_v6.try_next().await? {
+        while let Ok(Some(route)) = routes_v6.try_next().await {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
