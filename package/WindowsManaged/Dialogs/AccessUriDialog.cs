@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using DevolutionsGateway.Actions;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Helpers;
@@ -10,7 +11,7 @@ namespace WixSharpSetup.Dialogs
 {
     public partial class AccessUriDialog : GatewayDialog
     {
-        private static readonly string MachineName = Environment.MachineName;
+        private static readonly string MachineName = Dns.GetHostEntry(Environment.MachineName).HostName;
 
         private static readonly string[] Protocols = { Constants.HttpProtocol, Constants.HttpsProtocol };
 
@@ -38,7 +39,7 @@ namespace WixSharpSetup.Dialogs
             {
                 this.txtHostname.Text = 
                     this.cmbProtocol.SelectedValue.ToString() == Constants.HttpsProtocol ? 
-                    Environment.MachineName : "localhost";
+                    MachineName : "localhost";
             }
         }
 

@@ -80,10 +80,16 @@ public partial class ListenersDialog : GatewayDialog
             TcpListenerPort = Convert.ToUInt32(this.txtTcpPort.Text.Trim())
         };
 
+        // If the user hasn't customized the Access URI port, let's make it match
+        // the HTTP listener
         if (properties.AccessUriPort == GatewayProperties.accessUriPort.Default)
         {
             properties.AccessUriPort = properties.HttpListenerPort;
         }
+
+        // Generally they should match, so let's change that for the user
+        // They can adjust this on the Access URI page if needed
+        properties.AccessUriScheme = properties.HttpListenerScheme;
 
         return true;
     }
