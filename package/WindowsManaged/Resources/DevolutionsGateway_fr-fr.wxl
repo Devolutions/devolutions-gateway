@@ -58,6 +58,7 @@
                 <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
                 <String Id="CertificateDlgDescription">Un certificat est nécessaire pour utiliser HTTPS.</String>
                 <String Id="CertificateDlgTitle">Certificat</String>
+                <String Id="EnterTextToSearch">Saisir le texte à rechercher</String>
                     <!-- dialogs.listeners -->
                 <String Id="ListenersDlgDescription">Écouteurs HTTP(S) et TCP.</String>
                 <String Id="ListenersDlgHTTPLabel">Écouteur HTTP</String>
@@ -78,6 +79,9 @@
                 <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
                     <!-- links.- -->
+                <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
+                <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
+                <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
                 <String Id="NgrokAuthTokenLink">authentication token</String>
                 <String Id="NgrokDomainLink">domain</String>
                 <String Id="NgrokProvideYourX">Provide your {0}</String>
@@ -194,6 +198,7 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="AccessUriDlgExplanation">The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS).</String>
                 <String Id="AccessUriDlgHttpWarn">An insecure external URI is not recommended for production environments</String>
                     <!-- dialogs.certificate.- -->
+                <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                 <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
                 <String Id="CertificateSource">Certificate Source</String>
                 <String Id="CertificateStore">Certificate Store</String>

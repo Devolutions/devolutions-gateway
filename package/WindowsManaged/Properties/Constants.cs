@@ -27,5 +27,9 @@
         internal const string NgrokDomainsUrl = "https://dashboard.ngrok.com/cloud-edge/domains";
 
         internal const string NgrokTcpAddressesUrl = "https://dashboard.ngrok.com/cloud-edge/tcp-addresses";
+
+        internal const string DevolutionsServerHelpLink = "https://docs.devolutions.net/server/dgw/server-configuration/";
+
+        internal const string DevolutionsHubHelpLink = "https://docs.devolutions.net/hub/dgw/hub-business-configuration/install-manually/";
     }
 }

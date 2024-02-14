@@ -13,6 +13,7 @@ using static DevolutionsGateway.Properties.Constants;
 using File = System.IO.File;
 using StoreLocation = System.Security.Cryptography.X509Certificates.StoreLocation;
 using StoreName = System.Security.Cryptography.X509Certificates.StoreName;
+using DevolutionsGateway.Actions;
 
 namespace WixSharpSetup.Dialogs;
 
@@ -153,7 +154,9 @@ public partial class CertificateDialog : GatewayDialog
     public override void OnLoad(object sender, EventArgs e)
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
-        
+
+        WinAPI.SendMessage(this.txtSearch.Handle, WinAPI.EM_SETCUEBANNER, 0, I18n(Strings.EnterTextToSearch));
+
         this.cmbCertificateSource.Source<CertificateMode>(this.MsiRuntime);
         this.cmbCertificateSource.SetSelected(CertificateMode.External);
 

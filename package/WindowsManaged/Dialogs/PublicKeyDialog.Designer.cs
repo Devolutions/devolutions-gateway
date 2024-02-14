@@ -45,6 +45,7 @@ namespace WixSharpSetup.Dialogs
             this.butBrowsePublicKeyFile = new System.Windows.Forms.Button();
             this.lblPublicKeyFile = new System.Windows.Forms.Label();
             this.txtPublicKeyFile = new System.Windows.Forms.TextBox();
+            this.lnkKeyHint = new System.Windows.Forms.LinkLabel();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -101,6 +102,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.Controls.Add(this.butBrowsePublicKeyFile, 2, 1);
             this.tableLayoutPanel2.Controls.Add(this.lblPublicKeyFile, 0, 1);
             this.tableLayoutPanel2.Controls.Add(this.txtPublicKeyFile, 1, 1);
+            this.tableLayoutPanel2.Controls.Add(this.lnkKeyHint, 0, 5);
             this.tableLayoutPanel2.Location = new System.Drawing.Point(22, 17);
             this.tableLayoutPanel2.Name = "tableLayoutPanel2";
             this.tableLayoutPanel2.RowCount = 6;
@@ -110,7 +112,7 @@ namespace WixSharpSetup.Dialogs
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle());
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
             this.tableLayoutPanel2.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
-            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 192);
+            this.tableLayoutPanel2.Size = new System.Drawing.Size(449, 219);
             this.tableLayoutPanel2.TabIndex = 2;
             // 
             // lblKeysDescription
@@ -210,6 +212,20 @@ namespace WixSharpSetup.Dialogs
             this.txtPublicKeyFile.Name = "txtPublicKeyFile";
             this.txtPublicKeyFile.Size = new System.Drawing.Size(260, 20);
             this.txtPublicKeyFile.TabIndex = 0;
+            // 
+            // lnkKeyHint
+            // 
+            this.tableLayoutPanel2.SetColumnSpan(this.lnkKeyHint, 3);
+            this.lnkKeyHint.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.lnkKeyHint.Location = new System.Drawing.Point(3, 176);
+            this.lnkKeyHint.Name = "lnkKeyHint";
+            this.lnkKeyHint.Size = new System.Drawing.Size(443, 43);
+            this.lnkKeyHint.TabIndex = 16;
+            this.lnkKeyHint.TabStop = true;
+            this.lnkKeyHint.Text = "Find the public key file for Devolutions Server or Devolutions Hub";
+            this.lnkKeyHint.TextAlign = System.Drawing.ContentAlignment.BottomRight;
+            this.lnkKeyHint.Visible = false;
+            this.lnkKeyHint.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.lnkKeyHint_LinkClicked);
             // 
             // topBorder
             // 
@@ -396,5 +412,6 @@ namespace WixSharpSetup.Dialogs
         private System.Windows.Forms.Label lblPublicKeyDescription;
         private System.Windows.Forms.Label lblPublicKeyFile;
         private System.Windows.Forms.Label lblKeysDescription;
+        private System.Windows.Forms.LinkLabel lnkKeyHint;
     }
 }

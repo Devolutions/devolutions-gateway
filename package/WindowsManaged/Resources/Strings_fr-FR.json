@@ -210,6 +210,10 @@
           {
             "id": "CertificateDlgCertKeyFileLabel",
             "text": "Fichier de clé privée"
+          },
+          {
+            "id": "EnterTextToSearch",
+            "text": "Saisir le texte à rechercher"
           }
         ],
         "listeners": [

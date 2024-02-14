@@ -115,6 +115,18 @@
       ],
       "links": [
         {
+          "id": "FindYourPublicKeyForXorX",
+          "text": "Find your public key for {0} or {1}"
+        },
+        {
+          "id": "FindYourPublicKeyDevolutionsServerLink",
+          "text": "Devolutions Server"
+        },
+        {
+          "id": "FindYourPublicKeyDevolutionsHubLink",
+          "text": "Devolutions Hub"
+        },
+        {
           "id": "NgrokReadMoreAtX",
           "text": "Read more at {0}"
         },
@@ -571,6 +583,10 @@
             "text": "Certificate Source"
           },
           {
+            "id": "EnterTextToSearch",
+            "text": "Enter text to search"
+          },
+          {
             "id": "SearchForACertificateToUse",
             "text": "Search for a certificate to use"
           },
@@ -605,6 +621,10 @@
           {
             "id": "SelectTheCertificateToUse",
             "text": "Select the certificate to use"
+          },
+          {
+            "id": "AnX509CertificateInBinaryOrPemEncoded",
+            "text": "An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded"
           }
         ],
         "listeners": [
