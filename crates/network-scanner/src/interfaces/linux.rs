@@ -1,16 +1,14 @@
-use std::{
-    default, net::{IpAddr, Ipv4Addr}, ops::Index, vec
-};
+use std::net::IpAddr;
 
 use anyhow::Context;
 use futures::stream::TryStreamExt;
-use serde::de;
+
 use tokio::sync::mpsc::Receiver;
 
 use crate::interfaces::NetworkInterface;
 use netlink_packet_route::{
-    address::{AddressAttribute, AddressHeaderFlag, AddressMessage},
-    link::{self, LinkAttribute, LinkFlag},
+    address::{AddressAttribute, AddressMessage},
+    link::{LinkAttribute, LinkFlag},
     route::{RouteAddress, RouteAttribute, RouteMessage},
 };
 use rtnetlink::{new_connection, Handle};
@@ -19,28 +17,25 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
 
-    let (sender, mut receiver) = tokio::sync::mpsc::channel(5);
+    let (link_sender, link_receiver) = crossbeam::channel::bounded(10);
     let handle_clone = handle.clone();
     tokio::spawn(async move {
         let mut receiver = get_all_links(handle.clone()).await?;
         let handle = handle.clone();
-        while let Some(link) = receiver.recv().await {
+        while let Some(mut link) = receiver.recv().await {
+            tracing::debug!(raw_link = ?link);
             let handle = handle.clone();
             let addresses = get_address(handle, link.clone()).await?;
-            sender.send((addresses, link)).await?;
-        }
-        anyhow::Ok(())
-    });
 
-    let (link_sender, link_receiver) = crossbeam::channel::bounded(10);
-    tokio::spawn(async move {
-        while let Some((addr, mut link)) = receiver.recv().await {
-            link.addresses = addr
+            tracing::debug!(addresses= ?addresses);
+            link.addresses = addresses
                 .iter()
                 .map(|addr| AddressInfo::try_from(addr.clone()).unwrap())
                 .collect();
+
             link_sender.send(link).unwrap();
         }
+        anyhow::Ok(())
     });
 
     let (router_sender, router_receiver) = crossbeam::channel::unbounded();
@@ -48,12 +43,24 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         let mut routes_v4 = handle_clone.route().get(rtnetlink::IpVersion::V4).execute();
         let route_sender_v4 = router_sender.clone();
         while let Some(route) = routes_v4.try_next().await? {
-            let route_info = RouteInfo::try_from(route)?;
+            let route_info = match RouteInfo::try_from(route) {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!("Error parsing route: {:?}", e);
+                    continue;
+                }
+            };
             route_sender_v4.send(route_info)?;
         }
         let mut routes_v6 = handle_clone.route().get(rtnetlink::IpVersion::V6).execute();
         while let Some(route) = routes_v6.try_next().await? {
-            let route_info = RouteInfo::try_from(route)?;
+            let route_info = match RouteInfo::try_from(route) {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!("Error parsing route: {:?}", e);
+                    continue;
+                }
+            };
             router_sender.send(route_info)?;
         }
         anyhow::Ok(())
@@ -63,10 +70,12 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let mut route_infos = vec![];
 
     while let Ok(link_info) = link_receiver.recv() {
+        tracing::debug!(link = ?link_info);
         link_infos.push(link_info);
     }
 
     while let Ok(route_info) = router_receiver.recv() {
+        tracing::debug!(route = ?route_info);
         route_infos.push(route_info);
     }
 
@@ -83,7 +92,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
 impl From<&LinkInfo> for NetworkInterface {
     fn from(link_info: &LinkInfo) -> NetworkInterface {
-        convert_link_info_to_network_interface(&link_info)
+        convert_link_info_to_network_interface(link_info)
     }
 }
 
@@ -115,14 +124,13 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> NetworkInterf
         prefixes,
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         default_gateway,
-        dns_servers: vec![],     // TODO: Implement DNS server lookup
+        dns_servers: vec![], // TODO: Implement DNS server lookup
     }
 }
 
 #[derive(Debug, Clone, Default)]
 struct LinkInfo {
     mac: [u8; 6],
-    broadcast: Option<Vec<u8>>,
     flags: Vec<LinkFlag>,
     name: String,
     index: u32,
@@ -134,17 +142,12 @@ struct LinkInfo {
 struct AddressInfo {
     address: IpAddr,
     prefix_len: u8,
-    broadcast: Option<Ipv4Addr>,
-    flags: Vec<AddressHeaderFlag>,
-    index: u32,
 }
 
 #[derive(Debug, Clone)]
 struct RouteInfo {
     gateway: Option<IpAddr>,
     index: u32,
-    destination: RouteAddress,
-    destination_prefix_len: u8,
 }
 
 impl TryFrom<RouteMessage> for RouteInfo {
@@ -161,14 +164,13 @@ impl TryFrom<RouteMessage> for RouteInfo {
                     None
                 }
             })
-            .map(|route_addr| match route_addr {
-                RouteAddress::Inet(v4) => Some(IpAddr::from(v4.clone())),
-                RouteAddress::Inet6(v6) => Some(IpAddr::from(v6.clone())),
+            .and_then(|route_addr| match route_addr {
+                RouteAddress::Inet(v4) => Some(IpAddr::from(*v4)),
+                RouteAddress::Inet6(v6) => Some(IpAddr::from(*v6)),
                 _ => None,
-            })
-            .flatten();
+            });
 
-        let index = value
+        let index = *value
             .attributes
             .iter()
             .find_map(|attr| {
@@ -178,29 +180,11 @@ impl TryFrom<RouteMessage> for RouteInfo {
                     None
                 }
             })
-            .context("No index found")?
-            .clone();
+            .context("No index found")?;
 
-        let destination = value
-            .attributes
-            .iter()
-            .find_map(|attr| {
-                if let RouteAttribute::Destination(destination) = attr {
-                    Some(destination)
-                } else {
-                    None
-                }
-            })
-            .context("No destination found")?;
+        let _destination_prefix_len = value.header.destination_prefix_length;
 
-        let destination_prefix_len = value.header.destination_prefix_length;
-
-        let route_info = RouteInfo {
-            gateway,
-            index,
-            destination: destination.clone(),
-            destination_prefix_len,
-        };
+        let route_info = RouteInfo { gateway, index };
 
         Ok(route_info)
     }
@@ -224,7 +208,7 @@ impl TryFrom<AddressMessage> for AddressInfo {
 
         let prefix_len = value.header.prefix_len;
 
-        let broadcast = value
+        let _broadcast = value
             .attributes
             .iter()
             .find_map(|attr| {
@@ -236,15 +220,12 @@ impl TryFrom<AddressMessage> for AddressInfo {
             })
             .copied();
 
-        let flags = value.header.flags;
-        let index = value.header.index;
+        let _flags = value.header.flags;
+        let _index = value.header.index;
 
         let address_info = AddressInfo {
-            address: addr.clone(),
+            address: *addr,
             prefix_len,
-            broadcast,
-            flags,
-            index,
         };
 
         Ok(address_info)
@@ -279,7 +260,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
             })
             .context("No mac address found")?;
 
-        let broadcast = msg.attributes.iter().find_map(|attr| {
+        let _broadcast = msg.attributes.iter().find_map(|attr| {
             if let LinkAttribute::Broadcast(broadcast) = attr {
                 Some(broadcast)
             } else {
@@ -292,14 +273,13 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
 
         let link_info = LinkInfo {
             mac,
-            broadcast: broadcast.map(|broadcast| broadcast.to_vec()),
-            flags: flags,
-            name: name,
+            flags,
+            name,
             index,
             ..Default::default()
         };
 
-        sender.send(link_info).await;
+        sender.send(link_info).await?;
     }
 
     anyhow::Ok(receiver)
