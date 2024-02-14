@@ -125,6 +125,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         dns_servers.push(dns_server);
     }
 
+    // assign matching routes to links
     for link_info in &mut link_infos {
         link_info.routes = route_infos
             .iter()
@@ -133,7 +134,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             .collect();
     }
 
-    // if a dns server is in the same network as the link, add it to the link
+    // if a link can access a dns server, add it to the link
     for link_info in &mut link_infos {
         for dns_server in &dns_servers {
             if link_info.can_access(*dns_server) {
@@ -200,7 +201,7 @@ struct LinkInfo {
 
 impl LinkInfo {
     fn can_access(&self, ip: IpAddr) -> bool {
-        self.routes.iter().any(|route| route.is_accessible(ip))
+        self.routes.iter().any(|route| route.can_access(ip))
     }
 }
 
@@ -219,7 +220,8 @@ struct RouteInfo {
 }
 
 impl RouteInfo {
-    fn is_accessible(&self, ip: IpAddr) -> bool {
+    // check routing table to see if the ip can be accessed
+    fn can_access(&self, ip: IpAddr) -> bool {
         self.destination
             .map(|destination| is_ip_covered((destination, self.destination_prefix), ip))
             .unwrap_or(false)
