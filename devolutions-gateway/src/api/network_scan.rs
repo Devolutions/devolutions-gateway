@@ -111,15 +111,14 @@ impl From<NetworkScanQueryParams> for NetworkScannerParams {
 pub struct NetworkScanResponse {
     pub ip: IpAddr,
     pub hostname: Option<String>,
-    #[serde(rename = "type")]
-    pub ty: ApplicationProtocol,
+    pub protocol: ApplicationProtocol,
 }
 
 impl NetworkScanResponse {
     fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
         let hostname = dns;
 
-        let ty = match port {
+        let protocol = match port {
             22 => ApplicationProtocol::Known(Protocol::Ssh),
             23 => ApplicationProtocol::Known(Protocol::Telnet),
             80 => ApplicationProtocol::Known(Protocol::Http),
@@ -133,6 +132,6 @@ impl NetworkScanResponse {
             _ => ApplicationProtocol::unknown(),
         };
 
-        Self { ip, hostname, ty }
+        Self { ip, hostname, protocol }
     }
 }
