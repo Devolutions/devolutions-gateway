@@ -16,7 +16,10 @@ impl From<ipconfig::Adapter> for NetworkInterface {
         NetworkInterface {
             name: adapter.adapter_name().to_string(),
             description: Some(adapter.description().to_string()),
-            mac_address: adapter.physical_address().into_iter().map(|b| b.to_vec()).collect(),
+            mac_address: adapter
+                .physical_address()
+                .map(|mac| vec![[mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]]])
+                .unwrap_or_default(),
             ipv4_address: adapter
                 .ip_addresses()
                 .iter()
