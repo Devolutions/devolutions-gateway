@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{net::IpAddr, num::NonZeroI32};
 
 use anyhow::Context;
 use futures::stream::TryStreamExt;
@@ -25,8 +25,22 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         while let Some(mut link) = receiver.recv().await {
             tracing::debug!(raw_link = ?link);
             let handle = handle.clone();
-            let addresses = match get_address(handle, link.clone()).await {
-                Ok(res) => res,
+            
+            let mut result = get_address(handle.clone(), link.clone()).await;
+
+            if let Err(ref e) = result {
+                if let rtnetlink::Error::NetlinkError(msg) = e {
+                    if msg.code.map_or(0, NonZeroI32::get) == -16 {
+                        // Linux EBUSY, retry only once
+                        tracing::warn!("retrying link address fetch");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        result = get_address(handle, link.clone()).await;
+                    }
+                }
+            }
+
+            let addresses = match result {
+                Ok(addresses) => addresses,
                 Err(e) => {
                     tracing::error!("error getting address: {:?}", e);
                     continue;
@@ -103,50 +117,54 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         }
     }
 
-    anyhow::Ok(link_infos.iter().map(|link_info| link_info.into()).collect())
+    let result = link_infos
+        .iter()
+        .map(|link_info| link_info.try_into())
+        .collect::<Result<Vec<_>, _>>()?;
+
+    anyhow::Ok(result)
 }
 
-impl From<&LinkInfo> for NetworkInterface {
-    fn from(link_info: &LinkInfo) -> NetworkInterface {
+impl TryFrom<&LinkInfo> for NetworkInterface {
+    type Error = anyhow::Error;
+    fn try_from(link_info: &LinkInfo) -> Result<NetworkInterface, anyhow::Error> {
         convert_link_info_to_network_interface(link_info)
     }
 }
 
-fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> NetworkInterface {
-    let mut ipv4_address = Vec::new();
-    let mut ipv6_address = Vec::new();
+fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Result<NetworkInterface> {
+    let mut ip_addresses: Vec<IpAddr> = Vec::new();
     let mut prefixes = Vec::new();
 
     for address_info in &link_info.addresses {
         match address_info.address {
-            IpAddr::V4(addr) => ipv4_address.push(addr),
-            IpAddr::V6(addr) => ipv6_address.push(addr),
+            IpAddr::V4(addr) => ip_addresses.push(addr.into()),
+            IpAddr::V6(addr) => ip_addresses.push(addr.into()),
         }
         prefixes.push((address_info.address, address_info.prefix_len as u32));
     }
 
-    let default_gateway = link_info
+    let gateways = link_info
         .routes
         .iter()
         .filter_map(|route_info| route_info.gateway)
         .collect();
 
-    NetworkInterface {
+    Ok(NetworkInterface {
         name: link_info.name.clone(),
         description: None,
-        mac_address: vec![link_info.mac],
-        ipv4_address,
-        ipv6_address,
+        mac_addresses: vec![link_info.mac.as_slice().try_into()?],
+        ip_addresses,
         prefixes,
         operational_status: link_info.flags.contains(&LinkFlag::Up),
-        default_gateway,
+        gateways,
         dns_servers: vec![], // TODO: Implement DNS server lookup
-    }
+    })
 }
 
 #[derive(Debug, Clone, Default)]
 struct LinkInfo {
-    mac: [u8; 6],
+    mac: Vec<u8>,
     flags: Vec<LinkFlag>,
     name: String,
     index: u32,
@@ -196,7 +214,7 @@ impl TryFrom<RouteMessage> for RouteInfo {
                     None
                 }
             })
-            .context("No index found")?;
+            .context("no index found")?;
 
         let route_info = RouteInfo { gateway, index };
 
@@ -252,7 +270,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
             .iter()
             .find_map(|attr| {
                 if let LinkAttribute::Address(mac) = attr {
-                    Some([mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]])
+                    Some(mac.to_vec())
                 } else {
                     None
                 }
@@ -276,7 +294,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
     anyhow::Ok(receiver)
 }
 
-async fn get_address(handle: Handle, link_info: LinkInfo) -> anyhow::Result<Vec<AddressMessage>> {
+async fn get_address(handle: Handle, link_info: LinkInfo) -> Result<Vec<AddressMessage>, rtnetlink::Error> {
     let mut res = vec![];
 
     let mut addr_stream = handle.address().get().set_link_index_filter(link_info.index).execute();
@@ -285,5 +303,5 @@ async fn get_address(handle: Handle, link_info: LinkInfo) -> anyhow::Result<Vec<
         res.push(msg);
     }
 
-    anyhow::Ok(res)
+    Ok(res)
 }
