@@ -118,8 +118,8 @@ impl NetworkScanResponse {
     fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::Protocol>) -> Self {
         let hostname = dns;
 
-        let protocol = if service.is_some() {
-            network_scanner_protocol_to_gateway_protocol(service)
+        let protocol = if let Some(protocol) = service {
+            network_scanner_protocol_to_gateway_protocol(protocol)
         } else {
             match port {
                 22 => ApplicationProtocol::Known(Protocol::Ssh),
