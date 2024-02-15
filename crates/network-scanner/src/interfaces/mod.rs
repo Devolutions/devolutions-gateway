@@ -41,7 +41,7 @@ impl TryFrom<&[u8]> for MacAddr {
 pub struct NetworkInterface {
     pub name: String,
     pub description: Option<String>,
-    pub mac_addresses: Option<MacAddr>,
+    pub mac_address: Option<MacAddr>,
     pub ip_addresses: Vec<IpAddr>,
     pub prefixes: Vec<(IpAddr, u32)>,
     pub operational_status: bool,
