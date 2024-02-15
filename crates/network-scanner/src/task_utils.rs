@@ -6,7 +6,7 @@ use std::future::Future;
 
 use tokio::sync::Mutex;
 
-use crate::mdns::MdnsDeamon;
+use crate::mdns::MdnsDaemon;
 use crate::scanner::ScanEntry;
 use crate::{
     ip_utils::{get_subnets, Subnet},
@@ -31,7 +31,7 @@ pub(crate) struct TaskExecutionContext {
     pub ports: Vec<u16>,
 
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub mdns_deamon: MdnsDeamon,
+    pub mdns_daemon: MdnsDaemon,
 
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds
@@ -39,6 +39,7 @@ pub(crate) struct TaskExecutionContext {
     pub port_scan_timeout: Duration, // in milliseconds
     pub netbios_timeout: Duration,   // in milliseconds
     pub netbios_interval: Duration,  // in milliseconds
+    pub mdns_query_timeout: Duration, // in milliseconds
 
     pub subnets: Vec<Subnet>,
 }
@@ -69,7 +70,8 @@ impl TaskExecutionContext {
             netbios_timeout,
             runtime,
             netbios_interval,
-            mdns_deamon,
+            mdns_daemon,
+            mdns_query_timeout,
             ..
         } = network_scanner;
 
@@ -81,7 +83,7 @@ impl TaskExecutionContext {
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             ports,
             runtime,
-            mdns_deamon,
+            mdns_daemon,
             ping_interval,
             ping_timeout,
             broadcast_timeout,
@@ -89,6 +91,7 @@ impl TaskExecutionContext {
             netbios_timeout,
             netbios_interval,
             subnets,
+            mdns_query_timeout,
         };
 
         Ok(res)
@@ -197,7 +200,7 @@ pub(crate) struct TimeoutManager {
 }
 
 impl TimeoutManager {
-    pub(crate) fn when_finished<F>(self, f: F) -> Self
+    pub(crate) fn when_finish<F>(self, f: F) -> Self
     where
         F: FnOnce() + Send + 'static,
     {
@@ -210,7 +213,7 @@ impl TimeoutManager {
         Self {
             task_manager,
             duration,
-            when_finish,
+            when_finish
         }
     }
 
@@ -222,15 +225,15 @@ impl TimeoutManager {
         let Self {
             task_manager,
             duration,
-            when_finish,
+            when_finish
         } = self;
 
         task_manager.spawn(move |task_manager| async move {
             let future = task(task_manager);
             let _ = tokio::time::timeout(duration, future).await;
-            if let Some(when_finish) = when_finish {
-                when_finish();
-            }
+            // if let Some(when_finish) = when_finish {
+            //     when_finish();
+            // }
             anyhow::Ok(())
         });
     }

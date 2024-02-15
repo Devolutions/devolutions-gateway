@@ -80,15 +80,13 @@ pub struct NetworkScanQueryParams {
     pub netbios_timeout: Option<u64>,
     /// Interval in milliseconds (default is 200)
     pub netbios_interval: Option<u64>,
-    /// The maximum duration for mdns scan in milliseconds. Highly suggested! (default is 20 * 1000)
-    pub mdns_meta_query_timeout: Option<u64>,
     /// The maximum time for each mdns query in milliseconds. (default is 5 * 1000)
-    pub mdns_single_query_timeout: Option<u64>,
+    pub mdns_query_timeout: Option<u64>,
     /// The maximum duration for whole networking scan in milliseconds. Highly suggested!
     pub max_wait: Option<u64>,
 }
 
-const COMMON_PORTS: [u16; 10] = [22, 23, 80, 443, 389, 636, 3389, 5900, 5985, 5986];
+const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
 
 impl From<NetworkScanQueryParams> for NetworkScannerParams {
     fn from(val: NetworkScanQueryParams) -> Self {
@@ -101,8 +99,7 @@ impl From<NetworkScanQueryParams> for NetworkScannerParams {
             netbios_timeout: val.netbios_timeout.unwrap_or(1000),
             max_wait_time: val.max_wait.unwrap_or(120 * 1000),
             netbios_interval: val.netbios_interval.unwrap_or(200),
-            mdns_meta_query_timeout: val.mdns_meta_query_timeout.unwrap_or(20 * 1000), // in milliseconds
-            mdns_single_query_timeout: val.mdns_single_query_timeout.unwrap_or(5 * 1000), // in milliseconds
+            mdns_query_timeout: val.mdns_query_timeout.unwrap_or(5 * 1000), // in milliseconds
         }
     }
 }
@@ -140,24 +137,18 @@ impl NetworkScanResponse {
     }
 }
 
-fn network_scanner_protocol_to_gateway_protocol(protocol: Option<scanner::Protocol>) -> ApplicationProtocol {
+fn network_scanner_protocol_to_gateway_protocol(protocol: scanner::Protocol) -> ApplicationProtocol {
     match protocol {
-        None => ApplicationProtocol::unknown(),
-        Some(scanner::Protocol::Ssh) => ApplicationProtocol::Known(Protocol::Ssh),
-        Some(scanner::Protocol::Telnet) => ApplicationProtocol::Known(Protocol::Telnet),
-        Some(scanner::Protocol::Http) => ApplicationProtocol::Known(Protocol::Http),
-        Some(scanner::Protocol::Https) => ApplicationProtocol::Known(Protocol::Https),
-        Some(scanner::Protocol::Ldap) => ApplicationProtocol::Known(Protocol::Ldap),
-        Some(scanner::Protocol::Ldaps) => ApplicationProtocol::Known(Protocol::Ldaps),
-        Some(scanner::Protocol::Rdp) => ApplicationProtocol::Known(Protocol::Rdp),
-        Some(scanner::Protocol::Vnc) => ApplicationProtocol::Known(Protocol::Vnc),
-        Some(scanner::Protocol::WinrmHttpPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-        Some(scanner::Protocol::WinrmHttpsPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-        Some(scanner::Protocol::Ard) => ApplicationProtocol::Known(Protocol::Ard),
-        Some(scanner::Protocol::Sftp) => ApplicationProtocol::Known(Protocol::Sftp),
-        Some(scanner::Protocol::Scp) => ApplicationProtocol::Known(Protocol::Scp),
-        Some(scanner::Protocol::Wayk) => ApplicationProtocol::Known(Protocol::Wayk),
-        Some(scanner::Protocol::SshPwsh) => ApplicationProtocol::Known(Protocol::SshPwsh),
-        Some(scanner::Protocol::Tunnel) => ApplicationProtocol::Known(Protocol::Tunnel),
+        scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
+        scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
+        scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
+        scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
+        scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
+        scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
+        scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
+        scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
+        scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
+        scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
+        scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
     }
 }
