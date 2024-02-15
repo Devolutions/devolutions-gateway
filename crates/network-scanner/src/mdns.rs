@@ -141,7 +141,7 @@ fn parse_fullname(fullname: &str) -> Option<(String, Option<Protocol>)> {
         // https://jonathanmumm.com/tech-it/mdns-bonjour-bible-common-service-strings-for-various-vendors/
         // OSX Screen Sharing
         "_rfb._tcp" => Some(Protocol::Ard),
-        // Note: RDP, VNC, Wayk, and SSH-based PowerShell (SshPwsh), as well as tunneling (Tunnel), are not standardized service types
+        // Note: RDP, VNC, Wayk, and SSH-based PowerShell (SshPwsh) are not standardized service types
         _ => None,
     };
 
