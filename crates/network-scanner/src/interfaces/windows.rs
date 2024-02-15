@@ -13,12 +13,12 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
 impl From<ipconfig::Adapter> for NetworkInterface {
     fn from(adapter: ipconfig::Adapter) -> Self {
-        let mac_addresses: Option<MacAddr> = adapter.physical_address().and_then(|addr| addr.try_into().ok());
+        let mac_address: Option<MacAddr> = adapter.physical_address().and_then(|addr| addr.try_into().ok());
 
         NetworkInterface {
             name: adapter.adapter_name().to_string(),
             description: Some(adapter.description().to_string()),
-            mac_addresses,
+            mac_address,
             ip_addresses: adapter.ip_addresses().to_vec(),
             prefixes: adapter.prefixes().to_vec(),
             operational_status: adapter.oper_status() == ipconfig::OperStatus::IfOperStatusUp,
