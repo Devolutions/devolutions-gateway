@@ -179,7 +179,7 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
     Ok(NetworkInterface {
         name: link_info.name.clone(),
         description: None,
-        mac_addresses: vec![link_info.mac.as_slice().try_into()?],
+        mac_addresses: link_info.mac.as_slice().try_into().ok(),
         ip_addresses,
         prefixes,
         operational_status: link_info.flags.contains(&LinkFlag::Up),
