@@ -1,15 +1,15 @@
-use std::{net::IpAddr, num::NonZeroI32};
 use anyhow::Context;
+use std::{net::IpAddr, num::NonZeroI32};
 use tokio::sync::mpsc::Receiver;
 
 use crate::interfaces::NetworkInterface;
+use futures_util::stream::TryStreamExt;
 use netlink_packet_route::{
     address::{AddressAttribute, AddressMessage},
     link::{LinkAttribute, LinkFlag},
     route::{RouteAddress, RouteAttribute, RouteMessage},
 };
 use rtnetlink::{new_connection, Handle};
-use futures_util::stream::TryStreamExt;
 
 pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
