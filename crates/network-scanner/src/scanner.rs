@@ -4,7 +4,7 @@ use crate::{
     netbios::netbios_query_scan,
     ping::ping_range,
     port_discovery::{scan_ports, PortScanResult},
-    task_utils::TaskManager,
+    task_utils::{ScanEntryReceiver, TaskManager},
 };
 
 use anyhow::Context;
@@ -262,10 +262,14 @@ impl NetworkScanner {
     }
 }
 
+/// ScanEntry is a tuple of (IpAddr, Option<String>, u16, Option<Protocol>)
+/// where IpAddr is the ip address of the device
+/// Option<String> is the hostname of the device
+/// u16 is the port number
+/// Option<Protocol> is the protocol/Service running on the port
 pub type ScanEntry = (IpAddr, Option<String>, u16, Option<Protocol>);
-type ResultReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 pub struct NetworkScannerStream {
-    result_receiver: Arc<Mutex<ResultReceiver>>,
+    result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
 }
 
