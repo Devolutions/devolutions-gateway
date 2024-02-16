@@ -57,21 +57,21 @@ pub fn mdns_query_scan(
         task_manager
             .with_timeout(single_query_duration)
             .when_finish(move || {
-                tracing::debug!("Stopping browse for service: {}", service_name_clone);
+                tracing::debug!("stopping browse for service: {}", service_name_clone);
                 if let Err(e) = service_deamon_clone.stop_browse(service_name_clone.as_ref()) {
                     tracing::warn!("failed to stop browsing for service: {}", e);
                 }
             })
             .spawn(move |_| async move {
-                tracing::debug!("Browsing for service: {}", service_name);
+                tracing::debug!("srowsing for service: {}", service_name);
                 let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
-                    let err_msg = format!("Failed to browse for service: {}", service_name);
+                    let err_msg = format!("failed to browse for service: {}", service_name);
                     tracing::error!("{}", err_msg);
                     err_msg
                 })?;
 
                 while let Ok(service_event) = receiver.recv_async().await {
-                    tracing::debug!("ServiceEvent: {:?}", service_event);
+                    tracing::debug!("serviceEvent: {:?}", service_event);
                     if let ServiceEvent::ServiceResolved(msg) = service_event {
                         let (device_name, protocol) =
                             parse_fullname(msg.get_fullname()).unwrap_or((msg.get_fullname().to_string(), None));
@@ -83,7 +83,7 @@ pub fn mdns_query_scan(
                                 .send((*ip, Some(device_name.clone()), port, protocol.clone()))
                                 .await
                             {
-                                tracing::error!("Failed to send result: {}", e);
+                                tracing::error!("failed to send result: {}", e);
                             }
                         }
                     }
