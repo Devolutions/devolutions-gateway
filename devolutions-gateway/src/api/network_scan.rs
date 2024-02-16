@@ -140,7 +140,7 @@ impl NetworkScanResponse {
     }
 }
 
-fn network_scanner_protocol_to_gateway_protocol(protocol: Option<scanner::Protocol>) -> ApplicationProtocol {
+fn network_scanner_protocol_to_gateway_protocol(protocol: scanner::Protocol) -> ApplicationProtocol {
     match protocol {
         None => ApplicationProtocol::unknown(),
         Some(scanner::Protocol::Ssh) => ApplicationProtocol::Known(Protocol::Ssh),
