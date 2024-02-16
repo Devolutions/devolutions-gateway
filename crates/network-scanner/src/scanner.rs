@@ -352,8 +352,6 @@ pub struct NetworkScannerParams {
 
 #[derive(Debug, Clone)]
 pub enum Protocol {
-    /// Wayk Remote Desktop Protocol
-    Wayk,
     /// Remote Desktop Protocol
     Rdp,
     /// Apple Remote Desktop
@@ -362,18 +360,12 @@ pub enum Protocol {
     Vnc,
     /// Secure Shell
     Ssh,
-    /// PowerShell over SSH transport
-    SshPwsh,
     /// SSH File Transfer Protocol
     Sftp,
     /// Secure Copy Protocol
     Scp,
     /// Telnet
     Telnet,
-    /// PowerShell over WinRM via HTTP transport
-    WinrmHttpPwsh,
-    /// PowerShell over WinRM via HTTPS transport
-    WinrmHttpsPwsh,
     /// Hypertext Transfer Protocol
     Http,
     /// Hypertext Transfer Protocol Secure
@@ -382,6 +374,4 @@ pub enum Protocol {
     Ldap,
     /// Secure LDAP Protocol
     Ldaps,
-    /// Devolutions Gateway Tunnel (generic JMUX tunnel)
-    Tunnel,
 }

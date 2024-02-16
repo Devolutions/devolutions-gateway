@@ -142,22 +142,16 @@ impl NetworkScanResponse {
 
 fn network_scanner_protocol_to_gateway_protocol(protocol: scanner::Protocol) -> ApplicationProtocol {
     match protocol {
-        None => ApplicationProtocol::unknown(),
-        Some(scanner::Protocol::Ssh) => ApplicationProtocol::Known(Protocol::Ssh),
-        Some(scanner::Protocol::Telnet) => ApplicationProtocol::Known(Protocol::Telnet),
-        Some(scanner::Protocol::Http) => ApplicationProtocol::Known(Protocol::Http),
-        Some(scanner::Protocol::Https) => ApplicationProtocol::Known(Protocol::Https),
-        Some(scanner::Protocol::Ldap) => ApplicationProtocol::Known(Protocol::Ldap),
-        Some(scanner::Protocol::Ldaps) => ApplicationProtocol::Known(Protocol::Ldaps),
-        Some(scanner::Protocol::Rdp) => ApplicationProtocol::Known(Protocol::Rdp),
-        Some(scanner::Protocol::Vnc) => ApplicationProtocol::Known(Protocol::Vnc),
-        Some(scanner::Protocol::WinrmHttpPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-        Some(scanner::Protocol::WinrmHttpsPwsh) => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-        Some(scanner::Protocol::Ard) => ApplicationProtocol::Known(Protocol::Ard),
-        Some(scanner::Protocol::Sftp) => ApplicationProtocol::Known(Protocol::Sftp),
-        Some(scanner::Protocol::Scp) => ApplicationProtocol::Known(Protocol::Scp),
-        Some(scanner::Protocol::Wayk) => ApplicationProtocol::Known(Protocol::Wayk),
-        Some(scanner::Protocol::SshPwsh) => ApplicationProtocol::Known(Protocol::SshPwsh),
-        Some(scanner::Protocol::Tunnel) => ApplicationProtocol::Known(Protocol::Tunnel),
+        scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
+        scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
+        scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
+        scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
+        scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
+        scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
+        scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
+        scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
+        scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
+        scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
+        scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
     }
 }
