@@ -88,7 +88,7 @@ pub struct NetworkScanQueryParams {
     pub max_wait: Option<u64>,
 }
 
-const COMMON_PORTS: [u16; 10] = [22, 23, 80, 443, 389, 636, 3389, 5900, 5985, 5986];
+const COMMON_PORTS: [u16; 11] = [22, 23, 80, 443, 389, 636, 3283, 3389, 5900, 5985, 5986];
 
 impl From<NetworkScanQueryParams> for NetworkScannerParams {
     fn from(val: NetworkScanQueryParams) -> Self {

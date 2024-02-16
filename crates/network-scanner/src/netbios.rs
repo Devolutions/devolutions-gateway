@@ -7,7 +7,6 @@ use std::{
 use network_scanner_net::{runtime::Socket2Runtime, socket::AsyncRawSocket};
 use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
-use tokio::time::timeout;
 
 use crate::{assume_init, ip_utils::IpAddrRange, task_utils::IpReceiver, ScannerError};
 
@@ -50,13 +49,13 @@ pub(crate) fn netbios_query_one(
     duration: std::time::Duration,
     task_manager: crate::task_utils::TaskManager,
 ) {
-    task_manager.spawn_no_sub_task(async move {
+    task_manager.with_timeout(duration).spawn(move |_| async move {
         let socket_addr: SocketAddr = (ip, NET_BIOS_PORT).into();
         let addr = SockAddr::from(socket_addr);
 
-        timeout(duration, socket.send_to(&MESSAGE, &addr)).await??;
+        socket.send_to(&MESSAGE, &addr).await?;
         let mut buf: [MaybeUninit<u8>; 1024] = [MaybeUninit::<u8>::uninit(); 1024];
-        timeout(duration, socket.recv(&mut buf)).await??;
+        socket.recv(&mut buf).await?;
         unsafe {
             let buf = assume_init(&buf);
             let IpAddr::V4(ipv4) = ip else {
