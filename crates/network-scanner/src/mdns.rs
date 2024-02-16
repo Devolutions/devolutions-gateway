@@ -23,7 +23,7 @@ impl MdnsDaemon {
     }
 }
 
-const SERVICES_INTRESTED: [Protocol; 11] = [
+const SERVICES_INTERESTED: [Protocol; 11] = [
     Protocol::Ard,
     Protocol::Http,
     Protocol::Https,
@@ -45,10 +45,10 @@ pub fn mdns_query_scan(
     let service_daemon = service_daemon.get_service_daemon();
     let (result_sender, result_receiver) = tokio::sync::mpsc::channel(255);
 
-    for service in SERVICES_INTRESTED {
+    for service in SERVICES_INTERESTED {
         let service_name: &str = service.into();
         let service_name = format!("{}.local.", service_name);
-        let (result_sender, service_daemon, service_deamon_clone, service_name_clone) = (
+        let (result_sender, service_daemon, service_daemon_clone, service_name_clone) = (
             result_sender.clone(),
             service_daemon.clone(),
             service_daemon.clone(),
@@ -58,12 +58,12 @@ pub fn mdns_query_scan(
             .with_timeout(single_query_duration)
             .when_finish(move || {
                 tracing::debug!("stopping browse for service: {}", service_name_clone);
-                if let Err(e) = service_deamon_clone.stop_browse(service_name_clone.as_ref()) {
+                if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     tracing::warn!("failed to stop browsing for service: {}", e);
                 }
             })
             .spawn(move |_| async move {
-                tracing::debug!("srowsing for service: {}", service_name);
+                tracing::debug!("browsing for service: {}", service_name);
                 let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
                     let err_msg = format!("failed to browse for service: {}", service_name);
                     tracing::error!("{}", err_msg);
