@@ -3,6 +3,7 @@ use std::net::IpAddr;
 use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
+
 use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
 
