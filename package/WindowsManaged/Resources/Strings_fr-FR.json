@@ -19,6 +19,128 @@
           "text": "Accès et soutien à distance instantanés."
         }
       ],
+      "links": [
+        {
+          "id": "NgrokReadMoreAtX",
+          "text": "Plus de détails sur {0}"
+        },
+        {
+          "id": "NgrokReadMoreLink",
+          "text": "ngrok.com"
+        },
+        {
+          "id": "NgrokProvideYourX",
+          "text": "Entrez votre {0}"
+        },
+        {
+          "id": "NgrokAuthTokenLink",
+          "text": "jeton d'authentification"
+        },
+        {
+          "id": "NgrokXForWebClientAccess",
+          "text": "Le {0} pour accéder au client Web"
+        },
+        {
+          "id": "NgrokDomainLink",
+          "text": "domaine"
+        },
+        {
+          "id": "NgroXForNativeClientAccess",
+          "text": "Le {0} pour accéder au client natif"
+        },
+        {
+          "id": "NgrokTcpAddressLink",
+          "text": "Adresse TCP"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "ViewButton",
+          "text": "Afficher"
+        },
+        {
+          "id": "SearchButton",
+          "text": "Rechercher"
+        },
+        {
+          "id": "ViewLogButton",
+          "text": "Afficher le journal"
+        }
+      ],
+      "enums": [
+        {
+          "id": "CustomizeMode_Now",
+          "text": "Maintenant"
+        },
+        {
+          "id": "CustomizeMode_Later",
+          "text": "Plus tard"
+        },
+        {
+          "id": "CertificateMode_External",
+          "text": "Externe"
+        },
+        {
+          "id": "CertificateMode_System",
+          "text": "Système"
+        },
+        {
+          "id": "CertificateFindType_Thumbprint",
+          "text": "Empreinte"
+        },
+        {
+          "id": "CertificateFindType_SubjectName",
+          "text": "Nom du sujet"
+        },
+        {
+          "id": "AuthenticationMode_None",
+          "text": "Aucune"
+        },
+        {
+          "id": "AuthenticationMode_Custom",
+          "text": "Personnalisée"
+        },
+        {
+          "id": "StoreLocation_CurrentUser",
+          "text": "Utilisateur actuel"
+        },
+        {
+          "id": "StoreLocation_LocalMachine",
+          "text": "Machine locale"
+        },
+        {
+          "id": "StoreName_My",
+          "text": "Personnel"
+        },
+        {
+          "id": "StoreName_Root",
+          "text": "Autorités de certification racine de confiance"
+        },
+        {
+          "id": "StoreName_CertificateAuthority",
+          "text": "Autorités de certification intermédiaires"
+        },
+        {
+          "id": "StoreName_TrustedPublisher",
+          "text": "Source approuvée"
+        },
+        {
+          "id": "StoreName_Disallowed",
+          "text": "Certificats non approuvés"
+        },
+        {
+          "id": "StoreName_AuthRoot",
+          "text": "Autorités de certification racine tierces"
+        },
+        {
+          "id": "StoreName_TrustedPeople",
+          "text": "Personnes de confiance"
+        },
+        {
+          "id": "StoreName_AddressBook",
+          "text": "Autres personnes"
+        }
+      ],
 
       "messages": [
         {
@@ -41,7 +163,7 @@
           "id": "TheSpecifiedFileWasInvalidOrNotAccessible",
           "text": "Le chemin de fichier spécifié est invalide ou inaccessible"
         },
-      {
+        {
           "id": "OS2Old",
           "text": "Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum."
         },
@@ -56,6 +178,96 @@
         {
           "id": "x86VersionRequired",
           "text": "Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows."
+        },
+        {
+          "id": "YouMustSelectACertificateFromTheSystemCertificateStore",
+          "text": "Vous devez sélectionner un certificat dans le magasin de certificats du système"
+        },
+        {
+          "id": "NoMatchingCertificatesFound",
+          "text": "Aucun certificat correspondant n'a été trouvé"
+        },
+        {
+          "id": "AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX",
+          "text": "Une erreur inattendue est survenue au moment d'accéder au magasin de certificats du système : {0}"
+        },
+        {
+          "id": "AuthenticationTokenIsRequired",
+          "text": "Le jeton d'authentification est requis"
+        },
+        {
+          "id": "DomainIsRequiredAndMustBeValid",
+          "text": "Le domaine est requis et doit être un nom d'hôte valide"
+        },
+        {
+          "id": "RemoteAddressIsRequired",
+          "text": "L'adresse à distance est requise"
+        },
+        {
+          "id": "RemoteAddressMustBeInTheFormat",
+          "text": "L'adresse à distance doit être un hôte valide et un port de format {host}:{port}"
+        },
+        {
+          "id": "YouMustEnterAUsername",
+          "text": "Vous devez saisir un nom d'utilisateur"
+        },
+        {
+          "id": "YouMustEnterAPassword",
+          "text": "Vous devez saisir un mot de passe"
+        },
+        {
+          "id": "YouMustConfirmThePassword",
+          "text": "Vous devez confirmer le mot de passe"
+        },
+        {
+          "id": "PasswordsDoNotMatch",
+          "text": "Les mots de passe ne correspondent pas"
+        },
+        {
+          "id": "DotNet48IsStrongRecommendedDownloadNow",
+          "text": "Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+        },
+        {
+          "id": "Dotnet462IsRequired",
+          "text": "Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+        },
+        {
+          "id": "WindowsPowerShell51IsRequired",
+          "text": "Ce produit nécessite Windows PowerShell 5.1"
+        }
+      ],
+      "propertyGroups": [
+        {
+          "id": "Group_InstallLocation",
+          "text": "Emplacement de l'installation"
+        },
+        {
+          "id": "Group_Service",
+          "text": "Service"
+        },
+        {
+          "id": "Group_Ngrok",
+          "text": "ngrok"
+        },
+        {
+          "id": "Group_ExternalAccess",
+          "text": "Accès externe"
+        },
+        {
+          "id": "Group_Listeners",
+          "text": "Écouteurs"
+        },
+        {
+          "id": "Group_EncryptionKeys",
+          "text": "Clés de chiffrement"
+        },
+        {
+          "id": "Group_WebApp",
+          "text": "Application Web"
+        },
+        {
+          "id": "Group_Certificate",
+          "text": "Certificat"
         }
       ],
       "properties": [
@@ -82,6 +294,110 @@
         {
           "id": "Property_TcpListener",
           "text": "Écouteur TCP"
+        },
+        {
+          "id": "Property_CertificateMode",
+          "text": "Source du certificat"
+        },
+        {
+          "id": "Property_CertificateLocation",
+          "text": "Emplacement du certificat"
+        },
+        {
+          "id": "Property_CertificateStore",
+          "text": "Magasin de certificats"
+        },
+        {
+          "id": "Property_CertificateName",
+          "text": "Nom du certificat"
+        },
+        {
+          "id": "Property_PublicKeyFile",
+          "text": "Fichier de clé publique"
+        },
+        {
+          "id": "Property_PrivateKeyFile",
+          "text": "Fichier de clé privée"
+        },
+        {
+          "id": "Property_ServiceStart",
+          "text": "Mode démarrage du service"
+        },
+        {
+          "id": "Property_AuthenticationMode",
+          "text": "Mode authentification"
+        },
+        {
+          "id": "Property_WebUsername",
+          "text": "Nom d'utilisateur par défaut"
+        },
+        {
+          "id": "Property_WebPassword",
+          "text": "Mot de passe par défaut"
+        },
+        {
+          "id": "Property_NgrokAuthToken",
+          "text": "Jeton d'authentification"
+        },
+        {
+          "id": "Property_NgrokHttpDomain",
+          "text": "Domaine"
+        },
+        {
+          "id": "Property_NgrokRemoteAddress",
+          "text": "Adresse TCP"
+        },
+        {
+          "id": "Property_Directory",
+          "text": "Répertoire"
+        },
+        {
+          "id": "Property_NewKeyPair",
+          "text": "Une nouvelle paire de clés sera générée"
+        },
+        {
+          "id": "Property_NewCertificate",
+          "text": "Un nouveau certificat autosigné sera généré"
+        }
+      ],
+      "filters": [
+        {
+          "id": "Filter_PublicKeyFiles",
+          "text": "Fichiers de clés publiques (*.pem)"
+        },
+        {
+          "id": "Filter_PrivateKeyFiles",
+          "text": "Fichiers de clés privées (*.key)"
+        },
+        {
+          "id": "Filter_PfxFiles",
+          "text": "Fichiers PFX (*.pfx, *.p12)"
+        },
+        {
+          "id": "Filter_CertificateFiles",
+          "text": "Fichiers de certificat (*.pem, *.crt, *.cer)"
+        },
+        {
+          "id": "Filter_AllFiles",
+          "text": "Tous les fichiers"
+        }
+      ],
+      "static": [
+        {
+          "id": "Protocol",
+          "text": "Protocole"
+        },
+        {
+          "id": "Host",
+          "text": "Hôte"
+        },
+        {
+          "id": "Port",
+          "text": "Port"
+        },
+        {
+          "id": "UACPromptLabel",
+          "text": "Veuillez attendre que l'invite UAC apparaisse.\n\nSi elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches."
         }
       ],
       "dialogs": {
@@ -91,7 +407,75 @@
             "text": "Installation de [ProductName]"
           }
         ],
-        "browse": [
+        "ngrok": [
+          {
+            "id": "NgrokListenersDlgTitle",
+            "text": "ngrok"
+          },
+          {
+            "id": "NgrokListenersDlgDescription",
+            "text": "Configuration d'écouteurs ngrok."
+          },
+          {
+            "id": "UseNgrokForSimplifiedRemoteAccess",
+            "text": "Utilisez ngrok pour une connexion à distance Web simplifiée. Les écouteurs de Gateway permettent un accès à partir de n'importe quelle adresse IP par défaut."
+          },
+          {
+            "id": "AuthToken",
+            "text": "Jeton Auth"
+          },
+          {
+            "id": "Domain",
+            "text": "Domaine"
+          },
+          {
+            "id": "NativeClientAccess",
+            "text": "Accès pour clients natifs"
+          },
+          {
+            "id": "Configure",
+            "text": "Configurer"
+          },
+          {
+            "id": "RemoteAddress",
+            "text": "Adresse à distance"
+          }
+        ],
+        "webApp": [
+            {
+              "id": "WebAppDlgTitle",
+              "text": "Options de l'application Web"
+            },
+            {
+              "id": "WebAppDlgDescription",
+              "text": "Configuration de l'application Web intégrée."
+            },
+            {
+              "id": "ChooseTheAuthenticationMethod",
+              "text": "Choisir la méthode d'authentification à utiliser pour accéder à l'application Web"
+            },
+            {
+              "id": "Authentication",
+              "text": "Authentification"
+            },
+            {
+              "id": "DefaultUser",
+              "text": "Utilisateur par défaut"
+            },
+            {
+              "id": "Username",
+              "text": "Nom d'utilisateur"
+            },
+            {
+              "id": "Password",
+              "text": "Mot de passe"
+            },
+            {
+              "id": "ConfirmPassword",
+              "text": "Confirmer le mot de passe"
+            }
+          ],
+          "browse": [
           {
             "id": "BrowseDlgTitle",
             "text": "Modifier le dossier de destination"
@@ -174,6 +558,38 @@
           {
             "id": "CustomInstallDlgInfoLabel",
             "text": "L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant."
+          },
+          {
+            "id": "RecommendedForStandaloneInstallations",
+            "text": "Recommandé pour les installations autonomes. Générez une configuration initiale à l'aide de cet installateur et lancez le service Gateway automatiquement."
+          },
+          {
+            "id": "RecommendedForCompanionInstallations",
+            "text": "Recommandé pour l'installation du logiciel en tant qu'outil connexe pour un autre service (ex. : Devolutions Server). Le service Gateway devra être configuré et lancé après installation."
+          },
+          {
+            "id": "ConfigureTheGatewayInstallation",
+            "text": "Configurer l'installation de Gateway"
+          },
+          {
+            "id": "ConfigurationOptions",
+            "text": "Options de configuration"
+          },
+          {
+            "id": "EnableAccessOverTheInternetUsingNgrok",
+            "text": "Autoriser l'accès Web via ngrok."
+          },
+          {
+            "id": "EnableTheGatewayWebInterface",
+            "text": "Activer l'interface Web de Gateway"
+          },
+          {
+            "id": "GenerateASelfSignedHttpsCertificate",
+            "text": "Générer un certificat HTTPS autosigné"
+          },
+          {
+            "id": "GenerateEncryptionKeys",
+            "text": "Générer des clés de chiffrement"
           }
         ],
         "accessUri": [
@@ -184,6 +600,14 @@
           {
             "id": "AccessUriDlgDescription",
             "text": "URL pour rejoindre [ProductName]."
+          },
+          {
+            "id": "AccessUriDlgExplanation",
+            "text": "L'URI permettant de se connecter à la passerelle Gateway en externe pour effectuer des opérations HTTP. Il peut différer de l'adresse de l'écouteur dans certains cas (ex. : lors de l'utilisation d'un proxy inverse tel qu'IIS)."
+          },
+          {
+            "id": "AccessUriDlgHttpWarn",
+            "text": "Un URI externe non sécurisé est déconseillé pour les environnements de production"
           }
         ],
         "certificate": [
@@ -214,6 +638,46 @@
           {
             "id": "EnterTextToSearch",
             "text": "Saisir le texte à rechercher"
+          },
+          {
+            "id": "CertificateSource",
+            "text": "Source du certificat"
+          },
+          {
+            "id": "SearchForACertificateToUse",
+            "text": "Trouver un certificat à utiliser"
+          },
+          {
+            "id": "StoreLocation",
+            "text": "Emplacement du magasin"
+          },
+          {
+            "id": "CertificateStore",
+            "text": "Magasin de certificats"
+          },
+          {
+            "id": "SearchBy",
+            "text": "Rechercher selon"
+          },
+          {
+            "id": "Search",
+            "text": "Rechercher"
+          },
+          {
+            "id": "SelectedCertificate",
+            "text": "Certificat sélectionné"
+          },
+          {
+            "id": "BrowseForACertificateToUse",
+            "text": "Parcourir pour un certificat à utiliser"
+          },
+          {
+            "id": "EncryptedPrivateKeysAreNotSupported",
+            "text": "Les clés de chiffrement privées ne sont pas prises en charge"
+          },
+          {
+            "id": "SelectTheCertificateToUse",
+            "text": "Sélectionner le certificat à utiliser"
           }
         ],
         "listeners": [
@@ -236,12 +700,72 @@
           {
             "id": "ListenersDlgTCPLabel",
             "text": "Écouteur TCP"
+          },
+          {
+            "id": "AnHttpListenerDoesNotRequireACert",
+            "text": "Un écouteur HTTP ne nécessite pas de certificat."
+          },
+          {
+            "id": "AnHttpsListenerRequiresACertSelfSigned",
+            "text": "Un écouteur HTTPS nécessite un certificat. Le certificat autosigné généré par l'installateur n'est pas approuvé par défaut."
+          },
+          {
+            "id": "AnHttpsListenerRequiresACert",
+            "text": "Un écouteur HTTPS nécessite un certificat. Vous serez invité à en configurer un."
+          },
+          {
+            "id": "InvalidPort",
+            "text": "Port non valide"
+          },
+          {
+            "id": "ChosenPortAvailable",
+            "text": "Le port choisi n'est pas disponible"
+          },
+          {
+            "id": "ChosenPortNotAvailable",
+            "text": "Il se peut que le port choisi ne soit pas disponible"
+          },
+          {
+            "id": "ChosenPortCouldNotBeChecked",
+            "text": "Le port choisi n'a pas pu être vérifié"
           }
         ],
         "keys": [
           {
             "id": "PublicKeyDlgTitle",
             "text": "Paire de clés"
+          },
+          {
+            "id": "PublicKeyDlgDescription",
+            "text": "Clés pour la création et la vérification de jetons."
+          },
+          {
+            "id": "ProvideAnEncryptionKeyPairForTokenVerification",
+            "text": "Fournir une clé de chiffrement pour la vérification de jeton."
+          },
+          {
+            "id": "ProvideAnEncryptionKeyPairForTokenCreationVerification",
+            "text": "Fournir une paire de clés de chiffrement pour la génération et la vérification de jeton."
+          },
+          {
+            "id": "PublicKeyFile",
+            "text": "Fichier de clé publique"
+          },
+          {
+            "id": "ThePublicKeyIsUsedTo",
+            "text": "La clé publique sert à vérifier des jetons sans restrictions particulières"
+          },
+          {
+            "id": "PrivateKeyFile",
+            "text": "Fichier de clé privée"
+          },
+          {
+            "id": "ThePrivateKeyIsUsedTo",
+            "text": "La clé privée sert à générer des jetons de session pour l'application Web autonome"
+          },
+          {
+            "id": "ProvideAPublicKeyForTokenVerification",
+            "text": "Fournir une clé publique pour la vérification du jeton. La clé privée pour la génération de jeton est fournie par un service connexe (ex. : Devolutions Server)."
           }
         ],
         "summary": [

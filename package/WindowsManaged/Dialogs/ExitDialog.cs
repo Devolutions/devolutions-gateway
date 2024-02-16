@@ -1,3 +1,4 @@
+using System;
 using DevolutionsGateway.Dialogs;
 using System.Diagnostics;
 using System.Drawing;
@@ -37,6 +38,20 @@ public partial class ExitDialog : GatewayDialog
 
     void finish_Click(object sender, System.EventArgs e)
     {
+        if (!Shell.UserInterrupted && !Shell.ErrorDetected)
+        {
+            if (Wizard.Globals.TryGetValue("LaunchUrl", out string url))
+            {
+                try
+                {
+                    Process.Start(url.ToString());
+                }
+                catch
+                {
+                }
+            }
+        }
+
         Shell.Exit();
     }
 

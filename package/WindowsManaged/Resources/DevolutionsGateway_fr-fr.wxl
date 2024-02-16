@@ -5,25 +5,127 @@
                 <String Id="ProductDescription">Accès et soutien à distance instantanés.</String>
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
+                    <!-- links -->
+                <String Id="NgrokAuthTokenLink">jeton d'authentification</String>
+                <String Id="NgrokDomainLink">domaine</String>
+                <String Id="NgrokProvideYourX">Entrez votre {0}</String>
+                <String Id="NgrokReadMoreAtX">Plus de détails sur {0}</String>
+                <String Id="NgrokReadMoreLink">ngrok.com</String>
+                <String Id="NgrokTcpAddressLink">Adresse TCP</String>
+                <String Id="NgrokXForWebClientAccess">Le {0} pour accéder au client Web</String>
+                <String Id="NgroXForNativeClientAccess">Le {0} pour accéder au client natif</String>
+                    <!-- buttons -->
+                <String Id="SearchButton">Rechercher</String>
+                <String Id="ViewButton">Afficher</String>
+                <String Id="ViewLogButton">Afficher le journal</String>
+                    <!-- enums -->
+                <String Id="AuthenticationMode_Custom">Personnalisée</String>
+                <String Id="AuthenticationMode_None">Aucune</String>
+                <String Id="CertificateFindType_SubjectName">Nom du sujet</String>
+                <String Id="CertificateFindType_Thumbprint">Empreinte</String>
+                <String Id="CertificateMode_External">Externe</String>
+                <String Id="CertificateMode_System">Système</String>
+                <String Id="CustomizeMode_Later">Plus tard</String>
+                <String Id="CustomizeMode_Now">Maintenant</String>
+                <String Id="StoreLocation_CurrentUser">Utilisateur actuel</String>
+                <String Id="StoreLocation_LocalMachine">Machine locale</String>
+                <String Id="StoreName_AddressBook">Autres personnes</String>
+                <String Id="StoreName_AuthRoot">Autorités de certification racine tierces</String>
+                <String Id="StoreName_CertificateAuthority">Autorités de certification intermédiaires</String>
+                <String Id="StoreName_Disallowed">Certificats non approuvés</String>
+                <String Id="StoreName_My">Personnel</String>
+                <String Id="StoreName_Root">Autorités de certification racine de confiance</String>
+                <String Id="StoreName_TrustedPeople">Personnes de confiance</String>
+                <String Id="StoreName_TrustedPublisher">Source approuvée</String>
                     <!-- messages -->
+                <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Une erreur inattendue est survenue au moment d'accéder au magasin de certificats du système : {0}</String>
+                <String Id="AuthenticationTokenIsRequired">Le jeton d'authentification est requis</String>
+                <String Id="DomainIsRequiredAndMustBeValid">Le domaine est requis et doit être un nom d'hôte valide</String>
+                <String Id="Dotnet462IsRequired">Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
+                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
                 <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
+                <String Id="NoMatchingCertificatesFound">Aucun certificat correspondant n'a été trouvé</String>
                 <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum.</String>
+                <String Id="PasswordsDoNotMatch">Les mots de passe ne correspondent pas</String>
+                <String Id="RemoteAddressIsRequired">L'adresse à distance est requise</String>
+                <String Id="RemoteAddressMustBeInTheFormat">L'adresse à distance doit être un hôte valide et un port de format {host}:{port}</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau.</String>
                 <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">Le chemin de fichier spécifié est invalide ou inaccessible</String>
+                <String Id="WindowsPowerShell51IsRequired">Ce produit nécessite Windows PowerShell 5.1</String>
                 <String Id="x64VersionRequired">Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows.</String>
                 <String Id="x86VersionRequired">Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows.</String>
+                <String Id="YouMustConfirmThePassword">Vous devez confirmer le mot de passe</String>
+                <String Id="YouMustEnterAPassword">Vous devez saisir un mot de passe</String>
+                <String Id="YouMustEnterAUsername">Vous devez saisir un nom d'utilisateur</String>
                 <String Id="YouMustEnterAValidPort">Vous devez entrer un numéro de port valide</String>
                 <String Id="YouMustProvideAValidCertificateAndPasswordOrKey">Vous devez fournir un fichier de certificat valide avec mot de passe ou fichier de clée privée</String>
                 <String Id="YouMustProvideAValidHostname">Vous devez fournir un nom d'hôte valide</String>
+                <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">Vous devez sélectionner un certificat dans le magasin de certificats du système</String>
+                    <!-- propertyGroups -->
+                <String Id="Group_Certificate">Certificat</String>
+                <String Id="Group_EncryptionKeys">Clés de chiffrement</String>
+                <String Id="Group_ExternalAccess">Accès externe</String>
+                <String Id="Group_InstallLocation">Emplacement de l'installation</String>
+                <String Id="Group_Listeners">Écouteurs</String>
+                <String Id="Group_Ngrok">ngrok</String>
+                <String Id="Group_Service">Service</String>
+                <String Id="Group_WebApp">Application Web</String>
                     <!-- properties -->
                 <String Id="Property_AccessUri">URI d'accès</String>
+                <String Id="Property_AuthenticationMode">Mode authentification</String>
                 <String Id="Property_CertificateFile">Fichier de certificat</String>
+                <String Id="Property_CertificateLocation">Emplacement du certificat</String>
+                <String Id="Property_CertificateMode">Source du certificat</String>
+                <String Id="Property_CertificateName">Nom du certificat</String>
                 <String Id="Property_CertificatePassword">Mot de passe du certificat</String>
                 <String Id="Property_CertificatePrivateKeyFile">Fichier de clée privée</String>
+                <String Id="Property_CertificateStore">Magasin de certificats</String>
+                <String Id="Property_Directory">Répertoire</String>
                 <String Id="Property_HttpListener">Écouteur HTTP</String>
+                <String Id="Property_NewCertificate">Un nouveau certificat autosigné sera généré</String>
+                <String Id="Property_NewKeyPair">Une nouvelle paire de clés sera générée</String>
+                <String Id="Property_NgrokAuthToken">Jeton d'authentification</String>
+                <String Id="Property_NgrokHttpDomain">Domaine</String>
+                <String Id="Property_NgrokRemoteAddress">Adresse TCP</String>
+                <String Id="Property_PrivateKeyFile">Fichier de clé privée</String>
+                <String Id="Property_PublicKeyFile">Fichier de clé publique</String>
+                <String Id="Property_ServiceStart">Mode démarrage du service</String>
                 <String Id="Property_TcpListener">Écouteur TCP</String>
+                <String Id="Property_WebPassword">Mot de passe par défaut</String>
+                <String Id="Property_WebUsername">Nom d'utilisateur par défaut</String>
+                    <!-- filters -->
+                <String Id="Filter_AllFiles">Tous les fichiers</String>
+                <String Id="Filter_CertificateFiles">Fichiers de certificat (*.pem, *.crt, *.cer)</String>
+                <String Id="Filter_PfxFiles">Fichiers PFX (*.pfx, *.p12)</String>
+                <String Id="Filter_PrivateKeyFiles">Fichiers de clés privées (*.key)</String>
+                <String Id="Filter_PublicKeyFiles">Fichiers de clés publiques (*.pem)</String>
+                    <!-- static -->
+                <String Id="Host">Hôte</String>
+                <String Id="Port">Port</String>
+                <String Id="Protocol">Protocole</String>
+                <String Id="UACPromptLabel">Veuillez attendre que l'invite UAC apparaisse.
+
+Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches.</String>
                     <!-- dialogs.static -->
                 <String Id="GatewayDlg_Title">Installation de [ProductName]</String>
+                    <!-- dialogs.ngrok -->
+                <String Id="AuthToken">Jeton Auth</String>
+                <String Id="Configure">Configurer</String>
+                <String Id="Domain">Domaine</String>
+                <String Id="NativeClientAccess">Accès pour clients natifs</String>
+                <String Id="NgrokListenersDlgDescription">Configuration d'écouteurs ngrok.</String>
+                <String Id="NgrokListenersDlgTitle">ngrok</String>
+                <String Id="RemoteAddress">Adresse à distance</String>
+                <String Id="UseNgrokForSimplifiedRemoteAccess">Utilisez ngrok pour une connexion à distance Web simplifiée. Les écouteurs de Gateway permettent un accès à partir de n'importe quelle adresse IP par défaut.</String>
+                    <!-- dialogs.webApp -->
+                <String Id="Authentication">Authentification</String>
+                <String Id="ChooseTheAuthenticationMethod">Choisir la méthode d'authentification à utiliser pour accéder à l'application Web</String>
+                <String Id="ConfirmPassword">Confirmer le mot de passe</String>
+                <String Id="DefaultUser">Utilisateur par défaut</String>
+                <String Id="Password">Mot de passe</String>
+                <String Id="Username">Nom d'utilisateur</String>
+                <String Id="WebAppDlgDescription">Configuration de l'application Web intégrée.</String>
+                <String Id="WebAppDlgTitle">Options de l'application Web</String>
                     <!-- dialogs.browse -->
                 <String Id="BrowseDlgDescription">Sélectionnez le dossier de destination</String>
                 <String Id="BrowseDlgTitle">Modifier le dossier de destination</String>
@@ -45,28 +147,63 @@
                     <!-- dialogs.welcome -->
                 <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
                     <!-- dialogs.customize -->
+                <String Id="ConfigurationOptions">Options de configuration</String>
+                <String Id="ConfigureTheGatewayInstallation">Configurer l'installation de Gateway</String>
                 <String Id="CustomInstallDlgDescription">Veuillez choisir comment configurer [ProductName].</String>
                 <String Id="CustomInstallDlgInfoLabel">L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant.</String>
                 <String Id="CustomInstallDlgTitle">Configuration</String>
+                <String Id="EnableAccessOverTheInternetUsingNgrok">Autoriser l'accès Web via ngrok.</String>
+                <String Id="EnableTheGatewayWebInterface">Activer l'interface Web de Gateway</String>
+                <String Id="GenerateASelfSignedHttpsCertificate">Générer un certificat HTTPS autosigné</String>
+                <String Id="GenerateEncryptionKeys">Générer des clés de chiffrement</String>
+                <String Id="RecommendedForCompanionInstallations">Recommandé pour l'installation du logiciel en tant qu'outil connexe pour un autre service (ex. : Devolutions Server). Le service Gateway devra être configuré et lancé après installation.</String>
+                <String Id="RecommendedForStandaloneInstallations">Recommandé pour les installations autonomes. Générez une configuration initiale à l'aide de cet installateur et lancez le service Gateway automatiquement.</String>
                     <!-- dialogs.accessUri -->
                 <String Id="AccessUriDlgDescription">URL pour rejoindre [ProductName].</String>
+                <String Id="AccessUriDlgExplanation">L'URI permettant de se connecter à la passerelle Gateway en externe pour effectuer des opérations HTTP. Il peut différer de l'adresse de l'écouteur dans certains cas (ex. : lors de l'utilisation d'un proxy inverse tel qu'IIS).</String>
+                <String Id="AccessUriDlgHttpWarn">Un URI externe non sécurisé est déconseillé pour les environnements de production</String>
                 <String Id="AccessUriDlgTitle">URL Externe</String>
                     <!-- dialogs.certificate -->
+                <String Id="BrowseForACertificateToUse">Parcourir pour un certificat à utiliser</String>
                 <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
                 <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
                 <String Id="CertificateDlgCertKeyFileLabel">Fichier de clé privée</String>
                 <String Id="CertificateDlgCertPasswordLabel">Mot de passe du certificat</String>
                 <String Id="CertificateDlgDescription">Un certificat est nécessaire pour utiliser HTTPS.</String>
                 <String Id="CertificateDlgTitle">Certificat</String>
+                <String Id="CertificateSource">Source du certificat</String>
+                <String Id="CertificateStore">Magasin de certificats</String>
+                <String Id="EncryptedPrivateKeysAreNotSupported">Les clés de chiffrement privées ne sont pas prises en charge</String>
                 <String Id="EnterTextToSearch">Saisir le texte à rechercher</String>
+                <String Id="Search">Rechercher</String>
+                <String Id="SearchBy">Rechercher selon</String>
+                <String Id="SearchForACertificateToUse">Trouver un certificat à utiliser</String>
+                <String Id="SelectedCertificate">Certificat sélectionné</String>
+                <String Id="SelectTheCertificateToUse">Sélectionner le certificat à utiliser</String>
+                <String Id="StoreLocation">Emplacement du magasin</String>
                     <!-- dialogs.listeners -->
+                <String Id="AnHttpListenerDoesNotRequireACert">Un écouteur HTTP ne nécessite pas de certificat.</String>
+                <String Id="AnHttpsListenerRequiresACert">Un écouteur HTTPS nécessite un certificat. Vous serez invité à en configurer un.</String>
+                <String Id="AnHttpsListenerRequiresACertSelfSigned">Un écouteur HTTPS nécessite un certificat. Le certificat autosigné généré par l'installateur n'est pas approuvé par défaut.</String>
+                <String Id="ChosenPortAvailable">Le port choisi n'est pas disponible</String>
+                <String Id="ChosenPortCouldNotBeChecked">Le port choisi n'a pas pu être vérifié</String>
+                <String Id="ChosenPortNotAvailable">Il se peut que le port choisi ne soit pas disponible</String>
+                <String Id="InvalidPort">Port non valide</String>
                 <String Id="ListenersDlgDescription">Écouteurs HTTP(S) et TCP.</String>
                 <String Id="ListenersDlgHTTPLabel">Écouteur HTTP</String>
                 <String Id="ListenersDlgListenersLabel">Écouteurs</String>
                 <String Id="ListenersDlgTCPLabel">Écouteur TCP</String>
                 <String Id="ListenersDlgTitle">Écouteurs</String>
                     <!-- dialogs.keys -->
+                <String Id="PrivateKeyFile">Fichier de clé privée</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Fournir une paire de clés de chiffrement pour la génération et la vérification de jeton.</String>
+                <String Id="ProvideAnEncryptionKeyPairForTokenVerification">Fournir une clé de chiffrement pour la vérification de jeton.</String>
+                <String Id="ProvideAPublicKeyForTokenVerification">Fournir une clé publique pour la vérification du jeton. La clé privée pour la génération de jeton est fournie par un service connexe (ex. : Devolutions Server).</String>
+                <String Id="PublicKeyDlgDescription">Clés pour la création et la vérification de jetons.</String>
                 <String Id="PublicKeyDlgTitle">Paire de clés</String>
+                <String Id="PublicKeyFile">Fichier de clé publique</String>
+                <String Id="ThePrivateKeyIsUsedTo">La clé privée sert à générer des jetons de session pour l'application Web autonome</String>
+                <String Id="ThePublicKeyIsUsedTo">La clé publique sert à vérifier des jetons sans restrictions particulières</String>
                     <!-- dialogs.summary -->
                 <String Id="SummaryDlgDescription">Cliquez Suivant pour utiliser cette configuration ou Précédent pour revenir en arrière.</String>
                 <String Id="SummaryDlgTitle">Résumé</String>
@@ -82,148 +219,12 @@
                 <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
                 <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
                 <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
-                <String Id="NgrokAuthTokenLink">authentication token</String>
-                <String Id="NgrokDomainLink">domain</String>
-                <String Id="NgrokProvideYourX">Provide your {0}</String>
-                <String Id="NgrokReadMoreAtX">Read more at {0}</String>
-                <String Id="NgrokReadMoreLink">ngrok.com</String>
-                <String Id="NgrokTcpAddressLink">TCP address</String>
-                <String Id="NgrokXForWebClientAccess">The {0} for web client access</String>
-                <String Id="NgroXForNativeClientAccess">The {0} for native client access</String>
-                    <!-- buttons.- -->
-                <String Id="SearchButton">Search</String>
-                <String Id="ViewButton">View</String>
-                <String Id="ViewLogButton">View Log</String>
-                    <!-- propertyGroups.- -->
-                <String Id="Group_Certificate">Certificate</String>
-                <String Id="Group_EncryptionKeys">Encryption Keys</String>
-                <String Id="Group_ExternalAccess">External Access</String>
-                <String Id="Group_InstallLocation">Install Location</String>
-                <String Id="Group_Listeners">Listeners</String>
-                <String Id="Group_Ngrok">ngrok</String>
-                <String Id="Group_Service">Service</String>
-                <String Id="Group_WebApp">Web App</String>
                     <!-- enums.- -->
-                <String Id="AuthenticationMode_Custom">Custom</String>
-                <String Id="AuthenticationMode_None">None</String>
-                <String Id="CertificateFindType_SubjectName">Subject Name</String>
-                <String Id="CertificateFindType_Thumbprint">Thumbprint</String>
-                <String Id="CertificateMode_External">External</String>
-                <String Id="CertificateMode_System">System</String>
-                <String Id="CustomizeMode_Later">Later</String>
-                <String Id="CustomizeMode_Now">Now</String>
-                <String Id="StoreLocation_CurrentUser">Current User</String>
-                <String Id="StoreLocation_LocalMachine">Local Machine</String>
-                <String Id="StoreName_AddressBook">Other People</String>
-                <String Id="StoreName_AuthRoot">Third-Party Root Certification Authorities</String>
-                <String Id="StoreName_CertificateAuthority">Intermediate Certification Authorities</String>
-                <String Id="StoreName_Disallowed">Untrusted Certificates</String>
-                <String Id="StoreName_My">Personal</String>
-                <String Id="StoreName_Root">Trusted Root Certification Authorities</String>
-                <String Id="StoreName_TrustedPeople">Trusted People</String>
-                <String Id="StoreName_TrustedPublisher">Trusted Publishers</String>
-                    <!-- static.- -->
-                <String Id="Host">Host</String>
-                <String Id="Port">Port</String>
-                <String Id="Protocol">Protocol</String>
-                <String Id="UACPromptLabel">Please wait for UAC prompt to appear.
-
-If it appears minimized then active it from the taskbar.</String>
-                    <!-- filters.- -->
-                <String Id="Filter_AllFiles">All Files</String>
-                <String Id="Filter_CertificateFiles">Certificate Files (*.pem, *.crt, *.cer)</String>
-                <String Id="Filter_PfxFiles">PFX Files (*.pfx, *.p12)</String>
-                <String Id="Filter_PrivateKeyFiles">Private Key Files (*.key)</String>
-                <String Id="Filter_PublicKeyFiles">Public Key Files (*.pem)</String>
-                    <!-- messages.- -->
-                <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">An unexpected error occurred accessing the system certificate store: {0}</String>
-                <String Id="AuthenticationTokenIsRequired">The authentication token is required</String>
-                <String Id="DomainIsRequiredAndMustBeValid">The domain is required and must be a valid hostname</String>
-                <String Id="Dotnet462IsRequired">The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
-                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
-                <String Id="NoMatchingCertificatesFound">No matching certificates found</String>
-                <String Id="PasswordsDoNotMatch">Passwords do not match</String>
-                <String Id="RemoteAddressIsRequired">The remote address is required</String>
-                <String Id="RemoteAddressMustBeInTheFormat">The remote address must be a valid host and port in the format {host}:{port}</String>
-                <String Id="WindowsPowerShell51IsRequired">This product requires Windows PowerShell 5.1</String>
-                <String Id="YouMustConfirmThePassword">You must confirm the password</String>
-                <String Id="YouMustEnterAPassword">You must enter a password</String>
-                <String Id="YouMustEnterAUsername">You must enter a username</String>
-                <String Id="YouMustSelectACertificateFromTheSystemCertificateStore">You must select a certificate from the system certificate store</String>
-                    <!-- properties.- -->
-                <String Id="Property_AuthenticationMode">Authentication Mode</String>
-                <String Id="Property_CertificateLocation">Certificate Location</String>
-                <String Id="Property_CertificateMode">Certificate Source</String>
-                <String Id="Property_CertificateName">Certificate Name</String>
-                <String Id="Property_CertificateStore">Certificate Store</String>
-                <String Id="Property_Directory">Directory</String>
-                <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
-                <String Id="Property_NewKeyPair">A new key pair will be generated</String>
-                <String Id="Property_NgrokAuthToken">Authentication Token</String>
-                <String Id="Property_NgrokHttpDomain">Domain</String>
-                <String Id="Property_NgrokRemoteAddress">TCP Address</String>
-                <String Id="Property_PrivateKeyFile">Private Key File</String>
-                <String Id="Property_PublicKeyFile">Public Key File</String>
-                <String Id="Property_ServiceStart">Service Start Mode</String>
-                <String Id="Property_WebPassword">Default Password</String>
-                <String Id="Property_WebUsername">Default Username</String>
-                    <!-- dialogs.ngrok.- -->
-                <String Id="AuthToken">Auth Token</String>
-                <String Id="Configure">Configure</String>
-                <String Id="Domain">Domain</String>
-                <String Id="NativeClientAccess">Native Client Access</String>
-                <String Id="NgrokListenersDlgDescription">ngrok listener configuration.</String>
-                <String Id="NgrokListenersDlgTitle">ngrok</String>
-                <String Id="RemoteAddress">Remote Address</String>
-                <String Id="UseNgrokForSimplifiedRemoteAccess">Use ngrok for simplified remote access from the Internet. Gateway listeners allow access from any IP address by default.</String>
-                    <!-- dialogs.webApp.- -->
-                <String Id="Authentication">Authentication</String>
-                <String Id="ChooseTheAuthenticationMethod">Choose the authentication method used when accessing the web application</String>
-                <String Id="ConfirmPassword">Confirm Password</String>
-                <String Id="DefaultUser">Default User</String>
-                <String Id="Password">Password</String>
-                <String Id="Username">Username</String>
-                <String Id="WebAppDlgDescription">Configuration for the embedded web application.</String>
-                <String Id="WebAppDlgTitle">Web Application Options</String>
-                    <!-- dialogs.customize.- -->
-                <String Id="ConfigurationOptions">Configuration Options</String>
-                <String Id="ConfigureTheGatewayInstallation">Configure the Gateway installation</String>
-                <String Id="EnableAccessOverTheInternetUsingNgrok">Enable access over the internet using ngrok</String>
-                <String Id="EnableTheGatewayWebInterface">Enable the Gateway web interface</String>
-                <String Id="GenerateASelfSignedHttpsCertificate">Generate a self-signed HTTPS certificate</String>
-                <String Id="GenerateEncryptionKeys">Generate encryption keys</String>
-                <String Id="RecommendedForCompanionInstallations">Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.</String>
-                <String Id="RecommendedForStandaloneInstallations">Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.</String>
-                    <!-- dialogs.accessUri.- -->
-                <String Id="AccessUriDlgExplanation">The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS).</String>
-                <String Id="AccessUriDlgHttpWarn">An insecure external URI is not recommended for production environments</String>
+                <String Id="ServiceStartMode_Automatic">Automatic</String>
+                <String Id="ServiceStartMode_Boot">Boot</String>
+                <String Id="ServiceStartMode_Disabled">Disabled</String>
+                <String Id="ServiceStartMode_Manual">Manual</String>
+                <String Id="ServiceStartMode_System">System</String>
                     <!-- dialogs.certificate.- -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
-                <String Id="BrowseForACertificateToUse">Browse for a certificate to use</String>
-                <String Id="CertificateSource">Certificate Source</String>
-                <String Id="CertificateStore">Certificate Store</String>
-                <String Id="EncryptedPrivateKeysAreNotSupported">Encrypted private keys are not supported</String>
-                <String Id="Search">Search</String>
-                <String Id="SearchBy">Search By</String>
-                <String Id="SearchForACertificateToUse">Search for a certificate to use</String>
-                <String Id="SelectedCertificate">Selected Certificate</String>
-                <String Id="SelectTheCertificateToUse">Select the certificate to use</String>
-                <String Id="StoreLocation">Store Location</String>
-                    <!-- dialogs.listeners.- -->
-                <String Id="AnHttpListenerDoesNotRequireACert">An HTTP listener does not require a certificate.</String>
-                <String Id="AnHttpsListenerRequiresACert">An HTTPS listener requires a certificate. You will be prompted to configure one.</String>
-                <String Id="AnHttpsListenerRequiresACertSelfSigned">An HTTPS listener requires a certificate. The self-signed certificate generated by this installer is not trusted by default.</String>
-                <String Id="ChosenPortAvailable">The chosen port is available</String>
-                <String Id="ChosenPortCouldNotBeChecked">The chosen port could not be checked</String>
-                <String Id="ChosenPortNotAvailable">The chosen port might not be available</String>
-                <String Id="InvalidPort">Invalid port</String>
-                    <!-- dialogs.keys.- -->
-                <String Id="PrivateKeyFile">Private Key File</String>
-                <String Id="ProvideAnEncryptionKeyPairForTokenCreationVerification">Provide an encryption key pair for token generation and verification.</String>
-                <String Id="ProvideAnEncryptionKeyPairForTokenVerification">Provide an encryption key for token verification.</String>
-                <String Id="ProvideAPublicKeyForTokenVerification">Provide a public key for token verification. The private key for token generation is provisioned by a companion service (e.g. Devolutions Server).</String>
-                <String Id="PublicKeyDlgDescription">Keys for token creation and verification.</String>
-                <String Id="PublicKeyFile">Public Key File</String>
-                <String Id="ThePrivateKeyIsUsedTo">The private key is used to generate session tokens for the standalone web application</String>
-                <String Id="ThePublicKeyIsUsedTo">The public key is used to verify tokens without specific restrictions</String>
                     </WixLocalization>

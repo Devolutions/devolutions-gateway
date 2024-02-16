@@ -277,6 +277,26 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string StoreName_AddressBook = "StoreName_AddressBook";		
 		/// <summary>
+		/// Boot
+		/// </summary>
+		public const string ServiceStartMode_Boot = "ServiceStartMode_Boot";		
+		/// <summary>
+		/// System
+		/// </summary>
+		public const string ServiceStartMode_System = "ServiceStartMode_System";		
+		/// <summary>
+		/// Automatic
+		/// </summary>
+		public const string ServiceStartMode_Automatic = "ServiceStartMode_Automatic";		
+		/// <summary>
+		/// Manual
+		/// </summary>
+		public const string ServiceStartMode_Manual = "ServiceStartMode_Manual";		
+		/// <summary>
+		/// Disabled
+		/// </summary>
+		public const string ServiceStartMode_Disabled = "ServiceStartMode_Disabled";		
+		/// <summary>
 		/// Certificate Source
 		/// </summary>
 		public const string Property_CertificateMode = "Property_CertificateMode";		
