@@ -119,7 +119,19 @@ impl NetworkScanResponse {
         let hostname = dns;
 
         let protocol = if let Some(protocol) = service {
-            network_scanner_protocol_to_gateway_protocol(protocol)
+            match protocol {
+                scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
+                scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
+                scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
+                scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
+                scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
+                scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
+                scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
+                scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
+                scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
+                scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
+                scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
+            }
         } else {
             match port {
                 22 => ApplicationProtocol::Known(Protocol::Ssh),
@@ -135,23 +147,6 @@ impl NetworkScanResponse {
                 _ => ApplicationProtocol::unknown(),
             }
         };
-
         Self { ip, hostname, protocol }
-    }
-}
-
-fn network_scanner_protocol_to_gateway_protocol(protocol: scanner::Protocol) -> ApplicationProtocol {
-    match protocol {
-        scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
-        scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
-        scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
-        scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
-        scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
-        scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
-        scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
-        scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
-        scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
-        scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
-        scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
     }
 }
