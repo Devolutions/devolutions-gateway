@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-use network_scanner::scanner::NetworkScannerParams;
+use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
 
 use crate::http::HttpError;
@@ -33,10 +33,10 @@ pub async fn handler(
         loop {
             tokio::select! {
                 result = stream.recv() => {
-                    let Some((ip, dns, port)) = result else{
+                    let Some((ip, dns, port,protocol)) = result else{
                         break;
                     };
-                    let response = NetworkScanResponse::new(ip, port, dns);
+                    let response = NetworkScanResponse::new(ip, port, dns,protocol);
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
                         continue;
@@ -115,24 +115,38 @@ pub struct NetworkScanResponse {
 }
 
 impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>) -> Self {
+    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::Protocol>) -> Self {
         let hostname = dns;
 
-        let protocol = match port {
-            22 => ApplicationProtocol::Known(Protocol::Ssh),
-            23 => ApplicationProtocol::Known(Protocol::Telnet),
-            80 => ApplicationProtocol::Known(Protocol::Http),
-            443 => ApplicationProtocol::Known(Protocol::Https),
-            389 => ApplicationProtocol::Known(Protocol::Ldap),
-            636 => ApplicationProtocol::Known(Protocol::Ldaps),
-            3389 => ApplicationProtocol::Known(Protocol::Rdp),
-            5900 => ApplicationProtocol::Known(Protocol::Vnc),
-            5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
-            5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
-            3283 => ApplicationProtocol::Known(Protocol::Ard),
-            _ => ApplicationProtocol::unknown(),
+        let protocol = if let Some(protocol) = service {
+            match protocol {
+                scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
+                scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
+                scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
+                scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
+                scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
+                scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
+                scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
+                scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
+                scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
+                scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
+                scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
+            }
+        } else {
+            match port {
+                22 => ApplicationProtocol::Known(Protocol::Ssh),
+                23 => ApplicationProtocol::Known(Protocol::Telnet),
+                80 => ApplicationProtocol::Known(Protocol::Http),
+                443 => ApplicationProtocol::Known(Protocol::Https),
+                389 => ApplicationProtocol::Known(Protocol::Ldap),
+                636 => ApplicationProtocol::Known(Protocol::Ldaps),
+                3389 => ApplicationProtocol::Known(Protocol::Rdp),
+                5900 => ApplicationProtocol::Known(Protocol::Vnc),
+                5985 => ApplicationProtocol::Known(Protocol::WinrmHttpPwsh),
+                5986 => ApplicationProtocol::Known(Protocol::WinrmHttpsPwsh),
+                _ => ApplicationProtocol::unknown(),
+            }
         };
-
         Self { ip, hostname, protocol }
     }
 }

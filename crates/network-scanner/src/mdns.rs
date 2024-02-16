@@ -1,7 +1,8 @@
 use mdns_sd::ServiceEvent;
 
 use crate::{
-    task_utils::{PortReceiver, TaskManager},
+    scanner::Protocol,
+    task_utils::{ScanEntryReceiver, TaskManager},
     ScannerError,
 };
 
@@ -28,7 +29,7 @@ pub fn mdns_query_scan(
     task_manager: TaskManager,
     entire_duration: std::time::Duration,
     single_query_duration: std::time::Duration,
-) -> Result<PortReceiver, ScannerError> {
+) -> Result<ScanEntryReceiver, ScannerError> {
     let service_daemon = service_daemon.get_service_daemon();
 
     let receiver = service_daemon.browse(META_QUERY)?;
@@ -94,14 +95,21 @@ pub fn mdns_query_scan(
                         'outer: while let Ok(response) = receiver.recv_async().await {
                             tracing::debug!(sub_service_event=?response);
                             if let ServiceEvent::ServiceResolved(info) = response {
-                                let server = info.get_fullname();
+                                let full_name = info.get_fullname();
+                                let (server, protocol) =
+                                    parse_fullname(full_name).unwrap_or((full_name.to_string(), None));
+
                                 let port = info.get_port();
                                 let ip = info.get_addresses();
 
                                 for ip in ip {
                                     let ip = *ip;
                                     let server = server.to_string();
-                                    if result_sender.send((ip, Some(server), port)).await.is_err() {
+                                    if result_sender
+                                        .send((ip, Some(server), port, protocol.clone()))
+                                        .await
+                                        .is_err()
+                                    {
                                         break 'outer;
                                     }
                                 }
@@ -113,4 +121,36 @@ pub fn mdns_query_scan(
             anyhow::Ok(())
         });
     Ok(result_receiver)
+}
+
+fn parse_fullname(fullname: &str) -> Option<(String, Option<Protocol>)> {
+    let mut iter = fullname.split('.');
+    let device_name = iter.next()?;
+    let mut service_type = String::new();
+    for part in iter {
+        if part.starts_with('_') {
+            service_type.push_str(part);
+            service_type.push('.');
+        }
+    }
+    // remove the trailing dot
+    service_type.pop()?;
+
+    let protocol = match service_type.as_str() {
+        "_http._tcp" => Some(Protocol::Http),
+        "_https._tcp" => Some(Protocol::Https),
+        "_ssh._tcp" => Some(Protocol::Ssh),
+        "_sftp._tcp" => Some(Protocol::Sftp),
+        "_scp._tcp" => Some(Protocol::Scp),
+        "_telnet._tcp" => Some(Protocol::Telnet),
+        "_ldap._tcp" => Some(Protocol::Ldap),
+        "_ldaps._tcp" => Some(Protocol::Ldaps),
+        // https://jonathanmumm.com/tech-it/mdns-bonjour-bible-common-service-strings-for-various-vendors/
+        // OSX Screen Sharing
+        "_rfb._tcp" => Some(Protocol::Ard),
+        // Note: RDP, VNC, Wayk, and SSH-based PowerShell (SshPwsh) are not standardized service types
+        _ => None,
+    };
+
+    Some((device_name.to_string(), protocol))
 }
