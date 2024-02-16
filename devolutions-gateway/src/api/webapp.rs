@@ -248,6 +248,7 @@ pub(crate) enum SessionTokenContentType {
         /// Unique ID for this session
         session_id: Uuid,
     },
+    NetScan {},
     Kdc {
         /// Kerberos realm.
         ///
@@ -298,7 +299,9 @@ pub(crate) async fn sign_session_token(
     WebAppToken(web_app_token): WebAppToken,
     Json(req): Json<SessionTokenSignRequest>,
 ) -> Result<Response, HttpError> {
-    use crate::token::{AssociationTokenClaims, ConnectionMode, ContentType, JmuxTokenClaims, KdcTokenClaims};
+    use crate::token::{
+        AssociationTokenClaims, ConnectionMode, ContentType, JmuxTokenClaims, KdcTokenClaims, NetScanClaims,
+    };
 
     use picky::jose::jws::JwsAlg;
     use picky::jose::jwt::CheckedJwtSig;
@@ -327,7 +330,7 @@ pub(crate) async fn sign_session_token(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let exp = now + i64::try_from(lifetime).map_err(HttpError::internal().err())?;
 
-    let (claims, content_type, destination) = match req.content_type {
+    let (claims, content_type) = match req.content_type {
         SessionTokenContentType::Association {
             protocol,
             destination,
@@ -356,7 +359,6 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("ASSOCIATION claims").err())?,
             ContentType::Association,
-            destination,
         ),
 
         SessionTokenContentType::Jmux {
@@ -382,7 +384,6 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("JMUX claims").err())?,
             ContentType::Jmux,
-            destination,
         ),
 
         SessionTokenContentType::Kdc { krb_realm, krb_kdc } => (
@@ -401,7 +402,27 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("KDC claims").err())?,
             ContentType::Kdc,
-            krb_kdc,
+        ),
+
+        SessionTokenContentType::NetScan {} => (
+            NetScanClaims {
+                exp,
+                jti,
+                iat: now,
+                nbf: now,
+                jet_gw_id: None,
+            }
+            .pipe(serde_json::to_value)
+            .map(|mut claims| {
+                if let Some(claims) = claims.as_object_mut() {
+                    claims.insert("iat".to_owned(), serde_json::json!(now));
+                    claims.insert("nbf".to_owned(), serde_json::json!(now));
+                    claims.insert("exp".to_owned(), serde_json::json!(exp));
+                }
+                claims
+            })
+            .map_err(HttpError::internal().with_msg("Netscan claims").err())?,
+            ContentType::NetScan,
         ),
     };
 
@@ -413,7 +434,6 @@ pub(crate) async fn sign_session_token(
 
     info!(
         user = web_app_token.sub,
-        %destination,
         lifetime,
         %content_type,
         "Granted a session token"
