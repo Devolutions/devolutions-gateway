@@ -267,6 +267,11 @@ impl NetworkScanner {
     }
 }
 
+/// ScanEntry is a tuple of (IpAddr, Option<String>, u16, Option<Protocol>)
+/// where IpAddr is the ip address of the device
+/// Option<String> is the hostname of the device
+/// u16 is the port number
+/// Option<Protocol> is the protocol/Service running on the port
 pub type ScanEntry = (IpAddr, Option<String>, u16, Option<Protocol>);
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
