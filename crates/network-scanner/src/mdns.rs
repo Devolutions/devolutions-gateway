@@ -120,8 +120,8 @@ fn parse_fullname(fullname: &str) -> Option<(String, Option<Protocol>)> {
     let mut iter = fullname.split('.');
     let device_name = iter.next()?;
     let mut service_type = String::new();
-    while let Some(part) = iter.next() {
-        if part.starts_with("_") {
+    for part in iter {
+        if part.starts_with('_') {
             service_type.push_str(part);
             service_type.push('.');
         }
