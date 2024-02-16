@@ -6,7 +6,8 @@ use std::future::Future;
 
 use tokio::sync::Mutex;
 
-use crate::mdns::MdnsDeamon;
+use crate::mdns::MdnsDaemon;
+use crate::scanner::ScanEntry;
 use crate::{
     ip_utils::{get_subnets, Subnet},
     scanner::NetworkScanner,
@@ -14,23 +15,23 @@ use crate::{
 
 pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
 pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
-pub(crate) type PortSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>, u16)>;
-pub(crate) type PortReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>, u16)>;
+pub(crate) type ScanEntrySender = tokio::sync::mpsc::Sender<ScanEntry>;
+pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
     pub ip_sender: IpSender,
     pub ip_receiver: Arc<Mutex<IpReceiver>>,
 
-    pub port_sender: PortSender,
-    pub port_receiver: Arc<Mutex<PortReceiver>>,
+    pub port_sender: ScanEntrySender,
+    pub port_receiver: Arc<Mutex<ScanEntryReceiver>>,
 
     pub ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
     pub ports: Vec<u16>,
 
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub mdns_deamon: MdnsDeamon,
+    pub mdns_daemon: MdnsDaemon,
 
     pub ping_interval: Duration,     // in milliseconds
     pub ping_timeout: Duration,      // in milliseconds
@@ -68,7 +69,7 @@ impl TaskExecutionContext {
             netbios_timeout,
             runtime,
             netbios_interval,
-            mdns_deamon,
+            mdns_daemon,
             ..
         } = network_scanner;
 
@@ -80,7 +81,7 @@ impl TaskExecutionContext {
             ip_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
             ports,
             runtime,
-            mdns_deamon,
+            mdns_daemon,
             ping_interval,
             ping_timeout,
             broadcast_timeout,
@@ -196,7 +197,7 @@ pub(crate) struct TimeoutManager {
 }
 
 impl TimeoutManager {
-    pub(crate) fn when_finished<F>(self, f: F) -> Self
+    pub(crate) fn when_timed_out<F>(self, f: F) -> Self
     where
         F: FnOnce() + Send + 'static,
     {

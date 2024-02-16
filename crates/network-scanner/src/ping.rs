@@ -22,6 +22,7 @@ pub fn ping_range(
 ) -> anyhow::Result<tokio::sync::mpsc::Receiver<IpAddr>> {
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
     let mut futures = vec![];
+
     for ip in range.into_iter() {
         let socket = runtime.new_socket(
             socket2::Domain::IPV4,
@@ -31,6 +32,7 @@ pub fn ping_range(
         let addr = SocketAddr::new(ip, 0);
         let sender = sender.clone();
         let should_ping = should_ping.clone();
+
         let ping_future = async move {
             if !should_ping(ip) {
                 return anyhow::Ok(());
@@ -44,12 +46,9 @@ pub fn ping_range(
         futures.push(ping_future);
     }
 
-    task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
+    task_manager.spawn(move |task_manager| async move {
         for future in futures {
-            task_manager.spawn_no_sub_task(async move {
-                timeout(ping_wait_time, future).await??;
-                anyhow::Ok(())
-            });
+            task_manager.with_timeout(ping_wait_time).spawn(|_| future);
             tokio::time::sleep(ping_interval).await;
         }
         anyhow::Ok(())

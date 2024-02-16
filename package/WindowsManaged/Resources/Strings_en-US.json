@@ -279,6 +279,26 @@
         {
           "id": "StoreName_AddressBook",
           "text": "Other People"
+        },
+        {
+          "id": "ServiceStartMode_Boot",
+          "text": "Boot"
+        },
+        {
+          "id": "ServiceStartMode_System",
+          "text": "System"
+        },
+        {
+          "id": "ServiceStartMode_Automatic",
+          "text": "Automatic"
+        },
+        {
+          "id": "ServiceStartMode_Manual",
+          "text": "Manual"
+        },
+        {
+          "id": "ServiceStartMode_Disabled",
+          "text": "Disabled"
         }
       ],
       "properties": [

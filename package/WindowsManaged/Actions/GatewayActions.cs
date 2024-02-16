@@ -208,29 +208,6 @@ internal static class GatewayActions
     };
 
     /// <summary>
-    /// Open the installed web application in the user's system browser
-    /// </summary>
-    /// <remarks>
-    /// Shouldn't be done on silent installs, but we only support customization by UI currently
-    /// </remarks>
-    private static readonly ManagedAction openWebApp = new(
-        CustomActions.OpenWebApp,
-        Return.ignore, When.After,
-        Step.InstallFinalize,
-        GatewayProperties.firstInstall.Equal(true))
-    {
-        UsesProperties = UseProperties(new IWixProperty[]
-        {
-            GatewayProperties.configureWebApp,
-            GatewayProperties.httpListenerScheme,
-            GatewayProperties.httpListenerPort,
-            GatewayProperties.accessUriHost,
-            GatewayProperties.configureNgrok,
-            GatewayProperties.ngrokHttpDomain,
-        })
-    };
-
-    /// <summary>
     /// Set the start mode of the installed Devolutions Gateway service
     /// </summary>
     /// <remarks>
@@ -491,7 +468,6 @@ internal static class GatewayActions
         cleanGatewayConfigIfNeeded,
         cleanGatewayConfigIfNeededRollback,
         initGatewayConfigIfNeeded,
-        openWebApp,
         queryGatewayStartupType,
         setGatewayStartupType,
         startGatewayIfNeeded,
