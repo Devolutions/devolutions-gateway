@@ -11,6 +11,8 @@ namespace DevolutionsGateway.Dialogs;
 
 internal static class Wizard
 {
+    internal static Dictionary<string, string> Globals = new Dictionary<string, string>();
+
     private static readonly Type[] CustomizeSequence =
     {
         typeof(NgrokListenersDialog),

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using DevolutionsGateway.Helpers;
+using DevolutionsGateway.Properties;
 using WixSharp;
 using WixSharp.CommonTasks;
 
@@ -41,6 +42,33 @@ public partial class ProgressDialog : GatewayDialog, IProgressDialog
         if (!WindowsIdentity.GetCurrent().IsAdmin() && Uac.IsEnabled())
         {
             showWaitPromptTimer.Start();
+        }
+
+        GatewayProperties properties = new GatewayProperties(this.Session());
+
+        if (properties?.ConfigureWebApp ?? false)
+        {
+            string scheme = properties.ConfigureNgrok ? Constants.HttpsProtocol : properties.HttpListenerScheme;
+            string host = properties.ConfigureNgrok ? properties.NgrokHttpDomain : properties.AccessUriHost;
+            uint port = properties.ConfigureNgrok ? 443 : properties.HttpListenerPort;
+
+            Uri target;
+
+            if ((scheme == Constants.HttpProtocol && port == 80) ||
+                (scheme == Constants.HttpsProtocol && port == 443))
+            {
+                target = new Uri($"{scheme}://{host}", UriKind.Absolute);
+            }
+            else
+            {
+                target = new Uri($"{scheme}://{host}:{port}", UriKind.Absolute);
+            }
+
+            Wizard.Globals["LaunchUrl"] = target.ToString();
+        }
+        else
+        {
+            Wizard.Globals.Remove("LaunchUrl");
         }
 
         base.OnLoad(sender, e);
