@@ -63,6 +63,11 @@
                 <String Id="CertificateMode_System">System</String>
                 <String Id="CustomizeMode_Later">Later</String>
                 <String Id="CustomizeMode_Now">Now</String>
+                <String Id="ServiceStartMode_Automatic">Automatic</String>
+                <String Id="ServiceStartMode_Boot">Boot</String>
+                <String Id="ServiceStartMode_Disabled">Disabled</String>
+                <String Id="ServiceStartMode_Manual">Manual</String>
+                <String Id="ServiceStartMode_System">System</String>
                 <String Id="StoreLocation_CurrentUser">Current User</String>
                 <String Id="StoreLocation_LocalMachine">Local Machine</String>
                 <String Id="StoreName_AddressBook">Other People</String>
