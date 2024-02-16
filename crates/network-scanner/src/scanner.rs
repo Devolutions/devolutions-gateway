@@ -196,11 +196,7 @@ impl NetworkScanner {
                       ..
                   },
                   task_manager| async move {
-                let mut receiver = mdns::mdns_query_scan(
-                    mdns_daemon,
-                    task_manager,
-                    mdns_query_timeout
-                )?;
+                let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
                 while let Some((ip, server, port, protocol)) = receiver.recv().await {
                     if ip_cache.read().get(&ip).is_none() {
@@ -264,7 +260,7 @@ impl NetworkScanner {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
-            mdns_query_timeout: mdns_query_timeout,
+            mdns_query_timeout,
             max_wait_time: max_wait,
             mdns_daemon: MdnsDaemon::new()?,
         })

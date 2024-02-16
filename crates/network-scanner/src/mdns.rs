@@ -70,17 +70,17 @@ pub fn mdns_query_scan(
                     err_msg
                 })?;
 
-                while let Ok(service_event) = receiver.try_recv() {
+                while let Ok(service_event) = receiver.recv_async().await {
                     tracing::debug!("ServiceEvent: {:?}", service_event);
                     if let ServiceEvent::ServiceResolved(msg) = service_event {
                         let (device_name, protocol) =
-                            parse_fullname(&msg.get_fullname()).unwrap_or((msg.get_fullname().to_string(), None));
+                            parse_fullname(msg.get_fullname()).unwrap_or((msg.get_fullname().to_string(), None));
 
                         let port = msg.get_port();
 
                         for ip in msg.get_addresses() {
                             if let Err(e) = result_sender
-                                .send((ip.clone(), Some(device_name.clone()), port, protocol.clone()))
+                                .send((*ip, Some(device_name.clone()), port, protocol.clone()))
                                 .await
                             {
                                 tracing::error!("Failed to send result: {}", e);
@@ -89,7 +89,6 @@ pub fn mdns_query_scan(
                     }
                 }
 
-                tracing::debug!("Browsing for service: {} finished", service_name);
                 anyhow::Ok(())
             })
     }
@@ -137,20 +136,20 @@ impl TryFrom<&str> for Protocol {
     }
 }
 
-impl<'a> Into<&'a str> for Protocol {
-    fn into(self) -> &'a str {
-        match self {
-            Self::Ard => "_rfb._tcp",
-            Self::Http => "_http._tcp",
-            Self::Https => "_https._tcp",
-            Self::Ldap => "_ldap._tcp",
-            Self::Ldaps => "_ldaps._tcp",
-            Self::Sftp => "_sftp._tcp",
-            Self::Scp => "_scp._tcp",
-            Self::Ssh => "_ssh._tcp",
-            Self::Telnet => "_telnet._tcp",
-            Self::Vnc => "_rfb._tcp",
-            Self::Rdp => "_rdp._tcp",
+impl<'a> From<Protocol> for &'a str {
+    fn from(val: Protocol) -> Self {
+        match val {
+            Protocol::Ard => "_rfb._tcp",
+            Protocol::Http => "_http._tcp",
+            Protocol::Https => "_https._tcp",
+            Protocol::Ldap => "_ldap._tcp",
+            Protocol::Ldaps => "_ldaps._tcp",
+            Protocol::Sftp => "_sftp._tcp",
+            Protocol::Scp => "_scp._tcp",
+            Protocol::Ssh => "_ssh._tcp",
+            Protocol::Telnet => "_telnet._tcp",
+            Protocol::Vnc => "_rfb._tcp",
+            Protocol::Rdp => "_rdp._tcp",
         }
     }
 }
