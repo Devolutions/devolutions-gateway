@@ -112,22 +112,22 @@ pub struct NetworkScanResponse {
 }
 
 impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::Protocol>) -> Self {
+    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::ServiceType>) -> Self {
         let hostname = dns;
 
         let protocol = if let Some(protocol) = service {
             match protocol {
-                scanner::Protocol::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
-                scanner::Protocol::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
-                scanner::Protocol::Http => ApplicationProtocol::Known(Protocol::Http),
-                scanner::Protocol::Https => ApplicationProtocol::Known(Protocol::Https),
-                scanner::Protocol::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
-                scanner::Protocol::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
-                scanner::Protocol::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
-                scanner::Protocol::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
-                scanner::Protocol::Ard => ApplicationProtocol::Known(Protocol::Ard),
-                scanner::Protocol::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
-                scanner::Protocol::Scp => ApplicationProtocol::Known(Protocol::Scp),
+                scanner::ServiceType::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
+                scanner::ServiceType::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
+                scanner::ServiceType::Http => ApplicationProtocol::Known(Protocol::Http),
+                scanner::ServiceType::Https => ApplicationProtocol::Known(Protocol::Https),
+                scanner::ServiceType::Ldap => ApplicationProtocol::Known(Protocol::Ldap),
+                scanner::ServiceType::Ldaps => ApplicationProtocol::Known(Protocol::Ldaps),
+                scanner::ServiceType::Rdp => ApplicationProtocol::Known(Protocol::Rdp),
+                scanner::ServiceType::Vnc => ApplicationProtocol::Known(Protocol::Vnc),
+                scanner::ServiceType::Ard => ApplicationProtocol::Known(Protocol::Ard),
+                scanner::ServiceType::Sftp => ApplicationProtocol::Known(Protocol::Sftp),
+                scanner::ServiceType::Scp => ApplicationProtocol::Known(Protocol::Scp),
             }
         } else {
             match port {

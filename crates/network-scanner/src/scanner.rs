@@ -272,7 +272,7 @@ impl NetworkScanner {
 /// Option<String> is the hostname of the device
 /// u16 is the port number
 /// Option<Protocol> is the protocol/Service running on the port
-pub type ScanEntry = (IpAddr, Option<String>, u16, Option<Protocol>);
+pub type ScanEntry = (IpAddr, Option<String>, u16, Option<ServiceType>);
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
@@ -360,7 +360,7 @@ pub struct NetworkScannerParams {
 }
 
 #[derive(Debug, Clone)]
-pub enum Protocol {
+pub enum ServiceType {
     /// Remote Desktop Protocol
     Rdp,
     /// Apple Remote Desktop
