@@ -30,7 +30,7 @@ pub fn mdns_query_scan(
     entire_duration: std::time::Duration,
     single_query_duration: std::time::Duration,
 ) -> Result<ScanEntryReceiver, ScannerError> {
-    let service_daemon = service_daemon.service_daemon.clone();
+    let service_daemon = service_daemon.get_service_daemon();
 
     let receiver = service_daemon.browse(META_QUERY)?;
     let service_daemon_clone = service_daemon.clone();
