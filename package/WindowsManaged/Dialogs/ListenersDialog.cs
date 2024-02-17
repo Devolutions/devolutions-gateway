@@ -31,9 +31,6 @@ public partial class ListenersDialog : GatewayDialog
 
         httpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtHttpPort);
         tcpPortDebouncer = new Debouncer(TimeSpan.FromMilliseconds(500), PortCheck, this.txtTcpPort);
-
-        this.cmbHttpProtocol.DataSource = HttpProtocols;
-        this.cmbTcpProtocol.DataSource = TcpProtocols;
     }
 
     public override bool DoValidate()
@@ -98,6 +95,9 @@ public partial class ListenersDialog : GatewayDialog
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
+        this.cmbHttpProtocol.DataSource = HttpProtocols;
+        this.cmbTcpProtocol.DataSource = TcpProtocols;
+        
         base.OnLoad(sender, e);
     }
 
@@ -154,7 +154,17 @@ public partial class ListenersDialog : GatewayDialog
         
         Action result = () => {};
 
-        string portString = this.Invoke(new Func<string>(() => textBox.Text)).ToString();
+        string portString;
+
+        try
+        {
+            portString = this.Invoke(new Func<string>(() => textBox.Text)).ToString();
+
+        }
+        catch
+        {
+            return;
+        }
 
         if (string.IsNullOrEmpty(portString) || !Validation.IsValidPort(portString, out uint port))
         {

@@ -38,10 +38,10 @@ public partial class CustomizeDialog : GatewayDialog
         new GatewayProperties(this.Runtime.Session)
         {
             ConfigureGateway = this.ConfigureNow,
-            ConfigureNgrok = this.chkConfigureNgrok.Checked,
-            ConfigureWebApp = this.chkWebApp.Checked,
-            GenerateCertificate = this.chkGenerateCertificate.Checked && !this.chkConfigureNgrok.Checked,
-            GenerateKeyPair = this.chkGenerateKeyPair.Checked,
+            ConfigureNgrok = this.ConfigureNow && this.chkConfigureNgrok.Checked,
+            ConfigureWebApp = this.ConfigureNow && this.chkWebApp.Checked,
+            GenerateCertificate = this.ConfigureNow && this.chkGenerateCertificate.Checked && !this.chkConfigureNgrok.Checked,
+            GenerateKeyPair = this.ConfigureNow && this.chkGenerateKeyPair.Checked,
             ServiceStart = this.ConfigureNow ? ServiceStartMode.Automatic : ServiceStartMode.Manual,
         };
 
@@ -81,12 +81,12 @@ public partial class CustomizeDialog : GatewayDialog
         if (this.ConfigureNow)
         { 
             this.gbConfigure.Visible = true;
-            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForStandaloneInstallations);
+            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForMostInstallations);
         }
         else
         {
             this.gbConfigure.Visible = false;
-            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForCompanionInstallations);
+            this.lblConfigureDescription.Text = I18n(Strings.RecommendedForManualInstallations);
         }
     }
 
