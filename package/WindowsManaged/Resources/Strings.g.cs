@@ -497,13 +497,13 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string CustomInstallDlgInfoLabel = "CustomInstallDlgInfoLabel";		
 		/// <summary>
-		/// Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.
+		/// Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically.
 		/// </summary>
-		public const string RecommendedForStandaloneInstallations = "RecommendedForStandaloneInstallations";		
+		public const string RecommendedForMostInstallations = "RecommendedForMostInstallations";		
 		/// <summary>
-		/// Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.
+		/// The Gateway service will need to be manually configured and started after installation.
 		/// </summary>
-		public const string RecommendedForCompanionInstallations = "RecommendedForCompanionInstallations";		
+		public const string RecommendedForManualInstallations = "RecommendedForManualInstallations";		
 		/// <summary>
 		/// Configure the Gateway installation
 		/// </summary>

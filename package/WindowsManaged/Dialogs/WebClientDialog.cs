@@ -1,23 +1,22 @@
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
 using System;
+using DevolutionsGateway.Helpers;
 using DevolutionsGateway.Resources;
 using WixSharp;
+using static DevolutionsGateway.Properties.Constants;
 
 namespace WixSharpSetup.Dialogs;
 
 public partial class WebClientDialog : GatewayDialog
 {
-    private bool CustomAuth => this.cmbAuthentication.SelectedIndex == (int)Constants.AuthenticationMode.Custom;
+    private bool CustomAuth => this.cmbAuthentication.Selected<AuthenticationMode>() == AuthenticationMode.Custom;
 
     public WebClientDialog()
     {
         InitializeComponent();
         label1.MakeTransparentOn(banner);
         label2.MakeTransparentOn(banner);
-
-        this.cmbAuthentication.DataSource = Enum.GetValues(typeof(Constants.AuthenticationMode));
-        this.cmbAuthentication.SelectedIndex = 0;
     }
 
     public override bool DoValidate()
@@ -81,6 +80,9 @@ public partial class WebClientDialog : GatewayDialog
     {
         banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
 
+        this.cmbAuthentication.Source<AuthenticationMode>(this.MsiRuntime);
+        this.cmbAuthentication.SetSelected(AuthenticationMode.None);
+        
         base.OnLoad(sender, e);
     }
 

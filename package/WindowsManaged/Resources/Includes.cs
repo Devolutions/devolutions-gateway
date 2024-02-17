@@ -1,5 +1,4 @@
 ﻿using System;
-
 namespace DevolutionsGateway.Resources
 {
     internal static class Includes
@@ -17,6 +16,10 @@ namespace DevolutionsGateway.Resources
         internal static string SERVICE_DESCRIPTION = "Devolutions Gateway Service";
 
         internal static string EXECUTABLE_NAME = "DevolutionsGateway.exe";
+
+        internal static string EMAIL_SUPPORT = "support@devolutions.net";
+
+        internal static string FORUM_SUPPORT = "forum.devolutions.net";
 
         internal static Guid UPGRADE_CODE = new("db3903d6-c451-4393-bd80-eb9f45b90214");
 

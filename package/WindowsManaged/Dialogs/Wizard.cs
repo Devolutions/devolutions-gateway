@@ -41,9 +41,7 @@ internal static class Wizard
 
         Sequence = dialogs.ToArray();
     }
-
-    private static Type lastDialog;
-
+    
     internal static IEnumerable<Type> Dialogs => Sequence;
 
     private static bool Skip(Session session, Type dialog)
@@ -121,29 +119,23 @@ internal static class Wizard
         return false;
     }
 
-    internal static void DialogChanged(IManagedDialog dialog)
+    internal static int Move(IManagedDialog current, bool forward)
     {
-        Type previousDialog = lastDialog;
-        lastDialog = dialog.GetType();
+        Type t = current.GetType();
+        int index = Dialogs.FindIndex(t);
 
-        Type currentDialog = lastDialog;
-
-        if (!Skip(dialog.Session(), currentDialog))
+        while (true)
         {
-            return;
+            index = forward ? index + 1 : index - 1;
+
+            if (!Skip(current.Session(), Sequence[index]))
+            {
+                return index;
+            }
         }
-
-        int index = Dialogs.FindIndex(currentDialog);
-        int prevIndex = Dialogs.FindIndex(previousDialog);
-
-        bool backward = index < prevIndex;
-
-        while (Skip(dialog.Session(), currentDialog))
-        {
-            index = backward ? index - 1 : index + 1;
-            currentDialog = Sequence[index];
-        }
-
-        dialog.Shell.GoTo(index);
     }
+
+    internal static int GetNext(IManagedDialog current) => Move(current, true);
+
+    internal static int GetPrevious(IManagedDialog current) => Move(current, false);
 }

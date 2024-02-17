@@ -24,8 +24,6 @@ namespace WixSharpSetup.Dialogs
 
             this.pictureBox1.Image =
                 StockIcon.GetStockIcon(StockIcon.SIID_WARNING, StockIcon.SHGSI_SMALLICON).ToBitmap();
-
-            this.cmbProtocol.DataSource = Protocols;
         }
 
         public override void FromProperties()
@@ -83,6 +81,8 @@ namespace WixSharpSetup.Dialogs
         public override void OnLoad(object sender, EventArgs e)
         {
             banner.Image = Runtime.Session.GetResourceBitmap("WixUI_Bmp_Banner");
+
+            this.cmbProtocol.DataSource = Protocols;
 
             WinAPI.SendMessage(this.txtHostname.Handle, WinAPI.EM_SETCUEBANNER, 0, "dev.devolutions.net");
 

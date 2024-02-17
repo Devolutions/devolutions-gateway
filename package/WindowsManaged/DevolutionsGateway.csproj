@@ -24,8 +24,8 @@
   <ItemGroup>
 	<PackageReference Include="System.IO.Compression" Version="4.3.0" />
 	<PackageReference Include="System.ValueTuple" Version="4.5.0" />
-    <PackageReference Include="WixSharp" Version="1.25.0" />
-    <PackageReference Include="WixSharp.bin" Version="1.25.0" />
+    <PackageReference Include="WixSharp" Version="1.25.1" />
+    <PackageReference Include="WixSharp.bin" Version="1.25.1" />
     <PackageReference Include="WixSharp.wix.bin" Version="3.14.0.1" />
   </ItemGroup>
   <ItemGroup>

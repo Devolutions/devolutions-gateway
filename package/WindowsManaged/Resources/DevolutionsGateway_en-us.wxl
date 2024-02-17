@@ -146,8 +146,8 @@ If it appears minimized then active it from the taskbar.</String>
                 <String Id="EnableTheGatewayWebInterface">Enable the Gateway web interface</String>
                 <String Id="GenerateASelfSignedHttpsCertificate">Generate a self-signed HTTPS certificate</String>
                 <String Id="GenerateEncryptionKeys">Generate encryption keys</String>
-                <String Id="RecommendedForCompanionInstallations">Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation.</String>
-                <String Id="RecommendedForStandaloneInstallations">Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically.</String>
+                <String Id="RecommendedForManualInstallations">The Gateway service will need to be manually configured and started after installation.</String>
+                <String Id="RecommendedForMostInstallations">Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically.</String>
                     <!-- dialogs.accessUri -->
                 <String Id="AccessUriDlgDescription">URL to reach [ProductName].</String>
                 <String Id="AccessUriDlgExplanation">The URI to reach the Gateway externally for HTTP operations. This may differ from the HTTP listener address in certain cases (for example, when using a reverse proxy such as IIS).</String>

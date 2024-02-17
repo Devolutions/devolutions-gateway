@@ -309,7 +309,8 @@ internal class Program
             .Add<MaintenanceTypeDialog>()
             .Add<ProgressDialog>()
             .Add<ExitDialog>();
-        
+
+        project.UnhandledException += Project_UnhandledException;
         project.UIInitialized += Project_UIInitialized;
         
         if (SourceOnlyBuild)
@@ -343,6 +344,19 @@ internal class Program
             
             msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
         }
+    }
+
+    private static void Project_UnhandledException(ExceptionEventArgs e)
+    {
+        string errorMessage =
+            $"An unhandled error has occurred. If this is recurring, please report the issue to {Includes.EMAIL_SUPPORT} or on {Includes.FORUM_SUPPORT}.";
+        errorMessage += Environment.NewLine;
+        errorMessage += Environment.NewLine;
+        errorMessage += "Error details:";
+        errorMessage += Environment.NewLine;
+        errorMessage += e.Exception;
+
+        MessageBox.Show(errorMessage, Includes.PRODUCT_NAME, MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 
     private static void Project_UIInitialized(SetupEventArgs e)
@@ -430,7 +444,5 @@ internal class Program
                 Process.Start("https://go.microsoft.com/fwlink/?LinkId=2085155");
             }
         }
-
-        e.ManagedUI.OnCurrentDialogChanged += Wizard.DialogChanged;
     }
 }

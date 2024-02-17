@@ -49,12 +49,12 @@ namespace WixSharpSetup.Dialogs
             this.label7 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.txtHttpPort = new System.Windows.Forms.TextBox();
-            this.cmbHttpProtocol = new System.Windows.Forms.ComboBox();
             this.txtHttpHostname = new System.Windows.Forms.TextBox();
             this.label4 = new System.Windows.Forms.Label();
             this.txtTcpPort = new System.Windows.Forms.TextBox();
             this.txtTcpHostname = new System.Windows.Forms.TextBox();
             this.cmbTcpProtocol = new System.Windows.Forms.ComboBox();
+            this.cmbHttpProtocol = new System.Windows.Forms.ComboBox();
             this.topBorder = new System.Windows.Forms.Panel();
             this.topPanel = new System.Windows.Forms.Panel();
             this.label2 = new System.Windows.Forms.Label();
@@ -227,16 +227,6 @@ namespace WixSharpSetup.Dialogs
             this.txtHttpPort.TabIndex = 2;
             this.txtHttpPort.TextChanged += new System.EventHandler(this.txtHttpPort_TextChanged);
             // 
-            // cmbHttpProtocol
-            // 
-            this.cmbHttpProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.cmbHttpProtocol.FormattingEnabled = true;
-            this.cmbHttpProtocol.Location = new System.Drawing.Point(3, 45);
-            this.cmbHttpProtocol.Name = "cmbHttpProtocol";
-            this.cmbHttpProtocol.Size = new System.Drawing.Size(70, 21);
-            this.cmbHttpProtocol.TabIndex = 0;
-            this.cmbHttpProtocol.SelectedIndexChanged += new System.EventHandler(this.cmbHttpProtocol_SelectedIndexChanged);
-            // 
             // txtHttpHostname
             // 
             this.txtHttpHostname.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -284,6 +274,16 @@ namespace WixSharpSetup.Dialogs
             this.cmbTcpProtocol.Name = "cmbTcpProtocol";
             this.cmbTcpProtocol.Size = new System.Drawing.Size(70, 21);
             this.cmbTcpProtocol.TabIndex = 3;
+            // 
+            // cmbHttpProtocol
+            // 
+            this.cmbHttpProtocol.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbHttpProtocol.FormattingEnabled = true;
+            this.cmbHttpProtocol.Location = new System.Drawing.Point(3, 45);
+            this.cmbHttpProtocol.Name = "cmbHttpProtocol";
+            this.cmbHttpProtocol.Size = new System.Drawing.Size(70, 21);
+            this.cmbHttpProtocol.TabIndex = 0;
+            this.cmbHttpProtocol.SelectedIndexChanged += new System.EventHandler(this.cmbHttpProtocol_SelectedIndexChanged);
             // 
             // topBorder
             // 
