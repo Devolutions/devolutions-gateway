@@ -5,6 +5,7 @@ use network_interface::Addr;
 use network_scanner_proto::icmp_v4;
 
 pub mod broadcast;
+pub mod interfaces;
 pub mod ip_utils;
 pub mod mdns;
 pub mod netbios;
