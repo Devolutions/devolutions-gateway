@@ -131,7 +131,7 @@ impl TryFrom<&str> for ServiceType {
             // OSX Screen Sharing
             "_rfb._tcp" => Ok(ServiceType::Ard),
             "_rdp._tcp" | "_rdp._udp" => Ok(ServiceType::Rdp),
-            _ => Err(anyhow::anyhow!("Unknown protocol: {}", value)),
+            _ => Err(anyhow::anyhow!("unknown protocol: {}", value)),
         }
     }
 }
