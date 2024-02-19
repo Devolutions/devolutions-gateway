@@ -57,16 +57,16 @@ pub fn mdns_query_scan(
         task_manager
             .with_timeout(query_duration)
             .when_finish(move || {
-                tracing::debug!(service_name = ?service_name_clone, "stopping browse for service");
+                tracing::debug!(service_name = ?service_name_clone, "Stopping browse for service");
                 if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
-                    tracing::warn!("failed to stop browsing for service: {}", e);
+                    tracing::warn!(error = %e, "Failed to stop browsing for service");
                 }
             })
             .spawn(move |_| async move {
-                tracing::debug!(?service_name, "starting browse for service");
+                tracing::debug!(?service_name, "Starting browse for service");
                 let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
                     let err_msg = format!("failed to browse for service: {}", service_name);
-                    tracing::error!("{}", err_msg);
+                    tracing::error!(error = err_msg);
                     err_msg
                 })?;
 
@@ -83,7 +83,7 @@ pub fn mdns_query_scan(
                                 .send((*ip, Some(device_name.clone()), port, protocol.clone()))
                                 .await
                             {
-                                tracing::error!("failed to send result: {}", e);
+                                tracing::error!(error = %e, "Failed to send result");
                             }
                         }
                     }
