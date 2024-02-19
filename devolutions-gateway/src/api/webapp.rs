@@ -330,7 +330,7 @@ pub(crate) async fn sign_session_token(
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let exp = now + i64::try_from(lifetime).map_err(HttpError::internal().err())?;
 
-    let (claims, content_type) = match req.content_type {
+    let (claims, content_type, destination) = match req.content_type {
         SessionTokenContentType::Association {
             protocol,
             destination,
@@ -359,6 +359,7 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("ASSOCIATION claims").err())?,
             ContentType::Association,
+            Some(destination),
         ),
 
         SessionTokenContentType::Jmux {
@@ -384,6 +385,7 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("JMUX claims").err())?,
             ContentType::Jmux,
+            Some(destination),
         ),
 
         SessionTokenContentType::Kdc { krb_realm, krb_kdc } => (
@@ -402,6 +404,7 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("KDC claims").err())?,
             ContentType::Kdc,
+            Some(krb_kdc),
         ),
 
         SessionTokenContentType::NetScan {} => (
@@ -423,6 +426,7 @@ pub(crate) async fn sign_session_token(
             })
             .map_err(HttpError::internal().with_msg("Netscan claims").err())?,
             ContentType::NetScan,
+            None,
         ),
     };
 
@@ -432,12 +436,22 @@ pub(crate) async fn sign_session_token(
         .encode(provisioner_key)
         .map_err(HttpError::internal().with_msg("sign session token").err())?;
 
-    info!(
-        user = web_app_token.sub,
-        lifetime,
-        %content_type,
-        "Granted a session token"
-    );
+    if let Some(destination) = destination {
+        info!(
+            user = web_app_token.sub,
+            lifetime,
+            %content_type,
+            %destination,
+            "Granted a session token"
+        );
+    } else {
+        info!(
+            user = web_app_token.sub,
+            lifetime,
+            %content_type,
+            "Granted a session token"
+        );
+    }
 
     let cache_control = TypedHeader(headers::CacheControl::new().with_no_cache().with_no_store());
 
