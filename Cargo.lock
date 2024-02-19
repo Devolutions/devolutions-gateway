@@ -1663,16 +1663,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-tls"
-version = "0.5.0"
+name = "hyper-rustls"
+version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
+checksum = "8d78e1e73ec14cf7375674f74d7dde185c8206fd9dea6fb6295e8a98098aaa97"
 dependencies = [
- "bytes",
+ "futures-util",
+ "http 0.2.11",
  "hyper 0.14.28",
- "native-tls",
+ "rustls 0.21.10",
  "tokio",
- "tokio-native-tls",
+ "tokio-rustls 0.24.1",
 ]
 
 [[package]]
@@ -3228,15 +3229,16 @@ dependencies = [
  "http 0.2.11",
  "http-body 0.4.6",
  "hyper 0.14.28",
- "hyper-tls",
+ "hyper-rustls",
  "ipnet",
  "js-sys",
  "log",
  "mime",
- "native-tls",
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
+ "rustls 0.21.10",
+ "rustls-native-certs 0.6.3",
  "rustls-pemfile 1.0.4",
  "serde",
  "serde_json",
@@ -3244,7 +3246,7 @@ dependencies = [
  "sync_wrapper",
  "system-configuration",
  "tokio",
- "tokio-native-tls",
+ "tokio-rustls 0.24.1",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -3444,6 +3446,18 @@ dependencies = [
  "sha2",
  "thiserror",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile 1.0.4",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -4254,7 +4268,7 @@ dependencies = [
  "log",
  "native-tls",
  "rustls 0.22.2",
- "rustls-native-certs",
+ "rustls-native-certs 0.7.0",
  "rustls-pki-types",
  "tokio",
  "tokio-native-tls",
