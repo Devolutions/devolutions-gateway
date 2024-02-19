@@ -248,7 +248,7 @@ pub(crate) enum SessionTokenContentType {
         /// Unique ID for this session
         session_id: Uuid,
     },
-    NetScan {},
+    NetScan,
     Kdc {
         /// Kerberos realm.
         ///
