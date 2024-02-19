@@ -33,12 +33,13 @@ pub(crate) struct TaskExecutionContext {
     pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
     pub mdns_daemon: MdnsDaemon,
 
-    pub ping_interval: Duration,     // in milliseconds
-    pub ping_timeout: Duration,      // in milliseconds
-    pub broadcast_timeout: Duration, // in milliseconds
-    pub port_scan_timeout: Duration, // in milliseconds
-    pub netbios_timeout: Duration,   // in milliseconds
-    pub netbios_interval: Duration,  // in milliseconds
+    pub ping_interval: Duration,      // in milliseconds
+    pub ping_timeout: Duration,       // in milliseconds
+    pub broadcast_timeout: Duration,  // in milliseconds
+    pub port_scan_timeout: Duration,  // in milliseconds
+    pub netbios_timeout: Duration,    // in milliseconds
+    pub netbios_interval: Duration,   // in milliseconds
+    pub mdns_query_timeout: Duration, // in milliseconds
 
     pub subnets: Vec<Subnet>,
 }
@@ -70,6 +71,7 @@ impl TaskExecutionContext {
             runtime,
             netbios_interval,
             mdns_daemon,
+            mdns_query_timeout,
             ..
         } = network_scanner;
 
@@ -89,6 +91,7 @@ impl TaskExecutionContext {
             netbios_timeout,
             netbios_interval,
             subnets,
+            mdns_query_timeout,
         };
 
         Ok(res)
@@ -197,7 +200,7 @@ pub(crate) struct TimeoutManager {
 }
 
 impl TimeoutManager {
-    pub(crate) fn when_timed_out<F>(self, f: F) -> Self
+    pub(crate) fn when_finish<F>(self, f: F) -> Self
     where
         F: FnOnce() + Send + 'static,
     {
