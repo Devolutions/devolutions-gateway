@@ -98,7 +98,7 @@ jobs:
           echo "::notice::Packaging artifacts built from commit $Ref in run ${{ steps.get-run.outputs.run }}"
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.get-commit.outputs.commit }}
 
@@ -151,7 +151,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
@@ -373,7 +373,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
@@ -429,12 +429,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.commit }}
 
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1

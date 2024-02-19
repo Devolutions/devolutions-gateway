@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build
         shell: pwsh
@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build
         shell: pwsh
@@ -120,12 +120,12 @@ jobs:
           Set-PSDebug -Trace 1
 
           $Files = Get-ChildItem -Recurse nuget-packages/*.nupkg
-    
+
           foreach ($File in $Files) {
             $PushCmd = @(
-              'dotnet', 
-              'nuget', 
-              'push', 
+              'dotnet',
+              'nuget',
+              'push',
               "$File",
               '--api-key',
               '${{ secrets.NUGET_API_KEY }}',
@@ -150,14 +150,14 @@ jobs:
 
     steps:
       - name: Check out ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download NPM packages artifact
         uses: actions/download-artifact@v3
         with:
           name: npm
           path: npm-packages
-      
+
       - name: Configure NPM
         shell: pwsh
         run: npm config set "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}"

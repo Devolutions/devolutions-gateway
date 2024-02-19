@@ -90,7 +90,7 @@ jobs:
           echo "ref=$Ref" >> $Env:GITHUB_OUTPUT
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.get-commit.outputs.ref }}
 
@@ -143,7 +143,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
@@ -170,7 +170,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -204,7 +204,7 @@ jobs:
       # The intallation is successful, yet conan can’t be used afterward.
       - name: Pin Python version
         if: runner.os == 'macOS'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -290,12 +290,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1
@@ -309,7 +309,7 @@ jobs:
         shell: pwsh
         working-directory: webapp
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           key: ${{ runner.os }}-node-${{ hashFiles('webapp/package-lock.json') }}
           path: ${{ steps.npm-cache.outputs.dir }}
@@ -352,7 +352,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -436,7 +436,7 @@ jobs:
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
             $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
           }
-            
+
           ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
           if ($Env:RUNNER_OS -eq "Windows") {
@@ -461,7 +461,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 10
@@ -489,7 +489,7 @@ jobs:
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1
@@ -579,7 +579,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
@@ -596,7 +596,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 

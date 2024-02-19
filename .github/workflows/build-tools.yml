@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure runner
         run: rustup target add ${{ matrix.arch }}-${{ matrix.platform }}
@@ -80,7 +80,7 @@ jobs:
           $LipoCmd = $(@('lipo', '-create', '-output', (Join-Path -Path $OutputPath -ChildPath '${{ matrix.tool }}')) + $Binaries) -Join ' '
           Write-Host $LipoCmd
           Invoke-Expression $LipoCmd
-  
+
       - name: Upload binaries
         uses: actions/upload-artifact@v3
         with:
@@ -145,11 +145,11 @@ jobs:
 
           security import $DEVELOPER_ID_CERTIFICATE_PATH -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security list-keychain -d user -s $KEYCHAIN_PATH
-  
+
       - name: Configure runner
         if: matrix.platform == 'pc-windows-msvc'
         run: echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-  
+
       - name: Sign executables
         shell: pwsh
         run: |
@@ -165,7 +165,7 @@ jobs:
             AzureSignTool @Params '${{ steps.get-binary-path.outputs.binary-path }}'
           } elseif ('${{ matrix.platform }}' -Eq 'apple-darwin') {
             $SignCmd = $(@(
-              'codesign', 
+              'codesign',
               '--timestamp',
               '--force',
               '--options=runtime',
@@ -187,7 +187,7 @@ jobs:
           }
 
           if ($LastExitCode -Ne 0) {
-            echo "::error::failed to verify the signature of ${{ steps.get-binary-path.outputs.binary-path }}" 
+            echo "::error::failed to verify the signature of ${{ steps.get-binary-path.outputs.binary-path }}"
             exit 1
           }
 
