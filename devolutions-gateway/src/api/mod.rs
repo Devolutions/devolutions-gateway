@@ -27,7 +27,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .route("/jet/rdp", axum::routing::get(rdp::handler))
         .nest("/jet/fwd", fwd::make_router(state.clone()))
         .nest("/jet/webapp", webapp::make_router(state.clone()))
-        .route("/jet/net", network_scan::make_router(state.clone()));
+        .nest("/jet/net", network_scan::make_router(state.clone()));
 
     if state.conf_handle.get_conf().webapp_is_enabled() {
         router = router.route(
