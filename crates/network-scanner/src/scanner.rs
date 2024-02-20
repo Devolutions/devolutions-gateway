@@ -74,7 +74,7 @@ impl NetworkScanner {
                         (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
 
                     task_manager.spawn(move |task_manager| async move {
-                        tracing::debug!(scanning_ip = ?ip);
+                        debug!(scanning_ip = ?ip);
 
                         let dns_look_up_res = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip).ok());
 
@@ -86,7 +86,7 @@ impl NetworkScanner {
                         ip_cache.write().insert(ip, dns.clone());
 
                         while let Some(res) = port_scan_receiver.recv().await {
-                            tracing::trace!(port_scan_result = ?res);
+                            trace!(port_scan_result = ?res);
                             if let PortScanResult::Open(socket_addr) = res {
                                 let dns = ip_cache.read().get(&ip).cloned().flatten();
                                 port_sender.send((ip, dns, socket_addr.port(), None)).await?;
@@ -115,7 +115,7 @@ impl NetworkScanner {
                         let mut receiver =
                             broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                         while let Some(ip) = receiver.recv().await {
-                            tracing::trace!(broadcast_sent_ip = ?ip);
+                            trace!(broadcast_sent_ip = ?ip);
                             ip_sender.send((ip.into(), None)).await?;
                         }
                         anyhow::Ok(())
@@ -142,7 +142,7 @@ impl NetworkScanner {
                     let mut receiver =
                         netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
                     while let Some(res) = receiver.recv().await {
-                        tracing::debug!(netbios_query_sent_ip = ?res.0);
+                        debug!(netbios_query_sent_ip = ?res.0);
                         ip_sender.send(res).await?;
                     }
                 }
@@ -178,7 +178,7 @@ impl NetworkScanner {
                     )?;
 
                     while let Some(ip) = receiver.recv().await {
-                        tracing::debug!(ping_sent_ip = ?ip);
+                        debug!(ping_sent_ip = ?ip);
                         ip_sender.send((ip, None)).await?;
                     }
                 }

@@ -17,7 +17,7 @@ pub async fn handler(
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
     let scanner = network_scanner::scanner::NetworkScanner::new(scanner_params).map_err(|e| {
-        tracing::error!("failed to create network scanner: {:?}", e);
+        error!(error = format!("{e:#}"), "Failed to create network scanner");
         HttpError::internal().build(e)
     })?;
 
@@ -25,11 +25,13 @@ pub async fn handler(
         let stream = match scanner.start() {
             Ok(stream) => stream,
             Err(e) => {
-                tracing::error!("failed to start network scan: {:?}", e);
+                error!(error = format!("{e:#}"), "Failed to start network scan");
                 return;
             }
         };
-        info!("network scan started");
+
+        info!("Network scan started");
+
         loop {
             tokio::select! {
                 result = stream.recv() => {
@@ -42,8 +44,8 @@ pub async fn handler(
                         continue;
                     };
 
-                    if let Err(e) = websocket.send(Message::Text(response)).await {
-                        warn!("Failed to send message: {:?}", e);
+                    if let Err(error) = websocket.send(Message::Text(response)).await {
+                        warn!(%error, "Failed to send message");
                         break;
                     }
 
@@ -60,9 +62,12 @@ pub async fn handler(
                 }
             }
         }
+
         info!("Network scan finished");
+
         stream.stop();
     });
+
     Ok(res)
 }
 

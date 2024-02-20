@@ -181,7 +181,7 @@ impl TaskManager {
         while let Ok(handle) = handles.try_recv() {
             handle.abort();
         }
-        tracing::debug!("All tasks stopped");
+        debug!("All tasks stopped");
     }
 
     pub(crate) fn stop_timeout(&self, timeout: Duration) {
