@@ -1,17 +1,14 @@
 use std::net::SocketAddr;
 
 use anyhow::Context as _;
-use axum::{
-    body::Body,
-    extract::connect_info::MockConnectInfo,
-    http::{self, Request, StatusCode},
-};
+use axum::body::Body;
+use axum::extract::connect_info::MockConnectInfo;
+use axum::http::{self, Request, StatusCode};
 use axum_extra::headers::{self, HeaderMapExt as _};
 use http_body_util::BodyExt as _;
 use serde_json::json;
 use tap::prelude::*;
-use tower::Service as _;
-use tower::ServiceExt as _;
+use tower::{Service as _, ServiceExt as _};
 use tracing_cov_mark::init_cov_mark;
 
 const CONFIG: &str = r#"{

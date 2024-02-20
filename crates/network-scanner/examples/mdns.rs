@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use network_scanner::{mdns, task_utils::TaskManager};
+use network_scanner::mdns;
+use network_scanner::task_utils::TaskManager;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {

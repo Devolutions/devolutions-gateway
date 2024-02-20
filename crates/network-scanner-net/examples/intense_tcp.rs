@@ -1,16 +1,12 @@
-use std::{
-    mem::MaybeUninit,
-    net::{SocketAddr, SocketAddrV4},
-    sync::atomic::AtomicU32,
-    time::Instant,
-};
+use std::mem::MaybeUninit;
+use std::net::{SocketAddr, SocketAddrV4};
+use std::sync::atomic::AtomicU32;
+use std::time::Instant;
 
 use network_scanner_net::socket::AsyncRawSocket;
 use socket2::SockAddr;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    task::JoinHandle,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task::JoinHandle;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 12)]
 pub async fn main() -> anyhow::Result<()> {

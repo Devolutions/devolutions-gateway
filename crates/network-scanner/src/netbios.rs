@@ -1,14 +1,15 @@
-use std::{
-    mem::MaybeUninit,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
+use std::mem::MaybeUninit;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
-use network_scanner_net::{runtime::Socket2Runtime, socket::AsyncRawSocket};
+use network_scanner_net::runtime::Socket2Runtime;
+use network_scanner_net::socket::AsyncRawSocket;
 use network_scanner_proto::netbios::NetBiosPacket;
 use socket2::{Domain, SockAddr, Type};
 
-use crate::{assume_init, ip_utils::IpAddrRange, task_utils::IpReceiver, ScannerError};
+use crate::ip_utils::IpAddrRange;
+use crate::task_utils::IpReceiver;
+use crate::{assume_init, ScannerError};
 
 const MESSAGE: [u8; 50] = [
     0xA2, 0x48, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x43, 0x4b, 0x41, 0x41, 0x41, 0x41,

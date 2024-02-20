@@ -1,16 +1,16 @@
-use std::{
-    mem::MaybeUninit,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
+use std::mem::MaybeUninit;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
-use network_scanner_net::{runtime::Socket2Runtime, socket::AsyncRawSocket};
+use network_scanner_net::runtime::Socket2Runtime;
+use network_scanner_net::socket::AsyncRawSocket;
 use network_scanner_proto::icmp_v4;
 use tokio::time::timeout;
 
-use crate::{create_echo_request, ip_utils::IpAddrRange};
+use crate::create_echo_request;
+use crate::ip_utils::IpAddrRange;
 
 pub fn ping_range(
     runtime: Arc<Socket2Runtime>,

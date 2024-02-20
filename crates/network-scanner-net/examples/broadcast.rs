@@ -1,4 +1,5 @@
-use std::{mem::MaybeUninit, net::SocketAddr};
+use std::mem::MaybeUninit;
+use std::net::SocketAddr;
 
 use socket2::SockAddr;
 

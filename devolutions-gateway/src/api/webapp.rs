@@ -498,7 +498,9 @@ where
 }
 
 mod login_rate_limit {
-    use std::{collections::HashMap, net::IpAddr, time::Duration};
+    use std::collections::HashMap;
+    use std::net::IpAddr;
+    use std::time::Duration;
 
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
