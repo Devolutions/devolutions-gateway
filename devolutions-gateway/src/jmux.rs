@@ -68,7 +68,7 @@ pub async fn handle(
     let res = tokio::select! {
         res = join_fut => match res {
             Ok(res) => res.context("JMUX proxy error"),
-            Err(e) => anyhow::Error::new(e).context("Failed to wait for proxy task").pipe(Err),
+            Err(e) => anyhow::Error::new(e).context("failed to wait for proxy task").pipe(Err),
         },
         _ = kill_notified => Ok(()),
     };

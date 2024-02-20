@@ -125,7 +125,7 @@ pub async fn write_payload<W: AsyncWrite + Unpin>(writer: &mut W, payload: &[u8]
             .context("write_all operation")?;
         cursor = to;
     }
-    writer.flush().await.context("Flush operation")?;
+    writer.flush().await.context("flush operation")?;
 
     Ok(())
 }

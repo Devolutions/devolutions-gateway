@@ -37,7 +37,7 @@ impl Drop for Socket2Runtime {
         let _ = self // ignore errors, cannot handle it here
             .poller
             .notify()
-            .map_err(|e| tracing::error!("failed to notify poller: {:?}", e));
+            .inspect_err(|error| tracing::error!(%error, "Failed to notify poller"));
 
         // Event loop will terminate after this.
         // The register loop will also terminate because of sender is dropped.

@@ -72,11 +72,11 @@ async fn client(cfg: ClientConfig, socks5_port: u16, targets: [u16; NB_TARGETS])
 
                 info!("Echo test");
 
-                let write_fut = write_payload(&mut writer, &payload.0).map(|res| res.context("Write payload"));
-                let read_fut = read_assert_payload(&mut reader, &payload.0).map(|res| res.context("Assert payload"));
+                let write_fut = write_payload(&mut writer, &payload.0).map(|res| res.context("write payload"));
+                let read_fut = read_assert_payload(&mut reader, &payload.0).map(|res| res.context("assert payload"));
                 tokio::try_join!(write_fut, read_fut)?;
 
-                writer.shutdown().await.context("Shutdown operation")?;
+                writer.shutdown().await.context("shutdown operation")?;
             }
             Operation::FetchHtml => {
                 let mut stream = Socks5Stream::connect(stream, "rust-lang.org:80")
@@ -97,7 +97,7 @@ async fn client(cfg: ClientConfig, socks5_port: u16, targets: [u16; NB_TARGETS])
                 assert!(html.trim().starts_with("HTTP/1.1"));
                 assert!(html.trim().ends_with("</HTML>") || html.trim().ends_with("</html>"));
 
-                stream.shutdown().await.context("Shutdown operation")?;
+                stream.shutdown().await.context("shutdown operation")?;
             }
         }
     }
@@ -110,7 +110,7 @@ async fn echo_server(port: u16) -> anyhow::Result<()> {
     info!("Echo server listening on 127.0.0.1:{}", port);
 
     loop {
-        let (mut socket, _) = listener.accept().await.context("Accept operation")?;
+        let (mut socket, _) = listener.accept().await.context("accept operation")?;
 
         tokio::spawn(async move {
             let mut buf = [0; 256];
@@ -161,7 +161,7 @@ async fn client_side_jmux(socks5_port: u16, jmux_server_port: u16, kind: Transpo
         jmux_cfg: jmux_proxy::JmuxConfig::client(),
     };
 
-    jetsocat::jmux_proxy(cfg).await.context("Client-side JMUX")
+    jetsocat::jmux_proxy(cfg).await.context("client-side JMUX")
 }
 
 /// Server-side relay processing JMUX requests
@@ -192,7 +192,7 @@ async fn server_side_jmux(port: u16, kind: TransportKind) -> anyhow::Result<()> 
         },
     };
 
-    jetsocat::jmux_proxy(cfg).await.context("Server-side JMUX")
+    jetsocat::jmux_proxy(cfg).await.context("server-side JMUX")
 }
 
 #[test]

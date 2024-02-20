@@ -24,10 +24,11 @@ impl Debug for AsyncRawSocket {
 
 impl Drop for AsyncRawSocket {
     fn drop(&mut self) {
-        let _ = self // We ignore errors here, avoid crashing the thread
+        // We ignore errors here, avoid crashing the thread.
+        let _ = self
             .runtime
             .remove_socket(&self.socket, self.id)
-            .map_err(|e| tracing::error!("failed to remove socket from poller: {:?}", e));
+            .inspect_err(|e| tracing::error!(error = format!("{e:#}"), "Failed to remove socket from poller"));
     }
 }
 

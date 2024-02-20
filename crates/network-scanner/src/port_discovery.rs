@@ -32,7 +32,7 @@ pub async fn scan_ports(
             let connect_future = socket.connect(&addr);
             let addr = addr
                 .as_socket()
-                .context("Failed to scan port: only IPv4/IPv6 addresses are supported")?;
+                .context("failed to scan port: only IPv4/IPv6 addresses are supported")?;
 
             match tokio::time::timeout(timeout, connect_future).await {
                 Ok(Ok(())) => {

@@ -166,7 +166,7 @@ pub struct Subnet {
 }
 
 pub fn get_subnets() -> anyhow::Result<Vec<Subnet>> {
-    let interfaces = network_interface::NetworkInterface::show().context("Failed to get network interfaces")?;
+    let interfaces = network_interface::NetworkInterface::show().context("failed to get network interfaces")?;
 
     let subnet: Vec<_> = interfaces
         .into_iter()
