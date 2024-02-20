@@ -89,7 +89,15 @@ impl NetworkScanner {
                             trace!(port_scan_result = ?res);
                             if let PortScanResult::Open(socket_addr) = res {
                                 let dns = ip_cache.read().get(&ip).cloned().flatten();
-                                port_sender.send((ip, dns, socket_addr.port(), None)).await?;
+
+                                port_sender
+                                    .send(ScanEntry {
+                                        addr: ip,
+                                        hostname: dns,
+                                        port: socket_addr.port(),
+                                        service_type: None,
+                                    })
+                                    .await?;
                             }
                         }
                         anyhow::Ok(())
@@ -198,13 +206,16 @@ impl NetworkScanner {
                   task_manager| async move {
                 let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
-                while let Some((ip, server, port, protocol)) = receiver.recv().await {
-                    if ip_cache.read().get(&ip).is_none() {
-                        ip_cache.write().insert(ip, server.clone());
+                while let Some(mut entry) = receiver.recv().await {
+                    if ip_cache.read().get(&entry.addr).is_none() {
+                        ip_cache.write().insert(entry.addr, entry.hostname.clone());
                     }
-                    let dns_name = ip_cache.read().get(&ip).cloned().flatten();
-                    if ports.contains(&port) || protocol.is_some() {
-                        port_sender.send((ip, dns_name, port, protocol)).await?;
+
+                    let dns_name = ip_cache.read().get(&entry.addr).cloned().flatten();
+                    entry.hostname = dns_name;
+
+                    if ports.contains(&entry.port) || entry.service_type.is_some() {
+                        port_sender.send(entry).await?;
                     }
                 }
 
@@ -267,12 +278,18 @@ impl NetworkScanner {
     }
 }
 
-/// ScanEntry is a tuple of (IpAddr, Option<String>, u16, Option<Protocol>)
-/// where IpAddr is the ip address of the device
-/// Option<String> is the hostname of the device
-/// u16 is the port number
-/// Option<Protocol> is the protocol/Service running on the port
-pub type ScanEntry = (IpAddr, Option<String>, u16, Option<ServiceType>);
+#[derive(Debug)]
+pub struct ScanEntry {
+    // IP address of the device
+    pub addr: IpAddr,
+    // Hostname of the device
+    pub hostname: Option<String>,
+    // Port number
+    pub port: u16,
+    // The protocol / service type listening on the port
+    pub service_type: Option<ServiceType>,
+}
+
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
@@ -280,9 +297,10 @@ pub struct NetworkScannerStream {
 
 impl NetworkScannerStream {
     pub async fn recv(self: &Arc<Self>) -> Option<ScanEntry> {
-        // the caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver
+        // The caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver.
         self.result_receiver.lock().await.recv().await
     }
+
     pub async fn recv_timeout(self: &Arc<Self>, duration: Duration) -> anyhow::Result<Option<ScanEntry>> {
         tokio::time::timeout(duration, self.result_receiver.lock().await.recv())
             .await
@@ -359,7 +377,7 @@ pub struct NetworkScannerParams {
     pub max_wait_time: u64, // max_wait for entire scan duration in milliseconds, suggested!
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ServiceType {
     /// Remote Desktop Protocol
     Rdp,

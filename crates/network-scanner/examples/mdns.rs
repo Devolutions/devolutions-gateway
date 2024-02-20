@@ -11,8 +11,8 @@ pub async fn main() -> anyhow::Result<()> {
 
     let mut receiver = mdns::mdns_query_scan(mdns::MdnsDaemon::new()?, TaskManager::new(), Duration::from_secs(5))?;
 
-    while let Some((ip, server, port, protocol)) = receiver.recv().await {
-        tracing::info!("Found: {}:{:?}:{}:{:?}", ip, server, port, protocol);
+    while let Some(entry) = receiver.recv().await {
+        tracing::info!("Found: {entry:?}");
     }
 
     Ok(())
