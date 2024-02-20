@@ -407,7 +407,7 @@ pub(crate) async fn sign_session_token(
             Some(krb_kdc),
         ),
 
-        SessionTokenContentType::NetScan {} => (
+        SessionTokenContentType::NetScan => (
             NetScanClaims {
                 exp,
                 jti,
