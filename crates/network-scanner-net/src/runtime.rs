@@ -1,14 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    num::NonZeroUsize,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
-    task::Waker,
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::task::Waker;
+use std::time::Duration;
 
 use anyhow::Context;
 use crossbeam::channel::{Receiver, Sender};
@@ -17,7 +13,8 @@ use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
-use crate::{socket::AsyncRawSocket, ScannnerNetError};
+use crate::socket::AsyncRawSocket;
+use crate::ScannnerNetError;
 
 #[derive(Debug)]
 pub struct Socket2Runtime {

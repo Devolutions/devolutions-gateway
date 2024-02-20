@@ -1,4 +1,5 @@
-use std::{mem::MaybeUninit, net::Ipv4Addr};
+use std::mem::MaybeUninit;
+use std::net::Ipv4Addr;
 
 use anyhow::Context;
 

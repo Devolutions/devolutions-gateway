@@ -1,9 +1,7 @@
-use std::{
-    mem::MaybeUninit,
-    net::{Ipv4Addr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
+use std::mem::MaybeUninit;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner_net::runtime;

@@ -1,11 +1,9 @@
 use anyhow::Context;
 use mdns_sd::ServiceEvent;
 
-use crate::{
-    scanner::{ScanEntry, ServiceType},
-    task_utils::{ScanEntryReceiver, TaskManager},
-    ScannerError,
-};
+use crate::scanner::{ScanEntry, ServiceType};
+use crate::task_utils::{ScanEntryReceiver, TaskManager};
+use crate::ScannerError;
 
 #[derive(Clone)]
 pub struct MdnsDaemon {

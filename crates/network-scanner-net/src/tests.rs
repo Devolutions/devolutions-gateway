@@ -1,16 +1,13 @@
-use std::{
-    io::ErrorKind,
-    mem::MaybeUninit,
-    net::{SocketAddr, UdpSocket},
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
-};
+use std::io::ErrorKind;
+use std::mem::MaybeUninit;
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 
 use socket2::SockAddr;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    task::JoinHandle,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task::JoinHandle;
 
 use crate::socket::AsyncRawSocket;
 

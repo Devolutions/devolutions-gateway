@@ -1,22 +1,18 @@
-use crate::{
-    ip_utils::IpAddrRange,
-    mdns::{self, MdnsDaemon},
-    netbios::netbios_query_scan,
-    ping::ping_range,
-    port_discovery::{scan_ports, PortScanResult},
-    task_utils::{ScanEntryReceiver, TaskManager},
-};
-
+use crate::broadcast::asynchronous::broadcast;
+use crate::ip_utils::IpAddrRange;
+use crate::mdns::{self, MdnsDaemon};
+use crate::netbios::netbios_query_scan;
+use crate::ping::ping_range;
+use crate::port_discovery::{scan_ports, PortScanResult};
+use crate::task_utils::{ScanEntryReceiver, TaskExecutionContext, TaskExecutionRunner, TaskManager};
 use anyhow::Context;
-use std::{fmt::Display, net::IpAddr, sync::Arc, time::Duration};
+use std::fmt::Display;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
 use typed_builder::TypedBuilder;
 
-use tokio::sync::Mutex;
-
-use crate::{
-    broadcast::asynchronous::broadcast,
-    task_utils::{TaskExecutionContext, TaskExecutionRunner},
-};
 /// Represents a network scanner for discovering devices and their services over a network.
 #[derive(Clone)]
 pub struct NetworkScanner {

@@ -38,8 +38,7 @@ pub async fn main() -> anyhow::Result<()> {
 }
 
 mod utils {
-    use std::io::Read;
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::thread;
 

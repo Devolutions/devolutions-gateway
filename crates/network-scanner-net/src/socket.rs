@@ -1,5 +1,9 @@
 use polling::Event;
-use std::{fmt::Debug, future::Future, mem::MaybeUninit, sync::Arc, usize};
+use std::fmt::Debug;
+use std::future::Future;
+use std::mem::MaybeUninit;
+use std::sync::Arc;
+use std::usize;
 
 use socket2::{SockAddr, Socket};
 use std::result::Result::Ok;

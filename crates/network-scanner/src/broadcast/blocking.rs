@@ -1,8 +1,6 @@
-use std::{
-    mem::MaybeUninit,
-    net::{Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::mem::MaybeUninit;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::time::Duration;
 
 use anyhow::Context;
 
