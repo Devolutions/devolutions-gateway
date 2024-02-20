@@ -13,8 +13,4 @@
     "powershell.codeFormatting.whitespaceBeforeOpenBrace": true,
     "powershell.codeFormatting.whitespaceBeforeOpenParen": true,
     "powershell.codeFormatting.whitespaceBetweenParameters": true,
-    "rust-analyzer.linkedProjects": [
-        ".\\devolutions-gateway\\Cargo.toml",
-        ".\\devolutions-gateway\\Cargo.toml"
-    ],
 }
