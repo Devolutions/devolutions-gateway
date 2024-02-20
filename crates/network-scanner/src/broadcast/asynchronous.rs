@@ -39,7 +39,7 @@ pub async fn broadcast(
             .await?;
 
         tokio::time::timeout(read_time_out, loop_receive(socket, sender)).await??;
-        tracing::debug!("broadcast future dropped");
+        debug!("Broadcast future dropped");
         anyhow::Ok(())
     });
 
