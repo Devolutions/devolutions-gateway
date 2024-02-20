@@ -379,11 +379,13 @@ impl ForwardArgs {
         let repeat_count =
             usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("Bad repeat-count value")?;
 
-        let arg_pipe_a = c.args.get(0).context("<PIPE A> is missing")?.clone();
-        let pipe_a_mode = parse_pipe_mode(arg_pipe_a).context("Bad <PIPE A>")?;
+        let mut args = c.args.iter();
 
-        let arg_pipe_b = c.args.get(1).context("<PIPE B> is missing")?.clone();
-        let pipe_b_mode = parse_pipe_mode(arg_pipe_b).context("Bad <PIPE B>")?;
+        let arg_pipe_a = args.next().context("<PIPE A> is missing")?.clone();
+        let pipe_a_mode = parse_pipe_mode(arg_pipe_a).context("bad <PIPE A>")?;
+
+        let arg_pipe_b = args.next().context("<PIPE B> is missing")?.clone();
+        let pipe_b_mode = parse_pipe_mode(arg_pipe_b).context("bad <PIPE B>")?;
 
         Ok(Self {
             common,
@@ -415,8 +417,8 @@ impl JmuxProxyArgs {
             JmuxConfig::client()
         };
 
-        let arg_pipe = c.args.get(0).context("<PIPE> is missing")?.clone();
-        let pipe_mode = parse_pipe_mode(arg_pipe).context("Bad <PIPE>")?;
+        let arg_pipe = c.args.first().context("<PIPE> is missing")?.clone();
+        let pipe_mode = parse_pipe_mode(arg_pipe).context("bad <PIPE>")?;
 
         let listener_modes = c
             .args

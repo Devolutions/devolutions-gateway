@@ -977,12 +977,12 @@ pub mod dto {
                 tls_certificate_store_location: None,
                 listeners: vec![
                     ListenerConf {
-                        internal_url: "tcp://*:8181".try_into().unwrap(),
-                        external_url: "tcp://*:8181".try_into().unwrap(),
+                        internal_url: "tcp://*:8181".to_owned(),
+                        external_url: "tcp://*:8181".to_owned(),
                     },
                     ListenerConf {
-                        internal_url: "http://*:7171".try_into().unwrap(),
-                        external_url: "https://*:7171".try_into().unwrap(),
+                        internal_url: "http://*:7171".to_owned(),
+                        external_url: "https://*:7171".to_owned(),
                     },
                 ],
                 subscriber: None,

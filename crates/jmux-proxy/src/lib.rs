@@ -738,7 +738,7 @@ impl DataReaderTask {
 
         let codec = tokio_util::codec::BytesCodec::new();
         let mut bytes_stream = FramedRead::new(reader, codec);
-        let maximum_packet_size = usize::try_from(maximum_packet_size).unwrap();
+        let maximum_packet_size = usize::from(maximum_packet_size);
 
         trace!("Started forwarding");
 
