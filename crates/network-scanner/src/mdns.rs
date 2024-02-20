@@ -2,7 +2,7 @@ use anyhow::Context;
 use mdns_sd::ServiceEvent;
 
 use crate::{
-    scanner::ServiceType,
+    scanner::{ScanEntry, ServiceType},
     task_utils::{ScanEntryReceiver, TaskManager},
     ScannerError,
 };
@@ -79,10 +79,14 @@ pub fn mdns_query_scan(
                         let port = msg.get_port();
 
                         for ip in msg.get_addresses() {
-                            if let Err(e) = result_sender
-                                .send((*ip, Some(device_name.clone()), port, protocol.clone()))
-                                .await
-                            {
+                            let entry = ScanEntry {
+                                addr: *ip,
+                                hostname: Some(device_name.clone()),
+                                port,
+                                service_type: protocol,
+                            };
+
+                            if let Err(e) = result_sender.send(entry).await {
                                 error!(error = %e, "Failed to send result");
                             }
                         }

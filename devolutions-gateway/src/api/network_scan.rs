@@ -35,11 +35,11 @@ pub async fn handler(
         loop {
             tokio::select! {
                 result = stream.recv() => {
-                    let Some((ip, dns, port, protocol)) = result else {
+                    let Some(entry) = result else {
                         break;
                     };
 
-                    let response = NetworkScanResponse::new(ip, port, dns, protocol);
+                    let response = NetworkScanResponse::new(entry.addr, entry.port, entry.hostname, entry.service_type);
 
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
@@ -117,10 +117,10 @@ pub struct NetworkScanResponse {
 }
 
 impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::ServiceType>) -> Self {
+    fn new(ip: IpAddr, port: u16, dns: Option<String>, service_type: Option<scanner::ServiceType>) -> Self {
         let hostname = dns;
 
-        let protocol = if let Some(protocol) = service {
+        let protocol = if let Some(protocol) = service_type {
             match protocol {
                 scanner::ServiceType::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
                 scanner::ServiceType::Telnet => ApplicationProtocol::Known(Protocol::Telnet),
