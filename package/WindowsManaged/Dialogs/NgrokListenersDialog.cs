@@ -33,8 +33,8 @@ public partial class NgrokListenersDialog : GatewayDialog
             ShowValidationErrorString(I18n(Strings.DomainIsRequiredAndMustBeValid));
             return false;
         }
-
-        if (this.cmbNativeClient.SelectedIndex == 0)
+        
+        if (this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now)
         {
             if (string.IsNullOrWhiteSpace(this.txtRemoteAddress.Text.Trim()))
             {

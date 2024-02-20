@@ -32,7 +32,7 @@ public class GatewayDialog : ManagedForm
     {
         if (this.ToProperties())
         {
-            Shell.GoPrev();
+            Shell.GoTo(Wizard.GetPrevious(this));
         }
     }
 
@@ -45,7 +45,7 @@ public class GatewayDialog : ManagedForm
 
         if (this.ToProperties())
         {
-            Shell.GoNext();
+            Shell.GoTo(Wizard.GetNext(this));
         }
     }
 

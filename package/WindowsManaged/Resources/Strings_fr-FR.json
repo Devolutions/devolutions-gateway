@@ -560,14 +560,6 @@
             "text": "L'assistant d'installation va générer une configuration minimale à finaliser plus tard, ou vous pouvez compléter la configuration maintenant."
           },
           {
-            "id": "RecommendedForStandaloneInstallations",
-            "text": "Recommandé pour les installations autonomes. Générez une configuration initiale à l'aide de cet installateur et lancez le service Gateway automatiquement."
-          },
-          {
-            "id": "RecommendedForCompanionInstallations",
-            "text": "Recommandé pour l'installation du logiciel en tant qu'outil connexe pour un autre service (ex. : Devolutions Server). Le service Gateway devra être configuré et lancé après installation."
-          },
-          {
             "id": "ConfigureTheGatewayInstallation",
             "text": "Configurer l'installation de Gateway"
           },

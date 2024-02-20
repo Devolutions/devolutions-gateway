@@ -31,7 +31,10 @@ public partial class VerifyReadyDialog : GatewayDialog
     protected override void Back_Click(object sender, EventArgs e) => base.Back_Click(sender, e);
 
     // ReSharper disable once RedundantOverriddenMember
-    protected override void Next_Click(object sender, EventArgs e) => base.Next_Click(sender, e);
+    protected override void Next_Click(object sender, EventArgs e)
+    {
+        Shell.GoNext();
+    }
 
     // ReSharper disable once RedundantOverriddenMember
     protected override void Cancel_Click(object sender, EventArgs e) => base.Cancel_Click(sender, e);

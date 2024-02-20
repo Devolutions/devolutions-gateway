@@ -540,7 +540,7 @@ class TlkRecipe
         $Email = "support@devolutions.net"
         $Website = "https://devolutions.net"
         $PackageVersion = $this.Version
-        $DistroCodeName = "xenial" # Ubuntu 16.04
+        $DistroCodeName = "focal" # Ubuntu 20.04
         $Dependencies = @('liblzma5', 'liblz4-1', '${shlibs:Depends}', '${misc:Depends}')
 
         $Env:DEBFULLNAME = $Packager

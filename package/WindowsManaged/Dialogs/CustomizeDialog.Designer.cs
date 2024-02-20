@@ -250,7 +250,7 @@ namespace WixSharpSetup.Dialogs
             this.lblConfigureDescription.Name = "lblConfigureDescription";
             this.lblConfigureDescription.Size = new System.Drawing.Size(464, 37);
             this.lblConfigureDescription.TabIndex = 15;
-            this.lblConfigureDescription.Text = "[RecommendedForStandaloneInstallations]";
+            this.lblConfigureDescription.Text = "[RecommendedForMostInstallations]";
             // 
             // topBorder
             // 

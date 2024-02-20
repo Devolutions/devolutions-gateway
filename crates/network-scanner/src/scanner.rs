@@ -38,10 +38,8 @@ pub struct NetworkScanner {
     pub netbios_timeout: Duration,
     /// The interval between successive NetBIOS query attempts.
     pub netbios_interval: Duration,
-    /// The maximum amount of time to wait for mDNS metadata queries to complete during a scan.
-    pub mdns_meta_query_timeout: Duration,
-    /// The maximum amount of time to wait for each individual mDNS query response.
-    pub mdns_single_query_timeout: Duration,
+    /// The maximum amount of time to wait for individual mDNS query response.
+    pub mdns_query_timeout: Duration,
     /// The overall maximum duration to wait for the entire scanning process to complete.
     pub max_wait_time: Duration,
 }
@@ -194,15 +192,11 @@ impl NetworkScanner {
                       port_sender,
                       ip_cache,
                       ports,
+                      mdns_query_timeout,
                       ..
                   },
                   task_manager| async move {
-                let mut receiver = mdns::mdns_query_scan(
-                    mdns_daemon,
-                    task_manager,
-                    Duration::from_secs(10),
-                    Duration::from_secs(3),
-                )?;
+                let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
                 while let Some((ip, server, port, protocol)) = receiver.recv().await {
                     if ip_cache.read().get(&ip).is_none() {
@@ -243,8 +237,7 @@ impl NetworkScanner {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
-            mdns_meta_query_timeout,
-            mdns_single_query_timeout,
+            mdns_query_timeout,
         }: NetworkScannerParams,
     ) -> anyhow::Result<Self> {
         let runtime = network_scanner_net::runtime::Socket2Runtime::new(None)?;
@@ -255,8 +248,7 @@ impl NetworkScanner {
         let port_scan_timeout = Duration::from_millis(port_scan_timeout);
         let netbios_timeout = Duration::from_millis(netbios_timeout);
         let netbios_interval = Duration::from_millis(netbios_interval);
-        let mdns_meta_query_timeout = Duration::from_millis(mdns_meta_query_timeout);
-        let mdns_single_query_timeout = Duration::from_millis(mdns_single_query_timeout);
+        let mdns_query_timeout = Duration::from_millis(mdns_query_timeout);
         let max_wait = Duration::from_millis(max_wait);
 
         Ok(Self {
@@ -268,8 +260,7 @@ impl NetworkScanner {
             port_scan_timeout,
             netbios_timeout,
             netbios_interval,
-            mdns_meta_query_timeout,
-            mdns_single_query_timeout,
+            mdns_query_timeout,
             max_wait_time: max_wait,
             mdns_daemon: MdnsDaemon::new()?,
         })
@@ -281,7 +272,7 @@ impl NetworkScanner {
 /// Option<String> is the hostname of the device
 /// u16 is the port number
 /// Option<Protocol> is the protocol/Service running on the port
-pub type ScanEntry = (IpAddr, Option<String>, u16, Option<Protocol>);
+pub type ScanEntry = (IpAddr, Option<String>, u16, Option<ServiceType>);
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
@@ -364,13 +355,12 @@ pub struct NetworkScannerParams {
     pub port_scan_timeout: u64,
     pub netbios_timeout: u64,
     pub netbios_interval: u64,
-    pub mdns_meta_query_timeout: u64,
-    pub mdns_single_query_timeout: u64,
+    pub mdns_query_timeout: u64,
     pub max_wait_time: u64, // max_wait for entire scan duration in milliseconds, suggested!
 }
 
 #[derive(Debug, Clone)]
-pub enum Protocol {
+pub enum ServiceType {
     /// Remote Desktop Protocol
     Rdp,
     /// Apple Remote Desktop

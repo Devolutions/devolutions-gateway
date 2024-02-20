@@ -156,8 +156,6 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="EnableTheGatewayWebInterface">Activer l'interface Web de Gateway</String>
                 <String Id="GenerateASelfSignedHttpsCertificate">Générer un certificat HTTPS autosigné</String>
                 <String Id="GenerateEncryptionKeys">Générer des clés de chiffrement</String>
-                <String Id="RecommendedForCompanionInstallations">Recommandé pour l'installation du logiciel en tant qu'outil connexe pour un autre service (ex. : Devolutions Server). Le service Gateway devra être configuré et lancé après installation.</String>
-                <String Id="RecommendedForStandaloneInstallations">Recommandé pour les installations autonomes. Générez une configuration initiale à l'aide de cet installateur et lancez le service Gateway automatiquement.</String>
                     <!-- dialogs.accessUri -->
                 <String Id="AccessUriDlgDescription">URL pour rejoindre [ProductName].</String>
                 <String Id="AccessUriDlgExplanation">L'URI permettant de se connecter à la passerelle Gateway en externe pour effectuer des opérations HTTP. Il peut différer de l'adresse de l'écouteur dans certains cas (ex. : lors de l'utilisation d'un proxy inverse tel qu'IIS).</String>
@@ -225,6 +223,9 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="ServiceStartMode_Disabled">Disabled</String>
                 <String Id="ServiceStartMode_Manual">Manual</String>
                 <String Id="ServiceStartMode_System">System</String>
+                    <!-- dialogs.customize.- -->
+                <String Id="RecommendedForManualInstallations">The Gateway service will need to be manually configured and started after installation.</String>
+                <String Id="RecommendedForMostInstallations">Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically.</String>
                     <!-- dialogs.certificate.- -->
                 <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                     </WixLocalization>

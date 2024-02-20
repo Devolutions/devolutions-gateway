@@ -523,12 +523,12 @@
             "text": "The Setup Wizard will generate a configuration which you can update later; or you can provide configuration information now."
           },
           {
-            "id": "RecommendedForStandaloneInstallations",
-            "text": "Recommended for standalone installations. Generate an initial configuration using this installer and start the Gateway service automatically."
+            "id": "RecommendedForMostInstallations",
+            "text": "Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically."
           },
           {
-            "id": "RecommendedForCompanionInstallations",
-            "text": "Recommended when installing as a companion to another service (e.g. Devolutions Server). The Gateway service will need to be configured and started after installation."
+            "id": "RecommendedForManualInstallations",
+            "text": "The Gateway service will need to be manually configured and started after installation."
           },
           {
             "id": "ConfigureTheGatewayInstallation",
