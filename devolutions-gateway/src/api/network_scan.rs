@@ -35,10 +35,12 @@ pub async fn handler(
         loop {
             tokio::select! {
                 result = stream.recv() => {
-                    let Some((ip, dns, port,protocol)) = result else{
+                    let Some((ip, dns, port, protocol)) = result else {
                         break;
                     };
-                    let response = NetworkScanResponse::new(ip, port, dns,protocol);
+
+                    let response = NetworkScanResponse::new(ip, port, dns, protocol);
+
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
                         continue;
@@ -48,10 +50,8 @@ pub async fn handler(
                         warn!(%error, "Failed to send message");
                         break;
                     }
-
                 },
                 msg = websocket.recv() => {
-
                     let Some(msg) = msg else {
                         break;
                     };
