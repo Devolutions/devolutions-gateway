@@ -88,7 +88,7 @@ fn ssl_probe(mut out: impl fmt::Write) -> anyhow::Result<()> {
 fn check_root_store(mut out: impl fmt::Write) -> anyhow::Result<()> {
     let mut root_store = rustls::RootCertStore::empty();
 
-    for cert in rustls_native_certs::load_native_certs().context("Failed to load native certificates")? {
+    for cert in rustls_native_certs::load_native_certs().context("failed to load native certificates")? {
         let cert = rustls::Certificate(cert.0);
 
         if let Err(e) = root_store.add(&cert) {

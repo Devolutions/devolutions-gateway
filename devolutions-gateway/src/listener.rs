@@ -51,11 +51,11 @@ impl GatewayListener {
         let socket_addr = url_to_socket_addr(&url).context("invalid url")?;
 
         let socket = if socket_addr.is_ipv4() {
-            TcpSocket::new_v4().context("Failed to create IPv4 TCP socket")?
+            TcpSocket::new_v4().context("failed to create IPv4 TCP socket")?
         } else {
-            TcpSocket::new_v6().context("Failed to created IPv6 TCP socket")?
+            TcpSocket::new_v6().context("failed to created IPv6 TCP socket")?
         };
-        socket.bind(socket_addr).context("Failed to bind TCP socket")?;
+        socket.bind(socket_addr).context("failed to bind TCP socket")?;
 
         let listener = socket
             .listen(64)
@@ -175,7 +175,7 @@ async fn run_http_listener(listener: TcpListener, state: DgwState) -> anyhow::Re
                         error!(error = format!("{e:#}"), "handle_http_peer failed");
                     }
                 })
-                .map_err(|error| warn!(%error, "request timed out"))
+                .inspect_err(|error| warn!(%error, "Request timed out"))
                 .instrument(info_span!("http", client = %peer_addr));
 
                 ChildTask::spawn(fut).detach();
@@ -203,7 +203,7 @@ async fn run_https_listener(listener: TcpListener, state: DgwState) -> anyhow::R
                         error!(error = format!("{e:#}"), "handle_https_peer failed");
                     }
                 })
-                .map_err(|error| warn!(%error, "request timed out"))
+                .inspect_err(|error| warn!(%error, "Request timed out"))
                 .instrument(info_span!("https", client = %peer_addr));
 
                 ChildTask::spawn(fut).detach();

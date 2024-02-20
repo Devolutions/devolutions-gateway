@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 use std::net::ToSocketAddrs;
 
+use anyhow::Context as _;
 use network_scanner_net::assume_init;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -21,7 +22,7 @@ pub async fn main() -> anyhow::Result<()> {
     let socket_addr = "info.cern.ch:80"
         .to_socket_addrs()?
         .next()
-        .ok_or(anyhow::anyhow!("no address found"))?;
+        .context("no address found")?;
     let clone = socket_addr;
     let request_clone = request.clone();
 

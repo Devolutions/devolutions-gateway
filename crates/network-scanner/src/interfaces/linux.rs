@@ -301,7 +301,7 @@ impl TryFrom<AddressMessage> for AddressInfo {
                     None
                 }
             })
-            .context("No address found")?;
+            .context("no address found")?;
 
         let prefix_len = value.header.prefix_len;
 
@@ -340,7 +340,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
                     None
                 }
             })
-            .context("No mac address found")?;
+            .context("no mac address found")?;
 
         let index = msg.header.index;
         let flags = msg.header.flags;

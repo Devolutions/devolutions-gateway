@@ -196,7 +196,7 @@ where
                 .build()
                 .select_dissector_and_forward()
                 .await
-                .context("Encountered a failure during plain tls traffic proxying")
+                .context("encountered a failure during plain tls traffic proxying")
         } else {
             info!("WebSocket-TCP forwarding");
 
@@ -223,7 +223,7 @@ where
                 .build()
                 .select_dissector_and_forward()
                 .await
-                .context("Encountered a failure during plain tcp traffic proxying")
+                .context("encountered a failure during plain tcp traffic proxying")
         }
     }
 }

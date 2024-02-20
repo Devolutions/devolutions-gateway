@@ -43,7 +43,7 @@ pub struct PluginInformation {
 impl PluginInformation {
     pub fn new(lib: Arc<Library>) -> anyhow::Result<Self> {
         unsafe {
-            let lib_load = PluginInformationApi::load(&lib).context("Failed to load plugin information API")?;
+            let lib_load = PluginInformationApi::load(&lib).context("failed to load plugin information API")?;
             Ok(Self {
                 _lib: lib.clone(),
                 info: transmute::<PluginInformationApi<'_>, PluginInformationApi<'static>>(lib_load),
