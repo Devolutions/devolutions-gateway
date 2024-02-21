@@ -220,7 +220,12 @@ impl NetworkScanner {
         );
 
         let TaskExecutionRunner {
-            context: TaskExecutionContext { port_receiver, .. },
+            context:
+                TaskExecutionContext {
+                    port_receiver,
+                    mdns_daemon,
+                    ..
+                },
             task_manager,
         } = task_executor;
 
@@ -230,6 +235,7 @@ impl NetworkScanner {
             Arc::new(NetworkScannerStream {
                 result_receiver: port_receiver,
                 task_manager,
+                mdns_daemon,
             })
         })
     }
@@ -289,6 +295,7 @@ pub struct ScanEntry {
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
+    mdns_daemon: MdnsDaemon,
 }
 
 impl NetworkScannerStream {
@@ -305,6 +312,7 @@ impl NetworkScannerStream {
 
     pub fn stop(self: Arc<Self>) {
         self.task_manager.stop();
+        self.mdns_daemon.stop();
     }
 }
 
