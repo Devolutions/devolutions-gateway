@@ -90,7 +90,7 @@ pub fn mdns_query_scan(
                 if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     warn!(error = %e, "Failed to stop browsing for service");
                 }
-                // receive the last event (StopBrowse), preventing the receiver from being dropped
+                // Receive the last event (StopBrowse), preventing the receiver from being dropped,this will satisfy the sender side to avoid loging an error
                 let _ = receiver_clone.recv_timeout(std::time::Duration::from_millis(10));
             })
             .spawn(move |_| async move {
