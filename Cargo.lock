@@ -2233,6 +2233,7 @@ dependencies = [
  "network-scanner-proto",
  "parking_lot",
  "rtnetlink",
+ "serde",
  "socket2 0.5.5",
  "thiserror",
  "tokio",

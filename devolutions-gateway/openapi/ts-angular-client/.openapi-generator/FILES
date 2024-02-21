@@ -8,6 +8,7 @@ api/health.service.ts
 api/heartbeat.service.ts
 api/jrec.service.ts
 api/jrl.service.ts
+api/net.service.ts
 api/sessions.service.ts
 api/webApp.service.ts
 configuration.ts
@@ -26,6 +27,7 @@ model/identity.ts
 model/jrlInfo.ts
 model/listenerUrls.ts
 model/models.ts
+model/networkInterface.ts
 model/pubKeyFormat.ts
 model/sessionInfo.ts
 model/sessionTokenContentType.ts

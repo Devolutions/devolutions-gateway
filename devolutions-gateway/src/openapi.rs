@@ -20,6 +20,7 @@ use uuid::Uuid;
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
+        crate::api::net::get_net_config,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -38,6 +39,7 @@ use uuid::Uuid;
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
+        crate::api::net::NetworkInterface,
         SessionTokenContentType,
         SessionTokenSignRequest,
     )),
@@ -140,6 +142,19 @@ impl Modify for SecurityAddon {
                     .bearer_format("JWT")
                     .description(Some(
                         "Token allowing usage of the standalone web application".to_owned(),
+                    ))
+                    .build(),
+            ),
+        );
+
+        components.add_security_scheme(
+            "netscan_token",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "Token allowing usage of the network exploration endpoints".to_owned(),
                     ))
                     .build(),
             ),

@@ -32,7 +32,34 @@ impl TryFrom<&[u8]> for MacAddr {
                 eui64.copy_from_slice(value);
                 Ok(MacAddr::Eui64(eui64))
             }
-            _ => Err(anyhow::anyhow!("invalid MAC address length")),
+            _ => anyhow::bail!("invalid MAC address length"),
+        }
+    }
+}
+
+impl serde::Serialize for MacAddr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            let stringified = match self {
+                MacAddr::Eui64(b) => format!(
+                    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                ),
+                MacAddr::Eui48(b) => format!(
+                    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                    b[0], b[1], b[2], b[3], b[4], b[5],
+                ),
+            };
+
+            serializer.serialize_str(&stringified)
+        } else {
+            match self {
+                MacAddr::Eui64(bytes) => serializer.serialize_bytes(bytes),
+                MacAddr::Eui48(bytes) => serializer.serialize_bytes(bytes),
+            }
         }
     }
 }

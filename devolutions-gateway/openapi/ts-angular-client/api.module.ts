@@ -8,6 +8,7 @@ import { HealthService } from './api/health.service';
 import { HeartbeatService } from './api/heartbeat.service';
 import { JrecService } from './api/jrec.service';
 import { JrlService } from './api/jrl.service';
+import { NetService } from './api/net.service';
 import { SessionsService } from './api/sessions.service';
 import { WebAppService } from './api/webApp.service';
 

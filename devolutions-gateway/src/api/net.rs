@@ -1,16 +1,23 @@
-use std::net::IpAddr;
-
+use crate::http::HttpError;
+use crate::token::{ApplicationProtocol, Protocol};
+use crate::DgwState;
 use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-
+use axum::{Json, Router};
+use network_scanner::interfaces::{self, MacAddr};
 use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
+use std::net::IpAddr;
 
-use crate::http::HttpError;
-use crate::token::{ApplicationProtocol, Protocol};
+pub fn make_router<S>(state: DgwState) -> Router<S> {
+    Router::new()
+        .route("/scan", axum::routing::get(handle_network_scan))
+        .route("/config", axum::routing::get(get_net_config))
+        .with_state(state)
+}
 
-pub async fn handler(
+pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
@@ -151,5 +158,66 @@ impl NetworkScanResponse {
             }
         };
         Self { ip, hostname, protocol }
+    }
+}
+
+/// Lists network interfaces
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "GetNetConfig",
+    tag = "Net",
+    path = "/jet/net/config",
+    responses(
+        (status = 200, description = "Network interfaces", body = [Vec<NetworkInterface>]),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("netscan_token" = [])),
+))]
+pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+    let interfaces = network_scanner::interfaces::get_network_interfaces()
+        .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
+        .into_iter()
+        .map(NetworkInterface::from)
+        .collect();
+
+    Ok(Json(interfaces))
+}
+
+/// Network interface configuration
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkInterface {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<MacAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub ip_addresses: Vec<IpAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<(String, u32)>))]
+    pub prefixes: Vec<(IpAddr, u32)>,
+    pub operational_status: bool,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub gateways: Vec<IpAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
+    pub dns_servers: Vec<IpAddr>,
+}
+
+impl From<interfaces::NetworkInterface> for NetworkInterface {
+    fn from(iface: interfaces::NetworkInterface) -> Self {
+        Self {
+            name: iface.name,
+            description: iface.description,
+            mac_address: iface.mac_address,
+            ip_addresses: iface.ip_addresses,
+            prefixes: iface.prefixes,
+            operational_status: iface.operational_status,
+            gateways: iface.gateways,
+            dns_servers: iface.dns_servers,
+        }
     }
 }
