@@ -24,7 +24,7 @@ impl MdnsDaemon {
         let receiver = match self.service_daemon.shutdown() {
             Ok(receiver) => receiver,
             Err(e) => {
-                // if e is try again, we should try again
+                // if e is try again, we should try again, but only once
                 let result = if matches!(e, mdns_sd::Error::Again) {
                     self.service_daemon.shutdown()
                 } else {
