@@ -51,6 +51,18 @@
         {
           "id": "NgrokTcpAddressLink",
           "text": "Adresse TCP"
+        },
+        {
+          "id": "FindYourPublicKeyForXorX",
+          "text": "Trouvez votre clé publique pour {0} ou {1}"
+        },
+        {
+          "id": "FindYourPublicKeyDevolutionsServerLink",
+          "text": "Devolutions Server"
+        },
+        {
+          "id": "FindYourPublicKeyDevolutionsHubLink",
+          "text": "Devolutions Hub"
         }
       ],
       "buttons": [
@@ -139,6 +151,26 @@
         {
           "id": "StoreName_AddressBook",
           "text": "Autres personnes"
+        },
+        {
+          "id": "ServiceStartMode_Boot",
+          "text": "Démarrage"
+        },
+        {
+          "id": "ServiceStartMode_System",
+          "text": "Système"
+        },
+        {
+          "id": "ServiceStartMode_Automatic",
+          "text": "Automatique"
+        },
+        {
+          "id": "ServiceStartMode_Manual",
+          "text": "Manuel"
+        },
+        {
+          "id": "ServiceStartMode_Disabled",
+          "text": "Désactivé"
         }
       ],
 
@@ -582,6 +614,14 @@
           {
             "id": "GenerateEncryptionKeys",
             "text": "Générer des clés de chiffrement"
+          },
+          {
+            "id": "RecommendedForMostInstallations",
+            "text": "Recommandé pour la plupart des installations. Générez une configuration de base avec cet installateur et lancez le service Gateway automatiquement."
+          },
+          {
+            "id": "RecommendedForManualInstallations",
+            "text": "Le service Gateway service devra être configuré et lancé manuellement après installation."
           }
         ],
         "accessUri": [
@@ -670,6 +710,10 @@
           {
             "id": "SelectTheCertificateToUse",
             "text": "Sélectionner le certificat à utiliser"
+          },
+          {
+            "id": "AnX509CertificateInBinaryOrPemEncoded",
+            "text": "Un certificat X.509 en format binaire PKCS#12 (PFX/P12) ou codé en PEM"
           }
         ],
         "listeners": [
