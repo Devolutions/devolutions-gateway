@@ -1,75 +1,50 @@
 use std::net::IpAddr;
 
-use axum::body::Body;
-use axum::response::Response;
-use network_scanner::interfaces::{MacAddr, NetworkInterface};
+use axum::Json;
+use network_scanner::interfaces::{self, MacAddr};
 use serde::Serialize;
 
 use crate::http::HttpError;
 
-pub async fn handler(_netscan_claim: crate::extract::NetScanToken) -> Result<Response, HttpError> {
-    let res = network_scanner::interfaces::get_network_interfaces().map_err(|e| {
-        tracing::error!("failed to get network interfaces: {:?}", e);
-        HttpError::internal().build(e)
-    })?;
+pub async fn handler(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+    let interfaces = network_scanner::interfaces::get_network_interfaces()
+        .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
+        .into_iter()
+        .map(NetworkInterface::from)
+        .collect();
 
-    let body = serde_json::to_string(&res.into_iter().map(|i| i.into()).collect::<Vec<NetworkInterfaceDto>>())
-        .map_err(|e| {
-            tracing::error!("failed to serialize network interfaces: {:?}", e);
-            HttpError::internal().build(e)
-        })?;
-
-    Response::builder().body(Body::from(body)).map_err(|e| {
-        tracing::error!("failed to create response: {:?}", e);
-        HttpError::internal().build(e)
-    })
+    Ok(Json(interfaces))
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct NetworkInterfaceDto {
+pub struct NetworkInterface {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub mac_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<MacAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ip_addresses: Vec<IpAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub prefixes: Vec<(IpAddr, u32)>,
     pub operational_status: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub gateways: Vec<IpAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dns_servers: Vec<IpAddr>,
 }
 
-impl From<NetworkInterface> for NetworkInterfaceDto {
-    fn from(
-        NetworkInterface {
-            name,
-            description,
-            mac_address,
-            ip_addresses,
-            prefixes,
-            operational_status,
-            gateways,
-            dns_servers,
-        }: NetworkInterface,
-    ) -> Self {
-        let mac_address = mac_address.map(|mac| match mac {
-            MacAddr::Eui48(mac) => format!(
-                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
-            ),
-            MacAddr::Eui64(mac) => format!(
-                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], mac[6], mac[7]
-            ),
-        });
-
+impl From<interfaces::NetworkInterface> for NetworkInterface {
+    fn from(iface: interfaces::NetworkInterface) -> Self {
         Self {
-            name,
-            description,
-            mac_address,
-            ip_addresses,
-            prefixes,
-            operational_status,
-            gateways,
-            dns_servers,
+            name: iface.name,
+            description: iface.description,
+            mac_address: iface.mac_address,
+            ip_addresses: iface.ip_addresses,
+            prefixes: iface.prefixes,
+            operational_status: iface.operational_status,
+            gateways: iface.gateways,
+            dns_servers: iface.dns_servers,
         }
     }
 }
