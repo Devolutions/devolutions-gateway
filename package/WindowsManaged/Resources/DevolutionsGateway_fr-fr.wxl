@@ -6,6 +6,9 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- links -->
+                <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
+                <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
+                <String Id="FindYourPublicKeyForXorX">Trouvez votre clé publique pour {0} ou {1}</String>
                 <String Id="NgrokAuthTokenLink">jeton d'authentification</String>
                 <String Id="NgrokDomainLink">domaine</String>
                 <String Id="NgrokProvideYourX">Entrez votre {0}</String>
@@ -27,6 +30,11 @@
                 <String Id="CertificateMode_System">Système</String>
                 <String Id="CustomizeMode_Later">Plus tard</String>
                 <String Id="CustomizeMode_Now">Maintenant</String>
+                <String Id="ServiceStartMode_Automatic">Automatique</String>
+                <String Id="ServiceStartMode_Boot">Démarrage</String>
+                <String Id="ServiceStartMode_Disabled">Désactivé</String>
+                <String Id="ServiceStartMode_Manual">Manuel</String>
+                <String Id="ServiceStartMode_System">Système</String>
                 <String Id="StoreLocation_CurrentUser">Utilisateur actuel</String>
                 <String Id="StoreLocation_LocalMachine">Machine locale</String>
                 <String Id="StoreName_AddressBook">Autres personnes</String>
@@ -156,12 +164,15 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="EnableTheGatewayWebInterface">Activer l'interface Web de Gateway</String>
                 <String Id="GenerateASelfSignedHttpsCertificate">Générer un certificat HTTPS autosigné</String>
                 <String Id="GenerateEncryptionKeys">Générer des clés de chiffrement</String>
+                <String Id="RecommendedForManualInstallations">Le service Gateway service devra être configuré et lancé manuellement après installation.</String>
+                <String Id="RecommendedForMostInstallations">Recommandé pour la plupart des installations. Générez une configuration de base avec cet installateur et lancez le service Gateway automatiquement.</String>
                     <!-- dialogs.accessUri -->
                 <String Id="AccessUriDlgDescription">URL pour rejoindre [ProductName].</String>
                 <String Id="AccessUriDlgExplanation">L'URI permettant de se connecter à la passerelle Gateway en externe pour effectuer des opérations HTTP. Il peut différer de l'adresse de l'écouteur dans certains cas (ex. : lors de l'utilisation d'un proxy inverse tel qu'IIS).</String>
                 <String Id="AccessUriDlgHttpWarn">Un URI externe non sécurisé est déconseillé pour les environnements de production</String>
                 <String Id="AccessUriDlgTitle">URL Externe</String>
                     <!-- dialogs.certificate -->
+                <String Id="AnX509CertificateInBinaryOrPemEncoded">Un certificat X.509 en format binaire PKCS#12 (PFX/P12) ou codé en PEM</String>
                 <String Id="BrowseForACertificateToUse">Parcourir pour un certificat à utiliser</String>
                 <String Id="CertificateDlgCertConfigLabel">Configuration de certificat</String>
                 <String Id="CertificateDlgCertFileLabel">Fichier de certificat</String>
@@ -213,19 +224,4 @@ Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la ba
                 <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
                 <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
-                    <!-- links.- -->
-                <String Id="FindYourPublicKeyDevolutionsHubLink">Devolutions Hub</String>
-                <String Id="FindYourPublicKeyDevolutionsServerLink">Devolutions Server</String>
-                <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
-                    <!-- enums.- -->
-                <String Id="ServiceStartMode_Automatic">Automatic</String>
-                <String Id="ServiceStartMode_Boot">Boot</String>
-                <String Id="ServiceStartMode_Disabled">Disabled</String>
-                <String Id="ServiceStartMode_Manual">Manual</String>
-                <String Id="ServiceStartMode_System">System</String>
-                    <!-- dialogs.customize.- -->
-                <String Id="RecommendedForManualInstallations">The Gateway service will need to be manually configured and started after installation.</String>
-                <String Id="RecommendedForMostInstallations">Recommended for most installations. Generate a basic configuration using this installer and start the Gateway service automatically.</String>
-                    <!-- dialogs.certificate.- -->
-                <String Id="AnX509CertificateInBinaryOrPemEncoded">An X.509 certificate in PKCS#12 (PFX/P12) binary format or PEM-encoded</String>
                     </WixLocalization>
