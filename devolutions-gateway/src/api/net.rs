@@ -1,16 +1,23 @@
-use std::net::IpAddr;
-
+use crate::http::HttpError;
+use crate::token::{ApplicationProtocol, Protocol};
+use crate::DgwState;
 use axum::extract::ws::Message;
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-
+use axum::{Json, Router};
+use network_scanner::interfaces::{self, MacAddr};
 use network_scanner::scanner::{self, NetworkScannerParams};
 use serde::Serialize;
+use std::net::IpAddr;
 
-use crate::http::HttpError;
-use crate::token::{ApplicationProtocol, Protocol};
+pub fn make_router<S>(state: DgwState) -> Router<S> {
+    Router::new()
+        .route("/scan", axum::routing::get(handle_scan))
+        .route("/config", axum::routing::get(handle_config))
+        .with_state(state)
+}
 
-pub async fn handler(
+pub async fn handle_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
@@ -151,5 +158,48 @@ impl NetworkScanResponse {
             }
         };
         Self { ip, hostname, protocol }
+    }
+}
+
+pub async fn handle_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+    let interfaces = network_scanner::interfaces::get_network_interfaces()
+        .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
+        .into_iter()
+        .map(NetworkInterface::from)
+        .collect();
+
+    Ok(Json(interfaces))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkInterface {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<MacAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ip_addresses: Vec<IpAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub prefixes: Vec<(IpAddr, u32)>,
+    pub operational_status: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gateways: Vec<IpAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dns_servers: Vec<IpAddr>,
+}
+
+impl From<interfaces::NetworkInterface> for NetworkInterface {
+    fn from(iface: interfaces::NetworkInterface) -> Self {
+        Self {
+            name: iface.name,
+            description: iface.description,
+            mac_address: iface.mac_address,
+            ip_addresses: iface.ip_addresses,
+            prefixes: iface.prefixes,
+            operational_status: iface.operational_status,
+            gateways: iface.gateways,
+            dns_servers: iface.dns_servers,
+        }
     }
 }
