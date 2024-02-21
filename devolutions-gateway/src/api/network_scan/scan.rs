@@ -18,7 +18,7 @@ pub async fn handler(
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
     let scanner = network_scanner::scanner::NetworkScanner::new(scanner_params).map_err(|e| {
-        tracing::error!("failed to create network scanner: {:?}", e);
+        error!(error = format!("{e:#}"), "Failed to create network scanner");
         HttpError::internal().build(e)
     })?;
 
@@ -26,31 +26,33 @@ pub async fn handler(
         let stream = match scanner.start() {
             Ok(stream) => stream,
             Err(e) => {
-                tracing::error!("failed to start network scan: {:?}", e);
+                error!(error = format!("{e:#}"), "Failed to start network scan");
                 return;
             }
         };
-        info!("network scan started");
+
+        info!("Network scan started");
+
         loop {
             tokio::select! {
                 result = stream.recv() => {
-                    let Some((ip, dns, port,protocol)) = result else{
+                    let Some(entry) = result else {
                         break;
                     };
-                    let response = NetworkScanResponse::new(ip, port, dns,protocol);
+
+                    let response = NetworkScanResponse::new(entry.addr, entry.port, entry.hostname, entry.service_type);
+
                     let Ok(response) = serde_json::to_string(&response) else {
                         warn!("Failed to serialize response");
                         continue;
                     };
 
-                    if let Err(e) = websocket.send(Message::Text(response)).await {
-                        warn!("Failed to send message: {:?}", e);
+                    if let Err(error) = websocket.send(Message::Text(response)).await {
+                        warn!(%error, "Failed to send message");
                         break;
                     }
-
                 },
                 msg = websocket.recv() => {
-
                     let Some(msg) = msg else {
                         break;
                     };
@@ -61,9 +63,12 @@ pub async fn handler(
                 }
             }
         }
+
         info!("Network scan finished");
+
         stream.stop();
     });
+
     Ok(res)
 }
 
@@ -113,10 +118,10 @@ pub struct NetworkScanResponse {
 }
 
 impl NetworkScanResponse {
-    fn new(ip: IpAddr, port: u16, dns: Option<String>, service: Option<scanner::ServiceType>) -> Self {
+    fn new(ip: IpAddr, port: u16, dns: Option<String>, service_type: Option<scanner::ServiceType>) -> Self {
         let hostname = dns;
 
-        let protocol = if let Some(protocol) = service {
+        let protocol = if let Some(protocol) = service_type {
             match protocol {
                 scanner::ServiceType::Ssh => ApplicationProtocol::Known(Protocol::Ssh),
                 scanner::ServiceType::Telnet => ApplicationProtocol::Known(Protocol::Telnet),

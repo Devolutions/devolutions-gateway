@@ -1,5 +1,9 @@
 use polling::Event;
-use std::{fmt::Debug, future::Future, mem::MaybeUninit, sync::Arc, usize};
+use std::fmt::Debug;
+use std::future::Future;
+use std::mem::MaybeUninit;
+use std::sync::Arc;
+use std::usize;
 
 use socket2::{SockAddr, Socket};
 use std::result::Result::Ok;
@@ -24,10 +28,11 @@ impl Debug for AsyncRawSocket {
 
 impl Drop for AsyncRawSocket {
     fn drop(&mut self) {
-        let _ = self // We ignore errors here, avoid crashing the thread
+        // We ignore errors here, avoid crashing the thread.
+        let _ = self
             .runtime
             .remove_socket(&self.socket, self.id)
-            .map_err(|e| tracing::error!("failed to remove socket from poller: {:?}", e));
+            .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to remove socket from poller"));
     }
 }
 
@@ -221,7 +226,7 @@ impl<'a> Future for ConnectFuture<'a> {
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         let events = self.runtime.check_event_with_id(self.id);
         for event in events {
-            tracing::trace!(?event, "event found");
+            trace!(?event, "Event found");
             if event
                 .is_err() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
                 .expect("your platform does not support connect failed")
@@ -236,7 +241,7 @@ impl<'a> Future for ConnectFuture<'a> {
             // We clearly needs to call connect function, so we break the loop and call connect.
             #[cfg(target_os = "linux")]
             if event.is_interrupt() && !event.is_err().expect("your platform does not support connect failed") {
-                tracing::trace!("out and hup");
+                trace!("out and hup");
                 self.runtime.remove_events_with_id_from_history(self.id);
                 break;
             }
@@ -269,7 +274,7 @@ impl<'a> Future for ConnectFuture<'a> {
                 .runtime
                 .register_events(&self.socket, &events_interested, cx.waker().clone())
             {
-                tracing::warn!(?self.socket, ?self.addr, "failed to register socket to poller, error: {}", e);
+                warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
                 return std::task::Poll::Ready(Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     format!("failed to register socket to poller: {}", e),
@@ -342,15 +347,20 @@ impl Drop for RecvFuture<'_> {
 }
 
 fn resolve<T>(
-    err: std::io::Error,
+    error: std::io::Error,
     socket: &Arc<Socket>,
     runtime: &Arc<Socket2Runtime>,
     event: Event,
     waker: &std::task::Waker,
 ) -> std::task::Poll<std::io::Result<T>> {
-    if err.kind() == std::io::ErrorKind::WouldBlock {
+    if error.kind() == std::io::ErrorKind::WouldBlock {
         if let Err(e) = runtime.register(socket, event, waker.clone()) {
-            tracing::warn!(?socket, ?event, ?e, "failed to register socket to poller");
+            warn!(
+                error = format!("{e:#}"),
+                ?socket,
+                ?event,
+                "Failed to register socket to poller"
+            );
             return std::task::Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 format!("failed to register socket to poller: {}", e),
@@ -360,6 +370,7 @@ fn resolve<T>(
         return std::task::Poll::Pending;
     }
 
-    tracing::warn!(?err, "operation failed");
-    std::task::Poll::Ready(Err(err))
+    warn!(%error, "Operation failed");
+
+    std::task::Poll::Ready(Err(error))
 }

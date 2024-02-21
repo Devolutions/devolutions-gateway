@@ -142,7 +142,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
 
             let listener = TcpListener::bind(bind_addr)
                 .await
-                .context("Failed to bind TCP listener")?;
+                .context("failed to bind TCP listener")?;
             let (socket, peer_addr) = listener.accept().await.context("TCP listener couldn't accept")?;
 
             info!(%peer_addr, "Accepted peer");

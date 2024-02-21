@@ -25,7 +25,7 @@ impl Inspector for PluginRecordingInspector {
     fn inspect_bytes(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
         self.sender
             .send((self.side, bytes.to_vec()))
-            .context("Plugin Recording inspector task is terminated")?;
+            .context("plugin Recording inspector task is terminated")?;
         Ok(())
     }
 }

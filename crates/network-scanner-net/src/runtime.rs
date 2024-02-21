@@ -1,14 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    hash::Hash,
-    num::NonZeroUsize,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
-    },
-    task::Waker,
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::task::Waker;
+use std::time::Duration;
 
 use anyhow::Context;
 use crossbeam::channel::{Receiver, Sender};
@@ -17,7 +13,8 @@ use parking_lot::Mutex;
 use polling::{Event, Events};
 use socket2::Socket;
 
-use crate::{socket::AsyncRawSocket, ScannnerNetError};
+use crate::socket::AsyncRawSocket;
+use crate::ScannnerNetError;
 
 #[derive(Debug)]
 pub struct Socket2Runtime {
@@ -30,14 +27,14 @@ pub struct Socket2Runtime {
 
 impl Drop for Socket2Runtime {
     fn drop(&mut self) {
-        tracing::trace!(covmark = "socket2_runtime_drop");
+        trace!(covmark = "socket2_runtime_drop");
 
         self.is_terminated.store(true, Ordering::SeqCst);
 
         let _ = self // ignore errors, cannot handle it here
             .poller
             .notify()
-            .map_err(|e| tracing::error!("failed to notify poller: {:?}", e));
+            .inspect_err(|error| error!(%error, "Failed to notify poller"));
 
         // Event loop will terminate after this.
         // The register loop will also terminate because of sender is dropped.
@@ -100,8 +97,10 @@ impl Socket2Runtime {
             .name("[raw-socket]:io-event-loop".to_string())
             .spawn(move || {
                 let mut events = Events::with_capacity(NonZeroUsize::new(QUEUE_CAPACITY).unwrap());
-                tracing::debug!("starting io event loop");
-                // events registered but not happened yet
+
+                debug!("Start I/O event loop");
+
+                // Events registered but not happened yet.
                 let mut events_registered: HashMap<EventWrapper, Waker> = HashMap::new();
 
                 loop {
@@ -111,14 +110,14 @@ impl Socket2Runtime {
 
                     // The timeout 200ms is critical, sometimes the event might be registered after the event happened
                     // the timeout limit will allow the events to be checked periodically.
-                    if let Err(e) = poller.wait(&mut events, Some(Duration::from_millis(200))) {
-                        tracing::error!(error = ?e, "failed to poll events");
+                    if let Err(error) = poller.wait(&mut events, Some(Duration::from_millis(200))) {
+                        error!(%error, "Failed to poll events");
                         is_terminated.store(true, Ordering::SeqCst);
                         break;
                     };
 
                     for event in events.iter() {
-                        tracing::trace!(?event, "event happened");
+                        trace!(?event);
                         // This is different from just insert, as the event wrapper will have the same hash, it actually does not replace the old one.
                         // by removing the old one first, we can make sure the new one is inserted.
                         event_history.lock().remove(&event.into());
@@ -142,7 +141,7 @@ impl Socket2Runtime {
                         }
                     }
                 }
-                tracing::debug!("io event loop terminated");
+                debug!("I/O event loop terminated");
             })
             .with_context(|| "failed to spawn io event loop thread")?;
 
@@ -189,7 +188,7 @@ impl Socket2Runtime {
             Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
         }
 
-        tracing::trace!(?event, ?socket, "registering event");
+        trace!(?event, ?socket, "Registering event");
         self.poller.modify(socket, event)?;
 
         // Use try_send instead of send, in case some io events blocked the queue completely,
@@ -202,18 +201,18 @@ impl Socket2Runtime {
 
     pub(crate) fn register_events(&self, socket: &Socket, events: &[Event], waker: Waker) -> anyhow::Result<()> {
         if self.is_terminated.load(Ordering::Acquire) {
-            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_owned()))?;
         }
 
         for event in events {
-            tracing::trace!(?event, ?socket, "registering event");
+            trace!(?event, ?socket, "Registering event");
             self.poller.modify(socket, *event)?;
             self.register_sender
                 .try_send(RegisterEvent::Register {
                     event: *event,
                     waker: waker.clone(),
                 })
-                .with_context(|| "failed to send register event to register loop")?;
+                .context("failed to send register event to register loop")?;
         }
 
         Ok(())
@@ -221,11 +220,11 @@ impl Socket2Runtime {
 
     pub(crate) fn unregister(&self, event: Event) -> anyhow::Result<()> {
         if self.is_terminated.load(Ordering::Acquire) {
-            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_owned()))?;
         }
         self.register_sender
             .try_send(RegisterEvent::Unregister { event })
-            .with_context(|| "failed to send unregister event to register loop")?;
+            .context("failed to send unregister event to register loop")?;
 
         Ok(())
     }

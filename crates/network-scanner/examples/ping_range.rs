@@ -1,7 +1,5 @@
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    time::Duration,
-};
+use std::net::{IpAddr, Ipv4Addr};
+use std::time::Duration;
 
 use anyhow::Ok;
 use network_scanner::ping::ping_range;

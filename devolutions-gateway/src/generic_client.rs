@@ -90,7 +90,7 @@ where
                 server_stream
                     .write_buf(&mut leftover_bytes)
                     .await
-                    .context("Failed to write leftover bytes")?;
+                    .context("failed to write leftover bytes")?;
 
                 let info = SessionInfo::new(
                     claims.jet_aid,
@@ -115,7 +115,7 @@ where
                     .build()
                     .select_dissector_and_forward()
                     .await
-                    .context("Encountered a failure during plain tcp traffic proxying")
+                    .context("encountered a failure during plain tcp traffic proxying")
             }
             ConnectionMode::Fwd { creds: Some(_), .. } => {
                 // Credentials handling should be special cased (e.g.: RDP-TLS)

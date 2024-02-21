@@ -1,8 +1,6 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Duration,
-};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner_net::runtime::Socket2Runtime;
@@ -32,7 +30,7 @@ pub async fn scan_ports(
             let connect_future = socket.connect(&addr);
             let addr = addr
                 .as_socket()
-                .context("Failed to scan port: only IPv4/IPv6 addresses are supported")?;
+                .context("failed to scan port: only IPv4/IPv6 addresses are supported")?;
 
             match tokio::time::timeout(timeout, connect_future).await {
                 Ok(Ok(())) => {

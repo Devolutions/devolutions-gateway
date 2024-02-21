@@ -37,8 +37,8 @@ fn round_trip() {
         payload in payload().no_shrink(),
     )| {
         rt.block_on(async {
-            let server_fut = round_trip_server(&payload.0, port).map(|res| res.context("Server"));
-            let client_fut = round_trip_client(&payload.0, port).map(|res| res.context("Client"));
+            let server_fut = round_trip_server(&payload.0, port).map(|res| res.context("server"));
+            let client_fut = round_trip_client(&payload.0, port).map(|res| res.context("client"));
             tokio::try_join!(server_fut, client_fut).unwrap();
         });
     })
@@ -58,8 +58,8 @@ fn round_trip_large_payload() {
         payload in large_payload().no_shrink(),
     )| {
         rt.block_on(async {
-            let server_fut = round_trip_server(&payload.0, port).map(|res| res.context("Server"));
-            let client_fut = round_trip_client(&payload.0, port).map(|res| res.context("Client"));
+            let server_fut = round_trip_server(&payload.0, port).map(|res| res.context("server"));
+            let client_fut = round_trip_client(&payload.0, port).map(|res| res.context("client"));
             tokio::try_join!(server_fut, client_fut).unwrap();
         });
     })

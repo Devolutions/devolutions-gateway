@@ -1,4 +1,5 @@
-use std::{mem::MaybeUninit, net::SocketAddr};
+use std::mem::MaybeUninit;
+use std::net::SocketAddr;
 
 use network_scanner_net::assume_init;
 use socket2::SockAddr;

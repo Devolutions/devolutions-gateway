@@ -1,4 +1,8 @@
-use std::{mem::MaybeUninit, net::IpAddr};
+#[macro_use]
+extern crate tracing;
+
+use std::mem::MaybeUninit;
+use std::net::IpAddr;
 
 use anyhow::Context;
 use network_interface::Addr;

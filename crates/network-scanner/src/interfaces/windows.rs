@@ -5,7 +5,7 @@ use super::MacAddr;
 
 pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     ipconfig::get_adapters()
-        .context("Failed to get network interfaces")?
+        .context("failed to get network interfaces")?
         .into_iter()
         .map(|adapter| Ok(adapter.into()))
         .collect()

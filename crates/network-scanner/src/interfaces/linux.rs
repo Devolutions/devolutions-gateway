@@ -1,14 +1,13 @@
 use anyhow::Context;
-use std::{net::IpAddr, num::NonZeroI32};
+use std::net::IpAddr;
+use std::num::NonZeroI32;
 use tokio::sync::mpsc::Receiver;
 
 use crate::interfaces::NetworkInterface;
 use futures_util::stream::TryStreamExt;
-use netlink_packet_route::{
-    address::{AddressAttribute, AddressMessage},
-    link::{LinkAttribute, LinkFlag},
-    route::{RouteAddress, RouteAttribute, RouteMessage},
-};
+use netlink_packet_route::address::{AddressAttribute, AddressMessage};
+use netlink_packet_route::link::{LinkAttribute, LinkFlag};
+use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{new_connection, Handle};
 
 pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
@@ -22,15 +21,15 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         let mut receiver = get_all_links(handle.clone()).await?;
         let handle = handle.clone();
         while let Some(mut link) = receiver.recv().await {
-            tracing::debug!(raw_link = ?link);
+            debug!(raw_link = ?link);
             let handle = handle.clone();
 
             let mut result = get_address(handle.clone(), link.clone()).await;
 
             if let Err(rtnetlink::Error::NetlinkError(ref msg)) = result {
                 if msg.code.map_or(0, NonZeroI32::get) == -16 {
-                    // Linux EBUSY, retry only once
-                    tracing::warn!("retrying link address fetch");
+                    // Linux EBUSY, retry only once.
+                    warn!(error = %msg, %link.name, "Retrying link address fetch");
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     result = get_address(handle, link.clone()).await;
                 }
@@ -38,30 +37,32 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
 
             let addresses = match result {
                 Ok(addresses) => addresses,
-                Err(e) => {
-                    tracing::error!("error getting address: {:?}", e);
+                Err(error) => {
+                    error!(%error, %link.name, "Failed to get the address for the interface");
                     continue;
                 }
             };
 
-            tracing::debug!(addresses= ?addresses);
+            debug!(?addresses);
+
             let address = addresses
                 .iter()
                 .map(|addr| AddressInfo::try_from(addr.clone()))
-                .collect::<Result<Vec<_>, _>>();
+                .collect::<Result<Vec<_>, _>>()
+                .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to parse address info"));
 
             let Ok(address) = address else {
-                tracing::error!("error parsing address: {:?}", address);
                 continue;
             };
 
             link.addresses = address;
 
-            if let Err(e) = link_sender.send(link) {
-                tracing::error!("error sending link: {:?}", e);
+            if let Err(error) = link_sender.send(link) {
+                error!(%error, "Failed to send link info");
                 break;
             }
         }
+
         anyhow::Ok(())
     });
 
@@ -74,7 +75,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
-                    tracing::error!("error parsing route: {:?}", e);
+                    error!(error = format!("{e:#}"), "Failed to parse the route");
                     continue;
                 }
             };
@@ -85,7 +86,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
             let route_info = match RouteInfo::try_from(route) {
                 Ok(res) => res,
                 Err(e) => {
-                    tracing::error!("error parsing route: {:?}", e);
+                    error!(error = format!("{e:#}"), "Failed to parse route info");
                     continue;
                 }
             };
@@ -109,17 +110,17 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let mut dns_servers = vec![];
 
     while let Ok(link_info) = link_receiver.recv() {
-        tracing::debug!(link = ?link_info);
+        debug!(link = ?link_info);
         link_infos.push(link_info);
     }
 
     while let Ok(route_info) = router_receiver.recv() {
-        tracing::debug!(route = ?route_info);
+        debug!(route = ?route_info);
         route_infos.push(route_info);
     }
 
     while let Ok(dns_server) = dns_receiver.recv() {
-        tracing::debug!(dns_server = ?dns_server);
+        debug!(%dns_server);
         dns_servers.push(dns_server);
     }
 
@@ -301,7 +302,7 @@ impl TryFrom<AddressMessage> for AddressInfo {
                     None
                 }
             })
-            .context("No address found")?;
+            .context("no address found")?;
 
         let prefix_len = value.header.prefix_len;
 
@@ -340,7 +341,7 @@ async fn get_all_links(handle: Handle) -> anyhow::Result<Receiver<LinkInfo>> {
                     None
                 }
             })
-            .context("No mac address found")?;
+            .context("no mac address found")?;
 
         let index = msg.header.index;
         let flags = msg.header.flags;

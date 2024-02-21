@@ -1,8 +1,6 @@
-use std::{
-    mem::MaybeUninit,
-    net::{Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::mem::MaybeUninit;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::time::Duration;
 
 use anyhow::Context;
 
@@ -73,7 +71,7 @@ pub fn block_broadcast(ip: Ipv4Addr, read_time_out: Option<Duration>) -> anyhow:
 
     let (packet, verifier) = create_echo_request()?;
 
-    tracing::trace!(?packet, "sending packet");
+    trace!(?packet, "Sending packet");
     socket
         .send_to(&packet.to_bytes(true), &addr.into())
         .with_context(|| format!("Failed to send packet to {}", ip))?;

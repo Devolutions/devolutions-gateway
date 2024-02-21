@@ -1,5 +1,5 @@
 use crate::proxy::{ProxyConfig, ProxyType};
-use anyhow::{anyhow, Context as _};
+use anyhow::Context as _;
 use core::time::Duration;
 use futures_util::{future, Future, Sink, Stream};
 use proxy_types::{DestAddr, ToDestAddr};
@@ -18,7 +18,7 @@ async fn resolve_dest_addr(dest_addr: DestAddr) -> anyhow::Result<SocketAddr> {
             .await
             .with_context(|| "Lookup host failed")?
             .next()
-            .ok_or_else(|| anyhow!("Failed to resolve target address")),
+            .context("failed to resolve target address"),
     }
 }
 

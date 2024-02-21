@@ -68,12 +68,12 @@ fn hub_sample() -> Sample {
             tls_certificate_store_name: None,
             listeners: vec![
                 ListenerConf {
-                    internal_url: "tcp://*:8080".try_into().unwrap(),
-                    external_url: "tcp://*:8080".try_into().unwrap(),
+                    internal_url: "tcp://*:8080".to_owned(),
+                    external_url: "tcp://*:8080".to_owned(),
                 },
                 ListenerConf {
-                    internal_url: "ws://*:7171".try_into().unwrap(),
-                    external_url: "wss://*:443".try_into().unwrap(),
+                    internal_url: "ws://*:7171".to_owned(),
+                    external_url: "wss://*:443".to_owned(),
                 },
             ],
             subscriber: None,
@@ -217,12 +217,12 @@ fn standalone_custom_auth_sample() -> Sample {
             tls_certificate_store_name: None,
             listeners: vec![
                 ListenerConf {
-                    internal_url: "tcp://*:8080".try_into().unwrap(),
-                    external_url: "tcp://*:8080".try_into().unwrap(),
+                    internal_url: "tcp://*:8080".to_owned(),
+                    external_url: "tcp://*:8080".to_owned(),
                 },
                 ListenerConf {
-                    internal_url: "http://*:7171".try_into().unwrap(),
-                    external_url: "https://*:7171".try_into().unwrap(),
+                    internal_url: "http://*:7171".to_owned(),
+                    external_url: "https://*:7171".to_owned(),
                 },
             ],
             subscriber: None,
@@ -290,12 +290,12 @@ fn standalone_no_auth_sample() -> Sample {
             tls_certificate_store_name: None,
             listeners: vec![
                 ListenerConf {
-                    internal_url: "tcp://*:8080".try_into().unwrap(),
-                    external_url: "tcp://*:8080".try_into().unwrap(),
+                    internal_url: "tcp://*:8080".to_owned(),
+                    external_url: "tcp://*:8080".to_owned(),
                 },
                 ListenerConf {
-                    internal_url: "http://*:7171".try_into().unwrap(),
-                    external_url: "https://*:7171".try_into().unwrap(),
+                    internal_url: "http://*:7171".to_owned(),
+                    external_url: "https://*:7171".to_owned(),
                 },
             ],
             subscriber: None,

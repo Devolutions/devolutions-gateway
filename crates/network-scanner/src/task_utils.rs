@@ -1,17 +1,16 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::atomic::AtomicBool;
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::sync::Arc;
+use std::time::Duration;
 
 use std::future::Future;
 
 use tokio::sync::Mutex;
 
+use crate::ip_utils::{get_subnets, Subnet};
 use crate::mdns::MdnsDaemon;
-use crate::scanner::ScanEntry;
-use crate::{
-    ip_utils::{get_subnets, Subnet},
-    scanner::NetworkScanner,
-};
+use crate::scanner::{NetworkScanner, ScanEntry};
 
 pub(crate) type IpSender = tokio::sync::mpsc::Sender<(IpAddr, Option<String>)>;
 pub(crate) type IpReceiver = tokio::sync::mpsc::Receiver<(IpAddr, Option<String>)>;
@@ -181,7 +180,7 @@ impl TaskManager {
         while let Ok(handle) = handles.try_recv() {
             handle.abort();
         }
-        tracing::debug!("All tasks stopped");
+        debug!("All tasks stopped");
     }
 
     pub(crate) fn stop_timeout(&self, timeout: Duration) {

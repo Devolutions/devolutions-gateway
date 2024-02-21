@@ -69,7 +69,7 @@ pub fn init(
         .filename_suffix("log")
         .max_log_files(MAX_LOG_FILES)
         .build(log_cfg.folder)
-        .context("Couldn’t create file appender")?;
+        .context("couldn’t create file appender")?;
     let (file_non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 

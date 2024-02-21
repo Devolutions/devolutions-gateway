@@ -329,14 +329,14 @@ impl CommonArgs {
         };
 
         let pipe_timeout = if let Ok(timeout) = c.string_flag("pipe-timeout") {
-            let timeout = humantime::parse_duration(&timeout).context("Invalid value for pipe timeout")?;
+            let timeout = humantime::parse_duration(&timeout).context("invalid value for pipe timeout")?;
             Some(timeout)
         } else {
             None
         };
 
         let watch_process = if let Ok(process_id) = c.int_flag("watch-process") {
-            let pid = u32::try_from(process_id).context("Invalid value for process ID")?;
+            let pid = u32::try_from(process_id).context("invalid value for process ID")?;
             Some(sysinfo::PidExt::from_u32(pid))
         } else if c.bool_flag("watch-parent") {
             use sysinfo::{ProcessExt as _, ProcessRefreshKind, RefreshKind, System, SystemExt};
@@ -379,11 +379,13 @@ impl ForwardArgs {
         let repeat_count =
             usize::try_from(c.int_flag("repeat-count").unwrap_or(0)).context("Bad repeat-count value")?;
 
-        let arg_pipe_a = c.args.get(0).context("<PIPE A> is missing")?.clone();
-        let pipe_a_mode = parse_pipe_mode(arg_pipe_a).context("Bad <PIPE A>")?;
+        let mut args = c.args.iter();
 
-        let arg_pipe_b = c.args.get(1).context("<PIPE B> is missing")?.clone();
-        let pipe_b_mode = parse_pipe_mode(arg_pipe_b).context("Bad <PIPE B>")?;
+        let arg_pipe_a = args.next().context("<PIPE A> is missing")?.clone();
+        let pipe_a_mode = parse_pipe_mode(arg_pipe_a).context("bad <PIPE A>")?;
+
+        let arg_pipe_b = args.next().context("<PIPE B> is missing")?.clone();
+        let pipe_b_mode = parse_pipe_mode(arg_pipe_b).context("bad <PIPE B>")?;
 
         Ok(Self {
             common,
@@ -415,8 +417,8 @@ impl JmuxProxyArgs {
             JmuxConfig::client()
         };
 
-        let arg_pipe = c.args.get(0).context("<PIPE> is missing")?.clone();
-        let pipe_mode = parse_pipe_mode(arg_pipe).context("Bad <PIPE>")?;
+        let arg_pipe = c.args.first().context("<PIPE> is missing")?.clone();
+        let pipe_mode = parse_pipe_mode(arg_pipe).context("bad <PIPE>")?;
 
         let listener_modes = c
             .args
@@ -445,19 +447,19 @@ fn parse_pipe_mode(arg: String) -> anyhow::Result<PipeMode> {
 
     let scheme_end_idx = arg
         .find(SCHEME_SEPARATOR)
-        .context("Invalid format: missing scheme (e.g.: tcp://<ADDRESS>)")?;
+        .context("invalid format: missing scheme (e.g.: tcp://<ADDRESS>)")?;
     let scheme = &arg[..scheme_end_idx];
     let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
 
     fn parse_jet_pipe_format(value: &str) -> anyhow::Result<(String, Uuid, Uuid)> {
         let mut it = value.split('/');
-        let addr = it.next().context("Address is missing")?;
+        let addr = it.next().context("address is missing")?;
 
-        let association_id_str = it.next().context("Association ID is missing")?;
-        let association_id = Uuid::parse_str(association_id_str).context("Bad association ID")?;
+        let association_id_str = it.next().context("association ID is missing")?;
+        let association_id = Uuid::parse_str(association_id_str).context("bad association ID")?;
 
-        let candidate_id_str = it.next().context("Candidate ID is missing")?;
-        let candidate_id = Uuid::parse_str(candidate_id_str).context("Bad candidate ID")?;
+        let candidate_id_str = it.next().context("candidate ID is missing")?;
+        let candidate_id = Uuid::parse_str(candidate_id_str).context("bad candidate ID")?;
 
         Ok((addr.to_owned(), association_id, candidate_id))
     }
@@ -505,15 +507,15 @@ fn parse_listener_mode(arg: &str) -> anyhow::Result<ListenerMode> {
 
     let scheme_end_idx = arg
         .find(SCHEME_SEPARATOR)
-        .context("Invalid format: missing scheme (e.g.: socks5-listen://<BINDING ADDRESS>)")?;
+        .context("invalid format: missing scheme (e.g.: socks5-listen://<BINDING ADDRESS>)")?;
     let scheme = &arg[..scheme_end_idx];
     let value = &arg[scheme_end_idx + SCHEME_SEPARATOR.len()..];
 
     match scheme {
         "tcp-listen" => {
             let mut it = value.splitn(2, '/');
-            let bind_addr = it.next().context("Binding address is missing")?;
-            let destination_url = it.next().context("Destination URL is missing")?;
+            let bind_addr = it.next().context("binding address is missing")?;
+            let destination_url = it.next().context("destination URL is missing")?;
 
             Ok(ListenerMode::Tcp {
                 bind_addr: bind_addr.to_owned(),
@@ -600,12 +602,12 @@ fn clean_old_log_files(logging: &Logging) -> anyhow::Result<()> {
         clean_old: true,
     } = &logging
     {
-        filepath.parent().context("Invalid log path")?
+        filepath.parent().context("invalid log path")?
     } else {
         return Ok(());
     };
 
-    let read_dir = fs::read_dir(folder).context("Failed to read directory")?;
+    let read_dir = fs::read_dir(folder).context("failed to read directory")?;
 
     for entry in read_dir {
         let entry = match entry {

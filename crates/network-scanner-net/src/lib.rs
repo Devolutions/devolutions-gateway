@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate tracing;
+
 use std::mem::MaybeUninit;
 
 pub mod runtime;

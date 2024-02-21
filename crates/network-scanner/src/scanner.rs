@@ -1,22 +1,18 @@
-use crate::{
-    ip_utils::IpAddrRange,
-    mdns::{self, MdnsDaemon},
-    netbios::netbios_query_scan,
-    ping::ping_range,
-    port_discovery::{scan_ports, PortScanResult},
-    task_utils::{ScanEntryReceiver, TaskManager},
-};
-
+use crate::broadcast::asynchronous::broadcast;
+use crate::ip_utils::IpAddrRange;
+use crate::mdns::{self, MdnsDaemon};
+use crate::netbios::netbios_query_scan;
+use crate::ping::ping_range;
+use crate::port_discovery::{scan_ports, PortScanResult};
+use crate::task_utils::{ScanEntryReceiver, TaskExecutionContext, TaskExecutionRunner, TaskManager};
 use anyhow::Context;
-use std::{fmt::Display, net::IpAddr, sync::Arc, time::Duration};
+use std::fmt::Display;
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
 use typed_builder::TypedBuilder;
 
-use tokio::sync::Mutex;
-
-use crate::{
-    broadcast::asynchronous::broadcast,
-    task_utils::{TaskExecutionContext, TaskExecutionRunner},
-};
 /// Represents a network scanner for discovering devices and their services over a network.
 #[derive(Clone)]
 pub struct NetworkScanner {
@@ -74,7 +70,7 @@ impl NetworkScanner {
                         (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
 
                     task_manager.spawn(move |task_manager| async move {
-                        tracing::debug!(scanning_ip = ?ip);
+                        debug!(scanning_ip = ?ip);
 
                         let dns_look_up_res = tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip).ok());
 
@@ -86,10 +82,18 @@ impl NetworkScanner {
                         ip_cache.write().insert(ip, dns.clone());
 
                         while let Some(res) = port_scan_receiver.recv().await {
-                            tracing::trace!(port_scan_result = ?res);
+                            trace!(port_scan_result = ?res);
                             if let PortScanResult::Open(socket_addr) = res {
                                 let dns = ip_cache.read().get(&ip).cloned().flatten();
-                                port_sender.send((ip, dns, socket_addr.port(), None)).await?;
+
+                                port_sender
+                                    .send(ScanEntry {
+                                        addr: ip,
+                                        hostname: dns,
+                                        port: socket_addr.port(),
+                                        service_type: None,
+                                    })
+                                    .await?;
                             }
                         }
                         anyhow::Ok(())
@@ -115,7 +119,7 @@ impl NetworkScanner {
                         let mut receiver =
                             broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                         while let Some(ip) = receiver.recv().await {
-                            tracing::trace!(broadcast_sent_ip = ?ip);
+                            trace!(broadcast_sent_ip = ?ip);
                             ip_sender.send((ip.into(), None)).await?;
                         }
                         anyhow::Ok(())
@@ -142,7 +146,7 @@ impl NetworkScanner {
                     let mut receiver =
                         netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
                     while let Some(res) = receiver.recv().await {
-                        tracing::debug!(netbios_query_sent_ip = ?res.0);
+                        debug!(netbios_query_sent_ip = ?res.0);
                         ip_sender.send(res).await?;
                     }
                 }
@@ -178,7 +182,7 @@ impl NetworkScanner {
                     )?;
 
                     while let Some(ip) = receiver.recv().await {
-                        tracing::debug!(ping_sent_ip = ?ip);
+                        debug!(ping_sent_ip = ?ip);
                         ip_sender.send((ip, None)).await?;
                     }
                 }
@@ -198,13 +202,16 @@ impl NetworkScanner {
                   task_manager| async move {
                 let mut receiver = mdns::mdns_query_scan(mdns_daemon, task_manager, mdns_query_timeout)?;
 
-                while let Some((ip, server, port, protocol)) = receiver.recv().await {
-                    if ip_cache.read().get(&ip).is_none() {
-                        ip_cache.write().insert(ip, server.clone());
+                while let Some(mut entry) = receiver.recv().await {
+                    if ip_cache.read().get(&entry.addr).is_none() {
+                        ip_cache.write().insert(entry.addr, entry.hostname.clone());
                     }
-                    let dns_name = ip_cache.read().get(&ip).cloned().flatten();
-                    if ports.contains(&port) || protocol.is_some() {
-                        port_sender.send((ip, dns_name, port, protocol)).await?;
+
+                    let dns_name = ip_cache.read().get(&entry.addr).cloned().flatten();
+                    entry.hostname = dns_name;
+
+                    if ports.contains(&entry.port) || entry.service_type.is_some() {
+                        port_sender.send(entry).await?;
                     }
                 }
 
@@ -267,12 +274,18 @@ impl NetworkScanner {
     }
 }
 
-/// ScanEntry is a tuple of (IpAddr, Option<String>, u16, Option<Protocol>)
-/// where IpAddr is the ip address of the device
-/// Option<String> is the hostname of the device
-/// u16 is the port number
-/// Option<Protocol> is the protocol/Service running on the port
-pub type ScanEntry = (IpAddr, Option<String>, u16, Option<ServiceType>);
+#[derive(Debug)]
+pub struct ScanEntry {
+    // IP address of the device
+    pub addr: IpAddr,
+    // Hostname of the device
+    pub hostname: Option<String>,
+    // Port number
+    pub port: u16,
+    // The protocol / service type listening on the port
+    pub service_type: Option<ServiceType>,
+}
+
 pub struct NetworkScannerStream {
     result_receiver: Arc<Mutex<ScanEntryReceiver>>,
     task_manager: TaskManager,
@@ -280,9 +293,10 @@ pub struct NetworkScannerStream {
 
 impl NetworkScannerStream {
     pub async fn recv(self: &Arc<Self>) -> Option<ScanEntry> {
-        // the caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver
+        // The caller sometimes require Send, hence the Arc is necessary for socket_addr_receiver.
         self.result_receiver.lock().await.recv().await
     }
+
     pub async fn recv_timeout(self: &Arc<Self>, duration: Duration) -> anyhow::Result<Option<ScanEntry>> {
         tokio::time::timeout(duration, self.result_receiver.lock().await.recv())
             .await
@@ -359,7 +373,7 @@ pub struct NetworkScannerParams {
     pub max_wait_time: u64, // max_wait for entire scan duration in milliseconds, suggested!
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ServiceType {
     /// Remote Desktop Protocol
     Rdp,

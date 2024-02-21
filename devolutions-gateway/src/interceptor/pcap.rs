@@ -36,8 +36,8 @@ impl PcapInspector {
         pcap_filename: impl AsRef<Path>,
         dissector: impl Dissector + Send + 'static,
     ) -> anyhow::Result<(Self, Self)> {
-        let file = File::create(pcap_filename).context("Error creating file")?;
-        let pcap_writer = PcapWriter::new(file).context("Error creating pcap writer")?;
+        let file = File::create(pcap_filename).context("failed to crate pcap file")?;
+        let pcap_writer = PcapWriter::new(file).context("failed to create pcap writer")?;
 
         let (sender, receiver) = mpsc::unbounded_channel();
 

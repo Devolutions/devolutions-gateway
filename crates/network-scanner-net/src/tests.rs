@@ -1,16 +1,13 @@
-use std::{
-    io::ErrorKind,
-    mem::MaybeUninit,
-    net::{SocketAddr, UdpSocket},
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
-};
+use std::io::ErrorKind;
+use std::mem::MaybeUninit;
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 
 use socket2::SockAddr;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    task::JoinHandle,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task::JoinHandle;
 
 use crate::socket::AsyncRawSocket;
 
@@ -36,7 +33,7 @@ async fn multiple_udp() -> anyhow::Result<()> {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let (size, addr) = socket.recv_from(&mut buf).await?;
 
-            tracing::info!("size: {}, addr: {:?}", size, addr);
+            info!(%size, ?addr);
             let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, format!("hello from socket {}", number).as_bytes());
             Ok::<(), anyhow::Error>(())
@@ -141,7 +138,7 @@ async fn work_with_tokio_tcp() -> anyhow::Result<()> {
             socket.send(msg.as_bytes()).await?;
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             let size = socket.recv(&mut buf).await?;
-            tracing::debug!("size: {}", size);
+            debug!("size: {}", size);
             let back = unsafe { crate::assume_init(&buf[..size]) };
             assert_eq!(back, msg.as_bytes());
         }
@@ -209,14 +206,14 @@ fn local_udp_server() -> anyhow::Result<SocketAddr> {
     std::thread::spawn(move || {
         // Create and bind the UDP socket
 
-        tracing::debug!("UDP server listening on {}", socket.local_addr()?);
+        debug!("UDP server listening on {}", socket.local_addr()?);
 
         let mut buffer = [0u8; 1024]; // A buffer to store incoming data
 
         loop {
             match socket.recv_from(&mut buffer) {
                 Ok((size, src)) => {
-                    tracing::trace!("Received {} bytes from {}", size, src);
+                    trace!("Received {} bytes from {}", size, src);
                     let socket_clone = socket.try_clone()?;
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
@@ -227,8 +224,8 @@ fn local_udp_server() -> anyhow::Result<SocketAddr> {
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                     continue;
                 }
-                Err(e) => {
-                    tracing::error!("Encountered an error: {}", e);
+                Err(error) => {
+                    error!(%error, "Failed to read UDP socket");
                     break;
                 }
             }
@@ -258,7 +255,7 @@ async fn handle_client(mut stream: tokio::net::TcpStream, awake: Arc<AtomicBool>
             return Ok(());
         }
 
-        tracing::debug!("Received {} bytes: {:?}", size, &buffer[..size]);
+        debug!("Received {} bytes: {:?}", size, &buffer[..size]);
         std::thread::sleep(std::time::Duration::from_millis(200)); // simulate some work
         stream.write_all(&buffer[..size]).await?; // Echo the data back to the client
     }
@@ -283,8 +280,8 @@ async fn local_tcp_server(
             }?;
             let awake = awake.clone();
             tokio::task::spawn(async move {
-                if let Err(e) = handle_client(stream, awake).await {
-                    tracing::error!("An error occurred while handling the client: {}", e);
+                if let Err(error) = handle_client(stream, awake).await {
+                    error!(%error, "An error occurred while handling the client");
                 }
             });
         }
