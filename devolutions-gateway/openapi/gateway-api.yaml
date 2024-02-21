@@ -263,6 +263,34 @@ paths:
       security:
       - scope_token:
         - gateway.jrl.read
+  /jet/net/config:
+    get:
+      tags:
+      - Net
+      summary: Lists network interfaces
+      description: Lists network interfaces
+      operationId: GetNetConfig
+      responses:
+        '200':
+          description: Network interfaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/NetworkInterface'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '500':
+          description: Unexpected server error
+      security:
+      - netscan_token: []
   /jet/session/{id}/terminate:
     post:
       tags:
@@ -555,6 +583,49 @@ components:
         internal_url:
           type: string
           description: URL to use on local network
+    NetworkInterface:
+      type: object
+      description: Network interface configuration
+      required:
+      - name
+      - ip_addresses
+      - prefixes
+      - operational_status
+      - gateways
+      - dns_servers
+      properties:
+        description:
+          type: string
+          nullable: true
+        dns_servers:
+          type: array
+          items:
+            type: string
+        gateways:
+          type: array
+          items:
+            type: string
+        ip_addresses:
+          type: array
+          items:
+            type: string
+        mac_address:
+          type: string
+          nullable: true
+        name:
+          type: string
+        operational_status:
+          type: boolean
+        prefixes:
+          type: array
+          items:
+            type: array
+            items:
+              allOf:
+              - type: string
+              - type: integer
+                format: int32
+                minimum: 0
     PubKeyFormat:
       type: string
       enum:
@@ -696,6 +767,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Contains the JRL to apply if newer
+    netscan_token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token allowing usage of the network exploration endpoints
     scope_token:
       type: http
       scheme: bearer

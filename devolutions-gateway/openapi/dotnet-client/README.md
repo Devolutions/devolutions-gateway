@@ -113,6 +113,7 @@ Class | Method | HTTP request | Description
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
+*NetApi* | [**GetNetConfig**](docs/NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces
 *SessionsApi* | [**GetSessions**](docs/SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions
 *SessionsApi* | [**TerminateSession**](docs/SessionsApi.md#terminatesession) | **POST** /jet/session/{id}/terminate | Terminate forcefully a running session
 *WebAppApi* | [**SignAppToken**](docs/WebAppApi.md#signapptoken) | **POST** /jet/webapp/app-token | Requests a web application token using the configured authorization method
@@ -134,6 +135,7 @@ Class | Method | HTTP request | Description
  - [Model.Identity](docs/Identity.md)
  - [Model.JrlInfo](docs/JrlInfo.md)
  - [Model.ListenerUrls](docs/ListenerUrls.md)
+ - [Model.NetworkInterface](docs/NetworkInterface.md)
  - [Model.PubKeyFormat](docs/PubKeyFormat.md)
  - [Model.SessionInfo](docs/SessionInfo.md)
  - [Model.SessionTokenContentType](docs/SessionTokenContentType.md)
@@ -152,6 +154,11 @@ Class | Method | HTTP request | Description
 
 <a name="jrl_token"></a>
 ### jrl_token
+
+- **Type**: Bearer Authentication
+
+<a name="netscan_token"></a>
+### netscan_token
 
 - **Type**: Bearer Authentication
 

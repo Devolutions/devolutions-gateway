@@ -12,12 +12,12 @@ use std::net::IpAddr;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
-        .route("/scan", axum::routing::get(handle_scan))
-        .route("/config", axum::routing::get(handle_config))
+        .route("/scan", axum::routing::get(handle_network_scan))
+        .route("/config", axum::routing::get(get_net_config))
         .with_state(state)
 }
 
-pub async fn handle_scan(
+pub async fn handle_network_scan(
     _token: crate::extract::NetScanToken,
     ws: WebSocketUpgrade,
     query_params: axum::extract::Query<NetworkScanQueryParams>,
@@ -161,7 +161,22 @@ impl NetworkScanResponse {
     }
 }
 
-pub async fn handle_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
+/// Lists network interfaces
+#[cfg_attr(feature = "openapi", utoipa::path(
+    get,
+    operation_id = "GetNetConfig",
+    tag = "Net",
+    path = "/jet/net/config",
+    responses(
+        (status = 200, description = "Network interfaces", body = [Vec<NetworkInterface>]),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 500, description = "Unexpected server error"),
+    ),
+    security(("netscan_token" = [])),
+))]
+pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
     let interfaces = network_scanner::interfaces::get_network_interfaces()
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
@@ -171,21 +186,24 @@ pub async fn handle_config(_token: crate::extract::NetScanToken) -> Result<Json<
     Ok(Json(interfaces))
 }
 
+/// Network interface configuration
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
 pub struct NetworkInterface {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub ip_addresses: Vec<IpAddr>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<(String, u32)>))]
     pub prefixes: Vec<(IpAddr, u32)>,
     pub operational_status: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub dns_servers: Vec<IpAddr>,
 }
 

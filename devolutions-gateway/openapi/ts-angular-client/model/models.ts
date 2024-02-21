@@ -10,6 +10,7 @@ export * from './heartbeat';
 export * from './identity';
 export * from './jrlInfo';
 export * from './listenerUrls';
+export * from './networkInterface';
 export * from './pubKeyFormat';
 export * from './sessionInfo';
 export * from './sessionTokenContentType';

@@ -105,6 +105,15 @@ export class Configuration {
             };
         }
 
+        // init default netscan_token credential
+        if (!this.credentials['netscan_token']) {
+            this.credentials['netscan_token'] = () => {
+                return typeof this.accessToken === 'function'
+                    ? this.accessToken()
+                    : this.accessToken;
+            };
+        }
+
         // init default scope_token credential
         if (!this.credentials['scope_token']) {
             this.credentials['scope_token'] = () => {
