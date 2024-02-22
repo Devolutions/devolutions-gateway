@@ -41,6 +41,7 @@ impl MdnsDaemon {
             }
         };
 
+        // Receive the last event (Shutdown), preventing the receiver from being dropped
         let _ = receiver.recv_timeout(std::time::Duration::from_millis(100));
     }
 }
