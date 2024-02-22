@@ -1,6 +1,7 @@
 use anyhow::Context;
 use std::net::IpAddr;
 use std::num::NonZeroI32;
+use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
 use crate::interfaces::NetworkInterface;
@@ -95,34 +96,20 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         anyhow::Ok(())
     });
 
-    let (dns_sender, dns_receiver) = crossbeam::channel::unbounded();
-    // find all nameservers
-    tokio::spawn(async move {
-        let dns_servers = read_resolve_conf().await?;
-        for dns_server in dns_servers {
-            dns_sender.send(dns_server)?;
-        }
-        anyhow::Ok(())
-    });
-
     let mut link_infos = vec![];
     let mut route_infos = vec![];
-    let mut dns_servers = vec![];
 
-    while let Ok(link_info) = link_receiver.recv() {
+    while let Ok(link_info) = link_receiver.recv_timeout(Duration::from_secs(2)) {
         debug!(link = ?link_info);
         link_infos.push(link_info);
     }
 
-    while let Ok(route_info) = router_receiver.recv() {
+    while let Ok(route_info) = router_receiver.recv_timeout(Duration::from_secs(2)) {
         debug!(route = ?route_info);
         route_infos.push(route_info);
     }
 
-    while let Ok(dns_server) = dns_receiver.recv() {
-        debug!(%dns_server);
-        dns_servers.push(dns_server);
-    }
+    let dns_servers = read_resolve_conf()?;
 
     // assign matching routes to links
     for link_info in &mut link_infos {
@@ -372,9 +359,11 @@ async fn get_address(handle: Handle, link_info: LinkInfo) -> Result<Vec<AddressM
     Ok(res)
 }
 
-async fn read_resolve_conf() -> anyhow::Result<Vec<IpAddr>> {
+fn read_resolve_conf() -> anyhow::Result<Vec<IpAddr>> {
     let mut dns_servers = vec![];
-    let file = tokio::fs::read_to_string("/etc/resolv.conf").await?;
+    let file = std::fs::read_to_string("/etc/resolv.conf").inspect_err(|e| {
+        error!(error = format!("{e:#}"), "Failed to read /etc/resolv.conf");
+    })?;
     for line in file.lines() {
         if line.starts_with("nameserver") {
             let parts: Vec<&str> = line.split_whitespace().collect();
