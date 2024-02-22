@@ -178,6 +178,7 @@ impl NetworkScanResponse {
 ))]
 pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
     let interfaces = network_scanner::interfaces::get_network_interfaces()
+        .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()
         .map(NetworkInterface::from)
