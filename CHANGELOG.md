@@ -4,6 +4,88 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.0 (2023-02-22)
+
+### Features
+
+- _dgw_: standalone web application V1 :tada:
+
+- _installer_: new Windows installer built using WixSharp
+
+- _pwsh_: add powershell user management with argon2 password hashing ([#658](https://github.com/Devolutions/devolutions-gateway/issues/658)) ([7157ad6082](https://github.com/Devolutions/devolutions-gateway/commit/7157ad608278278d63096297ae1d6c04b768a984)) 
+
+- _installer_: add ngrok configuration support ([#669](https://github.com/Devolutions/devolutions-gateway/issues/669)) ([2caeabab2e](https://github.com/Devolutions/devolutions-gateway/commit/2caeabab2ed8e9827ce2507fa21dca81745d64c1)) 
+
+- _dgw_: debug option to set the webapp path ([#663](https://github.com/Devolutions/devolutions-gateway/issues/663)) ([7da20760f1](https://github.com/Devolutions/devolutions-gateway/commit/7da20760f1e57772d5f95f19f86872131e4bf3c9)) 
+
+  The `DGATEWAY_WEBAPP_PATH` env variable is conserved.
+  A new stable and documented configuration key is added: `WebApp.StaticRootPath`.
+  The environment variable will be checked first, then the key in the config file,
+  and if nothing is specified, we fall back to a `webapp` folder along the executable.
+
+- _dgw_: network scan HTTP API ([#689](https://github.com/Devolutions/devolutions-gateway/issues/689)) ([846f21d660](https://github.com/Devolutions/devolutions-gateway/commit/846f21d660db5e65341511c916cfd3a4ee15ad7f)) 
+
+### Improvements
+
+- _dgw_: use all resolved addresses when connecting ([#601](https://github.com/Devolutions/devolutions-gateway/issues/601)) ([fe4dc63e40](https://github.com/Devolutions/devolutions-gateway/commit/fe4dc63e409f1da1b0307b94af07bf2168ac0bbb)) ([DGW-125](https://devolutions.atlassian.net/browse/DGW-125)) 
+
+  This patch ensures Devolutions Gateway does not immediately discard
+  resolved addresses which are not emitted first by Tokio’s `lookup_host`.
+  
+  Typically, the first address is enough and there is no need to try
+  subsequent ones. Therefore, it is not expected for this change to
+  cause any additional latence in the the vast majority of the cases.
+  However, just to be on the safe side and enable easier troubleshooting,
+  a WARN-level log is emitted when failing at connecting to a resolved
+  address. If latence were to be introduced by this patch, we can
+  easily be made aware of the problem and investigate further (network
+  configuration, etc).
+  
+  If this proves to be a problem in the future, we can add filtering
+  options. For instance, on a network where IPv4 is not supported or
+  disabled, we may want to filter out all the IPv4 addresses which may
+  be resolved by the Devolutions Gateway.
+
+- _dgw_: improve logs quality for JMUX proxy ([abaa7b23bb](https://github.com/Devolutions/devolutions-gateway/commit/abaa7b23bbe4cd753dcc6f089c978e3f154dab6a)) 
+
+  Notably, status codes like ECONNRESET or ECONNABORTED are not
+  considered anymore as actual errors, and will be logged accordingly.
+
+- _dgw_: improve JMUX proxy error display in logs ([#666](https://github.com/Devolutions/devolutions-gateway/issues/666)) ([a42b9d6395](https://github.com/Devolutions/devolutions-gateway/commit/a42b9d63959583e8e7dc64e0f75199428e3343a0)) 
+
+### Bug Fixes
+
+- _dgw_: upgrade Windows store resolve error log ([#617](https://github.com/Devolutions/devolutions-gateway/issues/617)) ([4c4df605d0](https://github.com/Devolutions/devolutions-gateway/commit/4c4df605d0dfb6379bd2bcbbac3ae4034f740d9b)) 
+
+  This can help with troubleshooting configuration problems with
+  Windows system certificate store.
+
+- _dgw_: better status code for unreachable KDC server ([#618](https://github.com/Devolutions/devolutions-gateway/issues/618)) ([d0cbd7f6db](https://github.com/Devolutions/devolutions-gateway/commit/d0cbd7f6dbd9aff097af3ae0fb986c6584ab0357)) 
+
+- _dgw_: spurious warning when using a wildcard certificate ([#647](https://github.com/Devolutions/devolutions-gateway/issues/647)) ([b2244a9ab4](https://github.com/Devolutions/devolutions-gateway/commit/b2244a9ab46309c8ac1c3a93d584ca6e635c6645)) 
+
+- _dgw_: ensure the hostname matches TLS certificate ([#648](https://github.com/Devolutions/devolutions-gateway/issues/648)) ([6ebee46634](https://github.com/Devolutions/devolutions-gateway/commit/6ebee466344a365f90a270d47c31145741b457f2)) 
+
+  Warning logs are ignored at this point (logger not yet initialized),
+  so it doesn’t really help. Since specifying a hostname not matching the
+  TLS subject name is a configuration error, we now return an error upon
+  loading the configuration.Log warnings are ignored at this point, so it
+  doesn’t really help.
+
+- _dgw_: better support for ngrok free plan ([#718](https://github.com/Devolutions/devolutions-gateway/issues/718)) ([dc58835e20](https://github.com/Devolutions/devolutions-gateway/commit/dc58835e203d598426a789051918c8dee818348c)) ([DGW-134](https://devolutions.atlassian.net/browse/DGW-134)) 
+
+  Our installer is allowing the 0.0.0.0/0 CIDR by default because
+  premium plans need the IP restrictions to be configured or just
+  all external traffic. However this doesn’t play well with the free
+  plan. This patch is using a dirty trick to detect the free plan
+  and ignores the IP restriction configuration when it is detected.
+
+### Build
+
+- Include debug symbols for NuGet packages (.snupkg) ([186a319b71](https://github.com/Devolutions/devolutions-gateway/commit/186a319b71dbbd541672378f5cddead44d5fd8a7)) 
+
+- _dgw_: eliminate openssl link dependency on Linux ([#707](https://github.com/Devolutions/devolutions-gateway/issues/707)) ([8ffb181995](https://github.com/Devolutions/devolutions-gateway/commit/8ffb181995f49c205722cb9548e5e90372be2610)) 
+
 ## 2023.3.0 (2023-10-30)
 
 ### Features
