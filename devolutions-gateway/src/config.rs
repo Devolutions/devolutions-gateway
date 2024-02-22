@@ -1044,6 +1044,10 @@ pub mod dto {
         ///
         /// Providing this option will cause the PCAP interceptor to be attached to each stream.
         pub capture_path: Option<Utf8PathBuf>,
+
+        /// Enable unstable API which may break at any point
+        #[serde(default)]
+        pub enable_unstable: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -1056,6 +1060,7 @@ pub mod dto {
                 override_kdc: None,
                 log_directives: None,
                 capture_path: None,
+                enable_unstable: false,
             }
         }
     }
