@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
+use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
