@@ -227,7 +227,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .context("couldn’t create ngrok session")?;
 
         for (name, conf) in &ngrok_conf.tunnels {
-            let tunnel = session.configure_endpoint(name, conf);
+            let tunnel = session.configure_endpoint(name, conf).await;
             tasks.register(devolutions_gateway::ngrok::NgrokTunnelTask {
                 tunnel,
                 state: state.clone(),

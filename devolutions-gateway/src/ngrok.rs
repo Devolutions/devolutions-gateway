@@ -47,7 +47,8 @@ impl NgrokSession {
         Ok(Self { inner: session })
     }
 
-    pub fn configure_endpoint(&self, name: &str, conf: &NgrokTunnelConf) -> NgrokTunnel {
+    // FIXME: Make this function non-async again when the ngrok UX issue is fixed.
+    pub async fn configure_endpoint(&self, name: &str, conf: &NgrokTunnelConf) -> NgrokTunnel {
         use ngrok::config::Scheme;
 
         match conf {
@@ -92,6 +93,8 @@ impl NgrokSession {
                     builder = builder.compression();
                 }
 
+                let before_cidrs = builder.clone();
+
                 builder = http_conf
                     .allow_cidrs
                     .iter()
@@ -101,6 +104,25 @@ impl NgrokSession {
                     .deny_cidrs
                     .iter()
                     .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
+
+                // HACK: Find the subcribtion plan. This uses ngrok-rs internal API, so it’s not great.
+                // Ideally, we could use the `Session` to find out about the subscribtion plan without dirty tricks.
+                match builder
+                    .clone()
+                    .forwards_to("Devolutions Gateway Subscribtion probe")
+                    .listen()
+                    .await
+                {
+                    // https://ngrok.com/docs/errors/err_ngrok_9017/
+                    // "Your account is not authorized to use ip restrictions."
+                    Err(ngrok::session::RpcError::Response(e)) if e.error_code.as_deref() == Some("ERR_NGROK_9017") => {
+                        info!("Detected a ngrok free plan subscribtion. IP restriction rules are disabled.");
+
+                        // Revert the builder to before applying the CIDR rules.
+                        builder = before_cidrs;
+                    }
+                    _ => {}
+                }
 
                 NgrokTunnel {
                     name: name.to_owned(),
