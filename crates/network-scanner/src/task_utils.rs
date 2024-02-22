@@ -182,14 +182,6 @@ impl TaskManager {
         }
         debug!("All tasks stopped");
     }
-
-    pub(crate) fn stop_timeout(&self, timeout: Duration) {
-        let self_clone = self.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
-            self_clone.stop();
-        });
-    }
 }
 
 pub(crate) struct TimeoutManager {

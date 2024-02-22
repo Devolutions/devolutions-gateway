@@ -114,6 +114,7 @@ impl NetworkScanner {
                   }: TaskExecutionContext,
                   task_manager| async move {
                 for subnet in subnets {
+                    debug!(broadcasting_to_subnet = ?subnet);
                     let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
                     task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
                         let mut receiver =
@@ -140,6 +141,7 @@ impl NetworkScanner {
                   }: TaskExecutionContext,
                   task_manager| async move {
                 let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
+                debug!(netbios_query_ip_ranges = ?ip_ranges);
 
                 for ip_range in ip_ranges {
                     let (runtime, ip_sender, task_manager) = (runtime.clone(), ip_sender.clone(), task_manager.clone());
@@ -166,6 +168,7 @@ impl NetworkScanner {
                   }: TaskExecutionContext,
                   task_manager| async move {
                 let ip_ranges: Vec<IpAddrRange> = subnets.iter().map(|subnet| subnet.into()).collect();
+                debug!(ping_ip_ranges = ?ip_ranges);
 
                 let should_ping = move |ip: IpAddr| -> bool { !ip_cache.read().contains_key(&ip) };
 
@@ -229,15 +232,20 @@ impl NetworkScanner {
             task_manager,
         } = task_executor;
 
-        task_manager.stop_timeout(self.max_wait_time);
+        let scanner_stream = Arc::new(NetworkScannerStream {
+            result_receiver: port_receiver,
+            task_manager,
+            mdns_daemon,
+        });
 
-        Ok({
-            Arc::new(NetworkScannerStream {
-                result_receiver: port_receiver,
-                task_manager,
-                mdns_daemon,
-            })
-        })
+        let (scanner_stream_clone, max_wait_time) = (scanner_stream.clone(), self.max_wait_time);
+
+        tokio::spawn(async move {
+            tokio::time::sleep(max_wait_time).await;
+            scanner_stream_clone.stop();
+        });
+
+        Ok(scanner_stream)
     }
 
     pub fn new(

@@ -28,12 +28,12 @@ impl MdnsDaemon {
                 let result = if matches!(e, mdns_sd::Error::Again) {
                     self.service_daemon.shutdown()
                 } else {
-                    tracing::error!(error = %e, "Failed to shutdown service daemon");
                     Err(e)
                 };
 
-                let Ok(receiver) = result else {
-                    warn!("Failed to shutdown service daemon");
+                let Ok(receiver) = result.inspect_err(|e| {
+                    warn!(error = %e, "Failed to shutdown service daemon");
+                }) else {
                     return;
                 };
 

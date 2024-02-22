@@ -44,6 +44,15 @@ pub async fn handle_network_scan(
             tokio::select! {
                 result = stream.recv() => {
                     let Some(entry) = result else {
+                        let _ = websocket
+                            .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                                code: axum::extract::ws::close_code::NORMAL,
+                                reason: std::borrow::Cow::from("scan finished"),
+                            })))
+                            .await
+                            .inspect_err(|e| {
+                                warn!(%e, "Failed to close websocket");
+                            });
                         break;
                     };
 
@@ -72,8 +81,6 @@ pub async fn handle_network_scan(
         }
 
         info!("Network scan finished");
-
-        stream.stop();
     });
 
     Ok(res)
