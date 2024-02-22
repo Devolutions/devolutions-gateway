@@ -3,7 +3,7 @@ use anyhow::Context;
 
 use super::MacAddr;
 
-pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
+pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     ipconfig::get_adapters()
         .context("failed to get network interfaces")?
         .into_iter()

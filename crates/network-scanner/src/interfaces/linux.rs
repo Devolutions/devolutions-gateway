@@ -1,7 +1,6 @@
 use anyhow::Context;
 use std::net::IpAddr;
 use std::num::NonZeroI32;
-use std::time::Duration;
 use tokio::sync::mpsc::Receiver;
 
 use crate::interfaces::NetworkInterface;
@@ -11,109 +10,82 @@ use netlink_packet_route::link::{LinkAttribute, LinkFlag};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{new_connection, Handle};
 
-pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
+pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
+    let mut links_info = vec![];
+    let mut routes_info = vec![];
 
-    let (link_sender, link_receiver) = crossbeam::channel::unbounded();
-    let handle_clone = handle.clone();
     // Retrieve all links, and find the addresses associated with each link
-    tokio::spawn(async move {
-        let mut receiver = get_all_links(handle.clone()).await?;
+    let mut receiver = get_all_links(handle.clone()).await?;
+    let handle = handle.clone();
+    while let Some(mut link) = receiver.recv().await {
+        debug!(raw_link = ?link);
         let handle = handle.clone();
-        while let Some(mut link) = receiver.recv().await {
-            debug!(raw_link = ?link);
-            let handle = handle.clone();
 
-            let mut result = get_address(handle.clone(), link.clone()).await;
-
-            if let Err(rtnetlink::Error::NetlinkError(ref msg)) = result {
-                if msg.code.map_or(0, NonZeroI32::get) == -16 {
-                    // Linux EBUSY, retry only once.
-                    warn!(error = %msg, %link.name, "Retrying link address fetch");
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    result = get_address(handle, link.clone()).await;
-                }
+        let mut result = get_address(handle.clone(), link.clone()).await;
+        if let Err(rtnetlink::Error::NetlinkError(ref msg)) = result {
+            if msg.code.map_or(0, NonZeroI32::get) == -16 {
+                // Linux EBUSY, retry only once.
+                warn!(error = %msg, %link.name, "Retrying link address fetch");
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                result = get_address(handle, link.clone()).await;
             }
+        }
 
-            let addresses = match result {
-                Ok(addresses) => addresses,
-                Err(error) => {
-                    error!(%error, %link.name, "Failed to get the address for the interface");
-                    continue;
-                }
-            };
-
-            debug!(?addresses);
-
-            let address = addresses
-                .iter()
-                .map(|addr| AddressInfo::try_from(addr.clone()))
-                .collect::<Result<Vec<_>, _>>()
-                .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to parse address info"));
-
-            let Ok(address) = address else {
+        let addresses = match result {
+            Ok(addresses) => addresses,
+            Err(error) => {
+                error!(%error, %link.name, "Failed to get the address for the interface");
                 continue;
-            };
-
-            link.addresses = address;
-
-            if let Err(error) = link_sender.send(link) {
-                error!(%error, "Failed to send link info");
-                break;
             }
-        }
+        };
 
-        anyhow::Ok(())
-    });
+        debug!(?addresses);
 
-    let (router_sender, router_receiver) = crossbeam::channel::unbounded();
-    // find all routes
-    tokio::spawn(async move {
-        let mut routes_v4 = handle_clone.route().get(rtnetlink::IpVersion::V4).execute();
-        let route_sender_v4 = router_sender.clone();
-        while let Ok(Some(route)) = routes_v4.try_next().await {
-            let route_info = match RouteInfo::try_from(route) {
-                Ok(res) => res,
-                Err(e) => {
-                    error!(error = format!("{e:#}"), "Failed to parse the route");
-                    continue;
-                }
-            };
-            route_sender_v4.send(route_info)?;
-        }
-        let mut routes_v6 = handle_clone.route().get(rtnetlink::IpVersion::V6).execute();
-        while let Ok(Some(route)) = routes_v6.try_next().await {
-            let route_info = match RouteInfo::try_from(route) {
-                Ok(res) => res,
-                Err(e) => {
-                    error!(error = format!("{e:#}"), "Failed to parse route info");
-                    continue;
-                }
-            };
-            router_sender.send(route_info)?;
-        }
-        anyhow::Ok(())
-    });
+        let address = addresses
+            .iter()
+            .map(|addr| AddressInfo::try_from(addr.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .inspect_err(|e| error!(error = format!("{e:#}"), "Failed to parse address info"));
 
-    let mut link_infos = vec![];
-    let mut route_infos = vec![];
+        let Ok(address) = address else {
+            continue;
+        };
 
-    while let Ok(link_info) = link_receiver.recv_timeout(Duration::from_secs(2)) {
-        debug!(link = ?link_info);
-        link_infos.push(link_info);
+        link.addresses = address;
+        links_info.push(link);
     }
 
-    while let Ok(route_info) = router_receiver.recv_timeout(Duration::from_secs(2)) {
-        debug!(route = ?route_info);
-        route_infos.push(route_info);
+    let mut routes_v4 = handle.route().get(rtnetlink::IpVersion::V4).execute();
+    while let Ok(Some(route)) = routes_v4.try_next().await {
+        let route_info = match RouteInfo::try_from(route) {
+            Ok(res) => res,
+            Err(e) => {
+                error!(error = format!("{e:#}"), "Failed to parse the route");
+                continue;
+            }
+        };
+
+        routes_info.push(route_info);
+    }
+    let mut routes_v6 = handle.route().get(rtnetlink::IpVersion::V6).execute();
+    while let Ok(Some(route)) = routes_v6.try_next().await {
+        let route_info = match RouteInfo::try_from(route) {
+            Ok(res) => res,
+            Err(e) => {
+                error!(error = format!("{e:#}"), "Failed to parse route info");
+                continue;
+            }
+        };
+        routes_info.push(route_info);
     }
 
     let dns_servers = read_resolve_conf()?;
 
     // assign matching routes to links
-    for link_info in &mut link_infos {
-        link_info.routes = route_infos
+    for link_info in &mut links_info {
+        link_info.routes = routes_info
             .iter()
             .filter(|route_info| route_info.index == link_info.index)
             .cloned()
@@ -121,7 +93,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     }
 
     // if a link can access a dns server, add it to the link
-    for link_info in &mut link_infos {
+    for link_info in &mut links_info {
         for dns_server in &dns_servers {
             if link_info.can_access(*dns_server) {
                 link_info.dns_servers.push(*dns_server);
@@ -129,7 +101,7 @@ pub fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
         }
     }
 
-    let result: Vec<NetworkInterface> = link_infos
+    let result: Vec<NetworkInterface> = links_info
         .iter()
         .map(|link_info| link_info.try_into())
         .collect::<Result<Vec<_>, _>>()?;
