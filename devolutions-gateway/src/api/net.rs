@@ -11,10 +11,16 @@ use serde::Serialize;
 use std::net::IpAddr;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    Router::new()
-        .route("/scan", axum::routing::get(handle_network_scan))
-        .route("/config", axum::routing::get(get_net_config))
-        .with_state(state)
+    let router = Router::new().route("/scan", axum::routing::get(handle_network_scan));
+
+    let router = if state.conf_handle.get_conf().debug.enable_unstable {
+        // This route is currently unstable and disabled by default.
+        router.route("/config", axum::routing::get(get_net_config))
+    } else {
+        router
+    };
+
+    router.with_state(state)
 }
 
 pub async fn handle_network_scan(
