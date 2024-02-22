@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
-use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -24,7 +23,7 @@ fn main() -> anyhow::Result<()> {
         netbios_timeout: 1000,
         netbios_interval: 20,
 
-        mdns_query_timeout: 20 * 1000,
+        mdns_query_timeout: 5 * 1000,
 
         max_wait_time: 10 * 1000,
     };
@@ -47,7 +46,7 @@ fn main() -> anyhow::Result<()> {
                 "Failed to receive from stream"
             })
         {
-            tracing::info!("Result: {:?}", res);
+            tracing::warn!("Result: {:?}", res);
         }
         stream_clone.stop();
         tracing::warn!("Network Scan finished. elapsed: {:?}", now.elapsed());

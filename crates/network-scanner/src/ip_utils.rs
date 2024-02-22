@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use anyhow::Context;
 use network_interface::{Addr, NetworkInterfaceConfig, V4IfAddr};
 
+#[derive(Debug, Clone)]
 pub struct IpAddrRange {
     lower: IpAddr,
     upper: IpAddr,
