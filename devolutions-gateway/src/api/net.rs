@@ -67,10 +67,12 @@ pub async fn handle_network_scan(
                 },
                 msg = websocket.recv() => {
                     let Some(msg) = msg else {
+                        stream.stop();
                         break;
                     };
 
                     if let Ok(Message::Close(_)) = msg {
+                        stream.stop();
                         break;
                     }
                 }
