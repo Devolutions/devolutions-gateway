@@ -47,12 +47,9 @@ pub async fn handle_network_scan(
                         let _ = websocket
                             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                 code: axum::extract::ws::close_code::NORMAL,
-                                reason: std::borrow::Cow::from("scan finished"),
+                                reason: std::borrow::Cow::from("network scan finished successfully"),
                             })))
-                            .await
-                            .inspect_err(|e| {
-                                warn!(%e, "Failed to close websocket");
-                            });
+                            .await;
                         break;
                     };
 
