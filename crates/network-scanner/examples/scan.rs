@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
 
         mdns_query_timeout: 20 * 1000,
 
-        max_wait_time: 120 * 1000,
+        max_wait_time: 10 * 1000,
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
@@ -34,13 +34,12 @@ fn main() -> anyhow::Result<()> {
         let stream = scanner.start()?;
         let stream_clone = stream.clone();
         let now = std::time::Instant::now();
-
-        tokio::task::spawn_blocking(move || {
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input).unwrap();
-            stream.stop();
+        tokio::task::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                tracing::info!("Ctrl-C received, stopping network scan");
+                stream.stop();
+            }
         });
-
         while let Ok(Some(res)) = timeout(Duration::from_secs(120), stream_clone.recv())
             .await
             .with_context(|| {
