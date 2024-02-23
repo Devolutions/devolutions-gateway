@@ -6,8 +6,10 @@
 }
 
 :host ::ng-deep .tabview-container {
+  display: flex;
   height: 100%;
   width: 100%;
+  flex-direction: column;
 }
 
 :host ::ng-deep .hidden-tab-headers .p-tabview-nav {
@@ -18,7 +20,13 @@
   background: #F9F9F9 url('../../../../../assets/images/session_background.png');
 }
 
-
 :host ::ng-deep p-tabview .p-tabview-panels {
   padding: 0;
+}
+
+:host ::ng-deep .p-tabview {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  flex-direction: column;
 }

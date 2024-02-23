@@ -1,10 +1,10 @@
-<div #sessionRdpContainer>
+<div #sessionArdContainer>
   <div *ngIf="currentStatus.isDisabled" class="session-form">
-    <web-client-form
+    <web-client-vnc-form
       [webSessionId]="webSessionId"
       [inputFormData]="inputFormData"
       [error]="rdpError"
-      [isFormExists]="true"></web-client-form>
+      [isFormExists]="true"></web-client-vnc-form>
   </div>
 
   <div #sessionToolbar
@@ -54,7 +54,7 @@
 
     <div class="session-toolbar-right-group">
       <p-button (onClick)="startTerminationProcess()"
-        styleClass="other"
+                styleClass="other"
                 label="Close Session"
                 icon="dvl-icon dvl-icon-close"
                 iconPos="left"></p-button>
@@ -67,6 +67,6 @@
     </div>
   </div>
 
-  <iron-remote-gui #ironGuiElement debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui>
+  <iron-remote-gui-vnc #ironGuiElementVnc debugwasm="INFO" verbose="true" scale="fit" flexcenter="true"></iron-remote-gui-vnc>
 
 </div>

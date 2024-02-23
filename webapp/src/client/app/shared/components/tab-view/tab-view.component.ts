@@ -9,9 +9,9 @@ import {TabView} from "primeng/tabview";
 
 import {WebSession} from "@shared/models/web-session.model";
 import {WebSessionService} from "@shared/services/web-session.service";
-import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
+
 import {BaseComponent} from "@shared/bases/base.component";
-import {DesktopSize} from "@devolutions/iron-remote-gui";
+import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
 
 @Component({
   selector: 'web-client-tab-view',
@@ -74,7 +74,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
     const newSessionTabExists: boolean = this.webSessionService.getWebSessionSnapshot().some(webSession => webSession.name === 'New Session');
 
     if (!newSessionTabExists) {
-      const newSessionTab: WebSession<Type<RdpFormComponent>, any> = new WebSession('New Session', RdpFormComponent);
+      const newSessionTab: WebSession<Type<WebClientFormComponent>, any> = new WebSession('New Session', WebClientFormComponent);
       this.webSessionService.addSession(newSessionTab);
     }
   }

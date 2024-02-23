@@ -1,34 +1,34 @@
 import {
   AfterViewInit,
-  Component,
-  ElementRef,
+  Component, ElementRef,
   EventEmitter, HostListener,
-  Input, OnDestroy,
+  Input,
+  OnDestroy,
   OnInit,
   Output,
-  ViewChild,
-  Renderer2
-} from '@angular/core';
-import {EMPTY, from, Observable, of, Subject} from "rxjs";
-import {catchError, map, switchMap, takeUntil} from 'rxjs/operators';
+  Renderer2,
+  ViewChild
+} from "@angular/core";
 import {MessageService} from "primeng/api";
+import {EMPTY, from, Observable, of, Subject} from "rxjs";
+import {catchError, map, switchMap, takeUntil} from "rxjs/operators";
 
-import { WebClientBaseComponent } from "@shared/bases/base-web-client.component";
-import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
-import {WebSessionService} from "@shared/services/web-session.service";
-import {UtilsService} from "@shared/services/utils.service";
-import {WebClientService} from "@shared/services/web-client.service";
-import {ExtractedUsernameDomain} from "@shared/services/utils/string.service";
+import {WebClientBaseComponent} from "@shared/bases/base-web-client.component";
 import {ComponentStatus} from "@shared/models/component-status.model";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {ScreenScale} from "@shared/enums/screen-scale.enum";
 import {SessionEventType} from "@shared/enums/session-event-type.enum";
-import {IronRDPConnectionParameters} from "@shared/interfaces/connection-params.interfaces";
-import {RdpFormDataInput} from "@shared/interfaces/forms.interfaces";
+import {UtilsService} from "@shared/services/utils.service";
+import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
+import {WebSessionService} from "@shared/services/web-session.service";
+import {DefaultArdPort, WebClientService} from "@shared/services/web-client.service";
+import {ArdFormDataInput} from "@shared/interfaces/forms.interfaces";
+import {IronARDConnectionParameters} from "@shared/interfaces/connection-params.interfaces";
 
-import {UserInteraction, SessionEvent, UserIronRdpError, DesktopSize} from '@devolutions/iron-remote-gui';
-import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
-
+import {UserInteraction, SessionEvent, UserIronRdpError, DesktopSize} from '@devolutions/iron-remote-gui-vnc';
+import '@devolutions/iron-remote-gui-vnc/iron-remote-gui-vnc.umd.cjs';
+import {v4 as uuidv4} from "uuid";
+import {ExtractedHostnamePort} from "@shared/services/utils/string.service";
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -40,11 +40,11 @@ enum UserIronRdpErrorKind {
 }
 
 @Component({
-  templateUrl: 'web-client-rdp.component.html',
-  styleUrls: ['web-client-rdp.component.scss'],
+  templateUrl: 'web-client-ard.component.html',
+  styleUrls: ['web-client-ard.component.scss'],
   providers: [MessageService]
 })
-export class WebClientRdpComponent extends WebClientBaseComponent implements  OnInit,
+export class WebClientArdComponent extends WebClientBaseComponent implements  OnInit,
                                                                               AfterViewInit,
                                                                               OnDestroy {
 
@@ -52,17 +52,16 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
-  @ViewChild('sessionRdpContainer') sessionContainerElement: ElementRef;
-  @ViewChild('ironGuiElement') ironGuiElement: ElementRef;
+  @ViewChild('sessionArdContainer') sessionContainerElement: ElementRef;
+  @ViewChild('ironGuiElementVnc') ironGuiElement: ElementRef;
 
-  static DVL_RDP_ICON: string = 'dvl-icon-entry-session-rdp';
+  static DVL_ARD_ICON: string = 'dvl-icon-entry-session-apple-remote-desktop';
   static DVL_WARNING_ICON: string = 'dvl-icon-warning';
-  static JET_RDP_URL: string = '/jet/rdp';
-  static JET_KDC_PROXY_URL: string = '/jet/KdcProxy';
+  static JET_ARD_URL: string = '/jet/fwd/tcp';
 
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
-  inputFormData: RdpFormDataInput;
+  inputFormData: ArdFormDataInput;
   rdpError: string;
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
@@ -79,7 +78,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
               private webClientService: WebClientService) {
     super(gatewayAlertMessageService);
   }
-
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {
     this.handleSessionToolbarDisplay(event);
@@ -241,7 +239,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       switchMap(()=> this.setScreenSizeScale(this.inputFormData.screenSize)),
       switchMap(()=> this.fetchParameters(this.inputFormData)),
       switchMap((params)=> this.fetchTokens(params)),
-      switchMap((params)=> this.webClientService.generateKdcProxyUrl(params)),
       switchMap(params => this.callConnect(params)),
       catchError(error => {
         console.error(error.message);
@@ -257,37 +254,35 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     );
   }
 
-  private fetchParameters(formData: RdpFormDataInput): Observable<IronRDPConnectionParameters> {
-    const { hostname, password, preConnectionBlob, kdcUrl } = formData;
+  private fetchParameters(formData: ArdFormDataInput): Observable<IronARDConnectionParameters> {
+    const { hostname, username, password } = formData;
+    const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
-    const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.inputFormData.username);
+    const sessionId: string = uuidv4();
+    const gatewayHttpAddress: URL = new URL(WebClientArdComponent.JET_ARD_URL+`/${sessionId}`, window.location.href);
+    const gatewayAddress: string = gatewayHttpAddress.toString().replace("http", "ws");
 
     const desktopScreenSize: DesktopSize = this.webClientService.getDesktopSize(this.inputFormData) ??
-                                          this.webSessionService.getWebSessionScreenSizeSnapshot();
+      this.webSessionService.getWebSessionScreenSizeSnapshot();
 
-    const connectionParameters: IronRDPConnectionParameters = {
-      username: extractedData.username,
+    const connectionParameters: IronARDConnectionParameters = {
+      username: username,
       password: password,
-      host: hostname,
-      domain: extractedData.domain,
-      gatewayAddress: this.getWebSocketUrl(),
+      host: extractedData.hostname,
+      port: extractedData.port,
+      domain: '',
+      gatewayAddress: gatewayAddress,
       screenSize: desktopScreenSize,
-      preConnectionBlob: preConnectionBlob,
-      kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88')
+      preConnectionBlob: '',
+      kdcUrl: '',
+      sessionId: sessionId
     };
     console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 
-  fetchTokens(params: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
-    return this.webClientService.fetchRdpToken(params).pipe(
-      switchMap(updatedParams => this.webClientService.fetchKdcToken(updatedParams))
-    );
-  }
-
-  private getWebSocketUrl(): string {
-    const gatewayHttpAddress: URL = new URL(WebClientRdpComponent.JET_RDP_URL, window.location.href);
-    return gatewayHttpAddress.toString().replace("http", "ws");
+  fetchTokens(params: IronARDConnectionParameters): Observable<IronARDConnectionParameters> {
+    return this.webClientService.fetchArdToken(params);
   }
 
   private setScreenSizeScale(screenSize: ScreenSize): Observable<void> {
@@ -297,7 +292,9 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     return of(undefined);
   }
 
-  private callConnect(connectionParameters: IronRDPConnectionParameters): Observable<void> {
+  private callConnect(connectionParameters: IronARDConnectionParameters): Observable<void> {
+    console.log('callConnect', connectionParameters)
+    this.remoteClient.setKeyboardUnicodeMode(true);
     return this.remoteClient.connect(
       connectionParameters.username,
       connectionParameters.password,
@@ -314,6 +311,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
         // Connection data processing for future
       }),
       catchError(err => {
+        console.log('err', err)
         throw err;
       })
     );
@@ -355,7 +353,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   private handleIronRDPConnectStarted(): void {
     this.loading = false;
     this.remoteClient.setVisibility(true);
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_RDP_ICON);
+    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientArdComponent.DVL_ARD_ICON);
     this.webClientConnectionSuccess();
   }
 
@@ -363,8 +361,8 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
     this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
-                                        WebClientRdpComponent.DVL_WARNING_ICON :
-                                        WebClientRdpComponent.DVL_RDP_ICON;
+      WebClientArdComponent.DVL_WARNING_ICON :
+      WebClientArdComponent.DVL_ARD_ICON;
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
@@ -385,7 +383,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       this.rdpError = this.getMessage(error.kind());
     }
 
-    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_WARNING_ICON);
+    this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientArdComponent.DVL_WARNING_ICON);
   }
 
   private getMessage(errorKind: UserIronRdpErrorKind): string {

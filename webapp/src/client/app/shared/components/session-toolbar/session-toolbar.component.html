@@ -1,0 +1,50 @@
+<div #sessionToolbar
+     id="sessionToolbar"
+     *ngIf="!isFullScreenMode || (isFullScreenMode && showToolbarDiv)"
+     [ngClass]="isFullScreenMode?'session-toolbar-layer':''"
+     class="session-toolbar">
+
+  <div class="session-toolbar-left-group" *ngIf="leftButtons.length > 0">
+    <ng-container *ngFor="let button of leftButtons; let i = index; let last = last">
+      <p-button (click)="button.action()"
+                [label]="button.label"
+                [icon]="button.icon"
+                iconPos="left"></p-button>
+
+      <div class="separator"></div>
+
+    </ng-container>
+  </div>
+
+  <div class="session-toolbar-middle-group">
+    <p-button
+      (onClick)="toggleFullscreen()"
+      label="Full Screen"
+      icon="dvl-icon dvl-icon-fullscreen"
+      iconPos="left"></p-button>
+
+    <div class="separator" *ngIf="middleButtons.length > 0"></div>
+
+    <ng-container *ngFor="let button of middleButtons; let i = index; let last = last">
+      <p-button (click)="button.action()"
+                [label]="button.label"
+                [icon]="button.icon"
+                iconPos="left"></p-button>
+
+      <div class="separator"></div>
+
+    </ng-container>
+  </div>
+
+  <div class="session-toolbar-right-group" *ngIf="rightButtons.length > 0">
+    <ng-container *ngFor="let button of rightButtons; let i = index; let last = last">
+      <p-button (click)="button.action()"
+                [label]="button.label"
+                [icon]="button.icon"
+                iconPos="left"></p-button>
+
+      <div class="separator" *ngIf="rightButtons.length > 1"></div>
+
+    </ng-container>
+  </div>
+</div>

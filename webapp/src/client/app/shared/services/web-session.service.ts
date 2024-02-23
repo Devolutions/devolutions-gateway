@@ -1,11 +1,19 @@
 import {ComponentRef, Injectable} from '@angular/core';
-import {BehaviorSubject, Observable} from 'rxjs';
+import {BehaviorSubject, Observable, of} from 'rxjs';
 import {map} from "rxjs/operators";
+import {FormGroup} from "@angular/forms";
 
 import {WebSession} from "@shared/models/web-session.model";
+import {Protocol} from "@shared/enums/web-client-protocol.enum";
+import {AutoCompleteInput} from "@shared/interfaces/forms.interfaces";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 import {DesktopSize} from "@devolutions/iron-remote-gui";
-import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
+import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
+import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
+import {WebClientTelnetComponent} from "@gateway/modules/web-client/telnet/web-client-telnet.component";
+import {WebClientSshComponent} from "@gateway/modules/web-client/ssh/web-client-ssh.component";
+import {WebClientVncComponent} from "@gateway/modules/web-client/vnc/web-client-vnc.component";
+import {WebClientArdComponent} from "@gateway/modules/web-client/ard/web-client-ard.component";
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -26,6 +34,22 @@ export class WebSessionService {
   private webSessionScreenSizeSubject: BehaviorSubject<DesktopSize>;
   private webSessionScreenSizeIndex$: Observable<DesktopSize>;
 
+  private protocolComponentMap = {
+    [Protocol.RDP]: WebClientRdpComponent,
+    [Protocol.Telnet]: WebClientTelnetComponent,
+    [Protocol.SSH]: WebClientSshComponent,
+    [Protocol.VNC]: WebClientVncComponent,
+    [Protocol.ARD]: WebClientArdComponent,
+  };
+
+  private protocolIconMap = {
+    [Protocol.RDP]: WebClientRdpComponent.DVL_RDP_ICON,
+    [Protocol.Telnet]: WebClientTelnetComponent.DVL_TELNET_ICON,
+    [Protocol.SSH]: WebClientSshComponent.DVL_SSH_ICON,
+    [Protocol.VNC]: WebClientVncComponent.DVL_VNC_ICON,
+    [Protocol.ARD]: WebClientArdComponent.DVL_ARD_ICON,
+  };
+
   constructor(private dynamicComponentService: DynamicComponentService) {
     this.initializeWebSessionService();
   }
@@ -36,6 +60,27 @@ export class WebSessionService {
 
   public get numberOfAllSessions(): number {
     return this.webSessionDataSubject.getValue().length;
+  }
+
+  createWebSession(form: FormGroup, protocol: Protocol): Observable<WebSession<any, any>> {
+    const submittedData = form.value;
+    submittedData.hostname = this.processHostname(submittedData.autoComplete);
+
+    const sessionComponent = this.protocolComponentMap[protocol];
+    const iconName: string = this.protocolIconMap[protocol];
+
+    if (!sessionComponent) {
+      console.error(`Creating session, unsupported protocol: ${protocol}`)
+      return;
+    }
+
+    const webSession = new WebSession(
+      submittedData.hostname,
+      sessionComponent,
+      submittedData,
+      iconName
+    );
+    return of(webSession);
   }
 
   addSession(newSession: WebSession<any, any>): void {
@@ -84,9 +129,9 @@ export class WebSessionService {
     const currentSessions = this.webSessionDataSubject.value;
     const index: number = currentSessions.findIndex(session => session.id === updateWebSessionId);
     const webSession: WebSession<any, any> = currentSessions[index];
-    webSession.icon = icon;
 
     if (index !== -1) {
+      webSession.icon = icon;
       currentSessions[index] = webSession;
       this.webSessionDataSubject.next(currentSessions);
     } else {
@@ -196,7 +241,7 @@ export class WebSessionService {
     if (typeof session.componentRef.instance.sendTerminateSessionCmd === 'function') {
       session.componentRef.instance.sendTerminateSessionCmd();
       console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} terminated.`);
-    } else if (session.componentRef.componentType !== RdpFormComponent) {
+    } else if (session.componentRef.componentType !== WebClientFormComponent) {
       console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} has no terminate command.`);
     }
   }
@@ -214,5 +259,13 @@ export class WebSessionService {
 
   private isWebSessionValid(WebSession: WebSession<any, any>):ComponentRef<any> {
     return WebSession && WebSession.componentRef
+  }
+
+  private processHostname(autoCompleteInput: AutoCompleteInput): string {
+    if (typeof autoCompleteInput === 'string') {
+      return autoCompleteInput;
+    }
+
+    return autoCompleteInput?.hostname || '';
   }
 }
