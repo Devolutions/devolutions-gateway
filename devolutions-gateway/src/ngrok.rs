@@ -105,18 +105,18 @@ impl NgrokSession {
                     .iter()
                     .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
 
-                // HACK: Find the subcribtion plan. This uses ngrok-rs internal API, so it’s not great.
-                // Ideally, we could use the `Session` to find out about the subscribtion plan without dirty tricks.
+                // HACK: Find the subscription plan. This uses ngrok-rs internal API, so it’s not great.
+                // Ideally, we could use the `Session` to find out about the subscription plan without dirty tricks.
                 match builder
                     .clone()
-                    .forwards_to("Devolutions Gateway Subscribtion probe")
+                    .forwards_to("Devolutions Gateway Subscription probe")
                     .listen()
                     .await
                 {
                     // https://ngrok.com/docs/errors/err_ngrok_9017/
                     // "Your account is not authorized to use ip restrictions."
                     Err(ngrok::session::RpcError::Response(e)) if e.error_code.as_deref() == Some("ERR_NGROK_9017") => {
-                        info!("Detected a ngrok free plan subscribtion. IP restriction rules are disabled.");
+                        info!("Detected a ngrok free plan subscription. IP restriction rules are disabled.");
 
                         // Revert the builder to before applying the CIDR rules.
                         builder = before_cidrs;
