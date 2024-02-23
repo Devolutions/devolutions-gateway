@@ -4,7 +4,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
-## 2024.1.0 (2023-02-22)
+## 2024.1.0 (2023-02-26)
 
 ### Features
 
