@@ -18,8 +18,17 @@
             <p-dropdown id="protocol"
                         appendTo="body"
                         formControlName="protocol"
-                        [options]="protocolSelectItems"
-                        required></p-dropdown>
+                        [options]="protocolOptions"
+                        (onChange)="onProtocolChange($event.value)"
+                        pTooltip="{{protocolSelectedTooltip}}"
+                        required>
+              <ng-template let-item pTemplate="item">
+                <div pTooltip="{{item.tooltipText}}" tooltipPosition="right">
+                  {{item.label}}
+                </div>
+              </ng-template>
+
+            </p-dropdown>
           </div>
         </div>
 
@@ -28,12 +37,12 @@
           <div class="gateway-form-input">
             <span class="p-fluid" style="width: 100%">
               <p-autoComplete formControlName="autoComplete"
-                  id="hostname"
-                  field="hostname"
-                  placeholder="Enter hostname"
-                  [suggestions]="filteredHostnames"
-                  [dropdown]="isHostnamesExists()"
-                  (completeMethod)="filterHostname($event)" required></p-autoComplete>
+                              id="hostname"
+                              field="hostname"
+                              placeholder="Enter hostname"
+                              [suggestions]="filteredHostnames"
+                              [dropdown]="isHostnamesExists()"
+                              (completeMethod)="filterHostname($event)" required></p-autoComplete>
             </span>
           </div>
           <div class="form-helper-text"
@@ -42,7 +51,18 @@
           </div>
         </div>
 
-        <div class="col-12 gateway-form-group">
+        <div class="col-4 gateway-form-group col-pad-right-lg" *ngIf="showAuthModeInput()">
+          <label for="protocol">Authentication</label>
+          <div class="gateway-form-input">
+            <p-dropdown id="authSettings"
+                        appendTo="body"
+                        formControlName="authMode"
+                        [options]="authModeOptions">
+            </p-dropdown>
+          </div>
+        </div>
+
+        <div class="col-12 gateway-form-group" *ngIf="showUsernameInput()">
           <label for="username">Username</label>
           <div class="gateway-form-input">
             <input pInputText
@@ -59,7 +79,7 @@
           </div>
         </div>
 
-        <div class="col-12 gateway-form-group">
+        <div class="col-12 gateway-form-group" *ngIf="showPasswordInput()">
           <label for="password">Password</label>
           <div class="gateway-form-input password-container">
             <input pPassword
@@ -80,11 +100,11 @@
           </div>
         </div>
 
-        <div class="col-12 gateway-form-group">
-            <a href="#" (click)="toggleMoreSettings($event)">More Settings
-              <span *ngIf="!isMoreSettingsOpened()" >+</span>
-              <span *ngIf="isMoreSettingsOpened()">-</span>
-            </a>
+        <div class="col-12 gateway-form-group"  *ngIf="showMoreSettingsInputs()">
+          <a href="#" (click)="toggleMoreSettings($event)">More Settings
+            <span *ngIf="!isMoreSettingsOpened()" >+</span>
+            <span *ngIf="isMoreSettingsOpened()">-</span>
+          </a>
         </div>
 
         <div *ngIf="showMoreSettings" class="col-12 gateway-form-group">
@@ -151,7 +171,7 @@
             </div>
             <div class="form-helper-text"
                  *ngIf="connectSessionForm.get('kdcUrl').hasError('invalidKdcProtocol') && connectSessionForm.get('kdcUrl').touched">
-                  Invalid URL - Must start with tcp:// or udp:// .
+              Invalid URL - Must start with tcp:// or udp:// .
             </div>
           </div>
 
@@ -170,9 +190,9 @@
 
         <div class="col-12 gateway-form-group" style="text-align: right;">
           <p-button [disabled]="connectSessionForm.invalid"
-                      [type]="'submit'"
-                      [label]="'Connect Session'"
-                      (onClick)="onConnectSession()">
+                    [type]="'submit'"
+                    [label]="'Connect Session'"
+                    (onClick)="onConnectSession()">
           </p-button>
         </div>
 

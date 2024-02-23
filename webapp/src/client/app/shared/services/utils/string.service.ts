@@ -1,8 +1,14 @@
 import {UtilsService} from '../utils.service';
+import {DefaultSshPort} from "@shared/services/web-client.service";
 
 export interface ExtractedUsernameDomain {
   username: string,
   domain: string
+}
+
+export interface ExtractedHostnamePort {
+  hostname: string,
+  port: number
 }
 
 export class StringService {
@@ -42,6 +48,20 @@ export class StringService {
       return url;
     } else {
       return `${url}${defaultPort}`;
+    }
+  }
+
+  extractHostnameAndPort(urlString: string, DefaultPort: number): ExtractedHostnamePort {
+    // This regex assumes the URL might start with a protocol and captures hostname and optional port
+    const regex = /^(?:.*:\/\/)?([^:/]+)(?::(\d+))?/;
+    const match = urlString.match(regex);
+
+    if (match) {
+      const hostname: string = match[1];
+      const port: number = match[2] ? parseInt(match[2], 10) : DefaultPort;
+      return { hostname, port };
+    } else {
+      return null;
     }
   }
 

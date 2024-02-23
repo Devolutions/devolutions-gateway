@@ -1,12 +1,17 @@
 import {ComponentRef, Type} from "@angular/core";
 import { v4 as uuidv4 } from 'uuid';
 
-import {RdpFormComponent} from "@gateway/modules/web-client/rdp/form/rdp-form.component";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
+import {WebClientTelnetComponent} from "@gateway/modules/web-client/telnet/web-client-telnet.component";
+import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
+import {WebClientSshComponent} from "@gateway/modules/web-client/ssh/web-client-ssh.component";
 import {ComponentStatus} from "@shared/models/component-status.model";
 import {DesktopSize} from "@devolutions/iron-remote-gui";
 
-export type WebSessionComponentType = Type<RdpFormComponent> | Type<WebClientRdpComponent>;
+export type WebSessionComponentType = Type<WebClientFormComponent> |
+                                      Type<WebClientTelnetComponent> |
+                                      Type<WebClientSshComponent> |
+                                      Type<WebClientRdpComponent>;
 
 export class WebSession<WebSessionComponentType, TData> {
   public static readonly TOOLBAR_SIZE: number = 44;

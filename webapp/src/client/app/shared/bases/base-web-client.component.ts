@@ -5,6 +5,8 @@ import {GatewayAlertMessageService} from "@shared/components/gateway-alert-messa
 @Directive()
 export abstract class WebClientBaseComponent extends BaseComponent {
 
+  static DVL_WARNING_ICON: string = 'dvl-icon-warning';
+
   hideSpinnerOnly: boolean = false;
   error: string;
 
@@ -12,7 +14,7 @@ export abstract class WebClientBaseComponent extends BaseComponent {
     super();
   }
 
-  abstract removeWebClientGuiElement(): void ;
+  abstract removeWebClientGuiElement(): void;
 
   protected webClientConnectionSuccess(message?:string): void {
     this.hideSpinnerOnly = true;
@@ -46,13 +48,5 @@ export abstract class WebClientBaseComponent extends BaseComponent {
     }
     this.gatewayAlertMessageService.addInfo(message);
     console.warn(message);
-  }
-
-  protected getProtocol(gatewayUrl: URL): string {
-    return gatewayUrl.protocol.toUpperCase().indexOf('HTTPS') > -1 ? 'wss' : 'ws';
-  }
-
-  protected ensureEndWithSlash(path: string): string {
-    return path.endsWith('/') ? path : path + '/';
   }
 }
