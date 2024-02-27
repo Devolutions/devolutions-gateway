@@ -158,7 +158,7 @@ impl TryFrom<&str> for ServiceType {
             "_telnet._tcp" => Ok(ServiceType::Telnet),
             "_ldap._tcp" => Ok(ServiceType::Ldap),
             "_ldaps._tcp" => Ok(ServiceType::Ldaps),
-            // Ard is a special type of Vnc
+            // ARD is a variant of RFB (VNC) protocol.
             "_rfb._tcp" => Ok(ServiceType::Vnc),
             "_rdp._tcp" | "_rdp._udp" => Ok(ServiceType::Rdp),
             _ => Err(anyhow::anyhow!("unknown protocol: {}", value)),
