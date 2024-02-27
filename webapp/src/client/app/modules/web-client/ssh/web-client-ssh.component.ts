@@ -73,7 +73,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   ngOnInit(): void {
-    sshLoggingService.setLevel(LoggingLevel.DEBUG)
+    sshLoggingService.setLevel(LoggingLevel.FATAL)
     this.removeWebClientGuiElement();
     this.initializeStatus();
 
@@ -214,7 +214,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       gatewayAddress: gatewayAddress,
       sessionId: sessionId
     }
-    console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 

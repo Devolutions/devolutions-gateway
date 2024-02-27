@@ -275,7 +275,6 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       preConnectionBlob: preConnectionBlob,
       kdcUrl: this.utils.string.ensurePort(kdcUrl, ':88')
     };
-    console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 
