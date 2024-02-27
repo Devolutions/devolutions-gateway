@@ -46,7 +46,7 @@ impl MdnsDaemon {
     }
 }
 
-// Ard is the same as Vnc
+// ARD is a variant of the RFB (VNC) protocol, so it’s not included in this list.
 const SERVICE_TYPES_INTERESTED: [ServiceType; 10] = [
     ServiceType::Http,
     ServiceType::Https,
