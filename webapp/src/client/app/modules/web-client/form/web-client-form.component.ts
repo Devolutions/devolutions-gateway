@@ -72,8 +72,6 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    this.messages = [];
-
     if (changes.error && this.error) {
       let message: string = this.error;
 
@@ -410,7 +408,7 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
 
   private setupProtocolDropdown(): Observable<void> {
     this.protocolOptions = WebClientProtocol.getSelectItems();
-    this.updateProtocolTooltip(this.protocolOptions[0].value);
+    this.updateProtocolTooltip(this.getSelectedProtocol());
     this.subscribeToFormProtocol();
     return of(undefined);
   }

@@ -10,8 +10,8 @@ export enum Protocol {
 
 enum Tooltips {
   'Remote Desktop Protocol' = 'RDP',
-  // 'Telnet Protocol' = 'Telnet',
-  // 'Secure Shell' = 'SSH',
+  'Teletype Network' = 'Telnet',
+  'Secure Shell' = 'SSH',
   'Virtual Network Computing' = 'VNC',
   'Apple Remote Desktop' = 'ARD'
 }
