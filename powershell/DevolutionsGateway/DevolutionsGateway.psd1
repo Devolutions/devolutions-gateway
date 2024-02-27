@@ -106,7 +106,7 @@
         PSData = @{
 
             # Tags applied to this module. These help with module discovery in online galleries.
-            Tags = 'Devolutions', 'Gateway', 'Wayk', 'Bastion', 'WaykBastion', 'Windows', 'macOS', 'Linux', 'RemoteDesktop'
+            Tags = 'Devolutions', 'Gateway', 'RDM', 'DVLS', 'Hub', 'Windows', 'macOS', 'Linux', 'RemoteDesktop', 'VPN', 'Proxy'
 
             # A URL to the license for this module.
             LicenseUri = 'https://github.com/Devolutions/devolutions-gateway/tree/master/powershell/LICENSE-MIT'
