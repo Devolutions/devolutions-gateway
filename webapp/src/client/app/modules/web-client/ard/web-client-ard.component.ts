@@ -277,7 +277,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
       kdcUrl: '',
       sessionId: sessionId
     };
-    console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 
@@ -293,7 +292,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private callConnect(connectionParameters: IronARDConnectionParameters): Observable<void> {
-    console.log('callConnect', connectionParameters)
     this.remoteClient.setKeyboardUnicodeMode(true);
     return this.remoteClient.connect(
       connectionParameters.username,
@@ -311,7 +309,6 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
         // Connection data processing for future
       }),
       catchError(err => {
-        console.log('err', err)
         throw err;
       })
     );

@@ -118,7 +118,6 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
       switchMap((webSession) => this.manageWebSessionSubject(webSession))
     ).subscribe(
       (webSession) => {
-        console.log('Debug webSession', webSession)
         this.addHostnameToStorage(webSession?.data?.hostname);
       }
     );

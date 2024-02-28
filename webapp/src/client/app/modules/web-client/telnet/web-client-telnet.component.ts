@@ -215,7 +215,6 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       gatewayAddress: gatewayAddress,
       sessionId: sessionId
     }
-    console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 

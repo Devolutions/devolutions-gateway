@@ -88,7 +88,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   ngOnInit(): void {
-    console.log('init')
     this.removeWebClientGuiElement();
     this.initializeStatus();
   }
@@ -277,7 +276,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
       kdcUrl: '',
       sessionId: sessionId
     };
-    console.log('Debug: connectionParameters', connectionParameters)
     return of(connectionParameters);
   }
 
@@ -293,8 +291,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   private callConnect(connectionParameters: IronVNCConnectionParameters): Observable<void> {
-    console.log('callConnect', connectionParameters)
-
     this.remoteClient.setKeyboardUnicodeMode(true);
 
     return this.remoteClient.connect(
@@ -313,7 +309,6 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
         // Connection data processing for future
       }),
       catchError(err => {
-        console.log('err', err)
         throw err;
       })
     );

@@ -240,9 +240,9 @@ export class WebSessionService {
   private terminateSession(session: WebSession<any, any>): void {
     if (typeof session.componentRef.instance.sendTerminateSessionCmd === 'function') {
       session.componentRef.instance.sendTerminateSessionCmd();
-      console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} terminated.`);
+      console.warn(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} terminated.`);
     } else if (session.componentRef.componentType !== WebClientFormComponent) {
-      console.log(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} has no terminate command.`);
+      console.warn(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} has no terminate command.`);
     }
   }
 
