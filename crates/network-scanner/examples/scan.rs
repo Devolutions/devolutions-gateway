@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use network_scanner::scanner::{NetworkScanner, NetworkScannerParams};
+use tokio::time::timeout;
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
@@ -25,7 +26,7 @@ fn main() -> anyhow::Result<()> {
 
         mdns_query_timeout: 5 * 1000,
 
-        max_wait_time: 120 * 1000,
+        max_wait_time: 10 * 1000,
     };
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
@@ -33,8 +34,13 @@ fn main() -> anyhow::Result<()> {
         let stream = scanner.start()?;
         let stream_clone = stream.clone();
         let now = std::time::Instant::now();
-        while let Ok(Some(res)) = stream_clone
-            .recv_timeout(Duration::from_secs(120))
+        tokio::task::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                tracing::info!("Ctrl-C received, stopping network scan");
+                stream.stop();
+            }
+        });
+        while let Ok(Some(res)) = timeout(Duration::from_secs(120), stream_clone.recv())
             .await
             .with_context(|| {
                 tracing::error!("Failed to receive from stream");

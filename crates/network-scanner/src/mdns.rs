@@ -19,10 +19,35 @@ impl MdnsDaemon {
     pub fn get_service_daemon(&self) -> mdns_sd::ServiceDaemon {
         self.service_daemon.clone()
     }
+
+    pub fn stop(&self) {
+        let receiver = match self.service_daemon.shutdown() {
+            Ok(receiver) => receiver,
+            Err(e) => {
+                // if e is try again, we should try again, but only once
+                let result = if matches!(e, mdns_sd::Error::Again) {
+                    self.service_daemon.shutdown()
+                } else {
+                    Err(e)
+                };
+
+                let Ok(receiver) = result.inspect_err(|e| {
+                    warn!(error = %e, "Failed to shutdown service daemon");
+                }) else {
+                    return;
+                };
+
+                receiver
+            }
+        };
+
+        // Receive the last event (Shutdown), preventing the receiver from being dropped, avoid logging an error from the sender side(the mdns crate)
+        let _ = receiver.recv_timeout(std::time::Duration::from_millis(100));
+    }
 }
 
-const SERVICE_TYPES_INTERESTED: [ServiceType; 11] = [
-    ServiceType::Ard,
+// ARD is a variant of the RFB (VNC) protocol, so it’s not included in this list.
+const SERVICE_TYPES_INTERESTED: [ServiceType; 10] = [
     ServiceType::Http,
     ServiceType::Https,
     ServiceType::Ldap,
@@ -52,6 +77,13 @@ pub fn mdns_query_scan(
             service_daemon.clone(),
             service_name.clone(),
         );
+        let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
+            let err_msg = format!("failed to browse for service: {}", service_name);
+            error!(error = err_msg);
+            err_msg
+        })?;
+
+        let receiver_clone = receiver.clone();
         task_manager
             .with_timeout(query_duration)
             .when_finish(move || {
@@ -59,14 +91,11 @@ pub fn mdns_query_scan(
                 if let Err(e) = service_daemon_clone.stop_browse(service_name_clone.as_ref()) {
                     warn!(error = %e, "Failed to stop browsing for service");
                 }
+                // Receive the last event (StopBrowse), preventing the receiver from being dropped,this will satisfy the sender side to avoid loging an error
+                let _ = receiver_clone.recv_timeout(std::time::Duration::from_millis(10));
             })
             .spawn(move |_| async move {
                 debug!(?service_name, "Starting browse for service");
-                let receiver = service_daemon.browse(service_name.as_ref()).with_context(|| {
-                    let err_msg = format!("failed to browse for service: {}", service_name);
-                    error!(error = err_msg);
-                    err_msg
-                })?;
 
                 while let Ok(service_event) = receiver.recv_async().await {
                     debug!(?service_event);
@@ -129,9 +158,8 @@ impl TryFrom<&str> for ServiceType {
             "_telnet._tcp" => Ok(ServiceType::Telnet),
             "_ldap._tcp" => Ok(ServiceType::Ldap),
             "_ldaps._tcp" => Ok(ServiceType::Ldaps),
-            // https://jonathanmumm.com/tech-it/mdns-bonjour-bible-common-service-strings-for-various-vendors/
-            // OSX Screen Sharing
-            "_rfb._tcp" => Ok(ServiceType::Ard),
+            // ARD is a variant of RFB (VNC) protocol.
+            "_rfb._tcp" => Ok(ServiceType::Vnc),
             "_rdp._tcp" | "_rdp._udp" => Ok(ServiceType::Rdp),
             _ => Err(anyhow::anyhow!("unknown protocol: {}", value)),
         }
