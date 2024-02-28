@@ -50,6 +50,7 @@ pub async fn handle_network_scan(
                                 reason: std::borrow::Cow::from("network scan finished successfully"),
                             })))
                             .await;
+
                         break;
                     };
 
@@ -62,30 +63,36 @@ pub async fn handle_network_scan(
 
                     if let Err(error) = websocket.send(Message::Text(response)).await {
                         warn!(%error, "Failed to send message");
-                        stream.stop();
-                        // It is very likely that the websocket is already closed, but send it as a precaution
+
+                        // It is very likely that the websocket is already closed, but send it as a precaution.
                         let _ = websocket
                             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                                 code: axum::extract::ws::close_code::ABNORMAL,
                                 reason: std::borrow::Cow::from("network scan finished prematurely."),
                             })))
                             .await;
+
                         break;
                     }
                 },
                 msg = websocket.recv() => {
                     let Some(msg) = msg else {
-                        stream.stop();
                         break;
                     };
 
                     if let Ok(Message::Close(_)) = msg {
-                        stream.stop();
                         break;
                     }
                 }
             }
         }
+
+        // Stop the network scanner, whatever the code path (error or not).
+        stream.stop();
+
+        // In case the websocket is not closed yet.
+        // If the logic above is correct, it’s not necessary.
+        let _ = websocket.close().await;
 
         info!("Network scan finished");
     });
