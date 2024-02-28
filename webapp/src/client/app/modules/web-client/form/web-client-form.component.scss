@@ -17,6 +17,8 @@
 }
 
 :host ::ng-deep .p-message.p-message-error {
+  margin-bottom: 10px;
+
   timescircleicon {
     display: inline !important;
   }
@@ -65,7 +67,6 @@
 }
 
 .box-content {
-  overflow: auto;
   max-height: 100%;
 }
 
