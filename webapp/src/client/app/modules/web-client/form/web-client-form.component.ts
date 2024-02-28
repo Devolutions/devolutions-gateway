@@ -14,6 +14,11 @@ import {StorageService} from "@shared/services/utils/storage.service";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
+import {WebClientService} from "@shared/services/web-client.service";
+
+import {
+  sessionTokenParameters,
+} from "@shared/interfaces/connection-params.interfaces";
 
 
 interface FormInputVisibility {
@@ -21,6 +26,12 @@ interface FormInputVisibility {
   showUsernameInput?: boolean;
   showPasswordInput?: boolean;
   showMoreSettingsInputs?: boolean;
+}
+
+class DetectedServer {
+  hostname:string;
+  ip:string;
+  protocol:string;
 }
 
 @Component({
@@ -61,9 +72,12 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
 
+  detectServers: DetectedServer[] = [];
+
   constructor(private webSessionService: WebSessionService,
               private storageService: StorageService,
-              private formBuilder: FormBuilder) {
+              private formBuilder: FormBuilder,
+              private webClientService: WebClientService) {
     super();
   }
 
@@ -136,6 +150,29 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
 
   isHostnamesExists(): boolean {
     return this.hostnames?.length > 0;
+  }
+
+  iconForProtocol(protocol:string): string {
+    if (protocol=="ard") {
+      return "dvl-icon-entry-session-apple-remote-desktop";
+    }
+    if (protocol=="winrm-https-pwsh") {
+      return "dvl-icon-entry-PowerShellRemoteConsole";
+    }
+    if (protocol=="winrm-http-pwsh") {
+      return "dvl-icon-entry-PowerShellRemoteConsole";
+    }
+    if (protocol=="ldap") {
+      return "dvl-icon-entry-ActiveDirectoryDashboard";
+    }
+    if (protocol=="ldaps") {
+      return "dvl-icon-entry-ActiveDirectoryDashboard";
+    }
+    return "dvl-icon-entry-session-"+protocol;
+  }
+
+  clickServer(item:DetectedServer) {
+    console.log(item);
   }
 
   filterHostname(event: any): void {
@@ -360,6 +397,38 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
         return EMPTY;
       }),
     ).subscribe();
+
+    this.createWebSocket();
+  }
+
+  private createWebSocket() {
+    const data: sessionTokenParameters = {
+      "content_type": "NETSCAN",
+      "lifetime": 60
+    };
+
+    this.webClientService.fetchToken(data).toPromise().then((token) => {
+      const gatewayHttpAddress: URL = new URL("/jet/net/scan?token="+token, window.location.href);
+      var wsurl = gatewayHttpAddress.toString().replace("http", "ws");
+
+      let ws = new WebSocket(wsurl);
+
+      let supportedProcotols = ["ard", "vnc", "rdp", "ssh", "telnet", "ldap", "winrm-http-pwsh", "ldaps", "winrm-https-pwsh"];
+
+      ws.addEventListener("message", (event) => {
+        var d = Object.assign(new DetectedServer(), JSON.parse(event.data))
+        if (supportedProcotols.includes(d.protocol))
+        {
+          if (!this.detectServers.includes(d)) {
+            this.detectServers.push(d);
+            this.detectServers.sort((n1, n2) => n1.hostname > n2.hostname ? 1:-1);
+          }
+        }
+        else {
+          console.log(event.data);
+        }
+      });
+    });
   }
 
   private populateAutoCompleteLists(): Observable<void> {
