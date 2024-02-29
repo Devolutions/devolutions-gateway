@@ -251,7 +251,7 @@ jobs:
           # workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
           Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
           # Swap the latest msi for the legacy one
-          $RootPath = Join-Path devolutions-gateway Windows x86_64
+          $RootPath = Join-Path devolutions-gateway windows x86_64
           $NewMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
           Remove-Item $NewMsi -Force
           $OldMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
@@ -388,7 +388,7 @@ jobs:
         shell: pwsh
         run: |
           # Swap the latest msi for the legacy one
-          $RootPath = Join-Path Windows x86_64
+          $RootPath = Join-Path windows x86_64
           $NewMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Where-Object { $_.Name -NotLike "*legacy*"} | Select -First 1
           Remove-Item $NewMsi -Force
           $OldMsi = Get-ChildItem -Path "$RootPath" -Recurse -Include '*DevolutionsGateway*.msi' | Select -First 1
