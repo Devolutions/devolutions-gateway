@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "devolutions-gateway"
-version = "2024.1.0"
+version = "2024.1.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1827,7 +1827,7 @@ dependencies = [
 
 [[package]]
 name = "jetsocat"
-version = "2024.1.0"
+version = "2024.1.1"
 dependencies = [
  "anyhow",
  "dirs-next",

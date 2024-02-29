@@ -4,7 +4,37 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
-## 2024.1.0 (2023-02-26)
+## 2024.1.1 (2024-02-29)
+
+### Features
+
+- _webapp_: bump IronVNC and IronRDP packages ([#730](https://github.com/Devolutions/devolutions-gateway/issues/730)) ([dd46b48559](https://github.com/Devolutions/devolutions-gateway/commit/dd46b4855901176407384023fc7abf8d720e81e6)) 
+
+  - RDP: enable performance flags
+  - VNC: disable MVS codec for ARD
+  - VNC: clipboard support
+
+### Bug Fixes
+
+- _installer_: layout tweaks for better HiDPI support ([#724](https://github.com/Devolutions/devolutions-gateway/issues/724)) ([dd864ba80e](https://github.com/Devolutions/devolutions-gateway/commit/dd864ba80ec7cb7799584a168fbfd747e067c333)) 
+
+- _webapp_: disable debug logging by default ([#726](https://github.com/Devolutions/devolutions-gateway/issues/726)) ([27d70c9af4](https://github.com/Devolutions/devolutions-gateway/commit/27d70c9af44581567b78652b32b7a6e57da76e79)) 
+
+  Remove console.logs and turn off debugwasm for IronRDP and IronVNC.
+
+- _dgw_: UI issues in sidebar menu and web form ([#727](https://github.com/Devolutions/devolutions-gateway/issues/727)) ([6b605780c3](https://github.com/Devolutions/devolutions-gateway/commit/6b605780c3119c7e91b6e01db02d3c94e812a439)) 
+
+- _dgw_: fix Linux issues with network scanner ([#715](https://github.com/Devolutions/devolutions-gateway/issues/715)) ([0c6f644724](https://github.com/Devolutions/devolutions-gateway/commit/0c6f6447247883cb125df6d568ebe37e3106451c)) 
+
+- _webapp_: update SSH and Telnet packages ([#728](https://github.com/Devolutions/devolutions-gateway/issues/728)) ([5bc14ec9c7](https://github.com/Devolutions/devolutions-gateway/commit/5bc14ec9c7da9404dd9ec134af7a471c13525c9b)) 
+
+  Fixes a bug when the hostname is incorrect where the connection to the Gateway was being lost, and close session elegantly.
+
+### Documentation
+
+- _pwsh_: update PSGallery tags ([#725](https://github.com/Devolutions/devolutions-gateway/issues/725)) ([edd9fcff6b](https://github.com/Devolutions/devolutions-gateway/commit/edd9fcff6bbdc51789b67b8efa440882c8ca5f0c)) 
+
+## 2024.1.0 (2024-02-26)
 
 ### Features
 
