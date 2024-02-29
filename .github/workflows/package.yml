@@ -307,18 +307,6 @@ jobs:
 
           ./ci/tlk.ps1 package -PackageOption assemble
 
-      - name: Repackage legacy msi
-        if: matrix.project == 'devolutions-gateway'
-        shell: pwsh
-        run: |
-          $PackageRoot = Join-Path ${{ runner.temp }} devolutions-gateway
-          $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
-          $Env:DGATEWAY_PACKAGE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*-legacy.msi' | Select -First 1
-          $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
-          $Env:DGATEWAY_PSMODULE_CLEAN = "1"
-
-          ./ci/tlk.ps1 package -PackageOption legacy
-
       - name: Sign packages
         if: matrix.project == 'devolutions-gateway'
         shell: pwsh

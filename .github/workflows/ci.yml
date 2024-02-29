@@ -439,13 +439,6 @@ jobs:
             
           ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
-          if ($Env:RUNNER_OS -eq "Windows") {
-            $MsiFilename = "${{ steps.load-variables.outputs.dgateway-package }}"
-            $BaseMsiFileName = $MsiFilename.TrimEnd(".msi")
-            $Env:DGATEWAY_PACKAGE = $BaseMsiFileName + "-legacy.msi"
-            ./ci/tlk.ps1 package -PackageOption legacy -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
-          }
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
