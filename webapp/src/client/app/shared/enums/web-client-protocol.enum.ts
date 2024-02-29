@@ -16,6 +16,8 @@ enum Tooltips {
   'Apple Remote Desktop' = 'ARD'
 }
 
+export type ProtocolControlMap = { [key in Protocol]?: string[] };
+
 namespace WebClientProtocol {
 
   export function getEnumKey(value: Protocol): string {
@@ -38,6 +40,17 @@ namespace WebClientProtocol {
 
         return { label, value, tooltipText };
       });
+  }
+
+  export function getProtocolFormControlMap(): ProtocolControlMap {
+    const protocolControlMap: { [key in Protocol]?: string[] } = {
+      [Protocol.Telnet]: ['autoComplete', 'hostname'],
+      [Protocol.SSH]: ['autoComplete', 'hostname', 'username', 'password'],
+      [Protocol.VNC]: ['autoComplete', 'hostname', 'authMode', 'username', 'password'],
+      [Protocol.ARD]: ['autoComplete', 'hostname', 'username', 'password'],
+      [Protocol.RDP]: ['autoComplete', 'hostname', 'username', 'password', 'screenSize', 'customWidth', 'customHeight', 'kdcUrl', 'preConnectionBlob'],
+    };
+    return  protocolControlMap;
   }
 }
 export {WebClientProtocol};

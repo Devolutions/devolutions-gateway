@@ -1,13 +1,13 @@
 import {Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges} from '@angular/core';
 import {AbstractControl, FormBuilder, FormControl, FormGroup, ValidatorFn, Validators} from "@angular/forms";
 import {Message, SelectItem} from "primeng/api";
-import {catchError, switchMap, takeUntil} from "rxjs/operators";
+import {catchError, map, switchMap, takeUntil, tap} from "rxjs/operators";
 import {EMPTY, Observable, of} from "rxjs";
 
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebSession} from "@shared/models/web-session.model";
 import {ComponentStatus} from "@shared/models/component-status.model";
-import {Protocol, WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
+import {Protocol, WebClientProtocol, ProtocolControlMap } from "@shared/enums/web-client-protocol.enum";
 import {AuthMode, WebClientAuthMode} from "@shared/enums/web-client-auth-mode.enum";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {StorageService} from "@shared/services/utils/storage.service";
@@ -105,15 +105,16 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     return this.getCurrentProtocolInputVisibility().showMoreSettingsInputs ?? false;
   }
 
-  onProtocolChange(value: any): void {
-    this.updateProtocolTooltip(value);
-  }
-
   onConnectSession(): void {
-    this.webSessionService.createWebSession(this.connectSessionForm, this.getSelectedProtocol()).pipe(
+    this.processFormData(this.connectSessionForm).pipe(
       takeUntil(this.destroyed$),
+      switchMap((formToSubmit) => this.webSessionService.createWebSession(formToSubmit, this.getSelectedProtocol())),
       switchMap((webSession) => this.manageScreenSize(webSession)),
-      switchMap((webSession) => this.manageWebSessionSubject(webSession))
+      switchMap((webSession) => this.manageWebSessionSubject(webSession)),
+      catchError(error => {
+        console.error('Failed to process web session:', error);
+        return EMPTY;
+      })
     ).subscribe(
       (webSession) => {
         this.addHostnameToStorage(webSession?.data?.hostname);
@@ -174,11 +175,31 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   private updateProtocolTooltip(value: any): void {
-  const selectedItem: SelectItemWithTooltip = this.protocolOptions
-    .find(item => item.value === value);
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(item => item.value === value);
+    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
+  }
 
-  this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
-}
+  private processFormData(sessionForm: FormGroup<any>): Observable<FormGroup<any>> {
+    if (this.isSelectedProtocolRdp()) {
+      return of(new FormGroup(sessionForm.controls));
+    }
+
+    const selectedProtocol: Protocol = this.getSelectedProtocol();
+    const protocolControlMap: ProtocolControlMap = WebClientProtocol.getProtocolFormControlMap();
+    const requiredControls: string[] = protocolControlMap[selectedProtocol];
+
+    const newFormGroup: FormGroup<any> = new FormGroup({});
+    newFormGroup.addControl('protocol', sessionForm.controls['protocol']);
+
+    if (requiredControls) {
+      requiredControls.forEach(controlName => {
+        if (sessionForm.controls[controlName]) {
+          newFormGroup.addControl(controlName, sessionForm.controls[controlName]);
+        }
+      });
+    }
+    return of(newFormGroup);
+  }
 
   private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
     if (!this.isSelectedProtocolRdp()) {
@@ -250,7 +271,15 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   private buildForm(): Observable<void> {
-    const formControls = {
+    return this.createFormGroup().pipe(
+      takeUntil(this.destroyed$),
+      map((newFormGroup) => this.connectSessionForm = newFormGroup),
+      switchMap(() => this.updateFormControls())
+    );
+  }
+
+  private createFormGroup(): Observable<FormGroup<any>> {
+    const formControls= {
       protocol: [0, Validators.required],
       autoComplete: new FormControl('', Validators.required),
       hostname: [''],
@@ -282,15 +311,22 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
       });
     }
 
-    this.connectSessionForm = formGroup;
-    this.updateFormControls();
+    return of(formGroup);
+  }
 
+  private updateFormControls(protocol?: Protocol): Observable<void> {
+    protocol = protocol ?? this.getSelectedProtocol();
+
+    this.disableAllFormControls();
+    this.enableFormControlsByProtocol(protocol);
+
+    if (protocol === Protocol.VNC) {
+      this.handleVncFormControls();
+    }
     return of(undefined);
   }
 
-  private updateFormControls(protocol?: Protocol): void {
-    protocol = protocol ?? this.getSelectedProtocol();
-
+  private disableAllFormControls(): void {
     const controlsToDisable: string[] = [
       'authMode',
       'username',
@@ -305,22 +341,18 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     controlsToDisable.forEach(control => {
       this.connectSessionForm.get(control)?.disable();
     });
+  }
 
-    const protocolControlMap: { [key in Protocol]?: string[] } = {
-      [Protocol.SSH]: ['username', 'password'],
-      [Protocol.VNC]: ['authMode', 'username', 'password', 'screenSize'],
-      [Protocol.ARD]: ['username', 'password', 'screenSize'],
-      [Protocol.RDP]: ['username', 'password', 'screenSize', 'customWidth', 'customHeight', 'kdcUrl', 'preConnectionBlob'],
-    };
-
+  private enableFormControlsByProtocol(protocol: Protocol): void {
+    const protocolControlMap: ProtocolControlMap = WebClientProtocol.getProtocolFormControlMap();
     protocolControlMap[protocol]?.forEach(control => {
       this.connectSessionForm.get(control)?.enable();
     });
+  }
 
-    if (protocol === Protocol.VNC) {
-      this.setAuthMode();
-      this.updateFormControlsByAuthMode();
-    }
+  private handleVncFormControls(): void {
+    this.setAuthMode(this.getSelectedAuthMode() ?? AuthMode.VNC_Password);
+    this.updateFormControlsByAuthMode();
   }
 
   private updateFormControlsByAuthMode(authMode?: AuthMode): void {
@@ -429,10 +461,13 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   private subscribeToFormProtocol(): void {
     this.connectSessionForm.get('protocol').valueChanges.pipe(
       takeUntil(this.destroyed$),
-    ).subscribe(value => {
-      this.showMoreSettings = false;
-      this.updateFormControls(value);
-    });
+      tap(protocol => this.updateProtocolTooltip(protocol)),
+      switchMap(protocol => this.updateFormControls(protocol)),
+      catchError(error => {
+        console.error('Error handling protocol changes:', error);
+        return EMPTY;
+      })
+    ).subscribe(() => this.showMoreSettings = false);
   }
 
   private subscribeToFormAuthMode(): void {
