@@ -318,7 +318,7 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     });
 
     if (protocol === Protocol.VNC) {
-      this.setAuthMode();
+      this.setAuthMode(this.getSelectedAuthMode() ?? AuthMode.VNC_Password);
       this.updateFormControlsByAuthMode();
     }
   }
