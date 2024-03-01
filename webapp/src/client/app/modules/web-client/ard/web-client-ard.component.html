@@ -1,10 +1,10 @@
 <div #sessionArdContainer>
   <div *ngIf="currentStatus.isDisabled" class="session-form">
-    <web-client-vnc-form
+    <web-client-form
       [webSessionId]="webSessionId"
       [inputFormData]="inputFormData"
-      [error]="rdpError"
-      [isFormExists]="true"></web-client-vnc-form>
+      [error]="ardError"
+      [isFormExists]="true"></web-client-form>
   </div>
 
   <div #sessionToolbar

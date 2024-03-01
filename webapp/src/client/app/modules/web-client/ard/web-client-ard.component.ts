@@ -62,7 +62,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
   inputFormData: ArdFormDataInput;
-  rdpError: string;
+  ardError: string;
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
   loading: boolean = true;
@@ -355,7 +355,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
+    this.ardError = this.getMessage(errorData);
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
       WebClientArdComponent.DVL_WARNING_ICON :
@@ -374,16 +374,14 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    if (typeof error === 'string') {
-      this.rdpError = error;
-    } else {
-      this.rdpError = this.getMessage(error.kind());
-    }
+    this.ardError = this.getMessage(error);
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientArdComponent.DVL_WARNING_ICON);
   }
 
-  private getMessage(errorKind: UserIronRdpErrorKind): string {
+  private getMessage(errorData: UserIronRdpError | string): string {
+    const errorKind: UserIronRdpErrorKind = this.getErrorKind(errorData);
+
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
     //For translation 'AccessDenied'
@@ -399,5 +397,33 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
       default:
         return 'Connection error: Please verify your connection settings.';
     }
+  }
+
+  private getErrorKind(errorData: UserIronRdpError | string): UserIronRdpErrorKind {
+    if (typeof errorData === 'string') {
+      return this.parseErrorString(errorData);
+    }
+
+    if (errorData?.kind() !== UserIronRdpErrorKind.General) {
+      return errorData.kind();
+    }
+
+    console.error('Error Kind:', errorData.kind());
+    const backtrace: string = errorData?.backtrace();
+    return this.parseErrorString(backtrace);
+  }
+
+  private parseErrorString(error: string): UserIronRdpErrorKind {
+    console.error(error);
+
+    if (error.indexOf('authentication rejected') >= 0) {
+      return UserIronRdpErrorKind.WrongPassword;
+    }
+
+    if (error.indexOf('connection has been rejected') >= 0) {
+      return UserIronRdpErrorKind.LogonFailure;
+    }
+
+    return UserIronRdpErrorKind.General;
   }
 }
