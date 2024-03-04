@@ -142,9 +142,11 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   filterHostname(event: any): void {
     const query = event.query.toLowerCase();
 
-    this.filteredHostnames = this.hostnames?.filter(hostnameObj =>
-      hostnameObj.hostname.toLowerCase().startsWith(query)
-    );
+    Promise.resolve().then(() => {
+      this.filteredHostnames = this.hostnames?.filter(hostnameObj =>
+        hostnameObj.hostname.toLowerCase().startsWith(query)
+      ) || [];
+    });
   }
 
   private kdcServerUrlValidator(): ValidatorFn {
