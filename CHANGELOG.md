@@ -4,6 +4,32 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.1 (2024-03-05)
+
+### Bug Fixes
+
+- _webapp_: authentication list state is not preserved on error ([#735](https://github.com/Devolutions/devolutions-gateway/issues/735)) ([f2852d99ad](https://github.com/Devolutions/devolutions-gateway/commit/f2852d99adc1f108a4fdf9b80bf6504d1c81d592)) ([DGW-147](https://devolutions.atlassian.net/browse/DGW-147)) 
+
+- _webapp_: fix web form controls data submission ([#736](https://github.com/Devolutions/devolutions-gateway/issues/736)) ([d2f793b71f](https://github.com/Devolutions/devolutions-gateway/commit/d2f793b71f8aa0e5713de6347d0e846c4f649e21)) ([DGW-151](https://devolutions.atlassian.net/browse/DGW-151)) 
+
+- _webapp_: add favicon ([#738](https://github.com/Devolutions/devolutions-gateway/issues/738)) ([2fe051369d](https://github.com/Devolutions/devolutions-gateway/commit/2fe051369d4525054063bdecdec9bb2004c81e25)) 
+
+- _webapp_: configure angular production build ([#737](https://github.com/Devolutions/devolutions-gateway/issues/737)) ([52b58b92bd](https://github.com/Devolutions/devolutions-gateway/commit/52b58b92bd3fadbff74a4bd9879f9d7889828207)) ([DGW-144](https://devolutions.atlassian.net/browse/DGW-144)) 
+
+- _webapp_: web form UI - fix spinner for autocomplete ([#740](https://github.com/Devolutions/devolutions-gateway/issues/740)) ([8649bd3eac](https://github.com/Devolutions/devolutions-gateway/commit/8649bd3eacdd66cfa492f3840dfd413b07be6786)) 
+
+- _webapp_: bump IronVNC and IronRDP packages ([#744](https://github.com/Devolutions/devolutions-gateway/issues/744)) ([6677ed0a41](https://github.com/Devolutions/devolutions-gateway/commit/6677ed0a4178908ed6d398939010a958c229fd6d)) 
+
+  - RDP: fix performance flags
+  - VNC: better error status codes on authentication
+  - VNC: fix initial screen state not being properly painted
+
+- _pwsh_: support for non-PEM, binary certificate files ([#745](https://github.com/Devolutions/devolutions-gateway/issues/745)) ([6f7589f598](https://github.com/Devolutions/devolutions-gateway/commit/6f7589f59834c10ef302de8735f0c9900bcf2c75)) ([DGW-135](https://devolutions.atlassian.net/browse/DGW-135)) 
+
+### Documentation
+
+- _webapp_: updated fontscdn link ([#729](https://github.com/Devolutions/devolutions-gateway/issues/729)) ([989e5b98fc](https://github.com/Devolutions/devolutions-gateway/commit/989e5b98fc2be511fde9fd40fd3af1f2b1916b38)) 
+
 ## 2024.1.1 (2024-02-29)
 
 ### Features
@@ -22,7 +48,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
   Remove console.logs and turn off debugwasm for IronRDP and IronVNC.
 
-- _dgw_: UI issues in sidebar menu and web form ([#727](https://github.com/Devolutions/devolutions-gateway/issues/727)) ([6b605780c3](https://github.com/Devolutions/devolutions-gateway/commit/6b605780c3119c7e91b6e01db02d3c94e812a439)) 
+- _webapp_: UI issues in sidebar menu and web form ([#727](https://github.com/Devolutions/devolutions-gateway/issues/727)) ([6b605780c3](https://github.com/Devolutions/devolutions-gateway/commit/6b605780c3119c7e91b6e01db02d3c94e812a439)) 
 
 - _dgw_: fix Linux issues with network scanner ([#715](https://github.com/Devolutions/devolutions-gateway/issues/715)) ([0c6f644724](https://github.com/Devolutions/devolutions-gateway/commit/0c6f6447247883cb125df6d568ebe37e3106451c)) 
 
