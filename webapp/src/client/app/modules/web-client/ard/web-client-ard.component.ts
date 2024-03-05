@@ -380,7 +380,13 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private getMessage(errorData: UserIronRdpError | string): string {
-    const errorKind: UserIronRdpErrorKind = this.getErrorKind(errorData);
+    let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
+
+    if (typeof errorData === 'string') {
+      console.error(errorData);
+    } else {
+      errorKind = errorData.kind();
+    }
 
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
@@ -397,33 +403,5 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
       default:
         return 'Connection error: Please verify your connection settings.';
     }
-  }
-
-  private getErrorKind(errorData: UserIronRdpError | string): UserIronRdpErrorKind {
-    if (typeof errorData === 'string') {
-      return this.parseErrorString(errorData);
-    }
-
-    if (errorData?.kind() !== UserIronRdpErrorKind.General) {
-      return errorData.kind();
-    }
-
-    console.error('Error Kind:', errorData.kind());
-    const backtrace: string = errorData?.backtrace();
-    return this.parseErrorString(backtrace);
-  }
-
-  private parseErrorString(error: string): UserIronRdpErrorKind {
-    console.error(error);
-
-    if (error.indexOf('authentication rejected') >= 0) {
-      return UserIronRdpErrorKind.WrongPassword;
-    }
-
-    if (error.indexOf('connection has been rejected') >= 0) {
-      return UserIronRdpErrorKind.LogonFailure;
-    }
-
-    return UserIronRdpErrorKind.General;
   }
 }
