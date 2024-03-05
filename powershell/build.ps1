@@ -25,9 +25,15 @@ $Env:NUGET_CERT_REVOCATION_MODE='offline'
 
 $ManagedBasePath = "$PSScriptRoot\$ModuleName\bin"
 Get-Item "$ManagedBasePath\runtimes\*\native*" | ForEach-Object {
-	$NativeDirName = $_.Parent.Name
+    $NativeDirName = $_.Parent.Name
     Remove-Item "$ManagedBasePath\$NativeDirName" -Recurse -ErrorAction SilentlyContinue
-	Move-Item $_ "$ManagedBasePath\$NativeDirName" -Force
+    Move-Item $_ "$ManagedBasePath\$NativeDirName" -Force
+
+    Get-ChildItem "$ManagedBasePath\$NativeDirName" -Recurse |
+        Where-Object { $_.Name -match '^lib' } | ForEach-Object {
+        $newName = $_.Name -replace '^lib', '' # Remove "lib" prefix
+        Rename-Item $_.FullName -NewName $newName -Force
+    }
 }
 Remove-Item "$ManagedBasePath\runtimes" -Recurse -ErrorAction SilentlyContinue
 
