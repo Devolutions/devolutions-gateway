@@ -1,0 +1,14 @@
+[package]
+name = "devolutions-agent"
+version = "2024.1.2"
+edition = "2021"
+license = "MIT/Apache-2.0"
+authors = ["Marc-André Moreau <mamoreau@devolutions.net>"]
+build = "build.rs"
+
+[dependencies]
+ctrlc = "3.1"
+ceviche = "0.5"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.4"
