@@ -21,7 +21,7 @@
     "@angular/router": "16.2.1",
     "@devolutions/icons": "3.4.6",
     "@devolutions/iron-remote-gui": "^0.11.5",
-    "@devolutions/iron-remote-gui-vnc": "^0.1.5",
+    "@devolutions/iron-remote-gui-vnc": "^0.1.6",
     "@devolutions/web-telnet-gui": "^0.2.15",
     "@devolutions/web-ssh-gui": "^0.2.14",
     "primeflex": "3.3.1",
