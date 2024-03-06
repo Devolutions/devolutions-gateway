@@ -355,7 +355,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.clientError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
+    this.clientError = this.getMessage(errorData);
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
       WebClientVncComponent.DVL_WARNING_ICON :
@@ -374,16 +374,20 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    if (typeof error === 'string') {
-      this.clientError = error;
-    } else {
-      this.clientError = this.getMessage(error.kind());
-    }
+    this.clientError = this.getMessage(error);
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientVncComponent.DVL_WARNING_ICON);
   }
 
-  private getMessage(errorKind: UserIronRdpErrorKind): string {
+  private getMessage(errorData: UserIronRdpError | string): string {
+    let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
+
+    if (typeof errorData === 'string') {
+      console.error(errorData);
+    } else {
+      errorKind = errorData.kind();
+    }
+
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
     //For translation 'AccessDenied'

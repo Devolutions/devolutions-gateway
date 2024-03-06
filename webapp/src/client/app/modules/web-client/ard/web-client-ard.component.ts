@@ -62,7 +62,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
   inputFormData: ArdFormDataInput;
-  rdpError: string;
+  ardError: string;
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
   loading: boolean = true;
@@ -355,7 +355,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
+    this.ardError = this.getMessage(errorData);
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
       WebClientArdComponent.DVL_WARNING_ICON :
@@ -374,16 +374,20 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    if (typeof error === 'string') {
-      this.rdpError = error;
-    } else {
-      this.rdpError = this.getMessage(error.kind());
-    }
+    this.ardError = this.getMessage(error);
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientArdComponent.DVL_WARNING_ICON);
   }
 
-  private getMessage(errorKind: UserIronRdpErrorKind): string {
+  private getMessage(errorData: UserIronRdpError | string): string {
+    let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
+
+    if (typeof errorData === 'string') {
+      console.error(errorData);
+    } else {
+      errorKind = errorData.kind();
+    }
+
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
     //For translation 'AccessDenied'
