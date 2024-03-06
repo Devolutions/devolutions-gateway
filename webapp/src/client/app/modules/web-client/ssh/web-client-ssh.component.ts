@@ -99,9 +99,11 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   sendTerminateSessionCmd(): void {
-    if (this.currentStatus.isInitialized) {
-      this.remoteTerminal.close();
+    if (!this.currentStatus.isInitialized) {
+      return;
     }
+    this.currentStatus.isInitialized = false;
+    this.remoteTerminal.close();
   }
 
   removeWebClientGuiElement(): void {

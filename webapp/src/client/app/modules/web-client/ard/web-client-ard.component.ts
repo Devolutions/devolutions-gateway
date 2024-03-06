@@ -118,6 +118,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   sendTerminateSessionCmd(): void {
+    if (!this.currentStatus.isInitialized) {
+      return;
+    }
+    this.currentStatus.isInitialized = false;
     // shutdowns the session, not the server. Jan 2024 KAH.
     this.remoteClient.shutdown();
   }
