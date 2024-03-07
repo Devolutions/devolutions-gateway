@@ -61,7 +61,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
   inputFormData: VncFormDataInput;
-  clientError: string;
+  clientError: { 'kind': string, 'backtrace': string };
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
   loading: boolean = true;
@@ -355,7 +355,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.clientError = this.getMessage(errorData);
+    this.clientError = {
+      kind: this.getMessage(errorData),
+      backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
+    };
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
       WebClientVncComponent.DVL_WARNING_ICON :
@@ -374,7 +377,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    this.clientError = this.getMessage(error);
+    this.clientError = {
+      kind: this.getMessage(error),
+      backtrace: typeof error !== 'string' ? error?.backtrace() : ''
+    };
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientVncComponent.DVL_WARNING_ICON);
   }
@@ -383,7 +389,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
     let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
 
     if (typeof errorData === 'string') {
-      console.error(errorData);
+      return errorData;
     } else {
       errorKind = errorData.kind();
     }

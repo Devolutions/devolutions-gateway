@@ -62,7 +62,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
   inputFormData: ArdFormDataInput;
-  ardError: string;
+  ardError: { 'kind': string, 'backtrace': string };
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
   loading: boolean = true;
@@ -355,7 +355,10 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.ardError = this.getMessage(errorData);
+    this.ardError = {
+      kind: this.getMessage(errorData),
+      backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
+    };
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
       WebClientArdComponent.DVL_WARNING_ICON :
@@ -374,16 +377,18 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    this.ardError = this.getMessage(error);
+    this.ardError = {
+      kind: this.getMessage(error),
+      backtrace: typeof error !== 'string' ? error?.backtrace() : ''
+    };
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientArdComponent.DVL_WARNING_ICON);
   }
 
   private getMessage(errorData: UserIronRdpError | string): string {
     let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
-
     if (typeof errorData === 'string') {
-      console.error(errorData);
+      return errorData;
     } else {
       errorKind = errorData.kind();
     }

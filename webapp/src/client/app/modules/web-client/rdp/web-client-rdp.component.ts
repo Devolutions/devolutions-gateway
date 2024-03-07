@@ -63,7 +63,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   screenScale = ScreenScale;
   currentStatus: ComponentStatus;
   inputFormData: RdpFormDataInput;
-  rdpError: string;
+  rdpError: { 'kind': string, 'backtrace': string };
   isFullScreenMode: boolean = false;
   showToolbarDiv: boolean = true;
   loading: boolean = true;
@@ -359,7 +359,10 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUser(eventType: SessionEventType, errorData: UserIronRdpError | string): void {
-    this.rdpError = typeof errorData === 'string' ? errorData : this.getMessage(errorData.kind());
+    this.rdpError = {
+      kind: this.getMessage(errorData),
+      backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
+    };
 
     const icon: string = eventType === SessionEventType.TERMINATED ?
                                         WebClientRdpComponent.DVL_WARNING_ICON :
@@ -378,16 +381,23 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
   }
 
   private notifyUserAboutError(error: UserIronRdpError | string): void {
-    if (typeof error === 'string') {
-      this.rdpError = error;
-    } else {
-      this.rdpError = this.getMessage(error.kind());
-    }
+    this.rdpError = {
+      kind: this.getMessage(error),
+      backtrace: typeof error !== 'string' ? error?.backtrace() : ''
+    };
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientRdpComponent.DVL_WARNING_ICON);
   }
 
-  private getMessage(errorKind: UserIronRdpErrorKind): string {
+  private getMessage(errorData: UserIronRdpError | string): string {
+    let errorKind: UserIronRdpErrorKind = UserIronRdpErrorKind.General;
+
+    if (typeof errorData === 'string') {
+      return errorData;
+    } else {
+      errorKind = errorData.kind();
+    }
+
     //For translation 'UnknownError'
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
     //For translation 'AccessDenied'
