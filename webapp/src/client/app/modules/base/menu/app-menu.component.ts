@@ -22,6 +22,8 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
   version: string;
+  gatewayLatestUpdateLink: string;
+  hasNewVersion: boolean = false;
 
   constructor(public app: MainAppComponent,
               private navigationService: NavigationService,
@@ -38,6 +40,11 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     this.subscribeToIsAutoLoginOn();
     this.apiService.getVersion().subscribe((result) => {
       this.version = result.version;
+    });
+    
+    this.apiService.getLatestVersion().subscribe((result) => {
+      this.gatewayLatestUpdateLink = result.downloadLink || '';
+      this.hasNewVersion = result.latestVersion && result.latestVersion !== this.version;
     });
   }
 
