@@ -80,7 +80,10 @@ internal static class GatewayActions
     /// </summary>
     private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{GatewayProperties.InstallDir}]")
     {
-        Condition = Condition.Always
+        Execute = Execute.immediate,
+        Sequence = Sequence.InstallExecuteSequence,
+        When = When.After,
+        Step = Step.CostFinalize,
     };
 
     /// <summary>
