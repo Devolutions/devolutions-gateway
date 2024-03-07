@@ -95,16 +95,16 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
   startTerminationProcess(): void {
     this.currentStatus.isDisabledByUser = true;
-    this.handleSessionEndedOrError(TerminalConnectionStatus.failed);
     this.sendTerminateSessionCmd();
-    this.disableComponentStatus();
+    this.handleSessionEndedOrError(TerminalConnectionStatus.closed);
   }
 
   sendTerminateSessionCmd(): void {
-    if (this.currentStatus.isInitialized) {
-      //TODO Rust throws null pointer exceptions
-      //this.remoteTerminal.close();
+    if (!this.currentStatus.isInitialized) {
+      return;
     }
+    this.currentStatus.isInitialized = false;
+    this.remoteTerminal.close();
   }
 
   removeWebClientGuiElement(): void {

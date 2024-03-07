@@ -144,6 +144,7 @@ export class WebSessionService {
       const webSessionToDestroy = await this.getWebSession(webSessionId);
 
       if (this.isWebSessionValid(webSessionToDestroy)) {
+        await this.terminateSession(webSessionToDestroy);
         this.dynamicComponentService.destroyComponent(webSessionToDestroy.componentRef);
       } else {
         console.warn('Invalid or non-existent session to destroy:', webSessionId);
@@ -153,13 +154,13 @@ export class WebSessionService {
     }
   }
 
-  cleanupWebSessionService(): void {
-    this.webSessionDataSubject.getValue().forEach(session => {
+  async cleanupWebSessionService(): Promise<void> {
+    for (const session of this.webSessionDataSubject.getValue()) {
       if (session.componentRef) {
-        this.terminateSession(session);
+        await this.terminateSession(session);
         this.dynamicComponentService.destroyComponent(session.componentRef);
       }
-    });
+    }
 
     this.completeSubjects();
     this.initializeWebSessionService();
@@ -237,12 +238,9 @@ export class WebSessionService {
     this.webSessionScreenSizeSubject.complete();
   }
 
-  private terminateSession(session: WebSession<any, any>): void {
+  private async terminateSession(session: WebSession<any, any>): Promise<void> {
     if (typeof session.componentRef.instance.sendTerminateSessionCmd === 'function') {
       session.componentRef.instance.sendTerminateSessionCmd();
-      console.warn(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} terminated.`);
-    } else if (session.componentRef.componentType !== WebClientFormComponent) {
-      console.warn(`Session for ${session.componentRef.instance.formData?.hostname || 'unknown host'} has no terminate command.`);
     }
   }
 
