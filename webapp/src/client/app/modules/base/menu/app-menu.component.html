@@ -51,7 +51,7 @@
 
   <!-- Logout -->
   <gateway-menu-group-list-item
-    *ngIf="!isAutoLoginOn"
+  
     class="primary-menu-group-list"
     [accordion]="false">
 
@@ -64,6 +64,11 @@
         <span *ngIf="!isMenuSlim" class="menu-list-item-label">Logout</span>
       </div>
     </div>
-
   </gateway-menu-group-list-item>
+
+
+    <div class="dgw-version">
+      {{ version }}
+    </div>
+
 </div>
