@@ -58,11 +58,4 @@ export class ApiService {
     }) as Observable<GetVersionResult>;
   }
 
-  getLatestVersion(): Observable<any> {
-    return this.http.get(this.healthApiURL, {
-      headers: {
-        "accept": "application/json"
-      }
-    });
-  }
 }
