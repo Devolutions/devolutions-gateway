@@ -41,7 +41,6 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     this.apiService.getVersion().subscribe((result) => {
       this.version = result.version;
     });
-    
     this.apiService.getLatestVersion().subscribe((result) => {
       this.gatewayLatestUpdateLink = result.downloadLink || '';
       this.hasNewVersion = !isSameVersion(this.version, result.latestVersion);

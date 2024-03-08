@@ -73,13 +73,11 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes.error && this.error) {
-      let message: string = this.error;
-
       setTimeout(() => {
         this.addMessages([{
           severity: 'error',
-          summary: 'Error', //For translation lblError
-          detail: message
+          summary: this.error['kind'] ?? this.error,
+          detail: this.error['backtrace'] ?? ''
         }]);
       }, 500);
     }

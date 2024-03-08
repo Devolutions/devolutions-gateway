@@ -3,17 +3,17 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, throwError } from "rxjs";
 import { catchError, map } from 'rxjs/operators';
 
-export type GetVersionResult = {
-  id: string,
-  hostname:string,
-  version:string
-}
-
 interface VersionInfo {
   latestVersion?: string;
   downloadLink?: string;
 }
 
+
+export type GetVersionResult = {
+  id: string,
+  hostname:string,
+  version:string
+}
 
 @Injectable({
     providedIn: 'root'
