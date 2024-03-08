@@ -118,7 +118,7 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   }
 
   hasNewVersion() {
-    return !isSameVersion(this.version, this.latestVersion);
+    return this.version && this.latestVersion && !isSameVersion(this.version, this.latestVersion);
   }
 
 }
