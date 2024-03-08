@@ -66,8 +66,14 @@
     </div>
   </gateway-menu-group-list-item>
 
-  <div class="dgw-version">
-    {{ version }}
-  </div>
+    <div class="dgw-version">
+      <label for="version">
+        {{ version }}
+      </label>
+        <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
+          <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
+        </a>
+    </div>
+    
 
 </div>

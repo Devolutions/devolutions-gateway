@@ -272,4 +272,13 @@
     font-weight: 700;
     padding: 2px 5px;
     text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.download-icon {
+  font-size: 16px;
+  margin-left: 5px;
+  color: var(--input-hint-color-important);
 }

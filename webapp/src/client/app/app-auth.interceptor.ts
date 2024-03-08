@@ -6,6 +6,7 @@ import {catchError} from "rxjs/operators";
 import {Router} from "@angular/router";
 import {NavigationService} from "@shared/services/navigation.service";
 
+
 @Injectable()
 export class AuthInterceptor implements HttpInterceptor {
   private readonly appTokenUrl: string = '/app-token';
@@ -16,10 +17,23 @@ export class AuthInterceptor implements HttpInterceptor {
   }
 
   intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
-    if (req.url.endsWith(this.appTokenUrl)) {
+
+    // If the request is for the app token, we don't need to add the Authorization header
+    let goToNext = []
+    goToNext.push(req.url.endsWith(this.appTokenUrl))
+    
+    // If the requesting third party host, we don't need to add the Authorization header
+    try {
+      let currentUrl = new URL(window.location.href);
+      let targetUrl = new URL(req.url);
+      goToNext.push(currentUrl.hostname !== targetUrl.hostname)
+    } catch (e) {
+      // do nothing, the url is not valid, the req is for the same host
+    }
+
+    if (goToNext.filter(x => x).length > 0){
       return next.handle(req).pipe(
         catchError((error: HttpErrorResponse) => {
-          //console.error('error', error)
           if (error.status === 401 || error.status === 407) {
             this.navigationService.navigateToLogin();
           }
@@ -27,6 +41,7 @@ export class AuthInterceptor implements HttpInterceptor {
         })
       );
     }
+
 
     const authToken: string = this.authService.sessionValue.token;
     const authReq = authToken

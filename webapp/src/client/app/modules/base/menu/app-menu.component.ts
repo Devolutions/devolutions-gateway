@@ -22,6 +22,8 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
   version: string;
+  latestVersion: string;
+  gatewayLatestUpdateLink: string;
 
   constructor(public app: MainAppComponent,
               private navigationService: NavigationService,
@@ -38,6 +40,10 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     this.subscribeToIsAutoLoginOn();
     this.apiService.getVersion().subscribe((result) => {
       this.version = result.version;
+    });
+    this.apiService.getLatestVersion().subscribe((result) => {
+      this.gatewayLatestUpdateLink = result.downloadLink || '';
+      this.latestVersion = result.latestVersion;
     });
   }
 
@@ -106,5 +112,25 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   logout(): void {
     this.authService.logout();
   }
+  
+  downloadVersionToolTip() {
+    return `New version ${this.latestVersion} available`;
+  }
 
+  hasNewVersion() {
+    return this.version && this.latestVersion && !isSameVersion(this.version, this.latestVersion);
+  }
+
+}
+
+function isSameVersion(a: string, b: string): boolean {
+  const aParts = a.split('.').map(Number);
+  const bParts = b.split('.').map(Number);
+  for (let i = 0; i < Math.min(aParts.length,bParts.length); i++) {
+    if (aParts[i] !== bParts[i]) {
+      return false;
+    }
+  }
+
+  return true;
 }
