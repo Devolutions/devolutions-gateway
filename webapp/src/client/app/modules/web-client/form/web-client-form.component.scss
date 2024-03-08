@@ -12,8 +12,36 @@
   min-width: 100% !important;
 }
 
+:host ::ng-deep .p-message-wrapper {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+:host ::ng-deep .p-message-icon {
+  flex-shrink: 0; /* Prevent icon from shrinking */
+  margin-right: 10px;
+}
+
+/* Control the summary's growth and ensure it doesn't push the detail to break */
 :host ::ng-deep .p-message-summary {
-  display: none !important;
+  flex-grow: 1; /* Allow summary to fill available space next to the icon */
+  flex-basis: 0; /* Ensure it doesn't base its size on the content, allowing it to grow */
+  min-width: 0; /* Prevent it from maintaining an intrinsic minimum width */
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* Make detail take the full width of the container, ensuring it wraps */
+:host ::ng-deep .p-message-detail {
+  width: 100%; /* Force it to a new line */
+  order: 3; /* Ensure it's placed below all other flex items */
+}
+
+:host ::ng-deep .p-message .p-message-detail {
+  margin-top: 10px;
+  flex-basis: 100%;
 }
 
 :host ::ng-deep .p-message.p-message-error {
