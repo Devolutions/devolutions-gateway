@@ -44,7 +44,7 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     
     this.apiService.getLatestVersion().subscribe((result) => {
       this.gatewayLatestUpdateLink = result.downloadLink || '';
-      this.hasNewVersion = result.latestVersion && result.latestVersion !== this.version;
+      this.hasNewVersion = !isSameVersion(this.version, result.latestVersion);
     });
   }
 
@@ -114,4 +114,16 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     this.authService.logout();
   }
 
+}
+
+function isSameVersion(a: string, b: string): boolean {
+  const aParts = a.split('.').map(Number);
+  const bParts = b.split('.').map(Number);
+  for (let i = 0; i < Math.min(aParts.length,bParts.length); i++) {
+    if (aParts[i] !== bParts[i]) {
+      return false;
+    }
+  }
+
+  return true;
 }

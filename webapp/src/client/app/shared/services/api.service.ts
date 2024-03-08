@@ -67,8 +67,13 @@ export class ApiService {
   }
 
   getLatestVersion(keysToFetch: string[] = ['Gateway.Version', 'Gateway.Url']): Observable<VersionInfo> {
-    return this.http.get(this.devolutionProductApiURL, { responseType: 'text' }).pipe(
-      map((response: string) => {
+    return this.http.get(this.devolutionProductApiURL,{
+      headers : {
+        "accept" : "text/plain"
+      },
+      responseType: 'text'
+    }).pipe(
+      map((response:string) => {
         const result = response
           .split('\n')
           .map((line) => line.split('='))
