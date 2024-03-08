@@ -70,9 +70,9 @@
       <label for="version">
         {{ version }}
       </label>
-      <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion">
-        <a [href]="gatewayLatestUpdateLink"></a>
-      </i>
+        <a [href]="gatewayLatestUpdateLink" [pTooltip]="downloadVersionToolTip()">
+          <i class="dvl-icon dvl-icon-download download-icon" *ngIf="hasNewVersion()"></i>
+        </a>
     </div>
     
 

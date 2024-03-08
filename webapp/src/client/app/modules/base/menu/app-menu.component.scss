@@ -280,10 +280,5 @@
 .download-icon {
   font-size: 16px;
   margin-left: 5px;
-  color: var(--text-accent-color);
-}
-
-.download-icon:hover {
   color: var(--input-hint-color-important);
-  cursor: pointer;
 }

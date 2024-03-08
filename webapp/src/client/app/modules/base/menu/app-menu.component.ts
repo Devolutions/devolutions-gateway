@@ -22,8 +22,8 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
   version: string;
+  latestVersion: string;
   gatewayLatestUpdateLink: string;
-  hasNewVersion: boolean = false;
 
   constructor(public app: MainAppComponent,
               private navigationService: NavigationService,
@@ -43,7 +43,7 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
     });
     this.apiService.getLatestVersion().subscribe((result) => {
       this.gatewayLatestUpdateLink = result.downloadLink || '';
-      this.hasNewVersion = !isSameVersion(this.version, result.latestVersion);
+      this.latestVersion = result.latestVersion;
     });
   }
 
@@ -111,6 +111,14 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
 
   logout(): void {
     this.authService.logout();
+  }
+  
+  downloadVersionToolTip() {
+    return `New version ${this.latestVersion} available`;
+  }
+
+  hasNewVersion() {
+    return !isSameVersion(this.version, this.latestVersion);
   }
 
 }
