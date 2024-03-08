@@ -8,6 +8,7 @@ import {takeUntil} from "rxjs/operators";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {KeyValue} from "@angular/common";
 import {AuthService} from "@shared/services/auth.service";
+import { ApiService } from '@gateway/shared/services/api.service';
 
 
 @Component({
@@ -20,11 +21,14 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   isAutoLoginOn: boolean = false;
   isMenuSlim: boolean = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
+  version: string;
 
   constructor(public app: MainAppComponent,
               private navigationService: NavigationService,
               private webSessionService: WebSessionService,
-              private authService: AuthService) {
+              private authService: AuthService,
+              private apiService: ApiService,
+              ) {
     super();
     this.initMenu();
   }
@@ -32,6 +36,9 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   ngOnInit(): void {
     this.subscribeRouteChange();
     this.subscribeToIsAutoLoginOn();
+    this.apiService.getVersion().subscribe((result) => {
+      this.version = result.version;
+    });
   }
 
   onClickGoToNewSessionTab(): void {

@@ -20,5 +20,9 @@
   "/jet/KdcProxy": {
     "target": "http://localhost:7171",
     "secure": false
+  },
+  "/jet/health": {
+    "target": "http://localhost:7171",
+    "secure": false
   }
 }
