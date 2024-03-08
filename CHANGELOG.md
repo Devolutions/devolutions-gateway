@@ -4,6 +4,28 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.3 (2024-03-08)
+
+### Features
+
+- _webapp_: version number at the bottom of the app menu ([#752](https://github.com/Devolutions/devolutions-gateway/issues/752)) ([e46b4fc5a9](https://github.com/Devolutions/devolutions-gateway/commit/e46b4fc5a9eb237dd49d6f30650866be0323630b)) 
+
+### Improvements
+
+- _webapp_: improve the error catching for VNC and ARD ([#739](https://github.com/Devolutions/devolutions-gateway/issues/739)) ([d34e188aba](https://github.com/Devolutions/devolutions-gateway/commit/d34e188aba0e0a1ace4747bc9dbeaf7ca3e26824)) ([DGW-157](https://devolutions.atlassian.net/browse/DGW-157)) 
+
+### Bug Fixes
+
+- _webapp_: update IronVNC to 0.1.6 ([#749](https://github.com/Devolutions/devolutions-gateway/issues/749)) ([ffc4427dca](https://github.com/Devolutions/devolutions-gateway/commit/ffc4427dca1504e1180c7401e7d086e10adddc5c)) 
+
+  - fix connection not shut down properly
+
+- _webapp_: shutdown not called when closing from left menu ([#750](https://github.com/Devolutions/devolutions-gateway/issues/750)) ([ace64d3eb6](https://github.com/Devolutions/devolutions-gateway/commit/ace64d3eb6dcf5dc3e646937288708f0c1f39d49)) ([DGW-167](https://devolutions.atlassian.net/browse/DGW-167)) 
+
+- _installer_: properly write ARP InstallLocation on fresh installs ([270c4e981d](https://github.com/Devolutions/devolutions-gateway/commit/270c4e981d689bc25b681c4b76b535eb38a79c41)) 
+
+- _webapp_: show error backtrace for VNC, ARD and RDP clients ([#751](https://github.com/Devolutions/devolutions-gateway/issues/751)) ([c5caf5ab25](https://github.com/Devolutions/devolutions-gateway/commit/c5caf5ab25d16e1cae2b04600a0366e5f759f5a0)) ([DGW-162](https://devolutions.atlassian.net/browse/DGW-162)) 
+
 ## 2024.1.2 (2024-03-05)
 
 ### Bug Fixes
