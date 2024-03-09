@@ -10,6 +10,12 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _webapp_: version number at the bottom of the app menu ([#752](https://github.com/Devolutions/devolutions-gateway/issues/752)) ([e46b4fc5a9](https://github.com/Devolutions/devolutions-gateway/commit/e46b4fc5a9eb237dd49d6f30650866be0323630b)) 
 
+- _webapp_: check if a new version is available ([#757](https://github.com/Devolutions/devolutions-gateway/issues/757)) ([d2d8811c36](https://github.com/Devolutions/devolutions-gateway/commit/d2d8811c3688de3ef675599412db20b06a63bd3e)) 
+
+- _webapp_: bump iron-remote-gui-vnc to 0.2.1 ([#754](https://github.com/Devolutions/devolutions-gateway/issues/754)) ([6c3df0c18e](https://github.com/Devolutions/devolutions-gateway/commit/6c3df0c18e71dd11cb72c4fc3cb54f989eaa6682)) 
+
+  - Support for client-side rendered hardware-accelerated cursors
+
 ### Improvements
 
 - _webapp_: improve the error catching for VNC and ARD ([#739](https://github.com/Devolutions/devolutions-gateway/issues/739)) ([d34e188aba](https://github.com/Devolutions/devolutions-gateway/commit/d34e188aba0e0a1ace4747bc9dbeaf7ca3e26824)) ([DGW-157](https://devolutions.atlassian.net/browse/DGW-157)) 
@@ -48,9 +54,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _pwsh_: support for non-PEM, binary certificate files ([#745](https://github.com/Devolutions/devolutions-gateway/issues/745)) ([6f7589f598](https://github.com/Devolutions/devolutions-gateway/commit/6f7589f59834c10ef302de8735f0c9900bcf2c75)) ([DGW-135](https://devolutions.atlassian.net/browse/DGW-135)) 
 
-### Documentation
-
-- _webapp_: updated fontscdn link ([#729](https://github.com/Devolutions/devolutions-gateway/issues/729)) ([989e5b98fc](https://github.com/Devolutions/devolutions-gateway/commit/989e5b98fc2be511fde9fd40fd3af1f2b1916b38)) 
+- _webapp_: update fontscdn link ([#729](https://github.com/Devolutions/devolutions-gateway/issues/729)) ([989e5b98fc](https://github.com/Devolutions/devolutions-gateway/commit/989e5b98fc2be511fde9fd40fd3af1f2b1916b38)) 
 
 ## 2024.1.1 (2024-02-29)
 
