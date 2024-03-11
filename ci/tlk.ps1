@@ -557,6 +557,13 @@ class TlkRecipe
             throw ("Specify DGATEWAY_EXECUTABLE environment variable")
         }
 
+        if (Test-Path Env:DGATEWAY_WEBCLIENT_PATH) {
+            $DGatewayWebClient = $Env:DGATEWAY_WEBCLIENT_PATH
+        } else {
+            throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
+        }
+
+
         $InputPackagePath = Join-Path $this.SourcePath "package/Linux"
 
         $OutputPath = Join-Path $this.SourcePath "output"
@@ -600,6 +607,7 @@ class TlkRecipe
         $RulesTemplate = Join-Path $InputPackagePath "gateway/template/rules"
         Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
             dgateway_executable = $DGatewayExecutable
+            dgateway_webclient = $DGatewayWebClient
             platform_dir = $InputPackagePath
         } -OutputFile $RulesFile
 
