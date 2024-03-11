@@ -1,0 +1,15 @@
+.main-panel {
+    display: flex;
+    flex-direction: row;
+    align-items: end;
+    justify-content: space-evenly;
+}
+
+.net-scan-panel {
+    height: 100vh;
+    flex: 1;
+}
+
+.form-panel {
+    flex: 3;
+}

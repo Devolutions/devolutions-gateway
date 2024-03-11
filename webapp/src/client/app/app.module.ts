@@ -32,6 +32,9 @@ import { SidebarModule } from "primeng/sidebar";
 import { ToastModule } from "primeng/toast";
 import { TabView, TabViewModule } from "primeng/tabview";
 import { AutoCompleteModule } from "primeng/autocomplete";
+import { NetScanComponent } from './modules/web-client/net-scan/net-scan.component';
+import { MainPanelComponent } from './modules/web-client/main-panel/main-panel.component';
+import { NetScanService } from './shared/services/net-scan.services';
 
 
 @NgModule({
@@ -44,7 +47,7 @@ import { AutoCompleteModule } from "primeng/autocomplete";
     MenuListItemComponent,
     MenuListActiveSessionsComponent,
     MenuGroupListItemComponent,
-    GatewayAlertMessageComponent
+    GatewayAlertMessageComponent,
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
@@ -57,7 +60,7 @@ import { AutoCompleteModule } from "primeng/autocomplete";
     SidebarModule,
     ToastModule,
     TabViewModule,
-    AutoCompleteModule
+    AutoCompleteModule,
   ],
   providers: [
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
@@ -67,7 +70,8 @@ import { AutoCompleteModule } from "primeng/autocomplete";
     LoadingService,
     WebSessionService,
     WebClientService,
-    TabView
+    TabView,
+    NetScanService,
   ],
   exports: [
   ],

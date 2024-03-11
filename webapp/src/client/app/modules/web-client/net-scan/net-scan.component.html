@@ -1,0 +1,9 @@
+<div class="net-scan-main">
+    <div class="box">
+        <ul>
+            <li *ngFor="let service of services">
+                {{service.ip}} | {{service.hostname}} | {{service.protocol}}
+            </li>
+        </ul>
+    </div>
+</div>
