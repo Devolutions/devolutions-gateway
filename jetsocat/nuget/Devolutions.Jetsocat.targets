@@ -1,4 +1,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <IsPowerShell Condition="$(DefineConstants.Contains('__POWERSHELL__'))">true</IsPowerShell>
+    </PropertyGroup>
     <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) Or $([MSBuild]::IsOSPlatform('Linux'))">
         <CompileDependsOn>
             $(CompileDependsOn)
@@ -13,26 +16,26 @@
               ConsoleToMsBuild="true"
               Condition="$([MSBuild]::IsOSPlatform('Linux'))"/>
     </Target>
-    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) OR '$(IsPowerShell)' == 'true'">
         <None Include="$(MSBuildThisFileDirectory)../runtimes/win-x64/native/jetsocat.exe">
             <Link>runtimes\win-x64\native\%(Filename)%(Extension)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
-    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows')) OR '$(IsPowerShell)' == 'true'">
         <None Include="$(MSBuildThisFileDirectory)../runtimes/win-arm64/native/jetsocat.exe">
             <Link>runtimes\win-arm64\native\%(Filename)%(Extension)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
-    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) OR '$(IsPowerShell)' == 'true'">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat">
             <Link>%(Filename)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <PublishState>Included</PublishState>
         </Content>
     </ItemGroup>
-    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) OR '$(IsPowerShell)' == 'true'">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/linux-x64/native/jetsocat">
             <Link>runtimes\linux-x64\native\jetsocat</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
