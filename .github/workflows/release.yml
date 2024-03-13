@@ -235,6 +235,13 @@ jobs:
         if: needs.preflight.outputs.dl-strategy == 'action'
         uses: actions/download-artifact@v3
         with:
+          name: webapp-client
+          path: webapp-client
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
           name: changelog
           path: changelog
 
@@ -243,7 +250,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Manage artifacts
         shell: pwsh
