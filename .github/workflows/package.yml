@@ -403,7 +403,11 @@ jobs:
       - name: Build package
         shell: pwsh
         working-directory: jetsocat/nuget
-        run: nuget pack Devolutions.Jetsocat.nuspec -NonInteractive
+        run: |
+          Install-Module -Name ZipIt -Force
+          & 'nuget' 'pack' 'Devolutions.Jetsocat.nuspec'
+          $NugetPackage = (Get-Item ".\*.nupkg" | Select-Object -First 1) | Resolve-Path -Relative
+          Set-ZipItUnixFilePermissions $NugetPackage -FilePattern "native/jetsocat$" -FilePermissions "r-xr-xr-x"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
