@@ -28,4 +28,11 @@
             <PublishState>Included</PublishState>
         </Content>
     </ItemGroup>
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux')) OR '$(IsPowerShell)' == 'true'">
+        <Content Include="$(MSBuildThisFileDirectory)../runtimes/linux-arm64/native/jetsocat">
+            <Link>runtimes\linux-arm64\native\jetsocat</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <PublishState>Included</PublishState>
+        </Content>
+    </ItemGroup>
 </Project>
