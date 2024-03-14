@@ -243,7 +243,7 @@ pub struct NetworkInterface {
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
         let is_up = iface.operational_status;
-        
+
         Self {
             name: iface.name,
             description: iface.description,

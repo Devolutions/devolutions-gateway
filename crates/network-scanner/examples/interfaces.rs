@@ -1,7 +1,5 @@
 use network_scanner::interfaces::get_network_interfaces;
 
-
-
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::SubscriberBuilder::default()
