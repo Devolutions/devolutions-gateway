@@ -4,7 +4,7 @@
 {{{version}}}
 :toc: left
 :numbered:
-:toclevels: 3
+:toclevels: 4
 :source-highlighter: highlightjs
 :keywords: openapi, rest, {{appName}}
 :specDir: {{specDir}}
@@ -30,8 +30,9 @@
 
 {{#authMethods}}
 {{#isBasic}}
-{{#isBasicBasic}}* *HTTP Basic* Authentication `{{{name}}}`{{/isBasicBasic}}
-{{#isBasicBearer}}* *Bearer* Authentication `{{{name}}}`{{/isBasicBearer}}
+{{#isBasicBasic}}* *HTTP Basic* Authentication _{{{name}}}_{{/isBasicBasic}}
+{{#isBasicBearer}}* *Bearer* Authentication {{/isBasicBearer}}
+{{#isHttpSignature}}* *HTTP signature* Authentication{{/isHttpSignature}}
 {{/isBasic}}
 {{#isOAuth}}* *OAuth*  AuthorizationUrl: _{{authorizationUrl}}_, TokenUrl:   _{{tokenUrl}}_ {{/isOAuth}}
 {{#isApiKey}}* *APIKey* KeyParamName:     _{{keyParamName}}_,     KeyInQuery: _{{isKeyInQuery}}_, KeyInHeader: _{{isKeyInHeader}}_{{/isApiKey}}
@@ -71,27 +72,8 @@ Operation Id:: {{nickname}}
 
 {{#specinclude}}{{path}}/{{httpMethod}}/spec.adoc{{/specinclude}}
 
-===== Security
 
-{{#authMethods}}
-[cols="2,1,1"]
-|===
-| Name | Type | Scheme
-
-{{#this}}
-| `{{{name}}}`
-| {{{type}}}
-| {{{scheme}}}
-{{/this}}
-|===
-{{/authMethods}}
-{{^authMethods}}
--
-{{/authMethods}}
-
-{{#hasParams}}
 {{> params}}
-{{/hasParams}}
 
 ===== Return Type
 
@@ -114,7 +96,7 @@ Operation Id:: {{nickname}}
 
 ===== Responses
 
-.http response codes
+.HTTP Response Codes
 [cols="2,3,1"]
 |===
 | Code | Message | Datatype

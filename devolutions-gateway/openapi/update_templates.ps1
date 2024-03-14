@@ -15,7 +15,7 @@ $targets = @(
 	}
 	@{
 		Folder = './dotnet-client'
-		Generator = 'csharp-netcore'
+		Generator = 'csharp'
 		TemplatesDir = './dotnet-client/templates'
 	}
 	@{

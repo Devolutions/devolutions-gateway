@@ -11,25 +11,26 @@
     "openapi-client",
     "openapi-generator"
   ],
-  "license": "{{license}}",
+  "license": "Unlicense",
   "scripts": {
     "build": "ng-packagr -p ng-package.json"
   },
   "peerDependencies": {
-    "@angular/core": "^{{ngMinVersion}}",
-    "rxjs": "^{{rxjsMinVersion}}"
+    "@angular/core": "^{{ngVersion}}",
+    "rxjs": "^{{rxjsVersion}}"
   },
   "devDependencies": {
-    "@angular/common": "^{{ngMinVersion}}",
-    "@angular/compiler": "^{{ngMinVersion}}",
-    "@angular/compiler-cli": "^{{ngMinVersion}}",
-    "@angular/core": "^{{ngMinVersion}}",
-    "@angular/platform-browser": "^{{ngMinVersion}}",
-    "ng-packagr": "^{{ngPackagrMinVersion}}",
+    "@angular/common": "^{{ngVersion}}",
+    "@angular/compiler": "^{{ngVersion}}",
+    "@angular/compiler-cli": "^{{ngVersion}}",
+    "@angular/core": "^{{ngVersion}}",
+    "@angular/platform-browser": "^{{ngVersion}}",
+    "ng-packagr": "^{{ngPackagrVersion}}",
     "reflect-metadata": "^0.1.3",
-    "rxjs": "^{{rxjsMinVersion}}",
-    "typescript": "^{{tsMinVersion}}",
-    "zone.js": "^{{zonejsMinVersion}}"
+    "rxjs": "^{{rxjsVersion}}",{{#tsickleVersion}}
+    "tsickle": "^{{tsickleVersion}}",{{/tsickleVersion}}
+    "typescript": "{{{tsVersion}}}",
+    "zone.js": "^{{zonejsVersion}}"
   }{{#npmRepository}},
   "publishConfig": {
     "registry": "{{{npmRepository}}}"

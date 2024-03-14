@@ -13,7 +13,7 @@ $targets = @(
 	@{
 		Folder = './dotnet-client'
 		Config = './dotnet-client/config.json'
-		Generator = 'csharp-netcore'
+		Generator = 'csharp'
 		SpecFile = './gateway-api.yaml'
 		TemplatesDir = './dotnet-client/templates'
 	}
