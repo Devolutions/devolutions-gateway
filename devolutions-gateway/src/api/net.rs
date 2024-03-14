@@ -214,12 +214,6 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
     Ok(Json(interfaces))
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct InterfaceAddress {
-    pub ip: IpAddr,
-    pub prefixlen: usize,
-}
-
 /// Network interface configuration
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
@@ -231,30 +225,27 @@ pub struct NetworkInterface {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub ip_addresses: Vec<InterfaceAddress>,
-    #[cfg_attr(feature = "openapi", schema(value_type = String))]
-    pub is_up: bool,
+    pub ip_addresses: Vec<IpAddr>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<(String, u32)>))]
+    pub prefixes: Vec<(IpAddr, u32)>,
+    pub operational_status: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub nameserver: Vec<IpAddr>,
+    pub dns_servers: Vec<IpAddr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
     fn from(iface: interfaces::NetworkInterface) -> Self {
-        let is_up = iface.operational_status;
-
         Self {
             name: iface.name,
             description: iface.description,
             mac_address: iface.mac_address,
-            // ip_addresses: iface.ip_addresses,
-            // prefixes: iface.prefixes,
-            // operational_status: iface.operational_status,
+            ip_addresses: iface.ip_addresses,
+            prefixes: iface.prefixes,
+            operational_status: iface.operational_status,
             gateways: iface.gateways,
-            nameserver: iface.dns_servers,
-            ip_addresses: todo!(),
-            is_up,
+            dns_servers: iface.dns_servers,
         }
     }
 }
