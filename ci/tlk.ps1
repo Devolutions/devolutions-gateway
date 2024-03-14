@@ -220,7 +220,7 @@ class TlkTarget
         switch ($this.Architecture) {
             "x86" { "i386" }
             "x86_64" { "amd64" }
-            "aarch64" { "arm64" }
+            "arm64" { "arm64" }
         }
         
         return $DebianArchitecture
