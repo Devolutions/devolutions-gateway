@@ -7,7 +7,7 @@ All URIs are relative to *http://localhost*
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
 
-<a name="listrecordings"></a>
+<a id="listrecordings"></a>
 # **ListRecordings**
 > List&lt;Guid&gt; ListRecordings ()
 
@@ -99,7 +99,7 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="pullrecordingfile"></a>
+<a id="pullrecordingfile"></a>
 # **PullRecordingFile**
 > System.IO.Stream PullRecordingFile (Guid id, string filename)
 

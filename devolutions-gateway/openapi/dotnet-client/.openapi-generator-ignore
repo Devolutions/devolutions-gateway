@@ -24,3 +24,4 @@
 
 /appveyor.yml
 /git_push.sh
+/api/openapi.yaml

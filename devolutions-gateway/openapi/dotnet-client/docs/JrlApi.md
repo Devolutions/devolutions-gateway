@@ -7,7 +7,7 @@ All URIs are relative to *http://localhost*
 | [**GetJrlInfo**](JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info |
 | [**UpdateJrl**](JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token |
 
-<a name="getjrlinfo"></a>
+<a id="getjrlinfo"></a>
 # **GetJrlInfo**
 > JrlInfo GetJrlInfo ()
 
@@ -100,7 +100,7 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="updatejrl"></a>
+<a id="updatejrl"></a>
 # **UpdateJrl**
 > void UpdateJrl ()
 

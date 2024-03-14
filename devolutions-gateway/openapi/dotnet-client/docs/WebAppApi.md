@@ -7,7 +7,7 @@ All URIs are relative to *http://localhost*
 | [**SignAppToken**](WebAppApi.md#signapptoken) | **POST** /jet/webapp/app-token | Requests a web application token using the configured authorization method |
 | [**SignSessionToken**](WebAppApi.md#signsessiontoken) | **POST** /jet/webapp/session-token | Requests a session token using a web application token |
 
-<a name="signapptoken"></a>
+<a id="signapptoken"></a>
 # **SignAppToken**
 > string SignAppToken (AppTokenSignRequest appTokenSignRequest)
 
@@ -106,7 +106,7 @@ catch (ApiException e)
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="signsessiontoken"></a>
+<a id="signsessiontoken"></a>
 # **SignSessionToken**
 > string SignSessionToken (SessionTokenSignRequest sessionTokenSignRequest)
 

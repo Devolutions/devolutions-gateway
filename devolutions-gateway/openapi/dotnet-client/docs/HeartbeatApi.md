@@ -6,7 +6,7 @@ All URIs are relative to *http://localhost*
 |--------|--------------|-------------|
 | [**GetHeartbeat**](HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check |
 
-<a name="getheartbeat"></a>
+<a id="getheartbeat"></a>
 # **GetHeartbeat**
 > Heartbeat GetHeartbeat ()
 

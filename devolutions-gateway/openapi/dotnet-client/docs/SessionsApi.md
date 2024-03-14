@@ -7,7 +7,7 @@ All URIs are relative to *http://localhost*
 | [**GetSessions**](SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions |
 | [**TerminateSession**](SessionsApi.md#terminatesession) | **POST** /jet/session/{id}/terminate | Terminate forcefully a running session |
 
-<a name="getsessions"></a>
+<a id="getsessions"></a>
 # **GetSessions**
 > List&lt;SessionInfo&gt; GetSessions ()
 
@@ -100,7 +100,7 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="terminatesession"></a>
+<a id="terminatesession"></a>
 # **TerminateSession**
 > void TerminateSession (Guid id)
 

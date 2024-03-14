@@ -6,7 +6,7 @@ All URIs are relative to *http://localhost*
 |--------|--------------|-------------|
 | [**GetHealth**](HealthApi.md#gethealth) | **GET** /jet/health | Performs a health check |
 
-<a name="gethealth"></a>
+<a id="gethealth"></a>
 # **GetHealth**
 > Identity GetHealth ()
 
