@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, AfterViewInit } from '@angular/core';
 import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
@@ -6,19 +6,23 @@ import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.
   templateUrl: './net-scan.component.html',
   styleUrls: ['./net-scan.component.scss']
 })
-export class NetScanComponent {
+export class NetScanComponent implements AfterViewInit {
   services: NetScanEntry[] = [];
   started: boolean = false;
   ended: boolean = false;
 
   constructor(private netscanService: NetScanService) {}
 
+  ngAfterViewInit(): void {
+    this.startScan();
+  }
+
   startScan(): void {
     this.netscanService.startScan().subscribe({
       next: (entry: NetScanEntry) => {
         this.services.push(entry);
       },
-      error: (e) => {
+      error: () => {
         this.ended = true;
       },
       complete: () => {

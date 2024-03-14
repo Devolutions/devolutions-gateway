@@ -38,12 +38,21 @@
 }
 
 
+.box-title {
+  color: var(--box-text-color);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0em;
+  text-align: left;
+  margin-bottom: 5px;
+}
 
 .box {
   display: block;
   background-color: var(--box-background-color);
   min-width: 200px;
-  height: 300px;
+  height: 418px;
   border-radius: 8px;
   padding: 10px;
   margin: 3vw;
