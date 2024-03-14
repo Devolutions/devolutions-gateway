@@ -183,3 +183,26 @@
         }
     }
     {{/useGenericHost}}
+
+    {{#isString}}
+    {{>visibility}} static class {{classname}}Extensions
+    {
+        /// <summary>
+        /// Returns the value as string for a given variant
+        /// </summary>
+        {{>visibility}} static string ToValue(this {{classname}} variant)
+        {
+            switch (variant)
+            {
+            {{#allowableValues}}
+            {{#enumVars}}
+                case {{classname}}.{{name}}:
+                    return "{{{value}}}";
+            {{/enumVars}}
+            {{/allowableValues}}
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
+            }
+        }
+    }
+    {{/isString}}
