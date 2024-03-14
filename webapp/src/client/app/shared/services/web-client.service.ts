@@ -141,6 +141,18 @@ export class WebClientService extends BaseComponent {
     );
   }
 
+  fetchNetScanToken(): Observable<string> {
+    const data: sessionTokenParameters = {
+      "content_type": "NETSCAN",
+      "lifetime": 60
+    };
+
+    return this.fetchToken(data).pipe(
+      takeUntil(this.destroyed$),
+      catchError(err => throwError(err))
+    );
+  }
+
   //TODO refactor kdc token code when I am on the office wifi network KAH Feb 15, 2024
   fetchKdcToken(connectionParameters: IronRDPConnectionParameters): Observable<IronRDPConnectionParameters> {
     if (!connectionParameters.kdcUrl) {

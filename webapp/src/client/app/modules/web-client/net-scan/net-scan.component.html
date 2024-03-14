@@ -1,9 +1,23 @@
-<div class="net-scan-main">
+<div class="net-scan-main flex justify-center align-center">
     <div class="box">
-        <ul>
-            <li *ngFor="let service of services">
-                {{service.ip}} | {{service.hostname}} | {{service.protocol}}
-            </li>
-        </ul>
+        
+        <div class="flex justify-center align-center h-full" *ngIf="!started" pTooltip="Start Scan Your Local Network">
+            <p-button label="Start" (onClick)="startScan()"></p-button>
+        </div>
+
+        <div>
+            <p-progressBar *ngIf="started && !ended" mode="indeterminate" [style]="{'height':'6px'}"></p-progressBar>
+        </div>
+
+        <div class="scroll h-full" *ngIf="started">
+            <ul>
+                <li *ngFor="let service of services">
+                    <div class="entry" (click)="onServiceClick(service)">
+                        <i class="dvl-icon right-small-margin" [ngClass]="service.icon()"></i>
+                        <div class="service-name">{{service.hostname || service.ip}}</div>
+                    </div>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>

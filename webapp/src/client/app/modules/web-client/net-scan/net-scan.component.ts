@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { NetScanEntry } from '@gateway/shared/services/net-scan.services';
+import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
   selector: 'app-net-scan',
@@ -8,20 +8,28 @@ import { NetScanEntry } from '@gateway/shared/services/net-scan.services';
 })
 export class NetScanComponent {
   services: NetScanEntry[] = [];
+  started: boolean = false;
+  ended: boolean = false;
 
-  serivice =  {
-      ip: '123.123.123.123',
-      hostname: 'www.example.com',
-      protocol: 'HTTPS'
+  constructor(private netscanService: NetScanService) {}
+
+  startScan(): void {
+    this.netscanService.startScan().subscribe({
+      next: (entry: NetScanEntry) => {
+        this.services.push(entry);
+      },
+      error: (e) => {
+        this.ended = true;
+      },
+      complete: () => {
+        this.ended = true;
+      },
+    });
+
+    this.started = true;
   }
 
-  constructor() {
-    let handle = setInterval(() => {
-      // this.services.push(this.serivice);
-    }, 1000);
-
-    setTimeout(() => {
-      clearInterval(handle);
-    }, 5000);
+  onServiceClick(entry: NetScanEntry): void {
+    this.netscanService.serviceSelected(entry);
   }
 }
