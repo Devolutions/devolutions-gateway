@@ -51,7 +51,6 @@ export class DynamicTabComponent extends BaseComponent implements AfterViewInit,
     }
 
     const inputData: {formData: any} = { formData: this.webSessionTab.data };
-
     const componentRef: ComponentRef<any> = this.dynamicComponentService.
       createComponent(
         this.webSessionTab.component,

@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, EventEmitter, Output, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, EventEmitter, Input, OnChanges, Output, SimpleChanges, ViewChild } from '@angular/core';
 import { ComponentStatus } from '@shared/models/component-status.model';
 import { WebClientFormComponent } from '../form/web-client-form.component';
 
@@ -8,6 +8,7 @@ import { WebClientFormComponent } from '../form/web-client-form.component';
   styleUrls: ['./main-panel.component.scss']
 })
 export class MainPanelComponent implements AfterViewInit{
+
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @ViewChild('form') form : WebClientFormComponent;
 
