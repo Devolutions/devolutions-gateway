@@ -14,9 +14,6 @@ on:
         required: false
         type: string
 
-env:
-  conan-version: 1.43.4
-
 jobs:
   preflight:
     name: preflight
@@ -64,10 +61,6 @@ jobs:
           $Platforms | ForEach-Object {
               $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-11' } 'linux' { 'ubuntu-20.04' } }
               foreach ($Arch in $Archs) {
-                  if ($Arch -Eq 'arm64' -And $_ -Eq 'linux') {
-                      continue
-                  }
-
                   $Jobs += @{
                       arch = $Arch
                       os = $_
@@ -161,9 +154,6 @@ jobs:
     name: jetsocat [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: preflight
-    env:
-      CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.jetsocat-build-matrix) }}
@@ -180,6 +170,14 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools
 
+      - name: Configure Linux (arm) runner
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          rustup target add aarch64-unknown-linux-gnu
+          echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
+
       - name: Fix ring dependency for Windows ARM64
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         shell: pwsh
@@ -193,34 +191,11 @@ jobs:
           $LLVM_ROOT = Join-Path $VCINSTALLDIR "Tools\Llvm\x64"
           echo "PATH=$Env:PATH;${LLVM_ROOT}\bin" >> $Env:GITHUB_ENV
 
-      # HACK: workaround for when the runner is macOS 11.7.1
-      # Without this step, we sometimes get this error when installing conan:
-      #
-      # > DEPRECATION: conan is being installed using the legacy ‘setup.py install’ method, because
-      # > it does not have a ‘pyproject.toml’ and the ‘wheel’ package is not installed. pip 23.1
-      # > will enforce this behaviour change. A possible replacement is to enable the
-      # > ‘--use-pep517’ option.
-      #
-      # The intallation is successful, yet conan can’t be used afterward.
-      - name: Pin Python version
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
       - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
         run: |
           sudo rm -rf /Library/Developer/CommandLineTools
           rustup target add aarch64-apple-darwin
-
-      - name: Configure conan
-        if: matrix.os == 'windows'
-        run: |
-          pip3 install conan==${{ env.conan-version }} --upgrade
-          conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-          conan remote clean
-          conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
 
       - name: Build
         id: build
@@ -343,9 +318,6 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [preflight, devolutions-gateway-web-ui]
-    env:
-      CONAN_LOGIN_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
-      CONAN_PASSWORD: ${{ secrets.ARTIFACTORY_READ_TOKEN }}
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
@@ -394,18 +366,17 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
 
+      - name: Configure Linux (arm) runner
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          rustup target add aarch64-unknown-linux-gnu
+
       # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
         if: matrix.os == 'windows'
         run: echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Configure conan
-        if: matrix.os == 'windows'
-        run: |
-          pip3 install conan==${{ env.conan-version }} --upgrade
-          conan config install --type=git -sf settings https://github.com/Devolutions/conan-public
-          conan remote clean
-          conan remote add artifactory https://devolutions.jfrog.io/devolutions/api/conan/conan-local
 
       - name: Build
         shell: pwsh

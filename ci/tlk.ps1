@@ -308,7 +308,12 @@ class TlkRecipe
         $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
 
         if (-Not $this.Target.IsWindows()) {
-            & 'strip' $SrcExecutablePath | Out-Host
+            $StripExecutable = 'strip'
+            if (Test-Path Env:STRIP_EXECUTABLE) {
+                $StripExecutable = $Env:STRIP_EXECUTABLE
+            }
+
+            & $StripExecutable $SrcExecutablePath | Out-Host
         }
 
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
