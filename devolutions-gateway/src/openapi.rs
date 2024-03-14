@@ -20,7 +20,7 @@ use uuid::Uuid;
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
-        crate::api::net::get_net_config,
+        // crate::api::net::get_net_config,
     ),
     components(schemas(
         crate::api::health::Identity,
@@ -39,7 +39,7 @@ use uuid::Uuid;
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
-        crate::api::net::NetworkInterface,
+        // crate::api::net::NetworkInterface,
         SessionTokenContentType,
         SessionTokenSignRequest,
     )),
