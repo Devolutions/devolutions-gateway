@@ -6,7 +6,7 @@ All URIs are relative to *http://localhost*
 |--------|--------------|-------------|
 | [**PatchConfig**](ConfigApi.md#patchconfig) | **PATCH** /jet/config | Modifies configuration |
 
-<a name="patchconfig"></a>
+<a id="patchconfig"></a>
 # **PatchConfig**
 > void PatchConfig (ConfigPatch configPatch)
 

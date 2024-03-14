@@ -6,7 +6,7 @@ All URIs are relative to *http://localhost*
 |--------|--------------|-------------|
 | [**GetNetConfig**](NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces |
 
-<a name="getnetconfig"></a>
+<a id="getnetconfig"></a>
 # **GetNetConfig**
 > List&lt;List&lt;NetworkInterface&gt;&gt; GetNetConfig ()
 

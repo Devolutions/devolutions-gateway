@@ -8,7 +8,7 @@ All URIs are relative to *http://localhost*
 | [**GetConfigurationDiagnostic**](DiagnosticsApi.md#getconfigurationdiagnostic) | **GET** /jet/diagnostics/configuration | Retrieves a subset of the configuration, for diagnosis purposes. |
 | [**GetLogs**](DiagnosticsApi.md#getlogs) | **GET** /jet/diagnostics/logs | Retrieves latest logs. |
 
-<a name="getclockdiagnostic"></a>
+<a id="getclockdiagnostic"></a>
 # **GetClockDiagnostic**
 > ClockDiagnostic GetClockDiagnostic ()
 
@@ -94,7 +94,7 @@ No authorization required
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="getconfigurationdiagnostic"></a>
+<a id="getconfigurationdiagnostic"></a>
 # **GetConfigurationDiagnostic**
 > ConfigDiagnostic GetConfigurationDiagnostic ()
 
@@ -186,7 +186,7 @@ This endpoint does not need any parameter.
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-<a name="getlogs"></a>
+<a id="getlogs"></a>
 # **GetLogs**
 > string GetLogs ()
 
