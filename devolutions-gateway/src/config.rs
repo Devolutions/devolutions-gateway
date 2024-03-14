@@ -361,10 +361,19 @@ impl WebAppConf {
         } else if let Some(path) = &value.static_root_path {
             path.as_std_path().to_owned()
         } else {
-            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
-            exe_path.pop();
-            exe_path.push("webapp");
-            exe_path
+            if cfg!(target_os = "windows") {
+                let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+                exe_path.pop();
+                exe_path.push("webapp");
+                exe_path
+            } else if cfg!(target_os = "linux") {
+                let mut root_path = std::path::PathBuf::from("/usr/share");
+                root_path.push(APPLICATION_DIR);
+                root_path.push("webapp");
+                root_path
+            } else {
+                anyhow::bail!("standalone web application path should be specified manually on this platform");
+            }
         };
 
         let conf = Self {
