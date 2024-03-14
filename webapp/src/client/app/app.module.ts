@@ -1,41 +1,38 @@
-import { FormsModule } from '@angular/forms';
-import {CUSTOM_ELEMENTS_SCHEMA, NgModule} from '@angular/core';
-import {APP_BASE_HREF} from "@angular/common";
-import { BrowserModule } from '@angular/platform-browser';
+import { FormsModule } from "@angular/forms";
+import { CUSTOM_ELEMENTS_SCHEMA, NgModule } from "@angular/core";
+import { APP_BASE_HREF } from "@angular/common";
+import { BrowserModule } from "@angular/platform-browser";
 import { RouterModule } from "@angular/router";
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations'; // Import BrowserAnimationsModule
-import { HTTP_INTERCEPTORS, HttpClientModule } from '@angular/common/http';
+import { BrowserAnimationsModule } from "@angular/platform-browser/animations"; // Import BrowserAnimationsModule
+import { HTTP_INTERCEPTORS, HttpClientModule } from "@angular/common/http";
 
 // Components
-import { AppComponent } from './app.component';
+import { AppComponent } from "./app.component";
 import { LoginComponent } from "@gateway/modules/login/login.component";
 import { MainAppComponent } from "./modules/base/main-app/main-app.component";
-import { AppMenuComponent } from './modules/base/menu/app-menu.component';
-import { MenuListItemComponent } from './modules/base/menu/menu-list-item/menu-list-item.component';
+import { AppMenuComponent } from "./modules/base/menu/app-menu.component";
+import { MenuListItemComponent } from "./modules/base/menu/menu-list-item/menu-list-item.component";
 import { MenuListActiveSessionsComponent } from "@gateway/modules/base/menu/menu-list-active-sessions/menu-list-active-sessions.component";
-import { MenuGroupListItemComponent } from './modules/base/menu/menu-group-list-item/menu-group-list-item.component';
-import { AppHeaderComponent } from './modules/base/header/app-header.component';
-import {GatewayAlertMessageComponent} from "@shared/components/gateway-alert-message/gateway-alert-message.component";
+import { MenuGroupListItemComponent } from "./modules/base/menu/menu-group-list-item/menu-group-list-item.component";
+import { AppHeaderComponent } from "./modules/base/header/app-header.component";
+import { GatewayAlertMessageComponent } from "@shared/components/gateway-alert-message/gateway-alert-message.component";
 
 // Services
 import { MainMenuService } from "@shared/services/main-menu.service";
 import { GatewayAlertMessageService } from "@shared/components/gateway-alert-message/gateway-alert-message.service";
-import { LoadingService} from "@shared/services/loading.service";
+import { LoadingService } from "@shared/services/loading.service";
 import { WebSessionService } from "@shared/services/web-session.service";
 import { WebClientService } from "@shared/services/web-client.service";
 
 // Other
-import { routes } from './app.routes';
+import { routes } from "./app.routes";
 import { SharedModule } from "@shared/shared.module";
 import { AuthInterceptor } from "@gateway/app-auth.interceptor";
 import { SidebarModule } from "primeng/sidebar";
 import { ToastModule } from "primeng/toast";
 import { TabView, TabViewModule } from "primeng/tabview";
 import { AutoCompleteModule } from "primeng/autocomplete";
-import { NetScanComponent } from './modules/web-client/net-scan/net-scan.component';
-import { MainPanelComponent } from './modules/web-client/main-panel/main-panel.component';
-import { NetScanService } from './shared/services/net-scan.services';
-
+import { NetScanService } from "./shared/services/net-scan.services";
 
 @NgModule({
   declarations: [
@@ -47,7 +44,7 @@ import { NetScanService } from './shared/services/net-scan.services';
     MenuListItemComponent,
     MenuListActiveSessionsComponent,
     MenuGroupListItemComponent,
-    GatewayAlertMessageComponent,
+    GatewayAlertMessageComponent
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
@@ -60,21 +57,20 @@ import { NetScanService } from './shared/services/net-scan.services';
     SidebarModule,
     ToastModule,
     TabViewModule,
-    AutoCompleteModule,
+    AutoCompleteModule
   ],
   providers: [
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
-    { provide: APP_BASE_HREF, useValue: '/jet/webapp/client/' },
+    { provide: APP_BASE_HREF, useValue: "/jet/webapp/client/" },
     MainMenuService,
     GatewayAlertMessageService,
     LoadingService,
     WebSessionService,
     WebClientService,
     TabView,
-    NetScanService,
+    NetScanService
   ],
-  exports: [
-  ],
+  exports: [],
   bootstrap: [AppComponent]
 })
-export class AppModule { }
+export class AppModule {}
