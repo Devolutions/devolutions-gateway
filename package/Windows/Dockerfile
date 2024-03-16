@@ -1,13 +1,15 @@
-ARG FROM_IMAGE=mcr.microsoft.com/windows/servercore:ltsc2019
+ARG FROM_IMAGE=mcr.microsoft.com/powershell:windowsservercore-ltsc2022
 FROM ${FROM_IMAGE}
 
 LABEL maintainer "Devolutions Inc."
 
-WORKDIR "C:\\wayk"
+ADD webapp "C:\\Devolutions\Gateway\webapp"
+
+WORKDIR "C:\\Devolutions\Gateway"
 
 COPY DevolutionsGateway.exe .
 
 EXPOSE 8080
 EXPOSE 10256
 
-ENTRYPOINT ["c:\\wayk\\DevolutionsGateway.exe"]
+ENTRYPOINT ["c:\\Devolutions\\Gateway\\DevolutionsGateway.exe"]
