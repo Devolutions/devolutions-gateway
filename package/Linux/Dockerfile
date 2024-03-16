@@ -1,7 +1,9 @@
-FROM debian:buster-slim
+FROM mcr.microsoft.com/powershell:debian-bullseye-slim
 LABEL maintainer "Devolutions Inc."
 
-WORKDIR /opt/wayk
+ADD webapp /usr/share/devolutions-gateway/webapp
+
+WORKDIR /usr/bin
 
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends ca-certificates curl

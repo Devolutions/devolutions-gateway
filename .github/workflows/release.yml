@@ -109,20 +109,20 @@ jobs:
       matrix:
         arch: [ x86_64 ]
         os: [ windows, linux ]
-        base-image: [buster, servercore-ltsc2019, nanoserver-1809 ]
+        base-image: [debian-bullseye-slim, windowsservercore-ltsc2022, lts-nanoserver-ltsc2022 ]
 
         include:
           - os: windows
-            runner: windows-2019
+            runner: windows-2022
           - os: linux
             runner: ubuntu-20.04
         exclude:
           - os: windows
-            base-image: buster
+            base-image: debian-bullseye-slim
           - os: linux
-            base-image: servercore-ltsc2019
+            base-image: windowsservercore-ltsc2022
           - os: linux
-            base-image: nanoserver-1809
+            base-image: lts-nanoserver-ltsc2022
 
     steps:
       - name: Download artifacts (action)
@@ -139,18 +139,30 @@ jobs:
           name: devolutions-gateway
           path: devolutions-gateway
 
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: docker
+
+      - name: Download artifacts (action)
+        if: needs.preflight.outputs.dl-strategy == 'action'
+        uses: actions/download-artifact@v3
+        with:
+          name: webapp-client
+
       - name: Download artifacts (cli)
         if: needs.preflight.outputs.dl-strategy == 'cli'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
         shell: pwsh
         run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
-
+          
       - name: Prepare artifacts
         id: prepare-artifacts
         shell: pwsh
@@ -175,14 +187,19 @@ jobs:
             Invoke-Expression "chmod +x $TargetPath"
           }
 
+          $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
+          $TargetPath = Join-Path $PkgDir "webapp" "client"
+          New-Item -ItemType Directory -Path $TargetPath
+          tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
+
       - name: Build container
         id: build-container
         shell: pwsh
         working-directory: ${{ steps.prepare-artifacts.outputs.package-path }}
         run: |
           $ImageName = "devolutions/devolutions-gateway:${{ needs.preflight.outputs.version }}-${{ matrix.base-image }}"
-          if ("${{ matrix.base-image }}" -Eq "nanoserver-1809") {
-            docker build --build-arg FROM_IMAGE=mcr.microsoft.com/windows/nanoserver:1809 -t "$ImageName" .
+          if ("${{ matrix.base-image }}" -Eq "lts-nanoserver-ltsc2022") {
+            docker build --build-arg FROM_IMAGE=mcr.microsoft.com/powershell:lts-nanoserver-ltsc2022 -t "$ImageName" .
           } else {
             docker build -t "$ImageName" .
           }
