@@ -192,6 +192,9 @@ jobs:
           New-Item -ItemType Directory -Path $TargetPath
           tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
 
+          $PowerShellArchive = Get-ChildItem -Recurse -Filter "Devolutionsgateway-ps-*.zip" | Select-Object -First 1
+          Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"                   
+
       - name: Build container
         id: build-container
         shell: pwsh

@@ -3,13 +3,18 @@ FROM ${FROM_IMAGE}
 
 LABEL maintainer "Devolutions Inc."
 
-ADD webapp "C:\\Devolutions\Gateway\webapp"
-
 WORKDIR "C:\\Devolutions\Gateway"
 
-COPY DevolutionsGateway.exe .
+ENV DGATEWAY_EXECUTABLE_PATH="C:\\Devolutions\Gateway\DevolutionsGateway.exe"
+ENV DGATEWAY_WEBAPP_PATH="C:\\Devolutions\Gateway\webapp"
+
+ADD webapp $DGATEWAY_WEBAPP_PATH
+ADD DevolutionsGateway C:\\Devolutions\\Gateway\\PowerShell\\Modules\\DevolutionsGateway
+COPY DevolutionsGateway.exe $DGATEWAY_EXECUTABLE_PATH
+
+ENV PSModulePath="${PSModulePath}C:\\Devolutions\\Gateway\\PowerShell\\Modules;"
 
 EXPOSE 8080
 EXPOSE 10256
 
-ENTRYPOINT ["c:\\Devolutions\\Gateway\\DevolutionsGateway.exe"]
+ENTRYPOINT ["C:\\Devolutions\\Gateway\\DevolutionsGateway.exe"]
