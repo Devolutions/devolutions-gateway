@@ -19,6 +19,23 @@ import {WebClientArdComponent} from "@gateway/modules/web-client/ard/web-client-
 // KAH Jan 2024
 export const SESSIONS_MENU_OFFSET: number = 1;
 
+
+export const ProtocolIconMap = {
+  [Protocol.RDP]: WebClientRdpComponent.DVL_RDP_ICON,
+  [Protocol.Telnet]: WebClientTelnetComponent.DVL_TELNET_ICON,
+  [Protocol.SSH]: WebClientSshComponent.DVL_SSH_ICON,
+  [Protocol.VNC]: WebClientVncComponent.DVL_VNC_ICON,
+  [Protocol.ARD]: WebClientArdComponent.DVL_ARD_ICON,
+};
+
+export const ProtocolNameToProtocolMap = {
+  'vnc': Protocol.VNC,
+  'ssh': Protocol.SSH,
+  'telnet': Protocol.Telnet,
+  'rdp': Protocol.RDP,
+  'ard': Protocol.ARD,
+};
+
 @Injectable({
   providedIn: 'root',
 })
@@ -42,13 +59,6 @@ export class WebSessionService {
     [Protocol.ARD]: WebClientArdComponent,
   };
 
-  private protocolIconMap = {
-    [Protocol.RDP]: WebClientRdpComponent.DVL_RDP_ICON,
-    [Protocol.Telnet]: WebClientTelnetComponent.DVL_TELNET_ICON,
-    [Protocol.SSH]: WebClientSshComponent.DVL_SSH_ICON,
-    [Protocol.VNC]: WebClientVncComponent.DVL_VNC_ICON,
-    [Protocol.ARD]: WebClientArdComponent.DVL_ARD_ICON,
-  };
 
   constructor(private dynamicComponentService: DynamicComponentService) {
     this.initializeWebSessionService();
@@ -67,7 +77,7 @@ export class WebSessionService {
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
     const sessionComponent = this.protocolComponentMap[protocol];
-    const iconName: string = this.protocolIconMap[protocol];
+    const iconName: string = ProtocolIconMap[protocol];
 
     if (!sessionComponent) {
       console.error(`Creating session, unsupported protocol: ${protocol}`)

@@ -13,6 +13,8 @@ import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-clien
 import {TabViewComponent} from "@shared/components/tab-view/tab-view.component";
 import {DynamicTabComponent} from "@shared/components/dynamic-tab/dynamic-tab.component";
 import {SessionToolbarComponent} from "@shared/components/session-toolbar/session-toolbar.component";
+import { MainPanelComponent } from './main-panel/main-panel.component';
+import { NetScanComponent } from './net-scan/net-scan.component';
 
 const routes: Routes = [
   {
@@ -38,7 +40,9 @@ const routes: Routes = [
     WebClientFormComponent,
     TabViewComponent,
     DynamicTabComponent,
-    SessionToolbarComponent
+    SessionToolbarComponent,
+    MainPanelComponent,
+    NetScanComponent
   ],
     exports: [
       DynamicTabComponent

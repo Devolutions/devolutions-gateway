@@ -14,6 +14,7 @@ import {StorageService} from "@shared/services/utils/storage.service";
 import {WebSessionService} from "@shared/services/web-session.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
+import { NetScanService } from '@gateway/shared/services/net-scan.services';
 
 
 interface FormInputVisibility {
@@ -63,12 +64,14 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
 
   constructor(private webSessionService: WebSessionService,
               private storageService: StorageService,
-              private formBuilder: FormBuilder) {
+              private formBuilder: FormBuilder,
+              private netscanService: NetScanService) {
     super();
   }
 
   ngOnInit(): void {
     this.populateForm();
+    this.subscribeToNetScanClick();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -475,6 +478,15 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
       takeUntil(this.destroyed$),
     ).subscribe(value => {
       this.updateFormControlsByAuthMode(value);
+    });
+  }
+
+  private subscribeToNetScanClick(): void {
+    this.netscanService.onServiceSelected().pipe(
+      takeUntil(this.destroyed$)
+    ).subscribe((entry) => {
+      this.connectSessionForm.get('autoComplete').patchValue({ hostname: entry.ip});
+      this.connectSessionForm.get('protocol').patchValue(entry.protocol);
     });
   }
 }
