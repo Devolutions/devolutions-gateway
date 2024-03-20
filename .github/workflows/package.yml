@@ -94,6 +94,7 @@ jobs:
         with:
           name: version
           path: VERSION
+          overwrite: true
 
       - name: Upload docker file artifacts
         uses: actions/upload-artifact@v4
@@ -326,30 +327,42 @@ jobs:
           if-no-files-found: error
 
   devolutions-gateway-merge:
-    name: devolutions gateway merge artifacts
+    name: Merge Artifacts
     runs-on: ubuntu-latest
     needs: [preflight, codesign]
 
     steps:
-      - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: devolutions-gateway
           pattern: devolutions-gateway-*
-          delete-merged: true
+          merge-multiple: true
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ github.workspace }}/**/*
+          name: devolutions-gateway
+          overwrite: true
 
   jetsocat-merge:
-    name: jetsocat merge artifacts
+    name: Merge Artifacts
     runs-on: ubuntu-latest
     needs: [preflight, codesign]
 
     steps:
-      - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: jetsocat
           pattern: jetsocat-*
-          delete-merged: true
+          merge-multiple: true
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ github.workspace }}/**/*
+          name: jetsocat
+          overwrite: true
 
   web-app:
     name: Web App
@@ -372,6 +385,7 @@ jobs:
           name: webapp-client
           path: devolutions_gateway_webapp_${{ needs.preflight.outputs.version }}.tar.gz
           if-no-files-found: error
+          overwrite: true
 
   nuget:
     name: Nuget

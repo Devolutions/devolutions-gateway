@@ -19,6 +19,7 @@ Use the [Create New Release](create-new-release.yml) to run a full build and tes
 ##### Parameters
 
 - `ref` Optional SHA value of the commit to release.
+- `dry-run` If selected, the workflow will only indicate the actions to be taken. No deployment will occur.
 
 ## Making a Release (manual)
 
@@ -35,6 +36,7 @@ It's possible to run the individual workflows and generate a release manually.
  - Find the run ID of the [Package](#package) workflow and use it to call the [Release](#release) workflow. For example:
  
 `gh workflow run release.yml -f run=654321`
+
 ### CI
 
 The "CI" workflow builds, tests and packages `devolutions-gateway` and builds `jetsocat`, for supported platforms. The workflow is run automatically for pull requests and merges, or may be run manually.
@@ -77,10 +79,3 @@ Re-releasing the same version multiple times is not supported. The "Release" wor
 
 - `run` The run-id of the [Package](#package) workflow run containing the artifacts to package
 - `dry-run` If selected, the workflow will only indicate the actions to be taken. No deployment will occur.
-
-### JETSOCAT NUGET
-
-A separate workflow (Release jetsocat nuget package) is provided to generate the nuget package for jetsocat. It will retrieve the jetsocat binaries from the latest GitHub release, wrap them in a nuget package and deploy to Artifactory.
-##### Parameters
-
-- `version` The version for the nuget package. Note that this is distinct from the jetsocat binary version.

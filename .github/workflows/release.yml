@@ -34,7 +34,6 @@ jobs:
       run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
       skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
-      dry-run: ${{ steps.get-dry-run.outputs.dry-run }}
 
     steps:
       ## workflow_dispatch: The run_id is read from the inputs
@@ -56,11 +55,8 @@ jobs:
           $DryRun = "false"
           if ('${{ inputs.dry-run }}') {
             $DryRun = "${{ inputs.dry-run }}"
-          } elseif ('${{ github.event.inputs.dry-run }}') {
-            $DryRun = "${{ github.event.inputs.dry-run }}"
           }
-          echo "dry-run=$DryRun" >> $Env:GITHUB_OUTPUT
-
+          
           if ([System.Convert]::ToBoolean($DryRun)) {
             echo "::notice::This is a dry run; publishing will be skipped"
           } else {
@@ -108,7 +104,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -194,11 +190,7 @@ jobs:
           $DockerPushCmd = 'docker push ${{ steps.build-container.outputs.image-name }}'
           Write-Host $DockerPushCmd
 
-          $DryRun = $false
-          if ('${{ needs.preflight.outputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
-          }
-
+          $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if (-Not $DryRun) {
             Invoke-Expression $DockerPushCmd
           }
@@ -208,7 +200,7 @@ jobs:
     runs-on: ubuntu-20.04
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
 
     steps:
       - name: Configure runner
@@ -250,11 +242,7 @@ jobs:
           $GhCmd = $(@('gh', 'release', 'create', "v$Version", "--repo", $Env:GITHUB_REPOSITORY, "--notes-file", $ChangesPath, $HashPath) + $Files.Path) -Join ' '
           Write-Host $GhCmd
 
-          $DryRun = $false
-          if ('${{ needs.preflight.outputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
-          }
-
+          $DryRun =  [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if (-Not $DryRun) {
             Invoke-Expression $GhCmd
           }
@@ -264,7 +252,7 @@ jobs:
     runs-on: ubuntu-20.04
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
 
     steps:
       - name: Download artifacts
@@ -286,11 +274,7 @@ jobs:
 
           $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
 
-          $DryRun = $false
-          if ('${{ needs.preflight.outputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
-          }
-
+          $DryRun = [System.Convert]::ToBoolean('${{ inputs.dry-run }}')
           if ($DryRun) {
             $PublishCmd += '-WhatIf'
           }
@@ -313,7 +297,7 @@ jobs:
     name: OneDrive
     runs-on: ubuntu-20.04
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
 
     steps:
       - name: Check out Devolutions/actions
@@ -353,7 +337,7 @@ jobs:
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: needs.preflight.outputs.skip-publishing == 'false' && needs.preflight.outputs.dry-run == 'false'
+        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
