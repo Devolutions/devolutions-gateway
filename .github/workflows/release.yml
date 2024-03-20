@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: "workflow_call"
+      dry-run:
+        description: 'If true, the workflow only indicates which artifacts would be uploaded'
+        required: true
+        type: boolean
+        default: true
 
 concurrency: gateway-release
 
@@ -29,21 +34,9 @@ jobs:
       run: ${{ steps.get-run.outputs.run }}
       version: ${{ steps.get-version.outputs.version }}
       skip-publishing: ${{ steps.check-release.outputs.skip-publishing }}
-      dl-strategy: ${{ steps.get-dl-strategy.outputs.dl-strategy }}
+      dry-run: ${{ steps.get-dry-run.outputs.dry-run }}
 
     steps:
-      ## workflow_dispatch: CI run artifacts are downloaded using `gh` (specifying the CI workflow run_id)
-      ## workflow_call:     CI run artifacts are downloaded using actions/download-artifact (using the current run_id)
-      - name: Get download strategy
-        id: get-dl-strategy
-        shell: pwsh
-        run: |
-          if ('${{ inputs.dispatch }}') {
-            echo "dl-strategy=action" >> $Env:GITHUB_OUTPUT
-          } else {
-            echo "dl-strategy=cli" >> $Env:GITHUB_OUTPUT
-          }
-
       ## workflow_dispatch: The run_id is read from the inputs
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
@@ -56,14 +49,25 @@ jobs:
             echo "run=${{ github.run_id }}" >> $Env:GITHUB_OUTPUT
           }
 
-      - name: Download version (action)
-        if: steps.get-dl-strategy.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: version
+      - name: Get dry run
+        id: get-dry-run
+        shell: pwsh
+        run: |
+          $DryRun = "false"
+          if ('${{ inputs.dry-run }}') {
+            $DryRun = "${{ inputs.dry-run }}"
+          } elseif ('${{ github.event.inputs.dry-run }}') {
+            $DryRun = "${{ github.event.inputs.dry-run }}"
+          }
+          echo "dry-run=$DryRun" >> $Env:GITHUB_OUTPUT
 
-      - name: Download version (cli)
-        if: steps.get-dl-strategy.outputs.dl-strategy == 'cli'
+          if ([System.Convert]::ToBoolean($DryRun)) {
+            echo "::notice::This is a dry run; publishing will be skipped"
+          } else {
+            echo "::warning::This is not a dry run, release will be published!"
+          }
+
+      - name: Download version
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,7 +108,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
     strategy:
       matrix:
         arch: [ x86_64 ]
@@ -125,34 +129,7 @@ jobs:
             base-image: lts-nanoserver-ltsc2022
 
     steps:
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: docker
-          path: docker
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: devolutions-gateway
-          path: devolutions-gateway
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: docker
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: webapp-client
-
-      - name: Download artifacts (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
+      - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -218,8 +195,8 @@ jobs:
           Write-Host $DockerPushCmd
 
           $DryRun = $false
-          if ('${{ github.event.inputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          if ('${{ needs.preflight.outputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
           }
 
           if (-Not $DryRun) {
@@ -231,42 +208,13 @@ jobs:
     runs-on: ubuntu-20.04
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
 
     steps:
       - name: Configure runner
         run: cargo install parse-changelog
 
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: jetsocat
-          path: jetsocat
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: devolutions-gateway
-          path: devolutions-gateway
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: webapp-client
-          path: webapp-client
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: changelog
-          path: changelog
-
-      - name: Download artifacts (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
+      - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -303,8 +251,8 @@ jobs:
           Write-Host $GhCmd
 
           $DryRun = $false
-          if ('${{ github.event.inputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          if ('${{ needs.preflight.outputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
           }
 
           if (-Not $DryRun) {
@@ -316,17 +264,10 @@ jobs:
     runs-on: ubuntu-20.04
     environment: publish-prod
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
 
     steps:
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: devolutions-gateway
-
-      - name: Download artifacts (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
+      - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -346,8 +287,8 @@ jobs:
           $PublishCmd = @('Publish-Module', '-Force', '-Path', (Join-Path PowerShell DevolutionsGateway), '-NugetApiKey', '${{ secrets.PS_GALLERY_NUGET_API_KEY }}')
 
           $DryRun = $false
-          if ('${{ github.event.inputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
+          if ('${{ needs.preflight.outputs.dry-run }}') {
+            $DryRun = [System.Convert]::ToBoolean('${{ needs.preflight.outputs.dry-run }}')
           }
 
           if ($DryRun) {
@@ -372,11 +313,11 @@ jobs:
     name: OneDrive
     runs-on: ubuntu-20.04
     needs: preflight
-    if: needs.preflight.outputs.skip-publishing == 'false' || github.event.inputs.dry-run == 'true'
+    if: needs.preflight.outputs.skip-publishing == 'false' || needs.preflight.outputs.dry-run == 'true'
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1
@@ -390,16 +331,7 @@ jobs:
         with:
           github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
 
-      ## Download back the artifacts produced by the other jobs
-
-      - name: Download artifacts (action)
-        if: needs.preflight.outputs.dl-strategy == 'action'
-        uses: actions/download-artifact@v3
-        with:
-          name: devolutions-gateway
-
-      - name: Download artifacts (cli)
-        if: needs.preflight.outputs.dl-strategy == 'cli'
+      - name: Download artifacts
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -419,21 +351,9 @@ jobs:
           New-Item -Path "$destinationFolder" -ItemType "directory"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
 
-      # workflow_call: dry-run will be null, let's make sure we have a value for the following step
-      - name: Check inputs
-        id: check
-        shell: pwsh
-        run: |
-          $DryRun = $false
-          if ('${{ github.event.inputs.dry-run }}') {
-            $DryRun = [System.Convert]::ToBoolean('${{ github.event.inputs.dry-run }}')
-          }
-          $DryRun = $DryRun.ToString().ToLower()
-          echo "dry-run=$DryRun" >> $Env:GITHUB_OUTPUT
-
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
-        if: needs.preflight.outputs.skip-publishing == 'false' && steps.check.outputs.dry-run == 'false'
+        if: needs.preflight.outputs.skip-publishing == 'false' && needs.preflight.outputs.dry-run == 'false'
         with:
           azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}

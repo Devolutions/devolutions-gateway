@@ -7,6 +7,11 @@ on:
         description: "The commit SHA to build"
         required: false
         type: string
+      dry-run:
+          description: 'If true, the workflow only indicates which artifacts would be uploaded'
+          required: true
+          type: boolean
+          default: true
 
 jobs:
   call-ci-workflow:
@@ -28,3 +33,5 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets: inherit
     needs: [ call-package-workflow ]
+    with:
+      dry-run: ${{ github.event.inputs.dry-run }}
