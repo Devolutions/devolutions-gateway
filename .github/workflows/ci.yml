@@ -86,7 +86,7 @@ jobs:
           echo "ref=$Ref" >> $Env:GITHUB_OUTPUT
 
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.get-commit.outputs.ref }}
 
@@ -118,7 +118,7 @@ jobs:
           echo "rust-profile=$CargoProfile" >> $Env:GITHUB_OUTPUT
 
       - name: Upload version artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: version
           path: VERSION
@@ -139,7 +139,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
@@ -163,7 +163,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -223,18 +223,31 @@ jobs:
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetsocat-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.staging-path }}
+
+  jetsocat-merge:
+    name: jetsocat merge artifacts
+    runs-on: ubuntu-latest
+    needs: [preflight, jetsocat]
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
         with:
           name: jetsocat
-          path: ${{ steps.build.outputs.staging-path }}
+          pattern: jetsocat-*
+          delete-merged: true
 
   jetsocat-lipo:
     name: jetsocat macos universal
     runs-on: ubuntu-20.04
-    needs: [preflight, jetsocat]
+    needs: [preflight, jetsocat, jetsocat-merge]
 
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: jetsocat
 
@@ -256,10 +269,11 @@ jobs:
           Invoke-Expression $LipoCmd
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: jetsocat
           path: .
+          overwrite: true
 
   devolutions-gateway-web-ui:
     name: devolutions-gateway-web-ui
@@ -268,12 +282,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1
@@ -287,7 +301,7 @@ jobs:
         shell: pwsh
         working-directory: webapp
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           key: ${{ runner.os }}-node-${{ hashFiles('webapp/package-lock.json') }}
           path: ${{ steps.npm-cache.outputs.dir }}
@@ -312,7 +326,7 @@ jobs:
         working-directory: webapp
         run: ng build
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: webapp-client
           path: webapp/client/
@@ -327,12 +341,12 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Download webapp-client
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: webapp-client
           path: webapp/client
@@ -398,7 +412,7 @@ jobs:
 
       - name: Add msbuild to PATH
         if: matrix.os == 'windows'
-        uses: microsoft/setup-msbuild@v1.1
+        uses: microsoft/setup-msbuild@v2
 
       - name: Package
         if: matrix.arch != 'arm64'
@@ -416,10 +430,23 @@ jobs:
           ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
+        with:
+          name: devolutions-gateway-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.load-variables.outputs.staging-path }}
+
+  devolutions-gateway-merge:
+    name: devolutions gateway merge artifacts
+    runs-on: ubuntu-latest
+    needs: [preflight, devolutions-gateway]
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
         with:
           name: devolutions-gateway
-          path: ${{ steps.load-variables.outputs.staging-path }}
+          pattern: devolutions-gateway-*
+          delete-merged: true
 
   upload-git-log:
     name: Upload git-log output
@@ -430,7 +457,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 10
@@ -440,7 +467,7 @@ jobs:
         run: git log --max-count=10 > ./git-log.txt
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: git-log
           path: ./git-log.txt
@@ -452,13 +479,14 @@ jobs:
     needs:
       - preflight
       - devolutions-gateway
+      - devolutions-gateway-merge
       - jetsocat
       - jetsocat-lipo
       - upload-git-log
 
     steps:
       - name: Check out Devolutions/actions
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: Devolutions/actions
           ref: v1
@@ -480,17 +508,17 @@ jobs:
 
       ## Download back the artifacts produced by the other jobs
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: jetsocat
           path: ${{ runner.temp }}/artifacts_raw
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: devolutions-gateway
           path: ${{ runner.temp }}/artifacts_raw
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: git-log
           path: ${{ runner.temp }}/artifacts_raw
@@ -548,7 +576,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
@@ -565,7 +593,7 @@ jobs:
 
       steps:
         - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v3
+          uses: actions/checkout@v4
           with:
             ref: ${{ needs.preflight.outputs.ref }}
 
