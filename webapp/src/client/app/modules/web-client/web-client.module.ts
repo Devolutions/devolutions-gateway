@@ -13,6 +13,26 @@ import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-clien
 import {TabViewComponent} from "@shared/components/tab-view/tab-view.component";
 import {DynamicTabComponent} from "@shared/components/dynamic-tab/dynamic-tab.component";
 import {SessionToolbarComponent} from "@shared/components/session-toolbar/session-toolbar.component";
+import {RdpFormComponent} from "@gateway/modules/web-client/form/form-components/rdp/rdp-form.component";
+import {SshFormComponent} from "@gateway/modules/web-client/form/form-components/ssh/ssh-form.component";
+import {VncFormComponent} from "@gateway/modules/web-client/form/form-components/vnc/vnc-form.component";
+import {ArdFormComponent} from "@gateway/modules/web-client/form/form-components/ard/ard-form.component";
+import {
+  UsernameControlComponent
+} from "@gateway/modules/web-client/form/form-controls/username-control/username-control.component";
+import {
+  PasswordControlComponent
+} from "@gateway/modules/web-client/form/form-controls/password-control/password-control.component";
+import {
+  ScreenSizeControlComponent
+} from "@gateway/modules/web-client/form/form-controls/screen-size-control/screen-size-control.component";
+import {
+  KdcUrlControlComponent
+} from "@gateway/modules/web-client/form/form-controls/kdc-url-control/kdc-url-control.component";
+import {
+  PreConnectionBlobControlComponent
+} from "@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component";
+
 
 const routes: Routes = [
   {
@@ -36,6 +56,15 @@ const routes: Routes = [
     WebClientSshComponent,
     WebClientArdComponent,
     WebClientFormComponent,
+    RdpFormComponent,
+    SshFormComponent,
+    VncFormComponent,
+    ArdFormComponent,
+    UsernameControlComponent,
+    PasswordControlComponent,
+    ScreenSizeControlComponent,
+    KdcUrlControlComponent,
+    PreConnectionBlobControlComponent,
     TabViewComponent,
     DynamicTabComponent,
     SessionToolbarComponent

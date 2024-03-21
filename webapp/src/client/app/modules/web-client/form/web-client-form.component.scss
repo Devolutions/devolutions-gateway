@@ -107,23 +107,16 @@
   align-items: center;
 }
 
-.password-container {
-  position: relative;
+.gateway-form-input .p-fluid {
   width: 100%;
 }
 
-.password-container input[type="password"] {
-  width: 100%;
-  padding-right: 40px;
-  box-sizing: border-box;
+form .gateway-form-group:last-child {
+  text-align: right;
 }
 
-.password-container span {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  cursor: pointer;
+rdp-form, ssh-form, vnc-form, ard-form {
+  padding: 0;
 }
 
 .col-pad-right-lg {
@@ -157,8 +150,4 @@
   align-items: flex-start;
   gap: 10px;
   display: inline-flex
-}
-
-.more-text {
-  color: var(--security-box-action-color);
 }

@@ -1,27 +1,28 @@
-import {Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges} from '@angular/core';
-import {AbstractControl, FormBuilder, FormControl, FormGroup, ValidatorFn, Validators} from "@angular/forms";
-import {Message, SelectItem} from "primeng/api";
-import {catchError, map, switchMap, takeUntil, tap} from "rxjs/operators";
-import {EMPTY, Observable, of} from "rxjs";
+import {
+  ChangeDetectorRef,
+  Component,
+  EventEmitter,
+  Input,
+  OnChanges,
+  OnInit,
+  Output,
+  SimpleChanges
+} from '@angular/core';
+import {AbstractControl, FormBuilder, FormGroup, Validators} from "@angular/forms";
+import {Message} from "primeng/api";
+import {catchError, startWith, switchMap, takeUntil} from "rxjs/operators";
+import {EMPTY, forkJoin, Observable, of} from "rxjs";
 
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebSession} from "@shared/models/web-session.model";
 import {ComponentStatus} from "@shared/models/component-status.model";
-import {Protocol, WebClientProtocol, ProtocolControlMap } from "@shared/enums/web-client-protocol.enum";
-import {AuthMode, WebClientAuthMode} from "@shared/enums/web-client-auth-mode.enum";
+import {Protocol, WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {StorageService} from "@shared/services/utils/storage.service";
 import {WebSessionService} from "@shared/services/web-session.service";
+import {WebFormService} from "@shared/services/web-form.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
-
-
-interface FormInputVisibility {
-  showAuthModeInput?: boolean;
-  showUsernameInput?: boolean;
-  showPasswordInput?: boolean;
-  showMoreSettingsInputs?: boolean;
-}
 
 @Component({
   selector: 'web-client-form',
@@ -34,79 +35,42 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   @Input() isFormExists: boolean = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData: any;
-  @Input() error: string;
+  @Input() error: any;
 
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
-  private formInputVisibilityMap: { [key in Protocol]: FormInputVisibility } = {
-    [Protocol.RDP]: { showUsernameInput: true, showPasswordInput: true, showMoreSettingsInputs: true },
-    [Protocol.VNC]: { showAuthModeInput: true },
-    [Protocol.SSH]: { showUsernameInput: true, showPasswordInput: true },
-    [Protocol.ARD]: { showUsernameInput: true, showPasswordInput: true },
-    [Protocol.Telnet]: {},
-  };
+  connectSessionForm: FormGroup = this.fb.group({});
 
-  connectSessionForm: FormGroup;
-  authModeOptions: SelectItem[];
-  screenSizeOptions: SelectItem[];
   protocolOptions: SelectItemWithTooltip[];
   protocolSelectedTooltip: string = '';
-
-  showMoreSettings: boolean = false;
-  showPassword: boolean = false;
 
   messages: Message[] = [];
 
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
 
-  constructor(private webSessionService: WebSessionService,
+  constructor(private fb: FormBuilder,
+              private formService: WebFormService,
+              private webSessionService: WebSessionService,
               private storageService: StorageService,
-              private formBuilder: FormBuilder) {
+              private cdr: ChangeDetectorRef) {
     super();
   }
 
   ngOnInit(): void {
-    this.populateForm();
+    this.initializeFormAndOptions();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes.error && this.error) {
-      setTimeout(() => {
-        this.addMessages([{
-          severity: 'error',
-          summary: this.error['kind'] ?? this.error,
-          detail: this.error['backtrace'] ?? ''
-        }]);
-      }, 500);
+      this.displayErrorMessages(this.error);
     }
   }
 
-  get showCustomSize(): boolean {
-    return this.connectSessionForm.get('screenSize').value === ScreenSize.Custom;
-  }
-
-  showAuthModeInput(): boolean {
-    return this.getCurrentProtocolInputVisibility().showAuthModeInput ?? false;
-  }
-
-  showUsernameInput(): boolean {
-    return this.getCurrentProtocolInputVisibility().showUsernameInput ?? false;
-  }
-
-  showPasswordInput(): boolean {
-    return this.getCurrentProtocolInputVisibility().showPasswordInput ?? false;
-  }
-
-  showMoreSettingsInputs(): boolean {
-    return this.getCurrentProtocolInputVisibility().showMoreSettingsInputs ?? false;
-  }
-
   onConnectSession(): void {
-    this.processFormData(this.connectSessionForm).pipe(
+    this.webSessionService.createWebSession(this.connectSessionForm, this.getSelectedProtocol()).pipe(
       takeUntil(this.destroyed$),
-      switchMap((formToSubmit) => this.webSessionService.createWebSession(formToSubmit, this.getSelectedProtocol())),
       switchMap((webSession) => this.manageScreenSize(webSession)),
       switchMap((webSession) => this.manageWebSessionSubject(webSession)),
       catchError(error => {
@@ -118,19 +82,6 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
         this.addHostnameToStorage(webSession?.data?.hostname);
       }
     );
-  }
-
-  toggleShowPassword(): void {
-    this.showPassword = !this.showPassword;
-  }
-
-  toggleMoreSettings(event: Event): void {
-    event.preventDefault();
-    this.showMoreSettings = !this.showMoreSettings;
-  }
-
-  isMoreSettingsOpened(): boolean {
-    return this.showMoreSettings;
   }
 
   isHostnamesExists(): boolean {
@@ -147,58 +98,110 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     });
   }
 
-  private kdcServerUrlValidator(): ValidatorFn {
-    return (control: AbstractControl): { [key: string]: any } | null => {
-      if (!control.value) {
-        return null;
-      }
-
-      const validTcpProtocol: boolean = /^(tcp|udp):\/\/.*$/.test(control.value);
-      return validTcpProtocol ? null : { 'invalidKdcProtocol': { value: control.value } };
-    };
-  }
-
-  private getCurrentProtocolInputVisibility(): FormInputVisibility {
-    const currentProtocol: Protocol = this.getSelectedProtocol();
-    const visibility: FormInputVisibility = this.formInputVisibilityMap[currentProtocol] || {};
-
-    if (currentProtocol === Protocol.VNC) {
-      const authMode: AuthMode = this.getSelectedAuthMode();
-      return {
-        ...visibility,
-        showUsernameInput: authMode === AuthMode.Username_and_Password,
-        showPasswordInput: [AuthMode.VNC_Password, AuthMode.Username_and_Password].includes(authMode),
-      };
+  private subscribeToProtocolChanges(): void {
+    const protocolControl: AbstractControl<any,any> = this.connectSessionForm.get('protocol');
+    if (!protocolControl) {
+      return;
     }
 
-    return visibility;
-  }
-
-  private updateProtocolTooltip(value: any): void {
-    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(item => item.value === value);
-    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
-  }
-
-  private processFormData(sessionForm: FormGroup<any>): Observable<FormGroup<any>> {
-    if (this.isSelectedProtocolRdp()) {
-      return of(new FormGroup(sessionForm.controls));
-    }
-
-    const selectedProtocol: Protocol = this.getSelectedProtocol();
-    const protocolControlMap: ProtocolControlMap = WebClientProtocol.getProtocolFormControlMap();
-    const requiredControls: string[] = protocolControlMap[selectedProtocol];
-
-    const newFormGroup: FormGroup<any> = new FormGroup({});
-    newFormGroup.addControl('protocol', sessionForm.controls['protocol']);
-
-    if (requiredControls) {
-      requiredControls.forEach(controlName => {
-        if (sessionForm.controls[controlName]) {
-          newFormGroup.addControl(controlName, sessionForm.controls[controlName]);
+    protocolControl.valueChanges.pipe(
+      startWith(protocolControl.value as Protocol),
+      takeUntil(this.destroyed$)
+    ).subscribe((protocol) => {
+      const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
+      Object.keys(this.connectSessionForm.controls).forEach(key => {
+        if (!exceptions.includes(key)) {
+          this.connectSessionForm.get(key).disable();
         }
       });
+
+      this.formService.detectFormChanges(this.cdr);
+      }, error => console.error('Error subscribing to protocol changes:', error)
+    );
+  }
+
+  private initializeFormAndOptions(): void {
+    this.buildFormGroup(this.inputFormData)
+      .pipe(
+        takeUntil(this.destroyed$),
+        switchMap(formGroup => {
+          this.connectSessionForm = formGroup;
+          this.subscribeToProtocolChanges();
+
+          return forkJoin({
+            protocolOptions: this.formService.getProtocolOptions(),
+            hostnames: this.getHostnames(),
+          });
+        }),
+        catchError(error => {
+          console.error('Initialization failed', error);
+          return [];
+        })
+      )
+      .subscribe({
+        next: ({protocolOptions, hostnames}) => {
+          this.protocolOptions = protocolOptions;
+          this.hostnames = hostnames;
+
+          this.updateProtocolTooltip();
+        },
+        error: (error) => console.error('Error fetching dropdown options', error)
+      });
+  }
+
+  private buildFormGroup(inputFormData?: any): Observable<FormGroup> {
+    const formControls = {
+      protocol: [inputFormData?.protocol || 0, Validators.required],
+      autoComplete: [inputFormData?.autoComplete || '', Validators.required],
+      hostname: [inputFormData?.autoComplete || '']
+    };
+
+    const formGroup = this.fb.group(formControls);
+    return of(formGroup);
+  }
+
+  private getHostnames(): Observable<HostnameObject[]> {
+    return of(this.storageService.getItem<AutoCompleteInput[]>('hostnames'));
+  }
+
+  private isHostnameInArray(hostname: string, array: AutoCompleteInput[] = []): boolean {
+    return array.some(obj => obj.hostname === hostname);
+  }
+
+  private processHostnameInput(input: string | AutoCompleteInput): AutoCompleteInput {
+    return typeof input === 'string' ? {'hostname': input} : input;
+  }
+
+  private addHostnameToStorage(hostname: string): void {
+    try {
+      if (!hostname) {
+        return;
+      }
+
+      const hostnameObj: AutoCompleteInput = this.processHostnameInput(hostname);
+      const hostnames: AutoCompleteInput[] = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
+
+      if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
+        hostnames.push(hostnameObj);
+        this.storageService.setItem('hostnames', hostnames);
+        this.populateHostnameList();
+      }
+    } catch (e) {
+      console.error(e);
     }
-    return of(newFormGroup);
+  }
+
+  private populateHostnameList(): Observable<void> {
+    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+    return of(undefined);
+  }
+
+  private updateProtocolTooltip(value?: any): void {
+    if (!value && this.protocolOptions.length > 0) {
+      value = this.protocolOptions[0].value;
+    }
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(item => item.value === value);
+    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
   }
 
   private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
@@ -227,37 +230,20 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     return of(webSession);
   }
 
-  private isSelectedProtocolRdp(): boolean {
-    return this.getSelectedProtocol() === Protocol.RDP;
+  isSelectedProtocolRdp(): boolean {
+    return WebClientProtocol.isProtocolRdp(this.getSelectedProtocol());
   }
 
-  private isHostnameInArray(hostname: string, array: AutoCompleteInput[] = []): boolean {
-    return array.some(obj => obj.hostname === hostname);
+  isSelectedProtocolSsh(): boolean {
+    return WebClientProtocol.isProtocolSsh(this.getSelectedProtocol());
   }
 
-  private processAutoCompleteInput(input: string | AutoCompleteInput): AutoCompleteInput {
-    return typeof input === 'string' ? {'hostname': input} : input;
+  isSelectedProtocolVnc(): boolean {
+    return WebClientProtocol.isProtocolVnc(this.getSelectedProtocol());
   }
 
-  private addHostnameToStorage(hostname: string): void {
-    try {
-      if (!hostname) {
-        return;
-      }
-
-      const hostnameObj: AutoCompleteInput = this.processAutoCompleteInput(hostname);
-      const hostnames: AutoCompleteInput[] = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
-
-      if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
-        hostnames.push(hostnameObj);
-
-        this.storageService.setItem('hostnames', hostnames);
-
-        this.populateAutoCompleteLists();
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  isSelectedProtocolArd(): boolean {
+    return WebClientProtocol.isProtocolArd(this.getSelectedProtocol());
   }
 
   private addMessages(newMessages: Message[]): void {
@@ -270,211 +256,17 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     }
   }
 
-  private buildForm(): Observable<void> {
-    return this.createFormGroup().pipe(
-      takeUntil(this.destroyed$),
-      map((newFormGroup) => this.connectSessionForm = newFormGroup),
-      switchMap(() => this.updateFormControls())
-    );
-  }
-
-  private createFormGroup(): Observable<FormGroup<any>> {
-    const formControls= {
-      protocol: [0, Validators.required],
-      autoComplete: new FormControl('', Validators.required),
-      hostname: [''],
-      authMode: [AuthMode.VNC_Password],
-      username: ['', Validators.required],
-      password: ['', Validators.required],
-      screenSize: [null],
-      customWidth: [{value: '', disabled: true}],
-      customHeight: [{value: '', disabled: true}],
-      kdcUrl: ['', [this.kdcServerUrlValidator()]],
-      preConnectionBlob: ['']
-    };
-
-    const formGroup = this.formBuilder.group(formControls);
-
-    if (this.isFormExists && this.inputFormData) {
-      formGroup.patchValue({
-        protocol: this.inputFormData.protocol,
-        autoComplete: this.inputFormData.autoComplete,
-        hostname: this.inputFormData.hostname,
-        authMode: this.inputFormData.authMode,
-        username: this.inputFormData.username,
-        password: this.inputFormData.password,
-        screenSize: this.inputFormData.screenSize,
-        customWidth: this.inputFormData.customWidth, // Assuming you handle enabling/disabling based on conditions
-        customHeight: this.inputFormData.customHeight,
-        kdcUrl: this.inputFormData.kdcUrl,
-        preConnectionBlob: this.inputFormData.preConnectionBlob
-      });
-    }
-
-    return of(formGroup);
-  }
-
-  private updateFormControls(protocol?: Protocol): Observable<void> {
-    protocol = protocol ?? this.getSelectedProtocol();
-
-    this.disableAllFormControls();
-    this.enableFormControlsByProtocol(protocol);
-
-    if (protocol === Protocol.VNC) {
-      this.handleVncFormControls();
-    }
-    return of(undefined);
-  }
-
-  private disableAllFormControls(): void {
-    const controlsToDisable: string[] = [
-      'authMode',
-      'username',
-      'password',
-      'screenSize',
-      'customWidth',
-      'customHeight',
-      'kdcUrl',
-      'preConnectionBlob'
-    ];
-
-    controlsToDisable.forEach(control => {
-      this.connectSessionForm.get(control)?.disable();
-    });
-  }
-
-  private enableFormControlsByProtocol(protocol: Protocol): void {
-    const protocolControlMap: ProtocolControlMap = WebClientProtocol.getProtocolFormControlMap();
-    protocolControlMap[protocol]?.forEach(control => {
-      this.connectSessionForm.get(control)?.enable();
-    });
-  }
-
-  private handleVncFormControls(): void {
-    this.setAuthMode(this.getSelectedAuthMode() ?? AuthMode.VNC_Password);
-    this.updateFormControlsByAuthMode();
-  }
-
-  private updateFormControlsByAuthMode(authMode?: AuthMode): void {
-    authMode = authMode ?? this.inputFormData?.authMode ?? AuthMode.VNC_Password;
-
-    const controlsToDisable: string[] = ['username', 'password'];
-    controlsToDisable.forEach(control => {
-      this.connectSessionForm.get(control)?.disable();
-    });
-
-    switch (authMode) {
-      case AuthMode.VNC_Password:
-        this.connectSessionForm.get('password')?.enable();
-        break;
-
-      case AuthMode.Username_and_Password :
-        this.connectSessionForm.get('username')?.enable();
-        this.connectSessionForm.get('password')?.enable();
-        break;
-
-      case AuthMode.None:
-        // AuthMode is None. No controls enabled. KAH Feb 23, 2024
-        break;
-    }
-  }
-
-  private populateForm(): void {
-    this.populateAutoCompleteLists().pipe(
-      takeUntil(this.destroyed$),
-      switchMap(() => this.buildForm()),
-      switchMap(() => this.setHostnameDropdown()),
-      switchMap(() => this.setupAuthModeDropdown()),
-      switchMap(() => this.setupScreenSizeDropdown()),
-      switchMap(() => this.setupProtocolDropdown()),
-      catchError(error => {
-        console.error(error.message);
-        return EMPTY;
-      }),
-    ).subscribe();
-  }
-
-  private populateAutoCompleteLists(): Observable<void> {
-    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
-    return of(undefined);
-  }
-
   private getSelectedProtocol(): Protocol {
     return this.connectSessionForm.get('protocol').value;
   }
 
-  private getSelectedAuthMode(): AuthMode {
-    return this.connectSessionForm.get('authMode').value;
-  }
-
-  private setAuthMode(authMode: AuthMode = AuthMode.VNC_Password): void {
-    this.connectSessionForm.patchValue({
-      authMode: authMode
-    });
-  }
-
-  private setHostnameDropdown(): Observable<void> {
-    if (!this.isFormExists && !this.inputFormData) {
-      return of(undefined);
-    }
-
-    this.connectSessionForm.get('autoComplete').setValue(
-      this.hostnames.find(hostnames =>
-        hostnames?.hostname === this.inputFormData?.autoComplete?.hostname));
-
-    return of(undefined);
-  }
-
-  private setupAuthModeDropdown(): Observable<void> {
-    this.authModeOptions = WebClientAuthMode.getSelectItems();
-    this.subscribeToFormAuthMode();
-    return of(undefined);
-  }
-
-  private setupScreenSizeDropdown(): Observable<void> {
-    this.screenSizeOptions = ScreenSize.getSelectItems();
-    this.subscribeToFormScreenSize();
-    return of(undefined);
-  }
-
-  private setupProtocolDropdown(): Observable<void> {
-    this.protocolOptions = WebClientProtocol.getSelectItems();
-    this.updateProtocolTooltip(this.getSelectedProtocol());
-    this.subscribeToFormProtocol();
-    return of(undefined);
-  }
-
-  private subscribeToFormScreenSize(): void {
-    this.connectSessionForm.get('screenSize').valueChanges.pipe(
-      takeUntil(this.destroyed$),
-    ).subscribe(value => {
-      if (value === ScreenSize.Custom) {
-        this.connectSessionForm.get('customWidth').enable();
-        this.connectSessionForm.get('customHeight').enable();
-      } else {
-        this.connectSessionForm.get('customWidth').disable();
-        this.connectSessionForm.get('customHeight').disable();
-      }
-    });
-  }
-
-  private subscribeToFormProtocol(): void {
-    this.connectSessionForm.get('protocol').valueChanges.pipe(
-      takeUntil(this.destroyed$),
-      tap(protocol => this.updateProtocolTooltip(protocol)),
-      switchMap(protocol => this.updateFormControls(protocol)),
-      catchError(error => {
-        console.error('Error handling protocol changes:', error);
-        return EMPTY;
-      })
-    ).subscribe(() => this.showMoreSettings = false);
-  }
-
-  private subscribeToFormAuthMode(): void {
-    this.connectSessionForm.get('authMode').valueChanges.pipe(
-      takeUntil(this.destroyed$),
-    ).subscribe(value => {
-      this.updateFormControlsByAuthMode(value);
-    });
+  private displayErrorMessages(error: any): void {
+    setTimeout(() => {
+      this.addMessages([{
+        severity: 'error',
+        summary: error['kind'] ?? error,
+        detail: error['backtrace'] ?? ''
+      }]);
+    }, 500);
   }
 }

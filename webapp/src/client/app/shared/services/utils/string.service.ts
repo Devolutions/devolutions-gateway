@@ -1,5 +1,4 @@
 import {UtilsService} from '../utils.service';
-import {DefaultSshPort} from "@shared/services/web-client.service";
 
 export interface ExtractedUsernameDomain {
   username: string,
