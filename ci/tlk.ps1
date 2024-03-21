@@ -546,7 +546,13 @@ class TlkRecipe
         $Website = "https://devolutions.net"
         $PackageVersion = $this.Version
         $DistroCodeName = "focal" # Ubuntu 20.04
-        $Dependencies = @('liblzma5', 'liblz4-1', '${shlibs:Depends}', '${misc:Depends}')
+        $Dependencies = @('liblzma5', 'liblz4-1')
+
+        if ($this.Target.DebianArchitecture() -Eq 'arm64') {
+            $Dependencies += @("libc6 (>= 2.29)", "libgcc-s1 (>= 4.2)")
+        } else {
+            $Dependencies += @('${shlibs:Depends}', '${misc:Depends}')
+        }
 
         $Env:DEBFULLNAME = $Packager
         $Env:DEBEMAIL = $Email
@@ -562,7 +568,6 @@ class TlkRecipe
         } else {
             throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
         }
-
 
         $InputPackagePath = Join-Path $this.SourcePath "package/Linux"
 
@@ -605,10 +610,17 @@ class TlkRecipe
         # debian/rules
         $RulesFile = Join-Path $OutputDebianPath "rules"
         $RulesTemplate = Join-Path $InputPackagePath "gateway/template/rules"
+
+        $DhShLibDepsOverride = "";
+        if ($this.Target.DebianArchitecture() -Eq "amd64") {
+            $DhShLibDepsOverride = "dh_shlibdeps"
+        }
+
         Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
             dgateway_executable = $DGatewayExecutable
             dgateway_webclient = $DGatewayWebClient
             platform_dir = $InputPackagePath
+            dh_shlibdeps = $DhShLibDepsOverride
         } -OutputFile $RulesFile
 
         # debian/control
@@ -616,7 +628,7 @@ class TlkRecipe
         $ControlTemplate = Join-Path $InputPackagePath "gateway/template/control"
         Merge-Tokens -TemplateFile $ControlTemplate -Tokens @{
             arch = $DebianArchitecture
-            deps = $($Dependencies -Join ",")
+            deps = $($Dependencies -Join ", ")
             email = $Email
             package = $Packager
             website = $Website
@@ -653,6 +665,11 @@ class TlkRecipe
         }
 
         $DpkgBuildPackageArgs = @('-b', '-us', '-uc')
+
+        if ($this.Target.DebianArchitecture() -Eq 'arm64') {
+            $DpkgBuildPackageArgs += @('-a', $this.Target.DebianArchitecture())
+        }
+
         & 'dpkg-buildpackage' $DpkgBuildPackageArgs | Out-Host
 
         if (Test-Path Env:TARGET_OUTPUT_PATH) {
