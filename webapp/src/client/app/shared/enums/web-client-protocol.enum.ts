@@ -42,15 +42,20 @@ namespace WebClientProtocol {
       });
   }
 
-  export function getProtocolFormControlMap(): ProtocolControlMap {
-    const protocolControlMap: { [key in Protocol]?: string[] } = {
-      [Protocol.Telnet]: ['autoComplete', 'hostname'],
-      [Protocol.SSH]: ['autoComplete', 'hostname', 'username', 'password'],
-      [Protocol.VNC]: ['autoComplete', 'hostname', 'authMode', 'username', 'password'],
-      [Protocol.ARD]: ['autoComplete', 'hostname', 'username', 'password'],
-      [Protocol.RDP]: ['autoComplete', 'hostname', 'username', 'password', 'screenSize', 'customWidth', 'customHeight', 'kdcUrl', 'preConnectionBlob'],
-    };
-    return  protocolControlMap;
+  export function isProtocolRdp(protocol: Protocol): boolean {
+    return protocol === Protocol.RDP;
+  }
+
+  export function isProtocolSsh(protocol: Protocol): boolean {
+    return protocol === Protocol.SSH;
+  }
+
+  export function isProtocolVnc(protocol: Protocol): boolean {
+    return protocol === Protocol.VNC;
+  }
+
+  export function isProtocolArd(protocol: Protocol): boolean {
+    return protocol === Protocol.ARD;
   }
 }
 export {WebClientProtocol};

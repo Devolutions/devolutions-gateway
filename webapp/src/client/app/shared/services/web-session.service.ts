@@ -8,7 +8,6 @@ import {Protocol} from "@shared/enums/web-client-protocol.enum";
 import {AutoCompleteInput} from "@shared/interfaces/forms.interfaces";
 import {DynamicComponentService} from "@shared/services/dynamic-component.service";
 import {DesktopSize} from "@devolutions/iron-remote-gui";
-import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
 import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
 import {WebClientTelnetComponent} from "@gateway/modules/web-client/telnet/web-client-telnet.component";
 import {WebClientSshComponent} from "@gateway/modules/web-client/ssh/web-client-ssh.component";

@@ -34,7 +34,7 @@
         <div class="col-8 gateway-form-group">
           <label for="protocol">Hostname</label>
           <div class="gateway-form-input">
-            <span class="p-fluid" style="width: 100%">
+            <span class="p-fluid">
               <p-autoComplete formControlName="autoComplete"
                               id="hostname"
                               field="hostname"
@@ -50,144 +50,30 @@
           </div>
         </div>
 
-        <div class="col-4 gateway-form-group col-pad-right-lg" *ngIf="showAuthModeInput()">
-          <label for="protocol">Authentication</label>
-          <div class="gateway-form-input">
-            <p-dropdown id="authSettings"
-                        appendTo="body"
-                        formControlName="authMode"
-                        [options]="authModeOptions">
-            </p-dropdown>
-          </div>
-        </div>
+        <rdp-form class="col-12"
+                  *ngIf="isSelectedProtocolRdp()"
+                  [form]="connectSessionForm"
+                  [inputFormData]="inputFormData"></rdp-form>
 
-        <div class="col-12 gateway-form-group" *ngIf="showUsernameInput()">
-          <label for="username">Username</label>
-          <div class="gateway-form-input">
-            <input pInputText
-                   id="username"
-                   type="text"
-                   autocomplete="username"
-                   placeholder="Enter username"
-                   formControlName="username"
-                   required/>
-          </div>
-          <div class="form-helper-text"
-               *ngIf="connectSessionForm.get('username').hasError('required') && connectSessionForm.get('username').touched">
-            Username is required.
-          </div>
-        </div>
+        <!--// No telnet component required. KAH March 8, 2024 -->
 
-        <div class="col-12 gateway-form-group" *ngIf="showPasswordInput()">
-          <label for="password">Password</label>
-          <div class="gateway-form-input password-container">
-            <input pPassword
-                   id="password"
-                   [type]=" showPassword ? 'text' : 'password' "
-                   autocomplete="current-password"
-                   placeholder="Enter password"
-                   formControlName="password"
-                   showPassword="showPassword"
-                   required/>
-            <span>
-                  <i (click)="toggleShowPassword()" class="dvl-icon dvl-icon-view"></i>
-                </span>
-          </div>
-          <div class="form-helper-text"
-               *ngIf="connectSessionForm.get('password').hasError('required') && connectSessionForm.get('password').touched">
-            Password is required.
-          </div>
-        </div>
+        <ssh-form class="col-12"
+                  *ngIf="isSelectedProtocolSsh()"
+                  [form]="connectSessionForm"
+                  [inputFormData]="inputFormData"></ssh-form>
 
-        <div class="col-12 gateway-form-group"  *ngIf="showMoreSettingsInputs()">
-          <a href="#" (click)="toggleMoreSettings($event)">More Settings
-            <span *ngIf="!isMoreSettingsOpened()" >+</span>
-            <span *ngIf="isMoreSettingsOpened()">-</span>
-          </a>
-        </div>
+        <vnc-form class="col-12"
+                  *ngIf="isSelectedProtocolVnc()"
+                  [form]="connectSessionForm"
+                  [inputFormData]="inputFormData"></vnc-form>
 
-        <div *ngIf="showMoreSettings" class="col-12 gateway-form-group">
-          <div class="col-12 gateway-form-group">
-            <label for="username">Screen Size</label>
-            <div class="gateway-form-input">
-              <p-dropdown id="screenSize"
-                          styleClass="full-width-dropdown"
-                          appendTo="body"
-                          formControlName="screenSize"
-                          [options]="screenSizeOptions"></p-dropdown>
-            </div>
-          </div>
+        <ard-form class="col-12"
+                  *ngIf="isSelectedProtocolArd()"
+                  [form]="connectSessionForm"
+                  [inputFormData]="inputFormData"></ard-form>
 
-          <div class="col-12 grid nomargin nopad">
-            <div *ngIf="showCustomSize"
-                 class="col-6 gateway-form-group col-pad-right-md">
 
-              <label for="customWidth">Desktop Width</label>
-              <div class="gateway-form-input">
-                <input pInputText
-                       id="customWidth"
-                       type="number"
-                       [min]="0" [max]="4096"
-                       autocomplete="on"
-                       placeholder="Size in px"
-                       formControlName="customWidth"
-                       pKeyFilter="pint"/>
-              </div>
-              <div class="form-helper-text"
-                   *ngIf="connectSessionForm.get('customWidth').hasError('max') && connectSessionForm.get('customWidth').touched">
-                Maximum value is 4096
-              </div>
-            </div>
-            <div *ngIf="showCustomSize"
-                 class="col-6 gateway-form-group">
-              <label for="customHeight">Desktop Height</label>
-              <div class="gateway-form-input">
-                <input pInputText
-                       id="customHeight"
-                       type="number"
-                       [min]="0" [max]="2048"
-                       autocomplete="on"
-                       placeholder="Size in px"
-                       formControlName="customHeight"
-                       pKeyFilter="pint"/>
-              </div>
-              <div class="form-helper-text"
-                   *ngIf="connectSessionForm.get('customHeight').hasError('max') && connectSessionForm.get('customHeight').touched">
-                Maximum value is 2048
-              </div>
-            </div>
-          </div>
-
-          <div class="col-12 gateway-form-group">
-            <label for="kdcUrl">KDC Server URL</label>
-            <div class="gateway-form-input">
-              <input pInputText
-                     id="kdcUrl"
-                     type="text"
-                     autocomplete="on"
-                     placeholder="Enter KDC Url"
-                     formControlName="kdcUrl"/>
-            </div>
-            <div class="form-helper-text"
-                 *ngIf="connectSessionForm.get('kdcUrl').hasError('invalidKdcProtocol') && connectSessionForm.get('kdcUrl').touched">
-              Invalid URL - Must start with tcp:// or udp:// .
-            </div>
-          </div>
-
-          <div class="col-12 gateway-form-group">
-            <label for="preConnectionBlob">Pre Connection Blob</label>
-            <div class="gateway-form-input">
-              <input pInputText
-                     id="preConnectionBlob"
-                     type="text"
-                     autocomplete="on"
-                     placeholder="Enter Blob"
-                     formControlName="preConnectionBlob"/>
-            </div>
-          </div>
-        </div>
-
-        <div class="col-12 gateway-form-group" style="text-align: right;">
+        <div class="col-12 gateway-form-group">
           <p-button [disabled]="connectSessionForm.invalid"
                     [type]="'submit'"
                     [label]="'Connect Session'"

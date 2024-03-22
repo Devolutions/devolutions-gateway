@@ -1,0 +1,24 @@
+<div [formGroup]="form">
+  <div class="col-4 gateway-form-group col-pad-right-lg">
+    <label for="authSettings">Authentication</label>
+    <div class="gateway-form-input">
+      <p-dropdown id="authSettings"
+                  appendTo="body"
+                  formControlName="authMode"
+                  [options]="authModeOptions">
+      </p-dropdown>
+    </div>
+  </div>
+
+  <div class="col-12 gateway-form-group" [hidden]="!showUsernameInput()">
+    <web-client-username-control [parentForm]="form"
+                                 [inputFormData]="inputFormData"
+                                 [isEnabled]="showUsernameInput()"></web-client-username-control>
+  </div>
+
+  <div class="col-12 gateway-form-group" [hidden]="!showPasswordInput()">
+    <web-client-password-control [parentForm]="form"
+                                 [inputFormData]="inputFormData"
+                                 [isEnabled]="showPasswordInput()"></web-client-password-control>
+  </div>
+</div>
