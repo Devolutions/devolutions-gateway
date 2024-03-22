@@ -415,7 +415,6 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Package
-        if: matrix.arch != 'arm64'
         shell: pwsh
         env:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
