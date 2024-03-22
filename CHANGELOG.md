@@ -4,6 +4,40 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.4 (2024-03-22)
+
+### Bug Fixes
+
+- _installer_: add webapp client frontend to .deb package ([#770](https://github.com/Devolutions/devolutions-gateway/issues/770)) ([9832a6ad3b](https://github.com/Devolutions/devolutions-gateway/commit/9832a6ad3b566e5389f5375972831b074283f0ef)) 
+
+- _dgw_: resolve web frontend on Linux ([#772](https://github.com/Devolutions/devolutions-gateway/issues/772)) ([dff788c56b](https://github.com/Devolutions/devolutions-gateway/commit/dff788c56b0770b38fefb34f822f3da94adfc055)) 
+
+### Build
+
+- _jetsocat-nuget_: add IsPowerShell to jetsocat nuget package ([#760](https://github.com/Devolutions/devolutions-gateway/issues/760)) ([d8062396ab](https://github.com/Devolutions/devolutions-gateway/commit/d8062396ab584dac1ad8b51b37c186cb6a75adba)) 
+
+- _jetsocat-nuget_: fix executable file permissions in nuget package ([#764](https://github.com/Devolutions/devolutions-gateway/issues/764)) ([e807e0abef](https://github.com/Devolutions/devolutions-gateway/commit/e807e0abefb9713367d8c36159a5c60930217913)) 
+
+- _jetsocat_: build jetsocat for linux-arm64 target ([#765](https://github.com/Devolutions/devolutions-gateway/issues/765)) ([1ccfd690e0](https://github.com/Devolutions/devolutions-gateway/commit/1ccfd690e0030a976bb0d6a0f1fd9b508026d05e)) 
+
+### Continuous Integration
+
+- _dgw_: add a webclient archive to the GitHub release ([#767](https://github.com/Devolutions/devolutions-gateway/issues/767)) ([acd34604b0](https://github.com/Devolutions/devolutions-gateway/commit/acd34604b0a699a4f1208efd34a2b8fea78dae6f)) 
+
+- _dgw_: add arm64 build for Linux ([#768](https://github.com/Devolutions/devolutions-gateway/issues/768)) ([8160def5ee](https://github.com/Devolutions/devolutions-gateway/commit/8160def5eeffcd4e462e720774594c189f94332c)) 
+
+- _dgw_: update containers ([#774](https://github.com/Devolutions/devolutions-gateway/issues/774)) ([8ce98dec11](https://github.com/Devolutions/devolutions-gateway/commit/8ce98dec117ebd19b8170d95ffad233eff6d091e)) 
+
+- _pwsh_: add PowerShell module to containers ([#776](https://github.com/Devolutions/devolutions-gateway/issues/776)) ([66b2229a94](https://github.com/Devolutions/devolutions-gateway/commit/66b2229a94c6a6858fe49692a24a328266edf7cb)) 
+
+- Update CI workflow actions ([#778](https://github.com/Devolutions/devolutions-gateway/issues/778)) ([6fb3aa09de](https://github.com/Devolutions/devolutions-gateway/commit/6fb3aa09de46702f8b7dc86b4bc8c385c2e2b18b)) 
+
+- Update release workflow actions ([#780](https://github.com/Devolutions/devolutions-gateway/issues/780)) ([ac72abcca0](https://github.com/Devolutions/devolutions-gateway/commit/ac72abcca07aa92116ae963f852e7b804a7f6107)) 
+
+- _dgw_: build arm64 deb ([#782](https://github.com/Devolutions/devolutions-gateway/issues/782)) ([635654ec0f](https://github.com/Devolutions/devolutions-gateway/commit/635654ec0f788726b2f374e1eff288899daae4f5)) 
+
+- Fix artifact idempotency ([#783](https://github.com/Devolutions/devolutions-gateway/issues/783)) ([b317d2ab3e](https://github.com/Devolutions/devolutions-gateway/commit/b317d2ab3ea76d1299fb807a1b4baa078ee8f191)) 
+
 ## 2024.1.3 (2024-03-08)
 
 ### Features
