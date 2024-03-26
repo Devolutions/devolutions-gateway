@@ -56,7 +56,7 @@ jobs:
           if ('${{ inputs.dry-run }}') {
             $DryRun = "${{ inputs.dry-run }}"
           }
-          
+
           if ([System.Convert]::ToBoolean($DryRun)) {
             echo "::notice::This is a dry run; publishing will be skipped"
           } else {
@@ -135,7 +135,7 @@ jobs:
       - name: Manage artifacts
         shell: pwsh
         run: Remove-Item (Join-Path devolutions-gateway PowerShell DevolutionsGateway) -Recurse -ErrorAction Ignore
-          
+
       - name: Prepare artifacts
         id: prepare-artifacts
         shell: pwsh
@@ -166,7 +166,7 @@ jobs:
           tar -xvzf $WebAppArchive.FullName -C $TargetPath --strip-components=1
 
           $PowerShellArchive = Get-ChildItem -Recurse -Filter "Devolutionsgateway-ps-*.zip" | Select-Object -First 1
-          Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"                   
+          Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"
 
       - name: Build container
         id: build-container
@@ -334,6 +334,7 @@ jobs:
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
+          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${version}.0_amd64.deb"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
