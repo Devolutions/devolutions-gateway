@@ -15,8 +15,8 @@ export class WebFormService extends BaseComponent {
     super();
   }
 
-  getAuthModeOptions(): Observable<SelectItem[]> {
-    return of(WebClientAuthMode.getSelectItems());
+  getAuthModeOptions(protocol:'ssh' | 'vnc'): Observable<SelectItem[]> {
+    return protocol === 'vnc' ? of(WebClientAuthMode.getSelectVncItems()) : of(WebClientAuthMode.getSelectSshItems());
   }
 
   getProtocolOptions(): Observable<SelectItem[]> {

@@ -1,0 +1,16 @@
+<div>
+    <label for="SSH Privatekey">Private Key</label>
+    <p-fileUpload name="ssh-private-key" 
+        maxFileSize="10000" 
+        (onSelect)="onSelect($event)"
+        customUpload="true"
+        [multiple]="false" 
+        [showUploadButton]="false" 
+        [showCancelButton]="false">
+        
+    </p-fileUpload>
+    <div class="gateway-form-input password-container">
+        <div class="form-helper-text" *ngIf="false">
+            Ssh Private key is required.
+        </div>
+</div>

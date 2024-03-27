@@ -5,7 +5,7 @@ import {BaseComponent} from "@shared/bases/base.component";
 import {SelectItem} from "primeng/api";
 import {map, startWith, switchMap, takeUntil, tap} from "rxjs/operators";
 import {WebFormService} from "@shared/services/web-form.service";
-import {AuthMode} from "@shared/enums/web-client-auth-mode.enum";
+import {VncAuthMode} from "@shared/enums/web-client-auth-mode.enum";
 import {Observable, of} from "rxjs";
 
 interface FormInputVisibility {
@@ -42,7 +42,7 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
 
   private addControlsToParentForm(inputFormData?: any): void {
     if (this.form) {
-      this.form.addControl('authMode', new FormControl(inputFormData?.authMode || AuthMode.VNC_Password));
+      this.form.addControl('authMode', new FormControl(inputFormData?.authMode || VncAuthMode.VNC_Password));
       this.subscribeToAuthModeChanges();
     }
   }
@@ -56,7 +56,7 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
   }
 
   private initializeFormOptions(): void {
-    this.formService.getAuthModeOptions().pipe(
+    this.formService.getAuthModeOptions('vnc').pipe(
       takeUntil(this.destroyed$)
     ).subscribe({
       next: (authModeOptions) => {
@@ -68,7 +68,7 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
 
   private subscribeToAuthModeChanges(): void {
     this.form.get('authMode').valueChanges.pipe(
-      startWith(this.form.get('authMode').value as AuthMode),
+      startWith(this.form.get('authMode').value as VncAuthMode),
       takeUntil(this.destroyed$),
       switchMap((authMode) => this.getFormInputVisibility(authMode))
     ).subscribe(() => {
@@ -76,15 +76,15 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
     });
   }
 
-  private getFormInputVisibility(authMode: AuthMode): Observable<AuthMode> {
+  private getFormInputVisibility(authMode: VncAuthMode): Observable<VncAuthMode> {
     return of(this.formInputVisibility).pipe(
       tap((visibility) => {
         if (authMode === 0) {
           visibility.showUsernameInput = false;
           visibility.showPasswordInput = false;
         } else {
-          visibility.showUsernameInput = authMode === AuthMode.Username_and_Password;
-          visibility.showPasswordInput = [AuthMode.VNC_Password, AuthMode.Username_and_Password].includes(authMode);
+          visibility.showUsernameInput = authMode === VncAuthMode.Username_and_Password;
+          visibility.showPasswordInput = [VncAuthMode.VNC_Password, VncAuthMode.Username_and_Password].includes(authMode);
         }
       }),
       map(() => {

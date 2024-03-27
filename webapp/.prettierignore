@@ -1,0 +1,13 @@
+# Ignore all JSON files
+*.json
+
+# Ignore everything in the node_modules directory
+node_modules/
+
+./client
+
+# Ignore all files in the src/assets directory
+src/assets/
+
+# Ignore all files in the .vscode directory
+.vscode/

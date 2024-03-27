@@ -32,6 +32,7 @@ import {
 import {
   PreConnectionBlobControlComponent
 } from "@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component";
+import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 
 
 const routes: Routes = [
@@ -67,7 +68,8 @@ const routes: Routes = [
     PreConnectionBlobControlComponent,
     TabViewComponent,
     DynamicTabComponent,
-    SessionToolbarComponent
+    SessionToolbarComponent,
+    FileControlComponent
   ],
     exports: [
       DynamicTabComponent

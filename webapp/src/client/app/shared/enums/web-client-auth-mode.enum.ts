@@ -1,23 +1,39 @@
 import {SelectItem} from "primeng/api";
 
-export enum AuthMode {
+export enum VncAuthMode {
   'None' = 0,
   'VNC_Password', //default
   'Username_and_Password'
 }
 
+export enum SshAuthMode {
+  'Username_and_Password', //default
+  'Private_Key'
+}
+
 namespace WebClientAuthMode {
 
-  export function getEnumKey(value: AuthMode): string {
-    return AuthMode[value];
+  export function getEnumKey(value: VncAuthMode): string {
+    return VncAuthMode[value];
   }
 
-  export function getSelectItems(): SelectItem[] {
-    return Object.keys(AuthMode)
-      .filter((key) => isNaN(Number(key)) && typeof AuthMode[key as any] === 'number')
+  export function getSelectVncItems(): SelectItem[] {
+    return Object.keys(VncAuthMode)
+      .filter((key) => isNaN(Number(key)) && typeof VncAuthMode[key as any] === 'number')
       .map((key) => {
         const label = key.replaceAll('_and_', '_&_').replaceAll('_', ' ');
-        const value: AuthMode = AuthMode[key as keyof typeof AuthMode];
+        const value: VncAuthMode = VncAuthMode[key as keyof typeof VncAuthMode];
+
+        return { label, value };
+      });
+  }
+
+  export function getSelectSshItems(): SelectItem[] {
+    return Object.keys(SshAuthMode)
+      .filter((key) => isNaN(Number(key)) && typeof SshAuthMode[key as any] === 'number')
+      .map((key) => {
+        const label = key.replaceAll('_', ' ');
+        const value: SshAuthMode = SshAuthMode[key as keyof typeof SshAuthMode];
 
         return { label, value };
       });
