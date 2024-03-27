@@ -50,7 +50,7 @@ anyhow = "1.0"
 dirs-next = "2.0"
 
 # find parent process / watch process 
-sysinfo = { version = "0.29", default-features = false }
+sysinfo = { version = "0.30", default-features = false }
 
 [dev-dependencies]
 test-utils = { path = "../crates/test-utils" }
