@@ -4,6 +4,7 @@ using DevolutionsGateway.Properties;
 
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Windows.Forms;
@@ -180,7 +181,7 @@ public partial class ListenersDialog : GatewayDialog
 
             try
             {
-                listener = new TcpListener(IPAddress.Any, (int) port);
+                listener = new TcpListener(Dns.GetHostEntry("localhost").AddressList.First(), (int)port);
                 listener.Start();
 
                 result = () =>
@@ -191,16 +192,16 @@ public partial class ListenersDialog : GatewayDialog
             }
             catch (SocketException se)
             {
-                if (se.SocketErrorCode != SocketError.AddressAlreadyInUse)
-                {
-                    throw;
-                }
-
-                result = () =>
+                if (se.SocketErrorCode == SocketError.AddressAlreadyInUse || se.SocketErrorCode == SocketError.AccessDenied)
                 {
                     this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortNotAvailable));
                     textBox.ForeColor = Color.Red;
-                };
+                }
+                else
+                {
+                    this.ttPortCheck?.SetToolTip(textBox, I18n(Strings.ChosenPortCouldNotBeChecked));
+                    textBox.ForeColor = SystemColors.WindowText;
+                }
             }
             catch
             {
