@@ -74,7 +74,7 @@
 
 
         <div class="col-12 gateway-form-group">
-          <p-button [disabled]="connectSessionForm.invalid"
+          <p-button [disabled]="!canConnect()"
                     [type]="'submit'"
                     [label]="'Connect Session'"
                     (onClick)="onConnectSession()">

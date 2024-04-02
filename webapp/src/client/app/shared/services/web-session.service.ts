@@ -33,6 +33,8 @@ export class WebSessionService {
   private webSessionScreenSizeSubject: BehaviorSubject<DesktopSize>;
   private webSessionScreenSizeIndex$: Observable<DesktopSize>;
 
+  private extraSessionData: any;
+
   private protocolComponentMap = {
     [Protocol.RDP]: WebClientRdpComponent,
     [Protocol.Telnet]: WebClientTelnetComponent,
@@ -72,7 +74,7 @@ export class WebSessionService {
       console.error(`Creating session, unsupported protocol: ${protocol}`)
       return;
     }
-
+    submittedData.extraData = this.extraSessionData;
     const webSession = new WebSession(
       submittedData.hostname,
       sessionComponent,
@@ -264,5 +266,13 @@ export class WebSessionService {
     }
 
     return autoCompleteInput?.hostname || '';
+  }
+
+  public addExtraSessionData(data: Object): void {
+    if (!this.extraSessionData) {
+      this.extraSessionData = {};
+    }
+
+    this.extraSessionData = {...this.extraSessionData, ...data};
   }
 }

@@ -1,0 +1,16 @@
+<div>
+    <label for="SSH Privatekey">Private Key</label>
+    <p-fileUpload name="ssh-private-key" maxFileSize="10000" (onSelect)="onSelect($event)" customUpload="true"
+        [multiple]="false" [showUploadButton]="false" [showCancelButton]="false">
+        <ng-template file pTemplate="file">
+            <div class="file-container">
+                <div class="file-name">{{uploadedFile.name}}</div>
+                <div class="file-size">{{uploadedFile.size / 1024}} KB</div>
+            </div>
+        </ng-template>
+    </p-fileUpload>
+    <div class="gateway-form-input password-container">
+        <div class="form-helper-text" *ngIf="!isValidFile()">
+            {{getErrorMessage()}}
+        </div>
+</div>

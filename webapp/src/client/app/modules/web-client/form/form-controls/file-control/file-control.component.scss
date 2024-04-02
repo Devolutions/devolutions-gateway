@@ -1,0 +1,24 @@
+::ng-deep p-fileUpload .p-fileupload-content .p-progressbar {
+    display: none !important;
+}
+
+.file-container{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin:10px 5px 10px 5px;
+}
+
+.form-helper-text {
+  line-height: 11px;
+  word-wrap: break-word;
+  color: var(--status-error-text-color);
+  font-size: 11px;
+  font-family: Open Sans;
+  font-weight: 400;
+  padding-left: 0px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  display: inline-flex
+}

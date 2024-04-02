@@ -269,4 +269,8 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
       }]);
     }, 500);
   }
+
+  canConnect(): boolean {
+    return this.formService.canConnect(this.connectSessionForm);
+  }
 }
