@@ -23,14 +23,14 @@
     </ItemGroup>
     <ItemGroup Condition="'$(IsPowerShell)' == 'true'">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-arm64/native/jetsocat">
-            <Link>%$(MSBuildThisFileDirectory)../runtimes/osx-arm64/native/jetsocat</Link>
+            <Link>runtimes/osx-arm64/native/jetsocat</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <PublishState>Included</PublishState>
         </Content>
     </ItemGroup>
     <ItemGroup Condition="'$(IsPowerShell)' == 'true'">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-x64/native/jetsocat">
-            <Link>$(MSBuildThisFileDirectory)../runtimes/osx-x64/native/jetsocat</Link>
+            <Link>runtimes/osx-x64/native/jetsocat</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <PublishState>Included</PublishState>
         </Content>
