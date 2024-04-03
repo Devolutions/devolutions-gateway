@@ -14,8 +14,22 @@
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
-    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) OR '$(IsPowerShell)' == 'true'">
+    <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat">
+            <Link>%(Filename)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <PublishState>Included</PublishState>
+        </Content>
+    </ItemGroup>
+    <ItemGroup Condition="'$(IsPowerShell)' == 'true'">
+        <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-am64/native/jetsocat">
+            <Link>%(Filename)</Link>
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+            <PublishState>Included</PublishState>
+        </Content>
+    </ItemGroup>
+    <ItemGroup Condition="'$(IsPowerShell)' == 'true'">
+        <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-x64/native/jetsocat">
             <Link>%(Filename)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <PublishState>Included</PublishState>
