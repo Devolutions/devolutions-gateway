@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout ${{ github.repository }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure runner
         run: rustup target add ${{ matrix.arch }}-${{ matrix.platform }}
@@ -47,7 +47,7 @@ jobs:
           echo "binary-path=$Path" >> $Env:GITHUB_OUTPUT
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
           path: ${{ steps.get-binary-path.outputs.binary-path }}
@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Download binaries
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Configure runner
         run: |
@@ -82,7 +82,7 @@ jobs:
           Invoke-Expression $LipoCmd
   
       - name: Upload binaries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tool }}-universal-apple-darwin
           path: ${{ matrix.tool }}-universal-apple-darwin/${{ matrix.tool }}
@@ -110,7 +110,7 @@ jobs:
 
     steps:
       - name: Download binaries
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
 
       - name: Get binary path
         id: get-binary-path
@@ -192,10 +192,11 @@ jobs:
           }
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
           path: ${{ steps.get-binary-path.outputs.binary-path }}
+          overwrite: true
 
       - name: Create universal package
         if: matrix.platform == 'apple-darwin' && matrix.arch == 'universal'
@@ -215,7 +216,7 @@ jobs:
 
       - name: Upload package
         if: matrix.platform == 'apple-darwin' && matrix.arch == 'universal'
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tool }}-${{ matrix.arch }}-${{ matrix.platform }}
           path: ${{ matrix.tool }}.dmg
