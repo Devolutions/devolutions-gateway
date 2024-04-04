@@ -32,7 +32,7 @@ import { SidebarModule } from "primeng/sidebar";
 import { ToastModule } from "primeng/toast";
 import { TabView, TabViewModule } from "primeng/tabview";
 import { AutoCompleteModule } from "primeng/autocomplete";
-import { SshKeyService as SshKeyService } from './shared/services/ssh-key.service';
+import { SshKeyService } from './shared/services/ssh-key.service';
 
 
 @NgModule({

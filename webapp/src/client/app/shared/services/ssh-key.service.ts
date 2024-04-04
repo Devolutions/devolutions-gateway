@@ -15,7 +15,6 @@ export class SshKeyService {
   private file: File;
 
   constructor(private webFormService: WebFormService) {
-    console.log('SshKeyService created');
     this.reader.onload = () => {
       this.fileContent = this.reader.result as string;
       const keyFormat = recognizeKeyFormat(this.fileContent);
@@ -65,7 +64,6 @@ export class SshKeyService {
   }
 
   getKeyFile(): File {
-    console.log('getKeyFile', this.file);
     return this.file;
   }
 }

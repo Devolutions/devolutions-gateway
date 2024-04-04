@@ -181,7 +181,6 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   private callConnect(connectionParameters: SshConnectionParameters): Observable<any> {
-    console.debug(connectionParameters)
     return from(
       this.remoteTerminal.connect(
         connectionParameters.host,
