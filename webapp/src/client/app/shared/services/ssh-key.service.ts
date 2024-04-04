@@ -24,7 +24,12 @@ export class SshKeyService {
 
   saveFile(file: File, content: string) {
     this.file = file;
-    this.webFormService.setExtraSessionParameter({ sshPrivateKey: content });
+    this.fileContent = content;
+    this.webFormService.setExtraSessionParameter({ sshPrivateKey: this.fileContent });
+  }
+
+  getKeyContent(): string {
+    return this.fileContent;
   }
 
   removeFile() {
@@ -41,6 +46,10 @@ export class SshKeyService {
     if (file === null) {
       return of({ valid: false, error: 'No file selected' });
     }
+    
+    if (file.size > 10000) {
+      return of({ valid: false, error: 'File size is too large, must be less than 10kb' });
+    }
 
     this.reader.readAsText(file);
 
@@ -53,9 +62,17 @@ export class SshKeyService {
           };
         }
         if (value.format === SshKeyFormat.Unknown) {
-          observer.next({ valid: false, error: 'Invalid key format' });
+          observer.next({
+            valid: false,
+            error: 'Invalid key format',
+            content: value.content,
+          });
         } else if (value.format == SshKeyFormat.PKCS8_Encrypted) {
-          observer.next({ valid: false, error: 'Encrypted key not supported' });
+          observer.next({
+            valid: false,
+            error: 'Encrypted key not supported',
+            content: value.content,
+          });
         } else {
           observer.next({ valid: true, content: value.content });
         }
@@ -104,6 +121,7 @@ export type ValidateFileResult =
   | {
       valid: false;
       error: string;
+      content?: string;
     };
 
 export type RecognizeKeyFormatResult = {

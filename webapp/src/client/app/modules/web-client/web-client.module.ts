@@ -33,6 +33,7 @@ import {
   PreConnectionBlobControlComponent
 } from "@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component";
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
+import { FormsModule } from '@angular/forms';
 
 
 const routes: Routes = [
@@ -46,7 +47,8 @@ const routes: Routes = [
     imports: [
         RouterModule.forChild(routes),
         SharedModule,
-        KeyFilterModule
+        KeyFilterModule,
+        FormsModule
     ],
   schemas: [ CUSTOM_ELEMENTS_SCHEMA ],
   declarations: [

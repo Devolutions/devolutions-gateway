@@ -1,26 +1,46 @@
 <div>
-    <div class="flex-column">
-        <label for="SSH Privatekey">Private Key</label>
-        <div id="drop-area" (dragover)="preventDefaults($event)" (drop)="handleDrop($event)"
-            (dragleave)="unhighlight($event)" (dragenter)="highlight($event)"
-            [ngClass]="{dragging:isHightlight,'not-dragging':!isHightlight}">
-            <form class="my-form" *ngIf="!uploadedFile">
-                <input type="file" id="fileElem" (change)="handleFiles($event.target.files)">
-                <label for="fileElem" class="button">Select files</label>
-            </form>
-            <div id="file-content" *ngIf="uploadedFile">
-                <div class="file-display">
-                    <button class="file-remove-button" (click)="removeFile()">&times; </button>
-                    <div class="file-info">
-                        <span class="file-name">{{ uploadedFile.name }}</span>
-                        <span class="file-size">{{ getFileSize(uploadedFile.size) }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div class="gateway-form-group">
+        <label>Private Key Data</label>
+        <textarea
+            cols="30"
+            rows="5"
+            class="form-control"
+            name="privateKeyData"
+            pInputTextarea
+            [(ngModel)]="privateKeyContent"
+        >
+        </textarea>
     </div>
-    <div class="gateway-form-input password-container">
-        <div class="form-helper-text" *ngIf="uploadedFile && !isValidFile()">
-            {{getErrorMessage()}}
+    <div class="gateway-form-group">
+        <div class="flex-row justify-end">
+            <span>
+                <p-button
+                    type="button"
+                    [label]="'clear'"
+                    (onClick)="clearPublicKeyData()"
+                >
+                </p-button>
+                <p-button
+                    type="button"
+                    [label]="'upload'"
+                    (onClick)="openFileSelector()"
+                >
+                </p-button>
+            </span>
         </div>
+        <input
+            hidden
+            #publicKeyFileControl
+            type="file"
+            (change)="onKeyFileSelection($event)"
+        />
     </div>
+</div>
+<div class="gateway-form-input password-container">
+    <div
+        class="form-helper-text"
+        *ngIf="privateKeyContent !== '' && !isValidFile()"
+    >
+        {{ getErrorMessage() }}
+    </div>
+</div>
