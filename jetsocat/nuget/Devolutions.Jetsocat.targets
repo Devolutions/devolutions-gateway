@@ -15,11 +15,11 @@
         </None>
     </ItemGroup>
     <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-        <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat">
+        <None Include="$(MSBuildThisFileDirectory)../runtimes/osx-universal/native/jetsocat" CopyToPublishDirectory="Always" PublishFolderType="Resource">
             <Link>%(Filename)</Link>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
             <PublishState>Included</PublishState>
-        </Content>
+        </None>
     </ItemGroup>
     <ItemGroup Condition="'$(IsPowerShell)' == 'true'">
         <Content Include="$(MSBuildThisFileDirectory)../runtimes/osx-arm64/native/jetsocat">
