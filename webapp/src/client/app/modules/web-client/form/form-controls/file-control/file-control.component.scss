@@ -27,10 +27,6 @@
   display: inline-flex
 }
 
-input[type="file"] {
-  display: none;
-}
-
 .highlight {
   background-color: #f0f0f0;
 }
@@ -48,6 +44,40 @@ input[type="file"] {
   justify-content: end;
 }
 
-textarea {
+.private-key-textarea{
+  margin-top: 5px;
   resize: none;
+  font-family: monospace;
+  font-size: smaller;
+}
+
+.card {
+    border-radius: 10px;
+    margin-bottom: 1rem;
+}
+
+.card p-fileupload {
+  width: 100%;
+}
+
+::ng-deep .card p-fileupload .p-fileupload-buttonbar {
+  display: flex;
+  justify-content: end;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+::ng-deep .card p-fileupload .p-button {
+  background-color: white;
+  border : 1px solid var(--default-btn-bg-color);
+  color: var(--default-btn-bg-color);
+}
+
+::ng-deep .card p-fileupload .p-button:hover {
+  background-color: var(--default-btn-bg-color);
+  color: white;
 }

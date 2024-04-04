@@ -1,39 +1,40 @@
 <div>
     <div class="gateway-form-group">
         <label>Private Key Data</label>
-        <textarea
-            cols="30"
-            rows="5"
-            class="form-control"
-            name="privateKeyData"
-            pInputTextarea
-            [(ngModel)]="privateKeyContent"
-        >
-        </textarea>
-    </div>
-    <div class="gateway-form-group">
-        <div class="flex-row justify-end">
-            <span>
-                <p-button
-                    type="button"
-                    [label]="'clear'"
-                    (onClick)="clearPublicKeyData()"
-                >
-                </p-button>
-                <p-button
-                    type="button"
-                    [label]="'upload'"
-                    (onClick)="openFileSelector()"
-                >
-                </p-button>
-            </span>
+        <div class="card flex justify-content-center">
+            <p-fileUpload
+                name="myFiles"
+                maxFileSize="10000"
+                (onSelect)="onSelect($event)"
+                customUpload="true"
+                [multiple]="false"
+                [showUploadButton]="false"
+                [showCancelButton]="false"
+                chooseLabel="Select File"
+                cancelLabel="Clear"
+                styleClass="private-key-file-upload"
+                chooseStyleClass = "select-file-button"
+            >
+                <ng-template
+                    let-file
+                    pTemplate="file"
+                > 
+                <!-- Need to leave this as empty -->
+                </ng-template>
+                <ng-template pTemplate="content">
+                    <textarea
+                        cols="30"
+                        rows="5"
+                        class="private-key-textarea"
+                        name="privateKeyData"
+                        pInputTextarea
+                        [(ngModel)]="privateKeyContent"
+                        wrap="soft"
+                    >
+                    </textarea>
+                </ng-template>
+            </p-fileUpload>
         </div>
-        <input
-            hidden
-            #publicKeyFileControl
-            type="file"
-            (change)="onKeyFileSelection($event)"
-        />
     </div>
 </div>
 <div class="gateway-form-input password-container">
