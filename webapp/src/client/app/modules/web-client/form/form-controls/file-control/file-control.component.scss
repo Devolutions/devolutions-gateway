@@ -46,9 +46,11 @@
 
 .private-key-textarea{
   margin-top: 5px;
+  margin-bottom: 5px;
   resize: none;
   font-family: monospace;
   font-size: smaller;
+  line-height: 15px;
 }
 
 .card {
@@ -63,6 +65,12 @@
 ::ng-deep .card p-fileupload .p-fileupload-buttonbar {
   display: flex;
   justify-content: end;
+  flex-direction: row !important;
+}
+
+::ng-deep .card p-fileupload div  {
+  display: flex;
+  flex-direction: column-reverse;
 }
 
 .file-row {
