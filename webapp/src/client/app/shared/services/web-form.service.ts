@@ -95,7 +95,7 @@ export class WebFormService extends BaseComponent {
     this.canConnectExtraCallback = () => callback();
   }
 
-  resetCanConnectCallback(){
+  resetCanConnectCallback() {
     this.canConnectExtraCallback = () => true;
   }
 }
