@@ -1,18 +1,20 @@
 import { Injectable } from '@angular/core';
-import { WebSessionService } from './web-session.service';
 import { Observable, BehaviorSubject, of } from 'rxjs';
-import { take, tap } from 'rxjs/operators';
+import { WebFormService } from './web-form.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class SshKeyService {
   private reader = new FileReader();
-  private fileReadSubject = new BehaviorSubject<SshKeyFormat>(null);
+  private fileReadSubject = new BehaviorSubject<{
+    format: SshKeyFormat;
+    content: string;
+  }>(null);
   private fileContent = null;
   private file: File;
 
-  constructor(private webSessionService: WebSessionService) {
+  constructor(private webFormService: WebFormService) {
     console.log('SshKeyService created');
     this.reader.onload = () => {
       this.fileContent = this.reader.result as string;
@@ -21,23 +23,22 @@ export class SshKeyService {
     };
   }
 
-  addLastValidatedKeyToWebSession() {
-    if (!this.hasValidPrivateKey()) {
-      throw new Error('Invalid private key');
-    }
-    this.webSessionService.addExtraSessionData({
-      sshPrivateKey: this.fileContent,
-    });
+  saveFile(file: File, content: string) {
+    this.file = file;
+    this.webFormService.setExtraSessionParameter({ sshPrivateKey: content });
+  }
+
+  removeFile() {
+    this.file = null;
+    this.webFormService.setExtraSessionParameter({});
   }
 
   hasValidPrivateKey(): boolean {
     let value = this.fileReadSubject.getValue();
-    return value !== null && value !== SshKeyFormat.PKCS8_Encrypted;
+    return value !== null && value.format !== SshKeyFormat.PKCS8_Encrypted;
   }
 
-  public validateFile(
-    file: File | null
-  ): Observable<{ valid: boolean; error: String }> {
+  public validateFile(file: File | null): Observable<ValidateFileResult> {
     if (file === null) {
       return of({ valid: false, error: 'No file selected' });
     }
@@ -45,45 +46,48 @@ export class SshKeyService {
     this.reader.readAsText(file);
 
     return new Observable((observer) => {
-      this.fileReadSubject.subscribe((keyFormat) => {
-        if (keyFormat === null) {
-          return;
+      this.fileReadSubject.subscribe((value) => {
+        if (value === null) {
+          return {
+            valid: false,
+            error: 'Invalid key format',
+          };
         }
-        if (keyFormat === SshKeyFormat.Unknown) {
+        if (value.format === SshKeyFormat.Unknown) {
           observer.next({ valid: false, error: 'Invalid key format' });
-        } else if (keyFormat == SshKeyFormat.PKCS8_Encrypted) {
+        } else if (value.format == SshKeyFormat.PKCS8_Encrypted) {
           observer.next({ valid: false, error: 'Encrypted key not supported' });
         } else {
-          observer.next({ valid: true, error: null });
+          observer.next({ valid: true, content: value.content });
         }
       });
-    }).pipe(tap(() => (this.file = file))) as Observable<{
-      valid: boolean;
-      error: String;
-    }>;
+    });
   }
 
   getKeyFile(): File {
-    console.log('getKeyFile', this.file)
+    console.log('getKeyFile', this.file);
     return this.file;
   }
 }
 
-function recognizeKeyFormat(keyString): SshKeyFormat {
+function recognizeKeyFormat(keyString): RecognizeKeyFormatResult {
+  let format;
   if (
     keyString.includes('-----BEGIN RSA PRIVATE KEY-----') ||
     keyString.includes('-----BEGIN EC PRIVATE KEY-----')
   ) {
-    return SshKeyFormat.PEM;
+    format = SshKeyFormat.PEM;
   } else if (keyString.includes('-----BEGIN PRIVATE KEY-----')) {
-    return SshKeyFormat.PKCS8_Unencrypted;
+    format = SshKeyFormat.PKCS8_Unencrypted;
   } else if (keyString.includes('-----BEGIN ENCRYPTED PRIVATE KEY-----')) {
-    return SshKeyFormat.PKCS8_Encrypted;
+    format = SshKeyFormat.PKCS8_Encrypted;
   } else if (keyString.includes('-----BEGIN OPENSSH PRIVATE KEY-----')) {
-    return SshKeyFormat.OpenSSH;
+    format = SshKeyFormat.OpenSSH;
   } else {
-    return SshKeyFormat.Unknown;
+    format = SshKeyFormat.Unknown;
   }
+
+  return { format, content: keyString };
 }
 
 export enum SshKeyFormat {
@@ -93,3 +97,18 @@ export enum SshKeyFormat {
   OpenSSH,
   Unknown,
 }
+
+export type ValidateFileResult =
+  | {
+      valid: true;
+      content: string;
+    }
+  | {
+      valid: false;
+      error: string;
+    };
+
+export type RecognizeKeyFormatResult = {
+  format: SshKeyFormat;
+  content: string;
+};

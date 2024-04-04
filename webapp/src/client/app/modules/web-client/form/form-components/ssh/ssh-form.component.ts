@@ -13,8 +13,7 @@ import { SelectItem } from 'primeng/api';
 import { WebFormService } from '@gateway/shared/services/web-form.service';
 import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
 import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
-import { Observable, Subject, of } from 'rxjs';
-import { WebSessionService } from '@gateway/shared/services/web-session.service';
+import { Observable, of } from 'rxjs';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 
 interface FormInputVisibility {
@@ -52,7 +51,7 @@ export class SshFormComponent
   }
 
   ngAfterViewInit(): void {
-    this.formService.canConnectIfTrue(() => {
+    this.formService.canConnectIfAlsoTrue(() => {
       if (!this.formInputVisibility.showPrivateKeyInput) {
         return true;
       }
@@ -103,9 +102,7 @@ export class SshFormComponent
         startWith(this.form.get('authMode').value as SshAuthMode),
         switchMap((authMode) => this.getFormInputVisibility(authMode))
       )
-      .subscribe(() => {
-        // this.formService.detectFormChanges(this.cdr);
-      });
+      .subscribe(() => {});
   }
 
   private getFormInputVisibility(

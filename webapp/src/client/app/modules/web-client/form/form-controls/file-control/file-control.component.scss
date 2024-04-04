@@ -1,12 +1,16 @@
+@import '../../../../../../../assets/css/style/mixins';
+@import "../../../../../../../assets/css/style/variables";
+@import "../../../../../../../assets/css/theme/theme-mode-variables";
+
 ::ng-deep p-fileUpload .p-fileupload-content .p-progressbar {
-    display: none !important;
+  display: none !important;
 }
 
-.file-container{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin:10px 5px 10px 5px;
+.file-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 5px 10px 5px;
 }
 
 .form-helper-text {
@@ -21,4 +25,101 @@
   align-items: flex-start;
   gap: 10px;
   display: inline-flex
+}
+
+#drop-area {
+  border-radius: 20px;
+  padding: 10px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  height: 150px;
+  margin: 2vh 0 2vh 0;
+}
+
+.dragging {
+  border: 2px dashed var(--action-btn-secondary-icon-color);
+}
+
+.not-dragging {
+  border: 2px dashed var(--action-btn-icon-color);
+}
+
+.my-form {
+  margin-bottom: 10px;
+}
+
+.button {
+  display: inline-block;
+  padding: 10px;
+  background:var(--action-btn-icon-color);
+  color: #fff;
+  cursor: pointer;
+  border-radius: 5px;
+  border: none;
+}
+
+.button:hover {
+  background-color: var(--action-btn-secondary-icon-color);
+}
+
+input[type="file"] {
+  display: none;
+}
+
+.highlight {
+  background-color: #f0f0f0;
+}
+
+.file-display {
+  display: flex;
+  position: relative;
+  justify-content: center;
+  align-items: center;
+  padding: 10px;
+}
+
+.file-info {
+  display: flex;
+  flex-direction: row;
+  padding: 10px;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2vw;
+  border: 1px solid #ccc; /* Light grey border */
+  border-radius: 4px; /* Rounded corners */
+  background-color: #f9f9f9; /* Light grey background */
+}
+
+.file-name {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333; /* Dark grey text */
+}
+
+.file-size {
+  font-size: 14px;
+  color: #666; /* Medium grey text */
+}
+
+.file-remove-button {
+position: absolute;
+  top: 0; /* Aligns it to the top */
+  right: 0; /* Aligns it to the right */
+  border: none; /* Removes the border */
+  background-color: var(--error-btn-bg-color);; /* Set the background color */
+  color: white; /* Set the 'X' color */
+  border-radius: 50%; /* Makes it round */
+  cursor: pointer; /* Changes cursor to pointer when hovered */
+  width: 17px; /* Set the width */
+  height: 17px; /* Set the height */
+  font-size: 17px; /* Adjusts the size of the 'X' */
+  line-height: 17px; /* Centers the 'X' vertically */
+  text-align: center; /* Centers the 'X' horizontally */
+  padding: 0; /* Removes padding */
+}
+
+.file-remove-button:hover {
+  background-color: var(--error-btn-bg-hover-color); /* Darker red on hover */
 }

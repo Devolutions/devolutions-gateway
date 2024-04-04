@@ -1,41 +1,99 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
-import { FileSelectEvent } from 'primeng/fileupload';
-
-export type FileValidateResult = { valid: boolean; error: String };
+import { ValidateFileResult } from '../../../../../shared/services/ssh-key.service';
+import { WebFormService } from '@gateway/shared/services/web-form.service';
+import { WebSessionService } from '@gateway/shared/services/web-session.service';
 
 @Component({
   selector: 'app-file-control',
   templateUrl: './file-control.component.html',
   styleUrls: ['./file-control.component.scss'],
 })
-export class FileControlComponent {
+export class FileControlComponent implements OnInit, OnDestroy {
   @Input() isEnabled: boolean = true;
 
   uploadedFile: File = null;
-  private fileValidationResult: FileValidateResult = null;
+  private fileValidateResult: ValidateFileResult = null;
+  isHightlight: boolean = false;
 
-  constructor(private sshKeyService: SshKeyService) {
-    this.uploadedFile = sshKeyService.getKeyFile()
+  constructor(
+    private sshKeyService: SshKeyService,
+    private formService: WebFormService,
+  ) {
+    this.uploadedFile = sshKeyService.getKeyFile();
   }
 
-  onSelect(event: FileSelectEvent) {
-    if (event.currentFiles.length !== 1) {
+  ngOnDestroy(): void {
+    this.formService.resetCanConnectCallback();
+  }
+
+  ngOnInit(): void {
+    this.formService.canConnectIfAlsoTrue(() => {
+      return this.sshKeyService.hasValidPrivateKey();
+    });
+  }
+
+  preventDefaults(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  highlight(event: DragEvent) {
+    this.preventDefaults(event);
+    this.isHightlight = true;
+  }
+
+  unhighlight(event: DragEvent) {
+    this.preventDefaults(event);
+    this.isHightlight = false;
+  }
+
+  handleDrop(event: DragEvent) {
+    this.preventDefaults(event);
+    let files = event.dataTransfer?.files;
+    if (files) {
+      this.handleFiles(files);
+    }
+  }
+
+  handleFiles(fileList: FileList) {
+    if (fileList.length !== 1) {
       return;
     }
-    this.uploadedFile = event.currentFiles[0];
+
+    this.uploadedFile = fileList[0];
     this.sshKeyService.validateFile(this.uploadedFile).subscribe((res) => {
-      this.fileValidationResult = res;
-      this.sshKeyService.addLastValidatedKeyToWebSession();
+      this.fileValidateResult = res;
+      if (this.fileValidateResult.valid) {
+        this.sshKeyService.saveFile(this.uploadedFile, this.fileValidateResult.content);
+      }
     });
   }
 
   isValidFile(): boolean {
-    let res = this.fileValidationResult && this.fileValidationResult.valid;
-    return res;
+    return this.fileValidateResult ? this.fileValidateResult.valid : false;
+  }
+
+  removeFile() {
+    this.uploadedFile = null;
+    this.fileValidateResult = null;
+    this.sshKeyService.removeFile();
   }
 
   getErrorMessage(): String {
-    return this.fileValidationResult ? this.fileValidationResult.error : null;
+    if (!this.fileValidateResult) {
+      return '';
+    }
+    if (this.fileValidateResult.valid === false) {
+      return this.fileValidateResult.error;
+    }
+    return '';
+  }
+
+  getFileSize(): string {
+    if (!this.uploadedFile) {
+      return '';
+    }
+    return `${this.uploadedFile.size} bytes`;
   }
 }

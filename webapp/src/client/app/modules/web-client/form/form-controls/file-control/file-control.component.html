@@ -1,16 +1,26 @@
 <div>
-    <label for="SSH Privatekey">Private Key</label>
-    <p-fileUpload name="ssh-private-key" maxFileSize="10000" (onSelect)="onSelect($event)" customUpload="true"
-        [multiple]="false" [showUploadButton]="false" [showCancelButton]="false">
-        <ng-template file pTemplate="file">
-            <div class="file-container">
-                <div class="file-name">{{uploadedFile.name}}</div>
-                <div class="file-size">{{uploadedFile.size / 1024}} KB</div>
+    <div class="flex-column">
+        <label for="SSH Privatekey">Private Key</label>
+        <div id="drop-area" (dragover)="preventDefaults($event)" (drop)="handleDrop($event)"
+            (dragleave)="unhighlight($event)" (dragenter)="highlight($event)"
+            [ngClass]="{dragging:isHightlight,'not-dragging':!isHightlight}">
+            <form class="my-form" *ngIf="!uploadedFile">
+                <input type="file" id="fileElem" (change)="handleFiles($event.target.files)">
+                <label for="fileElem" class="button">Select files</label>
+            </form>
+            <div id="file-content" *ngIf="uploadedFile">
+                <div class="file-display">
+                    <button class="file-remove-button" (click)="removeFile()">&times; </button>
+                    <div class="file-info">
+                        <span class="file-name">{{ uploadedFile.name }}</span>
+                        <span class="file-size">{{ getFileSize(uploadedFile.size) }}</span>
+                    </div>
+                </div>
             </div>
-        </ng-template>
-    </p-fileUpload>
+        </div>
+    </div>
     <div class="gateway-form-input password-container">
-        <div class="form-helper-text" *ngIf="!isValidFile()">
+        <div class="form-helper-text" *ngIf="uploadedFile && !isValidFile()">
             {{getErrorMessage()}}
         </div>
-</div>
+    </div>

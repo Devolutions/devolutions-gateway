@@ -7,11 +7,14 @@ import {SelectItem} from "primeng/api";
 import {ScreenSize} from "@shared/enums/screen-size.enum";
 import {WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
 import {FormControl, FormGroup, ValidatorFn, Validators} from "@angular/forms";
+import { ExtraSessionParameter } from './web-session.service';
 
 @Injectable({ providedIn: 'root' })
 export class WebFormService extends BaseComponent {
 
   private canConnectExtraCallback: () => boolean = () => true;
+
+  private extraSessionParameter: ExtraSessionParameter = {};
 
   constructor() {
     super();
@@ -27,6 +30,14 @@ export class WebFormService extends BaseComponent {
 
   getScreenSizeOptions(): Observable<SelectItem[]> {
     return of(ScreenSize.getSelectItems());
+  }
+
+  setExtraSessionParameter(extraSessionParameter: ExtraSessionParameter): void {
+    this.extraSessionParameter = extraSessionParameter;
+  }
+
+  getExtraSessionParameter(): ExtraSessionParameter {
+    return this.extraSessionParameter;
   }
 
   addControlToForm(
@@ -80,7 +91,7 @@ export class WebFormService extends BaseComponent {
     return form.valid && this.canConnectExtraCallback();
   }
 
-  canConnectIfTrue(callback: () => boolean): void {
+  canConnectIfAlsoTrue(callback: () => boolean): void {
     this.canConnectExtraCallback = () => callback();
   }
 

@@ -18,6 +18,10 @@ import {WebClientArdComponent} from "@gateway/modules/web-client/ard/web-client-
 // KAH Jan 2024
 export const SESSIONS_MENU_OFFSET: number = 1;
 
+export interface ExtraSessionParameter {
+  sshPrivateKey?: string;
+};
+
 @Injectable({
   providedIn: 'root',
 })
@@ -32,8 +36,6 @@ export class WebSessionService {
 
   private webSessionScreenSizeSubject: BehaviorSubject<DesktopSize>;
   private webSessionScreenSizeIndex$: Observable<DesktopSize>;
-
-  private extraSessionData: any;
 
   private protocolComponentMap = {
     [Protocol.RDP]: WebClientRdpComponent,
@@ -63,7 +65,7 @@ export class WebSessionService {
     return this.webSessionDataSubject.getValue().length;
   }
 
-  createWebSession(form: FormGroup, protocol: Protocol): Observable<WebSession<any, any>> {
+  createWebSession(form: FormGroup, protocol: Protocol, extraData:ExtraSessionParameter): Observable<WebSession<any, any>> {
     const submittedData = form.value;
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
@@ -74,7 +76,7 @@ export class WebSessionService {
       console.error(`Creating session, unsupported protocol: ${protocol}`)
       return;
     }
-    submittedData.extraData = this.extraSessionData;
+    submittedData.extraData = extraData;
     const webSession = new WebSession(
       submittedData.hostname,
       sessionComponent,
@@ -266,13 +268,5 @@ export class WebSessionService {
     }
 
     return autoCompleteInput?.hostname || '';
-  }
-
-  public addExtraSessionData(data: Object): void {
-    if (!this.extraSessionData) {
-      this.extraSessionData = {};
-    }
-
-    this.extraSessionData = {...this.extraSessionData, ...data};
   }
 }
