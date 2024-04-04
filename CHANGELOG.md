@@ -4,6 +4,28 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.5 (2024-04-04)
+
+### Bug Fixes
+
+- _installer_: prevent possible prompt for firewall access in Windows installer ([f9760f2a1b](https://github.com/Devolutions/devolutions-gateway/commit/f9760f2a1b70cb000a63780eef2d279ce17a3ec7)) 
+
+### Continuous Integration
+
+- Add linux package onedrive upload ([#787](https://github.com/Devolutions/devolutions-gateway/issues/787)) ([b4d9f570ee](https://github.com/Devolutions/devolutions-gateway/commit/b4d9f570ee449d26c245b49c2cc6940916a72139)) 
+
+- Fix packaging of web client ([#789](https://github.com/Devolutions/devolutions-gateway/issues/789)) ([82b15c07e7](https://github.com/Devolutions/devolutions-gateway/commit/82b15c07e75c18339fc4e876c7d85157396ef496)) 
+
+- Package thin macOS binaries in nuget for PowerShell ([#792](https://github.com/Devolutions/devolutions-gateway/issues/792)) ([51b83d27aa](https://github.com/Devolutions/devolutions-gateway/commit/51b83d27aab3e856803b4335ea95d4aa79895985)) 
+
+- Fix typo in nuget deployment ([#793](https://github.com/Devolutions/devolutions-gateway/issues/793)) ([2627c52e15](https://github.com/Devolutions/devolutions-gateway/commit/2627c52e15022b68eafeff1a4f407022f9c36dd1)) 
+
+- Update remaining actions versions ([#794](https://github.com/Devolutions/devolutions-gateway/issues/794)) ([01ee6f162f](https://github.com/Devolutions/devolutions-gateway/commit/01ee6f162f65027f1abff378718f66db9554e487)) 
+
+- Fix macOS nuget packaging for PowerShell ([#795](https://github.com/Devolutions/devolutions-gateway/issues/795)) ([eecbdb05aa](https://github.com/Devolutions/devolutions-gateway/commit/eecbdb05aa230ee7468cde03d02d8846bf1d4e28)) 
+
+- Fix macOS nuget packaging for PowerShell ([#797](https://github.com/Devolutions/devolutions-gateway/issues/797)) ([5dd1ff1c19](https://github.com/Devolutions/devolutions-gateway/commit/5dd1ff1c196a7104cb0e9a4a2402046f35b94a44)) 
+
 ## 2024.1.4 (2024-03-22)
 
 ### Bug Fixes
