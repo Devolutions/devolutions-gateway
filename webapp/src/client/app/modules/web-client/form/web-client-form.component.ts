@@ -69,7 +69,7 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   onConnectSession(): void {
-    this.webSessionService.createWebSession(this.connectSessionForm, this.getSelectedProtocol()).pipe(
+    this.webSessionService.createWebSession(this.connectSessionForm, this.getSelectedProtocol(), this.formService.getExtraSessionParameter()).pipe(
       takeUntil(this.destroyed$),
       switchMap((webSession) => this.manageScreenSize(webSession)),
       switchMap((webSession) => this.manageWebSessionSubject(webSession)),
@@ -268,5 +268,9 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
         detail: error['backtrace'] ?? ''
       }]);
     }, 500);
+  }
+
+  canConnect(): boolean {
+    return this.formService.canConnect(this.connectSessionForm);
   }
 }

@@ -180,14 +180,15 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     ).subscribe();
   }
 
-  private callConnect(connectionParameters: any): Observable<any> {
+  private callConnect(connectionParameters: SshConnectionParameters): Observable<any> {
     return from(
       this.remoteTerminal.connect(
         connectionParameters.host,
         connectionParameters.port,
         connectionParameters.username,
         connectionParameters.gatewayAddress+`?token=${connectionParameters.token}`,
-        connectionParameters.password
+        connectionParameters.password,
+        connectionParameters.privateKey,
       )
     ).pipe(
       catchError(error => throwError(error))
@@ -207,6 +208,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
     const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL+`/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace("http", "ws");
+    const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
 
     const connectionParameters: SshConnectionParameters = {
       host: extractedData.hostname,
@@ -214,7 +216,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       password: password,
       port: extractedData.port,
       gatewayAddress: gatewayAddress,
-      sessionId: sessionId
+      sessionId: sessionId,
+      privateKey: privateKey
     }
     return of(connectionParameters);
   }

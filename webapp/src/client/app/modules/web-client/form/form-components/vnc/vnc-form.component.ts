@@ -5,8 +5,8 @@ import {BaseComponent} from "@shared/bases/base.component";
 import {SelectItem} from "primeng/api";
 import {map, startWith, switchMap, takeUntil, tap} from "rxjs/operators";
 import {WebFormService} from "@shared/services/web-form.service";
-import {AuthMode} from "@shared/enums/web-client-auth-mode.enum";
 import {Observable, of} from "rxjs";
+import { VncAuthMode as AuthMode } from '@shared/enums/web-client-auth-mode.enum';
 
 interface FormInputVisibility {
   showUsernameInput?: boolean;
@@ -56,7 +56,7 @@ export class VncFormComponent extends BaseComponent implements  OnInit {
   }
 
   private initializeFormOptions(): void {
-    this.formService.getAuthModeOptions().pipe(
+    this.formService.getAuthModeOptions('vnc').pipe(
       takeUntil(this.destroyed$)
     ).subscribe({
       next: (authModeOptions) => {

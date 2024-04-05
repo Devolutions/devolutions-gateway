@@ -18,6 +18,10 @@ import {WebClientArdComponent} from "@gateway/modules/web-client/ard/web-client-
 // KAH Jan 2024
 export const SESSIONS_MENU_OFFSET: number = 1;
 
+export interface ExtraSessionParameter {
+  sshPrivateKey?: string;
+};
+
 @Injectable({
   providedIn: 'root',
 })
@@ -61,7 +65,7 @@ export class WebSessionService {
     return this.webSessionDataSubject.getValue().length;
   }
 
-  createWebSession(form: FormGroup, protocol: Protocol): Observable<WebSession<any, any>> {
+  createWebSession(form: FormGroup, protocol: Protocol, extraData:ExtraSessionParameter): Observable<WebSession<any, any>> {
     const submittedData = form.value;
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
@@ -72,7 +76,7 @@ export class WebSessionService {
       console.error(`Creating session, unsupported protocol: ${protocol}`)
       return;
     }
-
+    submittedData.extraData = extraData;
     const webSession = new WebSession(
       submittedData.hostname,
       sessionComponent,
