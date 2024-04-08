@@ -68,10 +68,23 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: nupkg
+          name: nupkg-${{matrix.library}}
           path: |
             nuget-packages/*.nupkg
             nuget-packages/*.snupkg
+
+  nuget-merge:
+    name: NuGet merge artifacts
+    runs-on: ubuntu-latest
+    needs: nuget-build
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: nupkg
+          pattern: nupkg-*
+          delete-merged: true
 
   npm-build:
     name: NPM package build
@@ -105,7 +118,7 @@ jobs:
     if: needs.preflight.outputs.dry-run == 'false'
     needs:
       - preflight
-      - nuget-build
+      - nuget-merge
 
     steps:
       - name: Download NuGet packages artifact
@@ -173,3 +186,31 @@ jobs:
             Write-Host "Publishing $($File.Name)..."
             ./ci/npm-publish.ps1 -Tarball "$File" -Access 'public'
           }
+
+  notify:
+    name: Notify failure
+    runs-on: ubuntu-latest
+    if: ${{ always() && contains(needs.*.result, 'failure') && github.event_name == 'schedule' }}
+    needs:
+      - npm-build
+      - nuget-merge
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_ARCHITECTURE }}
+      SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+    steps:
+      - name: Send slack notification
+        id: slack
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*${{ github.repository }}* :fire::fire::fire::fire::fire: \n The scheduled build for *${{ github.repository }}* is <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|broken>"
+                  }
+                }
+              ]
+            }
