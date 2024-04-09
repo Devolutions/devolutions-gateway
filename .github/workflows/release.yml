@@ -334,8 +334,8 @@ jobs:
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
-
           # Note that at this point the deb package is already named using the ".0" suffix, so we don’t rename.
+          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${version}_amd64.deb"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
