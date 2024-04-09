@@ -7,16 +7,16 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.80"
+anyhow = "1.0.81"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 dns-lookup = "2.0.4"
-mdns-sd = "0.10.4"
-network-interface = "1.1.1"
+mdns-sd = "0.10.5"
+network-interface = "1.1.3"
 network-scanner-net = { path = "../network-scanner-net" }
 network-scanner-proto = { path = "../network-scanner-proto" }
 parking_lot = "0.12.1"
-socket2 = "0.5.5"
-thiserror = "1.0.57"
+socket2 = "0.5.6"
+thiserror = "1.0.58"
 tokio = { version = "1.37.0", features = ["rt", "sync", "time", "fs"] }
 tracing = "0.1.40"
 typed-builder = "0.18.1"
