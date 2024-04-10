@@ -1,4 +1,4 @@
-use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System, SystemExt as _};
+use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
 use tokio::time::{sleep, Duration};
 
 pub async fn watch_process(pid: Pid) {
