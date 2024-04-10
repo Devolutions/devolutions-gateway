@@ -337,9 +337,9 @@ impl CommonArgs {
 
         let watch_process = if let Ok(process_id) = c.int_flag("watch-process") {
             let pid = u32::try_from(process_id).context("invalid value for process ID")?;
-            Some(sysinfo::PidExt::from_u32(pid))
+            Some(sysinfo::Pid::from_u32(pid))
         } else if c.bool_flag("watch-parent") {
-            use sysinfo::{ProcessExt as _, ProcessRefreshKind, RefreshKind, System, SystemExt};
+            use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
             // Find current process' parent process ID
             let current_pid =
