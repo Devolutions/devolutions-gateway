@@ -23,6 +23,7 @@ const CERTIFICATE_LABELS: &[&str] = &["CERTIFICATE", "X509 CERTIFICATE", "TRUSTE
 const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"];
 const WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS: u64 = 28800; // 8 hours
 const WEB_APP_DEFAULT_LOGIN_LIMIT_RATE: u8 = 10;
+const ENV_VAR_DGATEWAY_WEBAPP_PATH: &str = "DGATEWAY_WEBAPP_PATH";
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -82,7 +83,7 @@ pub struct Conf {
     pub jrl_file: Utf8PathBuf,
     pub ngrok: Option<dto::NgrokConf>,
     pub verbosity_profile: dto::VerbosityProfile,
-    pub web_app: Option<WebAppConf>,
+    pub web_app: WebAppConf,
     pub debug: dto::DebugConf,
 }
 
@@ -295,21 +296,10 @@ impl Conf {
                 .web_app
                 .as_ref()
                 .map(WebAppConf::from_dto)
-                .transpose()
+                .unwrap_or_else(WebAppConf::from_env)
                 .context("webapp config")?,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
-    }
-
-    pub fn webapp_conf_if_enabled(&self) -> Option<&WebAppConf> {
-        match self.web_app.as_ref() {
-            Some(conf) if conf.enabled => Some(conf),
-            _ => None,
-        }
-    }
-
-    pub fn webapp_is_enabled(&self) -> bool {
-        self.webapp_conf_if_enabled().is_some()
     }
 }
 
@@ -356,22 +346,12 @@ impl WebAppConf {
                 .unwrap_or(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
         );
 
-        let static_root_path = if let Ok(path) = env::var("DGATEWAY_WEBAPP_PATH") {
+        let static_root_path = if let Ok(path) = env::var(ENV_VAR_DGATEWAY_WEBAPP_PATH) {
             std::path::PathBuf::from(path)
         } else if let Some(path) = &value.static_root_path {
             path.as_std_path().to_owned()
-        } else if cfg!(target_os = "windows") {
-            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
-            exe_path.pop();
-            exe_path.push("webapp");
-            exe_path
-        } else if cfg!(target_os = "linux") {
-            let mut root_path = std::path::PathBuf::from("/usr/share");
-            root_path.push(APPLICATION_DIR);
-            root_path.push("webapp");
-            root_path
         } else {
-            anyhow::bail!("standalone web application path must be specified manually on this platform");
+            Self::default_system_static_root_path()?
         };
 
         let conf = Self {
@@ -383,6 +363,38 @@ impl WebAppConf {
         };
 
         Ok(conf)
+    }
+
+    fn from_env() -> anyhow::Result<Self> {
+        let static_root_path = if let Ok(path) = env::var(ENV_VAR_DGATEWAY_WEBAPP_PATH) {
+            std::path::PathBuf::from(path)
+        } else {
+            Self::default_system_static_root_path()?
+        };
+
+        Ok(Self {
+            enabled: false,
+            authentication: WebAppAuth::None,
+            app_token_maximum_lifetime: std::time::Duration::from_secs(WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS),
+            login_limit_rate: WEB_APP_DEFAULT_LOGIN_LIMIT_RATE,
+            static_root_path,
+        })
+    }
+
+    fn default_system_static_root_path() -> anyhow::Result<std::path::PathBuf> {
+        if cfg!(target_os = "windows") {
+            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+            exe_path.pop();
+            exe_path.push("webapp");
+            Ok(exe_path)
+        } else if cfg!(target_os = "linux") {
+            let mut root_path = std::path::PathBuf::from("/usr/share");
+            root_path.push(APPLICATION_DIR);
+            root_path.push("webapp");
+            Ok(root_path)
+        } else {
+            anyhow::bail!("standalone web application path must be specified manually on this platform");
+        }
     }
 }
 

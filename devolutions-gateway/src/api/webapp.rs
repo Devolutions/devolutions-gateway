@@ -21,17 +21,8 @@ use crate::target_addr::TargetAddr;
 use crate::token::ApplicationProtocol;
 use crate::DgwState;
 
-macro_rules! extract_conf {
-    ($conf:expr) => {{
-        $conf
-            .webapp_conf_if_enabled()
-            .ok_or_else(|| crate::http::HttpError::internal().msg("standalone web application not enabled"))?
-    }};
-}
-use extract_conf as ensure_enabled;
-
 pub fn make_router<S>(state: DgwState) -> Router<S> {
-    if state.conf_handle.get_conf().webapp_is_enabled() {
+    if state.conf_handle.get_conf().web_app.enabled {
         Router::new()
             .route("/client", get(get_client))
             .route("/client/*path", get(get_client))
@@ -96,7 +87,7 @@ pub(crate) async fn sign_app_token(
         .as_ref()
         .ok_or_else(|| HttpError::internal().msg("provisioner private key is missing"))?;
 
-    let conf = extract_conf!(conf);
+    let conf = extract_conf(&conf)?;
 
     trace!(request = ?req, "Received sign app token request");
 
@@ -318,7 +309,7 @@ pub(crate) async fn sign_session_token(
         .ok_or_else(|| HttpError::internal().msg("provisioner private key is missing"))?;
 
     // Also perform a sanity check, ensuring the standalone web application is enabled.
-    ensure_enabled!(conf);
+    ensure_enabled(&conf)?;
 
     let lifetime = if req.lifetime < MAXIMUM_LIFETIME_SECS {
         req.lifetime
@@ -472,7 +463,7 @@ where
     use tower_http::services::ServeDir;
 
     let conf = conf_handle.get_conf();
-    let conf = extract_conf!(conf);
+    let conf = extract_conf(&conf)?;
 
     let path = path.map(|path| path.0).unwrap_or_else(|| "/".to_owned());
 
@@ -495,6 +486,17 @@ where
         Ok(response) => Ok(response),
         Err(never) => match never {},
     }
+}
+
+fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
+    conf.web_app
+        .enabled
+        .then(|| &conf.web_app)
+        .ok_or_else(|| HttpError::internal().msg("standalone web application not enabled"))
+}
+
+fn ensure_enabled(conf: &crate::config::Conf) -> Result<(), HttpError> {
+    extract_conf(conf).map(|_| ())
 }
 
 mod login_rate_limit {
