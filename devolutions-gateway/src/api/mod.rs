@@ -29,7 +29,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/webapp", webapp::make_router(state.clone()))
         .nest("/jet/net", net::make_router(state.clone()));
 
-    if state.conf_handle.get_conf().webapp_is_enabled() {
+    if state.conf_handle.get_conf().web_app.enabled {
         router = router.route(
             "/",
             axum::routing::get(|| async { axum::response::Redirect::temporary("/jet/webapp/client") }),

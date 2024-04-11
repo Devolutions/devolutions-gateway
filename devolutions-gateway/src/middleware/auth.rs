@@ -77,6 +77,12 @@ const AUTH_EXCEPTIONS: &[AuthException] = &[
         path: "/jet/webapp",
         exact_match: true,
     },
+    // -- Recording Player -- //
+    AuthException {
+        method: Method::GET,
+        path: "/jet/jrec/play",
+        exact_match: false,
+    },
 ];
 
 pub async fn auth_middleware(

@@ -23,6 +23,8 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/push/:id", get(jrec_push))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
+        .route("/play", get(get_player))
+        .route("/play/*path", get(get_player))
         .with_state(state)
 }
 
@@ -195,4 +197,40 @@ where
         .map_err(HttpError::internal().err())?;
 
     Ok(response)
+}
+
+async fn get_player<ReqBody>(
+    State(DgwState { conf_handle, .. }): State<DgwState>,
+    path: Option<extract::Path<String>>,
+    mut request: axum::http::Request<ReqBody>,
+) -> Result<Response<tower_http::services::fs::ServeFileSystemResponseBody>, HttpError>
+where
+    ReqBody: Send + 'static,
+{
+    use tower::ServiceExt as _;
+    use tower_http::services::{ServeDir, ServeFile};
+
+    let conf = conf_handle.get_conf();
+
+    let path = path.map(|path| path.0).unwrap_or_else(|| "/".to_owned());
+
+    debug!(path, "Requested player ressource");
+
+    *request.uri_mut() = axum::http::Uri::builder()
+        .path_and_query(path)
+        .build()
+        .map_err(HttpError::internal().with_msg("invalid ressource path").err())?;
+
+    let player_root = conf.web_app.static_root_path.join("player/");
+    let player_index = conf.web_app.static_root_path.join("player/index.html");
+
+    match ServeDir::new(player_root)
+        .fallback(ServeFile::new(player_index))
+        .append_index_html_on_directories(true)
+        .oneshot(request)
+        .await
+    {
+        Ok(response) => Ok(response),
+        Err(never) => match never {},
+    }
 }
