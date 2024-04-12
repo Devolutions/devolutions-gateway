@@ -12,7 +12,7 @@ import {
 import {v4 as uuidv4} from "uuid";
 import {MessageService} from "primeng/api";
 import {EMPTY, from, Observable, of, Subject, throwError} from "rxjs";
-import {catchError, map, switchMap, takeUntil} from "rxjs/operators";
+import {catchError, map, switchMap, takeUntil, tap} from "rxjs/operators";
 
 import {WebClientBaseComponent} from "@shared/bases/base-web-client.component";
 import {UtilsService} from "@shared/services/utils.service";
@@ -30,6 +30,7 @@ import {
   TerminalConnectionStatus
 } from "@devolutions/web-ssh-gui";
 import {ExtractedHostnamePort} from "@shared/services/utils/string.service";
+import { AnalyticService, ProtocolString } from "@gateway/shared/services/analytic.service";
 
 @Component({
   templateUrl: 'web-client-ssh.component.html',
@@ -68,8 +69,10 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
               protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService,
-              private webClientService: WebClientService) {
-    super(gatewayAlertMessageService);
+              private webClientService: WebClientService,
+              protected analyticService: AnalyticService
+            ) {
+    super(gatewayAlertMessageService,analyticService);
   }
 
   ngOnInit(): void {
@@ -191,7 +194,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
         connectionParameters.privateKey,
       )
     ).pipe(
-      catchError(error => throwError(error))
+      catchError(error => throwError(error)),
     );
   }
 
@@ -260,6 +263,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
     this.notifyUser(status);
     this.disableComponentStatus();
+    super.webClientConnectionClosed();
   }
 
   private notifyUser(status: TerminalConnectionStatus): void {
@@ -279,6 +283,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   private handleClientConnectStarted(): void {
     this.loading = false;
     this.webSessionService.updateWebSessionIcon(this.webSessionId, WebClientSshComponent.DVL_SSH_ICON);
+    super.webClientConnectionSuccess();
   }
 
   private handleSshError(error: string): void {
@@ -306,5 +311,9 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       default:
         return 'Unknown Error';
     }
+  }
+
+  protected getProtocol() : ProtocolString{
+      return "SSH";
   }
 }

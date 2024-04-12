@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, throwError } from "rxjs";
-import { catchError, map } from 'rxjs/operators';
+import { Observable, of, throwError } from "rxjs";
+import { catchError, map, tap } from 'rxjs/operators';
 
 interface VersionInfo {
   latestVersion?: string;
@@ -14,6 +14,8 @@ export type GetVersionResult = {
   hostname:string,
   version:string
 }
+
+let VersionCache : GetVersionResult = null;
 
 @Injectable({
     providedIn: 'root'
@@ -59,11 +61,19 @@ export class ApiService {
   }
 
   getVersion(): Observable<GetVersionResult> {
+    if (VersionCache) {
+      return of(VersionCache)
+    }
+
     return this.http.get(this.healthApiURL,{
       headers : {
         "accept" : "application/json"
       }
-    }) as Observable<GetVersionResult>;
+    }).pipe(
+      tap((result: GetVersionResult) => {
+        VersionCache = result;
+      })
+    ) as Observable<GetVersionResult>;
   }
 
   getLatestVersion(keysToFetch: string[] = ['Gateway.Version', 'Gateway.Url']): Observable<VersionInfo> {

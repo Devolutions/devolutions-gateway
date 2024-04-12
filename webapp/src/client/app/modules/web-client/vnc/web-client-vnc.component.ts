@@ -29,6 +29,7 @@ import {UserInteraction, SessionEvent, UserIronRdpError, DesktopSize} from '@dev
 import '@devolutions/iron-remote-gui-vnc/iron-remote-gui-vnc.umd.cjs';
 import {v4 as uuidv4} from "uuid";
 import {ExtractedHostnamePort} from "@shared/services/utils/string.service";
+import { AnalyticService, ProtocolString } from "@gateway/shared/services/analytic.service";
 
 enum UserIronRdpErrorKind {
   General = 0,
@@ -74,8 +75,10 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
               protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService,
-              private webClientService: WebClientService) {
-    super(gatewayAlertMessageService);
+              private webClientService: WebClientService,
+              protected analyticService: AnalyticService
+            ) {
+    super(gatewayAlertMessageService,analyticService);
   }
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {
@@ -349,6 +352,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
 
     this.notifyUser(event.type, event.data);
     this.disableComponentStatus();
+    super.webClientConnectionClosed();
   }
 
   private handleIronRDPConnectStarted(): void {
@@ -413,5 +417,9 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
       default:
         return 'Connection error: Please verify your connection settings.';
     }
+  }
+
+  protected getProtocol() : ProtocolString{
+      return "VNC";
   }
 }

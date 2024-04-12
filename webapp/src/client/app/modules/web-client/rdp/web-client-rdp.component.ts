@@ -28,6 +28,7 @@ import {RdpFormDataInput} from "@shared/interfaces/forms.interfaces";
 
 import {UserInteraction, SessionEvent, UserIronRdpError, DesktopSize} from '@devolutions/iron-remote-gui';
 import '@devolutions/iron-remote-gui/iron-remote-gui.umd.cjs';
+import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
 
 
 enum UserIronRdpErrorKind {
@@ -76,8 +77,10 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
               protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService,
-              private webClientService: WebClientService) {
-    super(gatewayAlertMessageService);
+              private webClientService: WebClientService,
+              protected analyticService : AnalyticService
+            ) {
+    super(gatewayAlertMessageService,analyticService);
   }
 
   @HostListener('document:mousemove', ['$event'])
@@ -353,6 +356,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
 
     this.notifyUser(event.type, event.data);
     this.disableComponentStatus();
+    super.webClientConnectionClosed();
   }
 
   private handleIronRDPConnectStarted(): void {
@@ -417,5 +421,9 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       default:
         return 'Connection error: Please verify your connection settings.';
     }
+  }
+
+  protected getProtocol() : ProtocolString{
+      return "RDP";
   }
 }

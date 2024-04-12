@@ -1,6 +1,7 @@
 import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
+import { AnalyticService, ConnectionIndentifier, ProtocolString } from '../services/analytic.service';
 
 @Directive()
 export abstract class WebClientBaseComponent extends BaseComponent {
@@ -10,7 +11,9 @@ export abstract class WebClientBaseComponent extends BaseComponent {
   hideSpinnerOnly: boolean = false;
   error: string;
 
-  protected constructor(protected gatewayAlertMessageService: GatewayAlertMessageService) {
+  analyticHandle: ConnectionIndentifier
+
+  protected constructor(protected gatewayAlertMessageService: GatewayAlertMessageService, protected analyticService:AnalyticService) {
     super();
   }
 
@@ -24,6 +27,7 @@ export abstract class WebClientBaseComponent extends BaseComponent {
       message = 'Connection successful';
     }
     this.gatewayAlertMessageService.addSuccess(message);
+    this.analyticHandle = this.analyticService.sendOpenEvent(this.getProtocol());
   }
 
   protected webClientConnectionFail(message?:string, trace?: string): void {
@@ -39,14 +43,13 @@ export abstract class WebClientBaseComponent extends BaseComponent {
     if (trace) {
       console.error(trace);
     }
+
+    this.analyticService.sendCloseEvent(this.analyticHandle);
   }
 
-  protected webClientConnectionClosed(message?:string): void {
-    if (!message) {
-      //For translation 'connection closed'
-      message = 'Connection error: Please verify your connection settings.';
-    }
-    this.gatewayAlertMessageService.addInfo(message);
-    console.warn(message);
+  protected webClientConnectionClosed(): void {
+    this.analyticService.sendCloseEvent(this.analyticHandle);
   }
+
+  protected abstract getProtocol(): ProtocolString;
 }
