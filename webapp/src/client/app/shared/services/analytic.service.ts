@@ -74,6 +74,7 @@ export class AnalyticService {
     let host = environment.OpenSearchUrl;
     let user = environment.OpenSearchUser;
     let password = environment.OpenSearchPassword;
+    let indexName = environment.OpenSearchIndex;
 
     let installId = localStorage.getItem('installId');
     if (!installId) {
@@ -96,12 +97,14 @@ export class AnalyticService {
       headers.append('Content-Type', 'application/json');
       headers.append('Authorization', `Basic ${btoa(user + ':' + password)}`)
 
-      let url = `${host}${INDEX_NAME}/_doc`;
-      const requestOptions = {
+      let url = `${host}${indexName}/_doc`;
+      const requestOptions :RequestInit = {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(event),
+        // mode: 'no-cors'  // Add this line to set the mode to 'no-cors'
       };
+
       fetch(url, requestOptions).then((response) => {
         if (!response.ok) {
           console.error('Failed to send event', response);
@@ -112,8 +115,6 @@ export class AnalyticService {
     });
   }
 }
-
-const INDEX_NAME = 'geteway_general_events';
 
 export interface ConnectionIndentifier {
   id: string;
