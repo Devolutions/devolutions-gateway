@@ -1,4 +1,6 @@
-//! Vendored code from https://github.com/tokio-rs/tokio/blob/1f6fc55917f971791d76dc91cce795e656c0e0d3/tokio/src/io/util/copy.rs
+//! Vendored code from:
+//! - https://github.com/tokio-rs/tokio/blob/1f6fc55917f971791d76dc91cce795e656c0e0d3/tokio/src/io/util/copy.rs
+//! - https://github.com/tokio-rs/tokio/blob/1f6fc55917f971791d76dc91cce795e656c0e0d3/tokio/src/io/util/copy_bidirectional.rs
 //! It is modified to allow us setting the `CopyBuffer` size instead of hardcoding 8k.
 //! See <https://github.com/tokio-rs/tokio/issues/6454>.
 
