@@ -1,6 +1,8 @@
+mod copy_bidirectional;
 mod forward;
 mod ws;
 
+pub use self::copy_bidirectional::*;
 pub use self::forward::*;
 pub use self::ws::*;
 
