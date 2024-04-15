@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.82"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 parking_lot = "0.12.1"
 polling = { git = "https://github.com/devolutions/polling.git", rev = "c04e8ee40415cad551fe044457270f4a2d7c491d" }
