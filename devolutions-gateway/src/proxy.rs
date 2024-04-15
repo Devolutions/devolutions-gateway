@@ -129,7 +129,8 @@ where
         let res = if let Some(buffer_size) = self.buffer_size {
             // Use our for of copy_bidirectional because tokio doesn't have an API to set the buffer size.
             // See https://github.com/tokio-rs/tokio/issues/6454.
-            let forward_fut = transport::copy_bidirectional(&mut transport_a, &mut transport_b, buffer_size, buffer_size);
+            let forward_fut =
+                transport::copy_bidirectional(&mut transport_a, &mut transport_b, buffer_size, buffer_size);
             match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
                 Either::Left((res, _)) => res.map(|_| ()),
                 Either::Right(_) => Ok(()),

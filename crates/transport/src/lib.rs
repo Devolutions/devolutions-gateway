@@ -1,11 +1,11 @@
-mod forward;
-mod ws;
 mod copy_bidirectional;
 mod copy_buffer;
+mod forward;
+mod ws;
 
-pub use copy_bidirectional::*;
 pub use self::forward::*;
 pub use self::ws::*;
+pub use copy_bidirectional::*;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 

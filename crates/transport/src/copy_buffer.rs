@@ -8,7 +8,6 @@ use std::io::{self};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-
 #[derive(Debug)]
 pub(super) struct CopyBuffer {
     read_done: bool,
@@ -20,7 +19,8 @@ pub(super) struct CopyBuffer {
 }
 
 impl CopyBuffer {
-    pub(super) fn new(buffer_size: usize) -> Self { // <- This is our change
+    pub(super) fn new(buffer_size: usize) -> Self {
+        // <- This is our change
         Self {
             read_done: false,
             need_flush: false,
@@ -31,13 +31,9 @@ impl CopyBuffer {
         }
     }
 
-    fn poll_fill_buf<R>(
-        &mut self,
-        cx: &mut Context<'_>,
-        reader: Pin<&mut R>,
-    ) -> Poll<io::Result<()>>
-        where
-            R: AsyncRead + ?Sized,
+    fn poll_fill_buf<R>(&mut self, cx: &mut Context<'_>, reader: Pin<&mut R>) -> Poll<io::Result<()>>
+    where
+        R: AsyncRead + ?Sized,
     {
         let me = &mut *self;
         let mut buf = ReadBuf::new(&mut me.buf);
@@ -58,9 +54,9 @@ impl CopyBuffer {
         mut reader: Pin<&mut R>,
         mut writer: Pin<&mut W>,
     ) -> Poll<io::Result<usize>>
-        where
-            R: AsyncRead + ?Sized,
-            W: AsyncWrite + ?Sized,
+    where
+        R: AsyncRead + ?Sized,
+        W: AsyncWrite + ?Sized,
     {
         let me = &mut *self;
         match writer.as_mut().poll_write(cx, &me.buf[me.pos..me.cap]) {
@@ -82,9 +78,9 @@ impl CopyBuffer {
         mut reader: Pin<&mut R>,
         mut writer: Pin<&mut W>,
     ) -> Poll<io::Result<u64>>
-        where
-            R: AsyncRead + ?Sized,
-            W: AsyncWrite + ?Sized,
+    where
+        R: AsyncRead + ?Sized,
+        W: AsyncWrite + ?Sized,
     {
         loop {
             // If our buffer is empty, then we need to read some data to
@@ -127,10 +123,7 @@ impl CopyBuffer {
             // If pos larger than cap, this loop will never stop.
             // In particular, user's wrong poll_write implementation returning
             // incorrect written length may lead to thread blocking.
-            debug_assert!(
-                self.pos <= self.cap,
-                "writer returned length larger than input slice"
-            );
+            debug_assert!(self.pos <= self.cap, "writer returned length larger than input slice");
 
             // If we've written all the data and we've seen EOF, flush out the
             // data and finish the transfer.

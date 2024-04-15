@@ -30,9 +30,9 @@ fn transfer_one_direction<A, B>(
     r: &mut A,
     w: &mut B,
 ) -> Poll<io::Result<u64>>
-    where
-        A: AsyncRead + AsyncWrite + Unpin + ?Sized,
-        B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     let mut r = Pin::new(r);
     let mut w = Pin::new(w);
@@ -54,20 +54,15 @@ fn transfer_one_direction<A, B>(
 }
 
 impl<'a, A, B> Future for CopyBidirectional<'a, A, B>
-    where
-        A: AsyncRead + AsyncWrite + Unpin + ?Sized,
-        B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     type Output = io::Result<(u64, u64)>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Unpack self into mut refs to each field to avoid borrow check issues.
-        let CopyBidirectional {
-            a,
-            b,
-            a_to_b,
-            b_to_a,
-        } = &mut *self;
+        let CopyBidirectional { a, b, a_to_b, b_to_a } = &mut *self;
 
         let a_to_b = transfer_one_direction(cx, a_to_b, &mut *a, &mut *b)?;
         let b_to_a = transfer_one_direction(cx, b_to_a, &mut *b, &mut *a)?;
@@ -108,10 +103,15 @@ impl<'a, A, B> Future for CopyBidirectional<'a, A, B>
 /// # Return value
 ///
 /// Returns a tuple of bytes copied `a` to `b` and bytes copied `b` to `a`.
-pub async fn copy_bidirectional<A, B>(a: &mut A, b: &mut B, send_buffer_size: usize,  recv_buffer_size: usize) -> Result<(u64, u64), std::io::Error>
-    where
-        A: AsyncRead + AsyncWrite + Unpin + ?Sized,
-        B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+pub async fn copy_bidirectional<A, B>(
+    a: &mut A,
+    b: &mut B,
+    send_buffer_size: usize,
+    recv_buffer_size: usize,
+) -> Result<(u64, u64), std::io::Error>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
     CopyBidirectional {
         a,
@@ -119,5 +119,5 @@ pub async fn copy_bidirectional<A, B>(a: &mut A, b: &mut B, send_buffer_size: us
         a_to_b: TransferState::Running(CopyBuffer::new(send_buffer_size)),
         b_to_a: TransferState::Running(CopyBuffer::new(recv_buffer_size)),
     }
-        .await
+    .await
 }
