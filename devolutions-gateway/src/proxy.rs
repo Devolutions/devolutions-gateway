@@ -24,6 +24,8 @@ pub struct Proxy<A, B> {
     address_b: SocketAddr,
     sessions: SessionMessageSender,
     subscriber_tx: SubscriberSender,
+    #[builder(default = None)]
+    buffer_size: Option<usize>,
 }
 
 impl<A, B> Proxy<A, B>
@@ -95,6 +97,7 @@ where
                 address_b: self.address_b,
                 sessions: self.sessions,
                 subscriber_tx: self.subscriber_tx,
+                buffer_size: self.buffer_size,
             }
             .forward()
             .await
@@ -121,12 +124,22 @@ where
         // NOTE(DGW-86): when recording is required, should we wait for it to start before we forward, or simply spawn
         // a timer to check if the recording is started within a few seconds?
 
-        let forward_fut = tokio::io::copy_bidirectional(&mut transport_a, &mut transport_b);
         let kill_notified = notify_kill.notified();
 
-        let res = match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
-            Either::Left((res, _)) => res.map(|_| ()),
-            Either::Right(_) => Ok(()),
+        let res = if let Some(buffer_size) = self.buffer_size {
+            // Use our for of copy_bidirectional because tokio doesn't have an API to set the buffer size.
+            // See https://github.com/tokio-rs/tokio/issues/6454.
+            let forward_fut = transport::copy_bidirectional(&mut transport_a, &mut transport_b, buffer_size, buffer_size);
+            match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
+                Either::Left((res, _)) => res.map(|_| ()),
+                Either::Right(_) => Ok(()),
+            }
+        } else {
+            let forward_fut = tokio::io::copy_bidirectional(&mut transport_a, &mut transport_b);
+            match futures::future::select(pin!(forward_fut), pin!(kill_notified)).await {
+                Either::Left((res, _)) => res.map(|_| ()),
+                Either::Right(_) => Ok(()),
+            }
         };
 
         // Ensure we close the transports cleanly at the end (ignore errors at this point)

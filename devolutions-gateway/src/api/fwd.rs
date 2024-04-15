@@ -18,7 +18,7 @@ use crate::http::HttpError;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{AssociationTokenClaims, ConnectionMode};
+use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol};
 use crate::{utils, DgwState};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -162,6 +162,13 @@ where
         trace!(%selected_target, "Connected");
         span.record("target", selected_target.to_string());
 
+        // ARD uses MVS codec which doesn't like buffering.
+        let buffer_size = if claims.jet_ap == ApplicationProtocol::Known(Protocol::Ard) {
+            Some(1024)
+        } else {
+            None
+        };
+
         if with_tls {
             trace!("Establishing TLS connection with server");
 
@@ -193,6 +200,7 @@ where
                 .transport_b(server_stream)
                 .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
+                .buffer_size(buffer_size)
                 .build()
                 .select_dissector_and_forward()
                 .await
@@ -220,6 +228,7 @@ where
                 .transport_b(server_stream)
                 .sessions(sessions)
                 .subscriber_tx(subscriber_tx)
+                .buffer_size(buffer_size)
                 .build()
                 .select_dissector_and_forward()
                 .await
