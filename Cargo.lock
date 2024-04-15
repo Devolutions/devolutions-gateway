@@ -869,7 +869,7 @@ dependencies = [
  "dlopen_derive",
  "embed-resource",
  "futures",
- "hostname",
+ "hostname 0.4.0",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -1473,6 +1473,17 @@ dependencies = [
  "libc",
  "match_cfg",
  "winapi",
+]
+
+[[package]]
+name = "hostname"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9c7c7c8ac16c798734b8a24560c1362120597c40d5e1459f09498f8f6c8f2ba"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows 0.52.0",
 ]
 
 [[package]]
@@ -2200,7 +2211,7 @@ dependencies = [
  "base64 0.13.1",
  "bytes",
  "futures",
- "hostname",
+ "hostname 0.3.1",
  "muxado",
  "once_cell",
  "parking_lot",
