@@ -145,8 +145,8 @@ impl CopyBuffer {
     }
 
     fn poll_fill_buf<R>(&mut self, cx: &mut Context<'_>, reader: Pin<&mut R>) -> Poll<io::Result<()>>
-        where
-            R: AsyncRead + ?Sized,
+    where
+        R: AsyncRead + ?Sized,
     {
         let me = &mut *self;
         let mut buf = ReadBuf::new(&mut me.buf);
@@ -167,9 +167,9 @@ impl CopyBuffer {
         mut reader: Pin<&mut R>,
         mut writer: Pin<&mut W>,
     ) -> Poll<io::Result<usize>>
-        where
-            R: AsyncRead + ?Sized,
-            W: AsyncWrite + ?Sized,
+    where
+        R: AsyncRead + ?Sized,
+        W: AsyncWrite + ?Sized,
     {
         let me = &mut *self;
         match writer.as_mut().poll_write(cx, &me.buf[me.pos..me.cap]) {
@@ -191,9 +191,9 @@ impl CopyBuffer {
         mut reader: Pin<&mut R>,
         mut writer: Pin<&mut W>,
     ) -> Poll<io::Result<u64>>
-        where
-            R: AsyncRead + ?Sized,
-            W: AsyncWrite + ?Sized,
+    where
+        R: AsyncRead + ?Sized,
+        W: AsyncWrite + ?Sized,
     {
         loop {
             // If our buffer is empty, then we need to read some data to
