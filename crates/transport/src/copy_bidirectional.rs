@@ -1,5 +1,5 @@
-//! Fork of https://github.com/tokio-rs/tokio/blob/master/tokio/src/io/util/copy.rs to allow us set
-//! variable length `CopyBuffer` size instead of default 8k.
+//! Vendored code from https://github.com/tokio-rs/tokio/blob/1f6fc55917f971791d76dc91cce795e656c0e0d3/tokio/src/io/util/copy.rs
+//! It is modified to allow us setting the `CopyBuffer` size instead of hardcoding 8k.
 //! See <https://github.com/tokio-rs/tokio/issues/6454>.
 
 use super::copy_buffer::CopyBuffer;
