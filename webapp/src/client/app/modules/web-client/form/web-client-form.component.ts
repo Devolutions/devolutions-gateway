@@ -27,17 +27,19 @@ import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.inte
 @Component({
   selector: 'web-client-form',
   templateUrl: 'web-client-form.component.html',
-  styleUrls: ['web-client-form.component.scss']
+  styleUrls: ['web-client-form.component.scss'],
 })
-export class WebClientFormComponent extends BaseComponent implements  OnInit,
-                                                                      OnChanges {
-
+export class WebClientFormComponent
+  extends BaseComponent
+  implements OnInit, OnChanges
+{
   @Input() isFormExists: boolean = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData: any;
   @Input() error: any;
 
-  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
+  @Output() componentStatus: EventEmitter<ComponentStatus> =
+    new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   connectSessionForm: FormGroup = this.fb.group({});
@@ -50,11 +52,13 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   hostnames!: HostnameObject[];
   filteredHostnames!: HostnameObject[];
 
-  constructor(private fb: FormBuilder,
-              private formService: WebFormService,
-              private webSessionService: WebSessionService,
-              private storageService: StorageService,
-              private cdr: ChangeDetectorRef) {
+  constructor(
+    private fb: FormBuilder,
+    private formService: WebFormService,
+    private webSessionService: WebSessionService,
+    private storageService: StorageService,
+    private cdr: ChangeDetectorRef
+  ) {
     super();
   }
 
@@ -69,19 +73,24 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   onConnectSession(): void {
-    this.webSessionService.createWebSession(this.connectSessionForm, this.getSelectedProtocol(), this.formService.getExtraSessionParameter()).pipe(
-      takeUntil(this.destroyed$),
-      switchMap((webSession) => this.manageScreenSize(webSession)),
-      switchMap((webSession) => this.manageWebSessionSubject(webSession)),
-      catchError(error => {
-        console.error('Failed to process web session:', error);
-        return EMPTY;
-      })
-    ).subscribe(
-      (webSession) => {
+    this.webSessionService
+      .createWebSession(
+        this.connectSessionForm,
+        this.getSelectedProtocol(),
+        this.formService.getExtraSessionParameter()
+      )
+      .pipe(
+        takeUntil(this.destroyed$),
+        switchMap((webSession) => this.manageScreenSize(webSession)),
+        switchMap((webSession) => this.manageWebSessionSubject(webSession)),
+        catchError((error) => {
+          console.error('Failed to process web session:', error);
+          return EMPTY;
+        })
+      )
+      .subscribe((webSession) => {
         this.addHostnameToStorage(webSession?.data?.hostname);
-      }
-    );
+      });
   }
 
   isHostnamesExists(): boolean {
@@ -92,39 +101,51 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     const query = event.query.toLowerCase();
 
     Promise.resolve().then(() => {
-      this.filteredHostnames = this.hostnames?.filter(hostnameObj =>
-        hostnameObj.hostname.toLowerCase().startsWith(query)
-      ) || [];
+      this.filteredHostnames =
+        this.hostnames?.filter((hostnameObj) =>
+          hostnameObj.hostname.toLowerCase().startsWith(query)
+        ) || [];
     });
   }
 
   private subscribeToProtocolChanges(): void {
-    const protocolControl: AbstractControl<any,any> = this.connectSessionForm.get('protocol');
+    const protocolControl: AbstractControl<any, any> =
+      this.connectSessionForm.get('protocol');
     if (!protocolControl) {
       return;
     }
 
-    protocolControl.valueChanges.pipe(
-      startWith(protocolControl.value as Protocol),
-      takeUntil(this.destroyed$)
-    ).subscribe((protocol) => {
-      const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
-      Object.keys(this.connectSessionForm.controls).forEach(key => {
-        if (!exceptions.includes(key)) {
-          this.connectSessionForm.get(key).disable();
-        }
-      });
+    protocolControl.valueChanges
+      .pipe(
+        startWith(protocolControl.value as Protocol),
+        takeUntil(this.destroyed$)
+      )
+      .subscribe(
+        (protocol) => {
+          const exceptions: string[] = [
+            'protocol',
+            'autoComplete',
+            'hostname',
+            'authMode',
+          ];
+          Object.keys(this.connectSessionForm.controls).forEach((key) => {
+            if (!exceptions.includes(key)) {
+              this.connectSessionForm.get(key).disable();
+            }
+          });
 
-      this.formService.detectFormChanges(this.cdr);
-      }, error => console.error('Error subscribing to protocol changes:', error)
-    );
+          this.formService.detectFormChanges(this.cdr);
+        },
+        (error) =>
+          console.error('Error subscribing to protocol changes:', error)
+      );
   }
 
   private initializeFormAndOptions(): void {
     this.buildFormGroup(this.inputFormData)
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap(formGroup => {
+        switchMap((formGroup) => {
           this.connectSessionForm = formGroup;
           this.subscribeToProtocolChanges();
 
@@ -133,19 +154,20 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
             hostnames: this.getHostnames(),
           });
         }),
-        catchError(error => {
+        catchError((error) => {
           console.error('Initialization failed', error);
           return [];
         })
       )
       .subscribe({
-        next: ({protocolOptions, hostnames}) => {
+        next: ({ protocolOptions, hostnames }) => {
           this.protocolOptions = protocolOptions;
           this.hostnames = hostnames;
 
           this.updateProtocolTooltip();
         },
-        error: (error) => console.error('Error fetching dropdown options', error)
+        error: (error) =>
+          console.error('Error fetching dropdown options', error),
       });
   }
 
@@ -153,7 +175,7 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     const formControls = {
       protocol: [inputFormData?.protocol || 0, Validators.required],
       autoComplete: [inputFormData?.autoComplete || '', Validators.required],
-      hostname: [inputFormData?.autoComplete || '']
+      hostname: [inputFormData?.autoComplete || ''],
     };
 
     const formGroup = this.fb.group(formControls);
@@ -164,12 +186,17 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     return of(this.storageService.getItem<AutoCompleteInput[]>('hostnames'));
   }
 
-  private isHostnameInArray(hostname: string, array: AutoCompleteInput[] = []): boolean {
-    return array.some(obj => obj.hostname === hostname);
+  private isHostnameInArray(
+    hostname: string,
+    array: AutoCompleteInput[] = []
+  ): boolean {
+    return array.some((obj) => obj.hostname === hostname);
   }
 
-  private processHostnameInput(input: string | AutoCompleteInput): AutoCompleteInput {
-    return typeof input === 'string' ? {'hostname': input} : input;
+  private processHostnameInput(
+    input: string | AutoCompleteInput
+  ): AutoCompleteInput {
+    return typeof input === 'string' ? { hostname: input } : input;
   }
 
   private addHostnameToStorage(hostname: string): void {
@@ -178,8 +205,10 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
         return;
       }
 
-      const hostnameObj: AutoCompleteInput = this.processHostnameInput(hostname);
-      const hostnames: AutoCompleteInput[] = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
+      const hostnameObj: AutoCompleteInput =
+        this.processHostnameInput(hostname);
+      const hostnames: AutoCompleteInput[] =
+        this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
 
       if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
         hostnames.push(hostnameObj);
@@ -192,7 +221,8 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   private populateHostnameList(): Observable<void> {
-    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+    this.hostnames =
+      this.storageService.getItem<AutoCompleteInput[]>('hostnames');
     return of(undefined);
   }
 
@@ -200,11 +230,17 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     if (!value && this.protocolOptions.length > 0) {
       value = this.protocolOptions[0].value;
     }
-    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(item => item.value === value);
-    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(
+      (item) => item.value === value
+    );
+    this.protocolSelectedTooltip = selectedItem
+      ? (selectedItem as any).tooltipText
+      : '';
   }
 
-  private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
+  private manageScreenSize(
+    webSession: WebSession<any, any>
+  ): Observable<WebSession<any, any>> {
     if (!this.isSelectedProtocolRdp()) {
       return of(webSession);
     }
@@ -220,7 +256,9 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
     return of(webSession);
   }
 
-  private manageWebSessionSubject(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
+  private manageWebSessionSubject(
+    webSession: WebSession<any, any>
+  ): Observable<WebSession<any, any>> {
     if (this.isFormExists) {
       webSession.id = this.webSessionId;
       this.webSessionService.updateSession(webSession);
@@ -247,9 +285,14 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
   }
 
   private addMessages(newMessages: Message[]): void {
-    const areThereNewMessages: boolean = newMessages.some(newMsg =>
-      !this.messages.some(existingMsg => existingMsg.summary === newMsg.summary &&
-        existingMsg.detail === newMsg.detail));
+    const areThereNewMessages: boolean = newMessages.some(
+      (newMsg) =>
+        !this.messages.some(
+          (existingMsg) =>
+            existingMsg.summary === newMsg.summary &&
+            existingMsg.detail === newMsg.detail
+        )
+    );
 
     if (areThereNewMessages) {
       this.messages = [...this.messages, ...newMessages];
@@ -262,11 +305,13 @@ export class WebClientFormComponent extends BaseComponent implements  OnInit,
 
   private displayErrorMessages(error: any): void {
     setTimeout(() => {
-      this.addMessages([{
-        severity: 'error',
-        summary: error['kind'] ?? error,
-        detail: error['backtrace'] ?? ''
-      }]);
+      this.addMessages([
+        {
+          severity: 'error',
+          summary: error['kind'] ?? error,
+          detail: error['backtrace'] ?? '',
+        },
+      ]);
     }, 500);
   }
 

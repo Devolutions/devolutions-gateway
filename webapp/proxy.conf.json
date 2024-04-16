@@ -24,5 +24,10 @@
   "/jet/health": {
     "target": "http://localhost:7171",
     "secure": false
+  },
+  "/jet/net/scan" : {
+    "target": "http://localhost:7171",
+    "secure": false,
+    "ws": true
   }
 }

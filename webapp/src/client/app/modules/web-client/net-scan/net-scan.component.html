@@ -1,0 +1,21 @@
+<div class="net-scan-main flex justify-center align-center">
+    <div class="box">
+        <div class="box-title">
+            <span>Found servers ({{services.length}})</span>
+        </div>
+        <div>
+            <p-progressBar *ngIf="started && !ended" mode="indeterminate" [style]="{'height':'6px'}"></p-progressBar>
+        </div>
+
+        <div class="scroll h-full" *ngIf="started">
+            <ul>
+                <li *ngFor="let service of services">
+                    <div class="entry" (click)="onServiceClick(service)">
+                        <i class="dvl-icon right-small-margin" [ngClass]="service.icon()"></i>
+                        <div class="service-name">{{service.hostname || service.ip}}</div>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
