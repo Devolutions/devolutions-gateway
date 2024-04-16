@@ -1,7 +1,7 @@
 import { Directive } from '@angular/core';
 import { BaseComponent } from '@shared/bases/base.component';
 import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
-import { AnalyticService, ConnectionIndentifier, ProtocolString } from '../services/analytic.service';
+import { AnalyticService, ConnectionIdentifier, ProtocolString } from '../services/analytic.service';
 
 @Directive()
 export abstract class WebClientBaseComponent extends BaseComponent {
@@ -11,7 +11,7 @@ export abstract class WebClientBaseComponent extends BaseComponent {
   hideSpinnerOnly: boolean = false;
   error: string;
 
-  analyticHandle: ConnectionIndentifier
+  analyticHandle: ConnectionIdentifier
 
   protected constructor(protected gatewayAlertMessageService: GatewayAlertMessageService, protected analyticService:AnalyticService) {
     super();

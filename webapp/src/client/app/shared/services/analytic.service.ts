@@ -23,7 +23,7 @@ export class AnalyticService {
     });
   }
 
-  public sendOpenEvent(connectionType: ProtocolString): ConnectionIndentifier {
+  public sendOpenEvent(connectionType: ProtocolString): ConnectionIdentifier {
     this.sendEvent({
       connectionType: connectionType,
     });
@@ -40,7 +40,7 @@ export class AnalyticService {
     };
   }
 
-  public sendCloseEvent(connectionId: ConnectionIndentifier): void {
+  public sendCloseEvent(connectionId: ConnectionIdentifier): void {
     let connection = this.openedConnections.get(connectionId.id);
     if (!connection) {
       return;
@@ -120,7 +120,7 @@ export class AnalyticService {
   }
 }
 
-export interface ConnectionIndentifier {
+export interface ConnectionIdentifier {
   id: string;
   type: ProtocolString;
 }
