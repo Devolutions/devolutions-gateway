@@ -72,8 +72,7 @@ export class AnalyticService {
     connectinoEvent: OpenedConnectionEvent | ClosedConnectionEvent
   ): void {
     let host = environment.OpenSearchUrl;
-    let user = environment.OpenSearchUser;
-    let password = environment.OpenSearchPassword;
+    let token = environment.OpenSearchToken;
     let indexName = environment.OpenSearchIndex;
 
     let installId = localStorage.getItem('installId');
@@ -95,7 +94,7 @@ export class AnalyticService {
 
       const headers = new Headers();
       headers.append('Content-Type', 'application/json');
-      headers.append('Authorization', `Basic ${btoa(user + ':' + password)}`);
+      headers.append('Authorization', `Basic ${token}`);
 
       let url = `${host}${indexName}/_doc`;
       const requestOptions: RequestInit = {

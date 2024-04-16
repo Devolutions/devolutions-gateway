@@ -1,6 +1,5 @@
 export const environment = {
   OpenSearchUrl: '',
-  OpenSearchUser: '',
-  OpenSearchPassword: '',
+  OpenSearchToken: '',
   OpenSearchIndex: '',
 };

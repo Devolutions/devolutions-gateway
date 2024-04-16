@@ -1,6 +1,5 @@
 export const environment = {
     OpenSearchUrl: 'https://telemetry2.devolutions.net:9200/',
-    OpenSearchUser: 'DGW_2024.1',
-    OpenSearchPassword: "%'YmWHh4lqbq",
+    OpenSearchToken: 'REdXXzIwMjQuMTolJ1ltV0hoNGxxYnE=',
     OpenSearchIndex: 'dev-gateway_general_events',
 };
