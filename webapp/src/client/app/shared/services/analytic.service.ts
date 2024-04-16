@@ -108,7 +108,7 @@ export class AnalyticService {
       fetch(url, requestOptions)
         .then((response) => {
           if (isDevMode()) {
-            console.log('Event sent', event);
+            console.log('Event sent', response);
           }
         })
         .catch((error) => {
