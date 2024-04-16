@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, isDevMode } from '@angular/core';
 import { Protocol } from '../enums/web-client-protocol.enum';
 import { ApiService } from './api.service';
 import { environment } from 'src/environments/environment';
@@ -95,23 +95,27 @@ export class AnalyticService {
 
       const headers = new Headers();
       headers.append('Content-Type', 'application/json');
-      headers.append('Authorization', `Basic ${btoa(user + ':' + password)}`)
+      headers.append('Authorization', `Basic ${btoa(user + ':' + password)}`);
 
       let url = `${host}${indexName}/_doc`;
-      const requestOptions :RequestInit = {
+      const requestOptions: RequestInit = {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(event),
         // mode: 'no-cors'  // Add this line to set the mode to 'no-cors'
       };
 
-      fetch(url, requestOptions).then((response) => {
-        if (!response.ok) {
-          console.error('Failed to send event', response);
-        }
-      }).catch((error) => {
-        console.error('Failed to send event', error);
-      })
+      fetch(url, requestOptions)
+        .then((response) => {
+          if (isDevMode()) {
+            console.log('Event sent', event);
+          }
+        })
+        .catch((error) => {
+          if (isDevMode()) {
+            console.error('Error sending event', error);
+          }
+        });
     });
   }
 }
