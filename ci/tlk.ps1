@@ -150,6 +150,7 @@ class TlkTarget
     [string] $Architecture
     [string] $CargoProfile
     [string] $ExecutableExtension
+    [string] $SymbolsExtension
 
     TlkTarget() {
         $this.Init()
@@ -161,8 +162,10 @@ class TlkTarget
 
         if ($this.IsWindows()) {
             $this.ExecutableExtension = 'exe'
+            $this.SymbolsExtension = 'pdb'
         } else {
             $this.ExecutableExtension = ''
+            $this.SymbolsExtension = ''
         }
     }
 
@@ -307,15 +310,6 @@ class TlkRecipe
         $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
         $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
 
-        if (-Not $this.Target.IsWindows()) {
-            $StripExecutable = 'strip'
-            if (Test-Path Env:STRIP_EXECUTABLE) {
-                $StripExecutable = $Env:STRIP_EXECUTABLE
-            }
-
-            & $StripExecutable $SrcExecutablePath | Out-Host
-        }
-
         if (Test-Path Env:DGATEWAY_EXECUTABLE) {
             $DGatewayExecutable = $Env:DGATEWAY_EXECUTABLE
             $DestinationExecutable = $DGatewayExecutable
@@ -324,6 +318,22 @@ class TlkRecipe
             $DestinationExecutable = $JetsocatExecutable
         } else {
             $DestinationExecutable = $null
+        }
+
+        if ($this.Target.IsWindows() -And $DestinationExecutable) {
+            $SrcSymbolsName = $CargoPackage.Replace('-','_')
+            $SrcSymbolsName = $SrcSymbolsName, $this.Target.SymbolsExtension -ne '' -Join '.'
+            $SrcSymbolsPath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcSymbolsName}"
+            $DestinationSymbolsName = $(Split-Path $DestinationExecutable -Leaf).Replace(".$($this.Target.ExecutableExtension)", ".$($this.Target.SymbolsExtension)")
+            $DestinationDirectory  = Split-Path $DestinationExecutable -Parent
+            Copy-Item $SrcSymbolsPath -Destination $(Join-Path $DestinationDirectory $DestinationSymbolsName)
+        } elseif (!$this.Target.IsWindows()) {
+            $StripExecutable = 'strip'
+            if (Test-Path Env:STRIP_EXECUTABLE) {
+                $StripExecutable = $Env:STRIP_EXECUTABLE
+            }
+
+            & $StripExecutable $SrcExecutablePath | Out-Host
         }
 
         if ($DestinationExecutable) {
