@@ -30,6 +30,7 @@ import {
   TerminalConnectionStatus,
 } from '@devolutions/web-telnet-gui';
 import {ExtractedHostnamePort} from "@shared/services/utils/string.service";
+import { AnalyticService, ProtocolString } from "@gateway/shared/services/analytic.service";
 
 
 @Component({
@@ -70,8 +71,10 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
               protected utils: UtilsService,
               protected gatewayAlertMessageService: GatewayAlertMessageService,
               private webSessionService: WebSessionService,
-              private webClientService: WebClientService) {
-    super(gatewayAlertMessageService);
+              private webClientService: WebClientService,
+              protected analyticService: AnalyticService
+            ) {
+    super(gatewayAlertMessageService, analyticService);
   }
 
   ngOnInit(): void {
@@ -246,6 +249,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
   private handleSessionStarted(): void {
     this.handleClientConnectStarted();
     this.currentStatus.isInitialized = true;
+    super.webClientConnectionSuccess();
   }
 
   private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
@@ -257,6 +261,7 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
 
     this.notifyUser(status);
     this.disableComponentStatus();
+    super.webClientConnectionClosed();
   }
 
   private notifyUser(status: TerminalConnectionStatus): void {
@@ -305,5 +310,9 @@ export class WebClientTelnetComponent extends WebClientBaseComponent implements 
       default:
         return 'Unknown Error';
     }
+  }
+
+  protected getProtocol() : ProtocolString{
+      return "Telnet";
   }
 }
