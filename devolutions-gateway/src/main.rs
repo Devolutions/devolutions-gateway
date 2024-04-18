@@ -24,7 +24,7 @@ enum CliAction {
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args();
 
-    let executable = args.next().unwrap();
+    let executable = args.next().context("executable name is missing from the environment")?;
 
     let action = match args.next().as_deref() {
         Some("--service") => CliAction::Run { service_mode: true },
@@ -108,7 +108,7 @@ fn main() -> anyhow::Result<()> {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_io()
                     .build()
-                    .unwrap();
+                    .context("failed to build the async runtime")?;
                 rt.block_on(build_signals_fut())?;
 
                 service.stop();
@@ -125,22 +125,36 @@ fn service_controller() -> Controller {
 
 enum GatewayServiceEvent {}
 
+const BAD_CONFIG_ERR_CODE: u32 = 1;
+const START_FAILED_ERR_CODE: u32 = 2;
+
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
     args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let conf_handle = ConfHandle::init().expect("unable to initialize configuration");
-    let mut service = GatewayService::load(conf_handle).expect("unable to load service");
+    let Ok(conf_handle) = ConfHandle::init() else {
+        // At this point, the logger is not yet initialized.
+        return BAD_CONFIG_ERR_CODE;
+    };
 
-    info!("{} service started", SERVICE_NAME);
-    info!("args: {:?}", args);
+    let mut service = match GatewayService::load(conf_handle) {
+        Ok(service) => service,
+        Err(error) => {
+            // At this point, the logger may or may not be initialized.
+            error!(error = format!("{error:#}"), "Failed to load service");
+            return START_FAILED_ERR_CODE;
+        }
+    };
 
-    service
-        .start()
-        .tap_err(|error| error!(error = format!("{error:#}"), "Failed to start"))
-        .expect("start service");
+    match service.start() {
+        Ok(()) => info!("{} service started", SERVICE_NAME),
+        Err(error) => {
+            error!(error = format!("{error:#}"), "Failed to start");
+            return START_FAILED_ERR_CODE;
+        }
+    }
 
     loop {
         if let Ok(control_code) = rx.recv() {
