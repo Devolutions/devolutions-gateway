@@ -194,11 +194,12 @@ jobs:
         if: matrix.os == 'windows' || matrix.os == 'macos'
         shell: pwsh
         run: |
-          $Pattern = switch ('${{ matrix.project }}') {
+          $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
             'jetsocat' { 'jetsocat_*' }
           }
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$Pattern" | % {
+          $ExcludePattern = "*.pdb"
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$IncludePattern" -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
               $Params = @('sign',
                 '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
@@ -413,9 +414,9 @@ jobs:
           Get-ChildItem -Directory -Recurse "x86_64" | Rename-Item -NewName "x64"
 
           # Remove version number and architecture from binary name
-          Get-ChildItem -File -Recurse | Rename-Item -NewName "jetsocat"
+          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat"
           cd windows
-          Get-ChildItem -File -Recurse | Rename-Item -NewName "jetsocat.exe"
+          Get-ChildItem -File -Recurse -Exclude "*.pdb" | Rename-Item -NewName "jetsocat.exe"
 
       - name: Set package metadata
         shell: pwsh

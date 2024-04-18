@@ -225,7 +225,7 @@ jobs:
         run: |
           $Version = "${{ needs.preflight.outputs.version }}"
           $HashPath = 'checksums'
-          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
+          $Files = Get-ChildItem -Recurse -File -Exclude 'CHANGELOG.md','*.pdb' | % { Get-FileHash -Algorithm SHA256 $_.FullName }
           $Files | % { "$($_.Hash)  $(Split-Path $_.Path -leaf)" } | Out-File -FilePath $HashPath -Append -Encoding ASCII
 
           echo "::group::checksums"
@@ -327,15 +327,17 @@ jobs:
         run: |
           $destinationFolder = "${{ runner.temp }}/artifacts"
           $version="${{ needs.preflight.outputs.version }}"
-
           # Note that ".0" is appended here (required by release tooling downstream)
-          echo "version=${version}.0" >> $Env:GITHUB_OUTPUT
+          $versionFull="$version.0"
+
+          echo "version=${versionFull}" >> $Env:GITHUB_OUTPUT
           echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
-          Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${version}.0.msi"
+          Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.msi"
+          Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
           # Note that at this point the deb package is already named using the ".0" suffix, so we don’t rename.
-          Move-Item -Path "./linux/x86_64/devolutions-gateway_${version}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${version}_amd64.deb"
+          Move-Item -Path "./linux/x86_64/devolutions-gateway_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
 
       - name: Upload to OneDrive
         uses: ./.github/workflows/onedrive-upload
