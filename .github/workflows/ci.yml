@@ -336,6 +336,7 @@ jobs:
     name: devolutions-gateway [${{ matrix.os }} ${{ matrix.arch }}]
     runs-on: ${{ matrix.runner }}
     needs: [preflight, devolutions-gateway-web-ui]
+    if: always()
     strategy:
       matrix:
         include: ${{ fromJson(needs.preflight.outputs.gateway-build-matrix) }}
