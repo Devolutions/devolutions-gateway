@@ -11,7 +11,7 @@ crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 parking_lot = "0.12.1"
 polling = { git = "https://github.com/devolutions/polling.git", rev = "c04e8ee40415cad551fe044457270f4a2d7c491d" }
 socket2 = { version = "0.5.6", features = ["all"] }
-thiserror = "1.0.58"
+thiserror = "1.0.59"
 tracing = "0.1.40"
 
 [dev-dependencies]
