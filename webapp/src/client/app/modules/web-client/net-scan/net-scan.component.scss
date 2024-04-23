@@ -21,13 +21,20 @@
   align-items: center;
 }
 
-.h-full {
-  height: 100%;
+.h-fill {
+  height: calc(100% - 50px);
 }
 
-.scroll{
+.scroll {
   overflow-y: scroll;
+  -ms-overflow-style: none;  /* Internet Explorer 10+ */
+  scrollbar-width: none;  /* Firefox */
 }
+
+.scroll::-webkit-scrollbar {
+  display: none;
+}
+
 
 .progress-bar {
   width: 100%;
@@ -37,21 +44,48 @@
   margin: 5px 0;
 }
 
+.spinner {
+  display: inline-block;
+  animation: spin 2s linear infinite;
+  width: 24px;
+  height: 24px;
+}
 
-.box-title {
-  color: var(--box-text-color);
-  font-size: 24px;
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+.title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 38px;
+  padding: 8px 16px 8px 16px;
+}
+
+.border-top {
+  border-top: 1px solid var(--border-secondary-color);
+}
+
+.scan-title {
+  font-family: Open Sans;
+  font-size: 16px;
   font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0em;
+  line-height: 21.79px;
   text-align: left;
-  margin-bottom: 5px;
 }
 
 .box {
   display: block;
   background-color: var(--box-background-color);
-  min-width: 200px;
+  width: 291px;
   height: 418px;
   border-radius: 8px;
   padding: 10px;
@@ -65,7 +99,7 @@ ul {
 }
 
 li:hover {
-  background-color: lightgray; 
+  background-color: lightgray;
   cursor: pointer;
 }
 
@@ -74,11 +108,47 @@ li:hover {
 }
 
 .entry {
+  width: 100%;
+  height: 51px;
+  padding: 8px 16px 8px 16px;
+  gap: 0px;
+  justify-content: space-between;
+  opacity: 0px;
   display: flex;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--Borders-Colors-border-tertiary-color, rgba(0, 0, 0, 0.07))
+}
+
+.flex {
+  display: flex;
+}
+
+.justify-start {
   justify-content: flex-start;
-  align-items: start;
-  padding: 5px 0;
-  margin-right: 5px;
-  margin-left: 5px;
-  border-bottom: 1px solid var(--border-secondary-color);
+}
+
+.center-one {
+  display: flex;
+  justify-content: start;
+  align-items: center;
+}
+
+.typography-service-name {
+  font-family: Open Sans;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 19.07px;
+  text-align: left;
+  max-width: 150px;
+  overflow: hidden;
+}
+
+.typography-service-sub-name {
+  font-family: Open Sans;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16.34px;
+  text-align: left;
 }
