@@ -20,10 +20,10 @@
                             </div>
                             <div>
                                 <div class="typography-service-name">{{service.hostname || service.ip}}</div>
-                                <span class="typography-service-sub-name">{{!service.hostname? "  " :service.ip}}</span>
+                                <div class="typography-service-sub-name">{{!service.hostname? "  " :service.ip}}</div>
                             </div>
                         </div>
-                        <div> 
+                        <div [pTooltip]="'Prefill form'"> 
                             <svg width="18" height="17" viewBox="0 0 18 17" fill="none"
                                 xmlns="http://www.w3.org/2000/svg">
                                 <path

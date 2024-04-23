@@ -8,7 +8,7 @@ import {
   Output,
   SimpleChanges
 } from '@angular/core';
-import {AbstractControl, FormBuilder, FormGroup, Validators} from "@angular/forms";
+import {AbstractControl, FormBuilder, FormControl, FormGroup, Validators} from "@angular/forms";
 import {Message} from "primeng/api";
 import {catchError, startWith, switchMap, takeUntil} from "rxjs/operators";
 import {EMPTY, forkJoin, Observable, of} from "rxjs";
@@ -23,6 +23,7 @@ import {WebSessionService} from "@shared/services/web-session.service";
 import {WebFormService} from "@shared/services/web-form.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
+import { NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
   selector: 'web-client-form',
@@ -57,6 +58,7 @@ export class WebClientFormComponent
     private formService: WebFormService,
     private webSessionService: WebSessionService,
     private storageService: StorageService,
+    private netscanService: NetScanService,
     private cdr: ChangeDetectorRef
   ) {
     super();
@@ -64,6 +66,7 @@ export class WebClientFormComponent
 
   ngOnInit(): void {
     this.initializeFormAndOptions();
+    this.subscribeToNetscanFillEvent();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -317,5 +320,19 @@ export class WebClientFormComponent
 
   canConnect(): boolean {
     return this.formService.canConnect(this.connectSessionForm);
+  }
+
+  subscribeToNetscanFillEvent() {
+    this.netscanService.onServiceSelected().subscribe((entry) => {
+      let protocol = this.connectSessionForm.get('protocol')
+      if (protocol && protocol.value!==entry.protocol) {
+        protocol.setValue(entry.protocol)
+        this.formService.detectFormChanges(this.cdr);
+      }
+      this.connectSessionForm.get('hostname')?.setValue(entry.ip)
+      this.connectSessionForm.get('autoComplete')?.setValue({
+        hostname: entry.ip
+      })
+    }); 
   }
 }
