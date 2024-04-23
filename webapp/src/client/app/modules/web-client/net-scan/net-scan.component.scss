@@ -3,12 +3,6 @@
   --box-text-color: rgb(var(--base-color-rgb));
 }
 
-.net-scan-main {
-  flex-direction: column;
-  justify-content: space-evenly;
-  height: 100%;
-}
-
 .flex {
   display: flex;
 }
@@ -22,16 +16,22 @@
 }
 
 .h-fill {
-  height: calc(100% - 50px);
+  height: calc(100% - 60px);
 }
 
-.scroll {
+.w-fill {
+  width: 100%;
+}
+
+.no-scroll {
   overflow-y: scroll;
-  -ms-overflow-style: none;  /* Internet Explorer 10+ */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  /* Internet Explorer 10+ */
+  scrollbar-width: none;
+  /* Firefox */
 }
 
-.scroll::-webkit-scrollbar {
+.no-scroll::-webkit-scrollbar {
   display: none;
 }
 
@@ -51,6 +51,7 @@
   height: 24px;
 }
 
+
 @keyframes spin {
   from {
     transform: rotate(0deg);
@@ -61,17 +62,33 @@
   }
 }
 
+.not-found-image {
+  width: 150px;
+  height: auto;
+}
 
 .title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  height: 38px;
-  padding: 8px 16px 8px 16px;
+  padding: 8px 26px 8px 26px;
 }
 
-.border-top {
-  border-top: 1px solid var(--border-secondary-color);
+.margin-10px {
+  margin: 10px;
+}
+
+.margin-x-10px {
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+.h-100 {
+  height: 100%;
+}
+
+.border-bottom {
+  border-bottom: 1px solid var(--border-secondary-color);
 }
 
 .scan-title {
@@ -82,13 +99,12 @@
   text-align: left;
 }
 
-.box {
+.net-scan-main-box {
   display: block;
   background-color: var(--box-background-color);
   width: 291px;
   height: 418px;
   border-radius: 8px;
-  padding: 10px;
   margin: 3vw;
 }
 
@@ -108,7 +124,7 @@ li:hover {
 }
 
 .entry {
-  width: 100%;
+  width: calc(100% - 20px); // 100% - margin left and right
   height: 51px;
   padding: 8px 16px 8px 16px;
   gap: 0px;
@@ -125,6 +141,10 @@ li:hover {
   display: flex;
 }
 
+.flex-column {
+  flex-direction: column;
+}
+
 .justify-start {
   justify-content: flex-start;
 }
@@ -136,7 +156,7 @@ li:hover {
 }
 
 .typography-service-name {
-  font-family: Open Sans;
+  font-family: 'Open Sans';
   font-size: 14px;
   font-weight: 400;
   line-height: 19.07px;
@@ -146,9 +166,41 @@ li:hover {
 }
 
 .typography-service-sub-name {
-  font-family: Open Sans;
+  font-family: 'Open Sans';
   font-size: 12px;
   font-weight: 400;
   line-height: 16.34px;
   text-align: left;
+}
+
+.typography-not-found-title {
+  font-family: 'Open Sans';
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 21.79px;
+  text-align: left;
+  color: var(--Text-Colors-text-primary-color, rgba(0, 0, 0, 0.8));
+}
+
+.typography-not-found-body {
+  font-family: 'Open Sans';
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 19.07px;
+  text-align: center;
+  color: var(--Text-Colors-text-secondary-color, rgba(0, 0, 0, 0.6));
+}
+
+.no-wrap {
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.margin-top-12px {
+  margin-top: 12px;
+}
+
+
+.w-193px {
+  width: 193px;
 }
