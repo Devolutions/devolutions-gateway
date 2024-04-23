@@ -33,6 +33,8 @@ import { ToastModule } from "primeng/toast";
 import { TabView, TabViewModule } from "primeng/tabview";
 import { AutoCompleteModule } from "primeng/autocomplete";
 import { SshKeyService } from './shared/services/ssh-key.service';
+import { MainPanelComponent } from './shared/components/main-panel/main-panel.component';
+import { WebClientModule } from './modules/web-client/web-client.module';
 
 
 @NgModule({
@@ -45,7 +47,8 @@ import { SshKeyService } from './shared/services/ssh-key.service';
     MenuListItemComponent,
     MenuListActiveSessionsComponent,
     MenuGroupListItemComponent,
-    GatewayAlertMessageComponent
+    GatewayAlertMessageComponent,
+    MainPanelComponent
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
@@ -58,7 +61,8 @@ import { SshKeyService } from './shared/services/ssh-key.service';
     SidebarModule,
     ToastModule,
     TabViewModule,
-    AutoCompleteModule
+    AutoCompleteModule,
+    WebClientModule,
   ],
   providers: [
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },

@@ -34,6 +34,7 @@ import {
 } from "@gateway/modules/web-client/form/form-controls/preconnection-blob/pre-connection-blob-control.component";
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 import { FormsModule } from '@angular/forms';
+import { NetScanComponent } from './net-scan/net-scan.component';
 
 
 const routes: Routes = [
@@ -71,10 +72,13 @@ const routes: Routes = [
     TabViewComponent,
     DynamicTabComponent,
     SessionToolbarComponent,
-    FileControlComponent
+    FileControlComponent,
+    NetScanComponent,
   ],
     exports: [
-      DynamicTabComponent
+      DynamicTabComponent,
+      WebClientFormComponent,
+      NetScanComponent,
     ],
   providers: []
 })

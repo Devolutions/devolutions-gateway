@@ -270,3 +270,19 @@ export class WebSessionService {
     return autoCompleteInput?.hostname || '';
   }
 }
+
+export const ProtocolIconMap = {
+  [Protocol.RDP]: WebClientRdpComponent.DVL_RDP_ICON,
+  [Protocol.Telnet]: WebClientTelnetComponent.DVL_TELNET_ICON,
+  [Protocol.SSH]: WebClientSshComponent.DVL_SSH_ICON,
+  [Protocol.VNC]: WebClientVncComponent.DVL_VNC_ICON,
+  [Protocol.ARD]: WebClientArdComponent.DVL_ARD_ICON,
+};
+
+export const ProtocolNameToProtocolMap = {
+  'vnc': Protocol.VNC,
+  'ssh': Protocol.SSH,
+  'telnet': Protocol.Telnet,
+  'rdp': Protocol.RDP,
+  'ard': Protocol.ARD,
+};
