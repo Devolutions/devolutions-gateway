@@ -9,7 +9,7 @@ import {PrimeNgModules} from "@shared/primeng.module";
         CommonModule,
         ReactiveFormsModule,
         RouterModule,
-        PrimeNgModules
+        PrimeNgModules,
     ],
   declarations: [
   ],

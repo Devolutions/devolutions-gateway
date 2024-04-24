@@ -12,6 +12,7 @@ import {WebSessionService} from "@shared/services/web-session.service";
 
 import {BaseComponent} from "@shared/bases/base.component";
 import {WebClientFormComponent} from "@gateway/modules/web-client/form/web-client-form.component";
+import { MainPanelComponent } from '../main-panel/main-panel.component';
 
 @Component({
   selector: 'web-client-tab-view',
@@ -74,7 +75,7 @@ export class TabViewComponent extends BaseComponent implements OnInit, OnDestroy
     const newSessionTabExists: boolean = this.webSessionService.getWebSessionSnapshot().some(webSession => webSession.name === 'New Session');
 
     if (!newSessionTabExists) {
-      const newSessionTab: WebSession<Type<WebClientFormComponent>, any> = new WebSession('New Session', WebClientFormComponent);
+      const newSessionTab: WebSession<Type<MainPanelComponent>, any> = new WebSession('New Session', MainPanelComponent);
       this.webSessionService.addSession(newSessionTab);
     }
   }
