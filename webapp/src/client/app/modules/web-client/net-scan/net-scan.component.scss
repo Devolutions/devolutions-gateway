@@ -72,6 +72,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 26px 8px 26px;
+  height: 41px;
 }
 
 .margin-10px {
@@ -203,4 +204,24 @@ li:hover {
 
 .w-193px {
   width: 193px;
+}
+
+.scan-button ::ng-deep .p-button {
+  border: 1px solid rgba(0, 104, 195, 1);
+  font-family: 'Open Sans';
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16.34px;
+  text-align: left;
+  background-color: rgba(240, 246, 251, 1);
+  color: rgba(0, 104, 195, 1);
+}
+
+.scan-button ::ng-deep .p-button:hover {
+  background-color: rgba(0, 104, 195, 1);
+  color: white;
+}
+
+.hover-pointer-cursor {
+  cursor: pointer;
 }

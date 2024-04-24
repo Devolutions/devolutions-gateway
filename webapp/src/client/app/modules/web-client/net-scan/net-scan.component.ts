@@ -18,6 +18,9 @@ export class NetScanComponent implements AfterViewInit {
   }
 
   startScan(): void {
+    this.started = true;
+    this.ended = false;
+    this.services = [];
     this.netscanService.startScan().subscribe({
       next: (entry: NetScanEntry) => {
         this.services.push(entry);
@@ -29,8 +32,6 @@ export class NetScanComponent implements AfterViewInit {
         this.ended = true;
       },
     });
-
-    this.started = true;
   }
 
   onServiceClick(entry: NetScanEntry): void {
