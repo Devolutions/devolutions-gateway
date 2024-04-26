@@ -491,7 +491,7 @@ where
 fn extract_conf(conf: &crate::config::Conf) -> Result<&WebAppConf, HttpError> {
     conf.web_app
         .enabled
-        .then(|| &conf.web_app)
+        .then_some(&conf.web_app)
         .ok_or_else(|| HttpError::internal().msg("standalone web application not enabled"))
 }
 
@@ -506,7 +506,7 @@ mod login_rate_limit {
 
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
-    use time::Instant;
+    use std::time::Instant;
 
     type LoginAttempts = Mutex<HashMap<(String, IpAddr), u8>>;
 
