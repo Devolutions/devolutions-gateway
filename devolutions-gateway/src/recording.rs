@@ -94,6 +94,7 @@ where
         let res = match fs::OpenOptions::new()
             .read(false)
             .write(true)
+            .truncate(true)
             .create(true)
             .open(&recording_file)
             .await

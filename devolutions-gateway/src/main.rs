@@ -131,7 +131,7 @@ const START_FAILED_ERR_CODE: u32 = 2;
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
-    args: Vec<String>,
+    _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
     let Ok(conf_handle) = ConfHandle::init() else {

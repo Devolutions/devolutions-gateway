@@ -101,6 +101,7 @@ pub async fn open_pipe(mode: PipeMode, proxy_cfg: Option<ProxyConfig>) -> Result
             let file = fs::OpenOptions::new()
                 .read(false)
                 .write(true)
+                .append(true)
                 .create(true)
                 .open(&path)
                 .await
