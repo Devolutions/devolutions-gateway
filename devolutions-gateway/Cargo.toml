@@ -48,6 +48,7 @@ anyhow = "1.0"
 thiserror = "1"
 typed-builder = "0.18"
 backoff = "0.4"
+sysinfo = "0.30"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509", "pkcs12"] }
