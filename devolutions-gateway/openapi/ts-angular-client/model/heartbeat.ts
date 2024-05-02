@@ -21,15 +21,15 @@ export interface Heartbeat {
      */
     id?: string | null;
     /**
-     * The remaining available space to store recordings, in bytes.
+     * The remaining available space to store recordings, in bytes.  Since v2024.1.6.
      */
     recording_storage_available_space?: number | null;
     /**
-     * Whether the recording storage is writeable or not.
+     * Whether the recording storage is writeable or not.  Since v2024.1.6.
      */
-    recording_storage_is_writeable: boolean;
+    recording_storage_is_writeable?: boolean | null;
     /**
-     * The total space of the disk used to store recordings, in bytes.
+     * The total space of the disk used to store recordings, in bytes.  Since v2024.1.6.
      */
     recording_storage_total_space?: number | null;
     /**

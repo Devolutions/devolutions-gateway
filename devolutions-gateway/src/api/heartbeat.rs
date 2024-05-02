@@ -18,11 +18,18 @@ pub(crate) struct Heartbeat {
     /// Number of running sessions
     running_session_count: usize,
     /// Whether the recording storage is writeable or not.
+    ///
+    /// Since v2024.1.6.
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<bool>))]
     recording_storage_is_writeable: bool,
     /// The total space of the disk used to store recordings, in bytes.
+    ///
+    /// Since v2024.1.6.
     #[serde(skip_serializing_if = "Option::is_none")]
     recording_storage_total_space: Option<u64>,
     /// The remaining available space to store recordings, in bytes.
+    ///
+    /// Since v2024.1.6.
     #[serde(skip_serializing_if = "Option::is_none")]
     recording_storage_available_space: Option<u64>,
 }

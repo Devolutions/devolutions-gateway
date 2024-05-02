@@ -6,9 +6,9 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **Hostname** | **string** | This Gateway&#39;s hostname | 
 **Id** | **Guid?** | This Gateway&#39;s unique ID | [optional] 
-**RecordingStorageAvailableSpace** | **long?** | The remaining available space to store recordings, in bytes. | [optional] 
-**RecordingStorageIsWriteable** | **bool** | Whether the recording storage is writeable or not. | 
-**RecordingStorageTotalSpace** | **long?** | The total space of the disk used to store recordings, in bytes. | [optional] 
+**RecordingStorageAvailableSpace** | **long?** | The remaining available space to store recordings, in bytes.  Since v2024.1.6. | [optional] 
+**RecordingStorageIsWriteable** | **bool?** | Whether the recording storage is writeable or not.  Since v2024.1.6. | [optional] 
+**RecordingStorageTotalSpace** | **long?** | The total space of the disk used to store recordings, in bytes.  Since v2024.1.6. | [optional] 
 **RunningSessionCount** | **int** | Number of running sessions | 
 **VarVersion** | **string** | Gateway service version | 
 

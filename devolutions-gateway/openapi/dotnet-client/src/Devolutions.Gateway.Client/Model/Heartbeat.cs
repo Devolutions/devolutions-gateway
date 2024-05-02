@@ -42,12 +42,12 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
         /// <param name="id">This Gateway&#39;s unique ID.</param>
-        /// <param name="recordingStorageAvailableSpace">The remaining available space to store recordings, in bytes..</param>
-        /// <param name="recordingStorageIsWriteable">Whether the recording storage is writeable or not. (required).</param>
-        /// <param name="recordingStorageTotalSpace">The total space of the disk used to store recordings, in bytes..</param>
+        /// <param name="recordingStorageAvailableSpace">The remaining available space to store recordings, in bytes.  Since v2024.1.6..</param>
+        /// <param name="recordingStorageIsWriteable">Whether the recording storage is writeable or not.  Since v2024.1.6..</param>
+        /// <param name="recordingStorageTotalSpace">The total space of the disk used to store recordings, in bytes.  Since v2024.1.6..</param>
         /// <param name="runningSessionCount">Number of running sessions (required).</param>
         /// <param name="varVersion">Gateway service version (required).</param>
-        public Heartbeat(string hostname = default(string), Guid? id = default(Guid?), long? recordingStorageAvailableSpace = default(long?), bool recordingStorageIsWriteable = default(bool), long? recordingStorageTotalSpace = default(long?), int runningSessionCount = default(int), string varVersion = default(string))
+        public Heartbeat(string hostname = default(string), Guid? id = default(Guid?), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), int runningSessionCount = default(int), string varVersion = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)
@@ -55,7 +55,6 @@ namespace Devolutions.Gateway.Client.Model
                 throw new ArgumentNullException("hostname is a required property for Heartbeat and cannot be null");
             }
             this.Hostname = hostname;
-            this.RecordingStorageIsWriteable = recordingStorageIsWriteable;
             this.RunningSessionCount = runningSessionCount;
             // to ensure "varVersion" is required (not null)
             if (varVersion == null)
@@ -65,6 +64,7 @@ namespace Devolutions.Gateway.Client.Model
             this.VarVersion = varVersion;
             this.Id = id;
             this.RecordingStorageAvailableSpace = recordingStorageAvailableSpace;
+            this.RecordingStorageIsWriteable = recordingStorageIsWriteable;
             this.RecordingStorageTotalSpace = recordingStorageTotalSpace;
         }
 
@@ -83,23 +83,23 @@ namespace Devolutions.Gateway.Client.Model
         public Guid? Id { get; set; }
 
         /// <summary>
-        /// The remaining available space to store recordings, in bytes.
+        /// The remaining available space to store recordings, in bytes.  Since v2024.1.6.
         /// </summary>
-        /// <value>The remaining available space to store recordings, in bytes.</value>
+        /// <value>The remaining available space to store recordings, in bytes.  Since v2024.1.6.</value>
         [DataMember(Name = "recording_storage_available_space", EmitDefaultValue = true)]
         public long? RecordingStorageAvailableSpace { get; set; }
 
         /// <summary>
-        /// Whether the recording storage is writeable or not.
+        /// Whether the recording storage is writeable or not.  Since v2024.1.6.
         /// </summary>
-        /// <value>Whether the recording storage is writeable or not.</value>
-        [DataMember(Name = "recording_storage_is_writeable", IsRequired = true, EmitDefaultValue = true)]
-        public bool RecordingStorageIsWriteable { get; set; }
+        /// <value>Whether the recording storage is writeable or not.  Since v2024.1.6.</value>
+        [DataMember(Name = "recording_storage_is_writeable", EmitDefaultValue = true)]
+        public bool? RecordingStorageIsWriteable { get; set; }
 
         /// <summary>
-        /// The total space of the disk used to store recordings, in bytes.
+        /// The total space of the disk used to store recordings, in bytes.  Since v2024.1.6.
         /// </summary>
-        /// <value>The total space of the disk used to store recordings, in bytes.</value>
+        /// <value>The total space of the disk used to store recordings, in bytes.  Since v2024.1.6.</value>
         [DataMember(Name = "recording_storage_total_space", EmitDefaultValue = true)]
         public long? RecordingStorageTotalSpace { get; set; }
 
