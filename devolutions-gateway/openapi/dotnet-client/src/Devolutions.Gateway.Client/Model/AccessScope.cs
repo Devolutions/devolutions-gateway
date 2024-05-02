@@ -81,10 +81,16 @@ namespace Devolutions.Gateway.Client.Model
         GatewayHeartbeatRead = 8,
 
         /// <summary>
+        /// Enum GatewayRecordingDelete for value: gateway.recording.delete
+        /// </summary>
+        [EnumMember(Value = "gateway.recording.delete")]
+        GatewayRecordingDelete = 9,
+
+        /// <summary>
         /// Enum GatewayRecordingsRead for value: gateway.recordings.read
         /// </summary>
         [EnumMember(Value = "gateway.recordings.read")]
-        GatewayRecordingsRead = 9
+        GatewayRecordingsRead = 10
     }
 
     public static class AccessScopeExtensions
@@ -112,6 +118,8 @@ namespace Devolutions.Gateway.Client.Model
                     return "gateway.config.write";
                 case AccessScope.GatewayHeartbeatRead:
                     return "gateway.heartbeat.read";
+                case AccessScope.GatewayRecordingDelete:
+                    return "gateway.recording.delete";
                 case AccessScope.GatewayRecordingsRead:
                     return "gateway.recordings.read";
                 default:

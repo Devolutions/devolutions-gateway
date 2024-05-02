@@ -34,7 +34,7 @@ namespace Devolutions.Gateway.Client.Client
         /// Version of the package.
         /// </summary>
         /// <value>Version of the package.</value>
-        public const string Version = "2024.4.16";
+        public const string Version = "2024.5.2";
 
         /// <summary>
         /// Identifier for ISO 8601 DateTime Format
@@ -118,7 +118,7 @@ namespace Devolutions.Gateway.Client.Client
         public Configuration()
         {
             Proxy = null;
-            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2024.4.16/csharp");
+            UserAgent = WebUtility.UrlEncode("OpenAPI-Generator/2024.5.2/csharp");
             BasePath = "http://localhost";
             DefaultHeaders = new ConcurrentDictionary<string, string>();
             ApiKey = new ConcurrentDictionary<string, string>();
@@ -541,7 +541,7 @@ namespace Devolutions.Gateway.Client.Client
             report += "    OS: " + System.Environment.OSVersion + "\n";
             report += "    .NET Framework Version: " + System.Environment.Version  + "\n";
             report += "    Version of the API: 2024.1.5\n";
-            report += "    SDK Package Version: 2024.4.16\n";
+            report += "    SDK Package Version: 2024.5.2\n";
 
             return report;
         }

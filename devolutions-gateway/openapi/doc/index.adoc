@@ -1294,6 +1294,7 @@ endif::internal-generation[]
 | gateway.jrl.read
 | gateway.config.write
 | gateway.heartbeat.read
+| gateway.recording.delete
 | gateway.recordings.read
 
 |===
@@ -1526,6 +1527,27 @@ Service configuration diagnostic
 |   UUID  
 | This Gateway's unique ID
 | uuid    
+
+| recording_storage_available_space
+| 
+| X
+|   Long  
+| The remaining available space to store recordings, in bytes.
+| int64    
+
+| recording_storage_is_writeable
+| X
+| 
+|   Boolean  
+| Whether the recording storage is writeable or not.
+|     
+
+| recording_storage_total_space
+| 
+| X
+|   Long  
+| The total space of the disk used to store recordings, in bytes.
+| int64    
 
 | running_session_count
 | X

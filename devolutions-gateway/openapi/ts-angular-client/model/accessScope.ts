@@ -11,7 +11,7 @@
  */
 
 
-export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recordings.read';
+export type AccessScope = '*' | 'gateway.sessions.read' | 'gateway.session.terminate' | 'gateway.associations.read' | 'gateway.diagnostics.read' | 'gateway.jrl.read' | 'gateway.config.write' | 'gateway.heartbeat.read' | 'gateway.recording.delete' | 'gateway.recordings.read';
 
 export const AccessScope = {
     Star: '*' as AccessScope,
@@ -22,6 +22,7 @@ export const AccessScope = {
     GatewayJrlRead: 'gateway.jrl.read' as AccessScope,
     GatewayConfigWrite: 'gateway.config.write' as AccessScope,
     GatewayHeartbeatRead: 'gateway.heartbeat.read' as AccessScope,
+    GatewayRecordingDelete: 'gateway.recording.delete' as AccessScope,
     GatewayRecordingsRead: 'gateway.recordings.read' as AccessScope
 };
 

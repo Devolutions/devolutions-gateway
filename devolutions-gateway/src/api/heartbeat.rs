@@ -17,8 +17,8 @@ pub(crate) struct Heartbeat {
     version: &'static str,
     /// Number of running sessions
     running_session_count: usize,
-    /// Whether the recording storage is writteable or not.
-    recording_storage_is_writteable: bool,
+    /// Whether the recording storage is writeable or not.
+    recording_storage_is_writeable: bool,
     /// The total space of the disk used to store recordings, in bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     recording_storage_total_space: Option<u64>,
@@ -56,7 +56,7 @@ pub(super) async fn get_heartbeat(
         .await
         .map_err(HttpError::internal().err())?;
 
-    let recording_storage_is_writteable = {
+    let recording_storage_is_writeable = {
         let probe_file = conf.recording_path.join("probe");
 
         let is_ok = std::fs::write(&probe_file, ".").is_ok();
@@ -112,7 +112,7 @@ pub(super) async fn get_heartbeat(
         hostname: conf.hostname.clone(),
         version: env!("CARGO_PKG_VERSION"),
         running_session_count,
-        recording_storage_is_writteable,
+        recording_storage_is_writeable,
         recording_storage_total_space,
         recording_storage_available_space,
     }))
