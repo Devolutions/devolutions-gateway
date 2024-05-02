@@ -6,14 +6,15 @@ use anyhow::Context as _;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::Response;
-use axum::routing::get;
+use axum::routing::{delete, get};
 use axum::{Json, Router};
 use devolutions_gateway_task::ShutdownSignal;
+use hyper::StatusCode;
 use tracing::Instrument as _;
 use uuid::Uuid;
 
-use crate::extract::{JrecToken, RecordingsReadScope};
-use crate::http::HttpError;
+use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
+use crate::http::{HttpError, HttpErrorBuilder};
 use crate::recording::RecordingMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 use crate::DgwState;
@@ -21,6 +22,7 @@ use crate::DgwState;
 pub fn make_router<S>(state: DgwState) -> Router<S> {
     Router::new()
         .route("/push/:id", get(jrec_push))
+        .route("/delete/:id", delete(jrec_delete))
         .route("/list", get(list_recordings))
         .route("/pull/:id/:filename", get(pull_recording_file))
         .route("/play", get(get_player))
@@ -93,23 +95,50 @@ async fn handle_jrec_push(
     }
 }
 
-fn list_uuid_dirs(dir_path: &Path) -> anyhow::Result<Vec<Uuid>> {
-    let read_dir = fs::read_dir(dir_path).context("couldn’t read directory")?;
+/// Lists all recordings stored on this instance
+#[cfg_attr(feature = "openapi", utoipa::path(
+    delete,
+    operation_id = "DeleteRecording",
+    tag = "Jrec",
+    path = "/jet/jrec/delete/{id}",
+    responses(
+        (status = 200, description = "Recording matching the ID in the path has been deleted"),
+        (status = 400, description = "Bad request"),
+        (status = 401, description = "Invalid or missing authorization token"),
+        (status = 403, description = "Insufficient permissions"),
+        (status = 406, description = "The recording is still ongoing and can't be deleted yet"),
+    ),
+    security(("scope_token" = ["gateway.recording.delete"])),
+))]
+async fn jrec_delete(
+    State(DgwState {
+        conf_handle,
+        recordings,
+        ..
+    }): State<DgwState>,
+    _scope: RecordingDeleteScope,
+    extract::Path(session_id): extract::Path<Uuid>,
+) -> Result<(), HttpError> {
+    let state = recordings
+        .get_state(session_id)
+        .await
+        .map_err(HttpError::internal().with_msg("failed recording listing").err())?;
 
-    let list = read_dir
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            if path.is_dir() {
-                let file_name = path.file_name()?.to_str()?;
-                let uuid = Uuid::parse_str(file_name).ok()?;
-                Some(uuid)
-            } else {
-                None
-            }
-        })
-        .collect();
+    if state.is_some() {
+        return Err(
+            HttpErrorBuilder::new(StatusCode::CONFLICT).msg("Attempted to delete a recording for an ongoing session")
+        );
+    }
 
-    Ok(list)
+    let recording_path = conf_handle.get_conf().recording_path.join(session_id.to_string());
+
+    debug!(%recording_path, "Delete recording");
+
+    tokio::fs::remove_dir_all(recording_path)
+        .await
+        .map_err(HttpError::internal().with_msg("failed to delete recording").err())?;
+
+    Ok(())
 }
 
 /// Lists all recordings stored on this instance
@@ -140,7 +169,26 @@ pub(crate) async fn list_recordings(
         Vec::new()
     };
 
-    Ok(Json(dirs))
+    return Ok(Json(dirs));
+
+    fn list_uuid_dirs(dir_path: &Path) -> anyhow::Result<Vec<Uuid>> {
+        let read_dir = fs::read_dir(dir_path).context("couldn’t read directory")?;
+
+        let list = read_dir
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                if path.is_dir() {
+                    let file_name = path.file_name()?.to_str()?;
+                    let uuid = Uuid::parse_str(file_name).ok()?;
+                    Some(uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(list)
+    }
 }
 
 /// Retrieves a recording file for a given session
