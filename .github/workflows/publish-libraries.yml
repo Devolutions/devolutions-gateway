@@ -190,7 +190,7 @@ jobs:
       - name: Update Artifactory Cache
         run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="devolutions-client"
         env:
-          github_token: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
 
   notify:
     name: Notify failure
