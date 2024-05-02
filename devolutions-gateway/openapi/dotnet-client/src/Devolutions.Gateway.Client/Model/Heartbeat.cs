@@ -42,9 +42,12 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="hostname">This Gateway&#39;s hostname (required).</param>
         /// <param name="id">This Gateway&#39;s unique ID.</param>
+        /// <param name="recordingStorageAvailableSpace">The remaining available space to store recordings, in bytes.  Since v2024.1.6..</param>
+        /// <param name="recordingStorageIsWriteable">Whether the recording storage is writeable or not.  Since v2024.1.6..</param>
+        /// <param name="recordingStorageTotalSpace">The total space of the disk used to store recordings, in bytes.  Since v2024.1.6..</param>
         /// <param name="runningSessionCount">Number of running sessions (required).</param>
         /// <param name="varVersion">Gateway service version (required).</param>
-        public Heartbeat(string hostname = default(string), Guid? id = default(Guid?), int runningSessionCount = default(int), string varVersion = default(string))
+        public Heartbeat(string hostname = default(string), Guid? id = default(Guid?), long? recordingStorageAvailableSpace = default(long?), bool? recordingStorageIsWriteable = default(bool?), long? recordingStorageTotalSpace = default(long?), int runningSessionCount = default(int), string varVersion = default(string))
         {
             // to ensure "hostname" is required (not null)
             if (hostname == null)
@@ -60,6 +63,9 @@ namespace Devolutions.Gateway.Client.Model
             }
             this.VarVersion = varVersion;
             this.Id = id;
+            this.RecordingStorageAvailableSpace = recordingStorageAvailableSpace;
+            this.RecordingStorageIsWriteable = recordingStorageIsWriteable;
+            this.RecordingStorageTotalSpace = recordingStorageTotalSpace;
         }
 
         /// <summary>
@@ -75,6 +81,27 @@ namespace Devolutions.Gateway.Client.Model
         /// <value>This Gateway&#39;s unique ID</value>
         [DataMember(Name = "id", EmitDefaultValue = true)]
         public Guid? Id { get; set; }
+
+        /// <summary>
+        /// The remaining available space to store recordings, in bytes.  Since v2024.1.6.
+        /// </summary>
+        /// <value>The remaining available space to store recordings, in bytes.  Since v2024.1.6.</value>
+        [DataMember(Name = "recording_storage_available_space", EmitDefaultValue = true)]
+        public long? RecordingStorageAvailableSpace { get; set; }
+
+        /// <summary>
+        /// Whether the recording storage is writeable or not.  Since v2024.1.6.
+        /// </summary>
+        /// <value>Whether the recording storage is writeable or not.  Since v2024.1.6.</value>
+        [DataMember(Name = "recording_storage_is_writeable", EmitDefaultValue = true)]
+        public bool? RecordingStorageIsWriteable { get; set; }
+
+        /// <summary>
+        /// The total space of the disk used to store recordings, in bytes.  Since v2024.1.6.
+        /// </summary>
+        /// <value>The total space of the disk used to store recordings, in bytes.  Since v2024.1.6.</value>
+        [DataMember(Name = "recording_storage_total_space", EmitDefaultValue = true)]
+        public long? RecordingStorageTotalSpace { get; set; }
 
         /// <summary>
         /// Number of running sessions
@@ -100,6 +127,9 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("class Heartbeat {\n");
             sb.Append("  Hostname: ").Append(Hostname).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
+            sb.Append("  RecordingStorageAvailableSpace: ").Append(RecordingStorageAvailableSpace).Append("\n");
+            sb.Append("  RecordingStorageIsWriteable: ").Append(RecordingStorageIsWriteable).Append("\n");
+            sb.Append("  RecordingStorageTotalSpace: ").Append(RecordingStorageTotalSpace).Append("\n");
             sb.Append("  RunningSessionCount: ").Append(RunningSessionCount).Append("\n");
             sb.Append("  VarVersion: ").Append(VarVersion).Append("\n");
             sb.Append("}\n");
@@ -122,6 +152,18 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
+            // RecordingStorageAvailableSpace (long?) minimum
+            if (this.RecordingStorageAvailableSpace < (long?)0)
+            {
+                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for RecordingStorageAvailableSpace, must be a value greater than or equal to 0.", new [] { "RecordingStorageAvailableSpace" });
+            }
+
+            // RecordingStorageTotalSpace (long?) minimum
+            if (this.RecordingStorageTotalSpace < (long?)0)
+            {
+                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for RecordingStorageTotalSpace, must be a value greater than or equal to 0.", new [] { "RecordingStorageTotalSpace" });
+            }
+
             // RunningSessionCount (int) minimum
             if (this.RunningSessionCount < (int)0)
             {

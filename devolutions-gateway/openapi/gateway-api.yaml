@@ -397,6 +397,7 @@ components:
       - gateway.jrl.read
       - gateway.config.write
       - gateway.heartbeat.read
+      - gateway.recording.delete
       - gateway.recordings.read
     AppTokenContentType:
       type: string
@@ -505,6 +506,31 @@ components:
           format: uuid
           description: This Gateway's unique ID
           nullable: true
+        recording_storage_available_space:
+          type: integer
+          format: int64
+          description: |-
+            The remaining available space to store recordings, in bytes.
+
+            Since v2024.1.6.
+          nullable: true
+          minimum: 0
+        recording_storage_is_writeable:
+          type: boolean
+          description: |-
+            Whether the recording storage is writeable or not.
+
+            Since v2024.1.6.
+          nullable: true
+        recording_storage_total_space:
+          type: integer
+          format: int64
+          description: |-
+            The total space of the disk used to store recordings, in bytes.
+
+            Since v2024.1.6.
+          nullable: true
+          minimum: 0
         running_session_count:
           type: integer
           description: Number of running sessions
