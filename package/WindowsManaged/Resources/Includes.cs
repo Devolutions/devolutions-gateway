@@ -28,13 +28,28 @@ namespace DevolutionsGateway.Resources
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\gateway ACL
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`
-        /// SYSTEM/BuiltInAdministrators = Full Control, LocalService = Read / Write / Execute, BuiltInUsers - Read/Execute
         /// </summary>
-        internal static string PROGRAM_DATA_SDDL = "D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        /// <remarks>
+        /// Owner  : NT AUTHORITY\SYSTEM
+        /// Group  : NT AUTHORITY\SYSTEM
+        /// Access :
+        ///    NT AUTHORITY\SYSTEM Allow  FullControl
+        ///    NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize
+        ///    NT AUTHORITY\NETWORK SERVICE Allow Modify, Synchronize
+        ///    BUILTIN\Administrators Allow  FullControl
+        ///    BUILTIN\Users Allow ReadAndExecute, Synchronize
+        /// </remarks>
+        internal static string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301bf;;;NS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
-        /// <summary>
-        /// NT AUTHORITY\SYSTEM Allow  FullControl, NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize, BUILTIN\Administrators Allow  FullControl
-        /// </summary>
-        internal static string USERS_FILE_SDDL = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;FA;;;BA)";
+        /// <remarks>
+        /// Owner  : NT AUTHORITY\SYSTEM
+        /// Group  : NT AUTHORITY\SYSTEM
+        /// Access :
+        ///    NT AUTHORITY\SYSTEM Allow  FullControl
+        ///    NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize
+        ///    NT AUTHORITY\NETWORK SERVICE Allow Write, ReadAndExecute, Synchronize
+        ///    BUILTIN\Administrators Allow  FullControl
+        /// </remarks>
+        internal static string USERS_FILE_SDDL = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;0x1201bf;;;NS)(A;;FA;;;BA)";
     }
 }

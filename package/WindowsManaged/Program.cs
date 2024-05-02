@@ -1,4 +1,4 @@
-﻿using DevolutionsGateway.Actions;
+using DevolutionsGateway.Actions;
 using DevolutionsGateway.Dialogs;
 using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
@@ -242,6 +242,7 @@ internal class Program
                         ServiceInstaller = new ServiceInstaller()
                         {
                             Type = SvcType.ownProcess,
+                            Account = "NT AUTHORITY\\NetworkService",
                             Interactive = false,
                             Vital = true,
                             Name = Includes.SERVICE_NAME,
