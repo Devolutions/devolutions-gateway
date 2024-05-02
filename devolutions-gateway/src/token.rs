@@ -406,6 +406,8 @@ pub enum AccessScope {
     ConfigWrite,
     #[serde(rename = "gateway.heartbeat.read")]
     HeartbeatRead,
+    #[serde(rename = "gateway.recording.delete")]
+    RecordingDelete,
     #[serde(rename = "gateway.recordings.read")]
     RecordingsRead,
 }
