@@ -35,6 +35,7 @@ import {
 import { FileControlComponent } from './form/form-controls/file-control/file-control.component';
 import { FormsModule } from '@angular/forms';
 import { NetScanComponent } from './net-scan/net-scan.component';
+import {MainPanelComponent} from "@shared/components/main-panel/main-panel.component";
 
 
 const routes: Routes = [
@@ -53,6 +54,7 @@ const routes: Routes = [
     ],
   schemas: [ CUSTOM_ELEMENTS_SCHEMA ],
   declarations: [
+    MainPanelComponent,
     WebClientComponent,
     WebClientRdpComponent,
     WebClientVncComponent,

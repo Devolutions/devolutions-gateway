@@ -22,7 +22,6 @@ export class RdpFormComponent extends BaseComponent implements  OnInit {
   }
 
   ngOnInit(): void {
-    console.log('form', this.form)
   }
 
   toggleMoreSettings(event: Event): void {
