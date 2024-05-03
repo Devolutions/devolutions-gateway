@@ -187,8 +187,10 @@ jobs:
         run: |
           echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-          $WixToolsetItem = Get-ChildItem -Path "C:\Program Files (x86)\" -Filter "WiX Toolset v*" | Select-Object -First 1
-          echo "C:\Program Files (x86)\$($WixToolsetItem.Name)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Sign executables
         if: matrix.os == 'windows' || matrix.os == 'macos'

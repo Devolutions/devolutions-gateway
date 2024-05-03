@@ -390,7 +390,11 @@ jobs:
       # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
         if: matrix.os == 'windows'
-        run: echo "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: |
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build
         shell: pwsh
