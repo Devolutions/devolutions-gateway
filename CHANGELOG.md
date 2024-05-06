@@ -4,6 +4,89 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.1.6 (2024-05-06)
+
+### Features
+
+- _webapp_: add ssh key authentication ([#796](https://github.com/Devolutions/devolutions-gateway/issues/796)) ([a884cbb8ff](https://github.com/Devolutions/devolutions-gateway/commit/a884cbb8ff313496fb3d4072e67ef75350c40c03)) 
+
+- _dgw_: add /jet/jrec/play endpoint ([#806](https://github.com/Devolutions/devolutions-gateway/issues/806)) ([3e7aa30da7](https://github.com/Devolutions/devolutions-gateway/commit/3e7aa30da7b6f6771cf63c8e714ea851d54c4475)) ([DGW-111](https://devolutions.atlassian.net/browse/DGW-111)) 
+
+- _webapp_: network scanning ([#826](https://github.com/Devolutions/devolutions-gateway/issues/826)) ([1e4a18a23c](https://github.com/Devolutions/devolutions-gateway/commit/1e4a18a23c3a2921bbaa174d4c9c7fbcb3bef83b)) ([DGW-119](https://devolutions.atlassian.net/browse/DGW-119))
+
+- _dgw_: return disk space available for recordings ([#827](https://github.com/Devolutions/devolutions-gateway/issues/827)) ([c0776d43de](https://github.com/Devolutions/devolutions-gateway/commit/c0776d43de0da63aa7a40ef40ae3ba456f8aedac)) ([DGW-100](https://devolutions.atlassian.net/browse/DGW-100)) 
+
+  The total and available space used for storing recordings is now
+  returned inside the heartbeat response.
+  
+  If the system does not support this operation, the fields are
+  excluded from the response.
+
+- _dgw_: add `/jet/jrec/delete/<ID>` endpoint ([#834](https://github.com/Devolutions/devolutions-gateway/issues/834)) ([0965f4e2a7](https://github.com/Devolutions/devolutions-gateway/commit/0965f4e2a7f5b39a1f3f93a1f8a1f2c0c77aa961)) ([DGW-96](https://devolutions.atlassian.net/browse/DGW-96)) 
+
+  This new endpoint is used for deleting recordings and allow the
+  service provider (e.g.: DVLS) to delete them according to its
+  policy.
+
+- _dgw_: add `recording_storage_is_writeable` in heartbeat ([#835](https://github.com/Devolutions/devolutions-gateway/issues/835)) ([a209dc6933](https://github.com/Devolutions/devolutions-gateway/commit/a209dc6933a03c0e57e5f6ce65f966e765741d88)) ([DGW-175](https://devolutions.atlassian.net/browse/DGW-175)) 
+
+- _dgw_: WebM player for remote desktop recordings ([#832](https://github.com/Devolutions/devolutions-gateway/issues/832)) ([58362b9c4a](https://github.com/Devolutions/devolutions-gateway/commit/58362b9c4a7ea7a8752a8921e6b65c6390524d2f)) ([DGW-110](https://devolutions.atlassian.net/browse/DGW-110)) 
+
+  Adds a video and xterm player at the `GET /jet/jrec/play` endpoint which
+  supports multiple videos and builds the page dynamically based on the
+  type of recording.
+
+### Improvements
+
+- _webapp_: update IronVNC to 0.2.2 ([#808](https://github.com/Devolutions/devolutions-gateway/issues/808)) ([1fc0242eee](https://github.com/Devolutions/devolutions-gateway/commit/1fc0242eeef8971f2f4e270253ae3c6b6cc09eb7)) ([DGW-138](https://devolutions.atlassian.net/browse/DGW-138)) 
+
+  - Improve MVS codec performance by about 60%
+  - Re-enable MVS codec
+
+- _webapp_: add analytics ([#813](https://github.com/Devolutions/devolutions-gateway/issues/813)) ([55d3749e3f](https://github.com/Devolutions/devolutions-gateway/commit/55d3749e3fa94e0d2ee70bfb71bb0b07ee92cf13)) 
+
+### Bug Fixes
+
+- _dgw_: error code on service startup failure ([#816](https://github.com/Devolutions/devolutions-gateway/issues/816)) ([66e7ce2599](https://github.com/Devolutions/devolutions-gateway/commit/66e7ce2599f2950d0e845e76628f7bb0edbfbdb1)) ([DGW-174](https://devolutions.atlassian.net/browse/DGW-174)) 
+
+  Instead of panicking when failing to start the service, we instead
+  attempt to log the error to the log file and return an error code.
+
+- _webapp_: login screen not shown when opening /jet/webapp/client/ ([#839](https://github.com/Devolutions/devolutions-gateway/issues/839)) ([b58b03832f](https://github.com/Devolutions/devolutions-gateway/commit/b58b03832ff8a1c4402447707665127b5258d8b9)) ([DGW-176](https://devolutions.atlassian.net/browse/DGW-176)) 
+
+- _installer_: [**breaking**] install Gateway service as NetworkService ([#838](https://github.com/Devolutions/devolutions-gateway/issues/838)) ([1c8a7d2e0a](https://github.com/Devolutions/devolutions-gateway/commit/1c8a7d2e0a7a7498ecc8cf3a5cd37dcd71dee6c3)) 
+
+### Performance
+
+- _dgw_: use a buffer of 1k bytes for ARD VNC sessions ([#809](https://github.com/Devolutions/devolutions-gateway/issues/809)) ([5697097561](https://github.com/Devolutions/devolutions-gateway/commit/5697097561d5569cea91d497ddb70e9c460da741)) ([DGW-138](https://devolutions.atlassian.net/browse/DGW-138)) 
+
+  Apple ARD uses the so-called MVS video codec.
+  It is a tricky codec: Apple didn't implement proper congestion control, so it's basically just TCP controlling the flow (not by much).
+  Our MVS implementation for the web client is obviously not as fast as the native one, and can’t keep up when there are too much data in transit.
+  To reduce the amount of data in transit, we reduced the size of the copy buffer when using web socket forwarding endpoint and if the application protocol of the session is set to ARD.
+
+### Build
+
+- Bump Rust toolchain to 1.77.2 ([#828](https://github.com/Devolutions/devolutions-gateway/issues/828)) ([8898dfcce4](https://github.com/Devolutions/devolutions-gateway/commit/8898dfcce4fd7757f78943159e026d959d3269e1)) 
+
+### Continuous Integration
+
+- Set content type on macOS jetsocat binary ([#800](https://github.com/Devolutions/devolutions-gateway/issues/800)) ([6e878d8db0](https://github.com/Devolutions/devolutions-gateway/commit/6e878d8db0dd1c42ede7e3fd0cbb9327969c767c)) 
+
+- Fix artifact upload conflicts ([#801](https://github.com/Devolutions/devolutions-gateway/issues/801)) ([aa14227434](https://github.com/Devolutions/devolutions-gateway/commit/aa1422743461c10221badc1b3adc1ce68e0a9b6e)) 
+
+- Restore deb package OneDrive upload in release ([#805](https://github.com/Devolutions/devolutions-gateway/issues/805)) ([3cc7e9bb1b](https://github.com/Devolutions/devolutions-gateway/commit/3cc7e9bb1b28f752411691713d967207eb7a8ebe)) 
+
+- Preserve Windows .pdb files ([#817](https://github.com/Devolutions/devolutions-gateway/issues/817)) ([301c499936](https://github.com/Devolutions/devolutions-gateway/commit/301c4999364d12b8a81d0eac375b5b538e89c814)) 
+
+- Skip packaging in forks ([#818](https://github.com/Devolutions/devolutions-gateway/issues/818)) ([fc851f2941](https://github.com/Devolutions/devolutions-gateway/commit/fc851f2941886ac67f1efb6c70d1c00173cff85b)) 
+
+- Don't run packaging in forked repo ([#822](https://github.com/Devolutions/devolutions-gateway/issues/822)) ([abd1bbc687](https://github.com/Devolutions/devolutions-gateway/commit/abd1bbc687f0d048215a1efc13e3103b836f0c1e)) 
+
+- _artifactory_: update the cache when a new version is published to NPM ([5008ca89d9](https://github.com/Devolutions/devolutions-gateway/commit/5008ca89d9dd6834b18621f92d230459a43f883d)) 
+
+- _artifactory_: update name of env variable ([c63f174e8e](https://github.com/Devolutions/devolutions-gateway/commit/c63f174e8e55ab69e49c183035ecd00c21150ab5)) 
+
 ## 2024.1.5 (2024-04-04)
 
 ### Bug Fixes
