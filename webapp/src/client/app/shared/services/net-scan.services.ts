@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, from, of } from 'rxjs';
+import { Observable, Subject, from, merge, of } from 'rxjs';
 import { Protocol } from '../enums/web-client-protocol.enum';
 import {
   ProtocolIconMap,
@@ -24,12 +24,13 @@ export class NetScanService {
   private serviceUpdatePipe: Subject<NetScanEntry> =
     new Subject<NetScanEntry>();
 
+  // JS set doesn't allow customized equality check, so we stringify for deep comparison
   private serviceCache: Set<String> = new Set<String>();
 
   constructor(private webClientService: WebClientService) {}
 
   public startScan(): Observable<NetScanEntry> {
-    return new Observable<NetScanEntry>((observer) => {
+    const newObserveable = new Observable<NetScanEntry>((observer) => {
       this.webClientService
         .fetchNetScanToken()
         .pipe(
@@ -41,6 +42,7 @@ export class NetScanService {
           })
         )
         .subscribe((socket: WebSocket) => {
+          // listen for new entries from the server
           socket.onmessage = (event) => {
             let entry: {
               ip: string;
@@ -73,6 +75,18 @@ export class NetScanService {
           };
         });
     });
+
+    const existingObservable = from(this.serviceCache).pipe(
+      map((entry: string) => {
+        let toAdd =  JSON.parse(entry);
+        toAdd.icon = () => {
+          return ProtocolIconMap[toAdd.protocol];
+        };
+        return toAdd;
+      })
+    );
+
+    return merge(newObserveable, existingObservable);
   }
 
 
