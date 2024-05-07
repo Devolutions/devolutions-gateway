@@ -39,16 +39,23 @@ export class NetScanService {
           return new WebSocket(url);
         })
       )
-      .subscribe((socket: WebSocket) => {
-        socket.onmessage = (event) => {
-          this.socketOnMessage(event);
-        };
-        socket.onclose = () => {
-          this.scanSubject.complete();
-        };
-        socket.onerror = () => {
-          this.scanSubject.error('Error scanning network');
-        };
+      .subscribe({
+        next: (socket: WebSocket) => {
+          socket.onmessage = (event) => {
+            this.socketOnMessage(event);
+          };
+          socket.onclose = () => {
+            this.scanSubject.complete();
+          };
+          socket.onerror = () => {
+            this.scanSubject.error('Error scanning network');
+          };
+        },
+
+        error: (error) => {
+          // Error create the websocket
+          this.scanSubject.error(error);
+        },
       });
   }
 
