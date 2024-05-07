@@ -24,6 +24,8 @@ export class NetScanService {
   private serviceUpdatePipe: Subject<NetScanEntry> =
     new Subject<NetScanEntry>();
 
+  private serviceCache: Set<String> = new Set<String>();
+
   constructor(private webClientService: WebClientService) {}
 
   public startScan(): Observable<NetScanEntry> {
@@ -59,6 +61,10 @@ export class NetScanService {
                 return ProtocolIconMap[protocol];
               }
             };
+            if (this.serviceCache.has(JSON.stringify(value))) {
+              return;
+            }
+            this.serviceCache.add(JSON.stringify(value));
             observer.next(value);
           };
 
