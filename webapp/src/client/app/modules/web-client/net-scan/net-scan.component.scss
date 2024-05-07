@@ -24,7 +24,6 @@
 }
 
 .no-scroll {
-  overflow-y: scroll;
   -ms-overflow-style: none;
   /* Internet Explorer 10+ */
   scrollbar-width: none;
@@ -224,4 +223,24 @@ li:hover {
 
 .hover-pointer-cursor {
   cursor: pointer;
+}
+
+.overflow-x-scroll-on-hover{
+  overflow-x: hidden;
+}
+
+.overflow-x-scroll-on-hover:hover {
+  overflow-x: scroll;
+}
+
+.overflow-x-hidden {
+  overflow-x: hidden;
+}
+
+.overflow-y-scroll {
+  overflow-y: scroll;
+}
+
+.max-width-180{
+  width: 180px;
 }
