@@ -17,7 +17,7 @@
                 </svg>
             </div>
         </div>
-        <div class="no-scroll h-fill" *ngIf="!ended || services.length !== 0">
+        <div class="no-scroll overflow-y-scroll h-fill" *ngIf="!ended || services.length !== 0">
             <ul class="services-list">
                 <li *ngFor="let service of services">
                     <div class="entry margin-x-10px" (click)="onServiceClick(service)">
@@ -25,9 +25,19 @@
                             <div class="center-one">
                                 <i class="dvl-icon right-small-margin" [ngClass]="service.icon()"></i>
                             </div>
-                            <div>
-                                <div class="typography-service-name">{{service.hostname || service.ip}}</div>
-                                <div class="typography-service-sub-name">{{!service.hostname? " " :service.ip}}</div>
+                            <div class="max-width-230">
+                                <div class="typography-service-name
+                                            max-width-180"
+                                    [ngClass]="{'overflow-x-scroll-on-hover': serviceTitle(service).length > 20,
+                                                'overflow-x-hidden': serviceTitle(service).length <= 20}">
+                                    {{serviceTitle(service)}}
+                                </div>
+                                <div class="typography-service-sub-name
+                                           max-width-180"
+                                    [ngClass]="{'overflow-x-scroll-on-hover': serviceSubtitle(service).length > 20,
+                                                'overflow-x-hidden': serviceSubtitle(service).length <= 20}">
+                                    {{serviceSubtitle(service)}}
+                                </div>
                             </div>
                         </div>
                         <div [pTooltip]="'Prefill form'">

@@ -37,4 +37,12 @@ export class NetScanComponent implements AfterViewInit {
   onServiceClick(entry: NetScanEntry): void {
     this.netscanService.serviceSelected(entry);
   }
+
+  serviceTitle(service: NetScanEntry): string {
+    return service.hostname? service.hostname :service.ip
+  }
+
+  serviceSubtitle(service: NetScanEntry): string {
+    return service.hostname? service.ip : " "
+  }
 }
