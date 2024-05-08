@@ -9,7 +9,7 @@
                         fill="black" />
                 </svg>
             </div>
-            <div *ngIf="ended" [pTooltip]="'Restart Network Scan'" class="hover-pointer-cursor" (click)="startScan()">
+            <div *ngIf="ended" [pTooltip]="'Restart Network Scan'" class="hover-pointer-cursor" (click)="forceScan()">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path
                         d="M7.00065 12.0002C5.61898 12.0002 4.37398 11.436 3.47065 10.5302L5.33398 8.66683H0.333984V13.6668L2.29398 11.7068C3.49815 12.9152 5.15898 13.6668 7.00065 13.6668C10.1057 13.6668 12.7073 11.541 13.449 8.66683H11.7098C11.0232 10.6077 9.17648 12.0002 7.00065 12.0002ZM11.7073 2.2935C10.5032 1.08516 8.84232 0.333496 7.00065 0.333496C3.89565 0.333496 1.29398 2.45933 0.552318 5.3335H2.29148C2.97815 3.39266 4.82482 2.00016 7.00065 2.00016C8.38232 2.00016 9.62732 2.56433 10.5307 3.47016L8.66732 5.3335H13.6673V0.333496L11.7073 2.2935Z"
@@ -65,7 +65,7 @@
                         We were unable to locate any servers. You can still enter the information manually.
                     </span>
                     <div class="flex justify-center align-center margin-top-12px scan-button">
-                        <p-button [label]="'Scan again'" severity="secondary" (onClick)="startScan()"></p-button>
+                        <p-button [label]="'Scan again'" severity="secondary" (onClick)="forceScan()"></p-button>
                     </div>
                 </div>
             </div>

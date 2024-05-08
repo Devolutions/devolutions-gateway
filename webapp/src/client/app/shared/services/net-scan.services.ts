@@ -29,6 +29,13 @@ export class NetScanService {
   private scanSubject = new Subject<NetScanEntry>();
 
   constructor(private webClientService: WebClientService) {
+    this.newScan();
+  }
+
+  public newScan() {
+    this.serviceCache.clear();
+    // Reset the subject, Subject will not emit any new value after complete or error
+    this.scanSubject = new Subject<NetScanEntry>();
     this.webClientService
       .fetchNetScanToken()
       .pipe(
@@ -47,8 +54,9 @@ export class NetScanService {
           socket.onclose = () => {
             this.scanSubject.complete();
           };
-          socket.onerror = () => {
-            this.scanSubject.error('Error scanning network');
+          socket.onerror = (e) => {
+            console.error('Error scanning network');
+            this.scanSubject.error(e);
           };
         },
 
