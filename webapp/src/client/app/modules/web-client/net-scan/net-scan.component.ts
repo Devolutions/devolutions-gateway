@@ -1,17 +1,23 @@
-import { Component, AfterViewInit } from '@angular/core';
-import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
+import { Component, AfterViewInit, ChangeDetectorRef } from '@angular/core';
+import {
+  NetScanEntry,
+  NetScanService,
+} from '@gateway/shared/services/net-scan.services';
 
 @Component({
   selector: 'app-net-scan',
   templateUrl: './net-scan.component.html',
-  styleUrls: ['./net-scan.component.scss']
+  styleUrls: ['./net-scan.component.scss'],
 })
 export class NetScanComponent implements AfterViewInit {
   services: NetScanEntry[] = [];
   started: boolean = false;
   ended: boolean = false;
 
-  constructor(private netscanService: NetScanService) {}
+  constructor(
+    private netscanService: NetScanService,
+    private cd: ChangeDetectorRef
+  ) {}
 
   ngAfterViewInit(): void {
     this.startScan();
@@ -25,7 +31,7 @@ export class NetScanComponent implements AfterViewInit {
       next: (entry: NetScanEntry) => {
         this.services.push(entry);
       },
-      error: () => {
+      error: (e) => {
         this.ended = true;
       },
       complete: () => {
@@ -34,15 +40,20 @@ export class NetScanComponent implements AfterViewInit {
     });
   }
 
+  forceScan(): void {
+    this.netscanService.newScan();
+    this.startScan();
+  }
+
   onServiceClick(entry: NetScanEntry): void {
     this.netscanService.serviceSelected(entry);
   }
 
   serviceTitle(service: NetScanEntry): string {
-    return service.hostname? service.hostname :service.ip
+    return service.hostname ? service.hostname : service.ip;
   }
 
   serviceSubtitle(service: NetScanEntry): string {
-    return service.hostname? service.ip : " "
+    return service.hostname ? service.ip : ' ';
   }
 }
