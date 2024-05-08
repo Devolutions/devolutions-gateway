@@ -118,19 +118,19 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   }
 
   hasNewVersion() {
-    return this.version && this.latestVersion && !isSameVersion(this.version, this.latestVersion);
+    return this.version && this.latestVersion && compareVersion(this.version, this.latestVersion) < 0;
   }
-
 }
 
-function isSameVersion(a: string, b: string): boolean {
-  const aParts = a.split('.').map(Number);
-  const bParts = b.split('.').map(Number);
-  for (let i = 0; i < Math.min(aParts.length,bParts.length); i++) {
-    if (aParts[i] !== bParts[i]) {
-      return false;
+function compareVersion(a:string,b:string) {
+  const partsA = a.split('.');
+  const partsB = b.split('.');
+  for (let i = 0; i < partsA.length; i++) {
+    if (parseInt(partsA[i]) > parseInt(partsB[i])) {
+      return 1;
+    } else if (parseInt(partsA[i]) < parseInt(partsB[i])) {
+      return -1;
     }
   }
-
-  return true;
+  return 0;
 }
