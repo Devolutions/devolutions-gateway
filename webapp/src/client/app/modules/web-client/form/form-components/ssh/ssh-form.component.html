@@ -16,8 +16,14 @@
       [isEnabled]="formInputVisibility.showPasswordInput"></web-client-password-control>
   </div>
 
+  <div class="col-12 gateway-form-group" *ngIf="formInputVisibility.showPrivateKeyInput">
+      <web-client-password-control [parentForm]="form" [inputFormData]="inputFormData" [label]="'Passpharse'" [formKey]="'passpharse'">
+      </web-client-password-control>    
+  </div>
+
   <div *ngIf="formInputVisibility.showPrivateKeyInput">
     <app-file-control privateKeyFileForm ></app-file-control>
   </div>
+
 
 </div>

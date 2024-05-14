@@ -67,12 +67,6 @@ export class SshKeyService {
             error: 'Invalid key format',
             content: value.content,
           });
-        } else if (value.format == SshKeyFormat.PKCS8_Encrypted) {
-          observer.next({
-            valid: false,
-            error: 'Encrypted key not supported',
-            content: value.content,
-          });
         } else {
           observer.next({ valid: true, content: value.content });
         }

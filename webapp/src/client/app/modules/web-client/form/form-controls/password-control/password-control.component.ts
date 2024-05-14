@@ -14,6 +14,8 @@ export class PasswordControlComponent extends BaseComponent implements  OnInit {
   @Input() parentForm: FormGroup;
   @Input() inputFormData: any;
   @Input() isEnabled: boolean = true;
+  @Input() label: string = 'Password';
+  @Input() formKey: string = 'password';
 
   showPasswordToggle: boolean = false;
 
@@ -22,7 +24,7 @@ export class PasswordControlComponent extends BaseComponent implements  OnInit {
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(this.parentForm, 'password', this.inputFormData);
+    this.formService.addControlToForm(this.parentForm,this.formKey, this.inputFormData);
     this.toggleControl();
   }
 
@@ -37,7 +39,7 @@ export class PasswordControlComponent extends BaseComponent implements  OnInit {
   }
 
   private toggleControl(): void {
-    const control: AbstractControl<any, any> = this.parentForm.get('password');
+    const control: AbstractControl<any, any> = this.parentForm.get(this.formKey);
     if (control) {
       this.isEnabled ? control.enable() : control.disable();
     }

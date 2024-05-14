@@ -76,7 +76,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   ngOnInit(): void {
-    sshLoggingService.setLevel(LoggingLevel.FATAL)
+    sshLoggingService.setLevel(LoggingLevel.DEBUG)
     this.removeWebClientGuiElement();
     this.initializeStatus();
 
@@ -184,6 +184,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   private callConnect(connectionParameters: SshConnectionParameters): Observable<any> {
+      debugger
     return from(
       this.remoteTerminal.connect(
         connectionParameters.host,
@@ -192,6 +193,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
         connectionParameters.gatewayAddress+`?token=${connectionParameters.token}`,
         connectionParameters.password,
         connectionParameters.privateKey,
+        connectionParameters.privateKeyPassphrase,
       )
     ).pipe(
       catchError(error => throwError(error)),
@@ -212,7 +214,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL+`/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace("http", "ws");
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
-
+    const privateKeyPassphrase: string = formData.passpharse || null;
     const connectionParameters: SshConnectionParameters = {
       host: extractedData.hostname,
       username: username,
@@ -220,7 +222,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       port: extractedData.port,
       gatewayAddress: gatewayAddress,
       sessionId: sessionId,
-      privateKey: privateKey
+      privateKey: privateKey,
+      privateKeyPassphrase: privateKeyPassphrase
     }
     return of(connectionParameters);
   }
