@@ -23,7 +23,7 @@ import {WebSessionService} from "@shared/services/web-session.service";
 import {WebFormService} from "@shared/services/web-form.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
-import { NetScanService } from '@gateway/shared/services/net-scan.services';
+import {NetScanEntry, NetScanService} from '@gateway/shared/services/net-scan.services';
 
 @Component({
   selector: 'web-client-form',
@@ -322,17 +322,17 @@ export class WebClientFormComponent
     return this.formService.canConnect(this.connectSessionForm);
   }
 
-  subscribeToNetscanFillEvent() {
-    this.netscanService.onServiceSelected().subscribe((entry) => {
-      let protocol = this.connectSessionForm.get('protocol')
-      if (protocol && protocol.value!==entry.protocol) {
-        protocol.setValue(entry.protocol)
-        this.formService.detectFormChanges(this.cdr);
-      }
+  subscribeToNetscanFillEvent(): void {
+    this.netscanService.onServiceSelected().subscribe((entry: NetScanEntry) => {
       this.connectSessionForm.get('hostname')?.setValue(entry.ip)
       this.connectSessionForm.get('autoComplete')?.setValue({
         hostname: entry.ip
       })
-    }); 
+
+      let protocol: AbstractControl<any, any> = this.connectSessionForm.get('protocol')
+      if (protocol && protocol.value!==entry.protocol) {
+        protocol.setValue(entry.protocol)
+      }
+    });
   }
 }

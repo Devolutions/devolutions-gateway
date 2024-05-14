@@ -19,9 +19,9 @@ namespace WebClientAuthMode {
 
   export function getSelectVncItems(): SelectItem[] {
     return Object.keys(VncAuthMode)
-      .filter((key) => isNaN(Number(key)) && typeof VncAuthMode[key as any] === 'number')
-      .map((key) => {
-        const label = key.replaceAll('_and_', '_&_').replaceAll('_', ' ');
+      .filter((key: string) => isNaN(Number(key)) && typeof VncAuthMode[key as any] === 'number')
+      .map((key: string): {label:string, value:VncAuthMode} => {
+        const label: string = key.replaceAll('_', ' ').replaceAll('_', ' ');
         const value: VncAuthMode = VncAuthMode[key as keyof typeof VncAuthMode];
 
         return { label, value };
@@ -30,9 +30,9 @@ namespace WebClientAuthMode {
 
   export function getSelectSshItems(): SelectItem[] {
     return Object.keys(SshAuthMode)
-      .filter((key) => isNaN(Number(key)) && typeof SshAuthMode[key as any] === 'number')
-      .map((key) => {
-        const label = key.replaceAll('_', ' ');
+      .filter((key: string) => isNaN(Number(key)) && typeof SshAuthMode[key as any] === 'number')
+      .map((key: string): {label:string, value:SshAuthMode} => {
+        const label: string = key.replaceAll('_', ' ');
         const value: SshAuthMode = SshAuthMode[key as keyof typeof SshAuthMode];
 
         return { label, value };
