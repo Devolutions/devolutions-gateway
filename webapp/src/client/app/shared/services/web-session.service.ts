@@ -120,13 +120,18 @@ export class WebSessionService {
     this.setWebSessionCurrentIndex(this.NEW_SESSION_IDX);
   }
 
+  //For translation ConnectionHasBeenTerminatedEllipsis
   async updateWebSessionIcon(updateWebSessionId: string, icon: string): Promise<void> {
-    const currentSessions = this.webSessionDataSubject.value;
+    const currentSessions: WebSession<any, any>[] = this.webSessionDataSubject.value;
     const index: number = currentSessions.findIndex(session => session.id === updateWebSessionId);
     const webSession: WebSession<any, any> = currentSessions[index];
 
     if (index !== -1) {
       webSession.icon = icon;
+      if (icon === WebClientRdpComponent.DVL_WARNING_ICON) {
+        webSession.iconTooltip = 'Connection has been terminated.';
+      }
+
       currentSessions[index] = webSession;
       this.webSessionDataSubject.next(currentSessions);
     } else {

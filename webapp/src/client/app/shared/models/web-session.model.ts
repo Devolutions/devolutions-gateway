@@ -24,6 +24,7 @@ export class WebSession<WebSessionComponentType, TData> {
   public tabIndex?: number;
   public data?: TData;
   public icon?: string = '';
+  public iconTooltip?: string = '';
   public status: ComponentStatus;
   public desktopSize: DesktopSize;
 
@@ -42,6 +43,7 @@ export class WebSession<WebSessionComponentType, TData> {
     this.component = component;
     this.data = data;
     this.icon = icon;
+    this.iconTooltip = name;
     this.tabIndex = tabIndex;
     this.id = id;
     this.sessionId = sessionId;
