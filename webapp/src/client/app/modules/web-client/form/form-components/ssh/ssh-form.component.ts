@@ -18,7 +18,6 @@ import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
 import { ChangeDetectorRef } from '@angular/core';
 
 interface FormInputVisibility {
-  showUsernameInput?: boolean;
   showPasswordInput?: boolean;
   showPrivateKeyInput?: boolean;
 }
@@ -39,7 +38,6 @@ export class SshFormComponent
   authModeOptions: SelectItem[];
 
   formInputVisibility: FormInputVisibility = {
-    showUsernameInput: true,
     showPasswordInput: true,
     showPrivateKeyInput: false,
   };
@@ -126,10 +124,6 @@ export class SshFormComponent
     return of(this.formInputVisibility).pipe(
       tap((visibility: FormInputVisibility) => {
         const authModeAsNumber: number = +authMode;
-
-        visibility.showUsernameInput =
-          authModeAsNumber === SshAuthMode.Username_and_Password ||
-          authModeAsNumber === SshAuthMode.Private_Key;
 
         visibility.showPasswordInput =
           authModeAsNumber === SshAuthMode.Username_and_Password;

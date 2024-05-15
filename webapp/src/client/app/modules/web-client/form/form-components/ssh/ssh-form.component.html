@@ -7,7 +7,7 @@
     </div>
   </div>
 
-  <div class="col-12 gateway-form-group" [hidden]="formInputVisibility.showUsernameInput">
+  <div class="col-12 gateway-form-group">
     <web-client-username-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-username-control>
   </div>
 
@@ -25,8 +25,8 @@
       </web-client-password-control>    
   </div>
 
-  <div *ngIf="formInputVisibility.showPrivateKeyInput">
-    <app-file-control privateKeyFileForm ></app-file-control>
+  <div [hidden]="!formInputVisibility.showPrivateKeyInput">
+    <app-file-control privateKeyFileForm [disabled] ="formInputVisibility.showPrivateKeyInput" ></app-file-control>
   </div>
 
 
