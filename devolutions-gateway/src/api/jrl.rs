@@ -40,17 +40,15 @@ async fn update_jrl(
     let jrl_json = serde_json::to_string_pretty(&claims)
         .map_err(HttpError::internal().with_msg("failed to serialize JRL").err())?;
 
-    let jrl_file = conf.jrl_file.as_path();
+    let jrl_tmp_path = conf.jrl_file.with_extension("tmp");
 
-    info!(path = %jrl_file, "Writing JRL file to disk");
-
-    // FIXME(DGW-104): use a temporary file to write the new JRL, and swap on success
+    debug!(path = %jrl_tmp_path, "Writing JRL file to disk");
 
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .create(true)
-        .open(jrl_file)
+        .open(&jrl_tmp_path)
         .await
         .map_err(HttpError::internal().err())?
         .pipe(BufWriter::new);
@@ -60,6 +58,14 @@ async fn update_jrl(
         .map_err(HttpError::internal().err())?;
 
     file.flush().await.map_err(HttpError::internal().err())?;
+
+    let jrl_path = conf.jrl_file.as_path();
+
+    debug!(tmp_path = %jrl_tmp_path, path = %jrl_path, "Swapping temporary JRL file");
+
+    tokio::fs::rename(jrl_tmp_path, jrl_path)
+        .await
+        .map_err(HttpError::internal().err())?;
 
     *jrl.lock() = claims;
 
