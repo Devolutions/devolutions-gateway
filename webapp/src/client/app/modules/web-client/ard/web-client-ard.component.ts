@@ -368,7 +368,7 @@ export class WebClientArdComponent extends WebClientBaseComponent implements  On
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
     };
 
-    const icon: string = eventType === SessionEventType.TERMINATED ?
+    const icon: string = eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ?
       WebClientArdComponent.DVL_WARNING_ICON :
       WebClientArdComponent.DVL_ARD_ICON;
 

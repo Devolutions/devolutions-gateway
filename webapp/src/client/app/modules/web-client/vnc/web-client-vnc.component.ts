@@ -368,7 +368,7 @@ export class WebClientVncComponent extends WebClientBaseComponent implements  On
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
     };
 
-    const icon: string = eventType === SessionEventType.TERMINATED ?
+    const icon: string = eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ?
       WebClientVncComponent.DVL_WARNING_ICON :
       WebClientVncComponent.DVL_VNC_ICON;
 
