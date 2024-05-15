@@ -81,8 +81,7 @@ export class SshFormComponent
         inputFormData,
         true,
         false,
-        SshAuthMode.Username_and_Password
-      );
+        SshAuthMode.Username_and_Password);
 
       this.subscribeToAuthModeChanges();
     }
@@ -113,26 +112,34 @@ export class SshFormComponent
       .valueChanges.pipe(
         takeUntil(this.destroyed$),
         startWith(this.form.get('authMode').value as SshAuthMode),
-        tap((authMode) => this.updateFormInputVisibility(authMode)),
-        tap(() => this.ChangeDetectorRef.detectChanges())
+        switchMap((authMode) => this.getFormInputVisibility(authMode)),
+        tap(()=>this.ChangeDetectorRef.detectChanges())
       )
       .subscribe({
-        error: (error) =>
-          console.error('Error subscribing to auth mode changes', error),
+        error: (error) => console.error('Error subscribing to auth mode changes', error)
       });
   }
 
-  private updateFormInputVisibility(authMode: SshAuthMode) {
-    const authModeAsNumber: number = +authMode;
+  private getFormInputVisibility(
+    authMode: SshAuthMode
+  ): Observable<SshAuthMode> {
+    return of(this.formInputVisibility).pipe(
+      tap((visibility: FormInputVisibility) => {
+        const authModeAsNumber: number = +authMode;
 
-    this.formInputVisibility.showUsernameInput =
-      authModeAsNumber === SshAuthMode.Username_and_Password ||
-      authModeAsNumber === SshAuthMode.Private_Key;
+        visibility.showUsernameInput =
+          authModeAsNumber === SshAuthMode.Username_and_Password ||
+          authModeAsNumber === SshAuthMode.Private_Key;
 
-    this.formInputVisibility.showPasswordInput =
-      authModeAsNumber === SshAuthMode.Username_and_Password;
+        visibility.showPasswordInput =
+          authModeAsNumber === SshAuthMode.Username_and_Password;
 
-    this.formInputVisibility.showPrivateKeyInput =
-      authModeAsNumber === SshAuthMode.Private_Key;
+        visibility.showPrivateKeyInput = authModeAsNumber === SshAuthMode.Private_Key;
+      }),
+      map(() => {
+        return authMode;
+      })
+    );
   }
+
 }
