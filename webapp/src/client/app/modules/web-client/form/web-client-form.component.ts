@@ -139,6 +139,7 @@ export class WebClientFormComponent
             }
           });
 
+          this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
         },
         (error) =>
@@ -150,10 +151,8 @@ export class WebClientFormComponent
     this.buildFormGroup(this.inputFormData)
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap((formGroup) => {
+        switchMap((formGroup: FormGroup<any>) => {
           this.connectSessionForm = formGroup;
-          this.subscribeToProtocolChanges();
-
           return forkJoin({
             protocolOptions: this.formService.getProtocolOptions(),
             hostnames: this.getHostnames(),
@@ -169,6 +168,7 @@ export class WebClientFormComponent
           this.protocolOptions = protocolOptions;
           this.hostnames = hostnames;
 
+          this.subscribeToProtocolChanges();
           this.updateProtocolTooltip();
         },
         error: (error) =>
