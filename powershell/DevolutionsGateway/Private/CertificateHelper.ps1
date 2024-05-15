@@ -230,28 +230,25 @@ function Get-PemCertificate
             $PrivateKey = $expanded.PrivateKey.ToPem().ToRepr()
         }
     } else {
-        $utf8 = New-Object System.Text.UTF8Encoding
-
-        $PemData = [System.IO.File]::ReadAllBytes($CertificateFile)
-
+        
         try {
+            $PemData = [System.IO.File]::ReadAllBytes($CertificateFile)
             # Try to parse the file as if it was a DER binary file.
             $Cert = [Devolutions.Picky.Cert]::FromDer($PemData);
             $PemData = $Cert.ToPem().ToRepr();
         } catch {
             # Assume we have a PEM.
-            $PemData = $utf8.GetString($PemData)
+            $PemData = Get-Content -Path $CertificateFile -Encoding UTF8 -Raw
         }
 
-        $PrivateKey = [System.IO.File]::ReadAllBytes($PrivateKeyFile)
-
         try {
+            $PrivateKey = [System.IO.File]::ReadAllBytes($PrivateKeyFile)
             # Try to parse the file as if it was a DER binary file.
             $PrivateKey = [Devolutions.Picky.PrivateKey]::FromPkcs8($PrivateKey);
             $PrivateKey = $PrivateKey.ToPem().ToRepr();
         } catch {
             # Assume we have a PEM.
-            $PrivateKey = $utf8.GetString($PrivateKey)
+            $PrivateKey = Get-Content -Path $PrivateKeyFile -Encoding UTF8 -Raw
         }
     }
 
