@@ -6,7 +6,7 @@ import {
   OnDestroy,
   OnInit,
 } from '@angular/core';
-import { FormControl, FormGroup } from '@angular/forms';
+import { FormGroup } from '@angular/forms';
 
 import { BaseComponent } from '@shared/bases/base.component';
 import { SelectItem } from 'primeng/api';
@@ -71,13 +71,23 @@ export class SshFormComponent
 
   private addControlsToParentForm(inputFormData?: any): void {
     if (this.form) {
-      this.form.addControl(
+      this.clearForm();
+
+      this.formService.addControlToForm(
+        this.form,
         'authMode',
-        new FormControl(
-          inputFormData?.authMode || SshAuthMode.Username_and_Password
-        )
-      );
+        inputFormData,
+        true,
+        false,
+        SshAuthMode.Username_and_Password);
+
       this.subscribeToAuthModeChanges();
+    }
+  }
+
+  private clearForm(): void {
+    if (this.form.contains('authMode')) {
+      this.form.removeControl('authMode');
     }
   }
 
@@ -102,20 +112,26 @@ export class SshFormComponent
         startWith(this.form.get('authMode').value as SshAuthMode),
         switchMap((authMode) => this.getFormInputVisibility(authMode))
       )
-      .subscribe(() => {});
+      .subscribe({
+        error: (error) => console.error('Error subscribing to auth mode changes', error)
+      });
   }
 
   private getFormInputVisibility(
     authMode: SshAuthMode
   ): Observable<SshAuthMode> {
     return of(this.formInputVisibility).pipe(
-      tap((visibility) => {
+      tap((visibility: FormInputVisibility) => {
+        const authModeAsNumber: number = +authMode;
+
         visibility.showUsernameInput =
-          authMode === SshAuthMode.Username_and_Password ||
-          authMode === SshAuthMode.Private_Key;
+          authModeAsNumber === SshAuthMode.Username_and_Password ||
+          authModeAsNumber === SshAuthMode.Private_Key;
+
         visibility.showPasswordInput =
-          authMode === SshAuthMode.Username_and_Password;
-        visibility.showPrivateKeyInput = authMode === SshAuthMode.Private_Key;
+          authModeAsNumber === SshAuthMode.Username_and_Password;
+
+        visibility.showPrivateKeyInput = authModeAsNumber === SshAuthMode.Private_Key;
       }),
       map(() => {
         return authMode;

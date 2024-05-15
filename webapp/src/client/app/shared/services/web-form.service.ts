@@ -46,7 +46,7 @@ export class WebFormService extends BaseComponent {
     inputFormData?: any,
     isRequired: boolean = true,
     isDisabled: boolean = false,
-    defaultValue: string | null = '',
+    defaultValue: string | number | null = '',
     additionalValidator?: ValidatorFn | ValidatorFn[]
   ): void {
     if (!formGroup) return;
