@@ -54,6 +54,7 @@ export class SshFormComponent
 
   ngAfterViewInit(): void {
     this.formService.canConnectIfAlsoTrue(() => {
+      console.log(`this.formInputVisibility.showPrivateKeyInput: ${this.formInputVisibility.showPrivateKeyInput}\n this.sshKeyService.hasValidPrivateKey(): ${this.sshKeyService.hasValidPrivateKey()}`)
       if (!this.formInputVisibility.showPrivateKeyInput) {
         return true;
       }
@@ -81,7 +82,8 @@ export class SshFormComponent
         inputFormData,
         true,
         false,
-        SshAuthMode.Username_and_Password);
+        SshAuthMode.Username_and_Password
+      );
 
       this.subscribeToAuthModeChanges();
     }
@@ -112,34 +114,27 @@ export class SshFormComponent
       .valueChanges.pipe(
         takeUntil(this.destroyed$),
         startWith(this.form.get('authMode').value as SshAuthMode),
-        switchMap((authMode) => this.getFormInputVisibility(authMode)),
-        tap(()=>this.ChangeDetectorRef.detectChanges())
+        tap((authMode) => this.updateFormInputVisibility(authMode)),
+        tap(() => this.ChangeDetectorRef.detectChanges())
       )
       .subscribe({
-        error: (error) => console.error('Error subscribing to auth mode changes', error)
+        error: (error) =>
+          console.error('Error subscribing to auth mode changes', error),
       });
   }
 
-  private getFormInputVisibility(
-    authMode: SshAuthMode
-  ): Observable<SshAuthMode> {
-    return of(this.formInputVisibility).pipe(
-      tap((visibility: FormInputVisibility) => {
-        const authModeAsNumber: number = +authMode;
+  private updateFormInputVisibility(authMode: SshAuthMode) {
+    console.log(`updateFormInputVisibility: ${authMode}`)
+    const authModeAsNumber: number = +authMode;
 
-        visibility.showUsernameInput =
-          authModeAsNumber === SshAuthMode.Username_and_Password ||
-          authModeAsNumber === SshAuthMode.Private_Key;
+    this.formInputVisibility.showUsernameInput =
+      authModeAsNumber === SshAuthMode.Username_and_Password ||
+      authModeAsNumber === SshAuthMode.Private_Key;
 
-        visibility.showPasswordInput =
-          authModeAsNumber === SshAuthMode.Username_and_Password;
+    this.formInputVisibility.showPasswordInput =
+      authModeAsNumber === SshAuthMode.Username_and_Password;
 
-        visibility.showPrivateKeyInput = authModeAsNumber === SshAuthMode.Private_Key;
-      }),
-      map(() => {
-        return authMode;
-      })
-    );
+    this.formInputVisibility.showPrivateKeyInput =
+      authModeAsNumber === SshAuthMode.Private_Key;
   }
-
 }

@@ -213,7 +213,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL+`/${sessionId}`, window.location.href);
     const gatewayAddress: string = gatewayHttpAddress.toString().replace("http", "ws");
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
-    const privateKeyPassphrase: string = formData.passpharse || null;
+    const privateKeyPassphrase: string = formData.passphrase || null;
     const connectionParameters: SshConnectionParameters = {
       host: extractedData.hostname,
       username: username,
