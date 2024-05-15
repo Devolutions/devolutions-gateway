@@ -372,7 +372,7 @@ export class WebClientRdpComponent extends WebClientBaseComponent implements  On
       backtrace: typeof errorData !== 'string' ? errorData?.backtrace() : ''
     };
 
-    const icon: string = eventType === SessionEventType.TERMINATED ?
+    const icon: string = eventType === SessionEventType.TERMINATED || SessionEventType.ERROR ?
                                         WebClientRdpComponent.DVL_WARNING_ICON :
                                         WebClientRdpComponent.DVL_RDP_ICON;
 
