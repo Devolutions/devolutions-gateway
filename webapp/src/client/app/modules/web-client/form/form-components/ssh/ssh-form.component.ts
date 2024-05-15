@@ -54,7 +54,6 @@ export class SshFormComponent
 
   ngAfterViewInit(): void {
     this.formService.canConnectIfAlsoTrue(() => {
-      console.log(`this.formInputVisibility.showPrivateKeyInput: ${this.formInputVisibility.showPrivateKeyInput}\n this.sshKeyService.hasValidPrivateKey(): ${this.sshKeyService.hasValidPrivateKey()}`)
       if (!this.formInputVisibility.showPrivateKeyInput) {
         return true;
       }
@@ -124,7 +123,6 @@ export class SshFormComponent
   }
 
   private updateFormInputVisibility(authMode: SshAuthMode) {
-    console.log(`updateFormInputVisibility: ${authMode}`)
     const authModeAsNumber: number = +authMode;
 
     this.formInputVisibility.showUsernameInput =
