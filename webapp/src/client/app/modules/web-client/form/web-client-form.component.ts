@@ -24,6 +24,7 @@ import {WebFormService} from "@shared/services/web-form.service";
 import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
 import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
 import {NetScanEntry, NetScanService} from '@gateway/shared/services/net-scan.services';
+import {UtilsService} from "@shared/services/utils.service";
 
 @Component({
   selector: 'web-client-form',
@@ -59,6 +60,7 @@ export class WebClientFormComponent
     private webSessionService: WebSessionService,
     private storageService: StorageService,
     private netscanService: NetScanService,
+    protected utils: UtilsService,
     private cdr: ChangeDetectorRef
   ) {
     super();
@@ -307,12 +309,16 @@ export class WebClientFormComponent
   }
 
   private displayErrorMessages(error: any): void {
+
+    const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error['kind'] ?? error);
+    const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error['backtrace'] ?? '');
+
     setTimeout(() => {
       this.addMessages([
         {
           severity: 'error',
-          summary: error['kind'] ?? error,
-          detail: error['backtrace'] ?? '',
+          summary: formattedSummary,
+          detail: formattedDetail,
         },
       ]);
     }, 500);

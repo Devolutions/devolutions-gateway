@@ -64,4 +64,7 @@ export class StringService {
     }
   }
 
+  replaceNewlinesWithBR(text: string): string {
+    return text.replace(/\n/g, '<br>');
+  }
 }

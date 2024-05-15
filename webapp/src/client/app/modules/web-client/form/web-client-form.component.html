@@ -6,7 +6,10 @@
           <span class="box-title">Remote Session Information</span>
         </span>
         <div class="form-message">
-          <p-messages *ngIf="messages.length > 0" [closable]="false" [value]="messages"></p-messages>
+          <p-messages *ngIf="messages.length > 0"
+                      [escape]="false"
+                      [closable]="false"
+                      [value]="messages"></p-messages>
         </div>
         <div class="box-content grid nomargin nopad">
           <div class="col-4 gateway-form-group col-pad-right-lg">
