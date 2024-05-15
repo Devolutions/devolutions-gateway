@@ -15,6 +15,7 @@ import { map, startWith, switchMap, takeUntil, tap } from 'rxjs/operators';
 import { SshAuthMode } from '@gateway/shared/enums/web-client-auth-mode.enum';
 import { Observable, of } from 'rxjs';
 import { SshKeyService } from '@gateway/shared/services/ssh-key.service';
+import { ChangeDetectorRef } from '@angular/core';
 
 interface FormInputVisibility {
   showUsernameInput?: boolean;
@@ -45,7 +46,8 @@ export class SshFormComponent
 
   constructor(
     private formService: WebFormService,
-    private sshKeyService: SshKeyService
+    private sshKeyService: SshKeyService,
+    private ChangeDetectorRef: ChangeDetectorRef
   ) {
     super();
   }
@@ -110,7 +112,8 @@ export class SshFormComponent
       .valueChanges.pipe(
         takeUntil(this.destroyed$),
         startWith(this.form.get('authMode').value as SshAuthMode),
-        switchMap((authMode) => this.getFormInputVisibility(authMode))
+        switchMap((authMode) => this.getFormInputVisibility(authMode)),
+        tap(()=>this.ChangeDetectorRef.detectChanges())
       )
       .subscribe({
         error: (error) => console.error('Error subscribing to auth mode changes', error)

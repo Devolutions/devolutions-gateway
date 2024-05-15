@@ -75,4 +75,5 @@ export interface SshConnectionParameters {
   token?: string;
   sessionId?: string,
   privateKey?: string
+  privateKeyPassphrase?: string
 }
