@@ -7,22 +7,26 @@
     </div>
   </div>
 
-  <div class="col-12 gateway-form-group" *ngIf="formInputVisibility.showUsernameInput">
+  <div class="col-12 gateway-form-group">
     <web-client-username-control [parentForm]="form" [inputFormData]="inputFormData"></web-client-username-control>
   </div>
 
-  <div class="col-12 gateway-form-group" *ngIf="formInputVisibility.showPasswordInput">
+  <div class="col-12 gateway-form-group" [hidden]="!formInputVisibility.showPasswordInput">
     <web-client-password-control [parentForm]="form" [inputFormData]="inputFormData"
       [isEnabled]="formInputVisibility.showPasswordInput"></web-client-password-control>
   </div>
 
-  <div class="col-12 gateway-form-group" *ngIf="formInputVisibility.showPrivateKeyInput">
-      <web-client-password-control [parentForm]="form" [inputFormData]="inputFormData" [label]="'Passpharse'" [formKey]="'passpharse'">
+  <div class="col-12 gateway-form-group" [hidden]="!formInputVisibility.showPrivateKeyInput">
+      <web-client-password-control [parentForm]="form" 
+            [inputFormData]="inputFormData" 
+            [label]="'Passphrase'" 
+            [formKey]="'passphrase'" 
+            [isEnabled]="formInputVisibility.showPrivateKeyInput">
       </web-client-password-control>    
   </div>
 
-  <div *ngIf="formInputVisibility.showPrivateKeyInput">
-    <app-file-control privateKeyFileForm ></app-file-control>
+  <div [hidden]="!formInputVisibility.showPrivateKeyInput">
+    <app-file-control privateKeyFileForm [disabled] ="formInputVisibility.showPrivateKeyInput" ></app-file-control>
   </div>
 
 

@@ -57,7 +57,7 @@ export interface SSHFormDataInput {
   hostname: string,
   username?: string,
   password?: string,
-  passpharse?: string,
+  passphrase?: string,
   extraData?:{
     sshPrivateKey?: string,
   }

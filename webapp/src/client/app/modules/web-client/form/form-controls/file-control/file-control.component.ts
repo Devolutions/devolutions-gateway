@@ -16,7 +16,15 @@ import { WebFormService } from '@gateway/shared/services/web-form.service';
     styleUrls: ['./file-control.component.scss'],
 })
 export class FileControlComponent implements OnInit, OnDestroy {
+
     @ViewChild('publicKeyFileControl') publicKeyFileControl: ElementRef;
+    
+    @Input()
+    set disabled(value: boolean) {
+        if (value) {
+            this.clearPublicKeyData();
+        }
+    }
 
     private uploadedFile: File = null;
     private fileValidateResult: ValidateFileResult = null;
@@ -45,6 +53,7 @@ export class FileControlComponent implements OnInit, OnDestroy {
         this.sshKeyService.removeFile();
         this.uploadedFile = null;
     }
+
     onDragEnter(event: any) {
         event.preventDefault();
         event.stopPropagation();
