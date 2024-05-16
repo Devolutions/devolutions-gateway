@@ -151,7 +151,7 @@ export class WebClientFormComponent
     this.buildFormGroup(this.inputFormData)
       .pipe(
         takeUntil(this.destroyed$),
-        switchMap((formGroup: FormGroup<any>) => {
+        switchMap((formGroup: FormGroup<unknown>) => {
           this.connectSessionForm = formGroup;
           return forkJoin({
             protocolOptions: this.formService.getProtocolOptions(),
