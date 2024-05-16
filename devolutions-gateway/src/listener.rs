@@ -13,7 +13,7 @@ use crate::generic_client::GenericClient;
 use crate::utils::url_to_socket_addr;
 use crate::DgwState;
 
-const HTTP_REQUEST_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(15);
+const HTTP_CONNECTION_MAX_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(10 * 60);
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
@@ -170,12 +170,12 @@ async fn run_http_listener(listener: TcpListener, state: DgwState) -> anyhow::Re
             Ok((stream, peer_addr)) => {
                 let state = state.clone();
 
-                let fut = tokio::time::timeout(HTTP_REQUEST_TIMEOUT, async move {
+                let fut = tokio::time::timeout(HTTP_CONNECTION_MAX_DURATION, async move {
                     if let Err(e) = handle_http_peer(stream, state, peer_addr).await {
                         error!(error = format!("{e:#}"), "handle_http_peer failed");
                     }
                 })
-                .inspect_err(|error| warn!(%error, "Request timed out"))
+                .inspect_err(|error| debug!(%error, "Drop long-lived HTTP connection"))
                 .instrument(info_span!("http", client = %peer_addr));
 
                 ChildTask::spawn(fut).detach();
@@ -198,12 +198,12 @@ async fn run_https_listener(listener: TcpListener, state: DgwState) -> anyhow::R
                 let tls_acceptor = tls_conf.acceptor.clone();
                 let state = state.clone();
 
-                let fut = tokio::time::timeout(HTTP_REQUEST_TIMEOUT, async move {
+                let fut = tokio::time::timeout(HTTP_CONNECTION_MAX_DURATION, async move {
                     if let Err(e) = handle_https_peer(stream, tls_acceptor, state, peer_addr).await {
                         error!(error = format!("{e:#}"), "handle_https_peer failed");
                     }
                 })
-                .inspect_err(|error| warn!(%error, "Request timed out"))
+                .inspect_err(|error| debug!(%error, "Drop long-lived HTTP connection"))
                 .instrument(info_span!("https", client = %peer_addr));
 
                 ChildTask::spawn(fut).detach();

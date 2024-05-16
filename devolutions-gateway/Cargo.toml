@@ -68,7 +68,7 @@ tokio-rustls = { version = "0.24", features = ["dangerous_configuration", "tls12
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] } # TODO: directly use hyper in subscriber module
 futures = "0.3"
 async-trait = "0.1"
-tower = "0.4"
+tower = { version = "0.4", features = ["timeout"] }
 ngrok = "0.13"
 
 # HTTP
