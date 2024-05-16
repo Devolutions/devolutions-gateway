@@ -248,10 +248,20 @@ where
             .call(request)
     });
 
-    hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+    let result = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
         .serve_connection_with_upgrades(hyper_util::rt::TokioIo::new(io), service)
-        .await
-        .map_err(|e| anyhow::anyhow!(e).context("HTTP server"))
+        .await;
+
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => match e.downcast_ref::<hyper::Error>() {
+            Some(e) if e.is_canceled() || e.is_incomplete_message() => {
+                debug!(error = %e, "Request was cancelled");
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!(e).context("HTTP server")),
+        },
+    }
 }
 
 pub trait ToInternalUrl {
