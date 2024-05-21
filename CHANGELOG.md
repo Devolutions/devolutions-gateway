@@ -2,7 +2,61 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
-## [Unreleased]
+## 2024.2.0 (2024-05-21)
+
+### Features
+
+- _webapp_: allow ssh client to use encrypted ssh keys ([#856](https://github.com/Devolutions/devolutions-gateway/issues/856)) ([6424c40ecb](https://github.com/Devolutions/devolutions-gateway/commit/6424c40ecbb975bbca05be476e11164a1e7b76c9)) 
+
+### Improvements
+
+- _webapp_: fix netscan result duplicate and performance improvement ([#845](https://github.com/Devolutions/devolutions-gateway/issues/845)) ([f447381294](https://github.com/Devolutions/devolutions-gateway/commit/f44738129446f3d609956d09674440b8efa7155e)) ([DGW-184](https://devolutions.atlassian.net/browse/DGW-184))
+
+### Bug Fixes
+
+- _webapp_: new version button is available even when a more recent version is used ([#846](https://github.com/Devolutions/devolutions-gateway/issues/846)) ([2b92c9ab3b](https://github.com/Devolutions/devolutions-gateway/commit/2b92c9ab3b7dc94007746be4eff5434fc3b1de64)) ([DGW-182](https://devolutions.atlassian.net/browse/DGW-182))
+
+- _webapp_: fix misaligned "Fill form" buttons when the hostname is too long ([#844](https://github.com/Devolutions/devolutions-gateway/issues/844)) ([1b8a6ebe9c](https://github.com/Devolutions/devolutions-gateway/commit/1b8a6ebe9c57469ce690380b480ce081842a3271)) ([DGW-180](https://devolutions.atlassian.net/browse/DGW-180))
+
+- _webapp_: fix force rescan button ([#847](https://github.com/Devolutions/devolutions-gateway/issues/847)) ([a08dd3159e](https://github.com/Devolutions/devolutions-gateway/commit/a08dd3159eb6ee5000d9214ac1f2664531b2e78d)) ([DGW-185](https://devolutions.atlassian.net/browse/DGW-185)) 
+
+- _webapp_: add tooltip to menu warning icon when session is closed ([#852](https://github.com/Devolutions/devolutions-gateway/issues/852)) ([b4ed845695](https://github.com/Devolutions/devolutions-gateway/commit/b4ed8456956917521a37e5ac24bae10742705175)) ([DGW-145](https://devolutions.atlassian.net/browse/DGW-145)) 
+
+- _webapp_: prevent suspicious "e" console logs ([#851](https://github.com/Devolutions/devolutions-gateway/issues/851)) ([cbf9bd360e](https://github.com/Devolutions/devolutions-gateway/commit/cbf9bd360e6dd2afe75de511e966ce748e129ca6)) ([DGW-164](https://devolutions.atlassian.net/browse/DGW-164)) 
+
+  Downgrade the Primeng package as the log was introduced in version 16.5.0.
+
+- _webapp_: connect session button stays grayed out intermittently ([#855](https://github.com/Devolutions/devolutions-gateway/issues/855)) ([3fdce898e5](https://github.com/Devolutions/devolutions-gateway/commit/3fdce898e55c19e0217816020cb1ed3316b067f0)) ([DGW-183](https://devolutions.atlassian.net/browse/DGW-183)) 
+
+- _dgw_: write new JRL into a temporary file, and swap on success ([#857](https://github.com/Devolutions/devolutions-gateway/issues/857)) ([d91f1cfb6a](https://github.com/Devolutions/devolutions-gateway/commit/d91f1cfb6a982be7c49e3fbdc31ce46a4ce4e20b)) ([DGW-104](https://devolutions.atlassian.net/browse/DGW-104)) 
+
+  It’s preferable to proceed like this to avoid losing current JRL file
+  if the file is truncated without being rewritten successfully immediately.
+
+- _pwsh_: fix reading .pem files from PowerShell runspace ([#859](https://github.com/Devolutions/devolutions-gateway/issues/859)) ([98437f6f4e](https://github.com/Devolutions/devolutions-gateway/commit/98437f6f4e836d4cdaa3fdce79d70aeda977c1bf)) 
+
+- _webapp_: format the error backtrace to show line breaks ([#860](https://github.com/Devolutions/devolutions-gateway/issues/860)) ([7e50a04dbd](https://github.com/Devolutions/devolutions-gateway/commit/7e50a04dbdba2e2d33dd9fa18dd6a06d7189624c)) ([DGW-169](https://devolutions.atlassian.net/browse/DGW-169)) 
+
+- _webapp_: menu icon does not update on error for RDP, ARD, VNC ([#861](https://github.com/Devolutions/devolutions-gateway/issues/861)) ([235e3a72f5](https://github.com/Devolutions/devolutions-gateway/commit/235e3a72f511a035b4666f3a721b77a377d4a591)) ([DGW-168](https://devolutions.atlassian.net/browse/DGW-168)) 
+
+- _webapp_: tooltip for the selected protocol is always set to RDP ([#862](https://github.com/Devolutions/devolutions-gateway/issues/862)) ([717d53e149](https://github.com/Devolutions/devolutions-gateway/commit/717d53e1494cfe796ed2978c1aa2757753ef0c95)) ([DGW-187](https://devolutions.atlassian.net/browse/DGW-187)) 
+
+- _dgw_: prevent error traces caused by browser behavior ([#864](https://github.com/Devolutions/devolutions-gateway/issues/864)) ([25b86ea1b3](https://github.com/Devolutions/devolutions-gateway/commit/25b86ea1b3ff63c692eacceed6abb43248ca85f2)) ([DGW-128](https://devolutions.atlassian.net/browse/DGW-128)) 
+
+  Since those are not actual errors, this was creating noise in the logs.
+
+### Performance
+
+- _dgw_: keep HTTP connections open for 10 minutes ([#863](https://github.com/Devolutions/devolutions-gateway/issues/863)) ([245e2cfb26](https://github.com/Devolutions/devolutions-gateway/commit/245e2cfb26ae4a6e39e865c506cd557e551a67c6)) 
+
+  Most browsers will keep HTTP connections open to increase throughput
+  when performing subsequent transactions.
+  For simplicity, we don’t distinguish between idle and non-idle
+  connections.
+
+### Build
+
+- _webapp_: build using production profile ([#853](https://github.com/Devolutions/devolutions-gateway/issues/853)) ([fbbcbbe96c](https://github.com/Devolutions/devolutions-gateway/commit/fbbcbbe96ce901b9103d32d89ead5a54284bd02b)) 
 
 ## 2024.1.6 (2024-05-06)
 
