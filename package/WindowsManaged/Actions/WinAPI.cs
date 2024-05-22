@@ -11,6 +11,8 @@ internal static class WinAPI
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
+    internal const uint DACL_SECURITY_INFORMATION = 0x00000004;
+
     internal const int EM_SETCUEBANNER = 0x1501;
 
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
@@ -195,6 +197,10 @@ internal static class WinAPI
     [DllImport("advapi32", EntryPoint = "CloseServiceHandle")]
     internal static extern int CloseServiceHandle(IntPtr hSCObject);
 
+    [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string StringSecurityDescriptor, uint StringSDRevision, out IntPtr SecurityDescriptor, out UIntPtr SecurityDescriptorSize);
+
+
     [DllImport("advapi32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ControlService(IntPtr hService, uint dwControl, IntPtr lpServiceStatus);
@@ -250,6 +256,9 @@ internal static class WinAPI
         uint uUnique,
         [Out] StringBuilder lpTempFileName);
 
+    [DllImport("kernel32", SetLastError = true)]
+    internal static extern IntPtr LocalFree(IntPtr hMem);
+
     [DllImport("kernel32", EntryPoint = "MoveFileExW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool MoveFileEx(
@@ -282,6 +291,9 @@ internal static class WinAPI
         int msg,
         int wParam,
         [MarshalAs(UnmanagedType.LPWStr)] string lParam);
+
+    [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
+    internal static extern bool SetFileSecurityW(string lpFileName, uint SecurityInformation, IntPtr pSecurityDescriptor);
 
     [DllImport("advapi32", EntryPoint = "StartServiceW", SetLastError = true)]
     internal static extern bool StartService(IntPtr hService, uint dwNumServiceArgs, IntPtr lpServiceArgVectors);
