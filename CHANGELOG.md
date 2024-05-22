@@ -2,6 +2,14 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## [Unreleased]
+
+## 2024.2.1 (2024-05-22)
+
+### Bug Fixes
+
+- _installer_: use Win32 to set file permissions ([#869](https://github.com/Devolutions/devolutions-gateway/issues/869)) ([813fc7f3bc](https://github.com/Devolutions/devolutions-gateway/commit/813fc7f3bc2c96793f2c4a6c99f7a8067402381e)) 
+
 ## 2024.2.0 (2024-05-21)
 
 ### Features
