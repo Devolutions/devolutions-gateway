@@ -634,6 +634,36 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult SetProgramDataDirectoryPermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult SetUsersDatabaseFilePermissions(Session session)
+        {
+            try
+            {
+                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "users.txt"), Includes.USERS_FILE_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to set permissions: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult StartGatewayIfNeeded(Session session)
         {
             try
@@ -875,6 +905,35 @@ namespace DevolutionsGateway.Actions
         private static string FormatPowerShellCommand(Session session, string command)
         {
             return $"\"{session.Property(GatewayProperties.powerShellPath.Id)}\" -ep Bypass -Command \"& Import-Module '{session.Property(GatewayProperties.InstallDir)}PowerShell\\Modules\\DevolutionsGateway'; {command}\"";
+        }
+        
+        public static void SetFileSecurity(Session session, string path, string sddl)
+        {
+            const uint sdRevision = 1;
+            IntPtr pSd = new IntPtr();
+            UIntPtr pSzSd = new UIntPtr();
+           
+            try
+            {
+                if (!WinAPI.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, sdRevision, out pSd, out pSzSd))
+                {
+                    session.Log($"ConvertStringSecurityDescriptorToSecurityDescriptorW failed (error: {Marshal.GetLastWin32Error()})");
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+
+                if (!WinAPI.SetFileSecurityW(path, WinAPI.DACL_SECURITY_INFORMATION, pSd))
+                {
+                    session.Log($"SetFileSecurityW failed (error: {Marshal.GetLastWin32Error()})");
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            }
+            finally
+            {
+                if (pSd != IntPtr.Zero)
+                {
+                    WinAPI.LocalFree(pSd);
+                }
+            }
         }
 
         private static bool TryGetGatewayStartupType(Session session, out ServiceStartMode startMode)
