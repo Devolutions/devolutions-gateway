@@ -214,6 +214,13 @@ pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json
     Ok(Json(interfaces))
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Serialize)]
+pub struct InterfaceAddress {
+    pub ip: IpAddr,
+    pub prefixlen: u32,
+}
+
 /// Network interface configuration
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Serialize)]
@@ -224,11 +231,10 @@ pub struct NetworkInterface {
     #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mac_address: Option<MacAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub ip_addresses: Vec<IpAddr>,
-    #[cfg_attr(feature = "openapi", schema(value_type = Vec<(String, u32)>))]
-    pub prefixes: Vec<(IpAddr, u32)>,
-    pub operational_status: bool,
+    #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
+    pub addresses: Vec<InterfaceAddress>,
+    #[cfg_attr(feature = "openapi", schema(value_type = bool>))]
+    pub is_up: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
@@ -241,9 +247,15 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
             name: iface.name,
             description: iface.description,
             mac_address: iface.mac_address,
-            ip_addresses: iface.ip_addresses,
-            prefixes: iface.prefixes,
-            operational_status: iface.operational_status,
+            addresses: iface
+                .addresses
+                .into_iter()
+                .map(|addr| InterfaceAddress {
+                    ip: addr.ip,
+                    prefixlen: addr.prefixlen,
+                })
+                .collect(),
+            is_up: iface.operational_status,
             gateways: iface.gateways,
             dns_servers: iface.dns_servers,
         }
