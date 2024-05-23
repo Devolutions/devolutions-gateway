@@ -140,10 +140,13 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         name: link_info.name.clone(),
         description: None,
         mac_address: link_info.mac.as_slice().try_into().ok(),
-        addresses: prefixes.into_iter().map(|(addr, prefix)| InterfaceAddress {
-            ip: addr,
-            prefixlen: prefix,
-        }).collect(),
+        addresses: prefixes
+            .into_iter()
+            .map(|(addr, prefix)| InterfaceAddress {
+                ip: addr,
+                prefixlen: prefix,
+            })
+            .collect(),
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         gateways,
         dns_servers: link_info.dns_servers.clone(),
