@@ -233,7 +233,7 @@ pub struct NetworkInterface {
     pub mac_address: Option<MacAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<InterfaceAddress>))]
     pub addresses: Vec<InterfaceAddress>,
-    #[cfg_attr(feature = "openapi", schema(value_type = bool>))]
+    #[cfg_attr(feature = "openapi", schema(value_type = bool))]
     pub is_up: bool,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
