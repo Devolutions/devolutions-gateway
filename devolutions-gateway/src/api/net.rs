@@ -238,7 +238,7 @@ pub struct NetworkInterface {
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
     pub gateways: Vec<IpAddr>,
     #[cfg_attr(feature = "openapi", schema(value_type = Vec<String>))]
-    pub dns_servers: Vec<IpAddr>,
+    pub nameservers: Vec<IpAddr>,
 }
 
 impl From<interfaces::NetworkInterface> for NetworkInterface {
@@ -257,7 +257,7 @@ impl From<interfaces::NetworkInterface> for NetworkInterface {
                 .collect(),
             is_up: iface.operational_status,
             gateways: iface.gateways,
-            dns_servers: iface.dns_servers,
+            nameservers: iface.dns_servers,
         }
     }
 }
