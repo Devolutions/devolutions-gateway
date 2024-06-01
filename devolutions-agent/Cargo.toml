@@ -13,7 +13,7 @@ devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
 
 # Lifecycle
-ceviche = "0.5"
+ceviche = "0.6"
 ctrlc = "3.1"
 
 # Serialization

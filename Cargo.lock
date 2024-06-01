@@ -552,26 +552,6 @@ dependencies = [
 
 [[package]]
 name = "ceviche"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd1a44085e79b3b02c2a5d18a54c8cb943bc7ae85207f76679b89f1e1c3c68c9"
-dependencies = [
- "cfg-if",
- "chrono",
- "core-foundation",
- "core-foundation-sys",
- "ctrlc",
- "libc",
- "log",
- "system-configuration-sys",
- "systemd-rs",
- "timer",
- "widestring 0.4.3",
- "winapi",
-]
-
-[[package]]
-name = "ceviche"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddeea570a42ad62fcc3a0f76ae1a29a610204f7bc78af1d9c5b3e86741fdf152"
@@ -781,7 +761,7 @@ version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b467862cc8610ca6fc9a1532d7777cee0804e678ab45410897b9396495994a0b"
 dependencies = [
- "nix 0.27.1",
+ "nix",
  "windows-sys 0.52.0",
 ]
 
@@ -926,7 +906,7 @@ version = "2024.1.2"
 dependencies = [
  "anyhow",
  "camino",
- "ceviche 0.5.2",
+ "ceviche",
  "cfg-if",
  "ctrlc",
  "devolutions-gateway-task",
@@ -954,7 +934,7 @@ dependencies = [
  "backoff",
  "bytes",
  "camino",
- "ceviche 0.6.0",
+ "ceviche",
  "cfg-if",
  "devolutions-gateway-generators",
  "devolutions-gateway-task",
@@ -1202,16 +1182,6 @@ dependencies = [
  "toml",
  "vswhom",
  "winreg 0.52.0",
-]
-
-[[package]]
-name = "epoll"
-version = "4.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74351c3392ea1ff6cd2628e0042d268ac2371cb613252ff383b6dfa50d22fa79"
-dependencies = [
- "bitflags 2.4.2",
- "libc",
 ]
 
 [[package]]
@@ -2100,15 +2070,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "523dc4f511e55ab87b694dc30d0f820d60906ef06413f93d4d7a1385599cc149"
 
 [[package]]
-name = "memoffset"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,18 +2320,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "windows-sys 0.45.0",
-]
-
-[[package]]
-name = "nix"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa52e972a9a719cecb6864fb88568781eb706bac2cd1d4f04a648542dbf78069"
-dependencies = [
- "bitflags 1.3.2",
- "cfg-if",
- "libc",
- "memoffset",
 ]
 
 [[package]]
@@ -3421,7 +3370,7 @@ dependencies = [
  "netlink-packet-utils",
  "netlink-proto",
  "netlink-sys",
- "nix 0.27.1",
+ "nix",
  "thiserror",
  "tokio",
 ]
@@ -4047,29 +3996,6 @@ checksum = "a75fb188eb626b924683e3b95e3a48e63551fcfb51949de2f06a9d91dbee93c9"
 dependencies = [
  "core-foundation-sys",
  "libc",
-]
-
-[[package]]
-name = "systemd-rs"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba28cdec1491faf8b9820305aa6cf9df1dff3378c1adfe41d5bd1261d4a17b59"
-dependencies = [
- "epoll",
- "libc",
- "log",
- "nix 0.24.3",
- "systemd-sys",
-]
-
-[[package]]
-name = "systemd-sys"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4816f770cdd05c0a0b8bd048178c3eb3048221016945469c6124a1dd1afc6400"
-dependencies = [
- "libc",
- "pkg-config",
 ]
 
 [[package]]
