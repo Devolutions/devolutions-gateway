@@ -1,0 +1,213 @@
+﻿<#@ template debug="false" hostspecific="true" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Xml" #>
+<#@ assembly name="System.Xml.Linq" #>
+<#@ assembly name="$(SolutionDir)Resources\Newtonsoft.Json.dll" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Xml" #>
+<#@ import namespace="System.Text.RegularExpressions" #>
+<#@ import namespace="System.Xml.Linq" #>
+<#@ import namespace="System.IO" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="Newtonsoft.Json.Linq" #>
+<#@ output extension=".cs" #>
+<#
+    const string mainCulture = "en-US";
+	string[] cultures = new string[] { mainCulture, "fr-FR" };
+
+    JToken mainCultureJson = JToken.Parse(File.ReadAllText(GetI18nFile(mainCulture, Host.TemplateFile)));
+    List<LocalizationToken> mainCultureTokens = null;
+
+    foreach (string culture in cultures)
+    {
+	    string sourceFile = GetI18nFile(culture, Host.TemplateFile);
+        
+        if (!File.Exists(sourceFile))
+        {
+            continue;
+        }
+
+        JToken root = JToken.Parse(File.ReadAllText(sourceFile));
+        JObject diff = null;
+
+        if (!culture.Equals(mainCulture))
+        {
+            diff = FindDiff(root, mainCultureJson); #>
+            <#= diff #>
+            <# SaveOutput($"DevolutionsAgent_{culture}_missing.json"); 
+        }
+
+        List<LocalizationToken> idTextPairs = new List<LocalizationToken>();
+        FindIdTextPairs(root, idTextPairs); 
+
+        if (culture.Equals(mainCulture))
+        {
+            mainCultureTokens = idTextPairs;
+        }
+        else
+        {
+            List<LocalizationToken> missing = new List<LocalizationToken>();
+            FindIdTextPairs((JObject)diff, missing);
+            idTextPairs.AddRange(missing);
+        }
+        #>
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="<#= culture.ToLower() #>" Codepage="1252" Language="<#= idTextPairs.First(x => x.id == "Language").text #>" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+        <# foreach (var tokenGroup in idTextPairs.GroupBy(x => x.path)) { #>
+<!-- <#= tokenGroup.Key #> -->
+            <# foreach (var token in tokenGroup.OrderBy(x => x.id)) { #>
+    <String Id="<#= token.id #>"><#= token.text.Replace("\\n", "&#13;&#10;") #></String>
+            <# } #>
+        <# } #>
+</WixLocalization>
+<# SaveOutput($"DevolutionsAgent_{culture.ToLower()}.wxl"); 
+} #>
+using WixSharp;
+
+namespace DevolutionsAgent.Resources
+{
+	public static class Strings
+	{
+		public static string I18n(this MsiRuntime runtime, string res)
+		{
+			return $"[{res}]".LocalizeWith(runtime.Localize);
+		}
+<# foreach (LocalizationToken token in mainCultureTokens) { #>
+		/// <summary>
+		/// <#= Regex.Replace(token.text.ToString(), @"\t|\n|\r", "") #>
+		/// </summary>
+		public const string <#= token.id #> = "<#= token.id #>";		
+<# } #>
+	}
+}
+<#+
+class LocalizationToken
+{
+    public string id { get; set; }
+    public string text { get; set; }
+    public string path { get; set; }
+    public string fullPath { get; set; }
+}
+
+static string GetI18nFile(string culture, string templateFile)
+{
+    string file = $"Strings_{culture}.json";
+	string directory = System.IO.Path.GetDirectoryName(templateFile);
+    return Path.Combine(directory, file);  
+}
+
+static void FindIdTextPairs(JToken token, List<LocalizationToken> pairs)
+{
+    string rootPath = "WixLocalization.strings.";
+    if (token.Type == JTokenType.Object)
+    {
+        var obj = (JObject)token;
+        var id = obj["id"];
+        var text = obj["text"];
+
+        if (id != null && text != null)
+        {
+            pairs.Add(new LocalizationToken { 
+                id = id.ToString(), 
+                text = text.ToString(), 
+                path = obj.Parent.Path.Replace(rootPath, ""),
+                fullPath = obj.Path
+            });
+        }
+
+        foreach (var property in obj.Properties())
+        {
+            FindIdTextPairs(property.Value, pairs);
+        }
+    }
+    else if (token.Type == JTokenType.Array)
+    {
+        foreach (var item in token.Children())
+        {
+            FindIdTextPairs(item, pairs);
+        }
+    }
+}
+
+private void SaveOutput(string outputFileName) 
+{
+  string templateDirectory = Path.GetDirectoryName(Host.TemplateFile);
+  string outputFilePath = Path.Combine(templateDirectory, outputFileName);
+  File.WriteAllText(outputFilePath, this.GenerationEnvironment.ToString()); 
+  this.GenerationEnvironment.Remove(0, this.GenerationEnvironment.Length);
+}
+
+private class LanguageTokenEqualityComparer : IEqualityComparer<JToken>
+{
+    public bool Equals(JToken x, JToken y)
+    {
+        return ((JObject)x)["id"].Equals(((JObject)y)["id"]);
+    }
+
+    public int GetHashCode(JToken obj)
+    {
+        if (obj == null)
+        {
+            return 0;
+        }
+
+        return ((JObject)obj)["id"].GetHashCode();
+    }
+}
+
+private JObject FindDiff(JToken Current, JToken Model)
+{
+    var diff = new JObject();
+    if (JToken.DeepEquals(Current, Model)) return diff;
+
+    switch(Current.Type)
+    {
+        case JTokenType.Object:
+            {
+                var current = Current as JObject;
+                var model = Model as JObject;
+                var addedKeys = current.Properties().Select(c => c.Name).Except(model.Properties().Select(c => c.Name));
+                var removedKeys = model.Properties().Select(c => c.Name).Except(current.Properties().Select(c => c.Name));
+                var unchangedKeys = current.Properties().Where(c => JToken.DeepEquals(c.Value, Model[c.Name])).Select(c => c.Name);
+                foreach (var k in addedKeys)
+                {
+                    diff[k] = new JObject
+                    {
+                        //["+"] = Current[k]
+                    };
+                }
+                foreach (var k in removedKeys)
+                {
+                    diff[k] = new JObject
+                    {
+                        ["-"] = Model[k]
+                    };
+                }
+                var potentiallyModifiedKeys = current.Properties().Select(c => c.Name).Except(addedKeys).Except(unchangedKeys);
+                foreach (var k in potentiallyModifiedKeys)
+                {
+                    var foundDiff = FindDiff(current[k], model[k]);
+                    if(foundDiff.HasValues) diff[k] = foundDiff;
+                }
+            }
+            break;
+        case JTokenType.Array:
+            {
+                var current = Current as JArray;
+                var model = Model as JArray;
+                var plus = new JArray(current.Except(model, new LanguageTokenEqualityComparer()));
+                var minus = new JArray(model.Except(current, new LanguageTokenEqualityComparer()));
+                if (plus.HasValues) diff["+"] = plus;
+                if (minus.HasValues) diff["-"] = minus;
+            }
+            break;
+        default:
+            diff["+"] = Current;
+            diff["-"] = Model;
+            break;
+    }
+
+    return diff;
+}
+#>

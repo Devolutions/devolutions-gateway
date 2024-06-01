@@ -9,6 +9,7 @@ use crate::config::Conf;
 use crate::extract::DiagnosticsReadScope;
 use crate::http::HttpError;
 use crate::listener::ListenerUrls;
+use crate::log::GatewayLog;
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -122,7 +123,7 @@ async fn get_logs(
 ) -> Result<Response, HttpError> {
     let conf = conf_handle.get_conf();
 
-    let latest_log_file_path = crate::log::find_latest_log_file(conf.log_file.as_path())
+    let latest_log_file_path = devolutions_log::find_latest_log_file::<GatewayLog>(conf.log_file.as_path())
         .await
         .map_err(HttpError::internal().with_msg("latest log file not found").err())?;
 

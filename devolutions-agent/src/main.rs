@@ -1,51 +1,21 @@
+#[macro_use]
+extern crate tracing;
+
+mod config;
+mod log;
+mod service;
+
 use std::env;
 use std::sync::mpsc;
 
 use ceviche::controller::*;
 use ceviche::{Service, ServiceEvent};
 
-pub const SERVICE_NAME: &str = "devolutions-agent";
-pub const DISPLAY_NAME: &str = "Devolutions Agent";
-pub const DESCRIPTION: &str = "Devolutions Agent service";
-pub const COMPANY_NAME: &str = "Devolutions";
+use config::ConfHandle;
+use service::AgentService;
 
-pub struct AgentService {
-    pub service_name: String,
-    pub display_name: String,
-    pub description: String,
-    pub company_name: String,
-}
-
-impl AgentService {
-    pub fn load() -> Option<Self> {
-        Some(AgentService {
-            service_name: SERVICE_NAME.to_string(),
-            display_name: DISPLAY_NAME.to_string(),
-            description: DESCRIPTION.to_string(),
-            company_name: COMPANY_NAME.to_string(),
-        })
-    }
-
-    pub fn get_service_name(&self) -> &str {
-        self.service_name.as_str()
-    }
-
-    pub fn get_display_name(&self) -> &str {
-        self.display_name.as_str()
-    }
-
-    pub fn get_description(&self) -> &str {
-        self.service_name.as_str()
-    }
-
-    pub fn get_company_name(&self) -> &str {
-        self.company_name.as_str()
-    }
-
-    pub fn start(&self) {}
-
-    pub fn stop(&self) {}
-}
+const BAD_CONFIG_ERR_CODE: u32 = 1;
+const START_FAILED_ERR_CODE: u32 = 2;
 
 enum AgentServiceEvent {}
 
@@ -55,21 +25,40 @@ fn agent_service_main(
     _args: Vec<String>,
     _standalone_mode: bool,
 ) -> u32 {
-    let service = AgentService::load().expect("unable to load agent");
+    let Ok(conf_handle) = ConfHandle::init() else {
+        // At this point, the logger is not yet initialized.
+        return BAD_CONFIG_ERR_CODE;
+    };
 
-    service.start();
+    let mut service = match AgentService::load(conf_handle) {
+        Ok(service) => service,
+        Err(error) => {
+            // At this point, the logger may or may not be initialized.
+            error!(error = format!("{error:#}"), "Failed to load service");
+            return START_FAILED_ERR_CODE;
+        }
+    };
+
+    match service.start() {
+        Ok(()) => info!("{} service started", service::SERVICE_NAME),
+        Err(error) => {
+            error!(error = format!("{error:#}"), "Failed to start");
+            return START_FAILED_ERR_CODE;
+        }
+    }
 
     loop {
         if let Ok(control_code) = rx.recv() {
-            match control_code {
-                ServiceEvent::Stop => {
-                    service.stop();
-                    break;
-                }
-                _ => (),
+            info!("Received control code: {}", control_code);
+
+            if let ServiceEvent::Stop = control_code {
+                service.stop();
+                break;
             }
         }
     }
+
+    info!("{} service stopping", service::SERVICE_NAME);
 
     0
 }
@@ -77,12 +66,7 @@ fn agent_service_main(
 Service!("agent", agent_service_main);
 
 fn main() {
-    let service = AgentService::load().expect("unable to load agent service");
-    let mut controller = Controller::new(
-        service.get_service_name(),
-        service.get_display_name(),
-        service.get_description(),
-    );
+    let mut controller = Controller::new(service::SERVICE_NAME, service::DISPLAY_NAME, service::DESCRIPTION);
 
     if let Some(cmd) = env::args().nth(1) {
         match cmd.as_str() {
@@ -117,8 +101,14 @@ fn main() {
 
                 agent_service_main(rx, _tx, vec![], true);
             }
+            "config" => {
+                let subcommand = env::args().nth(2).expect("missing config subcommand");
+                if let Err(e) = config::handle_cli(subcommand.as_str()) {
+                    eprintln!("[ERROR] Agent configuration failed: {}", e);
+                }
+            }
             _ => {
-                println!("invalid command: {}", cmd);
+                eprintln!("invalid command: {}", cmd);
             }
         }
     } else {

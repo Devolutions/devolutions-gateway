@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WixLocalization Culture="fr-fr" Codepage="1252" Language="1036" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+        <!-- metadata -->
+                <String Id="Language">1036</String>
+                <String Id="ProductDescription">Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway.</String>
+                <String Id="VendorFullName">Devolutions Inc.</String>
+                <String Id="VendorName">Devolutions</String>
+                    <!-- messages -->
+                <String Id="Dotnet462IsRequired">Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
+                <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
+                <String Id="NewerInstalled">Une version plus récente de ce produit est déjà installée.</String>
+                <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum.</String>
+                <String Id="ThereIsAProblemWithTheEnteredData">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau.</String>
+                <String Id="x64VersionRequired">Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows.</String>
+                <String Id="x86VersionRequired">Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows.</String>
+                    <!-- buttons -->
+                <String Id="SearchButton">Rechercher</String>
+                <String Id="ViewButton">Afficher</String>
+                <String Id="ViewLogButton">Afficher le journal</String>
+                    <!-- propertyGroups -->
+                <String Id="Group_InstallLocation">Emplacement de l'installation</String>
+                    <!-- properties -->
+                <String Id="Property_Directory">Répertoire</String>
+                    <!-- static -->
+                <String Id="UACPromptLabel">Veuillez attendre que l'invite UAC apparaisse.
+
+Si elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches.</String>
+                    <!-- filters -->
+                <String Id="Filter_AllFiles">Tous les fichiers</String>
+                    <!-- dialogs.static -->
+                <String Id="AgentDlg_Title">Installation de [ProductName]</String>
+                    <!-- dialogs.browse -->
+                <String Id="BrowseDlgDescription">Sélectionnez le dossier de destination</String>
+                <String Id="BrowseDlgTitle">Modifier le dossier de destination</String>
+                    <!-- dialogs.installDir -->
+                <String Id="InstallDirDlgDescription">Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier.</String>
+                <String Id="InstallDirDlgTitle">Dossier de destination</String>
+                    <!-- dialogs.progress -->
+                <String Id="ProgressDlgTitleChanging">Modification de [ProductName]</String>
+                <String Id="ProgressDlgTitleInstalling">Installation de [ProductName]</String>
+                <String Id="ProgressDlgTitleRemoving">Suppression de [ProductName]</String>
+                <String Id="ProgressDlgTitleRepairing">Réparation de [ProductName]</String>
+                <String Id="ProgressDlgTitleUpdating">Mise à jour de [ProductName]</String>
+                    <!-- dialogs.verifyReady -->
+                <String Id="VerifyReadyDlgChangeTitle">Prêt pour la modification de [ProductName]</String>
+                <String Id="VerifyReadyDlgInstallTitle">Prêt pour l'installation de [ProductName]</String>
+                <String Id="VerifyReadyDlgRemoveTitle">Prêt pour la suppression de [ProductName]</String>
+                <String Id="VerifyReadyDlgRepairTitle">Prêt pour la réparation de [ProductName]</String>
+                <String Id="VerifyReadyDlgUpdateTitle">Prêt pour la mise à jour de [ProductName]</String>
+                    <!-- dialogs.welcome -->
+                <String Id="WelcomeDlgTitle">Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]</String>
+                    <!-- dialogs.firewall -->
+                <String Id="msierrFirewallCannotConnect">Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])</String>
+                <String Id="WixExecFirewallExceptionsInstall">Installation de la configuration du Pare-feu Windows</String>
+                <String Id="WixExecFirewallExceptionsUninstall">Désinstallation de la configuration du Pare-feu Windows</String>
+                <String Id="WixRollbackFirewallExceptionsInstall">Restauration de la configuration du Pare-feu Windows</String>
+                <String Id="WixRollbackFirewallExceptionsUninstall">Restauration de la configuration du Pare-feu Windows</String>
+                <String Id="WixSchedFirewallExceptionsInstall">Configuration du Pare-feu Windows</String>
+                <String Id="WixSchedFirewallExceptionsUninstall">Configuration du Pare-feu Windows</String>
+                    </WixLocalization>

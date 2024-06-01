@@ -1035,6 +1035,22 @@ pub mod dto {
         Quiet,
     }
 
+    impl VerbosityProfile {
+        pub fn to_log_filter(self) -> &'static str {
+            match self {
+                VerbosityProfile::Default => "info",
+                VerbosityProfile::Debug => {
+                    "info,devolutions_gateway=debug,devolutions_gateway::api=trace,jmux_proxy=debug,tower_http=trace"
+                }
+                VerbosityProfile::Tls => {
+                    "info,devolutions_gateway=debug,devolutions_gateway::tls=trace,rustls=trace,tokio_rustls=debug"
+                }
+                VerbosityProfile::All => "trace",
+                VerbosityProfile::Quiet => "warn",
+            }
+        }
+    }
+
     /// Unsafe debug options that should only ever be used at development stage
     ///
     /// These options might change or get removed without further notice.

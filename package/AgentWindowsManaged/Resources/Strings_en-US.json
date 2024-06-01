@@ -1,0 +1,171 @@
+{
+  "WixLocalization": {
+    "strings": {
+      "metadata": [
+        {
+          "id": "Language",
+          "text": "1033"
+        },
+        {
+          "id": "VendorName",
+          "text": "Devolutions"
+        },
+        {
+          "id": "VendorFullName",
+          "text": "Devolutions Inc."
+        },
+        {
+          "id": "ProductDescription",
+          "text": "System-wide service for extending Devolutions Gateway functionality."
+        }
+      ],
+      "messages": [
+        {
+          "id": "ThereIsAProblemWithTheEnteredData",
+          "text": "There is a problem with the entered data. Please correct the issue and try again."
+        },
+        {
+          "id": "OS2Old",
+          "text": "This product requires at least Windows 8 / Windows Server 2012 R2"
+        },
+        {
+          "id": "NewerInstalled",
+          "text": "A newer version of this product is already installed."
+        },
+        {
+          "id": "x64VersionRequired",
+          "text": "You need to install the 64-bit version of this product on 64-bit Windows."
+        },
+        {
+          "id": "x86VersionRequired",
+          "text": "You need to install the 32-bit version of this product on 32-bit Windows."
+        },
+        {
+          "id": "DotNet48IsStrongRecommendedDownloadNow",
+          "text": "Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+        },
+        {
+          "id": "Dotnet462IsRequired",
+          "text": "The product requires Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "ViewButton",
+          "text": "View"
+        },
+        {
+          "id": "SearchButton",
+          "text": "Search"
+        },
+        {
+          "id": "ViewLogButton",
+          "text": "View Log"
+        }
+      ],
+      "propertyGroups": [
+        {
+          "id": "Group_InstallLocation",
+          "text": "Install Location"
+        }
+      ],
+      "properties": [
+        {
+          "id": "Property_Directory",
+          "text": "Directory"
+        }
+      ],
+      "static": [
+        {
+          "id": "UACPromptLabel",
+          "text": "Please wait for UAC prompt to appear.\n\nIf it appears minimized then active it from the taskbar."
+        }
+      ],
+      "filters": [
+        {
+          "id": "Filter_AllFiles",
+          "text": "All Files"
+        }
+      ],
+      "dialogs": {
+        "static": [
+          {
+            "id": "AgentDlg_Title",
+            "text": "[ProductName] Setup"
+          }
+        ],
+        "browse": [
+          {
+            "id": "BrowseDlgTitle",
+            "text": "Change destination folder"
+          },
+          {
+            "id": "BrowseDlgDescription",
+            "text": "Browse to the destination folder"
+          }
+        ],
+        "installDir": [
+          {
+            "id": "InstallDirDlgTitle",
+            "text": "Destination Folder"
+          },
+          {
+            "id": "InstallDirDlgDescription",
+            "text": "Click Next to install to the default folder or click Change to choose another."
+          }
+        ],
+        "progress": [
+          {
+            "id": "ProgressDlgTitleInstalling",
+            "text": "Installing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleChanging",
+            "text": "Changing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRepairing",
+            "text": "Repairing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRemoving",
+            "text": "Removing [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleUpdating",
+            "text": "Updating [ProductName]"
+          }
+        ],
+        "verifyReady": [
+          {
+            "id": "VerifyReadyDlgInstallTitle",
+            "text": "Ready to install [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgChangeTitle",
+            "text": "Ready to change [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRepairTitle",
+            "text": "Ready to repair [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRemoveTitle",
+            "text": "Ready to remove [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgUpdateTitle",
+            "text": "Ready to update [ProductName]"
+          }
+        ],
+        "welcome": [
+          {
+            "id": "WelcomeDlgTitle",
+            "overridable": "yes",
+            "text": "Welcome to the [ProductName] 20[ProductVersion] Setup Wizard"
+          }
+        ]
+      }
+    }
+  }
+}
