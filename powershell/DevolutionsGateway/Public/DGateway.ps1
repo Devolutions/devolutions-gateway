@@ -1344,37 +1344,128 @@ function Uninstall-DGatewayPackage {
 
 function Start-DGateway {
     [CmdletBinding()]
+
     param(
-        [string] $ConfigPath
+        [string]$ServiceName
     )
 
-    if ($IsWindows) {
-        Start-Service 'DevolutionsGateway'
+    if (-Not [String]::IsNullOrWhiteSpace($ServiceName)) {
+        $DGatewayService = $ServiceName
+    } elseif ($IsWindows) {
+        $DGatewayService = 'devolutionsgateway'
+    } elseif ($IsLinux) {
+        $DGatewayService = 'devolutions-gateway.service'  
     } else {
-        throw 'not implemented'
+        throw 'Service name is empty'
+    }
+
+    if ($IsWindows) {
+        Start-Service -Name $DGatewayService
+    } elseif ($IsLinux) {
+        & systemctl start $DGatewayService
+    } else {
+        throw 'Not implemented'
     }
 }
 
 function Stop-DGateway {
     [CmdletBinding()]
+
     param(
-        [string] $ConfigPath
+        [string]$ServiceName
     )
 
-    if ($IsWindows) {
-        Stop-Service 'DevolutionsGateway'
+    if (-Not [String]::IsNullOrWhiteSpace($serviceName)) {
+        $DGatewayService = $ServiceName
+    } elseif ($IsWindows) {
+        $DGatewayService = 'devolutionsgateway'
+    } elseif ($IsLinux) {
+        $DGatewayService = 'devolutions-gateway.service'  
     } else {
-        throw 'not implemented'
+        throw 'Service name is empty'
+    }
+
+    if ($IsWindows) {
+        Stop-Service -Name $DGatewayService
+    } elseif ($IsLinux) {
+        & systemctl stop $DGatewayService
+    } else {
+        throw 'Not implemented'
     }
 }
 
 function Restart-DGateway {
     [CmdletBinding()]
+
     param(
-        [string] $ConfigPath
+        [string]$ServiceName
     )
 
-    $ConfigPath = Find-DGatewayConfig -ConfigPath:$ConfigPath
-    Stop-DGateway -ConfigPath:$ConfigPath
-    Start-DGateway -ConfigPath:$ConfigPath
+    if (-Not [String]::IsNullOrWhiteSpace($ServiceName)) {
+        $DGatewayService = $ServiceName
+    } elseif ($IsWindows) {
+        $DGatewayService = 'devolutionsgateway'
+    } elseif ($IsLinux) {
+        $DGatewayService = 'devolutions-gateway.service'  
+    } else {
+        throw 'Service name is empty'
+    }
+
+    if ($IsWindows) {
+        Restart-Service -Name $DGatewayService
+    } elseif ($IsLinux) {
+        & systemctl restart $DGatewayService
+    } else {
+        throw 'Not implemented'
+    }    
+}
+
+function Get-DGatewayService {
+    [CmdletBinding()]
+
+    param(
+        [string]$ServiceName
+    )
+
+    if (-Not [String]::IsNullOrWhiteSpace($ServiceName)) {
+        $DGatewayService = $ServiceName
+    } elseif ($IsWindows) {
+        $DGatewayService = 'devolutionsgateway'
+    } elseif ($IsLinux) {
+        $DGatewayService = 'devolutions-gateway.service'  
+    } else {
+        throw 'Service name is empty'
+    }
+
+    if ($IsWindows) {
+        $Result = Get-Service -Name $DGatewayService
+
+        If ($Result) {
+            [PSCustomObject]@{
+                "Name"   = $Result.Name
+                "Status" = $Result.Status
+            }
+        } else {
+            throw 'Service not found'
+        }
+    } elseif ($IsLinux) {
+        $Result = & systemctl list-units --type=service --all --no-pager $DGatewayService --no-legend
+
+        if ($Result) {
+            $ID, $Load, $Active, $Status, $Description = ($Result.Trim()) -Split '\s+', 5
+
+            If ($ID -And $Active) {
+                [PSCustomObject]@{
+                    "Name"   = $ID
+                    "Status" = ($Active -EQ 'active' ? 'Running' : 'Stopped')
+                }
+            } else {
+                throw 'Unable to return service status'
+            }
+        } else {
+            throw 'Service not found'
+        }
+    } else {
+        throw 'Not implemented'
+    }
 }
