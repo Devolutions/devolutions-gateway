@@ -1,0 +1,201 @@
+{
+  "WixLocalization": {
+    "strings": {
+      "metadata": [
+        {
+          "id": "Language",
+          "text": "1036"
+        },
+        {
+          "id": "VendorName",
+          "text": "Devolutions"
+        },
+        {
+          "id": "VendorFullName",
+          "text": "Devolutions Inc."
+        },
+        {
+          "id": "ProductDescription",
+          "text": "Service à l’échelle du système pour étendre les fonctionnalités de Devolutions Gateway."
+        }
+      ],
+      "messages": [
+        {
+          "id": "ThereIsAProblemWithTheEnteredData",
+          "text": "Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau."
+        },
+        {
+          "id": "OS2Old",
+          "text": "Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum."
+        },
+        {
+          "id": "NewerInstalled",
+          "text": "Une version plus récente de ce produit est déjà installée."
+        },
+        {
+          "id": "x64VersionRequired",
+          "text": "Vous devez installer la version 64 bits de ce produit avec l'environnement 64 bits de Windows."
+        },
+        {
+          "id": "x86VersionRequired",
+          "text": "Vous devez installer la version 32 bits de ce produit avec l'environnement 32 bits de Windows."
+        },
+        {
+          "id": "DotNet48IsStrongRecommendedDownloadNow",
+          "text": "Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+        },
+        {
+          "id": "Dotnet462IsRequired",
+          "text": "Le produit nécessite Microsoft .NET Framework 4.6.2. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?"
+        }
+      ],
+      "buttons": [
+        {
+          "id": "ViewButton",
+          "text": "Afficher"
+        },
+        {
+          "id": "SearchButton",
+          "text": "Rechercher"
+        },
+        {
+          "id": "ViewLogButton",
+          "text": "Afficher le journal"
+        }
+      ],
+      "propertyGroups": [
+        {
+          "id": "Group_InstallLocation",
+          "text": "Emplacement de l'installation"
+        }
+      ],
+      "properties": [
+        {
+          "id": "Property_Directory",
+          "text": "Répertoire"
+        }
+      ],
+      "static": [
+        {
+          "id": "UACPromptLabel",
+          "text": "Veuillez attendre que l'invite UAC apparaisse.\n\nSi elle apparaît en mode réduit, alors vous devez l'activer à partir de la barre de tâches."
+        }
+      ],
+      "filters": [
+        {
+          "id": "Filter_AllFiles",
+          "text": "Tous les fichiers"
+        }
+      ],
+      "dialogs": {
+        "static": [
+          {
+            "id": "AgentDlg_Title",
+            "text": "Installation de [ProductName]"
+          }
+        ],
+        "browse": [
+          {
+            "id": "BrowseDlgTitle",
+            "text": "Modifier le dossier de destination"
+          },
+          {
+            "id": "BrowseDlgDescription",
+            "text": "Sélectionnez le dossier de destination"
+          }
+        ],
+        "installDir": [
+          {
+            "id": "InstallDirDlgTitle",
+            "text": "Dossier de destination"
+          },
+          {
+            "id": "InstallDirDlgDescription",
+            "text": "Cliquez sur Suivant pour effectuer l'installation dans le dossier par défaut, ou cliquez sur Modifier pour choisir un autre dossier."
+          }
+        ],
+        "progress": [
+          {
+            "id": "ProgressDlgTitleInstalling",
+            "text": "Installation de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleChanging",
+            "text": "Modification de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRepairing",
+            "text": "Réparation de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleRemoving",
+            "text": "Suppression de [ProductName]"
+          },
+          {
+            "id": "ProgressDlgTitleUpdating",
+            "text": "Mise à jour de [ProductName]"
+          }
+        ],
+        "verifyReady": [
+          {
+            "id": "VerifyReadyDlgInstallTitle",
+            "text": "Prêt pour l'installation de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgChangeTitle",
+            "text": "Prêt pour la modification de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRepairTitle",
+            "text": "Prêt pour la réparation de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgRemoveTitle",
+            "text": "Prêt pour la suppression de [ProductName]"
+          },
+          {
+            "id": "VerifyReadyDlgUpdateTitle",
+            "text": "Prêt pour la mise à jour de [ProductName]"
+          }
+        ],
+        "welcome": [
+          {
+            "id": "WelcomeDlgTitle",
+            "overridable": "yes",
+            "text": "Bienvenue dans l'assistant d'installation de [ProductName] 20[ProductVersion]"
+          }
+        ],
+        "firewall": [
+          {
+            "id": "msierrFirewallCannotConnect",
+            "text": "Impossible de se connecter au Pare-feu Windows.  ([2]   [3]   [4]   [5])"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsInstall",
+            "text": "Configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixSchedFirewallExceptionsUninstall",
+            "text": "Configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsInstall",
+            "text": "Restauration de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixExecFirewallExceptionsInstall",
+            "text": "Installation de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixRollbackFirewallExceptionsUninstall",
+            "text": "Restauration de la configuration du Pare-feu Windows"
+          },
+          {
+            "id": "WixExecFirewallExceptionsUninstall",
+            "text": "Désinstallation de la configuration du Pare-feu Windows"
+          }
+        ]
+      }
+    }
+  }
+}

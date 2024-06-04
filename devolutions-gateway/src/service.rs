@@ -1,13 +1,14 @@
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
-use devolutions_gateway::log::{self, LoggerGuard};
+use devolutions_gateway::log::GatewayLog;
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
 use devolutions_gateway::token::{CurrentJrl, JrlTokenClaims};
 use devolutions_gateway::DgwState;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
+use devolutions_log::{self, LoggerGuard};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,9 +38,9 @@ impl GatewayService {
     pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
         let conf = conf_handle.get_conf();
 
-        let logger_guard = log::init(
+        let logger_guard = devolutions_log::init::<GatewayLog>(
             &conf.log_file,
-            conf.verbosity_profile,
+            conf.verbosity_profile.to_log_filter(),
             conf.debug.log_directives.as_deref(),
         )
         .context("failed to setup logger")?;
@@ -237,9 +238,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
-    tasks.register(devolutions_gateway::log::LogDeleterTask {
-        prefix: conf.log_file.clone(),
-    });
+    tasks.register(devolutions_log::LogDeleterTask::<GatewayLog>::new(
+        conf.log_file.clone(),
+    ));
 
     tasks.register(devolutions_gateway::subscriber::SubscriberPollingTask {
         sessions: session_manager_handle,

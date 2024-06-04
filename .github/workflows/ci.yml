@@ -24,6 +24,7 @@ jobs:
       rust-profile: ${{ steps.rust-profile.outputs.rust-profile }}
       jetsocat-build-matrix: ${{ steps.setup-matrix.outputs.jetsocat-build-matrix }}
       gateway-build-matrix: ${{ steps.setup-matrix.outputs.gateway-build-matrix }}
+      agent-build-matrix: ${{ steps.setup-matrix.outputs.agent-build-matrix }}
 
     steps:
       - name: Setup matrix
@@ -50,6 +51,9 @@ jobs:
 
           $GatewayMatrix = ConvertTo-JSON $Jobs -Compress
           echo "gateway-build-matrix=$GatewayMatrix" >> $Env:GITHUB_OUTPUT
+
+          $AgentMatrix = ConvertTo-JSON $Jobs -Compress
+          echo "agent-build-matrix=$AgentMatrix" >> $Env:GITHUB_OUTPUT
 
           $Jobs = @()
           $Platforms += 'macos'
@@ -211,7 +215,7 @@ jobs:
           $Env:JETSOCAT_EXECUTABLE = Join-Path $TargetOutputPath $ExecutableFileName
           $Env:CARGO_PACKAGE = "jetsocat"
 
-          ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+          ./ci/tlk.ps1 build -Product jetsocat -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
 
@@ -402,7 +406,7 @@ jobs:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DGATEWAY_EXECUTABLE: ${{ steps.load-variables.outputs.dgateway-executable }}
           CARGO_PACKAGE: devolutions-gateway
-        run: ./ci/tlk.ps1 build -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+        run: ./ci/tlk.ps1 build -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Build PowerShell module
         if: matrix.os == 'windows'
@@ -426,8 +430,8 @@ jobs:
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
           }
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
-            
-          ./ci/tlk.ps1 package -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+          ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -446,6 +450,110 @@ jobs:
         with:
           name: devolutions-gateway
           pattern: devolutions-gateway-*
+          delete-merged: true
+
+  devolutions-agent:
+    name: devolutions-agent [${{ matrix.os }} ${{ matrix.arch }}]
+    runs-on: ${{ matrix.runner }}
+    needs: [preflight]
+    if: always()
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.preflight.outputs.agent-build-matrix) }}
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Load dynamic variables
+        id: load-variables
+        shell: pwsh
+        run: |
+          $PackageVersion = "${{ needs.preflight.outputs.version }}"
+          $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
+          $ExecutableFileName = "DevolutionsAgent_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $ExecutableFileName = "$($ExecutableFileName).exe"
+            $PackageFileName = "DevolutionsAgent-${{ matrix.arch }}-${PackageVersion}.msi"
+            $DAgentPackage = Join-Path $TargetOutputPath $PackageFileName
+
+            echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
+          }
+
+          $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
+          echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
+          echo "target-output-path=$TargetOutputPath" >> $Env:GITHUB_OUTPUT
+          echo "dagent-executable=$DAgentExecutable" >> $Env:GITHUB_OUTPUT
+
+      - name: Configure Linux runner
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
+
+      - name: Configure Linux (arm) runner
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get -o Acquire::Retries=3 install -qy binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu qemu-user
+          rustup target add aarch64-unknown-linux-gnu
+          echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
+
+      # WiX is installed on Windows runners but not in the PATH
+      - name: Configure Windows runner
+        if: matrix.os == 'windows'
+        run: |
+          # https://github.com/actions/runner-images/issues/9667
+          choco uninstall wixtoolset
+          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build
+        shell: pwsh
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
+          CARGO_PACKAGE: devolutions-agent
+        run: ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+      - name: Add msbuild to PATH
+        if: matrix.os == 'windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Package
+        shell: pwsh
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
+          DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
+          }
+
+          ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: devolutions-agent-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.load-variables.outputs.staging-path }}
+
+  devolutions-agent-merge:
+    name: devolutions agent merge artifacts
+    runs-on: ubuntu-latest
+    needs: [preflight, devolutions-agent]
+
+    steps:
+      - name: Merge Artifacts
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: devolutions-agent
+          pattern: devolutions-agent-*
           delete-merged: true
 
   upload-git-log:
@@ -480,6 +588,8 @@ jobs:
       - preflight
       - devolutions-gateway
       - devolutions-gateway-merge
+      - devolutions-agent
+      - devolutions-agent-merge
       - jetsocat
       - jetsocat-lipo
       - upload-git-log
@@ -516,6 +626,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: devolutions-gateway
+          path: ${{ runner.temp }}/artifacts_raw
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: devolutions-agent
           path: ${{ runner.temp }}/artifacts_raw
 
       - uses: actions/download-artifact@v4

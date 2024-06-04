@@ -1,0 +1,8 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: devolutions-agent
+Source: https://devolutions.net/agent
+
+Files: *
+Copyright: 2020-2024 Devolutions Inc.
+License: non-free
+ .

@@ -901,6 +901,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "devolutions-agent"
+version = "2024.1.2"
+dependencies = [
+ "anyhow",
+ "camino",
+ "ceviche",
+ "cfg-if",
+ "ctrlc",
+ "devolutions-gateway-task",
+ "devolutions-log",
+ "embed-resource",
+ "futures",
+ "parking_lot",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tap",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "devolutions-gateway"
 version = "2024.2.1"
 dependencies = [
@@ -916,6 +938,7 @@ dependencies = [
  "cfg-if",
  "devolutions-gateway-generators",
  "devolutions-gateway-task",
+ "devolutions-log",
  "dlopen",
  "dlopen_derive",
  "embed-resource",
@@ -986,6 +1009,20 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "tokio",
+]
+
+[[package]]
+name = "devolutions-log"
+version = "2024.2.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "devolutions-gateway-task",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
