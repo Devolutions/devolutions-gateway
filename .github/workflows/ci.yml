@@ -715,7 +715,7 @@ jobs:
         - name: Install Pester module
           id: prepare
           shell: pwsh
-          run: Install-Module Pester -Force
+          run: Install-Module Pester -RequiredVersion 5.5.0 -Force
 
         - name: Build module
           shell: pwsh

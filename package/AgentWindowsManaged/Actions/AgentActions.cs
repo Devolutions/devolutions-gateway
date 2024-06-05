@@ -8,7 +8,7 @@ using Action = WixSharp.Action;
 
 namespace DevolutionsAgent.Actions;
 
-internal static class GatewayActions
+internal static class AgentActions
 {
     // Immediate sequence
 

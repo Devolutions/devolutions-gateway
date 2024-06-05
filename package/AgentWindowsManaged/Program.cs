@@ -142,7 +142,7 @@ internal class Program
             {
                 new()
                 {
-                    Cabinet = "dgateway.cab",
+                    Cabinet = "dagent.cab",
                     EmbedCab = true,
                     CompressionLevel = CompressionLevel.mszip,
                 }
@@ -195,7 +195,7 @@ internal class Program
                         {
                             Type = SvcType.ownProcess,
                             // In contrast to Devolutions Gateway, Devolutions Agent uses LocalSystem
-                            // accout to be able to perform administrative operations 
+                            // accout to be able to perform administrative operations
                             // such as MSI installation (Updating, restarting DevolutionsGateway).
                             Interactive = false,
                             Vital = true,
@@ -217,7 +217,7 @@ internal class Program
         project.ResolveWildCards(true);
 
         project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
-        project.Actions = GatewayActions.Actions;
+        project.Actions = AgentActions.Actions;
         project.RegValues = new RegValue[]
         {
             new (RegistryHive.LocalMachine, $"Software\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "InstallDir", $"[{AgentProperties.InstallDir}]")
@@ -240,7 +240,7 @@ internal class Program
 
         project.UnhandledException += Project_UnhandledException;
         project.UIInitialized += Project_UIInitialized;
-        
+
         if (SourceOnlyBuild)
         {
             project.Language = ProjectLangId;
@@ -269,7 +269,7 @@ internal class Program
 
                 msi.EmbedTransform(mstFile);
             }
-            
+
             msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
         }
     }
@@ -351,7 +351,7 @@ internal class Program
             e.ManagedUI.Shell.ErrorDetected = true;
             e.Result = ActionResult.UserExit;
         }
-        
+
         if (netfx45Version < 528040)
         {
             if (MessageBox.Show(I18n(Strings.DotNet48IsStrongRecommendedDownloadNow), I18n(Strings.AgentDlg_Title),
