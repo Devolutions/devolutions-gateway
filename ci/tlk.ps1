@@ -429,7 +429,13 @@ class TlkRecipe
 
     [void] Package_Windows_Managed_Assemble() {
         Push-Location
-        Set-Location "$($this.SourcePath)/package/$($this.Target.Platform)Managed"
+
+        $InputPackagePathPrefix = switch ($this.Product) {
+            "gateway" { "" }
+            "agent" { "Agent" }
+        }
+
+        Set-Location "$($this.SourcePath)/package/$($InputPackagePathPrefix)$($this.Target.Platform)Managed"
 
         $TargetConfiguration = "Release"
 
@@ -441,7 +447,8 @@ class TlkRecipe
         foreach ($PackageLanguage in $([TlkRecipe]::PackageLanguages | Select-Object -Skip 1)) {
             # Build the localized MSI
             & ".\$TargetConfiguration\$($PackageLanguage.Name)\Build_$($this.PackageName()).cmd"
-            $LangMsi = Join-Path $TargetConfiguration $($PackageLanguage.Name) "$($this.PackageName()).msi"
+            $LangDir = Join-Path $TargetConfiguration $PackageLanguage.Name
+            $LangMsi = Join-Path $LangDir "$($this.PackageName()).msi"
             $Transform = Join-Path $TargetConfiguration "$($PackageLanguage.Name).mst"
             # Generate a language transform
             & 'torch.exe' "$BaseMsi" "$LangMsi" "-o" "$Transform" | Out-Host
