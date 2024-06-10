@@ -14,7 +14,7 @@ devolutions-log = { path = "../crates/devolutions-log" }
 
 # Lifecycle
 ceviche = "0.6"
-ctrlc = "3.1"
+ctrlc = "3.4"
 
 # Serialization
 serde = "1.0"
