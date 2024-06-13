@@ -12,11 +12,19 @@ public class TargetAddr
 
     public int? Port { get; set; }
 
-    public TargetAddr(string scheme, string host, int port)
+    public TargetAddr(string scheme, string host, int? port)
     {
         this.Scheme = scheme;
         this.Host = host;
-        this.Port = port;
+
+        if (port < 0 || port > 65535)
+        {
+            this.Port = null;
+        }
+        else
+        {
+            this.Port = port;
+        }
     }
 
     public TargetAddr(Uri uri)

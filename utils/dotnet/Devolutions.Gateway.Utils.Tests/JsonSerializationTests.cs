@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Devolutions.Gateway.Utils.Tests;
 
-public class JsonSerialization
+public class JsonSerializationTests
 {
     static readonly Guid gatewayId = new Guid("ccbaad3f-4627-4666-8bb5-cb6a1a7db815");
     static readonly Guid sessionId = new Guid("3e7c1854-f1eb-42d2-b9cb-9303036e50da");
