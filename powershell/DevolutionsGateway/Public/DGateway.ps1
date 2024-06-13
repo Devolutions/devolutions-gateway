@@ -1457,7 +1457,7 @@ function Get-DGatewayService {
             If ($ID -And $Active) {
                 [PSCustomObject]@{
                     "Name"   = $ID
-                    "Status" = ($Active -EQ 'active' ? 'Running' : 'Stopped')
+                    "Status" = if ($Active -EQ 'active') { 'Running' } else { 'Stopped' }
                 }
             } else {
                 throw 'Unable to return service status'
