@@ -188,7 +188,7 @@ jobs:
           }
 
       - name: Update Artifactory Cache
-        run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="devolutions-client"
+        run: gh workflow run update-artifactory-cache.yml --repo Devolutions/scheduled-tasks --field package_name="gateway-client"
         env:
           GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_WRITE_TOKEN }}
 
