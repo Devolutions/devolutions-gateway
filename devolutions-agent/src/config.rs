@@ -1,34 +1,18 @@
-use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
 use camino::{Utf8Path, Utf8PathBuf};
-use cfg_if::cfg_if;
+use devolutions_agent_shared::get_data_dir;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
-
-cfg_if! {
-    if #[cfg(target_os = "windows")] {
-        const COMPANY_DIR: &str = "Devolutions";
-        const PROGRAM_DIR: &str = "Agent";
-        const APPLICATION_DIR: &str = "Devolutions\\Agent";
-    } else if #[cfg(target_os = "macos")] {
-        const COMPANY_DIR: &str = "Devolutions";
-        const PROGRAM_DIR: &str = "Agent";
-        const APPLICATION_DIR: &str = "Devolutions Agent";
-    } else {
-        const COMPANY_DIR: &str = "devolutions";
-        const PROGRAM_DIR: &str = "agent";
-        const APPLICATION_DIR: &str = "devolutions-agent";
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub verbosity_profile: dto::VerbosityProfile,
+    pub updater: dto::UpdaterConf,
     pub debug: dto::DebugConf,
 }
 
@@ -45,6 +29,7 @@ impl Conf {
         Ok(Conf {
             log_file,
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
+            updater: conf_file.updater.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -95,29 +80,6 @@ fn save_config(conf: &dto::ConfFile) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn get_data_dir() -> Utf8PathBuf {
-    if let Ok(config_path_env) = env::var("DAGENT_CONFIG_PATH") {
-        Utf8PathBuf::from(config_path_env)
-    } else {
-        let mut config_path = Utf8PathBuf::new();
-
-        if cfg!(target_os = "windows") {
-            let program_data_env = env::var("ProgramData").expect("ProgramData env variable");
-            config_path.push(program_data_env);
-            config_path.push(COMPANY_DIR);
-            config_path.push(PROGRAM_DIR);
-        } else if cfg!(target_os = "macos") {
-            config_path.push("/Library/Application Support");
-            config_path.push(APPLICATION_DIR);
-        } else {
-            config_path.push("/etc");
-            config_path.push(APPLICATION_DIR);
-        }
-
-        config_path
-    }
-}
-
 fn get_conf_file_path() -> Utf8PathBuf {
     get_data_dir().join("agent.json")
 }
@@ -160,6 +122,14 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 pub mod dto {
     use super::*;
 
+    #[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct UpdaterConf {
+        /// Enable updater module (enabled by default)
+        #[serde(default)]
+        pub disable: bool,
+    }
+
     /// Source of truth for Agent configuration
     ///
     /// This struct represents the JSON file used for configuration as close as possible
@@ -177,13 +147,16 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
 
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub updater: Option<UpdaterConf>,
+
         /// (Unstable) Unsafe debug options for developers
         #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
 
-        // Other unofficial options.
-        // This field is useful so that we can deserialize
-        // and then losslessly serialize back all root keys of the config file.
+        /// Other unofficial options.
+        /// This field is useful so that we can deserialize
+        /// and then losslessly serialize back all root keys of the config file.
         #[serde(flatten)]
         pub rest: serde_json::Map<String, serde_json::Value>,
     }
@@ -193,6 +166,7 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
+                updater: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
@@ -233,14 +207,22 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct DebugConf {
         /// Directives string in the same form as the RUST_LOG environment variable
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
+        /// Skip MSI installation in updater module. Useful for debugging updater logic
+        /// without actually changing the system.
+        #[serde(default)]
+        pub skip_msi_install: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
     #[allow(clippy::derivable_impls)]
     impl Default for DebugConf {
         fn default() -> Self {
-            Self { log_directives: None }
+            Self {
+                log_directives: None,
+                skip_msi_install: false,
+            }
         }
     }
 

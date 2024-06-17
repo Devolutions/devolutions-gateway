@@ -4,38 +4,63 @@ version = "2024.1.2"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
 [dependencies]
-# In-house
-devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
-devolutions-log = { path = "../crates/devolutions-log" }
-
-# Lifecycle
+anyhow = "1.0"
+async-trait = "0.1"
+# TODO: serde not needed?
+camino = { version = "1.1", features = ["serde1"] }
 ceviche = "0.6"
 ctrlc = "3.1"
-
-# Serialization
+devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+devolutions-log = { path = "../crates/devolutions-log" }
+futures = "0.3"
+hex = "0.4"
+notify-debouncer-mini = "0.4.1"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-
-# Error handling
-anyhow = "1.0"
-
-# Utils, misc
-camino = { version = "1.1", features = ["serde1"] }
-cfg-if = "1.0"
-parking_lot = "0.12"
+sha2 = "0.10"
+smallvec = "1"
 tap = "1.0"
-
-# Async
-futures = "0.3"
-tokio = { version = "1.37", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
-
-# Logging
+thiserror = "1"
 tracing = "0.1"
+uuid = { version = "1.5", features = ["v4"] }
+
+[dependencies.tokio]
+version = "1.37"
+features = [
+    "signal",
+    "net",
+    "io-util",
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "parking_lot",
+    "fs",
+    "process"
+]
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.57"
+features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_Security_Cryptography",
+    "Win32_Security_Authorization",
+    "Win32_System_ApplicationInstallationAndServicing"
+]
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"

@@ -1,9 +1,11 @@
 use tokio::runtime::{self, Runtime};
 
+#[cfg(windows)]
+use crate::updater::UpdaterTask;
 use crate::{config::ConfHandle, log::AgentLog};
 use anyhow::Context;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
-use devolutions_log::{self, LoggerGuard};
+use devolutions_log::{self, LogDeleterTask, LoggerGuard};
 use std::time::Duration;
 
 pub const SERVICE_NAME: &str = "devolutions-agent";
@@ -174,7 +176,12 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let mut tasks = Tasks::new();
 
-    tasks.register(devolutions_log::LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
+    tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
+
+    #[cfg(windows)]
+    if !conf.updater.disable {
+        tasks.register(UpdaterTask::new(conf_handle.clone()));
+    }
 
     Ok(tasks)
 }
