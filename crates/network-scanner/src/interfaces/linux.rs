@@ -10,6 +10,8 @@ use netlink_packet_route::link::{LinkAttribute, LinkFlag};
 use netlink_packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{new_connection, Handle};
 
+use super::InterfaceAddress;
+
 pub async fn get_network_interfaces() -> anyhow::Result<Vec<NetworkInterface>> {
     let (connection, handle, _) = new_connection()?;
     tokio::spawn(connection);
@@ -138,8 +140,13 @@ fn convert_link_info_to_network_interface(link_info: &LinkInfo) -> anyhow::Resul
         name: link_info.name.clone(),
         description: None,
         mac_address: link_info.mac.as_slice().try_into().ok(),
-        ip_addresses,
-        prefixes,
+        addresses: prefixes
+            .into_iter()
+            .map(|(addr, prefix)| InterfaceAddress {
+                ip: addr,
+                prefixlen: prefix,
+            })
+            .collect(),
         operational_status: link_info.flags.contains(&LinkFlag::Up),
         gateways,
         dns_servers: link_info.dns_servers.clone(),

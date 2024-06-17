@@ -19,8 +19,14 @@ impl From<ipconfig::Adapter> for NetworkInterface {
             name: adapter.adapter_name().to_string(),
             description: Some(adapter.description().to_string()),
             mac_address,
-            ip_addresses: adapter.ip_addresses().to_vec(),
-            prefixes: adapter.prefixes().to_vec(),
+            addresses: adapter
+                .prefixes()
+                .iter()
+                .map(|(ip, prefix)| super::InterfaceAddress {
+                    ip: ip.clone(),
+                    prefixlen: *prefix,
+                })
+                .collect(),
             operational_status: adapter.oper_status() == ipconfig::OperStatus::IfOperStatusUp,
             gateways: adapter.gateways().to_vec(),
             dns_servers: adapter.dns_servers().to_vec(),

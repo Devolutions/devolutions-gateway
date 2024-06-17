@@ -65,12 +65,17 @@ impl serde::Serialize for MacAddr {
 }
 
 #[derive(Debug, Clone)]
+pub struct InterfaceAddress {
+    pub ip: IpAddr,
+    pub prefixlen: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct NetworkInterface {
     pub name: String,
     pub description: Option<String>,
     pub mac_address: Option<MacAddr>,
-    pub ip_addresses: Vec<IpAddr>,
-    pub prefixes: Vec<(IpAddr, u32)>,
+    pub addresses: Vec<InterfaceAddress>,
     pub operational_status: bool,
     pub gateways: Vec<IpAddr>,
     pub dns_servers: Vec<IpAddr>,
