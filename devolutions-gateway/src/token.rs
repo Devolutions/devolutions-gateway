@@ -410,6 +410,8 @@ pub enum AccessScope {
     RecordingDelete,
     #[serde(rename = "gateway.recordings.read")]
     RecordingsRead,
+    #[serde(rename = "gateway.update")]
+    Update,
 }
 
 #[derive(Clone, Deserialize)]

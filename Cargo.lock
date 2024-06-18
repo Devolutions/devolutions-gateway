@@ -957,6 +957,7 @@ dependencies = [
  "camino",
  "ceviche",
  "cfg-if",
+ "devolutions-agent-shared",
  "devolutions-gateway-generators",
  "devolutions-gateway-task",
  "devolutions-log",
