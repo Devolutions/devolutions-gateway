@@ -59,7 +59,7 @@ jobs:
           $Platforms += 'macos'
 
           $Platforms | ForEach-Object {
-              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-11' } 'linux' { 'ubuntu-20.04' } }
+              $Runner = switch ($_) { 'windows' { 'windows-2022' } 'macos' { 'macos-12' } 'linux' { 'ubuntu-20.04' } }
               foreach ($Arch in $Archs) {
                   $Jobs += @{
                       arch = $Arch
