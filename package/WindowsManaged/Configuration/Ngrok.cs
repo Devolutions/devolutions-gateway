@@ -6,9 +6,9 @@ namespace DevolutionsGateway.Configuration
     {
         public string AuthToken { get; set; }
 
-        public int HeartbeatInterval { get; set; }
+        public int? HeartbeatInterval { get; set; }
 
-        public int HeartbeatTolerance { get; set; }
+        public int? HeartbeatTolerance { get; set; }
 
         public string Metadata { get; set; }
 
