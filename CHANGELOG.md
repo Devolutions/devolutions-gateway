@@ -4,6 +4,21 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.2.2 (2024-06-18)
+
+### Features
+
+- _installer_: add a basic configuration check ([#888](https://github.com/Devolutions/devolutions-gateway/issues/888)) ([2c3877e802](https://github.com/Devolutions/devolutions-gateway/commit/2c3877e8023ea8bfa590dfd4d29a5d164ddb02b7)) 
+
+### Bug Fixes
+
+- _dgw_: IP restrictions fallback for ngrok TCP listeners ([#881](https://github.com/Devolutions/devolutions-gateway/issues/881)) ([c2635ec6dc](https://github.com/Devolutions/devolutions-gateway/commit/c2635ec6dca3c9820c909d7e3337311481a0376d)) ([DGW-193](https://devolutions.atlassian.net/browse/DGW-193)) 
+
+  Now properly fallbacks to disabling IP restriction rules for TCP
+  listeners as well.
+
+- _dgw_: rework network interface DTO definition ([#871](https://github.com/Devolutions/devolutions-gateway/issues/871)) ([bc2cb96f9d](https://github.com/Devolutions/devolutions-gateway/commit/bc2cb96f9ddf6f36d3a89f9b4db4bccfb39227fa)) ([DGW-133](https://devolutions.atlassian.net/browse/DGW-133)) 
+
 ## 2024.2.1 (2024-05-22)
 
 ### Bug Fixes
