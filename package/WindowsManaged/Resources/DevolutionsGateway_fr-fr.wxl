@@ -20,6 +20,7 @@
                     <!-- buttons -->
                 <String Id="SearchButton">Rechercher</String>
                 <String Id="ViewButton">Afficher</String>
+                <String Id="ViewErrorsButton">Afficher les problèmes de configuration</String>
                 <String Id="ViewLogButton">Afficher le journal</String>
                     <!-- enums -->
                 <String Id="AuthenticationMode_Custom">Personnalisée</String>

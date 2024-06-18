@@ -14,6 +14,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Xml;
+using Newtonsoft.Json;
 using WixSharp;
 using WixSharp.CommonTasks;
 using WixSharpSetup.Dialogs;
@@ -290,6 +291,7 @@ internal class Program
         project.ResolveWildCards(true);
 
         project.DefaultRefAssemblies.Add(typeof(ZipArchive).Assembly.Location);
+        project.DefaultRefAssemblies.Add(typeof(JsonSerializer).Assembly.Location);
         project.Actions = GatewayActions.Actions;
         project.RegValues = new RegValue[]
         {
@@ -362,6 +364,12 @@ internal class Program
 
     private static void Project_UIInitialized(SetupEventArgs e)
     {
+        e.Session.Set(GatewayProperties.userTempPath, Path.GetTempPath());
+
+        Guid installId = Guid.NewGuid();
+        e.Session.Set(GatewayProperties.installId, installId);
+        Wizard.Globals["installId"] = installId.ToString();
+
         string lcid = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "fr" ? frFR.Key : enUS.Key;
 
         using Stream stream = Assembly.GetExecutingAssembly()

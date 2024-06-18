@@ -173,7 +173,6 @@ Stable options are:
 
         * **Proto** (_String_): MUST be set to `http`.
         * **Domain** (_String_): The domain to request, as registered in the ngrok dashboard.
-        * **Metadata** (_String_): Arbitrary user-defined metadata that will appear in the ngrok service API when listing tunnel sessions.
         * **CircuitBreaker** (_Ratio_): Reject requests when 5XX responses exceed this ratio.
         * **Compression** (_Boolean_): Enable gzip compression for HTTP responses.
 

@@ -171,6 +171,10 @@
         {
           "id": "ViewLogButton",
           "text": "View Log"
+        },
+        {
+          "id": "ViewErrorsButton",
+          "text": "View configuration issues"
         }
       ],
       "propertyGroups": [

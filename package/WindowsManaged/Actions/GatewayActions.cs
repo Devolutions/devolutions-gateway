@@ -443,6 +443,19 @@ internal static class GatewayActions
         return action;
     }
 
+    private static readonly ElevatedManagedAction evaluateConfiguration = new(
+        new Id($"CA.{nameof(evaluateConfiguration)}"),
+        CustomActions.EvaluateConfiguration,
+        Return.ignore,
+        When.After, new Step(setUserDatabasePermissions.Id),
+        GatewayProperties.uninstalling.Equal(false),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.installId, GatewayProperties.userTempPath })
+    };
+
     internal static readonly Action[] Actions =
     {
         isFirstInstall,
@@ -476,5 +489,6 @@ internal static class GatewayActions
         configurePublicKey,
         configureWebApp,
         configureWebAppUser,
+        evaluateConfiguration,
     };
 }

@@ -77,6 +77,10 @@
         {
           "id": "ViewLogButton",
           "text": "Afficher le journal"
+        },
+        {
+          "id": "ViewErrorsButton",
+          "text": "Afficher les problèmes de configuration"
         }
       ],
       "enums": [

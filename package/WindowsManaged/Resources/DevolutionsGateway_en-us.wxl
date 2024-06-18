@@ -44,6 +44,7 @@
                     <!-- buttons -->
                 <String Id="SearchButton">Search</String>
                 <String Id="ViewButton">View</String>
+                <String Id="ViewErrorsButton">View configuration issues</String>
                 <String Id="ViewLogButton">View Log</String>
                     <!-- propertyGroups -->
                 <String Id="Group_Certificate">Certificate</String>
