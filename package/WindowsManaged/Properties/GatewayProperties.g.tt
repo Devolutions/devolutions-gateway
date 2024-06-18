@@ -243,7 +243,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("TcpListenerScheme", Statics.TcpProtocol),
 
     new PropertyDefinition<bool>("ConfigureWebApp", false, comment: "`true` to configure the standalone web application interactively"),
-    new PropertyDefinition<Statics.AuthenticationMode>("AuthenticationMode", Statics.AuthenticationMode.None),
+    new PropertyDefinition<Statics.AuthenticationMode>("AuthenticationMode", Statics.AuthenticationMode.Custom),
     new PropertyDefinition<string>("WebUsername", ""),
     new PropertyDefinition<string>("WebPassword", "", hidden: true),
 
@@ -254,7 +254,8 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("NgrokRemoteAddress", ""),
 
     new PropertyDefinition<bool>("DebugPowerShell", false),
-    new PropertyDefinition<Guid>("InstallId", Guid.Empty, isPublic: false, secure: false),
+    new PropertyDefinition<Guid>("InstallId", Guid.Empty, isPublic: true, secure: true),
+    new PropertyDefinition<string>("UserTempPath", "", isPublic: true, secure: true),
     new PropertyDefinition<uint>("NetFx45Version", 0, isPublic: false, secure: false),
     new PropertyDefinition<bool>("FirstInstall", false, isPublic: false, secure: false),
     new PropertyDefinition<bool>("Upgrading", false, isPublic: false, secure: false),
