@@ -771,6 +771,7 @@ class TlkRecipe
         switch ($this.Product) {
             "gateway" {
                 Merge-Tokens -TemplateFile $RulesTemplate -Tokens @{
+                    root_path = $this.SourcePath
                     dgateway_executable = $DGatewayExecutable
                     dgateway_webclient = $DGatewayWebClient
                     platform_dir = $InputPackagePath

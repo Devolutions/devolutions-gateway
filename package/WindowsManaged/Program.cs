@@ -282,7 +282,8 @@ internal class Program
                     {
                         Dirs = new Dir[]
                         {
-                            new("client", new Files($@"{DevolutionsWebClientPath}\*.*"))
+                            new("client", new Files($@"{DevolutionsWebClientPath}\*.*")),
+                            new("player", new Files(@"..\..\webapp\player\*.*"))
                         }
                     }
                 }
