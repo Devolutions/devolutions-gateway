@@ -9,9 +9,9 @@ namespace DevolutionsGateway.Configuration
 
         public string Authentication { get; set; }
 
-        public int AppTokenMaximumLifetime { get; set; }
+        public int? AppTokenMaximumLifetime { get; set; }
 
-        public int LoginLimitRate { get; set; }
+        public int? LoginLimitRate { get; set; }
 
         [DefaultValue(Actions.CustomActions.DefaultUsersFile)]
         [JsonProperty(DefaultValueHandling = DefaultValueHandling.Populate)]

@@ -9,6 +9,7 @@ namespace DevolutionsGateway.Actions
 {
     internal enum FileAccess
     {
+        None,
         Read,
         Write,
         Modify,

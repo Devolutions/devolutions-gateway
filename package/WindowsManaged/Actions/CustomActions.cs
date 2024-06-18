@@ -541,8 +541,11 @@ namespace DevolutionsGateway.Actions
 
                 using (Impersonation _ = new Impersonation(userDomain[1], userDomain[0], string.Empty))
                 {
-                    if (!TryReadGatewayConfig(session, out config))
+                    string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
+
+                    if (!TryReadGatewayConfig(session, configPath, out config, out Exception e))
                     {
+                        results[configPath] = (false, FileAccess.Read, e);
                         session.Log("failed to load or parse the configuration file");
                     }
 
@@ -700,6 +703,7 @@ namespace DevolutionsGateway.Actions
             }
             catch (Exception e)
             {
+                results["Not applicable"] = (false, FileAccess.None, e);
                 session.Log($"unexpected error while checking configuration: {e}");
                 result = ActionResult.Failure;
             }
@@ -1350,36 +1354,39 @@ namespace DevolutionsGateway.Actions
             return Version.TryParse(version, out powerShellVersion);
         }
 
-        internal static bool TryReadGatewayConfig(ILogger logger, out Gateway gatewayConfig)
+        internal static bool TryReadGatewayConfig(ILogger logger, string path, out Gateway gatewayConfig, out Exception error)
         {
             gatewayConfig = new Gateway();
-            string configPath = Path.Combine(ProgramDataDirectory, GatewayConfigFile);
 
-            if (!File.Exists(configPath))
+            if (!File.Exists(path))
             {
+                error = new FileNotFoundException(path);
                 return false;
             }
 
             try
             {
-                using StreamReader reader = new StreamReader(configPath);
+                using StreamReader reader = new StreamReader(path);
                 using JsonReader jsonReader = new JsonTextReader(reader);
 
                 JsonSerializer serializer = new JsonSerializer();
                 gatewayConfig = serializer.Deserialize<Gateway>(jsonReader);
 
+                error = null;
+
                 return true;
             }
             catch (Exception e)
             {
-                logger.Log($"failed to load configuration file at {configPath}: {e}");
+                logger.Log($"failed to load configuration file at {path}: {e}");
+                error = e;
                 return false;
             }
         }
 
-        internal static bool TryReadGatewayConfig(Session session, out Gateway gatewayConfig)
+        internal static bool TryReadGatewayConfig(Session session, string path, out Gateway gatewayConfig, out Exception error)
         {
-            return TryReadGatewayConfig(LogDelegate.WithSession(session), out gatewayConfig);
+            return TryReadGatewayConfig(LogDelegate.WithSession(session), path, out gatewayConfig, out error);
         }
     }
 }
