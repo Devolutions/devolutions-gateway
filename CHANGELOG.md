@@ -4,6 +4,18 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.2.3 (2024-06-18)
+
+### Bug Fixes
+
+- _installer_: fix parsing errors with configuration check ([#893](https://github.com/Devolutions/devolutions-gateway/issues/893)) ([4f89688316](https://github.com/Devolutions/devolutions-gateway/commit/4f8968831698bb82afe06eb69421c6d984c7b062))
+
+- (installer): package web player ([#894](https://github.com/Devolutions/devolutions-gateway/issues/894)) ([bbee301682](https://github.com/Devolutions/devolutions-gateway/commit/bbee301682dbdb8191a678a5853d92586eb883ff))
+
+### Continuous Integration
+
+- Update macOS runner version ([#892](https://github.com/Devolutions/devolutions-gateway/issues/892)) ([b0d81c66b2](https://github.com/Devolutions/devolutions-gateway/commit/b0d81c66b2ef806e33fc3d97abfd86c95f507a10))
+
 ## 2024.2.2 (2024-06-18)
 
 ### Features
