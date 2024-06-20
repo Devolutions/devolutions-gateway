@@ -53,7 +53,7 @@ sysinfo = "0.30"
 
 # Security, crypto…
 picky = { version = "7.0.0-rc.8", default-features = false, features = ["jose", "x509", "pkcs12"] }
-zeroize = { version = "1.7", features = ["derive"] }
+zeroize = { version = "1.8", features = ["derive"] }
 multibase = "0.9"
 argon2 = { version = "0.5", features = ["std"] }
 
@@ -99,7 +99,7 @@ packet = { git = "https://github.com/fdubois1/rust-packet.git" }
 portpicker = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-rustls-cng = "0.3"
+rustls-cng = "0.5"
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
