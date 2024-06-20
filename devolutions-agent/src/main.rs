@@ -5,6 +5,9 @@ mod config;
 mod log;
 mod service;
 
+#[cfg(windows)]
+mod updater;
+
 use std::env;
 use std::sync::mpsc;
 
