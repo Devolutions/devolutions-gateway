@@ -24,7 +24,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use crate::config::ConfHandle;
 
 use integrity::validate_artifact_hash;
-use io::{download_bytes, download_text, save_to_temp_file};
+use io::{download_binary, download_text, save_to_temp_file};
 use package::{install_package, validate_package};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
@@ -83,12 +83,12 @@ impl Task for UpdaterTask {
                     error!(%err, "Failed to watch update.json file");
                 }
             })
-            .context("Failed to create file notify debouncer")?;
+            .context("failed to create file notify debouncer")?;
 
         notify_debouncer
             .watcher()
             .watch(update_file_path.as_std_path(), RecursiveMode::NonRecursive)
-            .context("Failed to start update file watcher")?;
+            .context("failed to start update file watcher")?;
 
         // Trigger initial check during task startup
         file_change_notification.notify_waiters();
@@ -149,9 +149,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
     let target_version = order.target_version;
     let hash = order.hash;
 
-    let package_data = download_bytes(&order.package_url)
+    let package_data = download_binary(&order.package_url)
         .await
-        .with_context(|| format!("Failed to download package file for `{product}`"))?;
+        .with_context(|| format!("failed to download package file for `{product}`"))?;
 
     let package_path = save_to_temp_file(&package_data, Some(product.get_package_extension())).await?;
 
@@ -159,9 +159,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 
     let ctx = UpdaterCtx { product, conf };
 
-    validate_artifact_hash(&ctx, &package_data, &hash).context("Failed to validate package file integrity")?;
+    validate_artifact_hash(&ctx, &package_data, &hash).context("failed to validate package file integrity")?;
 
-    validate_package(&ctx, &package_path).context("Failed to validate package contents")?;
+    validate_package(&ctx, &package_path).context("failed to validate package contents")?;
 
     if ctx.conf.get_conf().debug.skip_msi_install {
         warn!(%product, "DEBUG MODE: Skipping package installation due to debug configuration");
@@ -180,9 +180,9 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJson> {
     let update_json_data = tokio::fs::read(update_file_path)
         .await
-        .context("Failed to read update.json file")?;
+        .context("failed to read update.json file")?;
     let update_json: UpdateJson =
-        serde_json::from_slice(&update_json_data).context("Failed to parse update.json file")?;
+        serde_json::from_slice(&update_json_data).context("failed to parse update.json file")?;
 
     Ok(update_json)
 }
@@ -221,15 +221,15 @@ async fn check_for_updates(product: Product, update_json: &UpdateJson) -> anyhow
 
     info!(%product, %target_version, "Ready to update the product");
 
-    let product_info_db = download_text(DEVOLUTIONS_PRODUCTINFO_URL)
+    let product_info_db = download_utf8(DEVOLUTIONS_PRODUCTINFO_URL)
         .await
-        .context("Failed to download productinfo database")?;
+        .context("failed to download productinfo database")?;
 
     let product_info_db: productinfo::ProductInfoDb = product_info_db.parse()?;
 
     let product_info = product_info_db
         .get(product.get_productinfo_id())
-        .ok_or_else(|| anyhow!("Product `{product}` info not found in remote database"))?;
+        .ok_or_else(|| anyhow!("product `{product}` info not found in remote database"))?;
 
     let remote_version = product_info.version.parse::<DateVersion>()?;
 
@@ -259,11 +259,11 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
     let update_file_path = get_updater_file_path();
 
     let default_update_json =
-        serde_json::to_string_pretty(&UpdateJson::default()).context("Failed to serialize default update.json")?;
+        serde_json::to_string_pretty(&UpdateJson::default()).context("failed to serialize default update.json")?;
 
     fs::write(&update_file_path, default_update_json)
         .await
-        .context("Failed to write default update.json file")?;
+        .context("failed to write default update.json file")?;
 
     // Set permissions for update.json file:
     match set_file_dacl(&update_file_path, security::UPDATE_JSON_DACL) {
@@ -276,7 +276,7 @@ async fn init_update_json() -> anyhow::Result<Utf8PathBuf> {
                 .unwrap_or_else(|err| warn!(%err, "Failed to remove update.json file after failed permissions set"));
 
             // Treat as fatal error
-            return Err(anyhow!(err).context("Failed to set update.json file permissions"));
+            return Err(anyhow!(err).context("failed to set update.json file permissions"));
         }
     }
 
