@@ -122,12 +122,16 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 pub mod dto {
     use super::*;
 
+    pub const fn default_bool<const V: bool>() -> bool {
+        V
+    }
+
     #[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct UpdaterConf {
         /// Enable updater module (enabled by default)
-        #[serde(default)]
-        pub disable: bool,
+        #[serde(default = "default_bool::<true>")]
+        pub enabled: bool,
     }
 
     /// Source of truth for Agent configuration
