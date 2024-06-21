@@ -33,8 +33,8 @@
         const windowURL = new URL(window.location.href);
         var sessionId = windowURL.searchParams.get('sessionId');
         var token = windowURL.searchParams.get('token');
-
-        var videoSrcInfo = `${windowURL.protocol}//${windowURL.host}/jet/jrec/pull/${sessionId}/recording.json?token=${token}`;
+        const gatewayAccessUrl = windowURL.toString().split("/jet/jrec")[0];
+        var videoSrcInfo = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/recording.json?token=${token}`;
         var request = new XMLHttpRequest();
 
         request.onreadystatechange = function () {
@@ -61,7 +61,7 @@
                   document.body.appendChild(videoPlayer)
 
                   // initialize the video player
-                  let videoSrc = `${windowURL.protocol}//${windowURL.host}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
+                  let videoSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
                   videoSrcElement.setAttribute('src', videoSrc);
 
                   // set up video cycling
@@ -73,7 +73,7 @@
                     if (currentIndex > maxIndex) {
                         currentIndex = 0;
                     }
-                    videoSrc = `${windowURL.protocol}//${windowURL.host}/jet/jrec/pull/${sessionId}/${recordingInfo.files[currentIndex].fileName}?token=${token}`;
+                    videoSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[currentIndex].fileName}?token=${token}`;
                     videoSrcElement.setAttribute('src', videoSrc);
                     videoPlayer.load();
                     videoPlayer.play();
@@ -87,7 +87,7 @@
                   var terminalDiv = document.createElement("div")
                   document.body.appendChild(terminalDiv)
 
-                  let trpSrc = `${windowURL.protocol}//${windowURL.host}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`
+                  let trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`
 
                   loadFile(trpSrc, function(trpFileContent) {
   
@@ -110,7 +110,7 @@
                   var terminalDiv = document.createElement("div")
                   document.body.appendChild(terminalDiv)
 
-                  let castSrc = `${windowURL.protocol}//${windowURL.host}/jet/jrec/pull/${sessionId}/${recordingInfo.files[currentIndex].fileName}?token=${token}`
+                  let castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[currentIndex].fileName}?token=${token}`
 
                   loadFile(castSrc, function(castFileContent) {
 
