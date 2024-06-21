@@ -179,7 +179,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
 
     #[cfg(windows)]
-    if !conf.updater.disable {
+    if conf.updater.enabled {
         tasks.register(UpdaterTask::new(conf_handle.clone()));
     }
 
