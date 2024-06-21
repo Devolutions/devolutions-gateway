@@ -24,7 +24,7 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use crate::config::ConfHandle;
 
 use integrity::validate_artifact_hash;
-use io::{download_binary, download_text, save_to_temp_file};
+use io::{download_binary, download_utf8, save_to_temp_file};
 use package::{install_package, validate_package};
 use productinfo::DEVOLUTIONS_PRODUCTINFO_URL;
 use security::set_file_dacl;
