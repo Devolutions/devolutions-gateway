@@ -17,9 +17,13 @@ pub(crate) struct UpdateQueryParam {
 #[derive(Serialize)]
 pub(crate) struct UpdateResponse {}
 
-/// Starts Devolutions Gateway update process
+/// Triggers Devolutions Gateway update process.
+///
+/// This is done via updating `Agent/update.json` file, which is then read by Devolutions Agent
+/// when changes are detected. If the version written to `update.json` is indeed higher than the
+/// currently installed version, Devolutions Agent will proceed with the update process.
 #[cfg_attr(feature = "openapi", utoipa::path(
-    get,
+    post,
     operation_id = "Update",
     tag = "Update",
     path = "/jet/update",
@@ -33,7 +37,7 @@ pub(crate) struct UpdateResponse {}
     ),
     security(("scope_token" = ["gateway.update"])),
 ))]
-pub(super) async fn start_update(
+pub(super) async fn trigger_update_check(
     Query(query): Query<UpdateQueryParam>,
     _scope: UpdateScope,
 ) -> Result<Json<UpdateResponse>, HttpError> {
@@ -42,22 +46,24 @@ pub(super) async fn start_update(
     let updater_file_path = get_updater_file_path();
 
     if !updater_file_path.exists() {
-        error!("Failed to start Gateway update, `update.json` does not exist (should be created by Devolutions Agent)");
-
-        return Err(HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("Agent updater service is unavailable"));
+        return Err(HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("Agent updater service is not installed"));
     }
 
     let update_json = UpdateJson {
         gateway: Some(ProductUpdateInfo { target_version }),
     };
 
-    serde_json::to_string(&update_json)
-        .ok()
-        .and_then(|serialized| std::fs::write(updater_file_path, serialized).ok())
-        .ok_or_else(|| {
-            error!("Failed to write new Gateway version to `update.json`");
-            HttpErrorBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).msg("Agent updater service is unavailable")
-        })?;
+    let update_json = serde_json::to_string(&update_json).map_err(
+        HttpError::internal()
+            .with_msg("failed to serialize the update manifest")
+            .err(),
+    )?;
+
+    std::fs::write(updater_file_path, update_json).map_err(
+        HttpError::internal()
+            .with_msg("failed to write the new `update.json` manifest on disk")
+            .err(),
+    )?;
 
     Ok(Json(UpdateResponse {}))
 }

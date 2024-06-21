@@ -20,7 +20,7 @@ use uuid::Uuid;
         crate::api::jrec::pull_recording_file,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
-        crate::api::update::start_update,
+        crate::api::update::trigger_update_check,
         // crate::api::net::get_net_config,
     ),
     components(schemas(
