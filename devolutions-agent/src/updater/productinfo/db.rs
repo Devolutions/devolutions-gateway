@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_productinfo_parse() {
-        let input = include_str!("test_asset_db");
+        let input = include_str!("../../../test_assets/test_asset_db");
         let db: ProductInfoDb = input.parse().unwrap();
 
         assert_eq!(db.get("Gatewaybin").unwrap().version, "2024.2.1.0");

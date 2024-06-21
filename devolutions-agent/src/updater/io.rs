@@ -8,7 +8,7 @@ use tokio::{fs::File, io::AsyncWriteExt};
 use crate::updater::UpdaterError;
 
 /// Download binary file to memory
-pub async fn download_bytes(url: &str) -> Result<Vec<u8>, UpdaterError> {
+pub async fn download_binary(url: &str) -> Result<Vec<u8>, UpdaterError> {
     info!(%url, "Downloading file from network...");
 
     let body = reqwest::get(url)
@@ -22,8 +22,8 @@ pub async fn download_bytes(url: &str) -> Result<Vec<u8>, UpdaterError> {
 }
 
 /// Download UTF-8 file to memory
-pub async fn download_text(url: &str) -> Result<String, UpdaterError> {
-    let bytes = download_bytes(url).await?;
+pub async fn download_utf8(url: &str) -> Result<String, UpdaterError> {
+    let bytes = download_binary(url).await?;
     String::from_utf8(bytes).map_err(|_| UpdaterError::Utf8)
 }
 
@@ -50,11 +50,11 @@ pub async fn save_to_temp_file(data: &[u8], extension: Option<&str>) -> Result<U
 
 /// Mark file to be removed on next reboot.
 pub fn remove_file_on_reboot(file_path: &Utf8Path) -> Result<(), UpdaterError> {
-    _impl_remove_file_on_reboot(file_path)
+    remove_file_on_reboot_impl(file_path)
 }
 
 #[cfg(windows)]
-pub fn _impl_remove_file_on_reboot(file_path: &Utf8Path) -> Result<(), UpdaterError> {
+pub fn remove_file_on_reboot_impl(file_path: &Utf8Path) -> Result<(), UpdaterError> {
     use windows::core::HSTRING;
     use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
 
@@ -70,7 +70,7 @@ pub fn _impl_remove_file_on_reboot(file_path: &Utf8Path) -> Result<(), UpdaterEr
 }
 
 #[cfg(not(windows))]
-pub fn _impl_remove_file_on_reboot(_file_path: &Utf8Path) -> Result<(), UpdaterError> {
-    // NOTE: On UNIX-like platforms /tmp filder is used which is cleared by OS automatically.
+pub fn impl_remove_file_on_reboot_impl(_file_path: &Utf8Path) -> Result<(), UpdaterError> {
+    // NOTE: On UNIX-like platforms /tmp folder is used which is cleared by OS automatically.
     Ok(())
 }

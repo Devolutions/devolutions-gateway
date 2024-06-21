@@ -57,9 +57,9 @@ mod tests {
             ("latest", VersionSpecification::Latest),
         ];
 
-        for (serialized, deserizlized) in cases {
+        for (serialized, deserialized) in cases {
             let parsed = serde_json::from_str::<VersionSpecification>(&format!("\"{}\"", serialized)).unwrap();
-            assert_eq!(parsed, *deserizlized);
+            assert_eq!(parsed, *deserialized);
 
             let reserialized = serde_json::to_string(&parsed).unwrap();
             assert_eq!(reserialized, format!("\"{}\"", serialized));
