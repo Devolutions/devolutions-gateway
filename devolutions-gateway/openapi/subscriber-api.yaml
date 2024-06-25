@@ -7,13 +7,14 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.2.3
+  version: 2024.1.5
 paths:
   /dgw/subscriber:
     post:
       tags:
       - Subscriber
       summary: Process a message originating from a Devolutions Gateway instance
+      description: Process a message originating from a Devolutions Gateway instance
       operationId: PostMessage
       requestBody:
         description: Message

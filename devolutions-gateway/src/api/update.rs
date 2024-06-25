@@ -46,7 +46,9 @@ pub(super) async fn trigger_update_check(
     let updater_file_path = get_updater_file_path();
 
     if !updater_file_path.exists() {
-        return Err(HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("Agent updater service is not installed"));
+        return Err(
+            HttpErrorBuilder::new(StatusCode::SERVICE_UNAVAILABLE).msg("Agent updater service is not installed")
+        );
     }
 
     let update_json = UpdateJson {
