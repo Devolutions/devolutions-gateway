@@ -11,6 +11,7 @@ pub mod net;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
+pub mod update;
 pub mod webapp;
 
 pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
@@ -27,7 +28,8 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .route("/jet/rdp", axum::routing::get(rdp::handler))
         .nest("/jet/fwd", fwd::make_router(state.clone()))
         .nest("/jet/webapp", webapp::make_router(state.clone()))
-        .nest("/jet/net", net::make_router(state.clone()));
+        .nest("/jet/net", net::make_router(state.clone()))
+        .route("/jet/update", axum::routing::post(update::trigger_update_check));
 
     if state.conf_handle.get_conf().web_app.enabled {
         router = router.route(
