@@ -267,7 +267,15 @@ pub enum RecordingFileType {
 }
 
 impl RecordingFileType {
-    pub const fn as_str(self) -> &'static str {
+    pub const fn format_name(self) -> &'static str {
+        match self {
+            RecordingFileType::WebM => "WebM",
+            RecordingFileType::TRP => "TRP",
+            RecordingFileType::Asciicast => "asciicast",
+        }
+    }
+
+    pub const fn extension(self) -> &'static str {
         match self {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
@@ -278,7 +286,7 @@ impl RecordingFileType {
 
 impl fmt::Display for RecordingFileType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
+        write!(f, "{}", self.format_name())
     }
 }
 

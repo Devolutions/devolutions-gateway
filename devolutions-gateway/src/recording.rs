@@ -342,7 +342,7 @@ impl RecordingManagerTask {
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-            let file_name = format!("recording-{next_file_idx}.{file_type}");
+            let file_name = format!("recording-{next_file_idx}.{}", file_type.extension());
             let recording_file = recording_path.join(&file_name);
 
             existing_manifest.files.push(JrecFile {
@@ -364,7 +364,7 @@ impl RecordingManagerTask {
                 .with_context(|| format!("failed to create recording path: {recording_path}"))?;
 
             let start_time = time::OffsetDateTime::now_utc().unix_timestamp();
-            let file_name = format!("recording-0.{file_type}");
+            let file_name = format!("recording-0.{}", file_type.extension());
             let recording_file = recording_path.join(&file_name);
 
             let first_file = JrecFile {
