@@ -271,7 +271,7 @@ impl RecordingFileType {
         match self {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
-            RecordingFileType::Asciicast => "cast",  
+            RecordingFileType::Asciicast => "cast",
         }
     }
 }
