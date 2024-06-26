@@ -17,18 +17,23 @@ public class AssociationClaims : IGatewayClaims
     public Guid SessionId { get; set; }
     [JsonPropertyName("jet_gw_id")]
     public Guid ScopeGatewayId { get; set; }
+    [JsonPropertyName("jet_ttl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SessionTtl? TimeToLive { get; set; }
 
     public AssociationClaims(
         Guid scopeGatewayId,
         TargetAddr destinationHost,
         ApplicationProtocol applicationProtocol,
-        Guid sessionId)
+        Guid sessionId,
+        SessionTtl? TimeToLive = null)
     {
         this.DestinationHost = destinationHost;
         this.ApplicationProtocol = applicationProtocol;
         this.ConnectionMode = "fwd";
         this.SessionId = sessionId;
         this.ScopeGatewayId = scopeGatewayId;
+        this.TimeToLive = TimeToLive;
     }
 
     public string GetContentType()
