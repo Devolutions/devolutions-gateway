@@ -262,6 +262,8 @@ pub enum RecordingFileType {
     WebM,
     /// Terminal Playback
     TRP,
+    /// asciinema cast for terminal playback
+    Asciicast,
 }
 
 impl RecordingFileType {
@@ -269,6 +271,7 @@ impl RecordingFileType {
         match self {
             RecordingFileType::WebM => "webm",
             RecordingFileType::TRP => "trp",
+            RecordingFileType::Asciicast => "cast",
         }
     }
 }
