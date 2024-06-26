@@ -120,8 +120,8 @@ jobs:
           name: version
           path: VERSION
 
-  test:
-      name: test [${{ matrix.os }} ${{ matrix.arch }}]
+  tests:
+      name: tests [${{ matrix.os }} ${{ matrix.arch }}]
       runs-on: ${{ matrix.runner }}
       needs: preflight
       strategy:
@@ -146,7 +146,7 @@ jobs:
             sudo apt-get update
             sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
 
-        - name: Test
+        - name: Tests
           shell: pwsh
           run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
@@ -556,12 +556,71 @@ jobs:
           pattern: devolutions-agent-*
           delete-merged: true
 
+  dotnet-utils-tests:
+      name: .NET utils tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Tests
+          shell: pwsh
+          run: |
+            Set-PSDebug -Trace 1
+            dotnet test utils/dotnet/GatewayUtils.sln
+
+  powershell-tests:
+      name: PowerShell module tests
+      runs-on: windows-2022
+      needs: preflight
+
+      steps:
+        - name: Checkout ${{ github.repository }}
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ needs.preflight.outputs.ref }}
+
+        - name: Install Pester module
+          id: prepare
+          shell: pwsh
+          run: Install-Module Pester -RequiredVersion 5.6.0
+
+        - name: Build module
+          shell: pwsh
+          run: |
+            ./powershell/build.ps1
+
+        - name: Pester
+          shell: pwsh
+          run: |
+            ./powershell/run-tests.ps1
+
+  success:
+    name: Success
+    runs-on: ubuntu-latest
+    if: ${{ success() }}
+    needs:
+      - tests
+      - jetsocat-lipo
+      - devolutions-gateway-merge
+      - devolutions-agent-merge
+      - dotnet-utils-tests
+      - powershell-tests
+
+    steps:
+      - name: CI succeeded
+        run: exit 0
+
   upload-git-log:
     name: Upload git-log output
     runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
-      - preflight
+      - success
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -570,11 +629,11 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 10
 
-      - name: Generate git log
+      - name: Generate git-log.txt
         shell: pwsh
         run: git log --max-count=10 > ./git-log.txt
 
-      - name: Upload artifacts
+      - name: Upload git-log.txt
         uses: actions/upload-artifact@v4
         with:
           name: git-log
@@ -585,13 +644,6 @@ jobs:
     runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
-      - preflight
-      - devolutions-gateway
-      - devolutions-gateway-merge
-      - devolutions-agent
-      - devolutions-agent-merge
-      - jetsocat
-      - jetsocat-lipo
       - upload-git-log
 
     steps:
@@ -684,45 +736,3 @@ jobs:
           remote: prereleases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
 
-  dotnet-utils-tests:
-      name: dotnet utils tests
-      runs-on: windows-2022
-      needs: preflight
-
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
-
-        - name: Test
-          shell: pwsh
-          run: |
-            Set-PSDebug -Trace 1
-            dotnet test utils/dotnet/GatewayUtils.sln
-
-  powershell-tests:
-      name: PowerShell module tests
-      runs-on: windows-2022
-      needs: preflight
-
-      steps:
-        - name: Checkout ${{ github.repository }}
-          uses: actions/checkout@v4
-          with:
-            ref: ${{ needs.preflight.outputs.ref }}
-
-        - name: Install Pester module
-          id: prepare
-          shell: pwsh
-          run: Install-Module Pester -RequiredVersion 5.6.0
-
-        - name: Build module
-          shell: pwsh
-          run: |
-            ./powershell/build.ps1
-
-        - name: Pester
-          shell: pwsh
-          run: |
-            ./powershell/run-tests.ps1
