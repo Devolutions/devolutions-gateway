@@ -1,3 +1,4 @@
+use crate::recording::RecordingMessageSender;
 use crate::subscriber;
 use crate::target_addr::TargetAddr;
 use crate::token::{ApplicationProtocol, SessionTtl};
@@ -133,6 +134,10 @@ enum SessionManagerMessage {
         info: SessionInfo,
         notify_kill: Arc<Notify>,
     },
+    GetInfo {
+        id: Uuid,
+        channel: oneshot::Sender<Option<SessionInfo>>,
+    },
     Remove {
         id: Uuid,
         channel: oneshot::Sender<Option<SessionInfo>>,
@@ -154,6 +159,9 @@ impl fmt::Debug for SessionManagerMessage {
         match self {
             SessionManagerMessage::New { info, notify_kill: _ } => {
                 f.debug_struct("New").field("info", info).finish_non_exhaustive()
+            }
+            SessionManagerMessage::GetInfo { id, channel: _ } => {
+                f.debug_struct("GetInfo").field("id", id).finish_non_exhaustive()
             }
             SessionManagerMessage::Remove { id, channel: _ } => {
                 f.debug_struct("Remove").field("id", id).finish_non_exhaustive()
@@ -177,6 +185,16 @@ impl SessionMessageSender {
             .await
             .ok()
             .context("couldn't send New message")
+    }
+
+    pub async fn get_session_info(&self, id: Uuid) -> anyhow::Result<Option<SessionInfo>> {
+        let (tx, rx) = oneshot::channel();
+        self.0
+            .send(SessionManagerMessage::GetInfo { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send Remove message")?;
+        rx.await.context("couldn't receive info for session")
     }
 
     pub async fn remove_session(&self, id: Uuid) -> anyhow::Result<Option<SessionInfo>> {
@@ -256,24 +274,46 @@ impl Ord for WithTtlInfo {
 }
 
 pub struct SessionManagerTask {
+    tx: SessionMessageSender,
     rx: SessionMessageReceiver,
     all_running: RunningSessions,
     all_notify_kill: HashMap<Uuid, Arc<Notify>>,
+    recording_manager_handle: RecordingMessageSender,
 }
 
 impl SessionManagerTask {
-    pub fn new(rx: SessionMessageReceiver) -> Self {
+    pub fn init(recording_manager_handle: RecordingMessageSender) -> Self {
+        let (tx, rx) = session_manager_channel();
+
+        Self::new(tx, rx, recording_manager_handle)
+    }
+
+    pub fn new(
+        tx: SessionMessageSender,
+        rx: SessionMessageReceiver,
+        recording_manager_handle: RecordingMessageSender,
+    ) -> Self {
         Self {
+            tx,
             rx,
             all_running: HashMap::new(),
             all_notify_kill: HashMap::new(),
+            recording_manager_handle,
         }
+    }
+
+    pub fn handle(&self) -> SessionMessageSender {
+        self.tx.clone()
     }
 
     fn handle_new(&mut self, info: SessionInfo, notify_kill: Arc<Notify>) {
         let id = info.association_id;
         self.all_running.insert(id, info);
         self.all_notify_kill.insert(id, notify_kill);
+    }
+
+    fn handle_get_info(&mut self, id: Uuid) -> Option<SessionInfo> {
+        self.all_running.get(&id).cloned()
     }
 
     fn handle_remove(&mut self, id: Uuid) -> Option<SessionInfo> {
@@ -312,17 +352,14 @@ async fn session_manager_task(
     debug!("Task started");
 
     let mut with_ttl = BinaryHeap::<WithTtlInfo>::new();
-
     let auto_kill_sleep = tokio::time::sleep_until(tokio::time::Instant::now());
     tokio::pin!(auto_kill_sleep);
-
-    // Consume initial sleep
-    (&mut auto_kill_sleep).await;
+    (&mut auto_kill_sleep).await; // Consume initial sleep.
 
     loop {
         tokio::select! {
             () = &mut auto_kill_sleep, if !with_ttl.is_empty() => {
-                // Will never panic since we check for non-emptiness before entering this block
+                // Will never panic since we check for non-emptiness before entering this block.
                 let to_kill = with_ttl.pop().unwrap();
 
                 match manager.handle_kill(to_kill.session_id) {
@@ -334,7 +371,7 @@ async fn session_manager_task(
                     }
                 }
 
-                // Re-arm the Sleep instance with the next deadline if required
+                // Re-arm the Sleep instance with the next deadline if required.
                 if let Some(next) = with_ttl.peek() {
                     auto_kill_sleep.as_mut().reset(next.deadline)
                 }
@@ -350,24 +387,41 @@ async fn session_manager_task(
                 match msg {
                     SessionManagerMessage::New { info, notify_kill } => {
                         if let SessionTtl::Limited { minutes } = info.time_to_live {
-                            let duration = Duration::from_secs(minutes.get() * 60);
                             let now = tokio::time::Instant::now();
+                            let duration = Duration::from_secs(minutes.get() * 60);
                             let deadline = now + duration;
+
                             with_ttl.push(WithTtlInfo {
                                 deadline,
                                 session_id: info.id(),
                             });
 
-                            // Reset the Sleep instance if the new deadline is sooner or it is already elapsed
+                            // Reset the Sleep instance if the new deadline is sooner or it is already elapsed.
                             if auto_kill_sleep.is_elapsed() || deadline < auto_kill_sleep.deadline() {
                                 auto_kill_sleep.as_mut().reset(deadline);
                             }
 
-                            debug!(session.id = %info.id(), minutes = minutes.get(), "Limited TTL session registed");
+                            debug!(session.id = %info.id(), minutes = minutes.get(), "Limited TTL session registered");
+                        }
+
+                        if info.recording_policy {
+                            let task = EnsureRecordingPolicyTask {
+                                session_id: info.id(),
+                                session_manager_handle: manager.tx.clone(),
+                                recording_manager_handle: manager.recording_manager_handle.clone(),
+                            };
+
+                            devolutions_gateway_task::spawn_task(task, shutdown_signal.clone()).detach();
+
+                            debug!(session.id = %info.id(), "Session with recording policy registered");
                         }
 
                         manager.handle_new(info, notify_kill);
-                    },
+                    }
+                    SessionManagerMessage::GetInfo { id, channel } => {
+                        let session_info = manager.handle_get_info(id);
+                        let _ = channel.send(session_info);
+                    }
                     SessionManagerMessage::Remove { id, channel } => {
                         let removed_session = manager.handle_remove(id);
                         let _ = channel.send(removed_session);
@@ -415,4 +469,56 @@ async fn session_manager_task(
     debug!("Task terminated");
 
     Ok(())
+}
+
+struct EnsureRecordingPolicyTask {
+    session_id: Uuid,
+    session_manager_handle: SessionMessageSender,
+    recording_manager_handle: RecordingMessageSender,
+}
+
+#[async_trait]
+impl Task for EnsureRecordingPolicyTask {
+    type Output = ();
+
+    const NAME: &'static str = "ensure recording policy";
+
+    async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
+        use futures::future::Either;
+        use std::pin::pin;
+
+        let sleep = tokio::time::sleep(Duration::from_secs(10));
+        let shutdown_signal = shutdown_signal.wait();
+
+        match futures::future::select(pin!(sleep), pin!(shutdown_signal)).await {
+            Either::Left(_) => {}
+            Either::Right(_) => return,
+        }
+
+        let is_not_recording = self
+            .recording_manager_handle
+            .get_state(self.session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_none();
+
+        if is_not_recording {
+            match self.session_manager_handle.kill_session(self.session_id).await {
+                Ok(KillResult::Success) => {
+                    warn!(
+                        session.id = %self.session_id,
+                        reason = "recording policy violated",
+                        "Session killed",
+                    );
+                }
+                Ok(KillResult::NotFound) => {
+                    trace!(session.id = %self.session_id, "Session already ended");
+                }
+                Err(error) => {
+                    debug!(session.id = %self.session_id, error = format!("{error:#}"), "Couldn’t kill the session");
+                }
+            }
+        }
+    }
 }

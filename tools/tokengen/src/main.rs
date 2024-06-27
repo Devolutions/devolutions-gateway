@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             jet_ap,
             jet_ttl,
             jet_aid,
+            jet_rec,
         } => {
             let claims = AssociationClaims {
                 exp,
@@ -40,6 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
@@ -62,6 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: Some(&dst_hst),
                 jet_cm: "fwd",
                 jet_ap: ApplicationProtocol::Rdp,
+                jet_rec: false,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
@@ -74,7 +77,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             ("ASSOCIATION", serde_json::to_value(claims)?)
         }
-        SubCommand::Rendezvous { jet_ap, jet_aid } => {
+        SubCommand::Rendezvous {
+            jet_ap,
+            jet_aid,
+            jet_rec,
+        } => {
             let claims = AssociationClaims {
                 exp,
                 nbf,
@@ -82,6 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_hst: None,
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl: None,
                 jet_gw_id: app.jet_gw_id,
@@ -223,12 +231,16 @@ enum SubCommand {
         jet_ttl: Option<u64>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     Rendezvous {
         #[clap(long)]
         jet_ap: Option<ApplicationProtocol>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     RdpTls {
         #[clap(long)]
@@ -287,6 +299,7 @@ struct AssociationClaims<'a> {
     jti: Uuid,
     jet_cm: &'a str,
     jet_ap: ApplicationProtocol,
+    jet_rec: bool,
     jet_aid: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
