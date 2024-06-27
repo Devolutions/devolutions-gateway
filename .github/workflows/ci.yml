@@ -644,6 +644,7 @@ jobs:
     runs-on: ubuntu-20.04
     if: ${{ github.ref == 'refs/heads/master' }}
     needs:
+      - preflight # required for needs.preflight.outputs
       - upload-git-log
 
     steps:
