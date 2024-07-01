@@ -208,7 +208,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         sessions: session_manager_handle.clone(),
         subscriber_tx: subscriber_tx.clone(),
         shutdown_signal: tasks.shutdown_signal.clone(),
-        recordings: recording_manager_handle,
+        recordings: recording_manager_handle.clone(),
     };
 
     conf.listeners
@@ -243,7 +243,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     ));
 
     tasks.register(devolutions_gateway::subscriber::SubscriberPollingTask {
-        sessions: session_manager_handle,
+        sessions: session_manager_handle.clone(),
         subscriber: subscriber_tx,
     });
 
@@ -253,12 +253,15 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     });
 
     tasks.register(devolutions_gateway::session::SessionManagerTask::new(
+        session_manager_handle.clone(),
         session_manager_rx,
+        recording_manager_handle,
     ));
 
     tasks.register(devolutions_gateway::recording::RecordingManagerTask::new(
         recording_manager_rx,
         conf.recording_path.clone(),
+        session_manager_handle,
     ));
 
     Ok(tasks)

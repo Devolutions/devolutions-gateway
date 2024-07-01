@@ -121,9 +121,6 @@ where
         )
         .await?;
 
-        // NOTE(DGW-86): when recording is required, should we wait for it to start before we forward, or simply spawn
-        // a timer to check if the recording is started within a few seconds?
-
         let kill_notified = notify_kill.notified();
 
         let res = if let Some(buffer_size) = self.buffer_size {

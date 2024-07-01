@@ -16,6 +16,7 @@ use tokio::{fs, io};
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
 
+use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
@@ -162,6 +163,7 @@ struct OnGoingRecording {
     state: OnGoingRecordingState,
     manifest: JrecManifest,
     manifest_path: Utf8PathBuf,
+    session_must_be_recorded: bool,
 }
 
 enum RecordingManagerMessage {
@@ -310,14 +312,20 @@ pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
     recordings_path: Utf8PathBuf,
+    session_manager_handle: SessionMessageSender,
 }
 
 impl RecordingManagerTask {
-    pub fn new(rx: RecordingMessageReceiver, recordings_path: Utf8PathBuf) -> Self {
+    pub fn new(
+        rx: RecordingMessageReceiver,
+        recordings_path: Utf8PathBuf,
+        session_manager_handle: SessionMessageSender,
+    ) -> Self {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
             recordings_path,
+            session_manager_handle,
         }
     }
 
@@ -389,12 +397,26 @@ impl RecordingManagerTask {
 
         let active_recording_count = self.rx.active_recordings.insert(id);
 
+        // NOTE: the session associated to this recording is not always running through the Devolutions Gateway.
+        // It is a normal situation when the Devolutions is used solely as a recording server.
+        // In such cases, we can only assume there is no recording policy.
+        let session_must_be_recorded = self
+            .session_manager_handle
+            .get_session_info(id)
+            .await
+            .inspect_err(|error| error!(%error, session.id = %id, "Failed to retrieve session info"))
+            .ok()
+            .flatten()
+            .map(|info| info.recording_policy)
+            .unwrap_or(false);
+
         self.ongoing_recordings.insert(
             id,
             OnGoingRecording {
                 state: OnGoingRecordingState::Connected,
                 manifest,
                 manifest_path,
+                session_must_be_recorded,
             },
         );
         let ongoing_recording_count = self.ongoing_recordings.len();
@@ -453,9 +475,42 @@ impl RecordingManagerTask {
                 OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + DISCONNECTED_TTL_SECS - 1 => {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
-                    self.ongoing_recordings.remove(&id);
 
-                    // TODO(DGW-86): now is a good timing to kill sessions that _must_ be recorded
+                    // Check the recording policy of the associated session and kill it if necessary.
+                    if ongoing.session_must_be_recorded {
+                        tokio::spawn({
+                            let session_manager_handle = self.session_manager_handle.clone();
+
+                            async move {
+                                let result = session_manager_handle.kill_session(id).await;
+
+                                match result {
+                                    Ok(crate::session::KillResult::Success) => {
+                                        warn!(
+                                            session.id = %id,
+                                            reason = "recording policy violated",
+                                            "Session killed",
+                                        );
+                                    }
+                                    Ok(crate::session::KillResult::NotFound) => {
+                                        trace!(
+                                            session.id = %id,
+                                            "Associated session is not running, as expected",
+                                        );
+                                    }
+                                    Err(error) => {
+                                        error!(
+                                            session.id = %id,
+                                            %error,
+                                            "Couldn’t kill session",
+                                        )
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    self.ongoing_recordings.remove(&id);
                 }
                 _ => {
                     trace!(%id, "Recording should not be removed yet");
