@@ -6,8 +6,10 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use core::fmt;
 use devolutions_gateway_task::{ShutdownSignal, Task};
+use futures::future::Either;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
+use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tap::prelude::*;
@@ -452,7 +454,23 @@ async fn session_manager_task(
 
     debug!("Task is stopping; wait for leftover messages");
 
-    while let Some(msg) = manager.rx.0.recv().await {
+    loop {
+        // Here, we await with a timeout because this task holds a handle to the
+        // recording manager, but the recording manager itself also holds a handle to
+        // the session manager. As long as the other end doesn’t drop the handle, the
+        // recv future will never resolve. We simply assume there are no leftover messages
+        // to process after one second of inactivity.
+        let msg = match futures::future::select(
+            pin!(manager.rx.0.recv()),
+            pin!(tokio::time::sleep(Duration::from_secs(1))),
+        )
+        .await
+        {
+            Either::Left((Some(msg), _)) => msg,
+            Either::Left((None, _)) => break,
+            Either::Right(_) => break,
+        };
+
         debug!(?msg, "Received message");
         match msg {
             SessionManagerMessage::Remove { id, channel } => {
@@ -484,9 +502,6 @@ impl Task for EnsureRecordingPolicyTask {
     const NAME: &'static str = "ensure recording policy";
 
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> Self::Output {
-        use futures::future::Either;
-        use std::pin::pin;
-
         let sleep = tokio::time::sleep(Duration::from_secs(10));
         let shutdown_signal = shutdown_signal.wait();
 
