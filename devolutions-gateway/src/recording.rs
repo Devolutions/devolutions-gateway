@@ -2,12 +2,14 @@ use core::fmt;
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
+use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
+use futures::future::Either;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
@@ -611,7 +613,23 @@ async fn recording_manager_task(
 
     debug!("Task is stopping; wait for disconnect messages");
 
-    while let Some(msg) = manager.rx.channel.recv().await {
+    loop {
+        // Here, we await with a timeout because this task holds a handle to the
+        // session manager, but the session manager itself also holds a handle to
+        // the recording manager. As long as the other end doesn’t drop the handle, the
+        // recv future will never resolve. We simply assume there are no leftover messages
+        // to process after one second of inactivity.
+        let msg = match futures::future::select(
+            pin!(manager.rx.channel.recv()),
+            pin!(tokio::time::sleep(std::time::Duration::from_secs(1))),
+        )
+        .await
+        {
+            Either::Left((Some(msg), _)) => msg,
+            Either::Left((None, _)) => break,
+            Either::Right(_) => break,
+        };
+
         debug!(?msg, "Received message");
         if let RecordingManagerMessage::Disconnect { id } = msg {
             if let Err(e) = manager.handle_disconnect(id) {

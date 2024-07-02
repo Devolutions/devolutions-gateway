@@ -233,7 +233,7 @@ async fn subscriber_task(
             }
             msg = rx.recv() => {
                 let Some(msg) = msg else {
-                    warn!("All senders are dead");
+                    debug!("All senders are dead");
                     break;
                 };
 
