@@ -28,11 +28,11 @@ public class JsonSerializationTests
     }
 
     [Fact]
-    public void JmuxClaimsWithTtl()
+    public void JmuxClaimsWithOptionalParameters()
     {
-        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":3}""";
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":3,"jet_rec":false}""";
 
-        var claims = new JmuxClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(3));
+        var claims = new JmuxClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(3), false);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
@@ -93,11 +93,11 @@ public class JsonSerializationTests
     }
 
     [Fact]
-    public void AssociationClaimsWithTtl()
+    public void AssociationClaimsWithOptionalParameters()
     {
-        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":120}""";
+        const string EXPECTED = """{"dst_hst":"tcp://hello.world","jet_ap":"rdp","jet_cm":"fwd","jet_aid":"3e7c1854-f1eb-42d2-b9cb-9303036e50da","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_ttl":120,"jet_rec":true}""";
 
-        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(120));
+        var claims = new AssociationClaims(gatewayId, "hello.world", ApplicationProtocol.Rdp, sessionId, new SessionTtl(120), true);
         string result = JsonSerializer.Serialize(claims);
         Assert.Equal(EXPECTED, result);
     }
