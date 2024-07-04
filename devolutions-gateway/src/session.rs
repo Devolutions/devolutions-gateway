@@ -510,15 +510,20 @@ impl Task for EnsureRecordingPolicyTask {
             Either::Right(_) => return,
         }
 
-        let is_not_recording = self
+        let is_recording = self
             .recording_manager_handle
             .get_state(self.session_id)
             .await
             .ok()
             .flatten()
-            .is_none();
+            .is_some();
 
-        if is_not_recording {
+        if is_recording {
+            let _ = self
+                .recording_manager_handle
+                .update_recording_policy(self.session_id, true)
+                .await;
+        } else {
             match self.session_manager_handle.kill_session(self.session_id).await {
                 Ok(KillResult::Success) => {
                     warn!(

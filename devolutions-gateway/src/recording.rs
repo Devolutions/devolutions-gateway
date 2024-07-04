@@ -184,6 +184,10 @@ enum RecordingManagerMessage {
     GetCount {
         channel: oneshot::Sender<usize>,
     },
+    UpdateRecordingPolicy {
+        id: Uuid,
+        session_must_be_recorded: bool,
+    },
 }
 
 impl fmt::Debug for RecordingManagerMessage {
@@ -203,6 +207,14 @@ impl fmt::Debug for RecordingManagerMessage {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
             RecordingManagerMessage::GetCount { channel: _ } => f.debug_struct("GetCount").finish_non_exhaustive(),
+            RecordingManagerMessage::UpdateRecordingPolicy {
+                id,
+                session_must_be_recorded,
+            } => f
+                .debug_struct("UpdateRecordingPolicy")
+                .field("id", id)
+                .field("session_must_be_recorded", session_must_be_recorded)
+                .finish(),
         }
     }
 }
@@ -255,6 +267,17 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send GetCount message")?;
         rx.await.context("couldn't receive ongoing recording count")
+    }
+
+    pub async fn update_recording_policy(&self, id: Uuid, session_must_be_recorded: bool) -> anyhow::Result<()> {
+        self.channel
+            .send(RecordingManagerMessage::UpdateRecordingPolicy {
+                id,
+                session_must_be_recorded,
+            })
+            .await
+            .ok()
+            .context("couldn't send UpdateRecordingPolicy message")
     }
 }
 
@@ -602,6 +625,16 @@ async fn recording_manager_task(
                     }
                     RecordingManagerMessage::GetCount { channel } => {
                         let _ = channel.send(manager.ongoing_recordings.len());
+                    }
+                    RecordingManagerMessage::UpdateRecordingPolicy { id, session_must_be_recorded } => {
+                        if let Some(ongoing) = manager.ongoing_recordings.get_mut(&id) {
+                            ongoing.session_must_be_recorded = session_must_be_recorded;
+                            trace!(
+                                session.id = %id,
+                                session_must_be_recorded,
+                                "Updated recording policy for session",
+                            );
+                        }
                     }
                 }
             }
