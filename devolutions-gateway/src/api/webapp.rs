@@ -361,6 +361,7 @@ pub(crate) async fn sign_session_token(
             JmuxTokenClaims {
                 jet_aid: session_id,
                 jet_ap: protocol,
+                jet_rec: false,
                 hosts: nonempty::NonEmpty::new(destination.clone()),
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
