@@ -464,6 +464,9 @@ pub struct JmuxTokenClaims {
     /// Application Protocol (mostly used to find a known default port)
     pub jet_ap: ApplicationProtocol,
 
+    /// Recording Policy
+    pub jet_rec: bool,
+
     /// Max duration
     pub jet_ttl: SessionTtl,
 
@@ -1190,6 +1193,8 @@ mod serde_impl {
         dst_addl: Vec<SmolStr>,
         #[serde(default)]
         jet_ap: ApplicationProtocol,
+        #[serde(default)]
+        jet_rec: bool,
         jet_aid: Uuid,
         #[serde(default)]
         jet_ttl: SessionTtl,
@@ -1313,6 +1318,7 @@ mod serde_impl {
                     .map(|target| SmolStr::new(target.as_str()))
                     .collect(),
                 jet_ap: self.jet_ap.clone(),
+                jet_rec: self.jet_rec,
                 jet_aid: self.jet_aid,
                 jet_ttl: self.jet_ttl,
                 exp: self.exp,
@@ -1349,6 +1355,7 @@ mod serde_impl {
                 jet_aid: claims.jet_aid,
                 hosts,
                 jet_ap,
+                jet_rec: claims.jet_rec,
                 jet_ttl: claims.jet_ttl,
                 exp: claims.exp,
                 jti: claims.jti,

@@ -51,7 +51,8 @@ pub async fn handle(
             destination_host: main_destination_host,
         },
     )
-    .with_ttl(claims.jet_ttl);
+    .with_ttl(claims.jet_ttl)
+    .with_recording_policy(claims.jet_rec);
 
     let notify_kill = Arc::new(Notify::new());
 

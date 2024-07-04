@@ -113,11 +113,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             dst_addl,
             jet_ttl,
             jet_aid,
+            jet_rec,
         } => {
             let claims = JmuxClaims {
                 dst_hst: &dst_hst,
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
+                jet_rec,
                 jet_aid: jet_aid.unwrap_or_else(Uuid::new_v4),
                 jet_ttl,
                 jet_gw_id: app.jet_gw_id,
@@ -270,6 +272,8 @@ enum SubCommand {
         jet_ttl: Option<u64>,
         #[clap(long)]
         jet_aid: Option<Uuid>,
+        #[clap(long)]
+        jet_rec: bool,
     },
     Jrec {
         #[clap(long)]
@@ -333,6 +337,7 @@ struct JmuxClaims<'a> {
     dst_hst: &'a str,
     dst_addl: Vec<&'a str>,
     jet_ap: ApplicationProtocol,
+    jet_rec: bool,
     jet_aid: Uuid,
     #[serde(skip_serializing_if = "Option::is_none")]
     jet_ttl: Option<u64>,
