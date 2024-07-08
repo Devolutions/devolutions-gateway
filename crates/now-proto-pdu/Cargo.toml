@@ -1,0 +1,16 @@
+[package]
+name = "now-proto-pdu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2"
+
+
+[dev-dependencies]
+rstest = "0.19"
+expect-test = "1"
+
+[features]
+default = ["std"]
+std = []

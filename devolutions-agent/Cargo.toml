@@ -18,6 +18,7 @@ ctrlc = "3.1"
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
+now-proto-pdu = { path = "../crates/now-proto-pdu" }
 futures = "0.3"
 hex = "0.4"
 notify-debouncer-mini = "0.4.1"
