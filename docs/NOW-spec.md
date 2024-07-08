@@ -519,32 +519,6 @@ The NOW_STRING256 structure is used to represent variable-length strings of up t
 
 #### NOW_BUFFER
 
-The NOW_BUFFER structure is used to represent variable-length buffers.
-
-<table class="byte-layout">
-    <thead>
-        <tr>
-            <th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th>
-            <th>8</th><th>9</th><th>10</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>
-            <th>6</th><th>7</th><th>8</th><th>9</th><th>20</th><th>1</th><th>2</th><th>3</th>
-            <th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>30</th><th>1</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td colspan="16">size</td>
-            <td colspan="16">data (variable)</td>
-        </tr>
-        <tr>
-            <td colspan="32">...</td>
-        </tr>
-    </tbody>
-</table>
-
-**size (2 bytes)**: An unsigned 16-bit number containing the buffer size.
-
-**data (variable)**: The buffer data, whose size is given by the size field.
-
 ##### NOW_VARBUF
 
 The NOW_VARBUF structure is used to represent variable-length buffers.
@@ -639,10 +613,7 @@ The NOW_HEADER structure is the header common to all NOW protocol messages.
 **msgFlags (2 bytes)**: The message flags, specific to the message type and class.
 
 #### NOW_STATUS
-
-##### NOW_VARU16
-
-The NOW_VARU16 structure is used to encode unsigned integer values in the range [0, 0x7FFF].
+A status code, with a structure similar to HRESULT.
 
 <table class="byte-layout">
     <thead>
@@ -729,7 +700,10 @@ The NOW_VARU16 structure is used to encode unsigned integer values in the range 
 | NOW_SYSTEM_INFO_RSP_ID<br>0x02 | NOW_SYSTEM_INFO_RSP_MSG |
 | NOW_SYSTEM_SHUTDOWN_ID<br>0x03 | NOW_SYSTEM_SHUTDOWN_MSG |
 
+<!-- TODO: Define NOW_SYSTEM_INFO_REQ_MSG, NOW_SYSTEM_INFO_RSP_MSG   -->
+
 #### NOW_SYSTEM_SHUTDOWN_MSG
+The NOW_SYSTEM_SHUTDOWN_MSG structure is used to request a system shutdown.NOW_SESSION_LOGOFF_MSG
 
 <table class="byte-layout">
     <thead>
@@ -769,7 +743,7 @@ The NOW_VARU16 structure is used to encode unsigned integer values in the range 
 | Flag | Meaning |
 |------|---------|
 | NOW_SHUTDOWN_FLAG_FORCE<br>0x0001 | Force shutdown |
-| NOW_SHUTDOWN_FLAG_REBOOT<br>0x0001 | Reboot after shutdown |
+| NOW_SHUTDOWN_FLAG_REBOOT<br>0x0002 | Reboot after shutdown |
 
 **timeout (4 bytes)**: This system shutdown timeout, in seconds.
 
@@ -810,8 +784,8 @@ The NOW_VARU16 structure is used to encode unsigned integer values in the range 
 |---------------------------------|----------------------|
 | NOW_SESSION_LOCK_MSG_ID<br>0x01 | NOW_SESSION_LOCK_MSG |
 | NOW_SESSION_LOGOFF_MSG_ID<br>0x02 | NOW_SESSION_LOGOFF_MSG |
-| NOW_SESSION_MESSAGE_BOX_MSG_ID<br>0x03 | NOW_SESSION_MESSAGE_BOX_MSG |
-| NOW_SESSION_MESSAGE_BOX_RSP_ID<br>0x04 | NOW_SESSION_MESSAGE_RSP_MSG |
+| NOW_SESSION_MESSAGE_BOX_MSG_REQ_ID<br>0x03 | NOW_SESSION_MESSAGE_BOX_MSG |
+| NOW_SESSION_MESSAGE_BOX_RSP_MSG_ID<br>0x04 | NOW_SESSION_MESSAGE_RSP_MSG |
 
 **msgFlags (2 bytes)**: The message flags.
 
@@ -932,7 +906,7 @@ The NOW_SESSION_MSGBOX_REQ_MSG is used to show a message box in the user session
 | Flag                                | Meaning                                 |
 |-------------------------------------|-----------------------------------------|
 | NOW_MSGBOX_FLAG_TITLE<br>0x00000001 | The title field contains a non-default value |
-| NOW_MSGBOX_FLAG_STYLE<br>0x00000002 | The title field contains a non-default value |
+| NOW_MSGBOX_FLAG_STYLE<br>0x00000002 | The style field contains a non-default value |
 | NOW_MSGBOX_FLAG_TIMEOUT<br>0x00000004 | The timeout field contains a non-default value |
 | NOW_MSGBOX_FLAG_RESPONSE<br>0x00000008 | A response message is expected (don't fire and forget) |
 
@@ -1084,20 +1058,20 @@ The NOW_EXEC_CAPSET_MSG message is sent to advertise capabilities.
 
 **msgType (1 byte)**: The message type (NOW_EXEC_CAPSET_MSG_ID).
 
-**msgFlags (2 bytes)**: The message flags.
-
-**execStyles (4 bytes)**: A 32-bit unsigned integer containing the supported execution styles.
+**msgFlags (2 bytes)**: A 16-bit unsigned integer containing the supported execution styles.
 
 | Flag | Meaning |
 |-------|---------|
-| NOW_EXEC_STYLE_RUN<br>0x00000001 | Generic "Run" execution style. |
-| NOW_EXEC_STYLE_CMD<br>0x00000002 | Generic command execution style. |
-| NOW_EXEC_STYLE_PROCESS<br>0x00000004 | CreateProcess() execution style. |
-| NOW_EXEC_STYLE_SHELL<br>0x00000008 | System shell (.sh) execution style. |
-| NOW_EXEC_STYLE_BATCH<br>0x00000010 | Windows batch file (.bat) execution style. |
-| NOW_EXEC_STYLE_WINPS<br>0x00000020 | Windows PowerShell (.ps1) execution style. |
-| NOW_EXEC_STYLE_PWSH<br>0x00000040 | PowerShell 7 (.ps1) execution style. |
-| NOW_EXEC_STYLE_APPLESCRIPT<br>0x00000080 | Applescript (.scpt) execution style. |
+| NOW_EXEC_STYLE_RUN<br>0x0001 | Generic "Run" execution style. |
+| NOW_EXEC_STYLE_CMD<br>0x0002 | Generic command execution style. |
+| NOW_EXEC_STYLE_PROCESS<br>0x0004 | CreateProcess() execution style. |
+| NOW_EXEC_STYLE_SHELL<br>0x0008 | System shell (.sh) execution style. |
+| NOW_EXEC_STYLE_BATCH<br>0x0010 | Windows batch file (.bat) execution style. |
+| NOW_EXEC_STYLE_WINPS<br>0x0020 | Windows PowerShell (.ps1) execution style. |
+| NOW_EXEC_STYLE_PWSH<br>0x0040 | PowerShell 7 (.ps1) execution style. |
+| NOW_EXEC_STYLE_APPLESCRIPT<br>0x0080 | Applescript (.scpt) execution style. |
+
+<!-- TODO: add AppleScript command -->
 
 #### NOW_EXEC_ABORT_MSG
 
@@ -1292,9 +1266,6 @@ The NOW_EXEC_DATA_MSG message is used to send input/output data as part of a rem
             <td colspan="32">sessionId</td>
         </tr>        
         <tr>
-            <td colspan="32">size</td>
-        </tr>
-        <tr>
             <td colspan="32">data (variable)</td>
         </tr>
     </tbody>
@@ -1318,9 +1289,7 @@ The NOW_EXEC_DATA_MSG message is used to send input/output data as part of a rem
 
 **sessionId (4 bytes)**: A 32-bit unsigned integer containing a unique remote execution session id.
 
-**size (4 bytes)**: A 32-bit unsigned integer containing input/output data size.
-
-**data (variable)**: The input/output data with the size specified by the size field.
+**data (variable)**: The input/output data represented as `NOW_VARBUF`
 
 #### NOW_EXEC_RUN_MSG
 
@@ -1364,6 +1333,9 @@ The NOW_EXEC_RUN_MSG message is used to send a run request. This request type ma
 **sessionId (4 bytes)**: A 32-bit unsigned integer containing a unique remote execution session id.
 
 **command (variable)**: A NOW_VARSTR structure containing the command to execute.
+
+#### NOW_EXEC_CMD_MSG
+<!-- TODO: Define CMD message -->
 
 #### NOW_EXEC_PROCESS_MSG
 
@@ -1412,11 +1384,11 @@ The NOW_EXEC_PROCESS_MSG message is used to send a Windows [CreateProcess()](htt
 
 **sessionId (4 bytes)**: A 32-bit unsigned integer containing a unique remote execution session id.
 
-**filename (variable)**: A NOW_STRING structure containing the file name. Corresponds to the lpApplicationName parameter.
+**filename (variable)**: A NOW_VARSTR structure containing the file name. Corresponds to the lpApplicationName parameter.
 
-**parameters (variable)**: A NOW_STRING structure containing the command parameters. Corresponds to the lpCommandLine parameter.
+**parameters (variable)**: A NOW_VARSTR structure containing the command parameters. Corresponds to the lpCommandLine parameter.
 
-**directory (variable)**: A NOW_STRING structure containing the command working directory. Corresponds to the lpCurrentDirectory parameter.
+**directory (variable)**: A NOW_VARSTR structure containing the command working directory. Corresponds to the lpCurrentDirectory parameter.
 
 #### NOW_EXEC_SHELL_MSG
 
@@ -1464,7 +1436,7 @@ The NOW_EXEC_SHELL_MSG message is used to execute a remote shell command.
 
 **command (variable)**: A NOW_VARSTR structure containing the command to execute.
 
-**shell (variable)**: A NOW_STRING structure containing the shell to use for execution. If no shell is specified, the default system shell (/bin/sh) will be used.
+**shell (variable)**: A NOW_VARSTR structure containing the shell to use for execution. If no shell is specified, the default system shell (/bin/sh) will be used.
 
 #### NOW_EXEC_BATCH_MSG
 
@@ -1537,6 +1509,12 @@ The NOW_EXEC_WINPS_MSG message is used to execute a remote Windows PowerShell (p
         <tr>
             <td colspan="32">command (variable)</td>
         </tr>
+        <tr>
+            <td colspan="32">executionPolicy (variable)</td>
+        </tr>
+        <tr>
+            <td colspan="32">configurationName (variable)</td>
+        </tr>
     </tbody>
 </table>
 
@@ -1561,9 +1539,9 @@ The NOW_EXEC_WINPS_MSG message is used to execute a remote Windows PowerShell (p
 
 **sessionId (4 bytes)**: A 32-bit unsigned integer containing a unique remote execution session id.
 
-**executionPolicy (variable)**: A NOW_STRING structure containing the execution policy (-ExecutionPolicy) parameter value. This value is ignored if the NOW_EXEC_FLAG_PS_EXECUTION_POLICY flag is not set.
+**executionPolicy (variable)**: A NOW_VARSTR structure containing the execution policy (-ExecutionPolicy) parameter value. This value is ignored if the NOW_EXEC_FLAG_PS_EXECUTION_POLICY flag is not set.
 
-**configurationName (variable)**: A NOW_STRING structure containing the configuration name (-ConfigurationName) parameter value. This value is ignored if the NOW_EXEC_FLAG_PS_CONFIGURATION_NAME flag is not set.
+**configurationName (variable)**: A NOW_VARSTR structure containing the configuration name (-ConfigurationName) parameter value. This value is ignored if the NOW_EXEC_FLAG_PS_CONFIGURATION_NAME flag is not set.
 
 **command (variable)**: A NOW_VARSTR structure containing the command to execute.
 
@@ -1595,6 +1573,12 @@ The NOW_EXEC_PWSH_MSG message is used to execute a remote PowerShell 7 (pwsh) co
         <tr>
             <td colspan="32">command (variable)</td>
         </tr>
+        <tr>
+            <td colspan="32">executionPolicy (variable)</td>
+        </tr>
+        <tr>
+            <td colspan="32">configurationName (variable)</td>
+        </tr>
     </tbody>
 </table>
 
@@ -1608,8 +1592,8 @@ The NOW_EXEC_PWSH_MSG message is used to execute a remote PowerShell 7 (pwsh) co
 
 **sessionId (4 bytes)**: A 32-bit unsigned integer containing a unique remote execution session id.
 
-**executionPolicy (variable)**: A NOW_STRING structure, same as with NOW_EXEC_WINPS_MSG.
+**executionPolicy (variable)**: A NOW_VARSTR structure, same as with NOW_EXEC_WINPS_MSG.
 
-**configurationName (variable)**: A NOW_STRING structure, same as with NOW_EXEC_WINPS_MSG.
+**configurationName (variable)**: A NOW_VARSTR structure, same as with NOW_EXEC_WINPS_MSG.
 
 **command (variable)**: A NOW_VARSTR structure containing the command to execute.
