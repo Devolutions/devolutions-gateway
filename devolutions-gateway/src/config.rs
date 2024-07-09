@@ -965,7 +965,7 @@ pub mod dto {
         pub sogar: Option<SogarConf>,
 
         /// (Unstable) Unsafe debug options for developers
-        #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
 
         // Other unofficial options.

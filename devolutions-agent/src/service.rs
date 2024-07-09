@@ -1,8 +1,10 @@
 use tokio::runtime::{self, Runtime};
 
+use crate::config::ConfHandle;
+use crate::log::AgentLog;
+use crate::remote_desktop::RemoteDesktopTask;
 #[cfg(windows)]
 use crate::updater::UpdaterTask;
-use crate::{config::ConfHandle, log::AgentLog};
 use anyhow::Context;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
@@ -177,6 +179,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let mut tasks = Tasks::new();
 
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
+
+    if conf.remote_desktop.enabled {
+        tasks.register(RemoteDesktopTask::new(conf_handle.clone()));
+    }
 
     #[cfg(windows)]
     if conf.updater.enabled {
