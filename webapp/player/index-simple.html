@@ -1,0 +1,40 @@
+<html>
+
+<head>
+  <meta name="viewport" content="width=device-width">
+  <link rel="stylesheet" href="css/xterm-player.min.css" />
+  <script src="js/xterm.min.js"></script>
+  <script src="js/xterm-player.min.js"></script>
+  <title>Recording Player</title>
+</head>
+
+<style>
+  html,
+  body {
+    background-color: black;
+  }
+
+  #terminal {
+    height: 100%;
+  }
+
+  .xterm .xterm-screen {
+    position: relative;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .xterm .xterm-screen canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+  }
+</style>
+
+<body>
+  <script src="./js/index-simple.js" type="module"></script>
+  <div id="terminal"></div>
+</body>
+
+</html>
