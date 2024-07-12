@@ -34,7 +34,7 @@ tracing = "0.1"
 uuid = { version = "1.5", features = ["v4"] }
 
 [dependencies.tokio]
-version = "1.37"
+version = "1.38"
 features = [
     "signal",
     "net",
