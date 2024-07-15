@@ -992,7 +992,7 @@ dependencies = [
  "parking_lot",
  "pcap-file",
  "picky",
- "picky-krb",
+ "picky-krb 0.9.0",
  "pin-project-lite",
  "portpicker",
  "proptest",
@@ -2733,6 +2733,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "p521"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fc9e2161f1f215afdfce23677034ae137bbd45016a880c2eb3ba8eb95f085b2"
+dependencies = [
+ "base16ct",
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "rand_core",
+ "sha2",
+]
+
+[[package]]
 name = "packet"
 version = "0.1.2"
 source = "git+https://github.com/fdubois1/rust-packet.git#8575682bff76bc31a3dddd62002059cffe702e02"
@@ -2840,27 +2854,29 @@ dependencies = [
 
 [[package]]
 name = "picky"
-version = "7.0.0-rc.8"
+version = "7.0.0-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52cccdaffd2f361b4b4eb70b4249bd71d89bb66cb84b7f76483ecd1640c543ce"
+checksum = "fe9b488630f493840c2e6ef270c3619a3dc2ad0953eb978d6e4273a8337fee5e"
 dependencies = [
  "aes",
  "aes-gcm",
  "aes-kw",
- "base64 0.21.7",
+ "base64 0.22.0",
  "cbc",
  "des",
  "digest",
  "ed25519-dalek",
+ "hex",
  "hmac",
  "md-5",
  "num-bigint-dig",
  "p256",
  "p384",
+ "p521",
  "pbkdf2",
- "picky-asn1",
- "picky-asn1-der",
- "picky-asn1-x509",
+ "picky-asn1 0.9.0",
+ "picky-asn1-der 0.5.0",
+ "picky-asn1-x509 0.13.0",
  "rand",
  "rand_core",
  "rc2",
@@ -2885,6 +2901,17 @@ dependencies = [
  "serde",
  "serde_bytes",
  "time",
+]
+
+[[package]]
+name = "picky-asn1"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "360019b238b11b8c0e88cd9db3a6677f1af122e3422d0a26a2b576f084d9be36"
+dependencies = [
+ "oid",
+ "serde",
+ "serde_bytes",
  "zeroize",
 ]
 
@@ -2894,7 +2921,18 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5df7873a9e36d42dadb393bea5e211fe83d793c172afad5fb4ec846ec582793f"
 dependencies = [
- "picky-asn1",
+ "picky-asn1 0.8.0",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "picky-asn1-der"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04784987e157b5a8f832ce68b3364915dc6ef4bed94a6e10e241fa1bae3db2e3"
+dependencies = [
+ "picky-asn1 0.9.0",
  "serde",
  "serde_bytes",
 ]
@@ -2906,12 +2944,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c5f20f71a68499ff32310f418a6fad8816eac1a2859ed3f0c5c741389dd6208"
 dependencies = [
  "base64 0.21.7",
- "num-bigint-dig",
  "oid",
- "picky-asn1",
- "picky-asn1-der",
+ "picky-asn1 0.8.0",
+ "picky-asn1-der 0.4.1",
  "serde",
  "widestring 1.0.2",
+]
+
+[[package]]
+name = "picky-asn1-x509"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3384ff768b1c4a04532916be77935f634a4738d3b2138da98798e90352fadf4"
+dependencies = [
+ "base64 0.22.0",
+ "num-bigint-dig",
+ "oid",
+ "picky-asn1 0.9.0",
+ "picky-asn1-der 0.5.0",
+ "serde",
  "zeroize",
 ]
 
@@ -2930,9 +2981,34 @@ dependencies = [
  "num-bigint-dig",
  "oid",
  "pbkdf2",
- "picky-asn1",
- "picky-asn1-der",
- "picky-asn1-x509",
+ "picky-asn1 0.8.0",
+ "picky-asn1-der 0.4.1",
+ "picky-asn1-x509 0.12.0",
+ "rand",
+ "serde",
+ "sha1",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "picky-krb"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2213fd3942a9d3366b3e108b6d02db2227c80937a55f79a71e1719ab075bb77"
+dependencies = [
+ "aes",
+ "byteorder",
+ "cbc",
+ "crypto",
+ "des",
+ "hmac",
+ "num-bigint-dig",
+ "oid",
+ "pbkdf2",
+ "picky-asn1 0.9.0",
+ "picky-asn1-der 0.5.0",
+ "picky-asn1-x509 0.13.0",
  "rand",
  "serde",
  "sha1",
@@ -4094,10 +4170,10 @@ dependencies = [
  "num-traits",
  "oid",
  "picky",
- "picky-asn1",
- "picky-asn1-der",
- "picky-asn1-x509",
- "picky-krb",
+ "picky-asn1 0.8.0",
+ "picky-asn1-der 0.4.1",
+ "picky-asn1-x509 0.12.0",
+ "picky-krb 0.8.0",
  "rand",
  "serde",
  "serde_derive",
@@ -4871,9 +4947,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.7.0"
+version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f00cc9702ca12d3c81455259621e676d0f7251cec66a21e98fe2e9a37db93b2a"
+checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
 dependencies = [
  "getrandom",
  "serde",
@@ -5505,9 +5581,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.7.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
+checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
 dependencies = [
  "zeroize_derive",
 ]
