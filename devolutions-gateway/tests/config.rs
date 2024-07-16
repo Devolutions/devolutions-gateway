@@ -49,7 +49,7 @@ fn hub_sample() -> Sample {
                 id: "subkey-id".to_owned(),
                 data: ConfData {
                     value: "subkey-value".to_owned(),
-                    format: PubKeyFormat::Rsa,
+                    format: PubKeyFormat::Pkcs1,
                     encoding: DataEncoding::Base64Pad,
                 },
             }),

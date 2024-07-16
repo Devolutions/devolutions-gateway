@@ -739,7 +739,7 @@ fn read_pub_key(
 
             match data.format {
                 dto::PubKeyFormat::Spki => PublicKey::from_der(&value).context("bad SPKI"),
-                dto::PubKeyFormat::Rsa => PublicKey::from_pkcs1(&value).context("bad RSA value"),
+                dto::PubKeyFormat::Pkcs1 => PublicKey::from_pkcs1(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -795,8 +795,8 @@ fn read_priv_key(
 
             match data.format {
                 dto::PrivKeyFormat::Pkcs8 => PrivateKey::from_pkcs8(&value).context("bad PKCS8"),
+                dto::PrivKeyFormat::Pkcs1 => PrivateKey::from_pkcs1(&value).context("bad RSA value"),
                 dto::PrivKeyFormat::Ec => PrivateKey::from_ec_der(&value).context("bad EC value"),
-                dto::PrivKeyFormat::Rsa => PrivateKey::from_rsa_der(&value).context("bad RSA value"),
             }
             .map(Some)
         }
@@ -1179,8 +1179,9 @@ pub mod dto {
     pub enum PrivKeyFormat {
         #[default]
         Pkcs8,
+        #[serde(alias = "Rsa")]
+        Pkcs1,
         Ec,
-        Rsa,
     }
 
     #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -1188,7 +1189,8 @@ pub mod dto {
     pub enum PubKeyFormat {
         #[default]
         Spki,
-        Rsa,
+        #[serde(alias = "Rsa")]
+        Pkcs1,
     }
 
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
