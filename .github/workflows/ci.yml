@@ -602,7 +602,7 @@ jobs:
   success:
     name: Success
     runs-on: ubuntu-latest
-    if: ${{ success() }}
+    if: ${{ always() }}
     needs:
       - tests
       - jetsocat-lipo
@@ -613,7 +613,13 @@ jobs:
 
     steps:
       - name: CI succeeded
+        id: succeeded
+        if: ${{ !contains(needs.*.result, 'failure') }}
         run: exit 0
+
+      - name: CI failed
+        if: ${{ steps.succeeded.outcome == 'skipped' }}
+        run: exit 1
 
   upload-git-log:
     name: Upload git-log output
