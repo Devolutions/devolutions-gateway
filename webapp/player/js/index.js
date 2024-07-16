@@ -8,6 +8,7 @@ var videoSrcInfo = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/recording.jso
 var request = new XMLHttpRequest();
 
 request.onreadystatechange = function () {
+
   if (request.readyState !== XMLHttpRequest.DONE) {
     return false;
   }
@@ -19,6 +20,9 @@ request.onreadystatechange = function () {
 
   var recordingInfo = JSON.parse(request.responseText);
   var fileType = recordingInfo.files[0].fileName.split(".")[1];
+
+  var terminalDiv = document.createElement("div");
+  terminalDiv.setAttribute("id", "terminal")
 
   switch (fileType) {
     case "webm":
@@ -58,7 +62,6 @@ request.onreadystatechange = function () {
 
     case "trp":
       // create the Div
-      var terminalDiv = document.createElement("div");
       document.body.appendChild(terminalDiv);
 
       let trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
@@ -69,7 +72,7 @@ request.onreadystatechange = function () {
         // make the file a base64 embedded src url
         var url = "data:text/plain;base64," + btoa(castFileContent);
         var player = new XtermPlayer.XtermPlayer(url, terminalDiv);
-
+        
         // need a slight delay to play waiting for it to load
         setTimeout(function () {
           player.play();
@@ -79,7 +82,6 @@ request.onreadystatechange = function () {
       break;
     case "cast":
       // create the Div
-      var terminalDiv = document.createElement("div");
       document.body.appendChild(terminalDiv);
       let castSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
       const player = new XtermPlayer.XtermPlayer(castSrc, terminalDiv , {
@@ -88,7 +90,7 @@ request.onreadystatechange = function () {
       player.play();
 
       break;
-  }
+  }   
 };
 
 request.open("GET", videoSrcInfo, true);
