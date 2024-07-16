@@ -70,7 +70,7 @@ Stable options are:
         Possible values:
         
         * `Spki` (default)
-        * `Rsa`
+        * `Pkcs1`
 
     * **Encoding** (_String_): The binary-to-text encoding used for the key data.
 
