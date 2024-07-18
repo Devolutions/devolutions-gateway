@@ -912,7 +912,7 @@ function Invoke-TlkStep {
 		[string] $Platform,
 		[ValidateSet('x86','x86_64','arm64')]
 		[string] $Architecture,
-        [ValidateSet('release', 'production')]
+        [ValidateSet('dev', 'release', 'production')]
         [string] $CargoProfile,
         [ValidateSet('gateway', 'agent', 'jetsocat')]
         [string] $Product
