@@ -658,6 +658,7 @@ jobs:
 
     steps:
       - name: Check success
+        shell: pwsh
         run: |
           $results = '${{ needs.*.result }}' | ConvertFrom-Json
           $successValues = $results | Where { $_ -Eq "success" }
