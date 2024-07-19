@@ -17,8 +17,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use notify_debouncer_mini::notify::RecursiveMode;
 use tokio::fs;
 
-use devolutions_agent_shared::{get_updater_file_path, DateVersion};
-use devolutions_agent_shared::{UpdateJson, VersionSpecification};
+use devolutions_agent_shared::{get_updater_file_path, DateVersion, UpdateJson, VersionSpecification};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 
 use crate::config::ConfHandle;

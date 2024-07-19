@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::BufReader;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -8,11 +9,14 @@ use devolutions_agent_shared::get_data_dir;
 use serde::{Deserialize, Serialize};
 use tap::prelude::*;
 
+const DEFAULT_RDP_PORT: u16 = 3389;
+
 #[derive(Debug, Clone)]
 pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub verbosity_profile: dto::VerbosityProfile,
     pub updater: dto::UpdaterConf,
+    pub remote_desktop: RemoteDesktopConf,
     pub debug: dto::DebugConf,
 }
 
@@ -26,11 +30,70 @@ impl Conf {
             .unwrap_or_else(|| Utf8PathBuf::from("agent"))
             .pipe_ref(|path| normalize_data_path(path, &data_dir));
 
+        let remote_desktop = conf_file
+            .remote_desktop
+            .clone()
+            .unwrap_or_default()
+            .pipe(RemoteDesktopConf::try_from)
+            .context("invalid remote desktop config")?;
+
         Ok(Conf {
             log_file,
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
             updater: conf_file.updater.clone().unwrap_or_default(),
+            remote_desktop,
             debug: conf_file.debug.clone().unwrap_or_default(),
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct RemoteDesktopConf {
+    pub enabled: bool,
+    pub bind_addresses: Vec<SocketAddr>,
+    pub certificate: Option<Utf8PathBuf>,
+    pub private_key: Option<Utf8PathBuf>,
+}
+
+impl TryFrom<dto::RemoteDesktopConf> for RemoteDesktopConf {
+    type Error = anyhow::Error;
+
+    fn try_from(conf: dto::RemoteDesktopConf) -> anyhow::Result<Self> {
+        use std::net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr};
+        use std::str::FromStr as _;
+
+        let data_dir = get_data_dir();
+
+        let enabled = conf.enabled;
+
+        let default_port = conf.port.unwrap_or(DEFAULT_RDP_PORT);
+
+        let bind_addresses = if conf.listeners.is_empty() {
+            vec![
+                SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), default_port),
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), default_port),
+            ]
+        } else {
+            let addresses: Result<Vec<SocketAddr>, AddrParseError> = conf
+                .listeners
+                .iter()
+                .map(|address| {
+                    SocketAddr::from_str(address)
+                        .or_else(|_| IpAddr::from_str(address).map(|ip| SocketAddr::new(ip, default_port)))
+                })
+                .collect();
+            addresses.context("failed to parse listener address")?
+        };
+
+        let certificate = conf.certificate.map(|path| normalize_data_path(&path, &data_dir));
+
+        let private_key = conf.private_key.map(|path| normalize_data_path(&path, &data_dir));
+
+        Ok(Self {
+            enabled,
+            bind_addresses,
+            certificate,
+            private_key,
         })
     }
 }
@@ -122,16 +185,60 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 pub mod dto {
     use super::*;
 
-    pub const fn default_bool<const V: bool>() -> bool {
+    const fn default_bool<const V: bool>() -> bool {
         V
     }
 
-    #[derive(PartialEq, Eq, Debug, Default, Clone, Serialize, Deserialize)]
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct UpdaterConf {
         /// Enable updater module (enabled by default)
         #[serde(default = "default_bool::<true>")]
         pub enabled: bool,
+    }
+
+    impl Default for UpdaterConf {
+        fn default() -> Self {
+            Self { enabled: true }
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct RemoteDesktopConf {
+        /// Enable remote desktop module
+        pub enabled: bool,
+        /// Port number that the service listens on
+        ///
+        /// Specifies the port number that the RDP service listens on.
+        /// The default is 3389.
+        pub port: Option<u16>,
+        /// Binding addresses for the listeners
+        ///
+        /// Specifies the local addresses the RDP service should listen on.
+        /// The format of a binding address is `<IPv4_addr|IPv6_addr>[:<port>]`.
+        /// If `<port>` is not specified, the service will listen on the address and the port specified by the `Port` option.
+        /// The default is to listen on all local addresses (the wildcard bind IPv4 address `0.0.0.0` and the wildcard bind IPv6 address `[::]`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub listeners: Vec<String>,
+        /// Certificate to use for TLS
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub certificate: Option<Utf8PathBuf>,
+        /// Private key to use for TLS
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub private_key: Option<Utf8PathBuf>,
+    }
+
+    impl Default for RemoteDesktopConf {
+        fn default() -> Self {
+            Self {
+                enabled: false,
+                port: Some(DEFAULT_RDP_PORT),
+                listeners: Vec::new(),
+                certificate: None,
+                private_key: None,
+            }
+        }
     }
 
     /// Source of truth for Agent configuration
@@ -151,11 +258,14 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
 
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         pub updater: Option<UpdaterConf>,
 
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub remote_desktop: Option<RemoteDesktopConf>,
+
         /// (Unstable) Unsafe debug options for developers
-        #[serde(default, rename = "__debug__", skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
         pub debug: Option<DebugConf>,
 
         /// Other unofficial options.
@@ -170,7 +280,8 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
-                updater: None,
+                updater: Some(UpdaterConf { enabled: true }),
+                remote_desktop: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }
@@ -211,7 +322,7 @@ pub mod dto {
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     pub struct DebugConf {
         /// Directives string in the same form as the RUST_LOG environment variable
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
         /// Skip MSI installation in updater module. Useful for debugging updater logic
         /// without actually changing the system.

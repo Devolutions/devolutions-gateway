@@ -1,9 +1,9 @@
 //! IO utilities for the updater logic
 
-use camino::Utf8Path;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use futures::TryFutureExt;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 
 use crate::updater::UpdaterError;
 

@@ -1,21 +1,14 @@
 #[macro_use]
 extern crate tracing;
 
-mod config;
-mod log;
-mod service;
-
-#[cfg(windows)]
-mod updater;
-
 use std::env;
 use std::sync::mpsc;
 
 use ceviche::controller::*;
 use ceviche::{Service, ServiceEvent};
 
-use config::ConfHandle;
-use service::AgentService;
+use devolutions_agent::config::ConfHandle;
+use devolutions_agent::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
 const BAD_CONFIG_ERR_CODE: u32 = 1;
 const START_FAILED_ERR_CODE: u32 = 2;
@@ -43,7 +36,7 @@ fn agent_service_main(
     };
 
     match service.start() {
-        Ok(()) => info!("{} service started", service::SERVICE_NAME),
+        Ok(()) => info!("{} service started", SERVICE_NAME),
         Err(error) => {
             error!(error = format!("{error:#}"), "Failed to start");
             return START_FAILED_ERR_CODE;
@@ -61,7 +54,7 @@ fn agent_service_main(
         }
     }
 
-    info!("{} service stopping", service::SERVICE_NAME);
+    info!("{} service stopping", SERVICE_NAME);
 
     0
 }
@@ -69,7 +62,7 @@ fn agent_service_main(
 Service!("agent", agent_service_main);
 
 fn main() {
-    let mut controller = Controller::new(service::SERVICE_NAME, service::DISPLAY_NAME, service::DESCRIPTION);
+    let mut controller = Controller::new(SERVICE_NAME, DISPLAY_NAME, DESCRIPTION);
 
     if let Some(cmd) = env::args().nth(1) {
         match cmd.as_str() {
@@ -106,7 +99,7 @@ fn main() {
             }
             "config" => {
                 let subcommand = env::args().nth(2).expect("missing config subcommand");
-                if let Err(e) = config::handle_cli(subcommand.as_str()) {
+                if let Err(e) = devolutions_agent::config::handle_cli(subcommand.as_str()) {
                     eprintln!("[ERROR] Agent configuration failed: {}", e);
                 }
             }

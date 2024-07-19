@@ -1,6 +1,6 @@
 [package]
 name = "devolutions-agent"
-version = "2024.1.2"
+version = "2024.2.3"
 edition = "2021"
 license = "MIT/Apache-2.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
@@ -32,6 +32,20 @@ tap = "1.0"
 thiserror = "1"
 tracing = "0.1"
 uuid = { version = "1.5", features = ["v4"] }
+rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
+zeroize = { version = "1.7", features = ["derive"] }
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.1" # FIXME(@CBenoit): maybe we don’t need this crate
+
+[dependencies.ironrdp]
+git = "https://github.com/Devolutions/IronRDP"
+rev = "2e1a9ac88e38e7d92d893007bc25d0a05c365861"
+default-features = false
+features = [
+    "server",
+    "acceptor",
+]
 
 [dependencies.tokio]
 version = "1.37"
@@ -44,7 +58,7 @@ features = [
     "macros",
     "parking_lot",
     "fs",
-    "process"
+    "process",
 ]
 
 [target.'cfg(windows)'.dependencies]
@@ -59,7 +73,7 @@ features = [
     "Win32_System_Threading",
     "Win32_Security_Cryptography",
     "Win32_Security_Authorization",
-    "Win32_System_ApplicationInstallationAndServicing"
+    "Win32_System_ApplicationInstallationAndServicing",
 ]
 
 [target.'cfg(windows)'.build-dependencies]
