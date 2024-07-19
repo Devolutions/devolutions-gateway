@@ -186,18 +186,29 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
-      - name: Fix ring dependency for Windows ARM64
+      - name: Configure Windows runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # NASM is required by aws-lc-rs (used as rustls crypto backend)
+          choco install nasm
+
+          # We need to add the NASM binary folder to the PATH manually.
+          Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # libclang / LLVM is a requirement for AWS LC.
+          # https://aws.github.io/aws-lc-rs/requirements/windows.html#libclang--llvm
+          $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
+          Write-Output "LIBCLANG_PATH=$VSINSTALLDIR\VC\Tools\Llvm\x64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # Install Visual Studio Developer PowerShell Module for cmdlets such as Enter-VsDevShell
+          Install-Module VsDevShell -Force
+
+      - name: Configure Windows (arm) runner
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         shell: pwsh
         run: |
           rustup target add aarch64-pc-windows-msvc
-          'ring = { git = "https://github.com/awakecoding/ring", branch = "0.16.20_alpha" }' | % {
-            Add-Content -Path "./Cargo.toml" -Value $_
-          }
-          $VSINSTALLDIR = $(vswhere.exe -latest -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath)
-          $VCINSTALLDIR = Join-Path $VSINSTALLDIR "VC"
-          $LLVM_ROOT = Join-Path $VCINSTALLDIR "Tools\Llvm\x64"
-          echo "PATH=$Env:PATH;${LLVM_ROOT}\bin" >> $Env:GITHUB_ENV
 
       - name: Configure macOS (arm) runner
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
@@ -391,6 +402,12 @@ jobs:
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
 
+          # We need a newer version of GCC because aws-lc-rs rejects versions affected
+          # by this bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+          # These lines can be safely removed once we switch to ubuntu-22.04 runner.
+          sudo apt install gcc-10
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 60
+
       - name: Configure Linux (arm) runner
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
         run: |
@@ -399,14 +416,21 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
           echo "STRIP_EXECUTABLE=aarch64-linux-gnu-strip" >> $GITHUB_ENV
 
-      # WiX is installed on Windows runners but not in the PATH
       - name: Configure Windows runner
         if: matrix.os == 'windows'
         run: |
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --force
-          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # WiX is installed on Windows runners but not in the PATH
+          Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          # NASM is required by aws-lc-rs (used as rustls crypto backend)
+          choco install nasm
+
+          # We need to add the NASM binary folder to the PATH manually.
+          Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build
         shell: pwsh
@@ -502,6 +526,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install python3-wget python3-setuptools libsystemd-dev dh-make
+
+          # We need a newer version of GCC because aws-lc-rs rejects versions affected
+          # by this bug: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=95189
+          # These lines can be safely removed once we switch to ubuntu-22.04 runner.
+          sudo apt install gcc-10
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 60
 
       - name: Configure Linux (arm) runner
         if: matrix.os == 'linux' && matrix.arch == 'arm64'
@@ -627,14 +657,12 @@ jobs:
       - powershell-tests
 
     steps:
-      - name: CI succeeded
-        id: succeeded
-        if: ${{ !contains(needs.*.result, 'failure') }}
-        run: exit 0
-
-      - name: CI failed
-        if: ${{ steps.succeeded.outcome == 'skipped' }}
-        run: exit 1
+      - name: Check success
+        shell: pwsh
+        run: |
+          $results = '${{ toJSON(needs.*.result) }}' | ConvertFrom-Json
+          $succeeded = $($results | Where { $_ -Ne "success" }).Count -Eq 0
+          exit $(if ($succeeded) { 0 } else { 1 })
 
   upload-git-log:
     name: Upload git-log output
