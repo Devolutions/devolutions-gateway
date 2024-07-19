@@ -661,9 +661,8 @@ jobs:
         shell: pwsh
         run: |
           $results = '${{ toJSON(needs.*.result) }}' | ConvertFrom-Json
-          $successValues = $results | Where { $_ -Eq "success" }
-          $succeeded = $results.Count -Eq $successValues.Count
-          exit $(if ($suceeded) { 0 } else { 1 })
+          $succeeded = $($results | Where { $_ -Ne "success" }).Count -Eq 0
+          exit $(if ($succeeded) { 0 } else { 1 })
 
   upload-git-log:
     name: Upload git-log output
