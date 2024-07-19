@@ -660,7 +660,7 @@ jobs:
       - name: Check success
         shell: pwsh
         run: |
-          $results = '${{ needs.*.result }}' | ConvertFrom-Json
+          $results = '${{ toJSON(needs.*.result) }}' | ConvertFrom-Json
           $successValues = $results | Where { $_ -Eq "success" }
           $succeeded = $results.Count -Eq $successValues.Count
           exit $(if ($suceeded) { 0 } else { 1 })
