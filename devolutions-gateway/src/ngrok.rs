@@ -19,8 +19,6 @@ pub struct NgrokSession {
 
 impl NgrokSession {
     pub async fn connect(conf: &NgrokConf) -> anyhow::Result<Self> {
-        info!("Connecting to ngrok service");
-
         let mut builder = ngrok::Session::builder().authtoken(&conf.auth_token);
 
         if let Some(heartbeat_interval) = conf.heartbeat_interval {
@@ -38,6 +36,8 @@ impl NgrokSession {
         if let Some(server_addr) = &conf.server_addr {
             builder = builder.server_addr(server_addr);
         }
+
+        info!("Connecting to ngrok service");
 
         // Connect the ngrok session
         let session = builder.connect().await.context("connect to ngrok service")?;

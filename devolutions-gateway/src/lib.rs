@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 #[macro_use]
-extern crate serde_derive;
+extern crate serde;
 #[macro_use]
 extern crate tracing;
 
@@ -31,6 +29,8 @@ pub mod tls;
 pub mod token;
 pub mod utils;
 pub mod ws;
+
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct DgwState {

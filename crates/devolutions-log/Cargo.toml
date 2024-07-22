@@ -16,11 +16,11 @@ devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 anyhow = "1.0"
 
 # Utils, misc
-camino = { version = "1.1", features = ["serde1"] }
+camino = "1.1"
 
 # Async
 async-trait = "0.1"
-tokio = { version = "1.37", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
+tokio = { version = "1.38", features = ["signal", "net", "io-util", "time", "rt", "rt-multi-thread", "sync", "macros", "parking_lot", "fs"] }
 
 # Logging
 tracing = "0.1"

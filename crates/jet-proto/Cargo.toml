@@ -7,16 +7,16 @@ publish = false
 
 [dependencies]
 log = "0.4"
-byteorder = "1.4"
-uuid = { version = "1.5", features = ["v4"] }
-httparse = "1.8"
-http = "1.0"
+byteorder = "1.5"
+uuid = { version = "1.10", features = ["v4"] }
+httparse = "1.9"
+http = "1.1"
 
 [dev-dependencies]
-lazy_static = "1.4"
+lazy_static = "1.5"
 bytes = "1.6"
 sspi = "0.12"
-ureq = { version = "2.9", features = ["json"] }
+ureq = { version = "2.10", features = ["json"] }
 url = "2.5"
 x509-parser = "0.16"
 exitcode = "1.1"
