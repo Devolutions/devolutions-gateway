@@ -703,6 +703,7 @@ A status code, with a structure similar to HRESULT.
 <!-- TODO: Define NOW_SYSTEM_INFO_REQ_MSG, NOW_SYSTEM_INFO_RSP_MSG   -->
 
 #### NOW_SYSTEM_SHUTDOWN_MSG
+
 The NOW_SYSTEM_SHUTDOWN_MSG structure is used to request a system shutdown.NOW_SESSION_LOGOFF_MSG
 
 <table class="byte-layout">
