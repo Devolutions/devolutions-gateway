@@ -1,13 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/*",
     "devolutions-agent",
     "devolutions-gateway",
     "jetsocat",
-    "crates/*",
     "tools/generate-openapi",
 ]
 default-members = [
+    "devolutions-agent",
     "devolutions-gateway",
     "jetsocat",
 ]

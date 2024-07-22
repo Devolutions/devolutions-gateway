@@ -7,7 +7,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod pcap;
 pub mod plugin_recording;
-// pub mod rdp;
 
 pin_project! {
     pub struct Interceptor<S> {
@@ -106,7 +105,11 @@ pub struct DummyDissector;
 
 impl Dissector for DummyDissector {
     fn dissect_one(&mut self, _: PeerSide, bytes: &mut BytesMut) -> Option<BytesMut> {
-        Some(bytes.split_to(bytes.len()))
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(bytes))
+        }
     }
 }
 
