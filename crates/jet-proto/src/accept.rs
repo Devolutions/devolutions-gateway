@@ -44,7 +44,7 @@ impl JetAcceptReq {
         Ok(())
     }
 
-    pub fn from_request(request: &httparse::Request) -> Result<Self, Error> {
+    pub fn from_request(request: &httparse::Request<'_, '_>) -> Result<Self, Error> {
         if request.is_get_method() {
             let version_opt = request
                 .get_header_value(JET_HEADER_VERSION)
@@ -59,7 +59,7 @@ impl JetAcceptReq {
                         {
                             return Ok(JetAcceptReq {
                                 version,
-                                host: host.to_string(),
+                                host: host.to_owned(),
                                 association: association_id,
                                 candidate: candidate_id,
                             });
@@ -69,7 +69,7 @@ impl JetAcceptReq {
                             if jet_method.to_lowercase().eq("accept") {
                                 return Ok(JetAcceptReq {
                                     version,
-                                    host: host.to_string(),
+                                    host: host.to_owned(),
                                     association: Uuid::nil(),
                                     candidate: Uuid::nil(),
                                 });
@@ -137,7 +137,7 @@ impl JetAcceptRsp {
         Ok(())
     }
 
-    pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
+    pub fn from_response(response: &httparse::Response<'_, '_>) -> Result<Self, Error> {
         if let Some(status_code) = response.code.and_then(|code| StatusCode::from_u16(code).ok()) {
             let version_opt = response
                 .get_header_value(JET_HEADER_VERSION)
@@ -171,7 +171,7 @@ impl JetAcceptRsp {
                         version: 2,
                         association: Uuid::nil(),
                         timeout: 0,
-                        instance: "".to_string(),
+                        instance: "".to_owned(),
                     });
                 }
                 _ => {}

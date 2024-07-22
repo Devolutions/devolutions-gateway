@@ -123,31 +123,38 @@ pub enum FilteringRule {
 }
 
 impl FilteringRule {
+    #[must_use]
     pub fn deny() -> Self {
         Self::Deny
     }
 
+    #[must_use]
     pub fn allow() -> Self {
         Self::Allow
     }
 
     /// Puts current rule behind a NOT operator
+    #[must_use]
     pub fn invert(self) -> Self {
         Self::Not(Box::new(self))
     }
 
+    #[must_use]
     pub fn host(host: impl Into<String>) -> Self {
         Self::Host(host.into())
     }
 
+    #[must_use]
     pub fn port(port: u16) -> Self {
         Self::Port(port)
     }
 
+    #[must_use]
     pub fn scheme(scheme: impl Into<String>) -> Self {
         Self::Scheme(scheme.into())
     }
 
+    #[must_use]
     pub fn host_and_port(host: impl Into<String>, port: u16) -> Self {
         Self::HostAndPort {
             host: host.into(),
@@ -155,11 +162,13 @@ impl FilteringRule {
         }
     }
 
+    #[must_use]
     pub fn wildcard_host(host: impl Into<String>) -> Self {
         Self::WildcardHost(host.into())
     }
 
     /// Combine current rule using an "AND" operator
+    #[must_use]
     pub fn and(self, rule: Self) -> Self {
         match self {
             Self::Allow => rule,
@@ -177,6 +186,7 @@ impl FilteringRule {
     }
 
     /// Combine current rule using an "OR" operator
+    #[must_use]
     pub fn or(self, rule: Self) -> Self {
         match self {
             Self::Deny => rule,

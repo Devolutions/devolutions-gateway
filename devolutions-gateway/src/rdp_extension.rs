@@ -47,7 +47,7 @@ fn authorize(
 }
 
 async fn send_clean_path_response(
-    stream: &mut (dyn tokio::io::AsyncWrite + Unpin + Send),
+    stream: &mut (dyn AsyncWrite + Unpin + Send),
     rd_clean_path_rsp: &RDCleanPathPdu,
 ) -> anyhow::Result<()> {
     let rd_clean_path_rsp = rd_clean_path_rsp
@@ -71,7 +71,7 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
                 std::cmp::Ordering::Equal => break,
                 std::cmp::Ordering::Greater => {
                     return Err(io::Error::new(
-                        io::ErrorKind::Other,
+                        ErrorKind::Other,
                         "no leftover is expected when reading cleanpath PDU",
                     ));
                 }
@@ -82,14 +82,14 @@ async fn read_cleanpath_pdu(mut stream: impl AsyncRead + Unpin + Send) -> io::Re
 
         if n == 0 {
             return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
+                ErrorKind::UnexpectedEof,
                 "EOF when reading RDCleanPathPdu",
             ));
         }
     }
 
     let rdcleanpath = RDCleanPathPdu::from_der(&buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?;
+        .map_err(|e| io::Error::new(ErrorKind::InvalidInput, format!("bad RDCleanPathPdu: {e}")))?;
 
     Ok(rdcleanpath)
 }
@@ -461,7 +461,7 @@ enum WsaError {
 }
 
 impl WsaError {
-    pub fn as_u16(self) -> u16 {
+    pub(crate) fn as_u16(self) -> u16 {
         self as u16
     }
 }

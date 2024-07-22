@@ -82,7 +82,7 @@ macro_rules! impl_tcp_connect {
 
 type TcpConnectOutput = (ErasedRead, ErasedWrite);
 
-pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<TcpConnectOutput> {
+pub(crate) async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<TcpConnectOutput> {
     impl_tcp_connect!(req_addr, proxy_cfg, anyhow::Result<TcpConnectOutput>, |stream| {
         let (read, write) = tokio::io::split(stream);
         future::ready(Ok((Box::new(read) as ErasedRead, Box::new(write) as ErasedWrite)))
@@ -91,7 +91,7 @@ pub async fn tcp_connect(req_addr: String, proxy_cfg: Option<ProxyConfig>) -> an
 
 type WebSocketConnectOutput = (ErasedRead, ErasedWrite, Response);
 
-pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<WebSocketConnectOutput> {
+pub(crate) async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow::Result<WebSocketConnectOutput> {
     use futures_util::StreamExt as _;
     use tokio_tungstenite::client_async_tls;
 
@@ -122,7 +122,7 @@ pub async fn ws_connect(addr: String, proxy_cfg: Option<ProxyConfig>) -> anyhow:
     })
 }
 
-pub async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
+pub(crate) async fn timeout<T, Fut, E>(duration: Option<Duration>, future: Fut) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
     E: From<tokio::time::error::Elapsed>,
@@ -135,7 +135,7 @@ where
     }
 }
 
-pub async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
+pub(crate) async fn while_process_is_running<Fut, E>(process: Option<sysinfo::Pid>, future: Fut) -> Result<(), E>
 where
     Fut: Future<Output = Result<(), E>>,
 {
@@ -153,7 +153,7 @@ where
     }
 }
 
-pub fn websocket_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
+pub(crate) fn websocket_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
 where
     S: Stream<Item = Result<tungstenite::Message, tungstenite::Error>> + Unpin + Send + 'static,
 {
@@ -172,21 +172,20 @@ where
     transport::WsStream::new(compat)
 }
 
-pub fn websocket_write<S>(sink: S) -> impl AsyncWrite + Unpin + Send + 'static
+pub(crate) fn websocket_write<S>(sink: S) -> impl AsyncWrite + Unpin + Send + 'static
 where
     S: Sink<tungstenite::Message, Error = tungstenite::Error> + Unpin + Send + 'static,
 {
     use futures_util::SinkExt as _;
 
-    let compat =
-        sink.with(|item| futures_util::future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
+    let compat = sink.with(|item| future::ready(Ok::<_, tungstenite::Error>(tungstenite::Message::Binary(item))));
 
     transport::WsStream::new(compat)
 }
 
 pub(crate) struct DummyReaderWriter;
 
-impl tokio::io::AsyncRead for DummyReaderWriter {
+impl AsyncRead for DummyReaderWriter {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,
@@ -196,7 +195,7 @@ impl tokio::io::AsyncRead for DummyReaderWriter {
     }
 }
 
-impl tokio::io::AsyncWrite for DummyReaderWriter {
+impl AsyncWrite for DummyReaderWriter {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,

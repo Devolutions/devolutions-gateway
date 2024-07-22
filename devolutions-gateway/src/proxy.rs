@@ -95,7 +95,7 @@ where
             &self.sessions,
             &self.subscriber_tx,
             self.session_info,
-            notify_kill.clone(),
+            Arc::clone(&notify_kill),
         )
         .await?;
 

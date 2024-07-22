@@ -67,7 +67,7 @@ pub fn url_to_socket_addr(url: &Url) -> anyhow::Result<SocketAddr> {
     let host = url.host_str().context("bad url: host missing")?;
     let port = url.port_or_known_default().context("bad url: port missing")?;
 
-    Ok((host, port).to_socket_addrs().unwrap().next().unwrap())
+    (host, port).to_socket_addrs()?.next().context("no address resolved")
 }
 
 pub fn wildcard_host_match(wildcard_host: &str, actual_host: &str) -> bool {

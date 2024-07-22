@@ -155,7 +155,7 @@ struct Tasks {
 
 impl Tasks {
     fn new() -> Self {
-        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
 
         Self {
             inner: Vec::new(),
@@ -181,7 +181,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
 
     if conf.remote_desktop.enabled {
-        tasks.register(RemoteDesktopTask::new(conf_handle.clone()));
+        tasks.register(RemoteDesktopTask::new(conf_handle));
     }
 
     #[cfg(windows)]

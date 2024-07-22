@@ -293,7 +293,7 @@ pub fn recording_message_channel() -> (RecordingMessageSender, RecordingMessageR
 
     let handle = RecordingMessageSender {
         channel: tx,
-        active_recordings: ongoing_recordings.clone(),
+        active_recordings: Arc::clone(&ongoing_recordings),
     };
 
     let receiver = RecordingMessageReceiver {
@@ -574,8 +574,7 @@ async fn recording_manager_task(
     loop {
         tokio::select! {
             () = &mut next_remove_sleep, if !disconnected.is_empty() => {
-                // Will never panic since we check for non-emptiness before entering this block
-                let to_remove = disconnected.pop().unwrap();
+                let to_remove = disconnected.pop().expect("we check for non-emptiness before entering this block");
 
                 manager.handle_remove(to_remove.id);
 

@@ -170,7 +170,8 @@ pub fn find_unused_ports(number: usize) -> Vec<u16> {
 
     'outer: for _ in 0..number {
         for _ in 0..5 {
-            let port = portpicker::pick_unused_port().expect("No available port");
+            let port = portpicker::pick_unused_port()
+                .expect("at least one free port should be found (try again if this failed)");
             if !ports.contains(&port) {
                 ports.insert(port);
                 continue 'outer;

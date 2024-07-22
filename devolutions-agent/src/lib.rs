@@ -1,3 +1,6 @@
+// Used by devolutions-agent binary.
+use {ceviche as _, ctrlc as _};
+
 #[macro_use]
 extern crate tracing;
 

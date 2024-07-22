@@ -19,28 +19,28 @@ pub(crate) type ScanEntryReceiver = tokio::sync::mpsc::Receiver<ScanEntry>;
 
 #[derive(Clone)]
 pub(crate) struct TaskExecutionContext {
-    pub ip_sender: IpSender,
-    pub ip_receiver: Arc<Mutex<IpReceiver>>,
+    pub(crate) ip_sender: IpSender,
+    pub(crate) ip_receiver: Arc<Mutex<IpReceiver>>,
 
-    pub port_sender: ScanEntrySender,
-    pub port_receiver: Arc<Mutex<ScanEntryReceiver>>,
+    pub(crate) port_sender: ScanEntrySender,
+    pub(crate) port_receiver: Arc<Mutex<ScanEntryReceiver>>,
 
-    pub ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
+    pub(crate) ip_cache: Arc<parking_lot::RwLock<HashMap<IpAddr, Option<String>>>>,
 
-    pub ports: Vec<u16>,
+    pub(crate) ports: Vec<u16>,
 
-    pub runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
-    pub mdns_daemon: MdnsDaemon,
+    pub(crate) runtime: Arc<network_scanner_net::runtime::Socket2Runtime>,
+    pub(crate) mdns_daemon: MdnsDaemon,
 
-    pub ping_interval: Duration,      // in milliseconds
-    pub ping_timeout: Duration,       // in milliseconds
-    pub broadcast_timeout: Duration,  // in milliseconds
-    pub port_scan_timeout: Duration,  // in milliseconds
-    pub netbios_timeout: Duration,    // in milliseconds
-    pub netbios_interval: Duration,   // in milliseconds
-    pub mdns_query_timeout: Duration, // in milliseconds
+    pub(crate) ping_interval: Duration,      // in milliseconds
+    pub(crate) ping_timeout: Duration,       // in milliseconds
+    pub(crate) broadcast_timeout: Duration,  // in milliseconds
+    pub(crate) port_scan_timeout: Duration,  // in milliseconds
+    pub(crate) netbios_timeout: Duration,    // in milliseconds
+    pub(crate) netbios_interval: Duration,   // in milliseconds
+    pub(crate) mdns_query_timeout: Duration, // in milliseconds
 
-    pub subnets: Vec<Subnet>,
+    pub(crate) subnets: Vec<Subnet>,
 }
 
 type HandlesReceiver = crossbeam::channel::Receiver<tokio::task::JoinHandle<anyhow::Result<()>>>;
@@ -176,7 +176,7 @@ impl TaskManager {
 
     pub(crate) fn stop(&self) {
         self.should_stop.store(true, std::sync::atomic::Ordering::SeqCst);
-        let handles = self.handles_receiver.clone();
+        let handles = Arc::clone(&self.handles_receiver);
         while let Ok(handle) = handles.try_recv() {
             handle.abort();
         }

@@ -84,8 +84,9 @@ struct SecurityAddon;
 
 impl Modify for SecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        // we can unwrap safely since there already is components registered.
-        let components = openapi.components.as_mut().unwrap();
+        let components = openapi
+            .components
+            .get_or_insert_with(utoipa::openapi::Components::default);
 
         components.add_security_scheme(
             "scope_token",
@@ -251,16 +252,18 @@ struct SubscriberSecurityAddon;
 
 impl Modify for SubscriberSecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        // we can unwrap safely since there already is components registered.
-        openapi.components.as_mut().unwrap().add_security_scheme(
-            "subscriber_token",
-            SecurityScheme::Http(
-                HttpBuilder::new()
-                    .scheme(HttpAuthScheme::Bearer)
-                    .description(Some("Token allowing to push messages".to_owned()))
-                    .build(),
-            ),
-        );
+        openapi
+            .components
+            .get_or_insert_with(utoipa::openapi::Components::default)
+            .add_security_scheme(
+                "subscriber_token",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some("Token allowing to push messages".to_owned()))
+                        .build(),
+                ),
+            );
     }
 }
 

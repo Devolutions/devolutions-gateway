@@ -1,3 +1,7 @@
+// Used by tests.
+#[cfg(test)]
+use anyhow as _;
+
 mod copy_bidirectional;
 mod forward;
 mod ws;

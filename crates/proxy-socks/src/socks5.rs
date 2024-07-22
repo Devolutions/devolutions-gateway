@@ -74,7 +74,7 @@ where
 {
     #[inline]
     fn poll_read(
-        mut self: std::pin::Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<io::Result<()>> {
@@ -88,7 +88,7 @@ where
 {
     #[inline]
     fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, io::Error>> {
@@ -96,16 +96,13 @@ where
     }
 
     #[inline]
-    fn poll_flush(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), io::Error>> {
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
     #[inline]
     fn poll_shutdown(
-        mut self: std::pin::Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), io::Error>> {
         Pin::new(&mut self.inner).poll_shutdown(cx)
@@ -277,11 +274,11 @@ impl Socks5FailureCode {
     }
 }
 
-impl From<std::io::ErrorKind> for Socks5FailureCode {
-    fn from(kind: std::io::ErrorKind) -> Socks5FailureCode {
+impl From<io::ErrorKind> for Socks5FailureCode {
+    fn from(kind: io::ErrorKind) -> Socks5FailureCode {
         match kind {
-            std::io::ErrorKind::ConnectionRefused => Socks5FailureCode::ConnectionRefused,
-            std::io::ErrorKind::TimedOut => Socks5FailureCode::TtlExpired,
+            io::ErrorKind::ConnectionRefused => Socks5FailureCode::ConnectionRefused,
+            io::ErrorKind::TimedOut => Socks5FailureCode::TtlExpired,
             #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
             std::io::ErrorKind::HostUnreachable => Socks5FailureCode::HostUnreachable,
             #[cfg(feature = "nightly")] // https://github.com/rust-lang/rust/issues/86442
@@ -291,14 +288,14 @@ impl From<std::io::ErrorKind> for Socks5FailureCode {
     }
 }
 
-impl From<std::io::Error> for Socks5FailureCode {
-    fn from(e: std::io::Error) -> Socks5FailureCode {
+impl From<io::Error> for Socks5FailureCode {
+    fn from(e: io::Error) -> Socks5FailureCode {
         Socks5FailureCode::from(e.kind())
     }
 }
 
-impl From<&std::io::Error> for Socks5FailureCode {
-    fn from(e: &std::io::Error) -> Socks5FailureCode {
+impl From<&io::Error> for Socks5FailureCode {
+    fn from(e: &io::Error) -> Socks5FailureCode {
         Socks5FailureCode::from(e.kind())
     }
 }

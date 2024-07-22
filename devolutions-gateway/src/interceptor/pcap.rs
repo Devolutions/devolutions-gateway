@@ -103,7 +103,7 @@ async fn writer_task(
                 .ack(ack_number)
                 .syn()
                 .write(&mut tcp_ip_packet, &message)
-                .expect("valid TCP/IP packet and enough memory for serializing and writing it");
+                .expect("enough memory for serializing and writing the TCP/IP packet");
 
             // Write packet in pcap file.
             let since_epoch = std::time::SystemTime::now()

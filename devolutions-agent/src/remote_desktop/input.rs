@@ -1,10 +1,10 @@
 use ironrdp::server::{KeyboardEvent, MouseEvent, RdpServerInputHandler};
 
 #[derive(Clone, Debug)]
-pub struct InputHandler;
+pub(crate) struct InputHandler;
 
 impl InputHandler {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }

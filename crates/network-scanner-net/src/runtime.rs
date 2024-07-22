@@ -56,7 +56,7 @@ impl Socket2Runtime {
             next_socket_id: AtomicUsize::new(0),
             is_terminated: Arc::new(AtomicBool::new(false)),
             register_sender,
-            event_history: event_history.clone(),
+            event_history: Arc::clone(&event_history),
         };
         let runtime = Arc::new(runtime);
         runtime.start_loop(register_receiver, event_history)?;
@@ -69,15 +69,16 @@ impl Socket2Runtime {
         ty: socket2::Type,
         protocol: Option<socket2::Protocol>,
     ) -> anyhow::Result<AsyncRawSocket> {
-        let socket = socket2::Socket::new(domain, ty, protocol)?;
+        let socket = Socket::new(domain, ty, protocol)?;
         let id = self.next_socket_id.fetch_add(1, Ordering::SeqCst);
+        // SAFETY: TODO: explain safety
         unsafe {
             self.poller.add(&socket, Event::all(id))?;
         }
-        Ok(AsyncRawSocket::from_socket(socket, id, self.clone())?)
+        Ok(AsyncRawSocket::from_socket(socket, id, Arc::clone(self))?)
     }
 
-    pub(crate) fn remove_socket(&self, socket: &socket2::Socket, id: usize) -> anyhow::Result<()> {
+    pub(crate) fn remove_socket(&self, socket: &Socket, id: usize) -> anyhow::Result<()> {
         self.poller.delete(socket)?;
         // remove all events related to this socket
         self.remove_events_with_id_from_history(id);
@@ -91,12 +92,13 @@ impl Socket2Runtime {
     ) -> anyhow::Result<()> {
         // We make is_terminated Arc<AtomicBool> and poller Arc<Poller> so that we can clone them and move them into the thread.
         // The reason why we cannot hold a Arc<Socket2Runtime> in the thread is because it will create a cycle reference and the runtime will never be dropped.
-        let is_terminated = self.is_terminated.clone();
-        let poller = self.poller.clone();
+        let is_terminated = Arc::clone(&self.is_terminated);
+        let poller = Arc::clone(&self.poller);
         std::thread::Builder::new()
-            .name("[raw-socket]:io-event-loop".to_string())
+            .name("[raw-socket]:io-event-loop".to_owned())
             .spawn(move || {
-                let mut events = Events::with_capacity(NonZeroUsize::new(QUEUE_CAPACITY).unwrap());
+                let mut events =
+                    Events::with_capacity(NonZeroUsize::new(QUEUE_CAPACITY).expect("QUEUE_CAPACITY is non-zero"));
 
                 debug!("Start I/O event loop");
 
@@ -185,7 +187,7 @@ impl Socket2Runtime {
 
     pub(crate) fn register(&self, socket: &Socket, event: Event, waker: Waker) -> anyhow::Result<()> {
         if self.is_terminated.load(Ordering::Acquire) {
-            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_string()))?;
+            Err(ScannnerNetError::AsyncRuntimeError("runtime is terminated".to_owned()))?;
         }
 
         trace!(?event, ?socket, "Registering event");

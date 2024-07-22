@@ -308,7 +308,6 @@ impl Icmpv4Packet {
                 }
             }
             t => {
-                dbg!(bytes);
                 return Err(PacketParseError::UnrecognizedICMPType(t));
             }
         };
@@ -339,15 +338,21 @@ impl Icmpv4Packet {
         while sum >> 16 != 0 {
             sum = (sum >> 16) + (sum & 0xFFFF);
         }
-        !sum as u16
+
+        #[allow(clippy::cast_possible_truncation)] // Truncation is intended.
+        {
+            !sum as u16
+        }
     }
 
     /// Populate the checksum field of this Packet.
+    #[must_use]
     pub fn with_checksum(mut self) -> Self {
         self.checksum = self.calculate_checksum();
         self
     }
 
+    #[must_use]
     pub fn from_message(message: Icmpv4Message) -> Self {
         Self {
             code: 0,
@@ -389,14 +394,14 @@ fn sum_big_endian_words(bs: &[u8]) -> u32 {
     let mut sum = 0u32;
     // Iterate by word which is two bytes.
     while data.len() >= 2 {
-        sum += BigEndian::read_u16(&data[0..2]) as u32;
+        sum += u32::from(BigEndian::read_u16(&data[0..2]));
         // remove the first two bytes now that we've already summed them
         data = &data[2..];
     }
 
     if (len % 2) != 0 {
         // If odd then checksum the last byte
-        sum += (data[0] as u32) << 8;
+        sum += u32::from(data[0]) << 8;
     }
     sum
 }

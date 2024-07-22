@@ -1,4 +1,6 @@
 #![allow(clippy::too_many_arguments)]
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
 
 use anyhow::Context as _;
 use devolutions_gateway::recording::ActiveRecordings;
@@ -457,7 +459,7 @@ fn with_scopes(
         let mut token = CheckedJwtSig::new_with_cty(JwsAlg::RS256, content_type, &claims);
 
         let token = if use_subkey {
-            token.header.kid = Some(subkey_metadata.kid.to_string());
+            token.header.kid = Some(subkey_metadata.kid.clone());
             token.encode(&subkey)?
         } else {
             token.encode(&provisioner_key)?

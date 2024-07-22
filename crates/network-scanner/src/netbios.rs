@@ -26,7 +26,7 @@ pub fn netbios_query_scan(
     task_manager: crate::task_utils::TaskManager,
 ) -> Result<IpReceiver, ScannerError> {
     if ip_range.is_ipv6() {
-        return Err(ScannerError::DoesNotSupportIpv6("netbios".to_string()));
+        return Err(ScannerError::DoesNotSupportIpv6("netbios".to_owned()));
     }
 
     let (sender, receiver) = tokio::sync::mpsc::channel(255);
@@ -57,14 +57,18 @@ pub(crate) fn netbios_query_one(
         socket.send_to(&MESSAGE, &addr).await?;
         let mut buf: [MaybeUninit<u8>; 1024] = [MaybeUninit::<u8>::uninit(); 1024];
         socket.recv(&mut buf).await?;
-        unsafe {
-            let buf = assume_init(&buf);
-            let IpAddr::V4(ipv4) = ip else {
-                anyhow::bail!("unreachable");
-            };
-            let packet = NetBiosPacket::from(ipv4, buf);
-            result_sender.send((ipv4.into(), Some(packet.name()))).await?
-        }
+
+        let IpAddr::V4(ipv4) = ip else {
+            anyhow::bail!("unreachable");
+        };
+
+        // SAFETY: TODO: explain why it’s safe.
+        let buf = unsafe { assume_init(&buf) };
+
+        let packet = NetBiosPacket::from(ipv4, buf);
+
+        result_sender.send((ipv4.into(), Some(packet.name()))).await?;
+
         anyhow::Result::<()>::Ok(())
     });
 }

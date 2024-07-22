@@ -4,3 +4,6 @@ version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
+
+[lints]
+workspace = true

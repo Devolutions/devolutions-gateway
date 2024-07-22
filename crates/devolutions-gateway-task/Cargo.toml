@@ -5,6 +5,9 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 default = []
 named_tasks = ["tokio/tracing"]

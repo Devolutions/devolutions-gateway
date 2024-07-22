@@ -32,7 +32,7 @@ pub fn get_data_dir() -> Utf8PathBuf {
         let mut config_path = Utf8PathBuf::new();
 
         if cfg!(target_os = "windows") {
-            let program_data_env = env::var("ProgramData").expect("ProgramData env variable");
+            let program_data_env = env::var("ProgramData").expect("ProgramData env variable should be set on Windows");
             config_path.push(program_data_env);
             config_path.push(COMPANY_DIR);
             config_path.push(PROGRAM_DIR);

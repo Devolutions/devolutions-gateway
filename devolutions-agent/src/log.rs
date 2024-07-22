@@ -1,6 +1,6 @@
 use devolutions_log::StaticLogConfig;
 
-pub struct AgentLog;
+pub(crate) struct AgentLog;
 
 impl StaticLogConfig for AgentLog {
     const MAX_BYTES_PER_LOG_FILE: u64 = 3_000_000; // 3 MB;

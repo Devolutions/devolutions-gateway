@@ -57,7 +57,7 @@ impl JetConnectReq {
         Ok(())
     }
 
-    pub fn from_request(request: &httparse::Request) -> Result<Self, Error> {
+    pub fn from_request(request: &httparse::Request<'_, '_>) -> Result<Self, Error> {
         if request.is_get_method() {
             // Version has to be specified
             let version_opt = if let Some(version_str) = request.get_header_value("jet-version") {
@@ -81,7 +81,7 @@ impl JetConnectReq {
                         {
                             return Ok(JetConnectReq {
                                 version,
-                                host: host.to_string(),
+                                host: host.to_owned(),
                                 association: association_id,
                                 candidate: candidate_id,
                             });
@@ -93,7 +93,7 @@ impl JetConnectReq {
                                     if let Ok(association) = Uuid::from_str(jet_association) {
                                         return Ok(JetConnectReq {
                                             version,
-                                            host: host.to_string(),
+                                            host: host.to_owned(),
                                             association,
                                             candidate: Uuid::nil(),
                                         });
@@ -131,7 +131,7 @@ impl JetConnectRsp {
         Ok(())
     }
 
-    pub fn from_response(response: &httparse::Response) -> Result<Self, Error> {
+    pub fn from_response(response: &httparse::Response<'_, '_>) -> Result<Self, Error> {
         if let Some(status_code) = response.code.and_then(|code| StatusCode::from_u16(code).ok()) {
             let version_opt = response
                 .get_header_value(JET_HEADER_VERSION)

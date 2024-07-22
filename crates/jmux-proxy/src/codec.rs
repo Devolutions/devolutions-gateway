@@ -5,9 +5,9 @@ use jmux_proto::{Header, Message};
 use tokio_util::codec::{Decoder, Encoder};
 
 /// This is a purely arbitrary number
-pub const MAXIMUM_PACKET_SIZE_IN_BYTES: usize = 4096;
+pub(crate) const MAXIMUM_PACKET_SIZE_IN_BYTES: usize = 4096;
 
-pub struct JmuxCodec;
+pub(crate) struct JmuxCodec;
 
 impl Decoder for JmuxCodec {
     type Item = Message;
@@ -71,7 +71,7 @@ impl Encoder<Message> for JmuxCodec {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
     use bytes::Bytes;
     use futures_util::StreamExt;
@@ -85,11 +85,7 @@ pub mod tests {
     }
 
     impl AsyncRead for MockAsyncReader {
-        fn poll_read(
-            mut self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-            buf: &mut ReadBuf<'_>,
-        ) -> Poll<std::io::Result<()>> {
+        fn poll_read(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
             if buf.remaining() > 0 {
                 let amount = std::cmp::min(buf.remaining(), self.raw_msg.len());
                 buf.put_slice(&self.raw_msg[0..amount]);

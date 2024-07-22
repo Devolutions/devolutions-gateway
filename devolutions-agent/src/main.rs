@@ -1,3 +1,13 @@
+#![allow(clippy::print_stderr)]
+#![allow(clippy::print_stdout)]
+
+// Used by devolutions-agent library.
+use {
+    anyhow as _, async_trait as _, camino as _, devolutions_agent_shared as _, devolutions_gateway_task as _,
+    devolutions_log as _, futures as _, ironrdp as _, parking_lot as _, rand as _, rustls as _, rustls_pemfile as _,
+    serde as _, serde_json as _, tap as _, tokio as _, tokio_rustls as _,
+};
+
 #[macro_use]
 extern crate tracing;
 
@@ -45,7 +55,7 @@ fn agent_service_main(
 
     loop {
         if let Ok(control_code) = rx.recv() {
-            info!("Received control code: {}", control_code);
+            info!(%control_code, "Received control code");
 
             if let ServiceEvent::Stop = control_code {
                 service.stop();
@@ -93,7 +103,7 @@ fn main() {
                 ctrlc::set_handler(move || {
                     let _ = tx.send(ServiceEvent::Stop);
                 })
-                .expect("Failed to register Ctrl-C handler");
+                .expect("failed to register Ctrl-C handler");
 
                 agent_service_main(rx, _tx, vec![], true);
             }
@@ -104,7 +114,7 @@ fn main() {
                 }
             }
             _ => {
-                eprintln!("invalid command: {}", cmd);
+                eprintln!("[ERROR] Invalid command: {cmd}");
             }
         }
     } else {

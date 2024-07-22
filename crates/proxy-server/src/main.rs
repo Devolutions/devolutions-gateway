@@ -1,3 +1,6 @@
+#![allow(clippy::print_stdout)]
+#![allow(clippy::print_stderr)]
+
 use proxy_http::HttpProxyAcceptor;
 use proxy_socks::{Socks5Acceptor, Socks5AcceptorConfig, Socks5FailureCode};
 use std::sync::Arc;
@@ -9,12 +12,14 @@ const USAGE: &str = "[--no-auth-required] [--socks-port <PORT>] [--https-port <P
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = env::args().collect();
     let args: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let args = parse_args(&args)?;
 
     if args.show_usage {
-        let prgm_name = env::args().next().unwrap();
+        let prgm_name = env::args()
+            .next()
+            .expect("the first argument should be set by the shell");
         println!("Usage: {prgm_name} {USAGE}");
         return Ok(());
     } else {

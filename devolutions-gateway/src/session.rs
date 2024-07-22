@@ -51,16 +51,19 @@ impl SessionInfo {
         }
     }
 
+    #[must_use]
     pub fn with_recording_policy(mut self, value: bool) -> Self {
         self.recording_policy = value;
         self
     }
 
+    #[must_use]
     pub fn with_filtering_policy(mut self, value: bool) -> Self {
         self.filtering_policy = value;
         self
     }
 
+    #[must_use]
     pub fn with_ttl(mut self, value: SessionTtl) -> Self {
         self.time_to_live = value;
         self
@@ -361,8 +364,7 @@ async fn session_manager_task(
     loop {
         tokio::select! {
             () = &mut auto_kill_sleep, if !with_ttl.is_empty() => {
-                // Will never panic since we check for non-emptiness before entering this block.
-                let to_kill = with_ttl.pop().unwrap();
+                let to_kill = with_ttl.pop().expect("we check for non-emptiness before entering this block");
 
                 match manager.handle_kill(to_kill.session_id) {
                     KillResult::Success => {

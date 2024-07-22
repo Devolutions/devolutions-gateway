@@ -101,7 +101,7 @@ pub fn mdns_query_scan(
                     debug!(?service_event);
                     if let ServiceEvent::ServiceResolved(msg) = service_event {
                         let (device_name, protocol) =
-                            parse_fullname(msg.get_fullname()).unwrap_or((msg.get_fullname().to_string(), None));
+                            parse_fullname(msg.get_fullname()).unwrap_or((msg.get_fullname().to_owned(), None));
 
                         let port = msg.get_port();
 
@@ -142,7 +142,7 @@ fn parse_fullname(fullname: &str) -> Option<(String, Option<ServiceType>)> {
 
     let protocol = service_type.as_str().try_into().ok();
 
-    Some((device_name.to_string(), protocol))
+    Some((device_name.to_owned(), protocol))
 }
 
 impl TryFrom<&str> for ServiceType {
@@ -166,7 +166,7 @@ impl TryFrom<&str> for ServiceType {
     }
 }
 
-impl<'a> From<ServiceType> for &'a str {
+impl From<ServiceType> for &str {
     fn from(val: ServiceType) -> Self {
         match val {
             ServiceType::Ard => "_rfb._tcp",

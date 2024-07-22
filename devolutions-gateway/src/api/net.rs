@@ -30,7 +30,7 @@ pub async fn handle_network_scan(
 ) -> Result<Response, HttpError> {
     let scanner_params: NetworkScannerParams = query_params.0.into();
 
-    let scanner = network_scanner::scanner::NetworkScanner::new(scanner_params).map_err(|e| {
+    let scanner = scanner::NetworkScanner::new(scanner_params).map_err(|e| {
         error!(error = format!("{e:#}"), "Failed to create network scanner");
         HttpError::internal().build(e)
     })?;
@@ -204,7 +204,7 @@ impl NetworkScanResponse {
     security(("netscan_token" = [])),
 ))]
 pub async fn get_net_config(_token: crate::extract::NetScanToken) -> Result<Json<Vec<NetworkInterface>>, HttpError> {
-    let interfaces = network_scanner::interfaces::get_network_interfaces()
+    let interfaces = interfaces::get_network_interfaces()
         .await
         .map_err(HttpError::internal().with_msg("failed to get network interfaces").err())?
         .into_iter()

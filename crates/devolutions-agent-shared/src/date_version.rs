@@ -93,7 +93,7 @@ mod tests {
     // Regression test in case field order gets changed
     #[test]
     fn date_version_ordering() {
-        const VERSIONS_ASCENDING_PAIRS: &[(&'static str, &'static str)] = &[
+        const VERSIONS_ASCENDING_PAIRS: &[(&str, &str)] = &[
             // cases (>) for fields in order
             ("2022.10.1.2", "2022.10.1.1"),
             ("2022.10.2.1", "2022.10.1.1"),

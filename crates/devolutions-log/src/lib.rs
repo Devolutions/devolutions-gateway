@@ -33,7 +33,7 @@ struct LogPathCfg<'a, C: StaticLogConfig> {
 }
 
 impl<'a, C: StaticLogConfig> LogPathCfg<'a, C> {
-    pub fn from_path(path: &'a Utf8Path) -> anyhow::Result<Self> {
+    pub(crate) fn from_path(path: &'a Utf8Path) -> anyhow::Result<Self> {
         if path.is_dir() {
             Ok(Self {
                 folder: path,
@@ -66,7 +66,7 @@ pub fn init<C: StaticLogConfig>(
     let (file_non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = fmt::layer().with_writer(file_non_blocking).with_ansi(false);
 
-    let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(std::io::stdout());
+    let (non_blocking_stdio, stdio_guard) = tracing_appender::non_blocking(io::stdout());
     let stdio_layer = fmt::layer().with_writer(non_blocking_stdio);
 
     let env_filter = EnvFilter::try_new(log_filter).context("invalid built-in filtering directives (this is a bug)")?;
@@ -76,7 +76,7 @@ pub fn init<C: StaticLogConfig>(
         .into_iter()
         .flat_map(|directives| directives.split(','))
         .fold(env_filter, |env_filter, directive| {
-            env_filter.add_directive(directive.parse().unwrap())
+            env_filter.add_directive(directive.parse().expect("a valid log directive (debug option)"))
         });
 
     tracing_subscriber::registry()

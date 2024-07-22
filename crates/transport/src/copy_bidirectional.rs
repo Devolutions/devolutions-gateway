@@ -54,7 +54,7 @@ where
     }
 }
 
-impl<'a, A, B> Future for CopyBidirectional<'a, A, B>
+impl<A, B> Future for CopyBidirectional<'_, A, B>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
     B: AsyncRead + AsyncWrite + Unpin + ?Sized,
@@ -109,7 +109,7 @@ pub async fn copy_bidirectional<A, B>(
     b: &mut B,
     send_buffer_size: usize,
     recv_buffer_size: usize,
-) -> Result<(u64, u64), std::io::Error>
+) -> Result<(u64, u64), io::Error>
 where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
     B: AsyncRead + AsyncWrite + Unpin + ?Sized,

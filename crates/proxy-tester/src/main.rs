@@ -7,7 +7,7 @@ const GOOGLE_ADDR: &str = "www.google.com:80";
 const USAGE: &str = "[--mode <TEST_MODE>] [--addr <PROXY_ADDR>] [--user <USERNAME>,<PASSWORD>]";
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = env::args().collect();
     let args: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let args = parse_args(&args).expect("bad argument");
 
@@ -61,7 +61,7 @@ struct Args<'a> {
     show_usage: bool,
 }
 
-impl<'a> Default for Args<'a> {
+impl Default for Args<'_> {
     fn default() -> Self {
         Self {
             mode: "socks5",
@@ -163,7 +163,7 @@ macro_rules! test {
 mod socks5_no_password {
     use super::*;
 
-    pub fn test(addr: &str) {
+    pub(crate) fn test(addr: &str) {
         test! {
             socks5_no_auth_connect(addr).await;
             socks5_unrequired_username_password_pair(addr).await;
@@ -172,14 +172,14 @@ mod socks5_no_password {
 
     async fn socks5_no_auth_connect(addr: &str) {
         let stream = socks5_connect(addr).await.unwrap();
-        crate::ping_google(stream).await;
+        ping_google(stream).await;
     }
 
     async fn socks5_unrequired_username_password_pair(addr: &str) {
         let stream = socks5_connect_with_password(addr, "xxxxxxxxxxx", "xxxxxxxxxxx")
             .await
             .unwrap();
-        crate::ping_google(stream).await;
+        ping_google(stream).await;
     }
 }
 
@@ -187,7 +187,7 @@ mod socks4 {
     use super::*;
     use proxy_socks::Socks4Stream;
 
-    pub fn test(addr: &str) {
+    pub(crate) fn test(addr: &str) {
         test! {
             socks4_connect(addr).await;
         }
@@ -196,14 +196,14 @@ mod socks4 {
     async fn socks4_connect(addr: &str) {
         let socket = TcpStream::connect(addr).await.unwrap();
         let stream = Socks4Stream::connect(socket, GOOGLE_ADDR, "david").await.unwrap();
-        crate::ping_google(stream).await;
+        ping_google(stream).await;
     }
 }
 
 mod socks5_password {
     use super::*;
 
-    pub fn test(addr: &str, username: &str, password: &str) {
+    pub(crate) fn test(addr: &str, username: &str, password: &str) {
         test! {
             socks5_with_password(addr, username, password).await;
             socks5_incorrect_password(addr).await;
@@ -213,7 +213,7 @@ mod socks5_password {
 
     async fn socks5_with_password(addr: &str, username: &str, password: &str) {
         let stream = socks5_connect_with_password(addr, username, password).await.unwrap();
-        crate::ping_google(stream).await;
+        ping_google(stream).await;
     }
 
     async fn socks5_incorrect_password(addr: &str) {
@@ -235,7 +235,7 @@ mod http {
     use super::*;
     use proxy_http::ProxyStream;
 
-    pub fn test(addr: &str) {
+    pub(crate) fn test(addr: &str) {
         test! {
             basic(addr).await;
         }
@@ -244,6 +244,6 @@ mod http {
     async fn basic(addr: &str) {
         let socket = TcpStream::connect(addr).await.unwrap();
         let stream = ProxyStream::connect(socket, GOOGLE_ADDR).await.unwrap();
-        crate::ping_google(stream).await;
+        ping_google(stream).await;
     }
 }

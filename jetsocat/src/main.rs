@@ -1,3 +1,19 @@
+#![allow(clippy::print_stderr)]
+#![allow(clippy::print_stdout)]
+
+// Used by the jetsocat library.
+use {
+    futures_util as _, jet_proto as _, jmux_proto as _, proxy_cfg as _, proxy_http as _, proxy_socks as _,
+    proxy_types as _, tokio_tungstenite as _, transport as _,
+};
+
+// Used by tests
+#[cfg(test)]
+use {proptest as _, test_utils as _};
+
+#[macro_use]
+extern crate tracing;
+
 use anyhow::Context as _;
 use jetsocat::listener::ListenerMode;
 use jetsocat::pipe::PipeMode;
@@ -8,10 +24,9 @@ use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use tokio::runtime;
-use tracing::*;
 
 fn main() {
-    let args: Vec<String> = if let Ok(args_str) = std::env::var("JETSOCAT_ARGS") {
+    let args: Vec<String> = if let Ok(args_str) = env::var("JETSOCAT_ARGS") {
         env::args()
             .take(1)
             .chain(parse_env_variable_as_args(&args_str))
@@ -346,7 +361,7 @@ impl CommonArgs {
                 sysinfo::get_current_pid().map_err(|e| anyhow::anyhow!("couldn't find current process ID: {e}"))?;
             let refresh_kind = RefreshKind::new().with_processes(ProcessRefreshKind::new());
             let system = System::new_with_specifics(refresh_kind);
-            let current_process = system.process(current_pid).unwrap(); // current process should exist
+            let current_process = system.process(current_pid).expect("current process exists");
             Some(current_process.parent().context("couldn't find parent process")?)
         } else {
             None
@@ -381,17 +396,17 @@ impl ForwardArgs {
 
         let mut args = c.args.iter();
 
-        let arg_pipe_a = args.next().context("<PIPE A> is missing")?.clone();
-        let pipe_a_mode = parse_pipe_mode(arg_pipe_a).context("bad <PIPE A>")?;
+        let arg_pipe_left = args.next().context("<PIPE A> is missing")?.clone();
+        let pipe_left_mode = parse_pipe_mode(arg_pipe_left).context("bad <PIPE A>")?;
 
-        let arg_pipe_b = args.next().context("<PIPE B> is missing")?.clone();
-        let pipe_b_mode = parse_pipe_mode(arg_pipe_b).context("bad <PIPE B>")?;
+        let arg_pipe_right = args.next().context("<PIPE B> is missing")?.clone();
+        let pipe_right_mode = parse_pipe_mode(arg_pipe_right).context("bad <PIPE B>")?;
 
         Ok(Self {
             common,
             repeat_count,
-            pipe_a_mode,
-            pipe_b_mode,
+            pipe_a_mode: pipe_left_mode,
+            pipe_b_mode: pipe_right_mode,
         })
     }
 }

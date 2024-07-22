@@ -55,7 +55,7 @@ impl NetworkScanner {
                       ..
                   }: TaskExecutionContext,
                   task_manager| async move {
-                let ip_cache = ip_cache.clone();
+                let ip_cache = Arc::clone(&ip_cache);
                 while let Some((ip, host)) = ip_receiver.lock().await.recv().await {
                     if ip_cache.read().get(&ip).is_some() {
                         if host.is_some() {
@@ -66,8 +66,12 @@ impl NetworkScanner {
 
                     ip_cache.write().insert(ip, host);
 
-                    let (runtime, ports, port_sender, ip_cache) =
-                        (runtime.clone(), ports.clone(), port_sender.clone(), ip_cache.clone());
+                    let (runtime, ports, port_sender, ip_cache) = (
+                        Arc::clone(&runtime),
+                        ports.clone(),
+                        port_sender.clone(),
+                        Arc::clone(&ip_cache),
+                    );
 
                     task_manager.spawn(move |task_manager| async move {
                         debug!(scanning_ip = ?ip);
@@ -115,8 +119,8 @@ impl NetworkScanner {
                   task_manager| async move {
                 for subnet in subnets {
                     debug!(broadcasting_to_subnet = ?subnet);
-                    let (runtime, ip_sender) = (runtime.clone(), ip_sender.clone());
-                    task_manager.spawn(move |task_manager: crate::task_utils::TaskManager| async move {
+                    let (runtime, ip_sender) = (Arc::clone(&runtime), ip_sender.clone());
+                    task_manager.spawn(move |task_manager: TaskManager| async move {
                         let mut receiver =
                             broadcast(subnet.broadcast, broadcast_timeout, runtime, task_manager).await?;
                         while let Some(ip) = receiver.recv().await {
@@ -144,7 +148,8 @@ impl NetworkScanner {
                 debug!(netbios_query_ip_ranges = ?ip_ranges);
 
                 for ip_range in ip_ranges {
-                    let (runtime, ip_sender, task_manager) = (runtime.clone(), ip_sender.clone(), task_manager.clone());
+                    let (runtime, ip_sender, task_manager) =
+                        (Arc::clone(&runtime), ip_sender.clone(), task_manager.clone());
                     let mut receiver =
                         netbios_query_scan(runtime, ip_range, netbios_timeout, netbios_interval, task_manager)?;
                     while let Some(res) = receiver.recv().await {
@@ -173,7 +178,8 @@ impl NetworkScanner {
                 let should_ping = move |ip: IpAddr| -> bool { !ip_cache.read().contains_key(&ip) };
 
                 for ip_range in ip_ranges {
-                    let (task_manager, runtime, ip_sender) = (task_manager.clone(), runtime.clone(), ip_sender.clone());
+                    let (task_manager, runtime, ip_sender) =
+                        (task_manager.clone(), Arc::clone(&runtime), ip_sender.clone());
                     let should_ping = should_ping.clone();
                     let mut receiver = ping_range(
                         runtime,
@@ -238,7 +244,8 @@ impl NetworkScanner {
             mdns_daemon,
         });
 
-        let (scanner_stream_clone, max_wait_time) = (scanner_stream.clone(), self.max_wait_time);
+        let scanner_stream_clone = Arc::clone(&scanner_stream);
+        let max_wait_time = self.max_wait_time;
 
         tokio::spawn(async move {
             tokio::time::sleep(max_wait_time).await;

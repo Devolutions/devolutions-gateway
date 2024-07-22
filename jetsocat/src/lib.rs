@@ -1,3 +1,10 @@
+// Used by the jetsocat binary.
+use {dirs_next as _, humantime as _, seahorse as _, tracing_appender as _, tracing_subscriber as _};
+
+// Used by tests
+#[cfg(test)]
+use {proptest as _, test_utils as _};
+
 #[macro_use]
 extern crate tracing;
 
@@ -65,7 +72,7 @@ pub async fn forward(cfg: ForwardCfg) -> anyhow::Result<()> {
 pub struct JmuxProxyCfg {
     pub pipe_mode: pipe::PipeMode,
     pub proxy_cfg: Option<proxy::ProxyConfig>,
-    pub listener_modes: Vec<self::listener::ListenerMode>,
+    pub listener_modes: Vec<listener::ListenerMode>,
     pub pipe_timeout: Option<Duration>,
     pub watch_process: Option<sysinfo::Pid>,
     pub jmux_cfg: JmuxConfig,

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)] // This library is used for testing only.
+
 use std::sync::{Arc, Mutex};
 
 use tracing::span;
@@ -33,7 +35,7 @@ impl CovMarkSubscriber {
 
     pub fn handle(&self) -> CovMarkHandle {
         CovMarkHandle {
-            records: self.records.clone(),
+            records: Arc::clone(&self.records),
         }
     }
 }
@@ -59,7 +61,7 @@ impl tracing::Subscriber for CovMarkSubscriber {
 
     fn event(&self, event: &tracing::Event<'_>) {
         let mut visitor = CovMarkVisitor {
-            records: self.records.clone(),
+            records: Arc::clone(&self.records),
         };
         event.record(&mut visitor);
     }

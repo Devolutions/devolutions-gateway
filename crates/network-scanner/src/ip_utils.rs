@@ -132,7 +132,7 @@ impl From<Subnet> for IpAddrRange {
         let Subnet { ip, netmask, .. } = value;
 
         let (lower, upper) = calculate_subnet_bounds(ip, netmask);
-        Self::new(lower.into(), upper.into()).unwrap()
+        Self::new(lower.into(), upper.into()).expect("calculate_subnet_bounds returns valid lower and upper values")
     }
 }
 

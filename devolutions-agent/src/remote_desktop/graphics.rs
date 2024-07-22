@@ -8,10 +8,10 @@ use ironrdp::server::{
 const WIDTH: u16 = 1024;
 const HEIGHT: u16 = 1024;
 
-pub struct DisplayHandler;
+pub(crate) struct DisplayHandler;
 
 impl DisplayHandler {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 }
@@ -42,11 +42,11 @@ impl RdpServerDisplayUpdates for DisplayUpdates {
         let mut rng = rand::rngs::OsRng;
 
         let top: u16 = rng.gen_range(0..HEIGHT);
-        let height = NonZeroU16::new(rng.gen_range(1..=HEIGHT - top)).unwrap();
+        let height = NonZeroU16::new(rng.gen_range(1..=HEIGHT - top)).expect("never zero");
         let left: u16 = rng.gen_range(0..WIDTH);
-        let width = NonZeroU16::new(rng.gen_range(1..=WIDTH - left)).unwrap();
+        let width = NonZeroU16::new(rng.gen_range(1..=WIDTH - left)).expect("never zero");
 
-        let data: Vec<u8> = std::iter::repeat([rng.gen(), rng.gen(), rng.gen(), 255])
+        let data: Vec<u8> = std::iter::repeat([rng.r#gen(), rng.r#gen(), rng.r#gen(), 255])
             .take(usize::from(width.get()) * usize::from(height.get()))
             .flatten()
             .collect();
