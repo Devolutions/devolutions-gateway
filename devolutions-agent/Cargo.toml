@@ -17,6 +17,7 @@ ctrlc = "3.4"
 devolutions-agent-shared = { path = "../crates/devolutions-agent-shared" }
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-log = { path = "../crates/devolutions-log" }
+now-proto-pdu = { path = "../crates/now-proto-pdu" }
 futures = "0.3"
 parking_lot = "0.12"
 rand = "0.8" # FIXME(@CBenoit): maybe we don’t need this crate
