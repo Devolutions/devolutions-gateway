@@ -210,7 +210,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n jetsocat -n devolutions-gateway -n devolutions-agent -n webapp-client -n changelog --repo $Env:GITHUB_REPOSITORY
 
       - name: Manage artifacts
         shell: pwsh
@@ -294,7 +294,7 @@ jobs:
           }
 
   onedrive:
-    name: OneDrive
+    name: OneDrive (Devolutions Gateway)
     runs-on: ubuntu-20.04
     needs: preflight
     if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
@@ -334,9 +334,11 @@ jobs:
           echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
 
           New-Item -Path "$destinationFolder" -ItemType "directory"
+
           Move-Item -Path "./windows/x86_64/DevolutionsGateway-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.msi"
           Move-Item -Path "./windows/x86_64/DevolutionsGateway_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsGateway-x86_64-${versionFull}.pdb"
-          # Note that at this point the deb package is already named using the ".0" suffix, so we don’t rename.
+
+          # Note that at this point the deb package is already named using the ".0" suffix.
           Move-Item -Path "./linux/x86_64/devolutions-gateway_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-gateway_${versionFull}_amd64.deb"
 
       - name: Upload to OneDrive
@@ -347,5 +349,64 @@ jobs:
           azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
           conflict_behavior: fail
           destination_path: /Gateway/${{ steps.prepare.outputs.version }}
+          remote: releases
+          source_path: ${{ steps.prepare.outputs.files-to-upload }}
+
+  onedrive:
+    name: OneDrive (Devolutions Agent)
+    runs-on: ubuntu-20.04
+    needs: preflight
+    if: needs.preflight.outputs.skip-publishing == 'false' || ${{ inputs.dry-run }}
+
+    steps:
+      - name: Check out Devolutions/actions
+        uses: actions/checkout@v4
+        with:
+          repository: Devolutions/actions
+          ref: v1
+          token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+          path: ./.github/workflows
+
+      ## Devolutions Toolbox is required for OneDrive uploading
+
+      - name: Install Devolutions Toolbox
+        uses: ./.github/workflows/toolbox-install
+        with:
+          github_token: ${{ secrets.DEVOLUTIONSBOT_TOKEN }}
+
+      - name: Download artifacts
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download ${{ needs.preflight.outputs.run }} -n devolutions-agent --repo $Env:GITHUB_REPOSITORY
+
+      - name: Prepare upload
+        id: prepare
+        shell: pwsh
+        run: |
+          $destinationFolder = "${{ runner.temp }}/artifacts"
+          $version="${{ needs.preflight.outputs.version }}"
+          # Note that ".0" is appended here (required by release tooling downstream)
+          $versionFull="$version.0"
+
+          echo "version=${versionFull}" >> $Env:GITHUB_OUTPUT
+          echo "files-to-upload=$destinationFolder" >> $Env:GITHUB_OUTPUT
+
+          New-Item -Path "$destinationFolder" -ItemType "directory"
+
+          Move-Item -Path "./windows/x86_64/DevolutionsAgent-x86_64-${version}.msi" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.msi"
+          Move-Item -Path "./windows/x86_64/DevolutionsAgent_Windows_${version}_x86_64.pdb" -Destination "$destinationFolder/DevolutionsAgent-x86_64-${versionFull}.pdb"
+
+          # Note that at this point the deb package is already named using the ".0" suffix.
+          Move-Item -Path "./linux/x86_64/devolutions-agent_${versionFull}_amd64.deb" -Destination "$destinationFolder/devolutions-agent_${versionFull}_amd64.deb"
+
+      - name: Upload to OneDrive
+        uses: ./.github/workflows/onedrive-upload
+        if: (needs.preflight.outputs.skip-publishing == 'false') && (inputs.dry-run == false)
+        with:
+          azure_client_id: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_ID }}
+          azure_client_secret: ${{ secrets.ONEDRIVE_AUTOMATION_CLIENT_SECRET }}
+          conflict_behavior: fail
+          destination_path: /Agent/${{ steps.prepare.outputs.version }}
           remote: releases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
