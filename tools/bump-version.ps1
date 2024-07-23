@@ -14,6 +14,7 @@ $targetFiles = @(
 	'./VERSION'
 	'./jetsocat/Cargo.toml'
 	'./devolutions-gateway/Cargo.toml'
+	'./devolutions-agent/Cargo.toml'
 	'./powershell/DevolutionsGateway/DevolutionsGateway.psd1'
 	'./Cargo.lock'
 	'./fuzz/Cargo.lock'
