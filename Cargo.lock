@@ -1037,7 +1037,7 @@ dependencies = [
  "portpicker",
  "proptest",
  "reqwest",
- "rstest",
+ "rstest 0.21.0",
  "rustls-cng",
  "serde",
  "serde_json",
@@ -2420,9 +2420,9 @@ dependencies = [
 
 [[package]]
 name = "mdns-sd"
-version = "0.10.5"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8031297470465389c1349c399b927505d0cc4503be7a997c3541765bca82b4d"
+checksum = "807457e493076539ff8f202806f9dc2eaa9f13f69701da7ed38eec7a9afd1616"
 dependencies = [
  "flume",
  "if-addrs",
@@ -2769,9 +2769,9 @@ dependencies = [
 name = "now-proto-pdu"
 version = "0.1.0"
 dependencies = [
- "bitflags 2.4.2",
+ "bitflags 2.6.0",
  "expect-test",
- "rstest",
+ "rstest 0.19.0",
 ]
 
 [[package]]
@@ -3863,14 +3863,43 @@ dependencies = [
 
 [[package]]
 name = "rstest"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d5316d2a1479eeef1ea21e7f9ddc67c191d497abc8fc3ba2467857abbb68330"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "rstest_macros 0.19.0",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9afd55a67069d6e434a95161415f5beeada95a01c7b815508a82dcb0e1593682"
 dependencies = [
  "futures",
  "futures-timer",
- "rstest_macros",
+ "rstest_macros 0.21.0",
  "rustc_version",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04a9df72cc1f67020b0d63ad9bfe4a323e459ea7eb68e03bd9824db49f9a4c25"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro2 1.0.86",
+ "quote 1.0.36",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 2.0.72",
+ "unicode-ident",
 ]
 
 [[package]]
