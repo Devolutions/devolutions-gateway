@@ -10,6 +10,7 @@ members = [
 default-members = [
     "devolutions-agent",
     "devolutions-gateway",
+    "devolutions-agent",
     "jetsocat",
 ]
 
