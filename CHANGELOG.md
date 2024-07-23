@@ -4,6 +4,36 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.2.3 (2024-07-24)
+
+### Features
+
+- _agent_: Devolutions Gateway service updater ([#889](https://github.com/Devolutions/devolutions-gateway/issues/889)) ([92f86bf51b](https://github.com/Devolutions/devolutions-gateway/commit/92f86bf51b072699a86173affda5b54cced1fc07)) 
+
+- _dgw_: add API to trigger Devolutions Gateway update ([#890](https://github.com/Devolutions/devolutions-gateway/issues/890)) ([799e518c15](https://github.com/Devolutions/devolutions-gateway/commit/799e518c154db18d8895b96a08eec336ff70edcb)) 
+
+- _dgw_: support .cast terminal recording files ([#900](https://github.com/Devolutions/devolutions-gateway/issues/900)) ([d1f7559a3e](https://github.com/Devolutions/devolutions-gateway/commit/d1f7559a3ee422c3e0696ed9f1ccc02eb17f9e7d)) 
+
+  The .cast extension is used for "asciicast" files, i.e.: asciinema cast files.
+  This is a widely used terminal playback format.
+
+### Bug Fixes
+
+- _dgw_: preserve DGW access URI base in recording player ([#899](https://github.com/Devolutions/devolutions-gateway/issues/899)) ([92f87c8cea](https://github.com/Devolutions/devolutions-gateway/commit/92f87c8ceac7f16e5f25cc68578474e7a4a17ee9)) 
+
+  This is notably important for DVLS side by side setups.
+
+- _dgw_: fix cast file not working in recording player page ([#904](https://github.com/Devolutions/devolutions-gateway/issues/904)) ([c6985152a2](https://github.com/Devolutions/devolutions-gateway/commit/c6985152a297c7a9b949781e6efc1f6b36be85d0)) 
+
+- _dgw_: enforce recording policy ([#906](https://github.com/Devolutions/devolutions-gateway/issues/906)) ([13ed397eee](https://github.com/Devolutions/devolutions-gateway/commit/13ed397eeea965e696bf811ef774cfaf1e2bb8ac)) ([DGW-86](https://devolutions.atlassian.net/browse/DGW-86)) 
+
+  When recording flag is set and recording stream is closed, the associated
+  session is killed within 10 seconds.
+
+- _dgw_: support for `jet_rec` claim in JMUX tokens ([#909](https://github.com/Devolutions/devolutions-gateway/issues/909)) ([8b0c3eb80b](https://github.com/Devolutions/devolutions-gateway/commit/8b0c3eb80b631307995a168d3839118874466fc8)) 
+
+- _dgw_: recording player now scales with the size of the window ([#922](https://github.com/Devolutions/devolutions-gateway/issues/922)) ([4cb95a5e0c](https://github.com/Devolutions/devolutions-gateway/commit/4cb95a5e0c19a92909df99894796e5f818cb7e1b)) ([DGW-198](https://devolutions.atlassian.net/browse/DGW-198)) 
+
 ## 2024.2.3 (2024-06-18)
 
 ### Bug Fixes
