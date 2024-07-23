@@ -185,21 +185,16 @@ pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
 pub mod dto {
     use super::*;
 
-    const fn default_bool<const V: bool>() -> bool {
-        V
-    }
-
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct UpdaterConf {
-        /// Enable updater module (enabled by default)
-        #[serde(default = "default_bool::<true>")]
+        /// Enable updater module
         pub enabled: bool,
     }
 
     impl Default for UpdaterConf {
         fn default() -> Self {
-            Self { enabled: true }
+            Self { enabled: false }
         }
     }
 
@@ -324,8 +319,9 @@ pub mod dto {
         /// Directives string in the same form as the RUST_LOG environment variable
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
-        /// Skip MSI installation in updater module. Useful for debugging updater logic
-        /// without actually changing the system.
+        /// Skip MSI installation in updater module
+        ///
+        /// Useful for debugging updater logic without actually changing the system.
         #[serde(default)]
         pub skip_msi_install: bool,
     }
