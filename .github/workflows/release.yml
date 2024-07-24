@@ -293,7 +293,7 @@ jobs:
             }
           }
 
-  onedrive:
+  onedrive-gateway:
     name: OneDrive (Devolutions Gateway)
     runs-on: ubuntu-20.04
     needs: preflight
@@ -352,7 +352,7 @@ jobs:
           remote: releases
           source_path: ${{ steps.prepare.outputs.files-to-upload }}
 
-  onedrive:
+  onedrive-agent:
     name: OneDrive (Devolutions Agent)
     runs-on: ubuntu-20.04
     needs: preflight
