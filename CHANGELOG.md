@@ -4,7 +4,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
-## 2024.2.3 (2024-07-24)
+## 2024.3.0 (2024-07-24)
 
 ### Features
 
@@ -40,11 +40,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - _installer_: fix parsing errors with configuration check ([#893](https://github.com/Devolutions/devolutions-gateway/issues/893)) ([4f89688316](https://github.com/Devolutions/devolutions-gateway/commit/4f8968831698bb82afe06eb69421c6d984c7b062))
 
-- (installer): package web player ([#894](https://github.com/Devolutions/devolutions-gateway/issues/894)) ([bbee301682](https://github.com/Devolutions/devolutions-gateway/commit/bbee301682dbdb8191a678a5853d92586eb883ff))
-
-### Continuous Integration
-
-- Update macOS runner version ([#892](https://github.com/Devolutions/devolutions-gateway/issues/892)) ([b0d81c66b2](https://github.com/Devolutions/devolutions-gateway/commit/b0d81c66b2ef806e33fc3d97abfd86c95f507a10))
+- _installer_: package web player ([#894](https://github.com/Devolutions/devolutions-gateway/issues/894)) ([bbee301682](https://github.com/Devolutions/devolutions-gateway/commit/bbee301682dbdb8191a678a5853d92586eb883ff))
 
 ## 2024.2.2 (2024-06-18)
 
@@ -188,45 +184,13 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Bump Rust toolchain to 1.77.2 ([#828](https://github.com/Devolutions/devolutions-gateway/issues/828)) ([8898dfcce4](https://github.com/Devolutions/devolutions-gateway/commit/8898dfcce4fd7757f78943159e026d959d3269e1)) 
 
-### Continuous Integration
-
 - Set content type on macOS jetsocat binary ([#800](https://github.com/Devolutions/devolutions-gateway/issues/800)) ([6e878d8db0](https://github.com/Devolutions/devolutions-gateway/commit/6e878d8db0dd1c42ede7e3fd0cbb9327969c767c)) 
-
-- Fix artifact upload conflicts ([#801](https://github.com/Devolutions/devolutions-gateway/issues/801)) ([aa14227434](https://github.com/Devolutions/devolutions-gateway/commit/aa1422743461c10221badc1b3adc1ce68e0a9b6e)) 
-
-- Restore deb package OneDrive upload in release ([#805](https://github.com/Devolutions/devolutions-gateway/issues/805)) ([3cc7e9bb1b](https://github.com/Devolutions/devolutions-gateway/commit/3cc7e9bb1b28f752411691713d967207eb7a8ebe)) 
-
-- Preserve Windows .pdb files ([#817](https://github.com/Devolutions/devolutions-gateway/issues/817)) ([301c499936](https://github.com/Devolutions/devolutions-gateway/commit/301c4999364d12b8a81d0eac375b5b538e89c814)) 
-
-- Skip packaging in forks ([#818](https://github.com/Devolutions/devolutions-gateway/issues/818)) ([fc851f2941](https://github.com/Devolutions/devolutions-gateway/commit/fc851f2941886ac67f1efb6c70d1c00173cff85b)) 
-
-- Don't run packaging in forked repo ([#822](https://github.com/Devolutions/devolutions-gateway/issues/822)) ([abd1bbc687](https://github.com/Devolutions/devolutions-gateway/commit/abd1bbc687f0d048215a1efc13e3103b836f0c1e)) 
-
-- _artifactory_: update the cache when a new version is published to NPM ([5008ca89d9](https://github.com/Devolutions/devolutions-gateway/commit/5008ca89d9dd6834b18621f92d230459a43f883d)) 
-
-- _artifactory_: update name of env variable ([c63f174e8e](https://github.com/Devolutions/devolutions-gateway/commit/c63f174e8e55ab69e49c183035ecd00c21150ab5)) 
 
 ## 2024.1.5 (2024-04-04)
 
 ### Bug Fixes
 
 - _installer_: prevent possible prompt for firewall access in Windows installer ([f9760f2a1b](https://github.com/Devolutions/devolutions-gateway/commit/f9760f2a1b70cb000a63780eef2d279ce17a3ec7)) 
-
-### Continuous Integration
-
-- Add linux package onedrive upload ([#787](https://github.com/Devolutions/devolutions-gateway/issues/787)) ([b4d9f570ee](https://github.com/Devolutions/devolutions-gateway/commit/b4d9f570ee449d26c245b49c2cc6940916a72139)) 
-
-- Fix packaging of web client ([#789](https://github.com/Devolutions/devolutions-gateway/issues/789)) ([82b15c07e7](https://github.com/Devolutions/devolutions-gateway/commit/82b15c07e75c18339fc4e876c7d85157396ef496)) 
-
-- Package thin macOS binaries in nuget for PowerShell ([#792](https://github.com/Devolutions/devolutions-gateway/issues/792)) ([51b83d27aa](https://github.com/Devolutions/devolutions-gateway/commit/51b83d27aab3e856803b4335ea95d4aa79895985)) 
-
-- Fix typo in nuget deployment ([#793](https://github.com/Devolutions/devolutions-gateway/issues/793)) ([2627c52e15](https://github.com/Devolutions/devolutions-gateway/commit/2627c52e15022b68eafeff1a4f407022f9c36dd1)) 
-
-- Update remaining actions versions ([#794](https://github.com/Devolutions/devolutions-gateway/issues/794)) ([01ee6f162f](https://github.com/Devolutions/devolutions-gateway/commit/01ee6f162f65027f1abff378718f66db9554e487)) 
-
-- Fix macOS nuget packaging for PowerShell ([#795](https://github.com/Devolutions/devolutions-gateway/issues/795)) ([eecbdb05aa](https://github.com/Devolutions/devolutions-gateway/commit/eecbdb05aa230ee7468cde03d02d8846bf1d4e28)) 
-
-- Fix macOS nuget packaging for PowerShell ([#797](https://github.com/Devolutions/devolutions-gateway/issues/797)) ([5dd1ff1c19](https://github.com/Devolutions/devolutions-gateway/commit/5dd1ff1c196a7104cb0e9a4a2402046f35b94a44)) 
 
 ## 2024.1.4 (2024-03-22)
 
@@ -238,29 +202,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Build
 
-- _jetsocat-nuget_: add IsPowerShell to jetsocat nuget package ([#760](https://github.com/Devolutions/devolutions-gateway/issues/760)) ([d8062396ab](https://github.com/Devolutions/devolutions-gateway/commit/d8062396ab584dac1ad8b51b37c186cb6a75adba)) 
-
-- _jetsocat-nuget_: fix executable file permissions in nuget package ([#764](https://github.com/Devolutions/devolutions-gateway/issues/764)) ([e807e0abef](https://github.com/Devolutions/devolutions-gateway/commit/e807e0abefb9713367d8c36159a5c60930217913)) 
-
 - _jetsocat_: build jetsocat for linux-arm64 target ([#765](https://github.com/Devolutions/devolutions-gateway/issues/765)) ([1ccfd690e0](https://github.com/Devolutions/devolutions-gateway/commit/1ccfd690e0030a976bb0d6a0f1fd9b508026d05e)) 
-
-### Continuous Integration
-
-- _dgw_: add a webclient archive to the GitHub release ([#767](https://github.com/Devolutions/devolutions-gateway/issues/767)) ([acd34604b0](https://github.com/Devolutions/devolutions-gateway/commit/acd34604b0a699a4f1208efd34a2b8fea78dae6f)) 
-
-- _dgw_: add arm64 build for Linux ([#768](https://github.com/Devolutions/devolutions-gateway/issues/768)) ([8160def5ee](https://github.com/Devolutions/devolutions-gateway/commit/8160def5eeffcd4e462e720774594c189f94332c)) 
-
-- _dgw_: update containers ([#774](https://github.com/Devolutions/devolutions-gateway/issues/774)) ([8ce98dec11](https://github.com/Devolutions/devolutions-gateway/commit/8ce98dec117ebd19b8170d95ffad233eff6d091e)) 
-
-- _pwsh_: add PowerShell module to containers ([#776](https://github.com/Devolutions/devolutions-gateway/issues/776)) ([66b2229a94](https://github.com/Devolutions/devolutions-gateway/commit/66b2229a94c6a6858fe49692a24a328266edf7cb)) 
-
-- Update CI workflow actions ([#778](https://github.com/Devolutions/devolutions-gateway/issues/778)) ([6fb3aa09de](https://github.com/Devolutions/devolutions-gateway/commit/6fb3aa09de46702f8b7dc86b4bc8c385c2e2b18b)) 
-
-- Update release workflow actions ([#780](https://github.com/Devolutions/devolutions-gateway/issues/780)) ([ac72abcca0](https://github.com/Devolutions/devolutions-gateway/commit/ac72abcca07aa92116ae963f852e7b804a7f6107)) 
-
-- _dgw_: build arm64 deb ([#782](https://github.com/Devolutions/devolutions-gateway/issues/782)) ([635654ec0f](https://github.com/Devolutions/devolutions-gateway/commit/635654ec0f788726b2f374e1eff288899daae4f5)) 
-
-- Fix artifact idempotency ([#783](https://github.com/Devolutions/devolutions-gateway/issues/783)) ([b317d2ab3e](https://github.com/Devolutions/devolutions-gateway/commit/b317d2ab3ea76d1299fb807a1b4baa078ee8f191)) 
 
 ## 2024.1.3 (2024-03-08)
 
@@ -422,8 +364,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ### Build
 
-- Include debug symbols for NuGet packages (.snupkg) ([186a319b71](https://github.com/Devolutions/devolutions-gateway/commit/186a319b71dbbd541672378f5cddead44d5fd8a7)) 
-
 - _dgw_: eliminate openssl link dependency on Linux ([#707](https://github.com/Devolutions/devolutions-gateway/issues/707)) ([8ffb181995](https://github.com/Devolutions/devolutions-gateway/commit/8ffb181995f49c205722cb9548e5e90372be2610)) 
 
 ## 2023.3.0 (2023-10-30)
@@ -471,10 +411,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Update README.md + COOKBOOK.md ([#582](https://github.com/Devolutions/devolutions-gateway/issues/582)) ([4da466553e](https://github.com/Devolutions/devolutions-gateway/commit/4da466553e88da296752649646a0f5512d3ba7fd)) 
 
-### Continuous Integration
-
-- Ensure upload to OneDrive works when dispatched with workflow_call ([#571](https://github.com/Devolutions/devolutions-gateway/issues/571)) ([efe8019faa](https://github.com/Devolutions/devolutions-gateway/commit/efe8019faab05d6628bbce722da738292646ee45)) 
-
 ## 2023.2.4 (2023-10-16)
 
 ### Features
@@ -508,14 +444,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 ### Build
 
 - Update Rust toolchain to 1.73.0 ([#560](https://github.com/Devolutions/devolutions-gateway/issues/560)) ([375ec71cf9](https://github.com/Devolutions/devolutions-gateway/commit/375ec71cf91fdf1b996f74b17dfbd2ace42b53e0)) 
-
-### Continuous Integration
-
-- Skip OneDrive upload if the release workflow is a dry run ([36ad076f32](https://github.com/Devolutions/devolutions-gateway/commit/36ad076f326e90f9e61a3bdd9ae123ce15f9b0de)) 
-
-- Change github token ([#542](https://github.com/Devolutions/devolutions-gateway/issues/542)) ([afbb7abcbf](https://github.com/Devolutions/devolutions-gateway/commit/afbb7abcbf697d3f9b3cec89ec4adcc907e2e694)) 
-
-- Fix OneDrive upload job ([#546](https://github.com/Devolutions/devolutions-gateway/issues/546)) ([787024e1f6](https://github.com/Devolutions/devolutions-gateway/commit/787024e1f6e4191f9918acf5d8280c70d412d1c7)) 
 
 ## 2023.2.3 (2023-08-15)
 
@@ -585,10 +513,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   cursor position after reading the PCB can be used to find the number of
   bytes actually read (even if re-encoding the PDU would give a different
   result).
-
-### Continuous Integration
-
-- SBOM cdxgen ([#471](https://github.com/Devolutions/devolutions-gateway/issues/471)) ([08520cdbbb](https://github.com/Devolutions/devolutions-gateway/commit/08520cdbbb8e46732ef2836cd780edbfc4ca0bd2)) 
 
 ## 2023.2.1 (2023-06-09)
 
@@ -722,16 +646,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   > This is because large collections of root certificates often include
   > ancient or syntactically invalid certificates.
 
-### Continuous Integration
-
-- Build and package jet-doctor and tokengen ([#423](https://github.com/Devolutions/devolutions-gateway/issues/423)) ([564717fbe2](https://github.com/Devolutions/devolutions-gateway/commit/564717fbe2ba5083a9aa04c3fdae399a6d3ac7eb)) 
-
-- Enable dependabot pull requests ([988921039e](https://github.com/Devolutions/devolutions-gateway/commit/988921039ee33efe7d4ee78c83ca396ff5899394)) 
-
-- Update Artifactory credentials ([#440](https://github.com/Devolutions/devolutions-gateway/issues/440)) ([8a4ecc003b](https://github.com/Devolutions/devolutions-gateway/commit/8a4ecc003b664d19e0f927741fd3b45c6dbb719b)) 
-
-- Limit builds on forked PRs, optimize CI workflow ([#441](https://github.com/Devolutions/devolutions-gateway/issues/441)) ([39d5f9a350](https://github.com/Devolutions/devolutions-gateway/commit/39d5f9a350fbc3188f76ea9afa9c7b9ee3a6fb32)) 
-
 ## 2023.1.3 (2023-03-16)
 
 ### Bug Fixes
@@ -815,17 +729,7 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 - Update Rust toolchain to 1.67.0 ([f581e9bdc7](https://github.com/Devolutions/devolutions-gateway/commit/f581e9bdc7fa91377603443da48d22939661e470))
 
-### Continuous Integration
-
 - _jetsocat_: enable hardened runtime on macOS ([#378](https://github.com/Devolutions/devolutions-gateway/issues/378)) ([84b5c33b47](https://github.com/Devolutions/devolutions-gateway/commit/84b5c33b47a6599fe7a2aaabb6393175fe66906b))
-
-- _jetsocat_: build the jetsocat nuget in package.yml ([#380](https://github.com/Devolutions/devolutions-gateway/issues/380)) ([2e0d0eef4d](https://github.com/Devolutions/devolutions-gateway/commit/2e0d0eef4dcef4008246878a6b05d63a1a41b64c))
-
-  Build the jetsocat nuget package as part of the packaging workflow (instead of the old standalone workflow, which just took the latest release from GitHub).
-
-  If running the package workflow manually, the version number of the package may be specified; else it defaults to the current date.
-
-- _jetsocat_: add Linux binary to nuget package ([#384](https://github.com/Devolutions/devolutions-gateway/issues/384)) ([8a74ff86ca](https://github.com/Devolutions/devolutions-gateway/commit/8a74ff86cac3c01828a40ce5eceae8119bba3829))
 
 ## 2022.3.4 (2023-01-16)
 
@@ -911,10 +815,6 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 - _dgw_: extend subkey capabilities to KDC tokens ([#334](https://github.com/Devolutions/devolutions-gateway/pull/334)) ([cdc53d0e98](https://github.com/Devolutions/devolutions-gateway/commit/cdc53d0e989b091800f02489d2ce4d5ce9763ac1))
 
   With this change, a subkey is allowed to sign a short-lived KDC token.
-
-### Build
-
-- _jetsocat-nuget_: add win-arm64 to nuget package ([#339](https://github.com/Devolutions/devolutions-gateway/pull/339)) ([2a676caddf](https://github.com/Devolutions/devolutions-gateway/commit/2a676caddfd1ba8c437ed6f20e6f646bae64326f))
 
 ## 2022.3.0 (2022-09-21)
 
