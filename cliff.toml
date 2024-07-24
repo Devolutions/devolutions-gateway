@@ -43,7 +43,11 @@ body = """
 {%- set commit_url = "https://github.com/Devolutions/devolutions-gateway/commit/" ~ commit.id %}
 {%- set commit_link = "[" ~ short_sha ~ "](" ~ commit_url ~ ")" %}
 
-{%- set jira_tickets = commit.footers | filter(attribute="token", value="Issue") | map(attribute="value") %}
+{%- if commit.footers %}
+  {%- set jira_tickets = commit.footers | filter(attribute="token", value="Issue") | map(attribute="value") %}
+{%- else %}
+  {%- set jira_tickets = [] %}
+{%- endif %}
 
 - {{scope}}{{breaking}}{{ message }} ({{commit_link}}){% for t in jira_tickets %} ([{{t}}](https://devolutions.atlassian.net/browse/{{t}})){% endfor %} \
   {% if commit.body %}\n\n  {{ commit.body | replace(from="\n", to="\n  ") }}{% endif %}
@@ -62,7 +66,7 @@ footer = ""
 # parse the commits based on https://www.conventionalcommits.org
 conventional_commits = true
 # filter out the commits that are not conventional
-filter_unconventional = true
+filter_unconventional = false
 # regex for preprocessing the commit messages
 commit_preprocessors = [
   # Check spelling of the commit with https://github.com/crate-ci/typos
@@ -79,25 +83,35 @@ commit_parsers = [
   { message = "^chore", skip = true },
   { message = "^style", skip = true },
   { message = "^refactor", skip = true },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
   { message = "^chore\\(release\\): prepare for", skip = true },
   { message = "^chore\\(deps\\)", skip = true },
   { message = "^build\\(deps\\)", skip = true },
+  { message = "^.+\\(.*nuget.*\\):", skip = true },
+  { message = "^.+\\(.*dotnet.*\\):", skip = true },
+  { message = "^.+\\(.*ts.*\\):", skip = true },
+  { message = "^.+\\(.*openapi.*\\):", skip = true },
+  { message = "^.+\\(.*npm.*\\):", skip = true },
+  { footer = "^[Cc]hangelog: ?ignore", skip = true },
 
   { message = "(?i)security", group = "<!-- 0 -->Security" },
   { body = "(?i)security", group = "<!-- 0 -->Security" },
+  { footer = "^[Ss]ecurity: ?yes", group = "<!-- 0 -->Security" },
+
+  { message = "^feat", group = "<!-- 1 -->Features" },
 
   { message = "(?i)improve", group = "<!-- 2 -->Improvements" },
   { message = "(?i)adjust", group = "<!-- 2 -->Improvements" },
   { message = "(?i)change", group = "<!-- 2 -->Improvements" },
 
-  { message = "^feat", group = "<!-- 1 -->Features" },
   { message = "^revert", group = "<!-- 3 -->Revert" },
   { message = "^fix", group = "<!-- 4 -->Bug Fixes" },
   { message = "^perf", group = "<!-- 5 -->Performance" },
   { message = "^doc", group = "<!-- 6 -->Documentation" },
-  { message = "^test", group = "<!-- 7 -->Testing" },
-  { message = "^build", group = "<!-- 8 -->Build" },
-  { message = "^ci", group = "<!-- 9 -->Continuous Integration" },
+  { message = "^build", group = "<!-- 7 -->Build" },
+
+  { message = ".*", group = "<!-- 99 -->Please Sort" },
 ]
 # filter out the commits that are not matched by commit parsers
 filter_commits = false
