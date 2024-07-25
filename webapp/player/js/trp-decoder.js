@@ -16,9 +16,6 @@ export function convertTRPtoCast(fileArray) {
     var chunk = fileArray.subarray(position + 8, position + 8 + size);
     position += 8 + size;
     time += timer / 1000;
-    if (castEvents.length>0 && castEvents[castEvents.length-1][0] === time) {
-      time += 0.001;
-    }
     if (type == 0) {
       // RECORD_CHUNK_TERMINAL_OUTPUT
       var data = new TextDecoder().decode(chunk);
