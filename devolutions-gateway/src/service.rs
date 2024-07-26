@@ -1,4 +1,5 @@
 use anyhow::Context as _;
+use camino::Utf8PathBuf;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
 use devolutions_gateway::log::GatewayLog;
@@ -68,6 +69,38 @@ impl GatewayService {
 
         if let Err(e) = devolutions_gateway::tls::sanity::check_default_configuration() {
             warn!("Anomality detected with TLS configuration: {e:#}");
+        }
+
+        let xmf_lib_path;
+        let xmf_lib_path = if let Some(path) = conf.debug.lib_xmf_path.as_deref() {
+            Some(path)
+        } else if cfg!(target_os = "windows") {
+            if let Ok(mut exe_path) = std::env::current_exe() {
+                exe_path.pop();
+                exe_path.push("xmf.dll");
+                xmf_lib_path = Utf8PathBuf::from_path_buf(exe_path).ok();
+                xmf_lib_path.as_deref()
+            } else {
+                None
+            }
+        } else if cfg!(target_os = "linux") {
+            xmf_lib_path = Some(Utf8PathBuf::from("/usr/lib/libxmf.so"));
+            xmf_lib_path.as_deref()
+        } else {
+            None
+        };
+
+        if let Some(path) = xmf_lib_path {
+            // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
+            let result = unsafe { cadeau::xmf::init(path.as_str()) };
+
+            match result {
+                Ok(_) => info!("XMF native library loaded and installed"),
+                Err(error) => warn!(
+                    %error,
+                    "Failed to load XMF native library, video processing features are disabled"
+                ),
+            }
         }
 
         Ok(GatewayService {

@@ -548,6 +548,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a12916984aab3fa6e39d655a33e09c0071eb36d6ab3aea5c2d78551f1df6d952"
 
 [[package]]
+name = "cadeau"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cba4af571bf872af2caaed2d274439dd542db94b75cfeaa85863f674105cf1a0"
+dependencies = [
+ "xmf-sys",
+]
+
+[[package]]
 name = "camino"
 version = "1.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1005,6 +1014,7 @@ dependencies = [
  "axum-extra",
  "backoff",
  "bytes",
+ "cadeau",
  "camino",
  "ceviche",
  "cfg-if",
@@ -1144,6 +1154,15 @@ name = "dissimilar"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59f8e79d1fbf76bdfbde321e902714bf6c49df88a7dda6fc682fc2979226962d"
+
+[[package]]
+name = "dlib"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
+dependencies = [
+ "libloading",
+]
 
 [[package]]
 name = "dlopen"
@@ -5956,6 +5975,15 @@ dependencies = [
  "rusticata-macros",
  "thiserror",
  "time",
+]
+
+[[package]]
+name = "xmf-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17dade9447321f393019b9ced5f73c15b868d2613f736c34f648354d7641ce4"
+dependencies = [
+ "dlib",
 ]
 
 [[package]]
