@@ -194,6 +194,43 @@ internal static class AgentActions
         Execute = Execute.rollback,
     };
 
+    private static readonly PathFileAction uninstallPedmContextMenu = new(
+        @"$(env.WinDir)\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "-Command \"& { Get-AppxProvisionedPackage -Online | Where-Object DisplayName -EQ 'DevolutionsPedmContextMenu' | ForEach-Object { Remove-AppxProvisionedPackage -Online -PackageName $_.PackageName }; Get-AppxPackage -All -Name 'DevolutionsPedmContextMenu' | Remove-AppxPackage -AllUsers }\"",
+        "INSTALLDIR"
+    )
+    {
+        Id = new Id("uninstallPedmContextMenu"),
+        Feature = Includes.PEDM_FEATURE,
+        Impersonate = false,
+        Execute = Execute.deferred,
+        Return = Return.check,
+        Step = Step.InstallFiles,
+        When = When.After,
+        Sequence = Sequence.InstallExecuteSequence,
+        Condition = Condition.BeingUninstalled,
+    };
+
+    // For some reason, when running as NT AUTHORITY\SYSTEM on Windows 11,
+    // Add-AppxProvisionedPackage needs to be done 3 times for a successful
+    // system install.
+    private static readonly PathFileAction installPedmContextMenu = new(
+        @"$(env.WinDir)\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "-Command \"{ 0..2 | % { Add-AppxProvisionedPackage -Online -SkipLicense -PackagePath '[#DevolutionsPedmContextMenuMsix]' -ErrorAction Ignore } }\"",
+        "INSTALLDIR"
+    )
+    {
+        Id = new Id("installPedmContextMenu"),
+        Feature = Includes.PEDM_FEATURE,
+        Impersonate = false,
+        Execute = Execute.deferred,
+        Return = Return.check,
+        Sequence = Sequence.InstallExecuteSequence,
+        Step = new Step(uninstallPedmContextMenu.Id),
+        When = When.After,
+        Condition = Condition.NOT_Installed,
+    };
+
     private static string UseProperties(IEnumerable<IWixProperty> properties)
     {
         if (!properties?.Any() ?? false)
@@ -223,6 +260,8 @@ internal static class AgentActions
         setArpInstallLocation,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
+        uninstallPedmContextMenu,
+        installPedmContextMenu,
 
         cleanAgentConfigIfNeeded,
         cleanAgentConfigIfNeededRollback,

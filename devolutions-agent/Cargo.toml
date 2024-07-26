@@ -65,6 +65,7 @@ smallvec = "1"
 thiserror = "1"
 uuid = { version = "1.10", features = ["v4"] }
 winreg = "0.52"
+devolutions-pedm = { path = "../crates/devolutions-pedm" }
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.58"

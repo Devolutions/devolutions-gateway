@@ -17,6 +17,7 @@ pub struct Conf {
     pub verbosity_profile: dto::VerbosityProfile,
     pub updater: dto::UpdaterConf,
     pub remote_desktop: RemoteDesktopConf,
+    pub pedm: dto::PedmConf,
     pub debug: dto::DebugConf,
 }
 
@@ -42,6 +43,7 @@ impl Conf {
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
             updater: conf_file.updater.clone().unwrap_or_default(),
             remote_desktop,
+            pedm: conf_file.pedm.clone().unwrap_or_default(),
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
     }
@@ -237,6 +239,21 @@ pub mod dto {
             }
         }
     }
+    
+    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    pub struct PedmConf {
+        /// Enable PEDM module (disabled by default)
+        pub enabled: bool,
+    }
+
+    impl Default for PedmConf {
+        fn default() -> Self {
+            Self {
+                enabled: false
+            }
+        }
+    }
 
     /// Source of truth for Agent configuration
     ///
@@ -260,6 +277,9 @@ pub mod dto {
 
         #[serde(skip_serializing_if = "Option::is_none")]
         pub remote_desktop: Option<RemoteDesktopConf>,
+        /// Devolutions PEDM configuration
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub pedm: Option<PedmConf>,
 
         /// (Unstable) Unsafe debug options for developers
         #[serde(rename = "__debug__", skip_serializing_if = "Option::is_none")]
@@ -279,6 +299,7 @@ pub mod dto {
                 log_file: None,
                 updater: Some(UpdaterConf { enabled: true }),
                 remote_desktop: None,
+                pedm: None,
                 debug: None,
                 rest: serde_json::Map::new(),
             }

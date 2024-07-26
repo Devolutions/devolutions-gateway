@@ -12,6 +12,7 @@ fn main() {
             api.to_yaml().unwrap()
         }
         Some("gateway") | None => ApiDoc::openapi().to_yaml().unwrap(),
+        Some("pedm") => serde_yaml::to_string(&devolutions_pedm::api::openapi()).unwrap(),
         _ => panic!("Unknown API doc"),
     };
     println!("{yaml}");

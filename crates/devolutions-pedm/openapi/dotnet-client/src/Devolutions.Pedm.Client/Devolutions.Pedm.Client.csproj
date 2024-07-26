@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo><!-- setting GenerateAssemblyInfo to false causes this bug https://github.com/dotnet/project-system/issues/3934 -->
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Devolutions.Pedm.Client</AssemblyName>
+    <PackageId>Devolutions.Pedm.Client</PackageId>
+    <OutputType>Library</OutputType>
+    <Authors>Devolutions Inc.</Authors>
+    <Company>OpenAPI</Company>
+    <AssemblyTitle>Devolutions PEDM REST API Client</AssemblyTitle>
+    <Description>Client for Devolutions PEDM REST API</Description>
+    <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
+    <RootNamespace>Devolutions.Pedm.Client</RootNamespace>
+    <Version>2024.5.26</Version>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Devolutions.Pedm.Client.xml</DocumentationFile>
+    <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReleaseNotes>Minor update</PackageReleaseNotes>
+    <Nullable>annotations</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JsonSubTypes" Version="2.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Polly" Version="8.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="System.Web" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Web" />
+  </ItemGroup>
+</Project>
