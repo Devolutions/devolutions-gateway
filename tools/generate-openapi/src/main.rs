@@ -1,6 +1,16 @@
 use devolutions_gateway::openapi::{ApiDoc, SubscriberApiDoc};
 use utoipa::OpenApi;
 
+#[cfg(target_os = "windows")]
+fn pedm_yaml() -> String {
+    serde_yaml::to_string(&devolutions_pedm::api::openapi()).unwrap()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pedm_yaml() -> String {
+    panic!("Not supported for this target")
+}
+
 fn main() {
     let yaml = match std::env::args().nth(1).as_deref() {
         Some("subscriber") => {
@@ -12,6 +22,7 @@ fn main() {
             api.to_yaml().unwrap()
         }
         Some("gateway") | None => ApiDoc::openapi().to_yaml().unwrap(),
+        Some("pedm") => pedm_yaml(),
         _ => panic!("Unknown API doc"),
     };
     println!("{yaml}");

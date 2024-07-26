@@ -11,6 +11,9 @@
     <Compile Update="Dialogs\AgentDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Update="Dialogs\FeaturesDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Update="Dialogs\InstallDirDialog.cs">
       <SubType>Form</SubType>
     </Compile>
