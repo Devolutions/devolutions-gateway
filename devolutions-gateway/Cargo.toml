@@ -83,9 +83,12 @@ utoipa = { version = "4.2", default-features = false, features = ["uuid", "time"
 # Safe pin projection
 pin-project-lite = "0.2"
 
-# Native plugins
+# Native plugins (QUESTION: now that we have Cadeau integrated, should we remove this feature?)
 dlopen = "0.1"
 dlopen_derive = "0.1"
+
+# Video processing for session recording
+cadeau = { version = "0.3", features = ["dlopen"] }
 
 # Dependencies required for PCAP support (QUESTION: should we keep that built-in?)
 pcap-file = "2.0"
