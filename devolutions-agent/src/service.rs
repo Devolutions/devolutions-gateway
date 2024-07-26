@@ -8,6 +8,8 @@ use crate::updater::UpdaterTask;
 use anyhow::Context;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 use devolutions_log::{self, LogDeleterTask, LoggerGuard};
+#[cfg(windows)]
+use devolutions_pedm::PedmTask;
 use std::time::Duration;
 
 pub const SERVICE_NAME: &str = "devolutions-agent";
@@ -187,6 +189,11 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     if conf.debug.enable_unstable && conf.remote_desktop.enabled {
         tasks.register(RemoteDesktopTask::new(conf_handle));
+    }
+
+    #[cfg(windows)]
+    if conf.pedm.enabled {
+        tasks.register(PedmTask::new())
     }
 
     Ok(tasks)

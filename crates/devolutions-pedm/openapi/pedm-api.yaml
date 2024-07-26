@@ -1,0 +1,858 @@
+openapi: 3.1.0
+info:
+  title: Devolutions PEDM API
+  version: ''
+paths:
+  /elevate/temporary:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ElevateTemporaryPayload'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /elevate/session:
+    post:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /launch:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LaunchPayload'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchResponse'
+  /revoke:
+    post:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /logs:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ElevationResult'
+  /status:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+  /policy/me:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetProfilesMeResponse'
+    put:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OptionalId'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /policy/profiles:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Id'
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /policy/profiles/{id}:
+    get:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+    put:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Profile'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+    delete:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /policy/rules:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Id'
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Rule'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /policy/rules/{id}:
+    get:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+    put:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Rule'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+    delete:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+  /policy/assignments:
+    get:
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Assignment'
+  /policy/assignments/{id}:
+    put:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          $ref: '#/components/schemas/Id'
+        style: simple
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/User'
+        required: true
+      responses:
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: no content
+components:
+  schemas:
+    Application:
+      type: object
+      required:
+      - CommandLine
+      - Hash
+      - Path
+      - Signature
+      - User
+      - WorkingDirectory
+      properties:
+        CommandLine:
+          type: array
+          items:
+            type: string
+        Hash:
+          $ref: '#/components/schemas/Hash'
+        Path:
+          type: string
+        Signature:
+          $ref: '#/components/schemas/Signature'
+        User:
+          $ref: '#/components/schemas/User'
+        WorkingDirectory:
+          type: string
+    ApplicationFilter:
+      type: object
+      required:
+      - Path
+      properties:
+        CommandLine:
+          type: array
+          items:
+            $ref: '#/components/schemas/StringFilter'
+          nullable: true
+        Hashes:
+          type: array
+          items:
+            $ref: '#/components/schemas/HashFilter'
+          nullable: true
+        Path:
+          $ref: '#/components/schemas/PathFilter'
+        Signature:
+          $ref: '#/components/schemas/SignatureFilter'
+          nullable: true
+        WorkingDirectory:
+          $ref: '#/components/schemas/PathFilter'
+          nullable: true
+    Assignment:
+      type: object
+      required:
+      - Profile
+      - Users
+      properties:
+        Profile:
+          $ref: '#/components/schemas/Profile'
+        Users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    AuthenticodeSignatureStatus:
+      type: string
+      enum:
+      - Valid
+      - Incompatible
+      - NotSigned
+      - HashMismatch
+      - NotSupportedFileFormat
+      - NotTrusted
+    Certificate:
+      type: object
+      required:
+      - Base64
+      - Eku
+      - Issuer
+      - SerialNumber
+      - Subject
+      - Thumbprint
+      properties:
+        Base64:
+          type: string
+        Eku:
+          type: array
+          items:
+            type: string
+        Issuer:
+          type: string
+        SerialNumber:
+          type: string
+        Subject:
+          type: string
+        Thumbprint:
+          $ref: '#/components/schemas/Hash'
+    ElevateTemporaryPayload:
+      type: object
+      required:
+      - Seconds
+      properties:
+        Seconds:
+          type: integer
+          format: int64
+          minimum: 0.0
+    ElevationConfigurations:
+      type: object
+      required:
+      - Session
+      - Temporary
+      properties:
+        Session:
+          $ref: '#/components/schemas/SessionElevationConfiguration'
+        Temporary:
+          $ref: '#/components/schemas/TemporaryElevationConfiguration'
+    ElevationKind:
+      type: string
+      enum:
+      - AutoApprove
+      - Confirm
+      - ReasonApproval
+      - Deny
+    ElevationMethod:
+      type: string
+      enum:
+      - LocalAdmin
+      - VirtualAccount
+    ElevationRequest:
+      type: object
+      required:
+      - Asker
+      - Target
+      - UnixTimestampSeconds
+      properties:
+        Asker:
+          $ref: '#/components/schemas/Application'
+        Target:
+          $ref: '#/components/schemas/Application'
+        UnixTimestampSeconds:
+          type: integer
+          format: int64
+          minimum: 0.0
+    ElevationResult:
+      type: object
+      required:
+      - Request
+      - Successful
+      properties:
+        Request:
+          $ref: '#/components/schemas/ElevationRequest'
+        Successful:
+          type: boolean
+    Error:
+      type: string
+      enum:
+      - AccessDenied
+      - NotFound
+      - InvalidParameter
+      - Internal
+      - Cancelled
+    ErrorResponse:
+      type: object
+      required:
+      - Kind
+      - Win32Error
+      properties:
+        Kind:
+          $ref: '#/components/schemas/Error'
+        Win32Error:
+          type: integer
+          format: int32
+          minimum: 0.0
+    GetProfilesMeResponse:
+      type: object
+      required:
+      - Available
+      properties:
+        Active:
+          $ref: '#/components/schemas/Id'
+          nullable: true
+        Available:
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+    Hash:
+      type: object
+      required:
+      - Sha1
+      - Sha256
+      properties:
+        Sha1:
+          type: string
+        Sha256:
+          type: string
+    HashFilter:
+      type: object
+      properties:
+        Sha1:
+          type: string
+          nullable: true
+        Sha256:
+          type: string
+          nullable: true
+    Id:
+      type: string
+    LaunchPayload:
+      type: object
+      required:
+      - CreationFlags
+      properties:
+        CommandLine:
+          type: string
+          nullable: true
+        CreationFlags:
+          type: integer
+          format: int32
+          minimum: 0.0
+        ExecutablePath:
+          type: string
+          nullable: true
+        StartupInfo:
+          $ref: '#/components/schemas/StartupInfoDto'
+          nullable: true
+        WorkingDirectory:
+          type: string
+          nullable: true
+    LaunchResponse:
+      type: object
+      required:
+      - ProcessId
+      - ThreadId
+      properties:
+        ProcessId:
+          type: integer
+          format: int32
+          minimum: 0.0
+        ThreadId:
+          type: integer
+          format: int32
+          minimum: 0.0
+    OptionalId:
+      type: object
+      properties:
+        Id:
+          $ref: '#/components/schemas/Id'
+          nullable: true
+    PathFilter:
+      type: object
+      required:
+      - Data
+      - Kind
+      properties:
+        Data:
+          type: string
+        Kind:
+          $ref: '#/components/schemas/PathFilterKind'
+    PathFilterKind:
+      type: string
+      enum:
+      - Equals
+      - FileName
+      - Wildcard
+    PathIdParameter:
+      type: object
+      required:
+      - id
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+    Profile:
+      type: object
+      properties:
+        DefaultElevationKind:
+          default: Deny
+          $ref: '#/components/schemas/ElevationKind'
+        ElevationMethod:
+          default: LocalAdmin
+          $ref: '#/components/schemas/ElevationMethod'
+        ElevationSettings:
+          default:
+            Session:
+              Enabled: false
+            Temporary:
+              Enabled: false
+              MaximumSeconds: 0
+          $ref: '#/components/schemas/ElevationConfigurations'
+        Id:
+          default: ''
+          $ref: '#/components/schemas/Id'
+        Name:
+          default: Unnamed profile
+          type: string
+        PromptSecureDesktop:
+          default: true
+          type: boolean
+        Rules:
+          default: []
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+    Rule:
+      type: object
+      required:
+      - ElevationKind
+      - Id
+      - Name
+      - Target
+      properties:
+        Asker:
+          $ref: '#/components/schemas/ApplicationFilter'
+          nullable: true
+        ElevationKind:
+          $ref: '#/components/schemas/ElevationKind'
+        Id:
+          $ref: '#/components/schemas/Id'
+        Name:
+          type: string
+        Target:
+          $ref: '#/components/schemas/ApplicationFilter'
+    SessionElevationConfiguration:
+      type: object
+      required:
+      - Enabled
+      properties:
+        Enabled:
+          type: boolean
+    SessionElevationStatus:
+      type: object
+      required:
+      - Enabled
+      properties:
+        Enabled:
+          type: boolean
+    Signature:
+      type: object
+      required:
+      - Status
+      properties:
+        Certificates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Certificate'
+          nullable: true
+        Signer:
+          $ref: '#/components/schemas/Signer'
+          nullable: true
+        Status:
+          $ref: '#/components/schemas/AuthenticodeSignatureStatus'
+    SignatureFilter:
+      type: object
+      required:
+      - CheckAuthenticode
+      properties:
+        CheckAuthenticode:
+          type: boolean
+    Signer:
+      type: object
+      required:
+      - Issuer
+      properties:
+        Issuer:
+          type: string
+    StartupInfoDto:
+      type: object
+      required:
+      - FillAttribute
+      - Flags
+      - ShowWindow
+      - X
+      - XCountChars
+      - XSize
+      - Y
+      - YCountChars
+      - YSize
+      properties:
+        Desktop:
+          type: string
+          nullable: true
+        FillAttribute:
+          type: integer
+          format: int32
+          minimum: 0.0
+        Flags:
+          type: integer
+          format: int32
+          minimum: 0.0
+        ParentPid:
+          type: integer
+          format: int32
+          minimum: 0.0
+          nullable: true
+        ShowWindow:
+          type: integer
+          format: int32
+          minimum: 0.0
+        Title:
+          type: string
+          nullable: true
+        X:
+          type: integer
+          format: int32
+          minimum: 0.0
+        XCountChars:
+          type: integer
+          format: int32
+          minimum: 0.0
+        XSize:
+          type: integer
+          format: int32
+          minimum: 0.0
+        Y:
+          type: integer
+          format: int32
+          minimum: 0.0
+        YCountChars:
+          type: integer
+          format: int32
+          minimum: 0.0
+        YSize:
+          type: integer
+          format: int32
+          minimum: 0.0
+    StatusResponse:
+      type: object
+      required:
+      - Elevated
+      - Session
+      - Temporary
+      properties:
+        Elevated:
+          type: boolean
+        Session:
+          $ref: '#/components/schemas/SessionElevationStatus'
+        Temporary:
+          $ref: '#/components/schemas/TemporaryElevationStatus'
+    StringFilter:
+      type: object
+      required:
+      - Data
+      - Kind
+      properties:
+        Data:
+          type: string
+        Kind:
+          $ref: '#/components/schemas/StringFilterKind'
+    StringFilterKind:
+      type: string
+      enum:
+      - Equals
+      - Regex
+      - StartsWith
+      - EndsWith
+      - Contains
+    TemporaryElevationConfiguration:
+      type: object
+      required:
+      - Enabled
+      - MaximumSeconds
+      properties:
+        Enabled:
+          type: boolean
+        MaximumSeconds:
+          type: integer
+          format: int64
+          minimum: 0.0
+    TemporaryElevationStatus:
+      type: object
+      required:
+      - Enabled
+      - MaximumSeconds
+      - TimeLeft
+      properties:
+        Enabled:
+          type: boolean
+        MaximumSeconds:
+          type: integer
+          format: int64
+          minimum: 0.0
+        TimeLeft:
+          type: integer
+          format: int64
+          minimum: 0.0
+    User:
+      type: object
+      required:
+      - AccountName
+      - AccountSid
+      - DomainName
+      - DomainSid
+      properties:
+        AccountName:
+          type: string
+        AccountSid:
+          type: string
+        DomainName:
+          type: string
+        DomainSid:
+          type: string
+

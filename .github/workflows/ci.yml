@@ -516,6 +516,9 @@ jobs:
         run: |
           $PackageVersion = "${{ needs.preflight.outputs.version }}"
           $StagingPath = Join-Path $Env:RUNNER_TEMP "staging"
+          $SymbolsPath = Join-Path $Env:RUNNER_TEMP "symbols"
+          New-Item -ItemType Directory $SymbolsPath
+
           $TargetOutputPath = Join-Path $StagingPath ${{ matrix.os }} ${{ matrix.arch }}
           $ExecutableFileName = "DevolutionsAgent_${{ runner.os }}_${PackageVersion}_${{ matrix.arch }}"
 
@@ -525,10 +528,20 @@ jobs:
             $DAgentPackage = Join-Path $TargetOutputPath $PackageFileName
 
             echo "dagent-package=$DAgentPackage" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmDesktopExecutable = Join-Path $TargetOutputPath "DevolutionsPedmDesktop.exe"
+            echo "dagent-pedm-desktop-executable=$DAgentPedmDesktopExecutable" >> $Env:GITHUB_OUTPUT
+
+            $DAgentPedmContextMenuMsix = Join-Path $TargetOutputPath "devolutions-pedm-contextmenu.msix"
+            echo "dagent-pedm-context-menu-msix=$DAgentPedmContextMenuMsix" >> $Env:GITHUB_OUTPUT
+            
+            $DAgentPedmHook = Join-Path $TargetOutputPath "devolutions_pedm_hook.dll"
+            echo "dagent-pedm-hook=$DAgentPedmHook" >> $Env:GITHUB_OUTPUT
           }
 
           $DAgentExecutable = Join-Path $TargetOutputPath $ExecutableFileName
           echo "staging-path=$StagingPath" >> $Env:GITHUB_OUTPUT
+          echo "symbols-path=$SymbolsPath" >> $Env:GITHUB_OUTPUT
           echo "target-output-path=$TargetOutputPath" >> $Env:GITHUB_OUTPUT
           echo "dagent-executable=$DAgentExecutable" >> $Env:GITHUB_OUTPUT
 
@@ -559,6 +572,9 @@ jobs:
           choco uninstall wixtoolset
           choco install wixtoolset --version 3.14.0 --allow-downgrade --force
 
+          # Devolutions PEDM needs MakeAppx.exe
+          Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
           # WiX is installed on Windows runners but not in the PATH
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
@@ -568,17 +584,24 @@ jobs:
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
+      - name: Add msbuild to PATH
+        if: matrix.os == 'windows'
+        uses: microsoft/setup-msbuild@v2
+
       - name: Build
         shell: pwsh
         env:
           TARGET_OUTPUT_PATH: ${{ steps.load-variables.outputs.target-output-path }}
           DAGENT_EXECUTABLE: ${{ steps.load-variables.outputs.dagent-executable }}
           CARGO_PACKAGE: devolutions-agent
-        run: ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
-
-      - name: Add msbuild to PATH
-        if: matrix.os == 'windows'
-        uses: microsoft/setup-msbuild@v2
+        run: |
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
+            $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-context-menu-msix }}"
+          }
+          
+          ./ci/tlk.ps1 build -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}
 
       - name: Package
         shell: pwsh
@@ -589,6 +612,9 @@ jobs:
         run: |
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DAGENT_PACKAGE = "${{ steps.load-variables.outputs.dagent-package }}"
+            $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = "${{ steps.load-variables.outputs.dagent-pedm-desktop-executable }}"
+            $Env:DAGENT_PEDM_HOOK = "${{ steps.load-variables.outputs.dagent-pedm-hook }}"
+            $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = "${{ steps.load-variables.outputs.dagent-pedm-context-menu-msix }}"
           }
 
           ./ci/tlk.ps1 package -Product agent -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

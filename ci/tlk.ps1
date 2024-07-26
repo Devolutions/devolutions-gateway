@@ -112,6 +112,20 @@ function New-ModulePackage
     $OutputFile
 }
 
+function Get-DestinationSymbolFile {
+    param(
+        [Parameter(Mandatory=$true,Position=0)]
+        [string] $DestinationExecutable,
+        [Parameter(Mandatory=$true,Position=1)]
+        [TlkTarget] $Target
+    )
+
+    $DestinationSymbolsName = $(Split-Path $DestinationExecutable -LeafBase) + ".$($Target.SymbolsExtension)"
+    $DestinationDirectory  = Split-Path $DestinationExecutable -Parent
+    
+    Join-Path $DestinationDirectory $DestinationSymbolsName
+}
+
 function Get-TlkPlatform {
     param(
         [Parameter(Position=0)]
@@ -163,6 +177,7 @@ class TlkTarget
     [string] $Architecture
     [string] $CargoProfile
     [string] $ExecutableExtension
+    [string] $LibraryExtension
     [string] $SymbolsExtension
 
     TlkTarget() {
@@ -176,9 +191,16 @@ class TlkTarget
         if ($this.IsWindows()) {
             $this.ExecutableExtension = 'exe'
             $this.SymbolsExtension = 'pdb'
+            $this.LibraryExtension = 'dll'
         } else {
             $this.ExecutableExtension = ''
             $this.SymbolsExtension = ''
+
+            if ($this.IsMacOS()) {
+                $this.LibraryExtension = 'dylib'
+            } else {
+                $this.LibraryExtension = 'so'
+            }
         }
     }
 
@@ -243,6 +265,45 @@ class TlkTarget
     }
 }
 
+class TlkPackage
+{
+    [string] $Name
+    [string] $Path
+    [bool] $IsLibrary
+
+    TlkPackage(
+        [string] $Name,
+        [string] $Path,
+        [bool] $IsLibrary
+    ) {
+        $this.Init($Name, $Path, $IsLibrary)
+    }
+
+    [void] Init(
+        [string] $Name,
+        [string] $Path,
+        [bool] $IsLibrary
+    ) {
+        $this.Name = $Name
+        $this.Path = $Path
+        $this.IsLibrary = $IsLibrary
+    }
+
+    [string] BinaryFileName([TlkTarget] $Target) {
+        $SrcBinaryName, $SrcBinaryExtension = if ($this.IsLibrary) {
+            $this.Name.Replace('-', '_'), $Target.LibraryExtension
+        } else {
+            $this.Name, $Target.ExecutableExtension
+        }
+
+        return $SrcBinaryName, $SrcBinaryExtension -ne '' -Join '.'
+    }
+
+    [string] SymbolsFileName([TlkTarget] $Target) {
+        return $this.Name.Replace('-', '_'), $Target.SymbolsExtension -ne '' -Join '.'
+    }
+}
+
 class TlkRecipe
 {
     [string] $Product
@@ -274,14 +335,23 @@ class TlkRecipe
         $this.Product = Get-TlkProduct
     }
 
-    [string] CargoPackage() {
-        $CargoPackage = `
+    [TlkPackage[]] CargoPackages() {
+        $CargoPackages = `
         switch ($this.Product) {
-            "gateway" { "devolutions-gateway" }
-            "agent" { "devolutions-agent" }
-            "jetsocat" { "jetsocat" }
+            "gateway" { @([TlkPackage]::new("devolutions-gateway", "devolutions-gateway", $false)) }
+            "agent" {
+                $agentPackages = @([TlkPackage]::new("devolutions-agent", "devolutions-agent", $false))
+
+                if ($this.Target.IsWindows()) {
+                    $agentPackages += [TlkPackage]::new("devolutions-pedm-hook", "crates/devolutions-pedm-hook", $true)
+                    $agentPackages += [TlkPackage]::new("devolutions-pedm-contextmenu", "crates/devolutions-pedm-contextmenu", $true)
+                }
+
+                $agentPackages
+            }
+            "jetsocat" { @([TlkPackage]::new("jetsocat", "jetsocat", $false)) }
         }
-        return $CargoPackage
+        return $CargoPackages
     }
 
     [string] PackageName() {
@@ -310,6 +380,9 @@ class TlkRecipe
         $CargoCmd = $(@('cargo') + $CargoArgs) -Join ' '
         Write-Host $CargoCmd
         & cargo $CargoArgs | Out-Host
+        if (!$?) {
+            throw "cargo failed: $CargoArgs, cwd: $(Get-Location)"
+        }
     }
 
     [void] Build() {
@@ -329,65 +402,114 @@ class TlkRecipe
         Push-Location
         Set-Location $this.SourcePath
 
-        $CargoPackage = $this.CargoPackage()
-        if (Test-Path Env:CARGO_PACKAGE) {
-            $CargoPackage = $Env:CARGO_PACKAGE
-        }
-        Set-Location -Path $CargoPackage
-
+        $CargoPackages = $this.CargoPackages()
         $CargoTarget = $this.Target.CargoTarget()
         $CargoProfile = $this.Target.CargoProfile
+        
+        $CargoOutputPath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}"
 
-        $this.Cargo(@('build'))
+        foreach ($CargoPackage in $CargoPackages) {
+            Push-Location
+            Set-Location -Path $CargoPackage.Path
+    
+            $this.Cargo(@('build'))
 
-        $SrcExecutableName = $CargoPackage, $this.Target.ExecutableExtension -ne '' -Join '.'
-        $SrcExecutablePath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcExecutableName}"
+            $SrcBinaryPath = "${CargoOutputPath}/$($CargoPackage.BinaryFileName($this.Target))"
 
-        $DestinationExecutable = switch ($this.Product) {
-            "gateway" {
-                if (Test-Path Env:DGATEWAY_EXECUTABLE) {
-                    $Env:DGATEWAY_EXECUTABLE
-                } else {
+            $DestinationExecutable = switch ($this.Product) {
+                "gateway" {
+                    if (Test-Path Env:DGATEWAY_EXECUTABLE) {
+                        $Env:DGATEWAY_EXECUTABLE
+                    } else {
+                        $null
+                    }
+                }
+                "agent" {
+                    if ($CargoPackage.Name -Eq "devolutions-agent" -And (Test-Path Env:DAGENT_EXECUTABLE)) {
+                        $Env:DAGENT_EXECUTABLE
+                    } elseif ($CargoPackage.Name -Eq "devolutions-pedm-hook" -And (Test-Path Env:DAGENT_PEDM_HOOK)) {
+                        $Env:DAGENT_PEDM_HOOK
+                    } else {
+                        $null
+                    }
+                }
+                "jetsocat" {
+                    if (Test-Path Env:JETSOCAT_EXECUTABLE) {
+                        $Env:JETSOCAT_EXECUTABLE
+                    } else {
+                        $null
+                    }
+                }
+                Default {
                     $null
                 }
             }
-            "agent" {
-                if (Test-Path Env:DAGENT_EXECUTABLE) {
-                    $Env:DAGENT_EXECUTABLE
-                } else {
-                    $null
+
+            if ($this.Target.IsWindows() -And $DestinationExecutable) {
+                $SrcSymbolsPath = "${CargoOutputPath}/$($CargoPackage.SymbolsFileName($this.Target))"
+                Copy-Item $SrcSymbolsPath -Destination $(Get-DestinationSymbolFile $DestinationExecutable $this.Target)
+            } elseif (!$this.Target.IsWindows()) {
+                $StripExecutable = 'strip'
+                if (Test-Path Env:STRIP_EXECUTABLE) {
+                    $StripExecutable = $Env:STRIP_EXECUTABLE
+                }
+    
+                & $StripExecutable $SrcBinaryPath | Out-Host
+            }
+    
+            if ($DestinationExecutable) {
+                Copy-Item -Path $SrcBinaryPath -Destination $DestinationExecutable
+            }
+
+            if ($CargoPackage.Name -Eq 'devolutions-pedm-contextmenu') {
+                if ($Null -Eq (Get-Command "MakeAppx.exe" -ErrorAction SilentlyContinue)) {
+                    throw 'MakeAppx was not found in the PATH'
+                }
+
+                $CargoPackagePath = Get-Location
+
+                Push-Location
+                Set-Location $CargoOutputPath
+    
+                $MakeAppxOutput = & 'MakeAppx.exe' 'pack' '/f' "${CargoPackagePath}/mapping.txt" '/p' "./devolutions-pedm-contextmenu.msix" '/nv' '/o'
+                if (!$?) {
+                    throw "MakeAppx package creation failed: ${MakeAppxOutput}"
+                }
+
+                if ($Env:DAGENT_PEDM_PFX -And (Test-Path $Env:DAGENT_PEDM_PFX) -And $Env:DAGENT_PEDM_PFX_PASSWORD -And (Get-Command "SignTool.exe" -ErrorAction SilentlyContinue)) {
+                    $SignToolOutput = & 'SignTool.exe' 'sign' '/fd' 'SHA256' '/a' '/f' "${Env:DAGENT_PEDM_PFX}" '/p' "${Env:DAGENT_PEDM_PFX_PASSWORD}" (Get-Item "./devolutions-pedm-contextmenu.msix").FullName
+                    if (!$?) {
+                        throw "SignTool failed: ${SignToolOutput}"
+                    }
+                }
+
+                Pop-Location
+
+                if (Test-Path Env:DAGENT_PEDM_CONTEXT_MENU_MSIX) {
+                    Copy-Item -Path $(Join-Path $CargoOutputPath "devolutions-pedm-contextmenu.msix") -Destination $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX
+
+                    $DestinationSymbolsFolder = Split-Path $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX -Parent
+                    Copy-Item "${CargoOutputPath}/devolutions_pedm_contextmenu.pdb" -Destination $DestinationSymbolsFolder
+                    Copy-Item "${CargoOutputPath}/deps/devolutions_pedm_contextmenu_shell.pdb" -Destination $DestinationSymbolsFolder
+    
                 }
             }
-            "jetsocat" {
-                if (Test-Path Env:JETSOCAT_EXECUTABLE) {
-                    $Env:JETSOCAT_EXECUTABLE
-                } else {
-                    $null
-                }
-            }
-            Default {
-                $null
-            }
+
+            Pop-Location
         }
 
-        if ($this.Target.IsWindows() -And $DestinationExecutable) {
-            $SrcSymbolsName = $CargoPackage.Replace('-','_')
-            $SrcSymbolsName = $SrcSymbolsName, $this.Target.SymbolsExtension -ne '' -Join '.'
-            $SrcSymbolsPath = "$($this.SourcePath)/target/${CargoTarget}/${CargoProfile}/${SrcSymbolsName}"
-            $DestinationSymbolsName = $(Split-Path $DestinationExecutable -Leaf).Replace(".$($this.Target.ExecutableExtension)", ".$($this.Target.SymbolsExtension)")
-            $DestinationDirectory  = Split-Path $DestinationExecutable -Parent
-            Copy-Item $SrcSymbolsPath -Destination $(Join-Path $DestinationDirectory $DestinationSymbolsName)
-        } elseif (!$this.Target.IsWindows()) {
-            $StripExecutable = 'strip'
-            if (Test-Path Env:STRIP_EXECUTABLE) {
-                $StripExecutable = $Env:STRIP_EXECUTABLE
+        if ($this.Product -Eq "agent" -And $this.Target.IsWindows()) {
+            & './crates/devolutions-pedm/DevolutionsPedmDesktop/build.ps1' | Out-Host
+
+            if (Test-Path Env:DAGENT_PEDM_DESKTOP_EXECUTABLE) {
+                $builtDesktopExe = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select-Object -First 1
+                $builtDesktopPdb = Get-ChildItem -Recurse -Include 'DevolutionsPedmDesktop.pdb' | Select-Object -First 1
+
+                Copy-Item -Path $builtDesktopExe -Destination $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE
+
+                Copy-Item -Path $builtDesktopPdb -Destination $(Get-DestinationSymbolFile $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE $this.Target)
+                
             }
-
-            & $StripExecutable $SrcExecutablePath | Out-Host
-        }
-
-        if ($DestinationExecutable) {
-            Copy-Item -Path $SrcExecutablePath -Destination $DestinationExecutable
         }
 
         Pop-Location

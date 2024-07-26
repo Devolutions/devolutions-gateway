@@ -1,0 +1,13 @@
+[Files]
+"AppxManifest.xml" "AppxManifest.xml"
+
+"deps\devolutions_pedm_contextmenu_shell.dll" "devolutions_pedm_contextmenu_shell.dll"
+"devolutions-pedm-contextmenu.exe" "devolutions-pedm-contextmenu.exe"
+
+"Assets\StoreLogo.png" "Assets\StoreLogo.png"
+"Assets\Wide310x150Logo.scale-200.png" "Assets\Wide310x150Logo.scale-200.png"
+"Assets\LockScreenLogo.scale-200.png" "Assets\LockScreenLogo.scale-200.png"
+"Assets\SplashScreen.scale-200.png" "Assets\SplashScreen.scale-200.png"
+"Assets\Square44x44Logo.scale-200.png" "Assets\Square44x44Logo.scale-200.png"
+"Assets\Square44x44Logo.targetsize-24_altform-unplated.png" "Assets\Square44x44Logo.targetsize-24_altform-unplated.png"
+"Assets\Square150x150Logo.scale-200.png" "Assets\Square150x150Logo.scale-200.png"

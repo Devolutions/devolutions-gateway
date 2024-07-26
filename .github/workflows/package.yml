@@ -34,8 +34,23 @@ jobs:
       run: ${{ steps.get-run.outputs.run }}
       commit: ${{ steps.get-commit.outputs.commit }}
       version: ${{ steps.get-version.outputs.version }}
+      package-env: ${{ steps.info.outputs.package-env }}
 
     steps:
+      - name: Package information
+        id: info
+        shell: pwsh
+        run: |
+          $ref = '${{ github.ref_name }}'
+          $IsMasterBranch = ('${{ github.ref_name }}' -eq 'master')
+          $IsScheduledJob = ('${{ github.event_name }}' -eq 'schedule')
+          $PackageEnv = if ($IsMasterBranch -And -Not $IsScheduledJob) {
+            "publish-prod"
+          } else {
+            "publish-prod" # "publish-test"
+          }
+          echo "package-env=$PackageEnv" >> $Env:GITHUB_OUTPUT
+
       ## workflow_dispatch: The run_id is read from the inputs
       ## workflow_call:     The run_id is the current run_id
       - name: Get run
@@ -130,8 +145,8 @@ jobs:
   codesign:
     name: Codesign
     runs-on: ${{ matrix.runner }}
-    environment: publish-prod
     needs: preflight
+    environment: ${{ needs.preflight.outputs.package-env }}
     strategy:
       matrix:
         project: [ jetsocat, devolutions-gateway, devolutions-agent ]
@@ -212,12 +227,33 @@ jobs:
         run: |
           $IncludePattern = switch ('${{ matrix.project }}') {
             'devolutions-gateway' { 'DevolutionsGateway_*.exe' }
-            'devolutions-agent' { 'DevolutionsAgent_*.exe' }
+            'devolutions-agent' { 'DevolutionsAgent_*.exe', 'devolutions-pedm-contextmenu.msix', 'DevolutionsPedmDesktop.exe', 'devolutions_pedm_hook.dll' }
             'jetsocat' { 'jetsocat_*' }
           }
           $ExcludePattern = "*.pdb"
-          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include "$IncludePattern" -Exclude $ExcludePattern | % {
+          Get-ChildItem -Path ${{ runner.temp }} -Recurse -Include $IncludePattern -Exclude $ExcludePattern | % {
             if ('${{ matrix.os }}' -Eq 'windows') {
+              if ($_.Name -Eq 'devolutions-pedm-contextmenu.msix') {
+                $PackagePublisher = '${{ secrets.CODE_SIGNING_APPX_PUBLISHER }}'
+                $UnpackedMsix = Join-Path ${{ runner.temp }} "unpacked-context-menu-msix"
+                $AppxManifest = Join-Path $UnpackedMsix "AppxManifest.xml"
+                $PackedMsix = $_.FullName
+
+                & 'MakeAppx.exe' unpack /p $PackedMsix /d $UnpackedMsix /nv
+                Remove-Item $PackedMsix -Force | Out-Null
+                $appx = [xml](Get-Content -Path $AppxManifest)
+                $appx.Package.Identity.Publisher = $PackagePublisher
+                $xmlWriterSettings = New-Object System.Xml.XmlWriterSettings
+                $xmlWriterSettings.Indent = $true
+                $xmlWriterSettings.Encoding = [System.Text.Encoding]::UTF8
+                $xmlTextWriter = [System.Xml.XmlTextWriter]::Create($AppxManifest, $xmlWriterSettings)
+                $appx.Save($xmlTextWriter)
+                $xmlTextWriter.Close()
+                & 'MakeAppx.exe' pack /d $UnpackedMsix /p $PackedMsix /nv
+              
+                Remove-Item $UnpackedMsix -Recurse -Force | Out-Null
+              }
+
               $Params = @('sign',
                 '-kvt', '${{ secrets.AZURE_TENANT_ID }}',
                 '-kvu', '${{ secrets.CODE_SIGNING_KEYVAULT_URL }}',
@@ -256,12 +292,12 @@ jobs:
         if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download native libs
+      - name: Download native-libs
+        uses: actions/download-artifact@v4
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n native-libs -D "./native-libs/"
+        with:
+          name: native-libs
+          path: native-libs
 
       - name: Regenerate Gateway MSI
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
@@ -285,6 +321,9 @@ jobs:
         run: |
           $PackageRoot = Join-Path ${{ runner.temp }} ${{ matrix.project}}
           $Env:DAGENT_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsAgent*.exe' | Select -First 1
+          $Env:DAGENT_PEDM_DESKTOP_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include 'DevolutionsPedmDesktop.exe' | Select -First 1
+          $Env:DAGENT_PEDM_CONTEXT_MENU_MSIX = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions-pedm-contextmenu.msix' | Select -First 1
+          $Env:DAGENT_PEDM_HOOK = Get-ChildItem -Path $PackageRoot -Recurse -Include 'devolutions_pedm_hook.dll' | Select -First 1
 
           ./ci/tlk.ps1 package -Product agent -PackageOption generate
 
@@ -363,7 +402,7 @@ jobs:
           }
 
       - name: Verification
-        if: matrix.os == 'windows' || matrix.os == 'macos'
+        if: (matrix.os == 'windows' || matrix.os == 'macos') && env.package-env == 'publish-prod'
         shell: pwsh
         run: |
           $RootPath = Join-Path ${{ runner.temp }} ${{ matrix.project }} ${{ matrix.os }}
@@ -423,12 +462,27 @@ jobs:
         with:
           pattern: devolutions-agent-*
           merge-multiple: true
+      
+      - name: Split symbols
+        shell: pwsh
+        run: |
+          $SymbolsPath = New-Item -ItemType Directory $(Join-Path "${{ runner.temp }}" 'symbols')
+          Get-ChildItem -Path "${{ github.workspace }}" -Recurse -Include '*.pdb' | % {
+            Move-Item $_ $SymbolsPath
+          }
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           path: ${{ github.workspace }}/**/*
           name: devolutions-agent
+          overwrite: true
+  
+      - name: Upload Symbol Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ runner.temp }}/symbols
+          name: devolutions-agent-symbols
           overwrite: true
 
   jetsocat-merge:
