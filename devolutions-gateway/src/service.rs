@@ -97,7 +97,7 @@ impl GatewayService {
             match result {
                 Ok(_) => info!("XMF native library loaded and installed"),
                 Err(error) => warn!(
-                    %error,
+                    ?error,
                     "Failed to load XMF native library, video processing features are disabled"
                 ),
             }

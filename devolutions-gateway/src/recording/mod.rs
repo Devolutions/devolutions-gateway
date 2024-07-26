@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
+use muxer::remux;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter};
@@ -20,6 +21,8 @@ use uuid::Uuid;
 
 use crate::session::SessionMessageSender;
 use crate::token::{JrecTokenClaims, RecordingFileType};
+
+mod muxer;
 
 const DISCONNECTED_TTL_SECS: i64 = 10;
 const DISCONNECTED_TTL_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(DISCONNECTED_TTL_SECS as u64);
@@ -121,7 +124,10 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        recordings
+            .disconnect(session_id, file_type, recording_file)
+            .await
+            .context("disconnect")?;
 
         res
     }
@@ -176,6 +182,8 @@ enum RecordingManagerMessage {
     },
     Disconnect {
         id: Uuid,
+        file_type: RecordingFileType,
+        recording_file: Utf8PathBuf,
     },
     GetState {
         id: Uuid,
@@ -202,7 +210,7 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("file_type", file_type)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::Disconnect { id, .. } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -241,9 +249,18 @@ impl RecordingMessageSender {
             .context("couldn't receive recording file path for this recording")
     }
 
-    async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn disconnect(
+        &self,
+        id: Uuid,
+        file_type: RecordingFileType,
+        recording_file: Utf8PathBuf,
+    ) -> anyhow::Result<()> {
         self.channel
-            .send(RecordingManagerMessage::Disconnect { id })
+            .send(RecordingManagerMessage::Disconnect {
+                id,
+                file_type,
+                recording_file,
+            })
             .await
             .ok()
             .context("couldn't send Remove message")
@@ -601,7 +618,7 @@ async fn recording_manager_task(
                             Err(e) => error!(error = format!("{e:#}"), "handle_connect"),
                         }
                     },
-                    RecordingManagerMessage::Disconnect { id } => {
+                    RecordingManagerMessage::Disconnect { id, file_type,recording_file } => {
                         if let Err(e) = manager.handle_disconnect(id) {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
@@ -614,6 +631,13 @@ async fn recording_manager_task(
                             id,
                         });
 
+                        if RecordingFileType::WebM == file_type {
+                            tokio::spawn(async move {
+                                if let Err(e) = remux(recording_file).await {
+                                    error!(error = format!("{e:#}"), "remux");
+                                }
+                            });
+                        }
                         // Reset the Sleep instance if the new deadline is sooner or it is already elapsed
                         if next_remove_sleep.is_elapsed() || deadline < next_remove_sleep.deadline() {
                             next_remove_sleep.as_mut().reset(deadline);
@@ -664,7 +688,7 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
+        if let RecordingManagerMessage::Disconnect { id, .. } = msg {
             if let Err(e) = manager.handle_disconnect(id) {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
