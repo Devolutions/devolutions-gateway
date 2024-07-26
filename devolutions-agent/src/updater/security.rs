@@ -18,10 +18,10 @@ pub const UPDATE_JSON_DACL: &str = "D:PAI(A;;FA;;;SY)(A;;0x1201bf;;;NS)(A;;FA;;;
 pub fn set_file_dacl(file_path: &Utf8Path, acl: &str) -> Result<(), UpdaterError> {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{LocalFree, ERROR_SUCCESS, FALSE, HLOCAL};
-    use windows::Win32::Security::PSID;
     use windows::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
+    use windows::Win32::Security::PSID;
     use windows::Win32::Security::{GetSecurityDescriptorDacl, ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
 
     struct OwnedPSecurityDescriptor(PSECURITY_DESCRIPTOR);
