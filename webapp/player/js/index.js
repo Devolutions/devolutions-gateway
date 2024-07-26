@@ -66,15 +66,26 @@ request.onreadystatechange = function () {
 
       let trpSrc = `${gatewayAccessUrl}/jet/jrec/pull/${sessionId}/${recordingInfo.files[0].fileName}?token=${token}`;
 
-      loadFile(trpSrc, function (trpFileContent) {
-        var castFileContent = convertTRPtoCast(trpFileContent);
+      loadFile(trpSrc, (trpFileContent) => {
+        const castFileContent = convertTRPtoCast(trpFileContent);
+        const objectUrl = URL.createObjectURL(new Blob([castFileContent], { type: 'text/plain' }));
+        const originalFetch = window.fetch;
+        // HACK: override fetch to return the cast file content, we should definately update the XtermPlayer to avoid this
+        window.fetch = (url, options) => {
+          if (url === objectUrl){
+            return Promise.resolve({
+              text: () => {
+                return Promise.resolve(castFileContent);
+              },
+            });
+          }
+          return originalFetch(url, options);
+        }
+        const player = new XtermPlayer.XtermPlayer(objectUrl, terminalDiv);
+        window.fetch = originalFetch;
 
-        // make the file a base64 embedded src url
-        var url = "data:text/plain;base64," + btoa(castFileContent);
-        var player = new XtermPlayer.XtermPlayer(url, terminalDiv);
-        
         // need a slight delay to play waiting for it to load
-        setTimeout(function () {
+        setTimeout(() => {
           player.play();
         }, 500);
       });
@@ -90,7 +101,7 @@ request.onreadystatechange = function () {
       player.play();
 
       break;
-  }   
+  }
 };
 
 request.open("GET", videoSrcInfo, true);
