@@ -5,7 +5,7 @@ use std::path::Path;
 use std::pin::pin;
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::{ShutdownSignal, Task};
