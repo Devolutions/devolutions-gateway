@@ -88,7 +88,7 @@ dlopen = "0.1"
 dlopen_derive = "0.1"
 
 # Video processing for session recording
-cadeau = { path = "../../cadeau/rust/cadeau", features = ["dlopen"] }
+cadeau = { version = "0.4", features = ["dlopen"] }
 
 # Dependencies required for PCAP support (QUESTION: should we keep that built-in?)
 pcap-file = "2.0"
