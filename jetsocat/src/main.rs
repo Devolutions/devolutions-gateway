@@ -2,9 +2,11 @@
 #![allow(clippy::print_stdout)]
 
 // Used by the jetsocat library.
+#[cfg(feature = "detect-proxy")]
+use proxy_cfg as _;
 use {
-    futures_util as _, jet_proto as _, jmux_proto as _, proxy_cfg as _, proxy_http as _, proxy_socks as _,
-    proxy_types as _, tokio_tungstenite as _, transport as _,
+    futures_util as _, jet_proto as _, jmux_proto as _, proxy_http as _, proxy_socks as _, proxy_types as _,
+    tokio_tungstenite as _, transport as _,
 };
 
 // Used by tests

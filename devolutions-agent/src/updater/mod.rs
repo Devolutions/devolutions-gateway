@@ -177,7 +177,7 @@ async fn update_product(conf: ConfHandle, product: Product, order: UpdateOrder) 
 }
 
 async fn read_update_json(update_file_path: &Utf8Path) -> anyhow::Result<UpdateJson> {
-    let update_json_data = tokio::fs::read(update_file_path)
+    let update_json_data = fs::read(update_file_path)
         .await
         .context("failed to read update.json file")?;
     let update_json: UpdateJson =
