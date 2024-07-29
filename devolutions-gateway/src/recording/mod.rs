@@ -182,8 +182,6 @@ enum RecordingManagerMessage {
     },
     Disconnect {
         id: Uuid,
-        file_type: RecordingFileType,
-        recording_file: Utf8PathBuf,
     },
     GetState {
         id: Uuid,
