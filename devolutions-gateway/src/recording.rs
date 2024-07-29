@@ -692,8 +692,10 @@ async fn recording_manager_task(
 }
 
 pub async fn remux(input_path: Utf8PathBuf) -> anyhow::Result<()> {
-    // CPU-intensive operation potentially lasting much more than 100ms.
-    tokio::task::spawn_blocking(move || remux_impl(input_path)).await??;
+    if cadeau::xmf::is_init() {
+        // CPU-intensive operation potentially lasting much more than 100ms.
+        tokio::task::spawn_blocking(move || remux_impl(input_path)).await??;
+    }
 
     return Ok(());
 
