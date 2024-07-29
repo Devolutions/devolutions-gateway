@@ -36,6 +36,7 @@ import { FileControlComponent } from './form/form-controls/file-control/file-con
 import { FormsModule } from '@angular/forms';
 import { NetScanComponent } from './net-scan/net-scan.component';
 import {MainPanelComponent} from "@shared/components/main-panel/main-panel.component";
+import {NgOptimizedImage} from "@angular/common";
 
 
 const routes: Routes = [
@@ -50,7 +51,8 @@ const routes: Routes = [
         RouterModule.forChild(routes),
         SharedModule,
         KeyFilterModule,
-        FormsModule
+        FormsModule,
+        NgOptimizedImage
     ],
   schemas: [ CUSTOM_ELEMENTS_SCHEMA ],
   declarations: [
