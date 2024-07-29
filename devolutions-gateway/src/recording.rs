@@ -477,12 +477,26 @@ impl RecordingManagerTask {
 
             ongoing.manifest.duration = end_time - ongoing.manifest.start_time;
 
+            let recording_file_path = ongoing
+                .manifest_path
+                .parent()
+                .expect("a parent")
+                .join(&current_file.file_name);
+
             debug!(path = %ongoing.manifest_path, "Write updated manifest to disk");
 
             ongoing
                 .manifest
                 .save_to_file(&ongoing.manifest_path)
                 .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
+
+            if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
+                tokio::spawn(async move {
+                    if let Err(e) = remux(recording_file_path).await {
+                        error!(error = format!("{e:#}"), "Remux operation failed");
+                    }
+                });
+            }
 
             Ok(())
         } else {
@@ -674,4 +688,35 @@ async fn recording_manager_task(
     debug!("Task terminated");
 
     Ok(())
+}
+
+pub async fn remux(input_path: Utf8PathBuf) -> anyhow::Result<()> {
+    if cadeau::xmf::is_init() {
+        // CPU-intensive operation potentially lasting much more than 100ms.
+        tokio::task::spawn_blocking(move || remux_impl(input_path)).await??;
+    }
+
+    return Ok(());
+
+    fn remux_impl(input_path: Utf8PathBuf) -> anyhow::Result<()> {
+        let input_file_name = input_path
+            .file_name()
+            .ok_or(anyhow::anyhow!("input file has no file name"))?;
+
+        let remuxed_file_name = format!("remuxed_{input_file_name}");
+
+        let output_path = input_path
+            .parent()
+            .context("failed to retrieve parent folder")?
+            .join(remuxed_file_name);
+
+        cadeau::xmf::muxer::webm_remux(&input_path, &output_path)
+            .with_context(|| format!("failed to remux file {input_path} to {output_path}"))?;
+
+        std::fs::rename(&output_path, &input_path).context("failed to override remuxed file")?;
+
+        debug!(%input_path, "Successfully remuxed video recording");
+
+        Ok(())
+    }
 }
