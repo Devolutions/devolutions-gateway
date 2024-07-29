@@ -202,7 +202,7 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("file_type", file_type)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id, .. } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -678,7 +678,7 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id, .. } = msg {
+        if let RecordingManagerMessage::Disconnect { id } = msg {
             if let Err(e) = manager.handle_disconnect(id) {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
