@@ -6,6 +6,8 @@ description = "Shared code between the Devolutions Agent and the Devolutions Gat
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
 
 [dependencies]
 camino = "1.1"

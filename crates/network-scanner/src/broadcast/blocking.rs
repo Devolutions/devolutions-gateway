@@ -34,6 +34,7 @@ impl Iterator for BorcastBlockStream {
             return None;
         }
 
+        // SAFETY: TODO: explain safety.
         let ping_result = unsafe { BroadcastResponseEntry::from_raw(addr, &buffer, size) };
 
         let ping_result = match ping_result {

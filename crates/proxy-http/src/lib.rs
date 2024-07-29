@@ -267,7 +267,7 @@ enum StatusCode {
 }
 
 impl StatusCode {
-    pub const fn reason_phrase(&self) -> &'static str {
+    pub(crate) const fn reason_phrase(&self) -> &'static str {
         match self {
             Self::ConnectionEstablished => "Connection Established",
             Self::Failure(error_code) => error_code.reason_phrase(),
@@ -597,7 +597,7 @@ struct Request<'a> {
     dest_addr: DestAddr,
 }
 
-fn decode_request(buf: &[u8]) -> Result<Request, Error> {
+fn decode_request(buf: &[u8]) -> Result<Request<'_>, Error> {
     let method_end_idx = find(buf, b" ").ok_or(Error::Truncated)?;
     let (method, buf) = buf.split_at(method_end_idx);
     let method = core::str::from_utf8(method).map_err(|_| Error::InvalidPayload)?;

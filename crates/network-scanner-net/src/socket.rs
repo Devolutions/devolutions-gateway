@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::mem::MaybeUninit;
 use std::sync::Arc;
-use std::usize;
 
 use socket2::{SockAddr, Socket};
 use std::result::Result::Ok;
@@ -12,7 +11,7 @@ use crate::runtime::Socket2Runtime;
 
 /// A wrapper on raw socket that can be used with a IO event loop provided by `Socket2Runtime`.
 pub struct AsyncRawSocket {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     runtime: Arc<Socket2Runtime>,
     id: usize,
 }
@@ -40,7 +39,7 @@ impl AsyncRawSocket {
     // Raw socket creation must be done through a `Socket2Runtime`,
     // and this function is `pub(crate)` instead of `pub` on purpose.
     pub(crate) fn from_socket(
-        socket: socket2::Socket,
+        socket: Socket,
         id: usize,
         runtime: Arc<Socket2Runtime>,
     ) -> std::io::Result<AsyncRawSocket> {
@@ -73,22 +72,18 @@ impl<'a> AsyncRawSocket {
         buf: &'a mut [MaybeUninit<u8>],
     ) -> impl Future<Output = std::io::Result<(usize, SockAddr)>> + 'a {
         RecvFromFuture {
-            socket: self.socket.clone(),
+            socket: Arc::clone(&self.socket),
             buf,
             id: self.id,
-            runtime: self.runtime.clone(),
+            runtime: Arc::clone(&self.runtime),
         }
     }
 
     #[tracing::instrument(skip(self, data))]
-    pub fn send_to(
-        &self,
-        data: &'a [u8],
-        addr: &'a socket2::SockAddr,
-    ) -> impl Future<Output = std::io::Result<usize>> + 'a {
+    pub fn send_to(&self, data: &'a [u8], addr: &'a SockAddr) -> impl Future<Output = std::io::Result<usize>> + 'a {
         SendToFuture {
-            socket: self.socket.clone(),
-            runtime: self.runtime.clone(),
+            socket: Arc::clone(&self.socket),
+            runtime: Arc::clone(&self.runtime),
             data,
             addr,
             id: self.id,
@@ -98,8 +93,8 @@ impl<'a> AsyncRawSocket {
     #[tracing::instrument(skip(self))]
     pub fn accept(&self) -> impl Future<Output = std::io::Result<(AsyncRawSocket, SockAddr)>> {
         AcceptFuture {
-            socket: self.socket.clone(),
-            runtime: self.runtime.clone(),
+            socket: Arc::clone(&self.socket),
+            runtime: Arc::clone(&self.runtime),
             id: self.id,
         }
     }
@@ -107,8 +102,8 @@ impl<'a> AsyncRawSocket {
     #[tracing::instrument(skip(self))]
     pub fn connect(&self, addr: &'a SockAddr) -> impl Future<Output = std::io::Result<()>> + 'a {
         ConnectFuture {
-            socket: self.socket.clone(),
-            runtime: self.runtime.clone(),
+            socket: Arc::clone(&self.socket),
+            runtime: Arc::clone(&self.runtime),
             addr,
             id: self.id,
         }
@@ -117,8 +112,8 @@ impl<'a> AsyncRawSocket {
     #[tracing::instrument(skip(self, data))]
     pub fn send(&mut self, data: &'a [u8]) -> impl Future<Output = std::io::Result<usize>> + 'a {
         SendFuture {
-            socket: self.socket.clone(),
-            runtime: self.runtime.clone(),
+            socket: Arc::clone(&self.socket),
+            runtime: Arc::clone(&self.runtime),
             data,
             id: self.id,
         }
@@ -127,16 +122,16 @@ impl<'a> AsyncRawSocket {
     #[tracing::instrument(skip(self, buf))]
     pub fn recv(&mut self, buf: &'a mut [MaybeUninit<u8>]) -> impl Future<Output = std::io::Result<usize>> + 'a {
         RecvFuture {
-            socket: self.socket.clone(),
+            socket: Arc::clone(&self.socket),
             buf,
             id: self.id,
-            runtime: self.runtime.clone(),
+            runtime: Arc::clone(&self.runtime),
         }
     }
 }
 
 struct RecvFromFuture<'a> {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     buf: &'a mut [MaybeUninit<u8>],
     id: usize,
     runtime: Arc<Socket2Runtime>,
@@ -145,7 +140,7 @@ struct RecvFromFuture<'a> {
 impl Future for RecvFromFuture<'_> {
     type Output = std::io::Result<(usize, SockAddr)>;
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        let socket = &self.socket.clone(); // avoid borrow checker error
+        let socket = &Arc::clone(&self.socket); // avoid borrow checker error
         match socket.recv_from(self.buf) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
             Err(e) => resolve(e, &self.socket, &self.runtime, Event::readable(self.id), cx.waker()),
@@ -161,14 +156,14 @@ impl Drop for RecvFromFuture<'_> {
 }
 
 struct SendToFuture<'a> {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     runtime: Arc<Socket2Runtime>,
     id: usize,
     data: &'a [u8],
-    addr: &'a socket2::SockAddr,
+    addr: &'a SockAddr,
 }
 
-impl<'a> Future for SendToFuture<'a> {
+impl Future for SendToFuture<'_> {
     type Output = std::io::Result<usize>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
@@ -187,7 +182,7 @@ impl Drop for SendToFuture<'_> {
 }
 
 struct AcceptFuture {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     runtime: Arc<Socket2Runtime>,
     id: usize,
 }
@@ -198,7 +193,7 @@ impl Future for AcceptFuture {
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
         match self.socket.accept() {
             Ok((socket, addr)) => {
-                let socket = AsyncRawSocket::from_socket(socket, self.id, self.runtime.clone())?;
+                let socket = AsyncRawSocket::from_socket(socket, self.id, Arc::clone(&self.runtime))?;
                 std::task::Poll::Ready(Ok((socket, addr)))
             }
             Err(e) => resolve(e, &self.socket, &self.runtime, Event::readable(self.id), cx.waker()),
@@ -214,13 +209,13 @@ impl Drop for AcceptFuture {
 }
 
 struct ConnectFuture<'a> {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     runtime: Arc<Socket2Runtime>,
     id: usize,
-    addr: &'a socket2::SockAddr,
+    addr: &'a SockAddr,
 }
 
-impl<'a> Future for ConnectFuture<'a> {
+impl Future for ConnectFuture<'_> {
     type Output = std::io::Result<()>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
@@ -296,13 +291,13 @@ impl Drop for ConnectFuture<'_> {
 }
 
 struct SendFuture<'a> {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     runtime: Arc<Socket2Runtime>,
     id: usize,
     data: &'a [u8],
 }
 
-impl<'a> Future for SendFuture<'a> {
+impl Future for SendFuture<'_> {
     type Output = std::io::Result<usize>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
@@ -321,17 +316,17 @@ impl Drop for SendFuture<'_> {
 }
 
 struct RecvFuture<'a> {
-    socket: Arc<socket2::Socket>,
+    socket: Arc<Socket>,
     buf: &'a mut [MaybeUninit<u8>],
     id: usize,
     runtime: Arc<Socket2Runtime>,
 }
 
-impl<'a> Future for RecvFuture<'a> {
+impl Future for RecvFuture<'_> {
     type Output = std::io::Result<usize>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        let socket = &self.socket.clone(); // avoid borrow checker error
+        let socket = &Arc::clone(&self.socket); // avoid borrow checker error
         match socket.recv(self.buf) {
             Ok(a) => std::task::Poll::Ready(Ok(a)),
             Err(e) => resolve(e, &self.socket, &self.runtime, Event::readable(self.id), cx.waker()),

@@ -6,6 +6,9 @@ edition = "2021"
 description = "(Web)Socket toolkit for jet protocol related operations"
 publish = false
 
+[lints]
+workspace = true
+
 [features]
 default = ["rustls", "detect-proxy"]
 detect-proxy = ["proxy_cfg"]

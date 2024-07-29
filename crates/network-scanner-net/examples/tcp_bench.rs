@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use std::net::{IpAddr, SocketAddr};
 
 use network_scanner_net::runtime::Socket2Runtime;

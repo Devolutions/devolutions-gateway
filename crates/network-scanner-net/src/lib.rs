@@ -26,5 +26,6 @@ pub enum ScannnerNetError {
 // TODO: replace with `MaybeUninit::slice_assume_init_ref` once stable.
 // https://github.com/rust-lang/rust/issues/63569
 pub unsafe fn assume_init(buf: &[MaybeUninit<u8>]) -> &[u8] {
-    &*(buf as *const [MaybeUninit<u8>] as *const [u8])
+    // SAFETY: Preconditions must be upheld by the caller.
+    unsafe { &*(buf as *const [MaybeUninit<u8>] as *const [u8]) }
 }

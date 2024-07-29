@@ -2,11 +2,11 @@ use bitvec::prelude::*;
 use jmux_proto::LocalChannelId;
 use std::convert::TryFrom;
 
-pub trait Id: Copy + From<u32> + Into<u32> {}
+pub(crate) trait Id: Copy + From<u32> + Into<u32> {}
 
 impl Id for LocalChannelId {}
 
-pub struct IdAllocator<T: Id> {
+pub(crate) struct IdAllocator<T: Id> {
     taken: BitVec,
     _pd: std::marker::PhantomData<T>,
 }
@@ -21,14 +21,14 @@ impl<T: Id> Default for IdAllocator<T> {
 }
 
 impl<T: Id> IdAllocator<T> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Allocates an ID
     ///
     /// Returns `None` when allocator is out of memory.
-    pub fn alloc(&mut self) -> Option<T> {
+    pub(crate) fn alloc(&mut self) -> Option<T> {
         match self.taken.iter_zeros().next() {
             Some(freed_idx) => {
                 // - Reclaim a freed ID -
@@ -50,7 +50,7 @@ impl<T: Id> IdAllocator<T> {
     /// Frees an ID
     ///
     /// Freed IDs can be later reclaimed.
-    pub fn free(&mut self, id: T) {
+    pub(crate) fn free(&mut self, id: T) {
         let idx = usize::try_from(Into::<u32>::into(id)).expect("ID should fit in an usize integer");
         self.taken.set(idx, false);
     }

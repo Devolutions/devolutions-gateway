@@ -1,3 +1,5 @@
+#![allow(unused_crate_dependencies)]
+
 use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 

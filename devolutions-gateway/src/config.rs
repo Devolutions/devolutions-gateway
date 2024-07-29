@@ -7,7 +7,6 @@ use cfg_if::cfg_if;
 use core::fmt;
 use picky::key::{PrivateKey, PublicKey};
 use picky::pem::Pem;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -383,7 +382,7 @@ impl WebAppConf {
 
     fn default_system_static_root_path() -> anyhow::Result<std::path::PathBuf> {
         if cfg!(target_os = "windows") {
-            let mut exe_path = std::env::current_exe().context("failed to find service executable location")?;
+            let mut exe_path = env::current_exe().context("failed to find service executable location")?;
             exe_path.pop();
             exe_path.push("webapp");
             Ok(exe_path)
@@ -526,6 +525,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
     }
 }
 
+#[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
@@ -658,7 +658,9 @@ fn read_pfx_file(
 }
 
 fn read_rustls_certificate_file(path: &Utf8Path) -> anyhow::Result<Vec<rustls::Certificate>> {
-    read_rustls_certificate(Some(path), None).transpose().unwrap()
+    read_rustls_certificate(Some(path), None)
+        .transpose()
+        .expect("a path is provided, so it’s never None")
 }
 
 fn read_rustls_certificate(
@@ -672,7 +674,7 @@ fn read_rustls_certificate(
             let mut x509_chain_file = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(File::open)
                 .with_context(|| format!("couldn't open file at {path}"))?
-                .pipe(std::io::BufReader::new);
+                .pipe(BufReader::new);
 
             let mut x509_chain = Vec::new();
 
@@ -720,7 +722,9 @@ fn read_rustls_certificate(
 }
 
 fn read_pub_key_data(data: &dto::ConfData<dto::PubKeyFormat>) -> anyhow::Result<PublicKey> {
-    read_pub_key(None, Some(data)).transpose().unwrap()
+    read_pub_key(None, Some(data))
+        .transpose()
+        .expect("data is provided, so it’s never None")
 }
 
 fn read_pub_key(
@@ -748,7 +752,9 @@ fn read_pub_key(
 }
 
 fn read_rustls_priv_key_file(path: &Utf8Path) -> anyhow::Result<rustls::PrivateKey> {
-    read_rustls_priv_key(Some(path), None).transpose().unwrap()
+    read_rustls_priv_key(Some(path), None)
+        .transpose()
+        .expect("path is provided, so it’s never None")
 }
 
 fn read_rustls_priv_key(
@@ -757,7 +763,7 @@ fn read_rustls_priv_key(
 ) -> anyhow::Result<Option<rustls::PrivateKey>> {
     let data = match (path, data) {
         (Some(path), _) => {
-            let pem: Pem = normalize_data_path(path, &get_data_dir())
+            let pem: Pem<'_> = normalize_data_path(path, &get_data_dir())
                 .pipe_ref(std::fs::read_to_string)
                 .with_context(|| format!("couldn't read file at {path}"))?
                 .pipe_deref(str::parse)
@@ -807,8 +813,8 @@ fn read_priv_key(
 fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -> anyhow::Result<Vec<ListenerUrls>> {
     fn map_scheme(url: &mut Url) {
         match url.scheme() {
-            "ws" => url.set_scheme("http").unwrap(),
-            "wss" => url.set_scheme("https").unwrap(),
+            "ws" => url.set_scheme("http").expect("http is a valid scheme"),
+            "wss" => url.set_scheme("https").expect("https is a valid scheme"),
             _ => (),
         }
     }
@@ -1354,10 +1360,10 @@ pub mod dto {
         {
             struct V;
 
-            impl<'de> de::Visitor<'de> for V {
+            impl de::Visitor<'_> for V {
                 type Value = Password;
 
-                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                     formatter.write_str("a string")
                 }
 

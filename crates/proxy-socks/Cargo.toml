@@ -6,6 +6,9 @@ edition = "2021"
 description = "SOCKS proxy clients and acceptors"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 proxy-types = { path = "../proxy-types" }
 tokio = { version = "1.38", features = ["io-util"] }

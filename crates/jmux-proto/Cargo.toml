@@ -5,6 +5,9 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 bytes = "1.6"
 smol_str = "0.2"

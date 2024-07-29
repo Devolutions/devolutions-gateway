@@ -136,7 +136,7 @@ async fn kdc_proxy(
         )?;
 
         let mut reply_buf = Vec::new();
-        reply_buf.extend_from_slice(&(n as u32).to_be_bytes());
+        reply_buf.extend_from_slice(&u32::try_from(n).expect("n not too big").to_be_bytes());
         reply_buf.extend_from_slice(&buf[0..n]);
         reply_buf
     };
@@ -149,9 +149,9 @@ async fn kdc_proxy(
     kdc_reply_message.to_vec().map_err(HttpError::internal().err())
 }
 
-async fn read_kdc_reply_message(connection: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+async fn read_kdc_reply_message(connection: &mut TcpStream) -> io::Result<Vec<u8>> {
     let len = connection.read_u32().await?;
-    let mut buf = vec![0; (len + 4).try_into().unwrap()];
+    let mut buf = vec![0; (len + 4).try_into().expect("u32-to-usize")];
     buf[0..4].copy_from_slice(&(len.to_be_bytes()));
     connection.read_exact(&mut buf[4..]).await?;
     Ok(buf)

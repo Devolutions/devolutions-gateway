@@ -5,7 +5,7 @@ pub(crate) trait RequestHelper {
     fn get_header_value(&self, header_name: &str) -> Option<&str>;
 }
 
-impl<'h, 'b> RequestHelper for httparse::Request<'h, 'b> {
+impl RequestHelper for httparse::Request<'_, '_> {
     fn is_get_method(&self) -> bool {
         if let Some(method) = self.method {
             if method.to_lowercase() == "get" {
@@ -30,7 +30,7 @@ pub(crate) trait ResponseHelper {
     fn get_header_value(&self, header_name: &str) -> Option<&str>;
 }
 
-impl<'h, 'b> ResponseHelper for httparse::Response<'h, 'b> {
+impl ResponseHelper for httparse::Response<'_, '_> {
     fn get_header_value(&self, header_name: &str) -> Option<&str> {
         self.headers.iter().find_map(|header| {
             if header.name.to_lowercase().eq(&header_name.to_lowercase()) {

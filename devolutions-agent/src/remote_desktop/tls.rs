@@ -7,7 +7,7 @@ use camino::Utf8Path;
 use rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
 
-pub fn acceptor(cert_path: &Utf8Path, key_path: &Utf8Path) -> anyhow::Result<TlsAcceptor> {
+pub(crate) fn acceptor(cert_path: &Utf8Path, key_path: &Utf8Path) -> anyhow::Result<TlsAcceptor> {
     let cert_file = File::open(cert_path).with_context(|| format!("failed to open {cert_path}"))?;
     let cert = rustls_pemfile::certs(&mut BufReader::new(cert_file))
         .next()

@@ -20,13 +20,16 @@ impl BroadcastResponseEntry {
     ) -> anyhow::Result<Self> {
         let addr = *addr
             .as_socket_ipv4()
-            .with_context(|| "sock addr is not ipv4".to_string())?
+            .with_context(|| "sock addr is not ipv4".to_owned())?
             .ip(); // ip is private
 
         let payload = payload[..size]
             .as_ref()
             .iter()
-            .map(|u| unsafe { u.assume_init() })
+            .map(|u| {
+                // SAFETY: TODO: explain safety.
+                unsafe { u.assume_init() }
+            })
             .collect::<Vec<u8>>();
 
         let packet = network_scanner_proto::icmp_v4::Icmpv4Packet::parse(payload.as_slice())?;

@@ -93,11 +93,11 @@ pub(crate) struct ClockDiagnostic {
 }
 
 impl ClockDiagnostic {
-    pub fn now() -> Self {
+    pub(crate) fn now() -> Self {
         let now = time::OffsetDateTime::now_utc();
         Self {
             timestamp_secs: now.unix_timestamp(),
-            timestamp_millis: (now.unix_timestamp_nanos() / 1_000_000) as i64,
+            timestamp_millis: i64::try_from(now.unix_timestamp_nanos() / 1_000_000).expect("never truncated"),
         }
     }
 }

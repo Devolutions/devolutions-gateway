@@ -130,7 +130,7 @@ pub async fn auth_middleware(
             Err(_) => {
                 let query = parts.uri.query().unwrap_or_default();
 
-                let Ok(query) = serde_urlencoded::from_str::<TokenQueryParam>(query) else {
+                let Ok(query) = serde_urlencoded::from_str::<TokenQueryParam<'_>>(query) else {
                     return Err(HttpError::unauthorized()
                         .msg("both authorization header and token query param invalid or missing"));
                 };

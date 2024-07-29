@@ -128,7 +128,6 @@ dependencies = [
  "num-traits",
  "rusticata-macros",
  "thiserror",
- "time",
 ]
 
 [[package]]
@@ -709,15 +708,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crc32fast"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "crossbeam"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -909,7 +899,6 @@ dependencies = [
  "asn1-rs",
  "displaydoc",
  "nom",
- "num-bigint",
  "num-traits",
  "rusticata-macros",
 ]
@@ -1304,12 +1293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "exitcode"
-version = "1.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de853764b47027c2e862a995c34978ffa63c1501f2e15f987ba11bd4f9bba193"
-
-[[package]]
 name = "fastrand"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1348,16 +1331,6 @@ name = "flagset"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
-
-[[package]]
-name = "flate2"
-version = "1.0.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f54427cfd1c7829e2a139fcefea601bf088ebca651d2bf53ebc600eac295dae"
-dependencies = [
- "crc32fast",
- "miniz_oxide",
-]
 
 [[package]]
 name = "flume"
@@ -2017,7 +1990,7 @@ dependencies = [
  "ironrdp-pdu",
  "ironrdp-svc",
  "rand_core",
- "sspi 0.11.1",
+ "sspi",
  "tracing",
  "url",
  "winapi",
@@ -2169,23 +2142,11 @@ name = "jet-proto"
 version = "0.0.0"
 dependencies = [
  "byteorder",
- "bytes",
- "exitcode",
  "hex-literal",
  "http",
  "httparse",
- "lazy_static",
  "log",
- "serde",
- "serde_derive",
- "serde_json",
- "sspi 0.12.0",
- "tempfile",
- "tokio-rustls 0.24.1",
- "ureq",
- "url",
  "uuid",
- "x509-parser",
 ]
 
 [[package]]
@@ -2896,15 +2857,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c19903c598813dba001b53beeae59bb77ad4892c5c1b9b3500ce4293a0d06c2"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "oid-registry"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c958dd45046245b9c3c2547369bb634eb461670b2e7e0de552905801a648d1d"
-dependencies = [
- "asn1-rs",
 ]
 
 [[package]]
@@ -4459,49 +4411,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sspi"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "579d8ebd38b21e9fc957788e6230dee92d7ff0bb236aec0fceaf8b203bd0b6e3"
-dependencies = [
- "async-dnssd",
- "async-recursion",
- "bitflags 2.6.0",
- "byteorder",
- "cfg-if",
- "crypto-mac",
- "futures",
- "hmac",
- "lazy_static",
- "md-5",
- "md4",
- "num-bigint-dig",
- "num-derive",
- "num-traits",
- "oid",
- "picky",
- "picky-asn1 0.8.0",
- "picky-asn1-der 0.4.1",
- "picky-asn1-x509 0.12.0",
- "picky-krb 0.8.0",
- "rand",
- "serde",
- "serde_derive",
- "sha1",
- "sha2",
- "time",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "winapi",
- "windows 0.51.1",
- "windows-sys 0.48.0",
- "winreg 0.51.0",
- "zeroize",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5186,24 +5095,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "ureq"
-version = "2.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72139d247e5f97a3eff96229a7ae85ead5328a39efe76f8bf5a06313d505b6ea"
-dependencies = [
- "base64 0.22.1",
- "flate2",
- "log",
- "once_cell",
- "rustls 0.23.11",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "url",
- "webpki-roots",
-]
-
-[[package]]
 name = "url"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5413,15 +5304,6 @@ checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
 dependencies = [
  "ring 0.17.8",
  "untrusted 0.9.0",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd7c23921eeb1713a4e851530e9b9756e4fb0e89978582942612524cf09f01cd"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -5903,23 +5785,6 @@ dependencies = [
  "der",
  "spki",
  "tls_codec",
-]
-
-[[package]]
-name = "x509-parser"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcbc162f30700d6f3f82a24bf7cc62ffe7caea42c0b2cba8bf7f3ae50cf51f69"
-dependencies = [
- "asn1-rs",
- "data-encoding",
- "der-parser",
- "lazy_static",
- "nom",
- "oid-registry",
- "rusticata-macros",
- "thiserror",
- "time",
 ]
 
 [[package]]

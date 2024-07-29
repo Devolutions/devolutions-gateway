@@ -166,6 +166,7 @@ fn load_conf_file(conf_path: &Utf8Path) -> anyhow::Result<Option<dto::ConfFile>>
     }
 }
 
+#[allow(clippy::print_stdout)] // Logger is likely not yet initialized at this point, so it’s fine to write to stdout.
 pub fn load_conf_file_or_generate_new() -> anyhow::Result<dto::ConfFile> {
     let conf_file_path = get_conf_file_path();
 
@@ -192,6 +193,7 @@ pub mod dto {
         pub enabled: bool,
     }
 
+    #[allow(clippy::derivable_impls)] // Just to be explicit about the default values of the config.
     impl Default for UpdaterConf {
         fn default() -> Self {
             Self { enabled: false }

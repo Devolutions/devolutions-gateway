@@ -67,7 +67,7 @@ impl ToDestAddr for (Ipv6Addr, u16) {
     }
 }
 
-impl<'a> ToDestAddr for (&'a str, u16) {
+impl ToDestAddr for (&str, u16) {
     fn to_dest_addr(&self) -> io::Result<DestAddr> {
         if let Ok(addr) = self.0.parse::<Ipv4Addr>() {
             return (addr, self.1).to_dest_addr();
@@ -81,7 +81,7 @@ impl<'a> ToDestAddr for (&'a str, u16) {
     }
 }
 
-impl<'a> ToDestAddr for &'a str {
+impl ToDestAddr for &str {
     fn to_dest_addr(&self) -> io::Result<DestAddr> {
         if let Ok(addr) = self.parse::<SocketAddrV4>() {
             return addr.to_dest_addr();

@@ -123,7 +123,7 @@ pub async fn send_message(subscriber: &Subscriber, message: &Message) -> anyhow:
                             retry_after = format!("{}s", duration.as_secs()),
                             "a transient error occured"
                         );
-                        tokio::time::sleep(duration).await;
+                        sleep(duration).await;
                     }
                     None => return Err(err),
                 }

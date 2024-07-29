@@ -26,7 +26,7 @@ lazy_static::lazy_static! {
         // > The CredSSP Protocol does not extend the TLS wire protocol. TLS session resumption is not supported.
         //
         // source: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cssp/385a7489-d46b-464c-b224-f7340e308a5c
-        tls_client_config.resumption = tokio_rustls::rustls::client::Resumption::disabled();
+        tls_client_config.resumption = rustls::client::Resumption::disabled();
 
         tokio_rustls::TlsConnector::from(Arc::new(tls_client_config))
     };

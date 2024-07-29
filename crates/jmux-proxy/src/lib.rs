@@ -68,6 +68,7 @@ pub struct JmuxProxy {
 }
 
 impl JmuxProxy {
+    #[must_use]
     pub fn new(
         jmux_reader: Box<dyn AsyncRead + Unpin + Send>,
         jmux_writer: Box<dyn AsyncWrite + Unpin + Send>,
@@ -80,11 +81,13 @@ impl JmuxProxy {
         }
     }
 
+    #[must_use]
     pub fn with_config(mut self, cfg: JmuxConfig) -> Self {
         self.cfg = cfg;
         self
     }
 
+    #[must_use]
     pub fn with_requester_api(mut self, api_request_rx: ApiRequestReceiver) -> Self {
         self.api_request_rx = Some(api_request_rx);
         self
@@ -313,7 +316,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                                 debug!("{} request {}", id, destination_url);
                                 pending_channels.insert(id, (destination_url.clone(), api_response_tx));
                                 msg_to_send_tx
-                                    .send(Message::open(id, MAXIMUM_PACKET_SIZE_IN_BYTES as u16, destination_url))
+                                    .send(Message::open(id, u16::try_from(MAXIMUM_PACKET_SIZE_IN_BYTES).expect("fits in a u16"), destination_url))
                                     .context("couldn’t send CHANNEL OPEN message through mpsc channel")?;
                             }
                             None => warn!("Couldn’t allocate ID for API request: {}", destination_url),
@@ -511,7 +514,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                         let channel_span = info_span!(parent: parent_span.clone(), "channel", %local_id, %peer_id, url = %msg.destination_url);
 
                         let window_size_updated = Arc::new(Notify::new());
-                        let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap()));
+                        let window_size = Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).expect("usize-to-u32")));
 
                         let channel = JmuxChannelCtx {
                             distant_id: peer_id,
@@ -521,8 +524,8 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                             local_state: JmuxChannelState::Streaming,
 
                             initial_window_size: msg.initial_window_size,
-                            window_size_updated: window_size_updated.clone(),
-                            window_size: window_size.clone(),
+                            window_size_updated: Arc::clone(&window_size_updated),
+                            window_size: Arc::clone(&window_size),
 
                             maximum_packet_size: msg.maximum_packet_size,
 
@@ -568,7 +571,7 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
 
                             initial_window_size: msg.initial_window_size,
                             window_size_updated: Arc::new(Notify::new()),
-                            window_size: Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).unwrap())),
+                            window_size: Arc::new(AtomicUsize::new(usize::try_from(msg.initial_window_size).expect("u32-to-usize"))),
 
                             maximum_packet_size: msg.maximum_packet_size,
 
@@ -577,13 +580,13 @@ async fn scheduler_task_impl<T: AsyncRead + Unpin + Send + 'static>(task: JmuxSc
                     }
                     Message::WindowAdjust(msg) => {
                         if let Some(ctx) = jmux_ctx.get_channel_mut(LocalChannelId::from(msg.recipient_channel_id)) {
-                            ctx.window_size.fetch_add(usize::try_from(msg.window_adjustment).unwrap(), Ordering::SeqCst);
+                            ctx.window_size.fetch_add(usize::try_from(msg.window_adjustment).expect("u32-to-usize"), Ordering::SeqCst);
                             ctx.window_size_updated.notify_one();
                         }
                     }
                     Message::Data(msg) => {
                         let id = LocalChannelId::from(msg.recipient_channel_id);
-                        let data_length = u32::try_from(msg.transfer_data.len()).unwrap();
+                        let data_length = u32::try_from(msg.transfer_data.len()).expect("MAXIMUM_PACKET_SIZE_IN_BYTES < u32::MAX");
                         let distant_id = match jmux_ctx.get_channel(id) {
                             Some(channel) => channel.distant_id,
                             None => {

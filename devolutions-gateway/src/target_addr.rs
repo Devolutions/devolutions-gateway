@@ -238,10 +238,10 @@ impl<'de> de::Deserialize<'de> for TargetAddr {
     {
         struct V;
 
-        impl<'de> de::Visitor<'de> for V {
+        impl de::Visitor<'_> for V {
             type Value = TargetAddr;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a destination host such as <SCHEME>://<HOST>:<PORT>")
             }
 
@@ -266,11 +266,14 @@ impl std::net::ToSocketAddrs for TargetAddr {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
-    use super::*;
     use core::fmt::Write as _;
-    use rstest::rstest;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use rstest::rstest;
+
+    use super::*;
 
     #[rstest]
     #[case("localhost:80", "tcp", "localhost", None, 80, "localhost:80")]

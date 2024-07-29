@@ -8,6 +8,9 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 description = "Logging utils library for Devolutions apps"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 # In-house
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }

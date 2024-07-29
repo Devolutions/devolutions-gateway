@@ -5,6 +5,9 @@ authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2021"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 crossbeam = { version = "0.8", features = ["crossbeam-channel"] }

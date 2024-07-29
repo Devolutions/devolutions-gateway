@@ -120,9 +120,9 @@ impl Dissector for WaykDissector {
         let header = <[u8; 4]>::try_from(bytes.get(..4)?).ok()?.pipe(u32::from_le_bytes);
 
         let msg_size = if header & 0x8000_0000 != 0 {
-            usize::try_from(header & 0x0000_FFFF).unwrap() + 4
+            usize::try_from(header & 0x0000_FFFF).expect("< 0xFFFF") + 4
         } else {
-            usize::try_from(header & 0x07FF_FFFF).unwrap() + 6
+            usize::try_from(header & 0x07FF_FFFF).expect("< 0x07FF_FFFF") + 6
         };
 
         if bytes.len() >= msg_size {

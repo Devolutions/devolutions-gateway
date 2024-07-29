@@ -10,12 +10,12 @@ use tokio::sync::oneshot;
 
 use crate::config::ConfHandle;
 
-pub struct RemoteDesktopTask {
+pub(crate) struct RemoteDesktopTask {
     conf_handle: ConfHandle,
 }
 
 impl RemoteDesktopTask {
-    pub fn new(conf_handle: ConfHandle) -> Self {
+    pub(crate) fn new(conf_handle: ConfHandle) -> Self {
         Self { conf_handle }
     }
 }
@@ -68,7 +68,7 @@ async fn recording_server_task(conf_handle: ConfHandle, mut shutdown_signal: Shu
         .first() // FIXME(@CBenoit): proper support for multiple bind addresses
         .context("no bind address configured")?;
 
-    let server = RdpServer::builder().with_addr(bind_address.clone());
+    let server = RdpServer::builder().with_addr(*bind_address);
 
     let server = if let Some(tls_acceptor) = tls_acceptor {
         server.with_tls(tls_acceptor)

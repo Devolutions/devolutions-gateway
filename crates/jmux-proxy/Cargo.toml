@@ -6,6 +6,9 @@ edition = "2021"
 description = "JMUX proxy server implementation"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 
 # jmux

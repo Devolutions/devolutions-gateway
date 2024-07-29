@@ -16,9 +16,9 @@ use std::time::Duration;
 use tap::prelude::*;
 use tokio::runtime::{self, Runtime};
 
-pub const SERVICE_NAME: &str = "devolutions-gateway";
-pub const DISPLAY_NAME: &str = "Devolutions Gateway";
-pub const DESCRIPTION: &str = "Devolutions Gateway service";
+pub(crate) const SERVICE_NAME: &str = "devolutions-gateway";
+pub(crate) const DISPLAY_NAME: &str = "Devolutions Gateway";
+pub(crate) const DESCRIPTION: &str = "Devolutions Gateway service";
 
 #[allow(clippy::large_enum_variant)] // `Running` variant is bigger than `Stopped` but we don't care
 enum GatewayState {
@@ -29,14 +29,14 @@ enum GatewayState {
     },
 }
 
-pub struct GatewayService {
+pub(crate) struct GatewayService {
     conf_handle: ConfHandle,
     state: GatewayState,
     _logger_guard: LoggerGuard,
 }
 
 impl GatewayService {
-    pub fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
+    pub(crate) fn load(conf_handle: ConfHandle) -> anyhow::Result<Self> {
         let conf = conf_handle.get_conf();
 
         let logger_guard = devolutions_log::init::<GatewayLog>(
@@ -110,7 +110,7 @@ impl GatewayService {
         })
     }
 
-    pub fn start(&mut self) -> anyhow::Result<()> {
+    pub(crate) fn start(&mut self) -> anyhow::Result<()> {
         let runtime = runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -151,7 +151,7 @@ impl GatewayService {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         match std::mem::replace(&mut self.state, GatewayState::Stopped) {
             GatewayState::Stopped => {
                 info!("Attempted to stop gateway service, but it's already stopped");
@@ -206,7 +206,7 @@ struct Tasks {
 
 impl Tasks {
     fn new() -> Self {
-        let (shutdown_handle, shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
 
         Self {
             inner: Vec::new(),
@@ -236,7 +236,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
-        token_cache: token_cache.clone(),
+        token_cache: Arc::clone(&token_cache),
         jrl,
         sessions: session_manager_handle.clone(),
         subscriber_tx: subscriber_tx.clone(),

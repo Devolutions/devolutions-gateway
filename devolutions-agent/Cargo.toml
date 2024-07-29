@@ -8,6 +8,9 @@ description = "Agent companion service for Devolutions Gateway"
 build = "build.rs"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

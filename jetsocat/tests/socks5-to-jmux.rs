@@ -1,4 +1,6 @@
 //! Multiple socks5 clients → socks5 server → jmux peer → several TCP listeners
+#![allow(unused_crate_dependencies)]
+#![allow(clippy::unwrap_used)]
 
 use anyhow::Context as _;
 use futures_util::FutureExt;

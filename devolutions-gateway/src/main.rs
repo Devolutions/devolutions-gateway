@@ -1,3 +1,26 @@
+#![allow(clippy::print_stderr)]
+#![allow(clippy::print_stdout)]
+
+// Used by devolutions-gateway library.
+#[cfg(feature = "openapi")]
+use utoipa as _;
+use {
+    argon2 as _, async_trait as _, axum as _, axum_extra as _, backoff as _, bytes as _, camino as _,
+    devolutions_agent_shared as _, dlopen as _, dlopen_derive as _, etherparse as _, hostname as _, hyper as _,
+    hyper_util as _, ironrdp_pdu as _, ironrdp_rdcleanpath as _, jmux_proxy as _, lazy_static as _, multibase as _,
+    network_scanner as _, ngrok as _, nonempty as _, pcap_file as _, picky as _, picky_krb as _, pin_project_lite as _,
+    portpicker as _, reqwest as _, serde as _, serde_urlencoded as _, smol_str as _, sysinfo as _, thiserror as _,
+    time as _, tokio_rustls as _, tower as _, tower_http as _, transport as _, tungstenite as _, typed_builder as _,
+    url as _, uuid as _, zeroize as _,
+};
+
+// Used by tests.
+#[cfg(test)]
+use {
+    devolutions_gateway_generators as _, http_body_util as _, proptest as _, rstest as _, tokio_test as _,
+    tracing_cov_mark as _,
+};
+
 #[macro_use]
 extern crate tracing;
 
@@ -77,7 +100,7 @@ fn main() -> anyhow::Result<()> {
                         [Install]
                         WantedBy=
                         WantedBy=multi-user.target
-                    "#.to_string());
+                    "#.to_owned());
             }}
 
             controller.create().context("failed to register service")?;
@@ -158,7 +181,7 @@ fn gateway_service_main(
 
     loop {
         if let Ok(control_code) = rx.recv() {
-            info!("Received control code: {}", control_code);
+            info!(%control_code, "Received control code");
 
             if let ServiceEvent::Stop = control_code {
                 service.stop();
