@@ -19,6 +19,6 @@ export class PreConnectionBlobControlComponent extends BaseComponent implements 
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(this.parentForm, 'preConnectionBlob', this.inputFormData);
+    this.formService.addControlToForm(this.parentForm, 'preConnectionBlob', this.inputFormData, false);
   }
 }
