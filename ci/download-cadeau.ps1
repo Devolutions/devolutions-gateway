@@ -2,12 +2,12 @@
 
 param(
 	[Parameter(Mandatory=$true)]
-    [ValidateSet('win', 'linux', 'osx')]
-    [string] $Platform,
+	[ValidateSet('win', 'linux', 'osx')]
+	[string] $Platform,
 
 	[Parameter(Mandatory=$true)]
-    [ValidateSet('x64', 'arm64')]
-    [string] $Architecture
+	[ValidateSet('x64', 'arm64')]
+	[string] $Architecture
 )
 
 $ErrorActionPreference = "Stop"
