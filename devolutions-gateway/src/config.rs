@@ -23,6 +23,7 @@ const PRIVATE_KEY_LABELS: &[&str] = &["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIV
 const WEB_APP_TOKEN_DEFAULT_LIFETIME_SECS: u64 = 28800; // 8 hours
 const WEB_APP_DEFAULT_LOGIN_LIMIT_RATE: u8 = 10;
 const ENV_VAR_DGATEWAY_WEBAPP_PATH: &str = "DGATEWAY_WEBAPP_PATH";
+const ENV_VAR_DGATEWAY_LIB_XMF_PATH: &str = "DGATEWAY_LIB_XMF_PATH";
 
 cfg_if! {
     if #[cfg(target_os = "windows")] {
@@ -299,6 +300,25 @@ impl Conf {
                 .context("webapp config")?,
             debug: conf_file.debug.clone().unwrap_or_default(),
         })
+    }
+
+    pub fn get_lib_xmf_path(&self) -> Option<Utf8PathBuf> {
+        if let Ok(path) = env::var(ENV_VAR_DGATEWAY_LIB_XMF_PATH) {
+            return Some(Utf8PathBuf::from(path));
+        };
+
+        if let Some(path) = self.debug.lib_xmf_path.as_deref() {
+            return Some(path.to_owned());
+        }
+
+        if cfg!(target_os = "windows") {
+            let path = env::current_exe().ok()?.parent()?.join("xmf.dll");
+            Utf8PathBuf::from_path_buf(path).ok()
+        } else if cfg!(target_os = "linux") {
+            Some(Utf8PathBuf::from("/usr/lib/libxmf.so"))
+        } else {
+            None
+        }
     }
 }
 

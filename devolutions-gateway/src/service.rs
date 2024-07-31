@@ -67,30 +67,14 @@ impl GatewayService {
             );
         }
 
-        if let Err(e) = devolutions_gateway::tls::sanity::check_default_configuration() {
-            warn!("Anomality detected with TLS configuration: {e:#}");
+        if let Err(error) = devolutions_gateway::tls::sanity::check_default_configuration() {
+            warn!(
+                error = format!("{error:#}"),
+                "Anomality detected with TLS configuration"
+            );
         }
 
-        let xmf_lib_path;
-        let xmf_lib_path = if let Some(path) = conf.debug.lib_xmf_path.as_deref() {
-            Some(path)
-        } else if cfg!(target_os = "windows") {
-            if let Ok(mut exe_path) = std::env::current_exe() {
-                exe_path.pop();
-                exe_path.push("xmf.dll");
-                xmf_lib_path = Utf8PathBuf::from_path_buf(exe_path).ok();
-                xmf_lib_path.as_deref()
-            } else {
-                None
-            }
-        } else if cfg!(target_os = "linux") {
-            xmf_lib_path = Some(Utf8PathBuf::from("/usr/lib/libxmf.so"));
-            xmf_lib_path.as_deref()
-        } else {
-            None
-        };
-
-        if let Some(path) = xmf_lib_path {
+        if let Some(path) = conf.get_lib_xmf_path() {
             // SAFETY: No initialisation or termination routine in the XMF library we should worry about for preconditions.
             let result = unsafe { cadeau::xmf::init(path.as_str()) };
 
