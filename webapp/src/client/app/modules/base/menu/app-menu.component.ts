@@ -1,36 +1,35 @@
-import {Component, OnInit} from '@angular/core';
-import {MainAppComponent} from '../main-app/main-app.component';
-import {RouterMenuItem} from './model/router-menu-item.model';
-import {BaseComponent} from "@shared/bases/base.component";
-import {NavigationService} from "@shared/services/navigation.service";
-import {noop} from "rxjs";
-import {takeUntil} from "rxjs/operators";
-import {WebSessionService} from "@shared/services/web-session.service";
-import {KeyValue} from "@angular/common";
-import {AuthService} from "@shared/services/auth.service";
+import { KeyValue } from '@angular/common';
+import { Component, OnInit } from '@angular/core';
 import { ApiService } from '@gateway/shared/services/api.service';
-
+import { BaseComponent } from '@shared/bases/base.component';
+import { AuthService } from '@shared/services/auth.service';
+import { NavigationService } from '@shared/services/navigation.service';
+import { WebSessionService } from '@shared/services/web-session.service';
+import { noop } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
+import { MainAppComponent } from '../main-app/main-app.component';
+import { RouterMenuItem } from './model/router-menu-item.model';
 
 @Component({
   selector: 'app-menu',
   templateUrl: './app-menu.component.html',
-  styleUrls: ['app-menu.component.scss']
+  styleUrls: ['app-menu.component.scss'],
 })
-export class AppMenuComponent extends BaseComponent implements  OnInit {
-
-  isAutoLoginOn: boolean = false;
-  isMenuSlim: boolean = false;
+export class AppMenuComponent extends BaseComponent implements OnInit {
+  isAutoLoginOn = false;
+  isMenuSlim = false;
   mainMenus: Map<string, RouterMenuItem> = new Map<string, RouterMenuItem>();
   version: string;
   latestVersion: string;
   gatewayLatestUpdateLink: string;
 
-  constructor(public app: MainAppComponent,
-              private navigationService: NavigationService,
-              private webSessionService: WebSessionService,
-              private authService: AuthService,
-              private apiService: ApiService,
-              ) {
+  constructor(
+    public app: MainAppComponent,
+    private navigationService: NavigationService,
+    private webSessionService: WebSessionService,
+    private authService: AuthService,
+    private apiService: ApiService,
+  ) {
     super();
     this.initMenu();
   }
@@ -56,34 +55,43 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   }
 
   private subscribeRouteChange(): void {
-    this.navigationService.getRouteChange().pipe(takeUntil(this.destroyed$)).subscribe((navigationEnd) => {
-      this.resetSelectedMenu(navigationEnd.url);
-    });
+    this.navigationService
+      .getRouteChange()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((navigationEnd) => {
+        this.resetSelectedMenu(navigationEnd.url);
+      });
   }
 
   private subscribeToIsAutoLoginOn(): void {
-    this.authService.isAutoLoginOn.pipe(takeUntil(this.destroyed$))
-      .subscribe(isAutoLoginOn => this.isAutoLoginOn = isAutoLoginOn);
+    this.authService.isAutoLoginOn
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((isAutoLoginOn) => (this.isAutoLoginOn = isAutoLoginOn));
   }
 
   private initMenu(): void {
     this.mainMenus = new Map<string, RouterMenuItem>();
 
-    const sessionsMenuItem: RouterMenuItem = this.createMenuItem('Sessions',
-                                    '',
-                                    (): void => { this.navigationService.navigateToRoot().then(noop); },
-                                    (url: string) => false,
-                                    true);
+    const sessionsMenuItem: RouterMenuItem = this.createMenuItem(
+      'Sessions',
+      '',
+      (): void => {
+        this.navigationService.navigateToRoot().then(noop);
+      },
+      (url: string) => false,
+      true,
+    );
 
     this.mainMenus.set('Sessions', sessionsMenuItem);
   }
 
-  private createMenuItem( label: string,
-                          icon: string,
-                          action: () => void,
-                          isSelectedFn: (url: string) => boolean = () => false,
-                          blockClickSelected: boolean = false
-                      ): RouterMenuItem {
+  private createMenuItem(
+    label: string,
+    icon: string,
+    action: () => void,
+    isSelectedFn: (url: string) => boolean = () => false,
+    blockClickSelected = false,
+  ): RouterMenuItem {
     return new RouterMenuItem({ label, icon, action, isSelectedFn, blockClickSelected });
   }
 
@@ -112,7 +120,7 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   logout(): void {
     this.authService.logout();
   }
-  
+
   downloadVersionToolTip() {
     return `New version ${this.latestVersion} available`;
   }
@@ -122,13 +130,13 @@ export class AppMenuComponent extends BaseComponent implements  OnInit {
   }
 }
 
-function compareVersion(a:string,b:string) {
+function compareVersion(a: string, b: string) {
   const partsA = a.split('.');
   const partsB = b.split('.');
   for (let i = 0; i < partsA.length; i++) {
-    if (parseInt(partsA[i]) > parseInt(partsB[i])) {
+    if (Number.parseInt(partsA[i]) > Number.parseInt(partsB[i])) {
       return 1;
-    } else if (parseInt(partsA[i]) < parseInt(partsB[i])) {
+    } else if (Number.parseInt(partsA[i]) < Number.parseInt(partsB[i])) {
       return -1;
     }
   }

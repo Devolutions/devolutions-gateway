@@ -1,24 +1,24 @@
-import {Component, Input, OnInit} from '@angular/core';
-import {BaseComponent} from '@shared/bases/base.component';
-import {WebSession} from "@shared/models/web-session.model";
-import {WebSessionService} from "@shared/services/web-session.service";
-import {takeUntil} from "rxjs/operators";
+import { Component, Input, OnInit } from '@angular/core';
+import { BaseComponent } from '@shared/bases/base.component';
+import { WebSession } from '@shared/models/web-session.model';
+import { WebSessionService } from '@shared/services/web-session.service';
+import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'gateway-menu-list-active-sessions',
   templateUrl: './menu-list-active-sessions.component.html',
-  styleUrls: ['menu-list-active-sessions.component.scss']
+  styleUrls: ['menu-list-active-sessions.component.scss'],
 })
 export class MenuListActiveSessionsComponent extends BaseComponent implements OnInit {
   // disables the menu item
-  @Input() disabled: boolean = false;
+  @Input() disabled = false;
 
   // indicates user is currently on the screen for the menu item
-  @Input() selected: boolean = false;
-  @Input() isMenuSlim: boolean = false;
+  @Input() selected = false;
+  @Input() isMenuSlim = false;
 
   activeWebSessions: WebSession<any, any>[] = [];
-  activeWebSessionIndex: number = 0;
+  activeWebSessionIndex = 0;
 
   constructor(private webSessionService: WebSessionService) {
     super();
@@ -36,7 +36,7 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
       return;
     }
     this.activeWebSessionIndex = webSession.tabIndex;
-    this.selectTab(webSession.tabIndex)
+    this.selectTab(webSession.tabIndex);
   }
 
   onCloseButtonClick(event: MouseEvent, webSession: WebSession<any, any>): void {
@@ -49,20 +49,26 @@ export class MenuListActiveSessionsComponent extends BaseComponent implements On
   }
 
   private subscribeToWebSessionsUpdates(): void {
-    this.webSessionService.getMenuWebSessions().pipe(takeUntil(this.destroyed$)).subscribe({
-      next: (tabs:WebSession<any, any>[]) => {
-        this.activeWebSessions = tabs
-      },
-      error: (e) => console.error(e)
-    });
+    this.webSessionService
+      .getMenuWebSessions()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe({
+        next: (tabs: WebSession<any, any>[]) => {
+          this.activeWebSessions = tabs;
+        },
+        error: (e) => console.error(e),
+      });
   }
 
   private subscribeToWebSessionsActiveIndex(): void {
-    this.webSessionService.getWebSessionCurrentIndex().pipe(takeUntil(this.destroyed$)).subscribe({
-      next: (activeIndex:number) => {
-        this.activeWebSessionIndex = activeIndex;
-      },
-      error: (e) => console.error(e)
-    });
+    this.webSessionService
+      .getWebSessionCurrentIndex()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe({
+        next: (activeIndex: number) => {
+          this.activeWebSessionIndex = activeIndex;
+        },
+        error: (e) => console.error(e),
+      });
   }
 }

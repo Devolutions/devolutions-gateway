@@ -1,4 +1,4 @@
-import {SelectItem} from "primeng/api";
+import { SelectItem } from 'primeng/api';
 
 enum ScreenSize {
   Default = 0,
@@ -22,11 +22,10 @@ enum ScreenSize {
   R2560x2048 = 18,
   R3200x2400 = 19,
   R3840x2400 = 20,
-  Custom = 21
+  Custom = 21,
 }
 
 namespace ScreenSize {
-
   export function getEnumRawKey(value: ScreenSize): string {
     return ScreenSize[value];
   }
@@ -49,6 +48,5 @@ namespace ScreenSize {
         return { label, value };
       });
   }
-
 }
-export {ScreenSize};
+export { ScreenSize };

@@ -1,15 +1,13 @@
-import {Directive, OnDestroy} from '@angular/core';
-import {Subject} from 'rxjs';
-
+import { Directive, OnDestroy } from '@angular/core';
+import { Subject } from 'rxjs';
 
 @Directive()
 export abstract class BaseComponent implements OnDestroy {
-  WEB_APP_CLIENT_URL: string = '/session';
+  WEB_APP_CLIENT_URL = '/session';
 
   protected destroyed$: Subject<boolean> = new Subject<boolean>();
 
-  protected constructor() {
-  }
+  protected constructor() {}
 
   ngOnDestroy(): void {
     this.destroyed$.next(true);

@@ -9,4 +9,4 @@ namespace SSPIType {
     return SSPIType[value];
   }
 }
-export {SSPIType};
+export { SSPIType };

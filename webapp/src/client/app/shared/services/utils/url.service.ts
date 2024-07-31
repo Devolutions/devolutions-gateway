@@ -1,7 +1,6 @@
-import {UtilsService} from '../utils.service';
+import { UtilsService } from '../utils.service';
 
 export class UrlService {
-
   private utils: UtilsService;
 
   constructor(parent: UtilsService) {
@@ -18,8 +17,7 @@ export class UrlService {
     if (arrUrl.length > 4) {
       const closingBracketIndex = url.lastIndexOf(']');
 
-      if ((closingBracketIndex !== -1) && (url.length > (closingBracketIndex + 1))
-        && (url[closingBracketIndex + 1] === ':')) {
+      if (closingBracketIndex !== -1 && url.length > closingBracketIndex + 1 && url[closingBracketIndex + 1] === ':') {
         return url.substr(0, closingBracketIndex + 1);
       }
 

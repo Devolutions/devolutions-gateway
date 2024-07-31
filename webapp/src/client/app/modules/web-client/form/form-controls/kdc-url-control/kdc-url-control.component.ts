@@ -1,17 +1,15 @@
-import {Component, Input, OnInit} from "@angular/core";
-import {AbstractControl, FormControl, FormGroup, ValidatorFn} from "@angular/forms";
+import { Component, Input, OnInit } from '@angular/core';
+import { AbstractControl, FormControl, FormGroup, ValidatorFn } from '@angular/forms';
 
-import {BaseComponent} from "@shared/bases/base.component";
-import {WebFormService} from "@shared/services/web-form.service";
-
+import { BaseComponent } from '@shared/bases/base.component';
+import { WebFormService } from '@shared/services/web-form.service';
 
 @Component({
   selector: 'web-client-kdc-url-control',
   templateUrl: 'kdc-url-control.component.html',
-  styleUrls: ['kdc-url-control.component.scss']
+  styleUrls: ['kdc-url-control.component.scss'],
 })
-export class KdcUrlControlComponent extends BaseComponent implements  OnInit {
-
+export class KdcUrlControlComponent extends BaseComponent implements OnInit {
   @Input() parentForm: FormGroup;
   @Input() inputFormData: any;
 
@@ -20,7 +18,15 @@ export class KdcUrlControlComponent extends BaseComponent implements  OnInit {
   }
 
   ngOnInit(): void {
-    this.formService.addControlToForm(this.parentForm, 'kdcUrl', this.inputFormData,false, false, '', this.kdcServerUrlValidator());
+    this.formService.addControlToForm(
+      this.parentForm,
+      'kdcUrl',
+      this.inputFormData,
+      false,
+      false,
+      '',
+      this.kdcServerUrlValidator(),
+    );
   }
 
   kdcServerUrlValidator(): ValidatorFn {
@@ -30,7 +36,7 @@ export class KdcUrlControlComponent extends BaseComponent implements  OnInit {
       }
 
       const validTcpProtocol: boolean = /^(tcp|udp):\/\/.*$/.test(control.value);
-      return validTcpProtocol ? null : { 'invalidKdcProtocol': { value: control.value } };
+      return validTcpProtocol ? null : { invalidKdcProtocol: { value: control.value } };
     };
   }
 }

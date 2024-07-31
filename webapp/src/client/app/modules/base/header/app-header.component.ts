@@ -4,10 +4,10 @@ import { BaseComponent } from '@shared/bases/base.component';
 @Component({
   selector: 'app-header',
   templateUrl: 'app-header.component.html',
-  styleUrls: ['app-header.component.scss']
+  styleUrls: ['app-header.component.scss'],
 })
 export class AppHeaderComponent extends BaseComponent {
-  focus: boolean = false;
+  focus = false;
 
   constructor() {
     super();

@@ -6,48 +6,44 @@ import {
   OnChanges,
   OnInit,
   Output,
-  SimpleChanges
+  SimpleChanges,
 } from '@angular/core';
-import {AbstractControl, FormBuilder, FormControl, FormGroup, Validators} from "@angular/forms";
-import {Message} from "primeng/api";
-import {catchError, startWith, switchMap, takeUntil} from "rxjs/operators";
-import {EMPTY, forkJoin, Observable, of} from "rxjs";
+import { AbstractControl, FormBuilder, FormControl, FormGroup, Validators } from '@angular/forms';
+import { Message } from 'primeng/api';
+import { EMPTY, Observable, forkJoin, of } from 'rxjs';
+import { catchError, startWith, switchMap, takeUntil } from 'rxjs/operators';
 
-import {BaseComponent} from "@shared/bases/base.component";
-import {WebSession} from "@shared/models/web-session.model";
-import {ComponentStatus} from "@shared/models/component-status.model";
-import {Protocol, WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
-import {ScreenSize} from "@shared/enums/screen-size.enum";
-import {StorageService} from "@shared/services/utils/storage.service";
-import {WebSessionService} from "@shared/services/web-session.service";
-import {WebFormService} from "@shared/services/web-form.service";
-import {AutoCompleteInput, HostnameObject} from "@shared/interfaces/forms.interfaces";
-import {SelectItemWithTooltip} from "@shared/interfaces/select-item-tooltip.interface";
-import {NetScanEntry, NetScanService} from '@gateway/shared/services/net-scan.services';
-import {UtilsService} from "@shared/services/utils.service";
+import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
+import { BaseComponent } from '@shared/bases/base.component';
+import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { Protocol, WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
+import { AutoCompleteInput, HostnameObject } from '@shared/interfaces/forms.interfaces';
+import { SelectItemWithTooltip } from '@shared/interfaces/select-item-tooltip.interface';
+import { ComponentStatus } from '@shared/models/component-status.model';
+import { WebSession } from '@shared/models/web-session.model';
+import { UtilsService } from '@shared/services/utils.service';
+import { StorageService } from '@shared/services/utils/storage.service';
+import { WebFormService } from '@shared/services/web-form.service';
+import { WebSessionService } from '@shared/services/web-session.service';
 
 @Component({
   selector: 'web-client-form',
   templateUrl: 'web-client-form.component.html',
   styleUrls: ['web-client-form.component.scss'],
 })
-export class WebClientFormComponent
-  extends BaseComponent
-  implements OnInit, OnChanges
-{
-  @Input() isFormExists: boolean = false;
+export class WebClientFormComponent extends BaseComponent implements OnInit, OnChanges {
+  @Input() isFormExists = false;
   @Input() webSessionId: string | undefined;
   @Input() inputFormData: any;
   @Input() error: any;
 
-  @Output() componentStatus: EventEmitter<ComponentStatus> =
-    new EventEmitter<ComponentStatus>();
+  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
   connectSessionForm: FormGroup = this.fb.group({});
 
   protocolOptions: SelectItemWithTooltip[];
-  protocolSelectedTooltip: string = '';
+  protocolSelectedTooltip = '';
 
   messages: Message[] = [];
 
@@ -61,7 +57,7 @@ export class WebClientFormComponent
     private storageService: StorageService,
     private netscanService: NetScanService,
     protected utils: UtilsService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
   ) {
     super();
   }
@@ -82,7 +78,7 @@ export class WebClientFormComponent
       .createWebSession(
         this.connectSessionForm,
         this.getSelectedProtocol(),
-        this.formService.getExtraSessionParameter()
+        this.formService.getExtraSessionParameter(),
       )
       .pipe(
         takeUntil(this.destroyed$),
@@ -91,7 +87,7 @@ export class WebClientFormComponent
         catchError((error) => {
           console.error('Failed to process web session:', error);
           return EMPTY;
-        })
+        }),
       )
       .subscribe((webSession) => {
         this.addHostnameToStorage(webSession?.data?.hostname);
@@ -107,32 +103,21 @@ export class WebClientFormComponent
 
     Promise.resolve().then(() => {
       this.filteredHostnames =
-        this.hostnames?.filter((hostnameObj) =>
-          hostnameObj.hostname.toLowerCase().startsWith(query)
-        ) || [];
+        this.hostnames?.filter((hostnameObj) => hostnameObj.hostname.toLowerCase().startsWith(query)) || [];
     });
   }
 
   private subscribeToProtocolChanges(): void {
-    const protocolControl: AbstractControl<any, any> =
-      this.connectSessionForm.get('protocol');
+    const protocolControl: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
     if (!protocolControl) {
       return;
     }
 
     protocolControl.valueChanges
-      .pipe(
-        startWith(protocolControl.value as Protocol),
-        takeUntil(this.destroyed$)
-      )
+      .pipe(startWith(protocolControl.value as Protocol), takeUntil(this.destroyed$))
       .subscribe(
         (protocol) => {
-          const exceptions: string[] = [
-            'protocol',
-            'autoComplete',
-            'hostname',
-            'authMode',
-          ];
+          const exceptions: string[] = ['protocol', 'autoComplete', 'hostname', 'authMode'];
           Object.keys(this.connectSessionForm.controls).forEach((key) => {
             if (!exceptions.includes(key)) {
               this.connectSessionForm.get(key).disable();
@@ -142,8 +127,7 @@ export class WebClientFormComponent
           this.updateProtocolTooltip(protocol);
           this.formService.detectFormChanges(this.cdr);
         },
-        (error) =>
-          console.error('Error subscribing to protocol changes:', error)
+        (error) => console.error('Error subscribing to protocol changes:', error),
       );
   }
 
@@ -161,7 +145,7 @@ export class WebClientFormComponent
         catchError((error) => {
           console.error('Initialization failed', error);
           return [];
-        })
+        }),
       )
       .subscribe({
         next: ({ protocolOptions, hostnames }) => {
@@ -171,8 +155,7 @@ export class WebClientFormComponent
           this.subscribeToProtocolChanges();
           this.updateProtocolTooltip();
         },
-        error: (error) =>
-          console.error('Error fetching dropdown options', error),
+        error: (error) => console.error('Error fetching dropdown options', error),
       });
   }
 
@@ -191,16 +174,11 @@ export class WebClientFormComponent
     return of(this.storageService.getItem<AutoCompleteInput[]>('hostnames'));
   }
 
-  private isHostnameInArray(
-    hostname: string,
-    array: AutoCompleteInput[] = []
-  ): boolean {
+  private isHostnameInArray(hostname: string, array: AutoCompleteInput[] = []): boolean {
     return array.some((obj) => obj.hostname === hostname);
   }
 
-  private processHostnameInput(
-    input: string | AutoCompleteInput
-  ): AutoCompleteInput {
+  private processHostnameInput(input: string | AutoCompleteInput): AutoCompleteInput {
     return typeof input === 'string' ? { hostname: input } : input;
   }
 
@@ -210,10 +188,8 @@ export class WebClientFormComponent
         return;
       }
 
-      const hostnameObj: AutoCompleteInput =
-        this.processHostnameInput(hostname);
-      const hostnames: AutoCompleteInput[] =
-        this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
+      const hostnameObj: AutoCompleteInput = this.processHostnameInput(hostname);
+      const hostnames: AutoCompleteInput[] = this.storageService.getItem<AutoCompleteInput[]>('hostnames') ?? [];
 
       if (!this.isHostnameInArray(hostnameObj.hostname, hostnames)) {
         hostnames.push(hostnameObj);
@@ -226,8 +202,7 @@ export class WebClientFormComponent
   }
 
   private populateHostnameList(): Observable<void> {
-    this.hostnames =
-      this.storageService.getItem<AutoCompleteInput[]>('hostnames');
+    this.hostnames = this.storageService.getItem<AutoCompleteInput[]>('hostnames');
     return of(undefined);
   }
 
@@ -235,17 +210,11 @@ export class WebClientFormComponent
     if (!value && this.protocolOptions.length > 0) {
       value = this.protocolOptions[0].value;
     }
-    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find(
-      (item) => item.value === value
-    );
-    this.protocolSelectedTooltip = selectedItem
-      ? (selectedItem as any).tooltipText
-      : '';
+    const selectedItem: SelectItemWithTooltip = this.protocolOptions.find((item) => item.value === value);
+    this.protocolSelectedTooltip = selectedItem ? (selectedItem as any).tooltipText : '';
   }
 
-  private manageScreenSize(
-    webSession: WebSession<any, any>
-  ): Observable<WebSession<any, any>> {
+  private manageScreenSize(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
     if (!this.isSelectedProtocolRdp()) {
       return of(webSession);
     }
@@ -261,9 +230,7 @@ export class WebClientFormComponent
     return of(webSession);
   }
 
-  private manageWebSessionSubject(
-    webSession: WebSession<any, any>
-  ): Observable<WebSession<any, any>> {
+  private manageWebSessionSubject(webSession: WebSession<any, any>): Observable<WebSession<any, any>> {
     if (this.isFormExists) {
       webSession.id = this.webSessionId;
       this.webSessionService.updateSession(webSession);
@@ -293,10 +260,8 @@ export class WebClientFormComponent
     const areThereNewMessages: boolean = newMessages.some(
       (newMsg) =>
         !this.messages.some(
-          (existingMsg) =>
-            existingMsg.summary === newMsg.summary &&
-            existingMsg.detail === newMsg.detail
-        )
+          (existingMsg) => existingMsg.summary === newMsg.summary && existingMsg.detail === newMsg.detail,
+        ),
     );
 
     if (areThereNewMessages) {
@@ -309,7 +274,6 @@ export class WebClientFormComponent
   }
 
   private displayErrorMessages(error: any): void {
-
     const formattedSummary: string = this.utils.string.replaceNewlinesWithBR(error['kind'] ?? error);
     const formattedDetail: string = this.utils.string.replaceNewlinesWithBR(error['backtrace'] ?? '');
 
@@ -330,14 +294,14 @@ export class WebClientFormComponent
 
   subscribeToNetscanFillEvent(): void {
     this.netscanService.onServiceSelected().subscribe((entry: NetScanEntry) => {
-      this.connectSessionForm.get('hostname')?.setValue(entry.ip)
+      this.connectSessionForm.get('hostname')?.setValue(entry.ip);
       this.connectSessionForm.get('autoComplete')?.setValue({
-        hostname: entry.ip
-      })
+        hostname: entry.ip,
+      });
 
-      let protocol: AbstractControl<any, any> = this.connectSessionForm.get('protocol')
-      if (protocol && protocol.value!==entry.protocol) {
-        protocol.setValue(entry.protocol)
+      const protocol: AbstractControl<any, any> = this.connectSessionForm.get('protocol');
+      if (protocol && protocol.value !== entry.protocol) {
+        protocol.setValue(entry.protocol);
       }
     });
   }

@@ -7,39 +7,37 @@ import {
   OnInit,
   Output,
   Renderer2,
-  ViewChild
-} from "@angular/core";
-import {v4 as uuidv4} from "uuid";
-import {MessageService} from "primeng/api";
-import {EMPTY, from, Observable, of, Subject, throwError} from "rxjs";
-import {catchError, map, switchMap, takeUntil, tap} from "rxjs/operators";
+  ViewChild,
+} from '@angular/core';
+import { MessageService } from 'primeng/api';
+import { EMPTY, Observable, Subject, from, of, throwError } from 'rxjs';
+import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
+import { v4 as uuidv4 } from 'uuid';
 
-import {WebClientBaseComponent} from "@shared/bases/base-web-client.component";
-import {UtilsService} from "@shared/services/utils.service";
-import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
-import {WebSessionService} from "@shared/services/web-session.service";
-import {DefaultSshPort, WebClientService} from "@shared/services/web-client.service";
-import {ComponentStatus} from "@shared/models/component-status.model";
-import {SSHFormDataInput} from "@shared/interfaces/forms.interfaces";
-import {SshConnectionParameters} from "@shared/interfaces/connection-params.interfaces";
+import { WebClientBaseComponent } from '@shared/bases/base-web-client.component';
+import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { SshConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
+import { SSHFormDataInput } from '@shared/interfaces/forms.interfaces';
+import { ComponentStatus } from '@shared/models/component-status.model';
+import { UtilsService } from '@shared/services/utils.service';
+import { DefaultSshPort, WebClientService } from '@shared/services/web-client.service';
+import { WebSessionService } from '@shared/services/web-session.service';
 
 import {
   LoggingLevel,
-  loggingService as sshLoggingService,
   SSHTerminal,
-  TerminalConnectionStatus
-} from "@devolutions/web-ssh-gui";
-import {ExtractedHostnamePort} from "@shared/services/utils/string.service";
-import { AnalyticService, ProtocolString } from "@gateway/shared/services/analytic.service";
+  TerminalConnectionStatus,
+  loggingService as sshLoggingService,
+} from '@devolutions/web-ssh-gui';
+import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
+import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 
 @Component({
   templateUrl: 'web-client-ssh.component.html',
   styleUrls: ['web-client-ssh.component.scss'],
-  providers: [MessageService]
+  providers: [MessageService],
 })
-export class WebClientSshComponent extends WebClientBaseComponent implements OnInit,
-                                                                              OnDestroy {
-
+export class WebClientSshComponent extends WebClientBaseComponent implements OnInit, OnDestroy {
   @Input() webSessionId: string;
   @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
@@ -47,36 +45,35 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   @ViewChild('sessionSshContainer') sessionContainerElement: ElementRef;
   @ViewChild('web-ssh-gui') webGuiTerminal: ElementRef;
 
-  static DVL_SSH_ICON: string = 'dvl-icon-entry-session-ssh';
-  static JET_SSH_URL: string = '/jet/fwd/tcp';
+  static DVL_SSH_ICON = 'dvl-icon-entry-session-ssh';
+  static JET_SSH_URL = '/jet/fwd/tcp';
 
   currentStatus: ComponentStatus;
   inputFormData: SSHFormDataInput;
   clientError: string;
-  loading: boolean = true;
+  loading = true;
 
   rightToolbarButtons = [
-    { label: 'Close Session',
-      icon: 'dvl-icon dvl-icon-close',
-      action: () => this.startTerminationProcess() },
+    { label: 'Close Session', icon: 'dvl-icon dvl-icon-close', action: () => this.startTerminationProcess() },
   ];
 
   protected removeElement: Subject<any> = new Subject();
   private remoteTerminal: SSHTerminal;
   private remoteTerminalEventListener: () => void;
 
-  constructor(private renderer: Renderer2,
-              protected utils: UtilsService,
-              protected gatewayAlertMessageService: GatewayAlertMessageService,
-              private webSessionService: WebSessionService,
-              private webClientService: WebClientService,
-              protected analyticService: AnalyticService
-            ) {
-    super(gatewayAlertMessageService,analyticService);
+  constructor(
+    private renderer: Renderer2,
+    protected utils: UtilsService,
+    protected gatewayAlertMessageService: GatewayAlertMessageService,
+    private webSessionService: WebSessionService,
+    private webClientService: WebClientService,
+    protected analyticService: AnalyticService,
+  ) {
+    super(gatewayAlertMessageService, analyticService);
   }
 
   ngOnInit(): void {
-    sshLoggingService.setLevel(LoggingLevel.DEBUG)
+    sshLoggingService.setLevel(LoggingLevel.DEBUG);
     this.removeWebClientGuiElement();
     this.initializeStatus();
 
@@ -110,18 +107,16 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   }
 
   removeWebClientGuiElement(): void {
-    this.removeElement
-      .pipe(takeUntil(this.destroyed$))
-      .subscribe({
-        next: (): void => {
-          if (this.webGuiTerminal && this.webGuiTerminal.nativeElement) {
-            this.webGuiTerminal.nativeElement.remove();
-          }
-        },
-        error: (err): void => {
-          console.error('Error while removing element:', err);
+    this.removeElement.pipe(takeUntil(this.destroyed$)).subscribe({
+      next: (): void => {
+        if (this.webGuiTerminal && this.webGuiTerminal.nativeElement) {
+          this.webGuiTerminal.nativeElement.remove();
         }
-      });
+      },
+      error: (err): void => {
+        console.error('Error while removing element:', err);
+      },
+    });
   }
 
   private removeRemoteTerminalListener(): void {
@@ -136,7 +131,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       isInitialized: false,
       isDisabled: false,
       isDisabledByUser: false,
-    }
+    };
   }
 
   private disableComponentStatus(): void {
@@ -167,20 +162,22 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     this.remoteTerminal.status.subscribe((v) => {
       if (v === TerminalConnectionStatus.connected) {
         // connected only indicates connection to Gateway is successful
-        this.remoteTerminal.writeToTerminal('connecting... \r\n')
+        this.remoteTerminal.writeToTerminal('connecting... \r\n');
       }
     });
 
-    this.getFormData().pipe(
-      takeUntil(this.destroyed$),
-      switchMap(()=> this.fetchParameters(this.inputFormData)),
-      switchMap(params=> this.webClientService.fetchSshToken(params)),
-      switchMap(params => this.callConnect(params)),
-      catchError(error => {
-        this.handleSshError(error.message);
-        return EMPTY;
-      })
-    ).subscribe();
+    this.getFormData()
+      .pipe(
+        takeUntil(this.destroyed$),
+        switchMap(() => this.fetchParameters(this.inputFormData)),
+        switchMap((params) => this.webClientService.fetchSshToken(params)),
+        switchMap((params) => this.callConnect(params)),
+        catchError((error) => {
+          this.handleSshError(error.message);
+          return EMPTY;
+        }),
+      )
+      .subscribe();
   }
 
   private callConnect(connectionParameters: SshConnectionParameters): Observable<any> {
@@ -189,19 +186,17 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
         connectionParameters.host,
         connectionParameters.port,
         connectionParameters.username,
-        connectionParameters.gatewayAddress+`?token=${connectionParameters.token}`,
+        connectionParameters.gatewayAddress + `?token=${connectionParameters.token}`,
         connectionParameters.password,
         connectionParameters.privateKey,
         connectionParameters.privateKeyPassphrase,
-      )
-    ).pipe(
-      catchError(error => throwError(error)),
-    );
+      ),
+    ).pipe(catchError((error) => throwError(error)));
   }
 
   private getFormData(): Observable<void> {
     return from(this.webSessionService.getWebSession(this.webSessionId)).pipe(
-      map(currentWebSession => this.inputFormData = currentWebSession.data)
+      map((currentWebSession) => (this.inputFormData = currentWebSession.data)),
     );
   }
 
@@ -210,8 +205,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
     const sessionId: string = uuidv4();
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultSshPort);
-    const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL+`/${sessionId}`, window.location.href);
-    const gatewayAddress: string = gatewayHttpAddress.toString().replace("http", "ws");
+    const gatewayHttpAddress: URL = new URL(WebClientSshComponent.JET_SSH_URL + `/${sessionId}`, window.location.href);
+    const gatewayAddress: string = gatewayHttpAddress.toString().replace('http', 'ws');
     const privateKey: string | null = formData.extraData?.sshPrivateKey || null;
     const privateKeyPassphrase: string = formData.passphrase || null;
     const connectionParameters: SshConnectionParameters = {
@@ -222,8 +217,8 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
       gatewayAddress: gatewayAddress,
       sessionId: sessionId,
       privateKey: privateKey,
-      privateKeyPassphrase: privateKeyPassphrase
-    }
+      privateKeyPassphrase: privateKeyPassphrase,
+    };
     return of(connectionParameters);
   }
 
@@ -247,7 +242,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
             break;
         }
       },
-      error: (err) => this.handleSubscriptionError(err)
+      error: (err) => this.handleSubscriptionError(err),
     });
   }
 
@@ -258,7 +253,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
 
   private handleSessionEndedOrError(status: TerminalConnectionStatus): void {
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(err => {
+      document.exitFullscreen().catch((err) => {
         console.error(`Error attempting to exit fullscreen: ${err}`);
       });
     }
@@ -271,9 +266,10 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
   private notifyUser(status: TerminalConnectionStatus): void {
     this.clientError = this.getMessage(status);
 
-    const icon: string = status !== TerminalConnectionStatus.connected ?
-      WebClientSshComponent.DVL_WARNING_ICON :
-      WebClientSshComponent.DVL_SSH_ICON;
+    const icon: string =
+      status !== TerminalConnectionStatus.connected
+        ? WebClientSshComponent.DVL_WARNING_ICON
+        : WebClientSshComponent.DVL_SSH_ICON;
 
     this.webSessionService.updateWebSessionIcon(this.webSessionId, icon);
   }
@@ -301,7 +297,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     //For translation 'ConnectionErrorPleaseVerifyYourConnectionSettings'
     //For translation 'SessionClosed'
     //For translation 'lblConnectionTimeout'
-    if (typeof status === "string") {
+    if (typeof status === 'string') {
       return status;
     }
 
@@ -315,7 +311,7 @@ export class WebClientSshComponent extends WebClientBaseComponent implements OnI
     }
   }
 
-  protected getProtocol() : ProtocolString{
-      return "SSH";
+  protected getProtocol(): ProtocolString {
+    return 'SSH';
   }
 }

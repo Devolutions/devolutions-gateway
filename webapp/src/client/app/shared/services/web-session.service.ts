@@ -1,18 +1,18 @@
-import {ComponentRef, Injectable} from '@angular/core';
-import {BehaviorSubject, Observable, of} from 'rxjs';
-import {map} from "rxjs/operators";
-import {FormGroup} from "@angular/forms";
+import { ComponentRef, Injectable } from '@angular/core';
+import { FormGroup } from '@angular/forms';
+import { BehaviorSubject, Observable, of } from 'rxjs';
+import { map } from 'rxjs/operators';
 
-import {WebSession} from "@shared/models/web-session.model";
-import {Protocol} from "@shared/enums/web-client-protocol.enum";
-import {AutoCompleteInput} from "@shared/interfaces/forms.interfaces";
-import {DynamicComponentService} from "@shared/services/dynamic-component.service";
-import {DesktopSize} from "@devolutions/iron-remote-gui";
-import {WebClientRdpComponent} from "@gateway/modules/web-client/rdp/web-client-rdp.component";
-import {WebClientTelnetComponent} from "@gateway/modules/web-client/telnet/web-client-telnet.component";
-import {WebClientSshComponent} from "@gateway/modules/web-client/ssh/web-client-ssh.component";
-import {WebClientVncComponent} from "@gateway/modules/web-client/vnc/web-client-vnc.component";
-import {WebClientArdComponent} from "@gateway/modules/web-client/ard/web-client-ard.component";
+import { DesktopSize } from '@devolutions/iron-remote-gui';
+import { WebClientArdComponent } from '@gateway/modules/web-client/ard/web-client-ard.component';
+import { WebClientRdpComponent } from '@gateway/modules/web-client/rdp/web-client-rdp.component';
+import { WebClientSshComponent } from '@gateway/modules/web-client/ssh/web-client-ssh.component';
+import { WebClientTelnetComponent } from '@gateway/modules/web-client/telnet/web-client-telnet.component';
+import { WebClientVncComponent } from '@gateway/modules/web-client/vnc/web-client-vnc.component';
+import { Protocol } from '@shared/enums/web-client-protocol.enum';
+import { AutoCompleteInput } from '@shared/interfaces/forms.interfaces';
+import { WebSession } from '@shared/models/web-session.model';
+import { DynamicComponentService } from '@shared/services/dynamic-component.service';
 
 // Offset is used to skip the first item in menu -- which is the create new session form.
 // KAH Jan 2024
@@ -20,14 +20,13 @@ export const SESSIONS_MENU_OFFSET: number = 1;
 
 export interface ExtraSessionParameter {
   sshPrivateKey?: string;
-};
+}
 
 @Injectable({
   providedIn: 'root',
 })
 export class WebSessionService {
-
-  private NEW_SESSION_IDX: number = 0;
+  private NEW_SESSION_IDX = 0;
   private webSessionDataSubject: BehaviorSubject<WebSession<any, any>[]>;
   private webSessionData$: Observable<WebSession<any, any>[]>;
 
@@ -57,7 +56,11 @@ export class WebSessionService {
     return this.webSessionDataSubject.getValue().length;
   }
 
-  createWebSession(form: FormGroup, protocol: Protocol, extraData:ExtraSessionParameter): Observable<WebSession<any, any>> {
+  createWebSession(
+    form: FormGroup,
+    protocol: Protocol,
+    extraData: ExtraSessionParameter,
+  ): Observable<WebSession<any, any>> {
     const submittedData = form.value;
     submittedData.hostname = this.processHostname(submittedData.autoComplete);
 
@@ -65,16 +68,11 @@ export class WebSessionService {
     const iconName: string = ProtocolIconMap[protocol];
 
     if (!sessionComponent) {
-      console.error(`Creating session, unsupported protocol: ${protocol}`)
+      console.error(`Creating session, unsupported protocol: ${protocol}`);
       return;
     }
     submittedData.extraData = extraData;
-    const webSession = new WebSession(
-      submittedData.hostname,
-      sessionComponent,
-      submittedData,
-      iconName
-    );
+    const webSession = new WebSession(submittedData.hostname, sessionComponent, submittedData, iconName);
     return of(webSession);
   }
 
@@ -88,7 +86,7 @@ export class WebSessionService {
 
   updateSession(updatedWebSession: WebSession<any, any>): void {
     const currentSessions = this.webSessionDataSubject.value;
-    const index: number = currentSessions.findIndex(webSession => webSession.id === updatedWebSession.id);
+    const index: number = currentSessions.findIndex((webSession) => webSession.id === updatedWebSession.id);
 
     if (index !== -1) {
       updatedWebSession.tabIndex = currentSessions[index].tabIndex;
@@ -97,7 +95,7 @@ export class WebSessionService {
       this.webSessionDataSubject.next(currentSessions);
       this.setWebSessionTabIndexToLastCreated(updatedWebSession.tabIndex);
     } else {
-      console.error('Web Session not found.')
+      console.error('Web Session not found.');
     }
   }
 
@@ -105,11 +103,10 @@ export class WebSessionService {
     await this.destroyWebSessionComponentRef(webSessionIdToRemove);
 
     const currentSessions = this.webSessionDataSubject.value;
-    const filteredSessions = currentSessions.
-      filter(webSession => webSession.id !== webSessionIdToRemove);
+    const filteredSessions = currentSessions.filter((webSession) => webSession.id !== webSessionIdToRemove);
 
     const sessionToRemove = await this.getWebSession(webSessionIdToRemove);
-    const updatedSessions = filteredSessions.map(session => {
+    const updatedSessions = filteredSessions.map((session) => {
       if (session.tabIndex && session.tabIndex > sessionToRemove.tabIndex) {
         return session.updatedTabIndex(session.tabIndex - 1);
       }
@@ -123,7 +120,7 @@ export class WebSessionService {
   //For translation ConnectionHasBeenTerminatedEllipsis
   async updateWebSessionIcon(updateWebSessionId: string, icon: string): Promise<void> {
     const currentSessions: WebSession<any, any>[] = this.webSessionDataSubject.value;
-    const index: number = currentSessions.findIndex(session => session.id === updateWebSessionId);
+    const index: number = currentSessions.findIndex((session) => session.id === updateWebSessionId);
     const webSession: WebSession<any, any> = currentSessions[index];
 
     if (index !== -1) {
@@ -135,7 +132,7 @@ export class WebSessionService {
       currentSessions[index] = webSession;
       this.webSessionDataSubject.next(currentSessions);
     } else {
-      console.error('Web Session not found.')
+      console.error('Web Session not found.');
     }
   }
 
@@ -171,18 +168,15 @@ export class WebSessionService {
   }
 
   getMenuWebSessions(): Observable<WebSession<any, any>[]> {
-    return this.webSessionData$.pipe(
-        map(array => array.slice(SESSIONS_MENU_OFFSET))
-    );
+    return this.webSessionData$.pipe(map((array) => array.slice(SESSIONS_MENU_OFFSET)));
   }
 
   async getWebSession(webSessionId: string): Promise<WebSession<any, any>> {
     const currentWebSessions = this.webSessionDataSubject.value;
-    const webSession = currentWebSessions.
-      filter(webSession => webSession.id === webSessionId);
+    const webSession = currentWebSessions.filter((webSession) => webSession.id === webSessionId);
 
     if (webSession.length === 0) {
-      return null
+      return null;
     }
     return webSession[0];
   }
@@ -255,8 +249,8 @@ export class WebSessionService {
     this.webSessionScreenSizeIndex$ = this.webSessionScreenSizeSubject.asObservable();
   }
 
-  private isWebSessionValid(WebSession: WebSession<any, any>):ComponentRef<any> {
-    return WebSession && WebSession.componentRef
+  private isWebSessionValid(WebSession: WebSession<any, any>): ComponentRef<any> {
+    return WebSession && WebSession.componentRef;
   }
 
   private processHostname(autoCompleteInput: AutoCompleteInput): string {
@@ -277,9 +271,9 @@ export const ProtocolIconMap = {
 };
 
 export const ProtocolNameToProtocolMap = {
-  'vnc': Protocol.VNC,
-  'ssh': Protocol.SSH,
-  'telnet': Protocol.Telnet,
-  'rdp': Protocol.RDP,
-  'ard': Protocol.ARD,
+  vnc: Protocol.VNC,
+  ssh: Protocol.SSH,
+  telnet: Protocol.Telnet,
+  rdp: Protocol.RDP,
+  ard: Protocol.ARD,
 };

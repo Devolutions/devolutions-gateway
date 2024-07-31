@@ -1,8 +1,5 @@
-import { Component, AfterViewInit, ChangeDetectorRef } from '@angular/core';
-import {
-  NetScanEntry,
-  NetScanService,
-} from '@gateway/shared/services/net-scan.services';
+import { AfterViewInit, ChangeDetectorRef, Component } from '@angular/core';
+import { NetScanEntry, NetScanService } from '@gateway/shared/services/net-scan.services';
 
 @Component({
   selector: 'app-net-scan',
@@ -11,12 +8,12 @@ import {
 })
 export class NetScanComponent implements AfterViewInit {
   services: NetScanEntry[] = [];
-  started: boolean = false;
-  ended: boolean = false;
+  started = false;
+  ended = false;
 
   constructor(
     private netscanService: NetScanService,
-    private cd: ChangeDetectorRef
+    private cd: ChangeDetectorRef,
   ) {}
 
   ngAfterViewInit(): void {

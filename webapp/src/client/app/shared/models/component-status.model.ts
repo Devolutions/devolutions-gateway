@@ -1,6 +1,6 @@
 export interface ComponentStatus {
-  id: string,
-  isInitialized: boolean,
-  isDisabled?: boolean,
-  isDisabledByUser?: boolean,
+  id: string;
+  isInitialized: boolean;
+  isDisabled?: boolean;
+  isDisabledByUser?: boolean;
 }

@@ -1,38 +1,40 @@
-import {Component, Input, ElementRef, Renderer2, HostListener} from '@angular/core';
-import {UtilsService} from "@shared/services/utils.service";
-
+import { Component, ElementRef, HostListener, Input, Renderer2 } from '@angular/core';
+import { UtilsService } from '@shared/services/utils.service';
 
 @Component({
   selector: 'session-toolbar',
   templateUrl: 'session-toolbar.component.html',
-  styleUrls: ['session-toolbar.component.scss']
+  styleUrls: ['session-toolbar.component.scss'],
 })
 export class SessionToolbarComponent {
-
   @Input() sessionContainerParent: ElementRef;
 
   @Input() leftButtons: {
     label: string;
     icon: string;
-    action: Function }[] = [];
+    action: Function;
+  }[] = [];
 
   @Input() middleButtons: {
     label: string;
     icon: string;
-    action: Function }[] = [];
+    action: Function;
+  }[] = [];
 
   @Input() rightButtons: {
     label: string;
     icon: string;
-    action: Function }[] = [];
+    action: Function;
+  }[] = [];
 
-  isFullScreenMode: boolean = false;
-  showToolbarDiv: boolean = true;
-  loading: boolean = true;
+  isFullScreenMode = false;
+  showToolbarDiv = true;
+  loading = true;
 
-  constructor(private renderer: Renderer2,
-              protected utils: UtilsService) {
-  }
+  constructor(
+    private renderer: Renderer2,
+    protected utils: UtilsService,
+  ) {}
 
   @HostListener('document:mousemove', ['$event'])
   onMouseMove(event: MouseEvent): void {
@@ -46,7 +48,7 @@ export class SessionToolbarComponent {
 
   private handleOnFullScreenEvent(): void {
     if (!document.fullscreenElement) {
-      this.handleExitFullScreenEvent()
+      this.handleExitFullScreenEvent();
     }
   }
 
@@ -67,7 +69,7 @@ export class SessionToolbarComponent {
     !document.fullscreenElement ? this.enterFullScreen() : this.exitFullScreen();
   }
 
-  private async enterFullScreen(): Promise<void>  {
+  private async enterFullScreen(): Promise<void> {
     if (document.fullscreenElement) {
       return;
     }
@@ -83,7 +85,7 @@ export class SessionToolbarComponent {
 
   private exitFullScreen(): void {
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(err => {
+      document.exitFullscreen().catch((err) => {
         console.error(`Error attempting to exit fullscreen: ${err}`);
       });
     }
