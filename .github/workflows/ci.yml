@@ -370,6 +370,13 @@ jobs:
           name: webapp-client
           path: webapp/client
 
+      - name: Download Cadeau
+        shell: pwsh
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          $Arch = @{'x86_64'='x64';'arm64'='arm64'}['${{ matrix.arch }}']
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
+
       - name: Load dynamic variables
         id: load-variables
         shell: pwsh
@@ -460,7 +467,11 @@ jobs:
           if ($Env:RUNNER_OS -eq "Windows") {
             $Env:DGATEWAY_PACKAGE = "${{ steps.load-variables.outputs.dgateway-package }}"
             $Env:DGATEWAY_PSMODULE_PATH = "${{ steps.load-variables.outputs.dgateway-psmodule-output-path }}"
+            $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
+          } else {
+            $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "libxmf.so" | Resolve-Path
           }
+
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
 
           ./ci/tlk.ps1 package -Product gateway -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile ${{ needs.preflight.outputs.rust-profile }}

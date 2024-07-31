@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 
 $tmpFolder = [System.IO.Path]::GetTempPath() + [System.Guid]::NewGuid()
 Write-Host "Temporary directory to extract package tarball: $tmpFolder"
-New-Item -ItemType "directory" -Path "$tmpFolder" | Out-Null
+New-Item -ItemType Directory -Path "$tmpFolder" | Out-Null
 
 try
 {
