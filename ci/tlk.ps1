@@ -691,6 +691,7 @@ class TlkRecipe
 
         $DGatewayExecutable = $null
         $DGatewayWebClient = $null
+        $DGatewayLibXmf = $null
         $DAgentExecutable = $null
 
         switch ($this.Product) {
@@ -705,6 +706,12 @@ class TlkRecipe
                     $DGatewayWebClient = $Env:DGATEWAY_WEBCLIENT_PATH
                 } else {
                     throw ("Specify DGATEWAY_WEBCLIENT_PATH environment variable")
+                }
+
+                if (Test-Path Env:DGATEWAY_LIB_XMF_PATH) {
+                    $DGatewayLibXmf = $Env:DGATEWAY_LIB_XMF_PATH
+                } else {
+                    throw ("Specify DGATEWAY_LIB_XMF_PATH environment variable")
                 }
             }
             "agent" {
@@ -774,6 +781,7 @@ class TlkRecipe
                     root_path = $this.SourcePath
                     dgateway_executable = $DGatewayExecutable
                     dgateway_webclient = $DGatewayWebClient
+                    dgateway_libxmf = $DGatewayLibXmf
                     platform_dir = $InputPackagePath
                     dh_shlibdeps = $DhShLibDepsOverride
                 } -OutputFile $RulesFile

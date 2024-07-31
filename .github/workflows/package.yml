@@ -240,6 +240,13 @@ jobs:
           $Destination = Join-Path "webapp" "client"
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
 
+      - name: Download Cadeau
+        shell: pwsh
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}[${{ matrix.os }}]
+          $Arch = @{'x86_64'='x64';'arm64'='arm64'}[${{ matrix.arch }}]
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
+
       - name: Add msbuild to PATH
         if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
         uses: microsoft/setup-msbuild@v2
@@ -252,6 +259,7 @@ jobs:
           $Env:DGATEWAY_EXECUTABLE = Get-ChildItem -Path $PackageRoot -Recurse -Include '*DevolutionsGateway*.exe' | Select -First 1
           $Env:DGATEWAY_PSMODULE_PATH = Join-Path $PackageRoot PowerShell DevolutionsGateway
           $Env:DGATEWAY_WEBCLIENT_PATH = Join-Path "webapp" "client" | Resolve-Path
+          $Env:DGATEWAY_LIB_XMF_PATH = Join-Path "native-libs" "xmf.dll" | Resolve-Path
 
           Get-ChildItem -Path (Join-Path $PackageRoot PowerShell "*.zip") -Recurse | % {
             Remove-Item $_.FullName -Force

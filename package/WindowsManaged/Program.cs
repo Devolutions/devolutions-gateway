@@ -100,6 +100,30 @@ internal class Program
         }
     }
 
+    private static string LibXmfPath
+    {
+        get
+        {
+            string path = Environment.GetEnvironmentVariable("DGATEWAY_LIB_XMF_PATH");
+
+            if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
+            {
+#if DEBUG
+                path = "..\\..\\native-libs\\xmf.dll";
+#else
+                throw new Exception("The environment variable DGATEWAY_LIB_XMF_PATH is not specified or the directory does not exist");
+#endif
+            }
+
+            if (!Directory.Exists(path))
+            {
+                throw new DirectoryNotFoundException("The web client was not found");
+            }
+
+            return path;
+        }
+    }
+
     private static Version DevolutionsGatewayVersion
     {
         get
@@ -259,6 +283,10 @@ internal class Program
                             StopOn = SvcEvent.InstallUninstall,
                         },
                     },
+                    new (LibXmfPath)
+                    {
+                        TargetFileName = Includes.EXECUTABLE_NAME,
+                    }
                 },
                 Dirs = new Dir[]
                 {
