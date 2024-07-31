@@ -106,7 +106,7 @@ internal class Program
         {
             string path = Environment.GetEnvironmentVariable("DGATEWAY_LIB_XMF_PATH");
 
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
             {
 #if DEBUG
                 path = "..\\..\\native-libs\\xmf.dll";
@@ -115,7 +115,7 @@ internal class Program
 #endif
             }
 
-            if (!File.Exists(path))
+            if (!System.IO.File.Exists(path))
             {
                 throw new FileNotFoundException("The XMF native library was not found");
             }
