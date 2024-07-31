@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2024.2.3
+  version: 2024.3.0
 paths:
   /jet/config:
     patch:
@@ -600,7 +600,7 @@ components:
       type: string
       enum:
       - Spki
-      - Rsa
+      - Pkcs1
     SessionInfo:
       type: object
       description: Information about an ongoing Gateway session

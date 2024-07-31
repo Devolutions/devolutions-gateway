@@ -31,10 +31,7 @@ fn local_admin_elevator() -> &'static LocalAdminElevator {
 
 fn virtual_account_elevator() -> &'static VirtualAccountElevator {
     static ELEVATOR: OnceLock<VirtualAccountElevator> = OnceLock::new();
-    ELEVATOR.get_or_init(|| VirtualAccountElevator {
-        domain: config::VADM_DOMAIN.to_owned(),
-        rid: config::VADM_RID,
-    })
+    ELEVATOR.get_or_init(|| VirtualAccountElevator::new(config::VADM_DOMAIN.to_owned(), config::VADM_RID))
 }
 
 fn elevator(method: ElevationMethod) -> &'static dyn Elevator {

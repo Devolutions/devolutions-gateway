@@ -1150,6 +1150,7 @@ dependencies = [
  "digest",
  "hyper 1.4.1",
  "hyper-util",
+ "parking_lot",
  "schemars",
  "serde",
  "serde_json",
@@ -1193,6 +1194,7 @@ name = "devolutions-pedm-contextmenu-shell"
 version = "0.1.0"
 dependencies = [
  "devolutions-pedm-shared",
+ "parking_lot",
  "tokio 1.38.1",
  "win-api-wrappers",
  "windows-core 0.58.0",

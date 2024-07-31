@@ -1,12 +1,12 @@
+pub mod api;
 mod config;
 mod desktop;
 mod elevations;
 mod elevator;
+mod error;
+mod log;
 mod policy;
 mod utils;
-mod log;
-mod error;
-pub mod api;
 
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};

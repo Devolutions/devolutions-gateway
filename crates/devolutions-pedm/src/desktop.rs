@@ -10,10 +10,15 @@ use win_api_wrappers::{
         },
         System::Threading::CREATE_SUSPENDED,
     },
-    win::{Pipe, Process, Sid, StartupInfo, ThreadAttributeList, ThreadAttributeType, WideString},
+    win::{
+        args_to_command_line, Pipe, Process, Sid, StartupInfo, ThreadAttributeList, ThreadAttributeType, WideString,
+    },
 };
 
-use crate::{config, policy, utils::{start_process, AccountExt}};
+use crate::{
+    config, policy,
+    utils::{start_process, AccountExt},
+};
 
 static SECURE_DESKTOP: &'static str = r"WinSta0\Winlogon";
 
@@ -54,21 +59,22 @@ fn launch_desktop(
         desktop: secure_desktop
             .then(|| WideString::from(SECURE_DESKTOP))
             .unwrap_or_default(),
-        attribute_list: Some(Some(unsafe { attributes.raw() })),
+        attribute_list: Some(Some(attributes.raw())),
         ..Default::default()
     };
+
+    let command_line = args_to_command_line(&[
+        config::pedm_desktop_path().to_string_lossy().as_ref(),
+        &user_behalf.to_string(),
+        verb,
+        &format!("{}", tx.handle.raw().0 as isize),
+        argument.unwrap_or_default(),
+    ]);
 
     let proc = start_process(
         &token,
         Some(config::pedm_desktop_path()),
-        Some(&format!(
-            "\"{}\" {} {} {} \"{}\"",
-            config::pedm_desktop_path().display(),
-            user_behalf.to_string(),
-            verb,
-            tx.handle.raw().0 as isize,
-            argument.unwrap_or_default()
-        )), // TODO sanitize
+        Some(&command_line),
         true,
         CREATE_SUSPENDED,
         None,
@@ -90,7 +96,7 @@ fn launch_desktop(
 }
 
 pub fn launch_consent(session_id: u32, user_behalf: &Sid, path: &Path) -> Result<bool> {
-    Ok(launch_desktop(
+    let status = launch_desktop(
         session_id,
         "consent",
         path.to_str(),
@@ -101,6 +107,8 @@ pub fn launch_consent(session_id: u32, user_behalf: &Sid, path: &Path) -> Result
             .user_current_profile(&user_behalf.account(None)?.to_user())
             .map_or(true, |x| x.prompt_secure_desktop),
     )?
-    .get(0)
-    .is_some_and(|x| *x != 0))
+    .first()
+    .is_some_and(|x| *x != 0);
+
+    Ok(status)
 }

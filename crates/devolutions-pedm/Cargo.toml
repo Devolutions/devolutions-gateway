@@ -33,6 +33,7 @@ tracing = "0.1.40"
 walkdir = "2.5.0"
 aide = { version = "0.13.4", features = ["axum", "axum-extra"] }
 tower-http = { version = "0.5.2", features = ["timeout"] }
+parking_lot = "0.12.3"
 
 [build-dependencies]
 devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["build", "policy"] }

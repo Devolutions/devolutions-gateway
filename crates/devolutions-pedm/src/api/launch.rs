@@ -6,12 +6,17 @@ use std::{
 use axum::{Extension, Json};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::trace;
+use tracing::info;
 use win_api_wrappers::{
-    raw::Win32::System::Threading::{PROCESS_CREATE_PROCESS, PROCESS_CREATION_FLAGS, STARTUPINFOW_FLAGS},
+    raw::Win32::{
+        Security::{WinLocalSystemSid, TOKEN_QUERY},
+        System::Threading::{
+            PROCESS_CREATE_PROCESS, PROCESS_CREATION_FLAGS, PROCESS_QUERY_INFORMATION, STARTUPINFOW_FLAGS,
+        },
+    },
     win::{
-        environment_block, expand_environment_path, Process, StartupInfo, ThreadAttributeList, ThreadAttributeType,
-        Token, WideString,
+        environment_block, expand_environment_path, Process, Sid, StartupInfo, ThreadAttributeList,
+        ThreadAttributeType, Token, WideString,
     },
 };
 
@@ -93,30 +98,37 @@ pub async fn post_launch(
         .map(|x| win_canonicalize(&x, Some(named_pipe_info.token.as_ref())))
         .transpose()?;
 
-    trace!("Received launch request: {payload:?}");
+    info!(?payload, "Received launch request");
 
     let mut startup_info = payload.startup_info.as_ref().map(StartupInfo::from).unwrap_or_default();
 
-    let attribute_holder = if let Some(info) = payload.startup_info {
-        let process = Process::try_get_by_pid(info.parent_pid, PROCESS_CREATE_PROCESS)?;
+    let parent_pid = payload
+        .startup_info
+        .as_ref()
+        .map_or(named_pipe_info.pipe_process_id, |x| x.parent_pid);
 
-        let mut attributes = ThreadAttributeList::with_count(1)?;
-        let attr = ThreadAttributeType::ParentProcess(&process);
-        attributes.update(&attr)?;
+    let process = Process::try_get_by_pid(parent_pid, PROCESS_QUERY_INFORMATION | PROCESS_CREATE_PROCESS)?;
 
-        startup_info.attribute_list = Some(Some(unsafe { attributes.raw() }));
+    let caller_sid = named_pipe_info.token.sid_and_attributes()?.sid;
+    if caller_sid != Sid::from_well_known(WinLocalSystemSid, None)? {
+        let process_token = process.token(TOKEN_QUERY)?;
 
-        Some((info.parent_pid, process, attributes))
-    } else {
-        None
-    };
+        if process_token.sid_and_attributes()?.sid != caller_sid
+            || process_token.session_id()? != named_pipe_info.token.session_id()?
+        {
+            return Err(Error::AccessDenied);
+        }
+    }
+
+    let mut attributes = ThreadAttributeList::with_count(1)?;
+    let attr = ThreadAttributeType::ParentProcess(&process);
+    attributes.update(&attr)?;
+
+    startup_info.attribute_list = Some(Some(attributes.raw()));
 
     let proc_info = elevator::try_start_elevated(
         &named_pipe_info.token,
-        attribute_holder
-            .as_ref()
-            .map(|x| x.0)
-            .unwrap_or(named_pipe_info.pipe_process_id),
+        parent_pid,
         payload.executable_path.as_deref(),
         payload.command_line.as_deref(),
         PROCESS_CREATION_FLAGS(payload.creation_flags),

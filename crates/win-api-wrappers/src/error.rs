@@ -16,16 +16,16 @@ use crate::undoc::LSA_SID_NAME_MAPPING_OPERATION_ERROR;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    Win32Error(windows::core::Error),
-    LsaError(LSA_SID_NAME_MAPPING_OPERATION_ERROR),
+    Win32(windows::core::Error),
+    Lsa(LSA_SID_NAME_MAPPING_OPERATION_ERROR),
     NullPointer(&'static str),
 }
 
 impl Error {
     pub fn code(&self) -> i32 {
         match self {
-            Error::Win32Error(err) => err.code().0,
-            Error::LsaError(err) => err.0,
+            Error::Win32(err) => err.code().0,
+            Error::Lsa(err) => err.0,
             Error::NullPointer(_) => E_POINTER.0,
         }
     }
@@ -34,8 +34,8 @@ impl Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::Win32Error(err) => err.source(),
-            Error::LsaError(_) => None,
+            Error::Win32(err) => err.source(),
+            Error::Lsa(_) => None,
             Error::NullPointer(_) => None,
         }
     }
@@ -44,8 +44,8 @@ impl std::error::Error for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Win32Error(err) => Debug::fmt(err, f),
-            Error::LsaError(err) => err.fmt(f),
+            Error::Win32(err) => Debug::fmt(err, f),
+            Error::Lsa(err) => err.fmt(f),
             Error::NullPointer(mem) => write!(f, "{} is null", mem),
         }
     }
@@ -53,11 +53,11 @@ impl std::fmt::Display for Error {
 
 impl Error {
     pub fn last_error() -> Self {
-        Self::Win32Error(windows::core::Error::from_win32())
+        Self::Win32(windows::core::Error::from_win32())
     }
 
     pub fn from_hresult(hresult: HRESULT) -> Self {
-        Self::Win32Error(windows::core::Error::from_hresult(hresult))
+        Self::Win32(windows::core::Error::from_hresult(hresult))
     }
 
     pub fn from_win32(win32_error: WIN32_ERROR) -> Self {
@@ -67,7 +67,7 @@ impl Error {
 
 impl From<windows::core::Error> for Error {
     fn from(err: windows::core::Error) -> Self {
-        Self::Win32Error(err)
+        Self::Win32(err)
     }
 }
 
@@ -80,8 +80,8 @@ impl From<windows::core::HRESULT> for Error {
 impl From<Error> for windows::core::Error {
     fn from(value: Error) -> Self {
         match value {
-            Error::Win32Error(err) => err.clone(),
-            Error::LsaError(err) => windows::core::Error::new(HRESULT(err.0), format!("Lsa Err {:?}", err)),
+            Error::Win32(err) => err.clone(),
+            Error::Lsa(err) => windows::core::Error::new(HRESULT(err.0), format!("Lsa Err {:?}", err)),
             Error::NullPointer(_) => Error::from_hresult(E_POINTER).into(),
         }
     }

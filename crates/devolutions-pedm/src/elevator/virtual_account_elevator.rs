@@ -1,13 +1,18 @@
-use anyhow::Result;
+use std::collections::HashMap;
+
+use anyhow::{anyhow, Result};
+use parking_lot::RwLock;
 use win_api_wrappers::{
     raw::Win32::{
-        Security::{WinBuiltinAdministratorsSid, WinLocalSid, LOGON32_LOGON_INTERACTIVE, SECURITY_NT_AUTHORITY},
+        Foundation::ERROR_ACCOUNT_EXPIRED,
+        Security::{WinBuiltinAdministratorsSid, WinLocalSid, LOGON32_LOGON_INTERACTIVE},
         System::SystemServices::{
             SE_GROUP_ENABLED, SE_GROUP_ENABLED_BY_DEFAULT, SE_GROUP_LOGON_ID, SE_GROUP_MANDATORY, SE_GROUP_OWNER,
         },
     },
     undoc::LOGON32_PROVIDER_VIRTUAL,
     win::{create_virtual_account, Sid, SidAndAttributes, Token, TokenGroups},
+    Error,
 };
 
 use super::Elevator;
@@ -15,25 +20,25 @@ use super::Elevator;
 pub struct VirtualAccountElevator {
     pub domain: String,
     pub rid: u32,
+    tokens: RwLock<HashMap<Sid, (Token, Token)>>,
 }
 
-impl Elevator for VirtualAccountElevator {
-    /// https://call4cloud.nl/2023/05/the-virtual-account-that-rocks-the-epm/
-    /// https://posts.specterops.io/getting-intune-with-bugs-and-tokens-a-journey-through-epm-013b431e7f49
-    /// consent.exe!CuipCreateAutomaticAdminAccount
-    fn elevate_token(&self, token: &Token) -> Result<Token> {
-        let virtual_account = create_virtual_account(self.rid, &self.domain, &token)?;
+impl VirtualAccountElevator {
+    pub fn new(domain: String, rid: u32) -> Self {
+        Self {
+            domain,
+            rid,
+            tokens: RwLock::new(HashMap::new()),
+        }
+    }
 
-        let luid = token.statistics()?.TokenId;
+    fn create_token(&self, token: &Token) -> Result<()> {
+        let virtual_account = create_virtual_account(self.rid, &self.domain, &token)?;
 
         let mut groups = Vec::new();
 
         groups.push(SidAndAttributes {
-            sid: Sid {
-                identifier_identity: SECURITY_NT_AUTHORITY,
-                sub_authority: vec![5, luid.HighPart as _, luid.LowPart],
-                ..Default::default()
-            },
+            sid: token.logon_sid()?,
             attributes: (SE_GROUP_LOGON_ID | SE_GROUP_ENABLED | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_MANDATORY) as _, // 0xc0000007
         });
 
@@ -61,13 +66,39 @@ impl Elevator for VirtualAccountElevator {
             Some(&TokenGroups(groups)),
         )?;
 
-        let session_id = token.session_id()?;
-
         base_token.load_profile(&virtual_account.account_name)?;
 
-        let mut admin_token = base_token.linked_token()?.duplicate_impersonation()?;
-        admin_token.set_session_id(session_id)?;
+        let admin_token = base_token.linked_token()?;
 
-        Ok(admin_token)
+        self.tokens
+            .write()
+            .insert(token.sid_and_attributes()?.sid, (base_token, admin_token));
+
+        Ok(())
+    }
+}
+
+impl Elevator for VirtualAccountElevator {
+    /// https://call4cloud.nl/2023/05/the-virtual-account-that-rocks-the-epm/
+    /// https://posts.specterops.io/getting-intune-with-bugs-and-tokens-a-journey-through-epm-013b431e7f49
+    /// consent.exe!CuipCreateAutomaticAdminAccount
+    fn elevate_token(&self, token: &Token) -> Result<Token> {
+        let sid = token.sid_and_attributes()?.sid;
+
+        if !self.tokens.read().contains_key(&sid) {
+            self.create_token(token)?;
+        }
+
+        self.tokens
+            .read()
+            .get(&sid)
+            .ok_or_else(|| anyhow!(Error::from_win32(ERROR_ACCOUNT_EXPIRED)))
+            .and_then(|vtoken| {
+                let mut vtoken = vtoken.1.duplicate_impersonation()?;
+
+                vtoken.set_session_id(token.session_id()?)?;
+
+                Ok(vtoken)
+            })
     }
 }

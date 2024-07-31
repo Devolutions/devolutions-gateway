@@ -121,7 +121,7 @@ unsafe impl Send for RpcServerInterfacePointer {}
 impl RpcServerInterfacePointer {
     pub fn handler_cnt(&self) -> Result<usize> {
         let dispatch_table =
-            NonNull::new(unsafe { self.raw.as_ref() }.DispatchTable).ok_or(Error::from_hresult(E_POINTER))?;
+            NonNull::new(unsafe { self.raw.as_ref() }.DispatchTable).ok_or_else(|| Error::from_hresult(E_POINTER))?;
 
         Ok(unsafe { dispatch_table.as_ref() }.DispatchTableCount as _)
     }
@@ -172,7 +172,7 @@ impl RpcServerInterfacePointer {
                 .cast::<MIDL_SERVER_INFO>()
                 .cast_mut(),
         )
-        .ok_or(Error::from_hresult(E_POINTER))?)
+        .ok_or_else(|| Error::from_hresult(E_POINTER))?)
     }
 
     pub fn id(&self) -> GUID {

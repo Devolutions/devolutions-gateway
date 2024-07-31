@@ -5,9 +5,7 @@ use crate::{elevations, error::Error, policy};
 
 use super::NamedPipeConnectInfo;
 
-pub async fn post_elevate_session(
-    Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
-) -> Result<(), Error> {
+pub async fn post_elevate_session(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Result<(), Error> {
     let policy = policy::policy().read().unwrap();
 
     let profile = policy.user_current_profile(&named_pipe_info.user);

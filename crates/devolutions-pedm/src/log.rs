@@ -19,17 +19,11 @@ fn log_path() -> Utf8PathBuf {
 
 fn log_path_for_user(user: &User) -> Result<Utf8PathBuf> {
     let mut dir = log_path();
-    ensure_protected_directory(
-        dir.as_std_path(),
-        vec![Sid::from_well_known(WinBuiltinUsersSid, None)?],
-    )?;
+    ensure_protected_directory(dir.as_std_path(), vec![Sid::from_well_known(WinBuiltinUsersSid, None)?])?;
 
     dir.push(&user.account_sid);
 
-    ensure_protected_directory(
-        dir.as_std_path(),
-        vec![Sid::try_from(user.account_sid.as_str())?],
-    )?;
+    ensure_protected_directory(dir.as_std_path(), vec![Sid::try_from(user.account_sid.as_str())?])?;
 
     Ok(dir)
 }

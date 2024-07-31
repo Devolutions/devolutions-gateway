@@ -2,16 +2,18 @@ use std::{
     ffi::{c_void, OsString},
     os::windows::ffi::OsStringExt,
     path::{Path, PathBuf},
-    ptr,
-    sync::RwLock,
-    thread,
+    ptr, thread,
     time::Duration,
 };
 
 use devolutions_pedm_shared::{
-    client::{self, models::LaunchPayload},
+    client::{
+        self,
+        models::{LaunchPayload, StartupInfoDto},
+    },
     desktop,
 };
+use parking_lot::RwLock;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use win_api_wrappers::{
     raw::{
@@ -21,10 +23,13 @@ use win_api_wrappers::{
                 BOOL, CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, ERROR_CANCELLED, E_FAIL, E_NOTIMPL,
                 E_UNEXPECTED, HINSTANCE,
             },
+            Security::TOKEN_QUERY,
             System::{
                 Com::{IBindCtx, IClassFactory, IClassFactory_Impl},
+                Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
                 Ole::{IObjectWithSite, IObjectWithSite_Impl},
                 SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
+                Threading::PROCESS_QUERY_INFORMATION,
             },
             UI::Shell::{
                 IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray, SHStrDupW, ECF_DEFAULT,
@@ -32,7 +37,7 @@ use win_api_wrappers::{
             },
         },
     },
-    win::{environment_block, expand_environment, expand_environment_path, Link},
+    win::{environment_block, expand_environment, expand_environment_path, Link, Process, Snapshot, Token},
 };
 
 static mut MODULE_INSTANCE: HINSTANCE = HINSTANCE(ptr::null_mut());
@@ -111,7 +116,7 @@ impl IExplorerCommand_Impl for ElevationContextMenuCommand_Impl {
 impl IObjectWithSite_Impl for ElevationContextMenuCommand_Impl {
     fn SetSite(&self, site: Option<&IUnknown>) -> Result<()> {
         if let Some(site) = site {
-            self.site.write().unwrap().replace(site.clone());
+            self.site.write().replace(site.clone());
             Ok(())
         } else {
             Err(E_FAIL.into())
@@ -119,12 +124,32 @@ impl IObjectWithSite_Impl for ElevationContextMenuCommand_Impl {
     }
 
     fn GetSite(&self, iid: *const GUID, out_site: *mut *mut core::ffi::c_void) -> Result<()> {
-        if let Some(site) = self.site.read().unwrap().as_ref() {
+        if let Some(site) = self.site.read().as_ref() {
             unsafe { site.query(iid, out_site) }.ok()
         } else {
             Err(E_FAIL.into())
         }
     }
+}
+
+fn find_main_explorer(session: u32) -> Option<u32> {
+    let snapshot = Snapshot::new(TH32CS_SNAPPROCESS, None).ok()?;
+
+    snapshot.process_ids().find_map(|pid| {
+        let proc = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION).ok()?;
+
+        if !proc
+            .exe_path()
+            .ok()?
+            .file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("explorer.exe"))
+            || proc.token(TOKEN_QUERY).ok()?.session_id().ok()? != session
+        {
+            return None;
+        }
+
+        Some(pid)
+    })
 }
 
 fn resolve_lnk(path: &Path) -> Option<LaunchPayload> {
@@ -162,12 +187,22 @@ fn start_listener(mut rx: Receiver<ChannelCommand>) {
                     match command {
                         ChannelCommand::Exit => break,
                         ChannelCommand::Elevate(path) => {
-                            let payload = resolve_lnk(&path).unwrap_or_else(|| LaunchPayload {
+                            let mut payload = resolve_lnk(&path).unwrap_or_else(|| LaunchPayload {
                                 executable_path: path.as_os_str().to_str().map(str::to_owned),
                                 command_line: None,
                                 working_directory: None,
                                 creation_flags: 0,
                                 startup_info: None,
+                            });
+
+                            payload.startup_info = Some(StartupInfoDto {
+                                parent_pid: find_main_explorer(
+                                    Token::current_process_token()
+                                        .session_id()
+                                        .expect("Session ID not found for current process"),
+                                )
+                                .unwrap_or(0),
+                                ..Default::default()
                             });
 
                             let err = match client::client().default_api().launch_post(payload).await {

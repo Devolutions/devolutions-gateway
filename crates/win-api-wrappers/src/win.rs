@@ -32,9 +32,10 @@ use windows::{
     Win32::{
         Foundation::{
             DuplicateHandle, FreeLibrary, LocalFree, CRYPT_E_BAD_MSG, DUPLICATE_SAME_ACCESS, ERROR_ALREADY_EXISTS,
-            ERROR_INCORRECT_SIZE, ERROR_INVALID_SID, ERROR_INVALID_VARIANT, ERROR_NO_TOKEN, ERROR_SUCCESS, HLOCAL,
-            HWND, INVALID_HANDLE_VALUE, LUID, NTE_BAD_ALGID, S_OK, TRUST_E_BAD_DIGEST, TRUST_E_EXPLICIT_DISTRUST,
-            TRUST_E_NOSIGNATURE, TRUST_E_PROVIDER_UNKNOWN, UNICODE_STRING, WAIT_EVENT, WAIT_FAILED,
+            ERROR_INCORRECT_SIZE, ERROR_INVALID_SECURITY_DESCR, ERROR_INVALID_SID, ERROR_INVALID_VARIANT,
+            ERROR_NO_TOKEN, ERROR_SUCCESS, HLOCAL, HWND, INVALID_HANDLE_VALUE, LUID, NTE_BAD_ALGID, S_OK,
+            TRUST_E_BAD_DIGEST, TRUST_E_EXPLICIT_DISTRUST, TRUST_E_NOSIGNATURE, TRUST_E_PROVIDER_UNKNOWN,
+            UNICODE_STRING, WAIT_EVENT, WAIT_FAILED,
         },
         NetworkManagement::NetManagement::{
             NERR_Success, NERR_UserNotFound, NetApiBufferFree, NetUserGetInfo, USER_INFO_4,
@@ -89,7 +90,7 @@ use windows::{
         System::{
             Com::{
                 CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
-                COINIT_MULTITHREADED, STGM_READ,
+                COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, COINIT_MULTITHREADED, STGM_READ,
             },
             Diagnostics::{
                 Debug::ReadProcessMemory,
@@ -106,7 +107,7 @@ use windows::{
             },
             Memory::{VirtualProtect, PAGE_PROTECTION_FLAGS},
             Pipes::{CreatePipe, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient, PeekNamedPipe},
-            SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION},
+            SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SE_GROUP_LOGON_ID},
             Threading::{
                 CreateProcessAsUserW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
                 InitializeProcThreadAttributeList, OpenProcessToken, QueryFullProcessImageNameW, SetThreadToken,
@@ -119,9 +120,10 @@ use windows::{
         UI::{
             Controls::INFOTIPSIZE,
             Shell::{
-                CommandLineToArgvW, CreateProfile, IShellLinkW, LoadUserProfileW, ShellLink, PROFILEINFOW,
-                SLGP_SHORTPATH, SLR_NO_UI,
+                CommandLineToArgvW, CreateProfile, IShellLinkW, LoadUserProfileW, ShellExecuteExW, ShellLink,
+                PROFILEINFOW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, SLGP_SHORTPATH, SLR_NO_UI,
             },
+            WindowsAndMessaging::SHOW_WINDOW_CMD,
         },
     },
 };
@@ -586,7 +588,7 @@ impl Token {
         let user = RawSidAndAttributes::from(user);
 
         let mut priv_token = find_token_with_privilege(lookup_privilege_value(None, SE_CREATE_TOKEN_NAME)?)?
-            .ok_or(Error::from_win32(ERROR_NO_TOKEN))?
+            .ok_or_else(|| Error::from_win32(ERROR_NO_TOKEN))?
             .duplicate_impersonation()?;
 
         priv_token.adjust_privileges(&TokenPrivilegesAdjustment::Enable(vec![
@@ -914,6 +916,16 @@ impl Token {
         Ok(Self {
             handle: self.handle.try_clone()?,
         })
+    }
+
+    pub fn logon_sid(&self) -> Result<Sid> {
+        Ok(self
+            .groups()?
+            .0
+            .into_iter()
+            .find(|g| (g.attributes & SE_GROUP_LOGON_ID.unsigned_abs()) != 0)
+            .ok_or_else(|| Error::from_win32(ERROR_INVALID_SECURITY_DESCR))?
+            .sid)
     }
 }
 
@@ -1657,7 +1669,7 @@ impl<'a> ThreadAttributeList {
         Ok(ThreadAttributeList(buf))
     }
 
-    pub unsafe fn raw(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+    pub fn raw(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
         LPPROC_THREAD_ATTRIBUTE_LIST(self.0.as_mut_ptr() as _)
     }
 
@@ -3393,4 +3405,96 @@ pub fn create_directory(path: &Path, security_attributes: &SecurityAttributes) -
     unsafe { CreateDirectoryW(path.as_pcwstr(), Some(security_attributes.raw())) }?;
 
     Ok(())
+}
+
+pub fn shell_execute(
+    path: &Path,
+    command_line: &str,
+    working_directory: &Path,
+    verb: &str,
+    show_cmd: SHOW_WINDOW_CMD,
+) -> Result<Process> {
+    let path = WideString::from(path);
+    let command_line = WideString::from(command_line);
+    let working_directory = WideString::from(working_directory);
+    let verb = WideString::from(verb);
+
+    let mut exec_info = SHELLEXECUTEINFOW {
+        cbSize: mem::size_of::<SHELLEXECUTEINFOW>() as _,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        lpFile: path.as_pcwstr(),
+        lpParameters: command_line.as_pcwstr(),
+        lpDirectory: working_directory.as_pcwstr(),
+        lpVerb: verb.as_pcwstr(),
+        nShow: show_cmd.0,
+        ..Default::default()
+    };
+
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).ok()?;
+
+        ShellExecuteExW(&mut exec_info)?;
+    }
+
+    Process::try_with_handle(exec_info.hProcess)
+}
+
+/// Encodes an argument array to a command line string for Windows.
+///
+/// Loosely based off of https://learn.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way.
+pub fn args_to_command_line<T: AsRef<str>>(args: &[T]) -> String {
+    let mut command_line = String::new();
+
+    let mut it = args.iter().peekable();
+    while let Some(arg) = it.next() {
+        let arg = arg.as_ref();
+
+        if !arg.is_empty() && !arg.contains(char::is_whitespace) {
+            command_line.push_str(arg);
+        } else {
+            command_line.push('"');
+
+            let mut chars = arg.chars().peekable();
+            let mut backslashes = 0;
+            while let Some(c) = chars.next() {
+                match c {
+                    '\\' => {
+                        if chars.peek().is_some() {
+                            backslashes += 1
+                        } else {
+                            std::iter::repeat('\\')
+                                .take(backslashes * 2)
+                                .for_each(|x| command_line.push(x));
+
+                            backslashes = 0;
+                        }
+                    }
+                    '"' => {
+                        std::iter::repeat('\\')
+                            .take(backslashes * 2 + 1)
+                            .for_each(|x| command_line.push(x));
+
+                        command_line.push('"');
+                        backslashes = 0;
+                    }
+                    x => {
+                        std::iter::repeat('\\')
+                            .take(backslashes)
+                            .for_each(|x| command_line.push(x));
+
+                        command_line.push(x);
+                        backslashes = 0;
+                    }
+                }
+            }
+
+            command_line.push('"');
+        }
+
+        if it.peek().is_some() {
+            command_line.push(' ');
+        }
+    }
+
+    command_line
 }

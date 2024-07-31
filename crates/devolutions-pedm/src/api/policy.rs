@@ -44,11 +44,11 @@ async fn get_profiles_id(
     let policy = policy::policy().read().unwrap();
 
     let profile = if named_pipe_info.token.is_elevated()? {
-        policy.profile(&id.id).ok_or(Error::NotFound)?
+        policy.profile(&id.id).ok_or_else(|| Error::NotFound)?
     } else {
         policy
             .user_profile(&named_pipe_info.user, &id.id)
-            .ok_or(Error::AccessDenied)?
+            .ok_or_else(|| Error::AccessDenied)?
     };
 
     Ok(Json(profile.clone()))
@@ -157,7 +157,7 @@ async fn get_rules_id(
         }
     }
 
-    Ok(Json(policy.rule(&id.id).ok_or(Error::NotFound)?.clone()))
+    Ok(Json(policy.rule(&id.id).ok_or_else(|| Error::NotFound)?.clone()))
 }
 
 async fn put_rules_id(
@@ -263,7 +263,10 @@ pub fn policy_router() -> ApiRouter {
             get(get_profiles_id).put(put_profiles_id).delete(delete_profiles_id),
         )
         .api_route("/rules", get(get_rules).post(post_rules))
-        .api_route("/rules/:id", get(get_rules_id).put(put_rules_id).delete(delete_rules_id))
+        .api_route(
+            "/rules/:id",
+            get(get_rules_id).put(put_rules_id).delete(delete_rules_id),
+        )
         .api_route("/assignments", get(get_assignments))
         .api_route("/assignments/:id", put(put_assignments_id))
 }

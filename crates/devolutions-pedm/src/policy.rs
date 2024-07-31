@@ -159,7 +159,7 @@ impl Policy {
             config::data_dir().as_std_path(),
             vec![Sid::from_well_known(WinBuiltinIUsersSid, None)?],
         )?;
-        
+
         ensure_protected_directory(policy_path().as_std_path(), vec![])?;
         ensure_protected_directory(policy.profiles.path(), vec![])?;
         ensure_protected_directory(policy.rules.path(), vec![])?;

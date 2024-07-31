@@ -1,6 +1,6 @@
 use devolutions_pedm_shared::build::target_dir;
 use fs_extra::dir::CopyOptions;
-use std::{env, fs, path::PathBuf, error::Error};
+use std::{env, error::Error, fs, path::PathBuf};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let target = target_dir()?;
@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         copy_inside: true,
         ..Default::default()
     };
-    
+
     fs_extra::dir::copy(crate_dir.join("Assets"), &target, &options)?;
 
     fs::copy(crate_dir.join("AppxManifest.xml"), target.join("AppxManifest.xml"))?;

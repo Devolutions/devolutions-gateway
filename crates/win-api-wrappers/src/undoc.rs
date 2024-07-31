@@ -1,3 +1,4 @@
+//! Undocumented Windows API functions
 use std::ffi::c_void;
 
 use windows::{
@@ -63,7 +64,7 @@ where
 }
 
 /// Argument to LsaManageSidNameMapping to add a mapping.
-/// 
+///
 /// https://github.com/gtworek/PSBits/blob/5cdd1a8c03ee0c1c69d3abd20916cf347c9d7e47/VirtualAccounts/TrustedInstallerCmd2.c#L33
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -75,7 +76,7 @@ pub struct LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT {
 }
 
 /// Error codes for LsaManageSidNameMapping.
-/// 
+///
 /// https://github.com/gtworek/PSBits/blob/5cdd1a8c03ee0c1c69d3abd20916cf347c9d7e47/VirtualAccounts/TrustedInstallerCmd2.c#L22
 #[repr(transparent)]
 #[derive(PartialEq, Eq, Copy, Clone, Default, Debug)]
@@ -96,9 +97,9 @@ pub const LsaSidNameMappingOperation_MappingNotFound: LSA_SID_NAME_MAPPING_OPERA
     LSA_SID_NAME_MAPPING_OPERATION_ERROR(6);
 
 /// Generic error code for LsaManageSidNameMapping.
-/// 
+///
 /// From the reference document, every output type is a typedef to this type.
-/// 
+///
 /// https://github.com/gtworek/PSBits/blob/5cdd1a8c03ee0c1c69d3abd20916cf347c9d7e47/VirtualAccounts/TrustedInstallerCmd2.c#L60
 #[repr(C)]
 #[derive(PartialEq, Eq, Copy, Clone, Default)]
@@ -229,7 +230,7 @@ impl Default for OBJECT_ATTRIBUTES {
 }
 
 /// Manually creates a Windows token.
-/// 
+///
 /// The caller must have the SeCreateTokenPrivilege privilege.
 ///
 /// http://undocumented.ntinternals.net/index.html?page=UserMode%2FUndocumented%20Functions%2FNT%20Objects%2FToken%2FNtCreateToken.html

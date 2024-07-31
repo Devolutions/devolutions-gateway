@@ -35,6 +35,7 @@ features = [
     "Win32_System_Ole",
     "Win32_System_Pipes",
     "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
     "Win32_System_Rpc",
     "Win32_System_StationsAndDesktops",
     "Win32_System_SystemServices",

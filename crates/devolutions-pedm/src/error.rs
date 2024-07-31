@@ -1,12 +1,17 @@
 use std::fmt::Debug;
 
 use aide::OperationOutput;
-use axum::{response::{IntoResponse, Response}, Json};
+use axum::{
+    response::{IntoResponse, Response},
+    Json,
+};
 use hyper::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::error;
-use win_api_wrappers::raw::Win32::Foundation::{ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_INVALID_PARAMETER, E_UNEXPECTED};
+use win_api_wrappers::raw::Win32::Foundation::{
+    ERROR_ACCESS_DISABLED_BY_POLICY, ERROR_CANCELLED, ERROR_INVALID_PARAMETER, E_UNEXPECTED,
+};
 
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
@@ -82,6 +87,7 @@ impl IntoResponse for ErrorResponse {
                 Error::Cancelled => StatusCode::REQUEST_TIMEOUT,
             },
             Json(self),
-        ).into_response()
+        )
+            .into_response()
     }
 }
