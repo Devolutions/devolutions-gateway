@@ -19,12 +19,14 @@ Write-Host "Temporary directory: $tmpFolder"
 New-Item -ItemType "directory" -Path "$tmpFolder" | Out-Null
 
 $downloadUrl = "https://github.com/Devolutions/cadeau/releases/download/v2024.7.23.0/cadeau-$Platform-$Architecture.zip"
+Write-Host "Download URL: $downloadUrl"
 
 try
 {
 	Invoke-WebRequest $downloadUrl -OutFile "$tmpFolder/cadeau.zip"
 	New-Item -Path "../native-libs" -ItemType Directory -Force | Out-Null
-	Expand-Archive "$tmpFolder/cadeau.zip" "../native-libs" -Force
+	$expanded = Expand-Archive "$tmpFolder/cadeau.zip" "../native-libs" -Force -PassThru
+	Write-Host "Extracted: $expanded"
 }
 finally
 {
