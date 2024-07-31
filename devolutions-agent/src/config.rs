@@ -321,11 +321,16 @@ pub mod dto {
         /// Directives string in the same form as the RUST_LOG environment variable
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
+
         /// Skip MSI installation in updater module
         ///
         /// Useful for debugging updater logic without actually changing the system.
         #[serde(default)]
         pub skip_msi_install: bool,
+
+        /// Enable unstable features which may break at any point
+        #[serde(default)]
+        pub enable_unstable: bool,
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -335,6 +340,7 @@ pub mod dto {
             Self {
                 log_directives: None,
                 skip_msi_install: false,
+                enable_unstable: false,
             }
         }
     }
