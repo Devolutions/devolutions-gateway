@@ -5,9 +5,6 @@ use ceviche as _;
 #[cfg(test)]
 use {devolutions_gateway_generators as _, http_body_util as _, proptest as _, tokio_test as _, tracing_cov_mark as _};
 
-// FIXME: will be used soon
-use cadeau as _;
-
 #[macro_use]
 extern crate serde;
 #[macro_use]

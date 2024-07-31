@@ -491,11 +491,12 @@ impl RecordingManagerTask {
                 .with_context(|| format!("write manifest at {}", ongoing.manifest_path))?;
 
             if recording_file_path.extension() == Some(RecordingFileType::WebM.extension()) {
-                tokio::spawn(async move {
-                    if let Err(e) = remux(recording_file_path).await {
-                        error!(error = format!("{e:#}"), "Remux operation failed");
-                    }
-                });
+                if cadeau::xmf::is_init() {
+                    debug!(%recording_file_path, "Enqueue video remuxing operation");
+                    tokio::spawn(remux(recording_file_path));
+                } else {
+                    debug!("Video remuxing was skipped because XMF native library is not loaded");
+                }
             }
 
             Ok(())
@@ -690,13 +691,15 @@ async fn recording_manager_task(
     Ok(())
 }
 
-pub async fn remux(input_path: Utf8PathBuf) -> anyhow::Result<()> {
-    if cadeau::xmf::is_init() {
-        // CPU-intensive operation potentially lasting much more than 100ms.
-        tokio::task::spawn_blocking(move || remux_impl(input_path)).await??;
+pub async fn remux(input_path: Utf8PathBuf) {
+    // CPU-intensive operation potentially lasting much more than 100ms.
+    match tokio::task::spawn_blocking(move || remux_impl(input_path)).await {
+        Err(error) => error!(%error, "Couldn't join the CPU-intensive muxer task"),
+        Ok(Err(error)) => error!(error = format!("{error:#}"), "Remux operation failed"),
+        Ok(Ok(())) => {}
     }
 
-    return Ok(());
+    return;
 
     fn remux_impl(input_path: Utf8PathBuf) -> anyhow::Result<()> {
         let input_file_name = input_path
