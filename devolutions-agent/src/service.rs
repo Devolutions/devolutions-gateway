@@ -185,7 +185,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         tasks.register(UpdaterTask::new(conf_handle.clone()));
     }
 
-    if conf.remote_desktop.enabled {
+    if conf.debug.enable_unstable && conf.remote_desktop.enabled {
         tasks.register(RemoteDesktopTask::new(conf_handle));
     }
 

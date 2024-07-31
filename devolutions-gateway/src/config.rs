@@ -1089,7 +1089,7 @@ pub mod dto {
         /// Path to the XMF shared library (Cadeau) for runtime loading.
         pub lib_xmf_path: Option<Utf8PathBuf>,
 
-        /// Enable unstable API which may break at any point
+        /// Enable unstable features which may break at any point
         #[serde(default)]
         pub enable_unstable: bool,
     }
