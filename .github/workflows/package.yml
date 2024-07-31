@@ -243,8 +243,8 @@ jobs:
       - name: Download Cadeau
         shell: pwsh
         run: |
-          $Platform = @{'windows'='win'; 'linux'='linux'}[${{ matrix.os }}]
-          $Arch = @{'x86_64'='x64';'arm64'='arm64'}[${{ matrix.arch }}]
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          $Arch = 'x64'
           ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
 
       - name: Add msbuild to PATH
