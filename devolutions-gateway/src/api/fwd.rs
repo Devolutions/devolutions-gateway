@@ -18,7 +18,7 @@ use crate::http::HttpError;
 use crate::proxy::Proxy;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol};
+use crate::token::{ApplicationProtocol, AssociationTokenClaims, ConnectionMode, Protocol, RecordingPolicy};
 use crate::{utils, DgwState};
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -144,8 +144,9 @@ where
             with_tls,
         } = self;
 
-        if claims.jet_rec {
-            anyhow::bail!("can't meet recording policy");
+        match claims.jet_rec {
+            RecordingPolicy::None | RecordingPolicy::Stream => (),
+            RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
         }
 
         let ConnectionMode::Fwd { targets, .. } = claims.jet_cm else {

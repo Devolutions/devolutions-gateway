@@ -704,7 +704,7 @@ pub async fn remux(input_path: Utf8PathBuf) {
     fn remux_impl(input_path: Utf8PathBuf) -> anyhow::Result<()> {
         let input_file_name = input_path
             .file_name()
-            .ok_or(anyhow::anyhow!("input file has no file name"))?;
+            .ok_or_else(|| anyhow::anyhow!("invalid path (not a file): {input_path}"))?;
 
         let remuxed_file_name = format!("remuxed_{input_file_name}");
 

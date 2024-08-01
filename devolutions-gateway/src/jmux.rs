@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::JmuxTokenClaims;
+use crate::token::{JmuxTokenClaims, RecordingPolicy};
 
 use anyhow::Context as _;
 use devolutions_gateway_task::ChildTask;
@@ -19,6 +19,11 @@ pub async fn handle(
     subscriber_tx: SubscriberSender,
 ) -> anyhow::Result<()> {
     use jmux_proxy::{FilteringRule, JmuxConfig};
+
+    match claims.jet_rec {
+        RecordingPolicy::None | RecordingPolicy::Stream => (),
+        RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
+    }
 
     let (reader, writer) = tokio::io::split(stream);
     let reader = Box::new(reader) as ErasedRead;

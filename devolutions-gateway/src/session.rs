@@ -1,7 +1,7 @@
 use crate::recording::RecordingMessageSender;
 use crate::subscriber;
 use crate::target_addr::TargetAddr;
-use crate::token::{ApplicationProtocol, SessionTtl};
+use crate::token::{ApplicationProtocol, RecordingPolicy, SessionTtl};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use core::fmt;
@@ -52,8 +52,8 @@ impl SessionInfo {
     }
 
     #[must_use]
-    pub fn with_recording_policy(mut self, value: bool) -> Self {
-        self.recording_policy = value;
+    pub fn with_recording_policy(mut self, value: RecordingPolicy) -> Self {
+        self.recording_policy = value != RecordingPolicy::None;
         self
     }
 

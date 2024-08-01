@@ -1,7 +1,7 @@
 use devolutions_gateway::session::{ConnectionModeDetails, SessionInfo};
 use devolutions_gateway::target_addr::TargetAddr;
 use devolutions_gateway::token::{
-    self, AccessScope, ApplicationProtocol, Protocol, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
+    self, AccessScope, ApplicationProtocol, Protocol, RecordingPolicy, MAX_SUBKEY_TOKEN_VALIDITY_DURATION_SECS,
 };
 use proptest::collection::vec;
 use proptest::option;
@@ -46,6 +46,15 @@ pub fn application_protocol() -> impl Strategy<Value = ApplicationProtocol> {
         Just(ApplicationProtocol::Known(Protocol::Ldap)),
         Just(ApplicationProtocol::Known(Protocol::Ldaps)),
         Just(ApplicationProtocol::unknown()),
+    ]
+    .no_shrink()
+}
+
+pub fn recording_policy() -> impl Strategy<Value = RecordingPolicy> {
+    prop_oneof![
+        Just(RecordingPolicy::None),
+        Just(RecordingPolicy::Stream),
+        Just(RecordingPolicy::Proxy),
     ]
     .no_shrink()
 }
@@ -157,7 +166,7 @@ pub struct AssociationClaims {
     pub jet_ap: ApplicationProtocol,
     #[serde(flatten)]
     pub jet_cm: ConnectionMode,
-    pub jet_rec: bool,
+    pub jet_rec: RecordingPolicy,
     pub jet_flt: bool,
     pub nbf: i64,
     pub exp: i64,
@@ -174,7 +183,7 @@ pub fn any_association_claims(now: i64, validity_duration: i64) -> impl Strategy
     (
         uuid_typed(),
         jet_ap_and_jet_cm(),
-        any::<bool>(),
+        recording_policy(),
         any::<bool>(),
         uuid_typed(),
     )
@@ -239,6 +248,7 @@ pub fn any_bridge_claims(now: i64, validity_duration: i64) -> impl Strategy<Valu
 #[derive(Debug, Clone, Serialize)]
 pub struct JmuxClaims {
     pub jet_aid: Uuid,
+    pub jet_rec: RecordingPolicy,
     pub dst_hst: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dst_addl: Vec<String>,
@@ -251,13 +261,15 @@ pub struct JmuxClaims {
 pub fn any_jmux_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = JmuxClaims> {
     (
         uuid_typed(),
+        recording_policy(),
         host(),
         alternate_hosts(),
         application_protocol(),
         uuid_typed(),
     )
-        .prop_map(move |(jet_aid, dst_hst, dst_addl, jet_ap, jti)| JmuxClaims {
+        .prop_map(move |(jet_aid, jet_rec, dst_hst, dst_addl, jet_ap, jti)| JmuxClaims {
             jet_aid,
+            jet_rec,
             dst_hst,
             dst_addl,
             jet_ap,
