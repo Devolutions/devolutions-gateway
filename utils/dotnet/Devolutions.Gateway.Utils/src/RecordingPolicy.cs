@@ -13,7 +13,7 @@ public struct RecordingPolicy
     }
 
     public static RecordingPolicy None = new RecordingPolicy("none");
-    public static RecordingPolicy External = new RecordingPolicy("external");
+    public static RecordingPolicy Stream = new RecordingPolicy("stream");
     public static RecordingPolicy Proxy = new RecordingPolicy("proxy");
 
     public override string? ToString()
