@@ -22,7 +22,7 @@ public class AssociationClaims : IGatewayClaims
     public SessionTtl? TimeToLive { get; set; }
     [JsonPropertyName("jet_rec")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? RecordingPolicy { get; set; }
+    public RecordingPolicy? RecordingPolicy { get; set; }
 
     public AssociationClaims(
         Guid scopeGatewayId,
@@ -30,7 +30,7 @@ public class AssociationClaims : IGatewayClaims
         ApplicationProtocol applicationProtocol,
         Guid sessionId,
         SessionTtl? TimeToLive = null,
-        bool? RecordingPolicy = null)
+        RecordingPolicy? RecordingPolicy = null)
     {
         this.DestinationHost = destinationHost;
         this.ApplicationProtocol = applicationProtocol;

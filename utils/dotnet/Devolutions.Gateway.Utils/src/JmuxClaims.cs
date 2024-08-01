@@ -20,7 +20,7 @@ public class JmuxClaims : IGatewayClaims
     public SessionTtl? TimeToLive { get; set; }
     [JsonPropertyName("jet_rec")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? RecordingPolicy { get; set; }
+    public RecordingPolicy? RecordingPolicy { get; set; }
 
     public JmuxClaims(
         Guid scopeGatewayId,
@@ -28,7 +28,7 @@ public class JmuxClaims : IGatewayClaims
         ApplicationProtocol applicationProtocol,
         Guid sessionId,
         SessionTtl? TimeToLive = null,
-        bool? RecordingPolicy = null)
+        RecordingPolicy? RecordingPolicy = null)
     {
         this.Destination = destinationHost;
         this.ApplicationProtocol = applicationProtocol;
