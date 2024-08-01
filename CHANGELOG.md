@@ -4,6 +4,45 @@ This document provides a list of notable changes introduced in Devolutions Gatew
 
 ## [Unreleased]
 
+## 2024.3.1 (2024-08-01)
+
+### Features
+
+- _dgw_: dynamically load XMF native lib on startup ([#939](https://github.com/Devolutions/devolutions-gateway/issues/939)) ([86dee2631a](https://github.com/Devolutions/devolutions-gateway/commit/86dee2631a210cf89e07727bec52cc773f23e8e8)) 
+
+  The `DGATEWAY_LIB_XMF_PATH` environment variable can be used optionally to specify the path to
+  the XMF native library.
+
+- _dgw_: remux webm files when video recording ends ([#943](https://github.com/Devolutions/devolutions-gateway/issues/943)) ([cc787ef691](https://github.com/Devolutions/devolutions-gateway/commit/cc787ef69195cc55dbd001159b19a61d70fe6404)) 
+
+### Bug Fixes
+
+- _dgw_: fix recording player parsing problem ([#937](https://github.com/Devolutions/devolutions-gateway/issues/937)) ([cdf08a3e2c](https://github.com/Devolutions/devolutions-gateway/commit/cdf08a3e2cd3357af5a68573aa5ba7fe3ad07862)) ([DPS-11197](https://devolutions.atlassian.net/browse/DPS-11197)) 
+
+  - Remove usage of btoa, it fails on different charset.
+
+  - Add 1 millisecond if the time of previous event is the same at the next event.
+    Otherwise, the player will throw an error.
+
+- _webapp_: fix RDP connection form - set pre connection blob as not required ([#950](https://github.com/Devolutions/devolutions-gateway/issues/950)) ([c684994fce](https://github.com/Devolutions/devolutions-gateway/commit/c684994fcec84b376a716725a72c8e856e59ecac)) 
+
+- _webapp_: add tooltip ellipsis for long netscan service names ([#946](https://github.com/Devolutions/devolutions-gateway/issues/946)) ([5e4b3080d6](https://github.com/Devolutions/devolutions-gateway/commit/5e4b3080d6f6ce8525bf36d3fff2da8d56782276)) ([DGW-204](https://devolutions.atlassian.net/browse/DGW-204))
+
+- _dgw_: [**breaking**] jet_rec claim is now a string ([#957](https://github.com/Devolutions/devolutions-gateway/issues/957)) ([59bb0af249](https://github.com/Devolutions/devolutions-gateway/commit/59bb0af249ad99a616e2b6308db7bbab84b55068)) 
+
+  Possible values are:
+  
+  - `none`: No policy to enforce (recording is optional)
+  
+  - `stream`: An external application (e.g.: RDM) must push the
+    recording stream via a separate websocket connection
+  
+  - `proxy`: Session must be recorded directly at Devolutions Gateway
+    level (not implemented yet)
+
+  Note: Up until now, Devolutions Gateway was rejecting sessions when this claim was found because it couldn’t upheld
+  the policy. It’s effectively not breaking anything which wasn’t already broken previously.
+
 ## 2024.3.0 (2024-07-24)
 
 ### Features
