@@ -240,16 +240,14 @@ jobs:
           $Destination = Join-Path "webapp" "client"
           gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -D "$Destination"
 
-      - name: Download Cadeau
-        shell: pwsh
-        run: |
-          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
-          $Arch = 'x64'
-          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture $Arch
-
       - name: Add msbuild to PATH
         if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
         uses: microsoft/setup-msbuild@v2
+
+      - name: Download Cadeau
+        if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
+        shell: pwsh
+        run: ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
 
       - name: Regenerate Gateway MSI
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
