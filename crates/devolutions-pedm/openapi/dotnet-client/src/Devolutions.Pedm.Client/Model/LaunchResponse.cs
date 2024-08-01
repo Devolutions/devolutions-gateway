@@ -87,18 +87,18 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             // ProcessId (int) minimum
             if (this.ProcessId < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for ProcessId, must be a value greater than or equal to 0.", new [] { "ProcessId" });
+                yield return new ValidationResult("Invalid value for ProcessId, must be a value greater than or equal to 0.", new [] { "ProcessId" });
             }
 
             // ThreadId (int) minimum
             if (this.ThreadId < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for ThreadId, must be a value greater than or equal to 0.", new [] { "ThreadId" });
+                yield return new ValidationResult("Invalid value for ThreadId, must be a value greater than or equal to 0.", new [] { "ThreadId" });
             }
 
             yield break;

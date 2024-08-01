@@ -41,5 +41,8 @@ namespace DevolutionsPedmDesktop
 
         [DllImport("user32.dll")]
         public static extern bool PaintDesktop(IntPtr hdc);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
+        static extern uint ExtractIconEx(string szFileName, int nIconIndex, IntPtr[] phiconLarge, IntPtr[] phiconSmall, uint nIcons);
     }
 }

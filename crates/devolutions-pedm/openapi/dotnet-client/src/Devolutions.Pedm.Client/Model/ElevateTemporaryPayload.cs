@@ -78,12 +78,12 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             // Seconds (long) minimum
             if (this.Seconds < (long)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for Seconds, must be a value greater than or equal to 0.", new [] { "Seconds" });
+                yield return new ValidationResult("Invalid value for Seconds, must be a value greater than or equal to 0.", new [] { "Seconds" });
             }
 
             yield break;

@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -20,11 +21,11 @@ pub enum ElevationMethod {
 
 }
 
-impl ToString for ElevationMethod {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ElevationMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::LocalAdmin => String::from("LocalAdmin"),
-            Self::VirtualAccount => String::from("VirtualAccount"),
+            Self::LocalAdmin => write!(f, "LocalAdmin"),
+            Self::VirtualAccount => write!(f, "VirtualAccount"),
         }
     }
 }

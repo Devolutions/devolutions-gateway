@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**CommandLine** | [**StringFilter**](StringFilter.md) |  | [optional] 
+**CommandLine** | [**List&lt;StringFilter&gt;**](StringFilter.md) |  | [optional] 
 **Hashes** | [**List&lt;HashFilter&gt;**](HashFilter.md) |  | [optional] 
 **Path** | [**PathFilter**](PathFilter.md) |  | 
 **Signature** | [**SignatureFilter**](SignatureFilter.md) |  | [optional] 

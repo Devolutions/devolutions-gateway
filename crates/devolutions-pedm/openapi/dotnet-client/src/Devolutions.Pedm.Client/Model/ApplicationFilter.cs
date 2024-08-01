@@ -44,7 +44,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="path">path (required).</param>
         /// <param name="signature">signature.</param>
         /// <param name="workingDirectory">workingDirectory.</param>
-        public ApplicationFilter(StringFilter commandLine = default(StringFilter), List<HashFilter> hashes = default(List<HashFilter>), PathFilter path = default(PathFilter), SignatureFilter signature = default(SignatureFilter), PathFilter workingDirectory = default(PathFilter))
+        public ApplicationFilter(List<StringFilter> commandLine = default(List<StringFilter>), List<HashFilter> hashes = default(List<HashFilter>), PathFilter path = default(PathFilter), SignatureFilter signature = default(SignatureFilter), PathFilter workingDirectory = default(PathFilter))
         {
             // to ensure "path" is required (not null)
             if (path == null)
@@ -62,7 +62,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets CommandLine
         /// </summary>
         [DataMember(Name = "CommandLine", EmitDefaultValue = false)]
-        public StringFilter CommandLine { get; set; }
+        public List<StringFilter> CommandLine { get; set; }
 
         /// <summary>
         /// Gets or Sets Hashes
@@ -119,7 +119,7 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             yield break;
         }

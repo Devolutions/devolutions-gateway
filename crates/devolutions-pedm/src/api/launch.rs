@@ -15,7 +15,7 @@ use win_api_wrappers::{
         },
     },
     win::{
-        environment_block, expand_environment_path, Process, Sid, StartupInfo, ThreadAttributeList,
+        environment_block, expand_environment_path, CommandLine, Process, Sid, StartupInfo, ThreadAttributeList,
         ThreadAttributeType, Token, WideString,
     },
 };
@@ -110,12 +110,15 @@ pub async fn post_launch(
     let process = Process::try_get_by_pid(parent_pid, PROCESS_QUERY_INFORMATION | PROCESS_CREATE_PROCESS)?;
 
     let caller_sid = named_pipe_info.token.sid_and_attributes()?.sid;
+
+    // If NT AUTHORITY\SYSTEM is caller, it can be on behalf of anyone
     if caller_sid != Sid::from_well_known(WinLocalSystemSid, None)? {
         let process_token = process.token(TOKEN_QUERY)?;
 
         if process_token.sid_and_attributes()?.sid != caller_sid
             || process_token.session_id()? != named_pipe_info.token.session_id()?
         {
+            info!(user = ?named_pipe_info.user, "User tried to create process under an unowned process");
             return Err(Error::AccessDenied);
         }
     }
@@ -130,7 +133,11 @@ pub async fn post_launch(
         &named_pipe_info.token,
         parent_pid,
         payload.executable_path.as_deref(),
-        payload.command_line.as_deref(),
+        payload
+            .command_line
+            .as_deref()
+            .map(CommandLine::from_command_line)
+            .as_ref(),
         PROCESS_CREATION_FLAGS(payload.creation_flags),
         payload.working_directory.as_deref(),
         &mut startup_info,

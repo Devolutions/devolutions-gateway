@@ -28,53 +28,56 @@
         /// </summary>
         private void InitializeComponent()
         {
-            lblApplication = new Label();
-            lblPath = new Label();
-            imgIcon = new PictureBox();
-            ((System.ComponentModel.ISupportInitialize)imgIcon).BeginInit();
-            SuspendLayout();
+            this.lblApplication = new System.Windows.Forms.Label();
+            this.lblPath = new System.Windows.Forms.Label();
+            this.imgIcon = new System.Windows.Forms.PictureBox();
+            ((System.ComponentModel.ISupportInitialize)(this.imgIcon)).BeginInit();
+            this.SuspendLayout();
             // 
             // lblApplication
             // 
-            lblApplication.AutoSize = true;
-            lblApplication.Font = new Font("Segoe UI", 12F);
-            lblApplication.Location = new Point(115, 20);
-            lblApplication.Name = "lblApplication";
-            lblApplication.Size = new Size(52, 21);
-            lblApplication.TabIndex = 0;
-            lblApplication.Text = "label1";
+            this.lblApplication.AutoSize = true;
+            this.lblApplication.Font = new System.Drawing.Font("Segoe UI", 12F);
+            this.lblApplication.Location = new System.Drawing.Point(131, 21);
+            this.lblApplication.Name = "lblApplication";
+            this.lblApplication.Size = new System.Drawing.Size(52, 21);
+            this.lblApplication.TabIndex = 0;
+            this.lblApplication.Text = "label1";
             // 
             // lblPath
             // 
-            lblPath.AutoSize = true;
-            lblPath.Location = new Point(115, 41);
-            lblPath.Name = "lblPath";
-            lblPath.Size = new Size(38, 15);
-            lblPath.TabIndex = 1;
-            lblPath.Text = "label1";
+            this.lblPath.AutoSize = true;
+            this.lblPath.Font = new System.Drawing.Font("Segoe UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblPath.Location = new System.Drawing.Point(131, 44);
+            this.lblPath.Name = "lblPath";
+            this.lblPath.Size = new System.Drawing.Size(43, 17);
+            this.lblPath.TabIndex = 1;
+            this.lblPath.Text = "label1";
             // 
             // imgIcon
             // 
-            imgIcon.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left;
-            imgIcon.Location = new Point(20, 20);
-            imgIcon.Name = "imgIcon";
-            imgIcon.Size = new Size(80, 80);
-            imgIcon.SizeMode = PictureBoxSizeMode.Zoom;
-            imgIcon.TabIndex = 2;
-            imgIcon.TabStop = false;
+            this.imgIcon.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Left)));
+            this.imgIcon.Location = new System.Drawing.Point(23, 21);
+            this.imgIcon.Name = "imgIcon";
+            this.imgIcon.Size = new System.Drawing.Size(91, 85);
+            this.imgIcon.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+            this.imgIcon.TabIndex = 2;
+            this.imgIcon.TabStop = false;
             // 
             // AppView
             // 
-            AutoScaleDimensions = new SizeF(7F, 15F);
-            AutoScaleMode = AutoScaleMode.Font;
-            Controls.Add(imgIcon);
-            Controls.Add(lblPath);
-            Controls.Add(lblApplication);
-            Name = "AppView";
-            Size = new Size(400, 120);
-            ((System.ComponentModel.ISupportInitialize)imgIcon).EndInit();
-            ResumeLayout(false);
-            PerformLayout();
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.Controls.Add(this.imgIcon);
+            this.Controls.Add(this.lblPath);
+            this.Controls.Add(this.lblApplication);
+            this.Name = "AppView";
+            this.Size = new System.Drawing.Size(457, 128);
+            ((System.ComponentModel.ISupportInitialize)(this.imgIcon)).EndInit();
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
         }
 
         #endregion

@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -28,15 +29,15 @@ pub enum AuthenticodeSignatureStatus {
 
 }
 
-impl ToString for AuthenticodeSignatureStatus {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for AuthenticodeSignatureStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Valid => String::from("Valid"),
-            Self::Incompatible => String::from("Incompatible"),
-            Self::NotSigned => String::from("NotSigned"),
-            Self::HashMismatch => String::from("HashMismatch"),
-            Self::NotSupportedFileFormat => String::from("NotSupportedFileFormat"),
-            Self::NotTrusted => String::from("NotTrusted"),
+            Self::Valid => write!(f, "Valid"),
+            Self::Incompatible => write!(f, "Incompatible"),
+            Self::NotSigned => write!(f, "NotSigned"),
+            Self::HashMismatch => write!(f, "HashMismatch"),
+            Self::NotSupportedFileFormat => write!(f, "NotSupportedFileFormat"),
+            Self::NotTrusted => write!(f, "NotTrusted"),
         }
     }
 }

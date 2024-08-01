@@ -1174,7 +1174,6 @@ dependencies = [
  "hyper 0.14.30",
  "hyper-tls",
  "serde",
- "serde_derive",
  "serde_json",
  "url",
  "uuid",

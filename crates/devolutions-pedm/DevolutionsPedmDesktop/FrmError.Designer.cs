@@ -28,47 +28,51 @@
         /// </summary>
         private void InitializeComponent()
         {
-            btnOk = new Button();
-            ctrlHeader1 = new CtrlHeader();
-            SuspendLayout();
+            this.btnOk = new System.Windows.Forms.Button();
+            this.ctrlHeader1 = new DevolutionsPedmDesktop.CtrlHeader();
+            this.SuspendLayout();
             // 
             // btnOk
             // 
-            btnOk.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            btnOk.Location = new Point(278, 94);
-            btnOk.Name = "btnOk";
-            btnOk.Size = new Size(110, 25);
-            btnOk.TabIndex = 2;
-            btnOk.Text = "Ok";
-            btnOk.UseVisualStyleBackColor = true;
-            btnOk.Click += BtnOk_Click;
+            this.btnOk.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnOk.Font = new System.Drawing.Font("Segoe UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.btnOk.Location = new System.Drawing.Point(305, 106);
+            this.btnOk.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
+            this.btnOk.Name = "btnOk";
+            this.btnOk.Size = new System.Drawing.Size(103, 27);
+            this.btnOk.TabIndex = 2;
+            this.btnOk.Text = "Ok";
+            this.btnOk.UseVisualStyleBackColor = true;
             // 
             // ctrlHeader1
             // 
-            ctrlHeader1.BackColor = Color.RosyBrown;
-            ctrlHeader1.Dock = DockStyle.Top;
-            ctrlHeader1.Location = new Point(0, 0);
-            ctrlHeader1.Margin = new Padding(3, 4, 3, 4);
-            ctrlHeader1.Name = "ctrlHeader1";
-            ctrlHeader1.Size = new Size(400, 80);
-            ctrlHeader1.Subtitle = "Error";
-            ctrlHeader1.TabIndex = 5;
+            this.ctrlHeader1.AutoSize = true;
+            this.ctrlHeader1.BackColor = System.Drawing.Color.RosyBrown;
+            this.ctrlHeader1.Dock = System.Windows.Forms.DockStyle.Top;
+            this.ctrlHeader1.Location = new System.Drawing.Point(0, 0);
+            this.ctrlHeader1.Name = "ctrlHeader1";
+            this.ctrlHeader1.Size = new System.Drawing.Size(420, 43);
+            this.ctrlHeader1.Subtitle = "Error";
+            this.ctrlHeader1.TabIndex = 5;
             // 
             // FrmError
             // 
-            AutoScaleDimensions = new SizeF(8F, 20F);
-            AutoScaleMode = AutoScaleMode.Font;
-            AutoSize = true;
-            ClientSize = new Size(400, 131);
-            Controls.Add(ctrlHeader1);
-            Controls.Add(btnOk);
-            FormBorderStyle = FormBorderStyle.None;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            Name = "FrmError";
-            StartPosition = FormStartPosition.CenterScreen;
-            Text = "Devolutions PEDM";
-            ResumeLayout(false);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoSize = true;
+            this.ClientSize = new System.Drawing.Size(420, 143);
+            this.Controls.Add(this.ctrlHeader1);
+            this.Controls.Add(this.btnOk);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+            this.Margin = new System.Windows.Forms.Padding(3, 2, 3, 2);
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.Name = "FrmError";
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            this.Text = "Devolutions PEDM";
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
         }
 
         #endregion

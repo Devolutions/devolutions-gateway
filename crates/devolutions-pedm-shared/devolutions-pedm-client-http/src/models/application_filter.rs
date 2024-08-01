@@ -9,11 +9,12 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ApplicationFilter {
     #[serde(rename = "CommandLine", skip_serializing_if = "Option::is_none")]
-    pub command_line: Option<models::StringFilter>,
+    pub command_line: Option<Vec<models::StringFilter>>,
     #[serde(rename = "Hashes", skip_serializing_if = "Option::is_none")]
     pub hashes: Option<Vec<models::HashFilter>>,
     #[serde(rename = "Path")]

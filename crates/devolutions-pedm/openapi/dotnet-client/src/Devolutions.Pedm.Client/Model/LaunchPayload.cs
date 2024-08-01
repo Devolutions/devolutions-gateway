@@ -114,12 +114,12 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             // CreationFlags (int) minimum
             if (this.CreationFlags < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for CreationFlags, must be a value greater than or equal to 0.", new [] { "CreationFlags" });
+                yield return new ValidationResult("Invalid value for CreationFlags, must be a value greater than or equal to 0.", new [] { "CreationFlags" });
             }
 
             yield break;

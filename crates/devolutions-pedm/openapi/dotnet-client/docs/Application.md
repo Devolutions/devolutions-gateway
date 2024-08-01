@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**CommandLine** | **string** |  | 
+**CommandLine** | **List&lt;string&gt;** |  | 
 **Hash** | [**Hash**](Hash.md) |  | 
 **Path** | **string** |  | 
 **Signature** | [**Signature**](Signature.md) |  | 

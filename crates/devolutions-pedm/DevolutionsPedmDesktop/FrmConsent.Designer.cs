@@ -28,93 +28,101 @@
         /// </summary>
         private void InitializeComponent()
         {
-            btnApprove = new Button();
-            btnDeny = new Button();
-            appView = new AppView();
-            header = new CtrlHeader();
-            tableLayoutPanel1 = new TableLayoutPanel();
-            tableLayoutPanel1.SuspendLayout();
-            SuspendLayout();
+            this.btnApprove = new System.Windows.Forms.Button();
+            this.btnDeny = new System.Windows.Forms.Button();
+            this.tableLayoutPanel1 = new System.Windows.Forms.TableLayoutPanel();
+            this.header = new DevolutionsPedmDesktop.CtrlHeader();
+            this.appView = new DevolutionsPedmDesktop.AppView();
+            this.tableLayoutPanel1.SuspendLayout();
+            this.SuspendLayout();
             // 
             // btnApprove
             // 
-            btnApprove.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
-            btnApprove.FlatStyle = FlatStyle.System;
-            btnApprove.Font = new Font("Segoe UI", 9F);
-            btnApprove.Location = new Point(3, 3);
-            btnApprove.Name = "btnApprove";
-            btnApprove.Size = new Size(182, 36);
-            btnApprove.TabIndex = 1;
-            btnApprove.Text = "Approve";
-            btnApprove.UseVisualStyleBackColor = true;
-            btnApprove.Click += BtnApprove_Click;
+            this.btnApprove.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnApprove.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnApprove.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this.btnApprove.Location = new System.Drawing.Point(3, 4);
+            this.btnApprove.Name = "btnApprove";
+            this.btnApprove.Size = new System.Drawing.Size(208, 38);
+            this.btnApprove.TabIndex = 1;
+            this.btnApprove.Text = "Approve";
+            this.btnApprove.UseVisualStyleBackColor = true;
+            this.btnApprove.Click += new System.EventHandler(this.BtnApprove_Click);
             // 
             // btnDeny
             // 
-            btnDeny.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            btnDeny.FlatStyle = FlatStyle.System;
-            btnDeny.Font = new Font("Segoe UI", 9F);
-            btnDeny.Location = new Point(191, 3);
-            btnDeny.Name = "btnDeny";
-            btnDeny.Size = new Size(182, 36);
-            btnDeny.TabIndex = 0;
-            btnDeny.Text = "Deny";
-            btnDeny.UseVisualStyleBackColor = true;
-            btnDeny.Click += BtnDeny_Click;
-            // 
-            // appView
-            // 
-            appView.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-            appView.ExePath = "C:\\Windows\\System32\\cmd.exe";
-            appView.Location = new Point(42, 90);
-            appView.Name = "appView";
-            appView.Size = new Size(316, 120);
-            appView.TabIndex = 2;
-            // 
-            // header
-            // 
-            header.BackColor = SystemColors.ActiveCaption;
-            header.Dock = DockStyle.Top;
-            header.Location = new Point(0, 0);
-            header.Name = "header";
-            header.Size = new Size(400, 80);
-            header.Subtitle = "Do you want to allow this application to make changes to your computer?";
-            header.TabIndex = 3;
+            this.btnDeny.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnDeny.DialogResult = System.Windows.Forms.DialogResult.Cancel;
+            this.btnDeny.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnDeny.Font = new System.Drawing.Font("Segoe UI", 9F);
+            this.btnDeny.Location = new System.Drawing.Point(219, 4);
+            this.btnDeny.Name = "btnDeny";
+            this.btnDeny.Size = new System.Drawing.Size(208, 38);
+            this.btnDeny.TabIndex = 0;
+            this.btnDeny.Text = "Deny";
+            this.btnDeny.UseVisualStyleBackColor = true;
+            this.btnDeny.Click += new System.EventHandler(this.BtnDeny_Click);
             // 
             // tableLayoutPanel1
             // 
-            tableLayoutPanel1.Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            tableLayoutPanel1.ColumnCount = 2;
-            tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tableLayoutPanel1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tableLayoutPanel1.Controls.Add(btnApprove, 0, 0);
-            tableLayoutPanel1.Controls.Add(btnDeny, 1, 0);
-            tableLayoutPanel1.Location = new Point(12, 246);
-            tableLayoutPanel1.Name = "tableLayoutPanel1";
-            tableLayoutPanel1.RowCount = 1;
-            tableLayoutPanel1.RowStyles.Add(new RowStyle(SizeType.Percent, 50F));
-            tableLayoutPanel1.Size = new Size(376, 42);
-            tableLayoutPanel1.TabIndex = 4;
+            this.tableLayoutPanel1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.tableLayoutPanel1.ColumnCount = 2;
+            this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+            this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+            this.tableLayoutPanel1.Controls.Add(this.btnApprove, 0, 0);
+            this.tableLayoutPanel1.Controls.Add(this.btnDeny, 1, 0);
+            this.tableLayoutPanel1.Location = new System.Drawing.Point(14, 262);
+            this.tableLayoutPanel1.Name = "tableLayoutPanel1";
+            this.tableLayoutPanel1.RowCount = 1;
+            this.tableLayoutPanel1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 50F));
+            this.tableLayoutPanel1.Size = new System.Drawing.Size(430, 45);
+            this.tableLayoutPanel1.TabIndex = 4;
+            // 
+            // header
+            // 
+            this.header.AutoSize = true;
+            this.header.BackColor = System.Drawing.SystemColors.ActiveCaption;
+            this.header.Dock = System.Windows.Forms.DockStyle.Top;
+            this.header.Location = new System.Drawing.Point(0, 0);
+            this.header.Name = "header";
+            this.header.Size = new System.Drawing.Size(457, 63);
+            this.header.Subtitle = "Do you want to allow this application to make changes to your computer?";
+            this.header.TabIndex = 3;
+            // 
+            // appView
+            // 
+            this.appView.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.appView.ExePath = "C:\\Windows\\System32\\cmd.exe";
+            this.appView.Location = new System.Drawing.Point(48, 96);
+            this.appView.Name = "appView";
+            this.appView.Size = new System.Drawing.Size(361, 128);
+            this.appView.TabIndex = 2;
             // 
             // FrmConsent
             // 
-            AcceptButton = btnDeny;
-            AutoScaleDimensions = new SizeF(7F, 15F);
-            AutoScaleMode = AutoScaleMode.Font;
-            CancelButton = btnDeny;
-            ClientSize = new Size(400, 300);
-            Controls.Add(tableLayoutPanel1);
-            Controls.Add(header);
-            Controls.Add(appView);
-            FormBorderStyle = FormBorderStyle.None;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            Name = "FrmConsent";
-            StartPosition = FormStartPosition.CenterScreen;
-            Text = "ConsentForm";
-            TopMost = true;
-            tableLayoutPanel1.ResumeLayout(false);
-            ResumeLayout(false);
+            this.AcceptButton = this.btnDeny;
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.CancelButton = this.btnDeny;
+            this.ClientSize = new System.Drawing.Size(457, 320);
+            this.Controls.Add(this.tableLayoutPanel1);
+            this.Controls.Add(this.header);
+            this.Controls.Add(this.appView);
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+            this.Name = "FrmConsent";
+            this.ShowIcon = false;
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            this.Text = "Devolutions PEDM";
+            this.TopMost = true;
+            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.FrmConsent_FormClosed);
+            this.tableLayoutPanel1.ResumeLayout(false);
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
         }
 
         #endregion

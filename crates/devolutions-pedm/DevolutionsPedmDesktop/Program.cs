@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 
@@ -31,7 +29,7 @@ namespace DevolutionsPedmDesktop
 
             if (nullByteIdx >= 0)
             {
-                desktopName = desktopName[..nullByteIdx];
+                desktopName = desktopName.Substring(0, nullByteIdx);
             }
 
             return desktopName;
@@ -56,7 +54,10 @@ namespace DevolutionsPedmDesktop
                 var screens = Screen.AllScreens;
                 foreach (var screen in screens)
                 {
-                    var backgroundForm = new FrmBackground(screen, new Bitmap(wallpaper, screen.Bounds.Size));
+                    var backgroundForm = new FrmBackground(screen)
+                    {
+                        Background = new Bitmap(wallpaper, screen.Bounds.Size)
+                    };
 
                     backgroundForm.GotFocus += (sender, args) =>
                     {
@@ -94,6 +95,8 @@ namespace DevolutionsPedmDesktop
         [STAThread]
         public static void Main(string[] args)
         {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
             WinAPI.SetProcessDpiAwareness(WinAPI.ProcessDPIAwareness.ProcessPerMonitorDPIAware);
 
             AppDomain.CurrentDomain.UnhandledException += (sender, eventArgs) =>
@@ -109,8 +112,6 @@ namespace DevolutionsPedmDesktop
             var sid = new SecurityIdentifier(args[0]);
             var verb = args[1];
             var cmdArgs = args.Skip(2).ToArray();
-
-            ApplicationConfiguration.Initialize();
 
             Form? mainForm = null;
             switch (verb)
@@ -134,7 +135,6 @@ namespace DevolutionsPedmDesktop
             }
 
             SetupSecureDesktop(sid, mainForm);
-
             Application.Run(mainForm);
         }
     }

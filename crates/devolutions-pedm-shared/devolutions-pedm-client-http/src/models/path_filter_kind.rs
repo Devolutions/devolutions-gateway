@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -22,12 +23,12 @@ pub enum PathFilterKind {
 
 }
 
-impl ToString for PathFilterKind {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for PathFilterKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Equals => String::from("Equals"),
-            Self::FileName => String::from("FileName"),
-            Self::Wildcard => String::from("Wildcard"),
+            Self::Equals => write!(f, "Equals"),
+            Self::FileName => write!(f, "FileName"),
+            Self::Wildcard => write!(f, "Wildcard"),
         }
     }
 }

@@ -1,6 +1,6 @@
 ﻿using System.IO.Pipes;
-using System.Net.Http.Json;
-using Devolutions.Pedm.Client;
+using System.Text;
+using System.Net.Http;
 using Devolutions.Pedm.Client.Api;
 
 namespace DevolutionsPedmDesktop
@@ -9,7 +9,7 @@ namespace DevolutionsPedmDesktop
     {
         public static DefaultApi Get()
         {
-            var httpHandler = new SocketsHttpHandler
+            var httpHandler = new StandardSocketsHttpHandler
             {
                 ConnectCallback = async(ctx, ct) => {
                     var pipe = new NamedPipeClientStream(".", "DevolutionsPEDM", PipeDirection.InOut);

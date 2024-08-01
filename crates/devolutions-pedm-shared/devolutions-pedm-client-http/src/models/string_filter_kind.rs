@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -26,14 +27,14 @@ pub enum StringFilterKind {
 
 }
 
-impl ToString for StringFilterKind {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for StringFilterKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Equals => String::from("Equals"),
-            Self::Regex => String::from("Regex"),
-            Self::StartsWith => String::from("StartsWith"),
-            Self::EndsWith => String::from("EndsWith"),
-            Self::Contains => String::from("Contains"),
+            Self::Equals => write!(f, "Equals"),
+            Self::Regex => write!(f, "Regex"),
+            Self::StartsWith => write!(f, "StartsWith"),
+            Self::EndsWith => write!(f, "EndsWith"),
+            Self::Contains => write!(f, "Contains"),
         }
     }
 }

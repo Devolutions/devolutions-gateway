@@ -239,7 +239,7 @@ pub mod dto {
             }
         }
     }
-    
+
     #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
     #[serde(rename_all = "PascalCase")]
     pub struct PedmConf {
@@ -249,9 +249,7 @@ pub mod dto {
 
     impl Default for PedmConf {
         fn default() -> Self {
-            Self {
-                enabled: false
-            }
+            Self { enabled: false }
         }
     }
 

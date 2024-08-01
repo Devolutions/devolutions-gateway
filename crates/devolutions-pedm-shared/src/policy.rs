@@ -151,21 +151,18 @@ where
 {
     fn is_match(&self, base: &T) -> bool {
         let base = fs::canonicalize(PathBuf::from(base));
+        let data = self.data.canonicalize();
 
-        if base.is_err() {
-            return false;
-        }
-
-        let base = base.unwrap();
-
-        match &self.kind {
-            PathFilterKind::Equals => self.data == base,
-            PathFilterKind::FileName => self.data.file_name().as_deref() == base.file_name().as_deref(),
-            PathFilterKind::Wildcard => self
-                .data
-                .as_os_str()
-                .to_str()
-                .is_some_and(|x| glob::Pattern::new(x).is_ok_and(|p| p.matches_path(&base))),
+        match (base, data) {
+            (Ok(base), Ok(data)) => match &self.kind {
+                PathFilterKind::Equals => data == base,
+                PathFilterKind::FileName => data.file_name().as_deref() == base.file_name().as_deref(),
+                PathFilterKind::Wildcard => data
+                    .as_os_str()
+                    .to_str()
+                    .is_some_and(|x| glob::Pattern::new(x).is_ok_and(|p| p.matches_path(&base))),
+            },
+            (_, _) => false,
         }
     }
 }
@@ -204,7 +201,7 @@ pub struct User {
 #[serde(rename_all = "PascalCase")]
 pub struct Application {
     pub path: PathBuf,
-    pub command_line: String,
+    pub command_line: Vec<String>,
     pub working_directory: PathBuf,
     pub signature: Signature,
     pub hash: Hash,
@@ -215,7 +212,7 @@ pub struct Application {
 #[serde(rename_all = "PascalCase")]
 pub struct ApplicationFilter {
     pub path: PathFilter,
-    pub command_line: Option<StringFilter>,
+    pub command_line: Option<Vec<StringFilter>>,
     pub working_directory: Option<PathFilter>,
     pub signature: Option<SignatureFilter>,
     pub hashes: Option<Vec<HashFilter>>,
@@ -228,8 +225,18 @@ impl Filter<Application> for ApplicationFilter {
             None => true,
         };
 
+        let command_line_match = if let Some(command_line) = &self.command_line {
+            command_line.len() == base.command_line.len()
+                && command_line
+                    .iter()
+                    .zip(base.command_line.iter())
+                    .all(|(x, y)| x.is_match(y))
+        } else {
+            true
+        };
+
         self.path.is_match(&base.path)
-            && is_option_match(self.command_line.as_ref(), Some(&base.command_line))
+            && command_line_match
             && is_option_match(self.working_directory.as_ref(), Some(&base.working_directory))
             && is_option_match(self.signature.as_ref(), Some(&base.signature))
             && hashes_match

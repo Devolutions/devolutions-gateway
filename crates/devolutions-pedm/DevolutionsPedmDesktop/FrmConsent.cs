@@ -34,5 +34,12 @@ namespace DevolutionsPedmDesktop
 
             _pipe?.Dispose();
         }
+
+        private void FrmConsent_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            _pipe.WriteByte(0);
+            _pipe.Flush();
+            Close();
+        }
     }
 }

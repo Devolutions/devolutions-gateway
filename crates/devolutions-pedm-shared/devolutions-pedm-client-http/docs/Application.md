@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**command_line** | **String** |  | 
+**command_line** | **Vec<String>** |  | 
 **hash** | [**models::Hash**](Hash.md) |  | 
 **path** | **String** |  | 
 **signature** | [**models::Signature**](Signature.md) |  | 

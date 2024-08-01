@@ -4,21 +4,22 @@ use devolutions_pedm_shared::policy::{
     Application, Certificate, Configuration, ElevationRequest, Filter, Id, Identifiable, Profile, Rule, Signature,
     Signer, User,
 };
+use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     collections::HashMap,
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
-    sync::{OnceLock, RwLock},
+    sync::OnceLock,
 };
 use tracing::{error, warn};
 use win_api_wrappers::{
     raw::Win32::{
-        Security::{WinBuiltinIUsersSid, TOKEN_QUERY},
+        Security::{WinBuiltinUsersSid, TOKEN_QUERY},
         System::Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
     },
-    win::{authenticode_status, CryptProviderCertificate, Process, Sid, SignerInfo},
+    win::{authenticode_status, CommandLine, CryptProviderCertificate, Process, Sid, SignerInfo},
 };
 
 use anyhow::{anyhow, bail, Result};
@@ -157,7 +158,7 @@ impl Policy {
 
         ensure_protected_directory(
             config::data_dir().as_std_path(),
-            vec![Sid::from_well_known(WinBuiltinIUsersSid, None)?],
+            vec![Sid::from_well_known(WinBuiltinUsersSid, None)?],
         )?;
 
         ensure_protected_directory(policy_path().as_std_path(), vec![])?;
@@ -457,7 +458,7 @@ pub fn policy() -> &'static RwLock<Policy> {
         RwLock::new(
             Policy::new()
                 .map_err(|error| error!(%error, "Failed to load policy"))
-                .unwrap(),
+                .expect("Failed to load policy"),
         )
     })
 }
@@ -490,7 +491,7 @@ pub fn load_signature(path: &Path) -> Result<Signature> {
 
 pub fn application_from_path(
     path: PathBuf,
-    command_line: String,
+    command_line: CommandLine,
     working_directory: PathBuf,
     user: User,
 ) -> Result<Application> {
@@ -499,7 +500,7 @@ pub fn application_from_path(
 
     Ok(Application {
         path,
-        command_line,
+        command_line: command_line.0,
         working_directory,
         signature,
         hash,
@@ -512,7 +513,7 @@ pub fn application_from_process(pid: u32) -> Result<Application> {
 
     let path = process.exe_path()?;
 
-    let proc_params = unsafe { process.peb()?.user_process_parameters() }?;
+    let proc_params = process.peb()?.user_process_parameters()?;
 
     let user = process
         .token(TOKEN_QUERY)?

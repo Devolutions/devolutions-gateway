@@ -17,7 +17,7 @@ async fn get_profiles(Extension(named_pipe_info): Extension<NamedPipeConnectInfo
         return Err(Error::AccessDenied);
     }
 
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     Ok(Json(policy.profiles().map(|p| p.id.clone()).collect()))
 }
@@ -30,7 +30,7 @@ async fn post_profiles(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.add_profile(profile)?;
 
@@ -41,7 +41,7 @@ async fn get_profiles_id(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Path(id): Path<PathIdParameter>,
 ) -> Result<Json<Profile>, Error> {
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     let profile = if named_pipe_info.token.is_elevated()? {
         policy.profile(&id.id).ok_or_else(|| Error::NotFound)?
@@ -63,7 +63,7 @@ async fn put_profiles_id(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.replace_profile(&id.id, profile)?;
 
@@ -78,7 +78,7 @@ async fn delete_profiles_id(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.remove_profile(&id.id)?;
 
@@ -107,7 +107,7 @@ async fn get_me(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
 ) -> Result<Json<GetProfilesMeResponse>, Error> {
     info!(user = ?named_pipe_info.user, "Querying profiles for user");
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     Ok(Json(GetProfilesMeResponse {
         active: policy.user_current_profile(&named_pipe_info.user).map(|p| p.id.clone()),
@@ -123,7 +123,7 @@ async fn put_me(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Json(id): Json<OptionalId>,
 ) -> Result<(), Error> {
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.set_user_current_profile(named_pipe_info.user.clone(), id.id)?;
 
@@ -135,7 +135,7 @@ async fn get_rules(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) 
         return Err(Error::AccessDenied);
     }
 
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     Ok(Json(policy.rules().map(|x| x.id.clone()).collect()))
 }
@@ -144,7 +144,7 @@ async fn get_rules_id(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Path(id): Path<PathIdParameter>,
 ) -> Result<Json<Rule>, Error> {
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     // If we are not elevated, check that user has access to rule.
     if !named_pipe_info.token.is_elevated()? {
@@ -169,7 +169,7 @@ async fn put_rules_id(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.replace_rule(&id.id, rule)?;
 
@@ -184,7 +184,7 @@ async fn delete_rules_id(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.remove_rule(&id.id)?;
 
@@ -199,7 +199,7 @@ async fn post_rules(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.add_rule(rule)?;
 
@@ -220,7 +220,7 @@ async fn get_assignments(
         return Err(Error::AccessDenied);
     }
 
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     let assignments = policy
         .assignments()
@@ -247,7 +247,7 @@ async fn put_assignments_id(
         return Err(Error::AccessDenied);
     }
 
-    let mut policy = policy::policy().write().unwrap();
+    let mut policy = policy::policy().write();
 
     policy.set_assignments(id.id, users)?;
 

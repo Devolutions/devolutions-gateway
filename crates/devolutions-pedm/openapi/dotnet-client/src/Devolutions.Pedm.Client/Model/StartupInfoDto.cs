@@ -177,66 +177,66 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             // FillAttribute (int) minimum
             if (this.FillAttribute < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for FillAttribute, must be a value greater than or equal to 0.", new [] { "FillAttribute" });
+                yield return new ValidationResult("Invalid value for FillAttribute, must be a value greater than or equal to 0.", new [] { "FillAttribute" });
             }
 
             // Flags (int) minimum
             if (this.Flags < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for Flags, must be a value greater than or equal to 0.", new [] { "Flags" });
+                yield return new ValidationResult("Invalid value for Flags, must be a value greater than or equal to 0.", new [] { "Flags" });
             }
 
             // ParentPid (int) minimum
             if (this.ParentPid < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for ParentPid, must be a value greater than or equal to 0.", new [] { "ParentPid" });
+                yield return new ValidationResult("Invalid value for ParentPid, must be a value greater than or equal to 0.", new [] { "ParentPid" });
             }
 
             // ShowWindow (int) minimum
             if (this.ShowWindow < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for ShowWindow, must be a value greater than or equal to 0.", new [] { "ShowWindow" });
+                yield return new ValidationResult("Invalid value for ShowWindow, must be a value greater than or equal to 0.", new [] { "ShowWindow" });
             }
 
             // X (int) minimum
             if (this.X < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for X, must be a value greater than or equal to 0.", new [] { "X" });
+                yield return new ValidationResult("Invalid value for X, must be a value greater than or equal to 0.", new [] { "X" });
             }
 
             // XCountChars (int) minimum
             if (this.XCountChars < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for XCountChars, must be a value greater than or equal to 0.", new [] { "XCountChars" });
+                yield return new ValidationResult("Invalid value for XCountChars, must be a value greater than or equal to 0.", new [] { "XCountChars" });
             }
 
             // XSize (int) minimum
             if (this.XSize < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for XSize, must be a value greater than or equal to 0.", new [] { "XSize" });
+                yield return new ValidationResult("Invalid value for XSize, must be a value greater than or equal to 0.", new [] { "XSize" });
             }
 
             // Y (int) minimum
             if (this.Y < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for Y, must be a value greater than or equal to 0.", new [] { "Y" });
+                yield return new ValidationResult("Invalid value for Y, must be a value greater than or equal to 0.", new [] { "Y" });
             }
 
             // YCountChars (int) minimum
             if (this.YCountChars < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for YCountChars, must be a value greater than or equal to 0.", new [] { "YCountChars" });
+                yield return new ValidationResult("Invalid value for YCountChars, must be a value greater than or equal to 0.", new [] { "YCountChars" });
             }
 
             // YSize (int) minimum
             if (this.YSize < (int)0)
             {
-                yield return new System.ComponentModel.DataAnnotations.ValidationResult("Invalid value for YSize, must be a value greater than or equal to 0.", new [] { "YSize" });
+                yield return new ValidationResult("Invalid value for YSize, must be a value greater than or equal to 0.", new [] { "YSize" });
             }
 
             yield break;

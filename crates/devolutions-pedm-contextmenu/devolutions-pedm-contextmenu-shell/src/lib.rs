@@ -29,7 +29,7 @@ use win_api_wrappers::{
                 Diagnostics::ToolHelp::TH32CS_SNAPPROCESS,
                 Ole::{IObjectWithSite, IObjectWithSite_Impl},
                 SystemServices::{DLL_PROCESS_ATTACH, DLL_PROCESS_DETACH},
-                Threading::PROCESS_QUERY_INFORMATION,
+                Threading::{PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
             },
             UI::Shell::{
                 IEnumExplorerCommand, IExplorerCommand, IExplorerCommand_Impl, IShellItemArray, SHStrDupW, ECF_DEFAULT,
@@ -136,14 +136,22 @@ fn find_main_explorer(session: u32) -> Option<u32> {
     let snapshot = Snapshot::new(TH32CS_SNAPPROCESS, None).ok()?;
 
     snapshot.process_ids().find_map(|pid| {
-        let proc = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION).ok()?;
+        let proc = Process::try_get_by_pid(pid, PROCESS_QUERY_INFORMATION | PROCESS_VM_READ).ok()?;
 
-        if !proc
+        if !(proc
             .exe_path()
             .ok()?
             .file_name()
             .is_some_and(|n| n.eq_ignore_ascii_case("explorer.exe"))
-            || proc.token(TOKEN_QUERY).ok()?.session_id().ok()? != session
+            && proc.token(TOKEN_QUERY).ok()?.session_id().ok()? == session
+            && proc
+                .peb()
+                .ok()?
+                .user_process_parameters()
+                .ok()?
+                .command_line
+                .to_command_line()
+                .eq_ignore_ascii_case("C:\\Windows\\Explorer.EXE"))
         {
             return None;
         }

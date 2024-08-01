@@ -9,11 +9,12 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
     #[serde(rename = "CommandLine")]
-    pub command_line: String,
+    pub command_line: Vec<String>,
     #[serde(rename = "Hash")]
     pub hash: models::Hash,
     #[serde(rename = "Path")]
@@ -27,7 +28,7 @@ pub struct Application {
 }
 
 impl Application {
-    pub fn new(command_line: String, hash: models::Hash, path: String, signature: models::Signature, user: models::User, working_directory: String) -> Application {
+    pub fn new(command_line: Vec<String>, hash: models::Hash, path: String, signature: models::Signature, user: models::User, working_directory: String) -> Application {
         Application {
             command_line,
             hash,

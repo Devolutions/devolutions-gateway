@@ -10,8 +10,8 @@ use win_api_wrappers::raw::Win32::Foundation::{GENERIC_ALL, GENERIC_READ};
 use win_api_wrappers::raw::Win32::Security::Authorization::SE_FILE_OBJECT;
 use win_api_wrappers::raw::Win32::Security::{WinLocalSystemSid, OBJECT_INHERIT_ACE};
 use win_api_wrappers::win::{
-    create_directory, set_named_security_info, Account, Ace, AceType, Acl, InheritableAcl, InheritableAclKind,
-    SecurityAttributes, SecurityDescriptor, Sid,
+    create_directory, set_named_security_info, Account, Ace, AceType, Acl, CommandLine, InheritableAcl,
+    InheritableAclKind, SecurityAttributes, SecurityDescriptor, Sid,
 };
 use win_api_wrappers::{
     raw::Win32::System::Threading::PROCESS_CREATION_FLAGS,
@@ -23,7 +23,7 @@ use anyhow::Result;
 pub fn start_process(
     token: &Token,
     executable_path: Option<&Path>,
-    command_line: Option<&str>,
+    command_line: Option<&CommandLine>,
     inherit_handles: bool,
     creation_flags: PROCESS_CREATION_FLAGS,
     environment: Option<&HashMap<String, String>>,

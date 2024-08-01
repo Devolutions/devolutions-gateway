@@ -374,7 +374,9 @@ components:
       example:
         Path: Path
         WorkingDirectory: WorkingDirectory
-        CommandLine: CommandLine
+        CommandLine:
+        - CommandLine
+        - CommandLine
         User:
           DomainSid: DomainSid
           DomainName: DomainName
@@ -383,7 +385,7 @@ components:
         Signature:
           Signer:
             Issuer: Issuer
-          Status: null
+          Status: Valid
           Certificates:
           - Base64: Base64
             SerialNumber: SerialNumber
@@ -410,7 +412,9 @@ components:
           Sha256: Sha256
       properties:
         CommandLine:
-          type: string
+          items:
+            type: string
+          type: array
         Hash:
           $ref: '#/components/schemas/Hash'
         Path:
@@ -431,13 +435,15 @@ components:
     ApplicationFilter:
       example:
         Path:
-          Kind: null
+          Kind: Equals
           Data: Data
         WorkingDirectory:
-          Kind: null
+          Kind: Equals
           Data: Data
         CommandLine:
-          Kind: null
+        - Kind: Equals
+          Data: Data
+        - Kind: Equals
           Data: Data
         Hashes:
         - Sha1: Sha1
@@ -448,7 +454,10 @@ components:
           CheckAuthenticode: true
       properties:
         CommandLine:
-          $ref: '#/components/schemas/StringFilter'
+          items:
+            $ref: '#/components/schemas/StringFilter'
+          type: array
+          nullable: true
         Hashes:
           items:
             $ref: '#/components/schemas/HashFilter'
@@ -475,7 +484,7 @@ components:
           AccountName: AccountName
         Profile:
           PromptSecureDesktop: true
-          DefaultElevationKind: null
+          DefaultElevationKind: AutoApprove
           Id: Id
           ElevationSettings:
             Temporary:
@@ -483,7 +492,7 @@ components:
               Enabled: true
             Session:
               Enabled: true
-          ElevationMethod: null
+          ElevationMethod: LocalAdmin
           Rules:
           - null
           - null
@@ -583,7 +592,9 @@ components:
         Target:
           Path: Path
           WorkingDirectory: WorkingDirectory
-          CommandLine: CommandLine
+          CommandLine:
+          - CommandLine
+          - CommandLine
           User:
             DomainSid: DomainSid
             DomainName: DomainName
@@ -592,7 +603,7 @@ components:
           Signature:
             Signer:
               Issuer: Issuer
-            Status: null
+            Status: Valid
             Certificates:
             - Base64: Base64
               SerialNumber: SerialNumber
@@ -621,7 +632,9 @@ components:
         Asker:
           Path: Path
           WorkingDirectory: WorkingDirectory
-          CommandLine: CommandLine
+          CommandLine:
+          - CommandLine
+          - CommandLine
           User:
             DomainSid: DomainSid
             DomainName: DomainName
@@ -630,7 +643,7 @@ components:
           Signature:
             Signer:
               Issuer: Issuer
-            Status: null
+            Status: Valid
             Certificates:
             - Base64: Base64
               SerialNumber: SerialNumber
@@ -674,7 +687,9 @@ components:
           Target:
             Path: Path
             WorkingDirectory: WorkingDirectory
-            CommandLine: CommandLine
+            CommandLine:
+            - CommandLine
+            - CommandLine
             User:
               DomainSid: DomainSid
               DomainName: DomainName
@@ -683,7 +698,7 @@ components:
             Signature:
               Signer:
                 Issuer: Issuer
-              Status: null
+              Status: Valid
               Certificates:
               - Base64: Base64
                 SerialNumber: SerialNumber
@@ -712,7 +727,9 @@ components:
           Asker:
             Path: Path
             WorkingDirectory: WorkingDirectory
-            CommandLine: CommandLine
+            CommandLine:
+            - CommandLine
+            - CommandLine
             User:
               DomainSid: DomainSid
               DomainName: DomainName
@@ -721,7 +738,7 @@ components:
             Signature:
               Signer:
                 Issuer: Issuer
-              Status: null
+              Status: Valid
               Certificates:
               - Base64: Base64
                 SerialNumber: SerialNumber
@@ -765,7 +782,7 @@ components:
       type: string
     ErrorResponse:
       example:
-        Kind: null
+        Kind: AccessDenied
         Win32Error: 0
       properties:
         Kind:
@@ -878,7 +895,7 @@ components:
           type: string
     PathFilter:
       example:
-        Kind: null
+        Kind: Equals
         Data: Data
       properties:
         Data:
@@ -903,7 +920,7 @@ components:
     Profile:
       example:
         PromptSecureDesktop: true
-        DefaultElevationKind: null
+        DefaultElevationKind: AutoApprove
         Id: Id
         ElevationSettings:
           Temporary:
@@ -911,7 +928,7 @@ components:
             Enabled: true
           Session:
             Enabled: true
-        ElevationMethod: null
+        ElevationMethod: LocalAdmin
         Rules:
         - null
         - null
@@ -940,13 +957,15 @@ components:
       example:
         Target:
           Path:
-            Kind: null
+            Kind: Equals
             Data: Data
           WorkingDirectory:
-            Kind: null
+            Kind: Equals
             Data: Data
           CommandLine:
-            Kind: null
+          - Kind: Equals
+            Data: Data
+          - Kind: Equals
             Data: Data
           Hashes:
           - Sha1: Sha1
@@ -955,17 +974,19 @@ components:
             Sha256: Sha256
           Signature:
             CheckAuthenticode: true
-        ElevationKind: null
+        ElevationKind: AutoApprove
         Id: Id
         Asker:
           Path:
-            Kind: null
+            Kind: Equals
             Data: Data
           WorkingDirectory:
-            Kind: null
+            Kind: Equals
             Data: Data
           CommandLine:
-            Kind: null
+          - Kind: Equals
+            Data: Data
+          - Kind: Equals
             Data: Data
           Hashes:
           - Sha1: Sha1
@@ -1011,7 +1032,7 @@ components:
       example:
         Signer:
           Issuer: Issuer
-        Status: null
+        Status: Valid
         Certificates:
         - Base64: Base64
           SerialNumber: SerialNumber
@@ -1155,7 +1176,7 @@ components:
       - Temporary
     StringFilter:
       example:
-        Kind: null
+        Kind: Equals
         Data: Data
       properties:
         Data:

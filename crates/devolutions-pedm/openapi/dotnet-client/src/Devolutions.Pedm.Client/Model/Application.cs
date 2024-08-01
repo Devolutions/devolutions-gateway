@@ -45,7 +45,7 @@ namespace Devolutions.Pedm.Client.Model
         /// <param name="signature">signature (required).</param>
         /// <param name="user">user (required).</param>
         /// <param name="workingDirectory">workingDirectory (required).</param>
-        public Application(string commandLine = default(string), Hash hash = default(Hash), string path = default(string), Signature signature = default(Signature), User user = default(User), string workingDirectory = default(string))
+        public Application(List<string> commandLine = default(List<string>), Hash hash = default(Hash), string path = default(string), Signature signature = default(Signature), User user = default(User), string workingDirectory = default(string))
         {
             // to ensure "commandLine" is required (not null)
             if (commandLine == null)
@@ -89,7 +89,7 @@ namespace Devolutions.Pedm.Client.Model
         /// Gets or Sets CommandLine
         /// </summary>
         [DataMember(Name = "CommandLine", IsRequired = true, EmitDefaultValue = true)]
-        public string CommandLine { get; set; }
+        public List<string> CommandLine { get; set; }
 
         /// <summary>
         /// Gets or Sets Hash
@@ -153,7 +153,7 @@ namespace Devolutions.Pedm.Client.Model
         /// </summary>
         /// <param name="validationContext">Validation context</param>
         /// <returns>Validation Result</returns>
-        IEnumerable<System.ComponentModel.DataAnnotations.ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
+        IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
             yield break;
         }

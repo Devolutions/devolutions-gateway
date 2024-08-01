@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**command_line** | Option<[**models::StringFilter**](StringFilter.md)> |  | [optional]
+**command_line** | Option<[**Vec<models::StringFilter>**](StringFilter.md)> |  | [optional]
 **hashes** | Option<[**Vec<models::HashFilter>**](HashFilter.md)> |  | [optional]
 **path** | [**models::PathFilter**](PathFilter.md) |  | 
 **signature** | Option<[**models::SignatureFilter**](SignatureFilter.md)> |  | [optional]

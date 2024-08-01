@@ -28,42 +28,31 @@
         /// </summary>
         private void InitializeComponent()
         {
-            imageFill = new ImageFill();
-            SuspendLayout();
-            // 
-            // imageFill
-            // 
-            imageFill.Dock = DockStyle.Fill;
-            imageFill.Image = null;
-            imageFill.Location = new Point(0, 0);
-            imageFill.Name = "imageFill";
-            imageFill.Size = new Size(460, 375);
-            imageFill.TabIndex = 0;
-            imageFill.Text = "imageFill1";
+            this.SuspendLayout();
             // 
             // FrmBackground
             // 
-            AutoScaleMode = AutoScaleMode.None;
-            BackColor = SystemColors.Desktop;
-            BackgroundImageLayout = ImageLayout.None;
-            ClientSize = new Size(460, 375);
-            ControlBox = false;
-            Controls.Add(imageFill);
-            DoubleBuffered = true;
-            Enabled = false;
-            FormBorderStyle = FormBorderStyle.None;
-            MinimizeBox = false;
-            Name = "FrmBackground";
-            ShowIcon = false;
-            ShowInTaskbar = false;
-            StartPosition = FormStartPosition.CenterScreen;
-            Text = "FrmBackground";
-            WindowState = FormWindowState.Maximized;
-            ResumeLayout(false);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.None;
+            this.BackColor = System.Drawing.SystemColors.Desktop;
+            this.BackgroundImageLayout = System.Windows.Forms.ImageLayout.None;
+            this.ClientSize = new System.Drawing.Size(744, 343);
+            this.ControlBox = false;
+            this.DoubleBuffered = true;
+            this.Enabled = false;
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+            this.MinimizeBox = false;
+            this.Name = "FrmBackground";
+            this.ShowIcon = false;
+            this.ShowInTaskbar = false;
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            this.Text = "FrmBackground";
+            this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
+            this.Load += new System.EventHandler(this.FrmBackground_Load);
+            this.Resize += new System.EventHandler(this.FrmBackground_Resize);
+            this.ResumeLayout(false);
+
         }
 
         #endregion
-
-        private ImageFill imageFill;
     }
 }

@@ -5,7 +5,6 @@ using System.Data;
 using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
-using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -25,7 +24,7 @@ namespace DevolutionsPedmDesktop
 
                 if (value.Length <= 0) return;
 
-                imgIcon.Image = Icon.ExtractIcon(value, 0)?.ToBitmap();
+                imgIcon.Image = Icon.ExtractAssociatedIcon(value)?.ToBitmap();
 
                 var info = FileVersionInfo.GetVersionInfo(value);
                 lblApplication.Text = info.FileDescription;

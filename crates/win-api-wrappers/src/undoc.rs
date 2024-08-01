@@ -328,3 +328,101 @@ pub struct RTL_USER_PROCESS_PARAMETERS {
     pub ShellInfo: UNICODE_STRING,
     pub RuntimeData: UNICODE_STRING,
 }
+#[repr(transparent)]
+#[derive(PartialEq, Eq, Copy, Clone, Default, Debug)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L165.
+/// It is a `u16` because of its usage in `TOKEN_SECURITY_ATTRIBUTE_V1`.
+pub struct TOKEN_SECURITY_ATTRIBUTE_TYPE(pub u16);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_INVALID: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(0);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_INT64: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(1);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(2);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(3);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_FQBN: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(4);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_SID: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(5);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_BOOLEAN: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(6);
+pub const TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING: TOKEN_SECURITY_ATTRIBUTE_TYPE = TOKEN_SECURITY_ATTRIBUTE_TYPE(16);
+
+#[repr(transparent)]
+#[derive(PartialEq, Eq, Copy, Clone, Default, Debug)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L176.
+/// It is a `u32` because of its usage in `TOKEN_SECURITY_ATTRIBUTE_V1`.
+pub struct TOKEN_SECURITY_ATTRIBUTE_FLAG(pub u32);
+pub const TOKEN_SECURITY_ATTRIBUTE_NON_INHERITABLE: TOKEN_SECURITY_ATTRIBUTE_FLAG = TOKEN_SECURITY_ATTRIBUTE_FLAG(1);
+pub const TOKEN_SECURITY_ATTRIBUTE_VALUE_CASE_SENSITIVE: TOKEN_SECURITY_ATTRIBUTE_FLAG =
+    TOKEN_SECURITY_ATTRIBUTE_FLAG(2);
+pub const TOKEN_SECURITY_ATTRIBUTE_USE_FOR_DENY_ONLY: TOKEN_SECURITY_ATTRIBUTE_FLAG = TOKEN_SECURITY_ATTRIBUTE_FLAG(4);
+pub const TOKEN_SECURITY_ATTRIBUTE_DISABLED_BY_DEFAULT: TOKEN_SECURITY_ATTRIBUTE_FLAG =
+    TOKEN_SECURITY_ATTRIBUTE_FLAG(8);
+pub const TOKEN_SECURITY_ATTRIBUTE_DISABLED: TOKEN_SECURITY_ATTRIBUTE_FLAG = TOKEN_SECURITY_ATTRIBUTE_FLAG(16);
+pub const TOKEN_SECURITY_ATTRIBUTE_MANDATORY: TOKEN_SECURITY_ATTRIBUTE_FLAG = TOKEN_SECURITY_ATTRIBUTE_FLAG(32);
+pub const TOKEN_SECURITY_ATTRIBUTE_COMPARE_IGNORE: TOKEN_SECURITY_ATTRIBUTE_FLAG = TOKEN_SECURITY_ATTRIBUTE_FLAG(64);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L197.
+pub struct TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE {
+    pub Version: u64,
+    pub Name: UNICODE_STRING,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L204.
+pub struct TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE {
+    pub pValue: *const u8,
+    pub ValueLength: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L211.
+pub union TOKEN_SECURITY_ATTRIBUTE_V1_VALUE {
+    pub pGeneric: *const c_void,
+    pub pInt64: *const i64,
+    pub pUint64: *const u64,
+    pub pString: *const UNICODE_STRING,
+    pub pFqbn: *const TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE,
+    pub pOctetString: *const TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L211.
+pub struct TOKEN_SECURITY_ATTRIBUTE_V1 {
+    pub Name: UNICODE_STRING,
+    pub ValueType: TOKEN_SECURITY_ATTRIBUTE_TYPE,
+    pub Reserved: u16,
+    pub Flags: TOKEN_SECURITY_ATTRIBUTE_FLAG,
+    pub ValueCount: u32,
+    pub Values: TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
+}
+
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L229.
+pub const TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1: u16 = 1;
+
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L231.
+pub const TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION: u16 = TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Based on https://github.com/winsiderss/systeminformer/blob/7ad69bf13d31892a89be7230bdbd47ffde024a2b/phnt/include/ntseapi.h#L234.
+pub struct TOKEN_SECURITY_ATTRIBUTES_INFORMATION {
+    pub Version: u16,
+    pub Reserved: u16,
+    pub AttributeCount: u32,
+    pub pAttributeV1: *const TOKEN_SECURITY_ATTRIBUTE_V1,
+}
+
+#[repr(C)]
+pub enum TOKEN_SECURITY_ATTRIBUTE_OPERATION {
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_NONE,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_REPLACE_ALL,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_ADD,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_DELETE,
+    TOKEN_SECURITY_ATTRIBUTE_OPERATION_REPLACE,
+}
+
+pub struct TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION {
+    pub Attributes: *const TOKEN_SECURITY_ATTRIBUTES_INFORMATION,
+    pub Operations: *const TOKEN_SECURITY_ATTRIBUTE_OPERATION,
+}

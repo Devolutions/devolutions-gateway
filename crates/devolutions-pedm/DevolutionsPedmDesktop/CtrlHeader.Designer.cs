@@ -28,44 +28,44 @@
         /// </summary>
         private void InitializeComponent()
         {
-            lblTitle = new Label();
-            lblSubtitle = new Label();
-            SuspendLayout();
+            this.lblTitle = new System.Windows.Forms.Label();
+            this.lblSubtitle = new System.Windows.Forms.Label();
+            this.SuspendLayout();
             // 
             // lblTitle
             // 
-            lblTitle.AutoSize = true;
-            lblTitle.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
-            lblTitle.Location = new Point(0, 0);
-            lblTitle.Name = "lblTitle";
-            lblTitle.Padding = new Padding(3, 4, 3, 4);
-            lblTitle.Size = new Size(145, 28);
-            lblTitle.TabIndex = 3;
-            lblTitle.Text = "Devolutions PEDM";
+            this.lblTitle.AutoSize = true;
+            this.lblTitle.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblTitle.Location = new System.Drawing.Point(0, 0);
+            this.lblTitle.Name = "lblTitle";
+            this.lblTitle.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.lblTitle.Size = new System.Drawing.Size(116, 21);
+            this.lblTitle.TabIndex = 3;
+            this.lblTitle.Text = "Devolutions PEDM";
             // 
             // lblSubtitle
             // 
-            lblSubtitle.AutoSize = true;
-            lblSubtitle.Font = new Font("Segoe UI", 12F, FontStyle.Regular, GraphicsUnit.Point, 0);
-            lblSubtitle.Location = new Point(0, 28);
-            lblSubtitle.MaximumSize = new Size(457, 133);
-            lblSubtitle.Name = "lblSubtitle";
-            lblSubtitle.Size = new Size(351, 28);
-            lblSubtitle.TabIndex = 4;
-            lblSubtitle.Text = "This is a test to see if the label will wrap";
+            this.lblSubtitle.AutoSize = true;
+            this.lblSubtitle.Font = new System.Drawing.Font("Segoe UI", 12F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.lblSubtitle.Location = new System.Drawing.Point(3, 21);
+            this.lblSubtitle.MaximumSize = new System.Drawing.Size(450, 106);
+            this.lblSubtitle.Name = "lblSubtitle";
+            this.lblSubtitle.Size = new System.Drawing.Size(282, 21);
+            this.lblSubtitle.TabIndex = 4;
+            this.lblSubtitle.Text = "This is a test to see if the label will wrap";
             // 
             // CtrlHeader
             // 
-            AutoScaleDimensions = new SizeF(8F, 20F);
-            AutoScaleMode = AutoScaleMode.Font;
-            AutoSize = true;
-            Controls.Add(lblSubtitle);
-            Controls.Add(lblTitle);
-            Margin = new Padding(3, 4, 3, 4);
-            Name = "CtrlHeader";
-            Size = new Size(457, 107);
-            ResumeLayout(false);
-            PerformLayout();
+            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoSize = true;
+            this.Controls.Add(this.lblSubtitle);
+            this.Controls.Add(this.lblTitle);
+            this.Name = "CtrlHeader";
+            this.Size = new System.Drawing.Size(457, 86);
+            this.ResumeLayout(false);
+            this.PerformLayout();
+
         }
 
         #endregion

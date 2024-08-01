@@ -7,10 +7,13 @@ use std::sync::OnceLock;
 use devolutions_pedm_shared::policy::{ElevationMethod, ElevationRequest, ElevationResult};
 use local_admin_elevator::LocalAdminElevator;
 use virtual_account_elevator::VirtualAccountElevator;
-use win_api_wrappers::win::environment_block;
+use win_api_wrappers::undoc::{TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_OPERATION};
+use win_api_wrappers::win::{
+    environment_block, CommandLine, TokenSecurityAttribute, TokenSecurityAttributeValues, WideString,
+};
 use win_api_wrappers::{
     raw::Win32::{Foundation::ERROR_INVALID_PARAMETER, System::Threading::PROCESS_CREATION_FLAGS},
-    win::{parse_command_line, ProcessInformation, StartupInfo, Token, TokenElevationType},
+    win::{ProcessInformation, StartupInfo, Token, TokenElevationType},
     Error,
 };
 
@@ -44,7 +47,7 @@ fn elevator(method: ElevationMethod) -> &'static dyn Elevator {
 fn elevate_token(token: &Token) -> Result<Token> {
     match token.elevation_type()? {
         TokenElevationType::Default => {
-            let policy = policy::policy().read().unwrap();
+            let policy = policy::policy().read();
             let elevation_method = policy
                 .user_current_profile(&token.sid_and_attributes()?.sid.account(None)?.to_user())
                 .ok_or_else(|| anyhow!("User not assigned"))?
@@ -60,7 +63,7 @@ fn validate_elevation(
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
-    command_line: Option<&str>,
+    command_line: Option<&CommandLine>,
     working_directory: Option<&Path>,
 ) -> Result<()> {
     let asker = policy::application_from_process(client_pid)?;
@@ -71,30 +74,28 @@ fn validate_elevation(
     let (executable_path, command_line) = match (executable_path, command_line) {
         (None, None) => Err(Error::from_win32(ERROR_INVALID_PARAMETER)),
         (None, Some(command_line)) => Ok::<_, Error>((
-            parse_command_line(command_line)?
+            command_line
+                .args()
                 .get(0)
                 .and_then(|x| PathBuf::from_str(x).ok())
                 .ok_or_else(|| Error::from_win32(ERROR_INVALID_PARAMETER))?,
-            command_line.to_owned(),
+            command_line.clone(),
         )),
         (Some(executable_path), None) => Ok((
             executable_path.to_owned(),
-            executable_path
+            CommandLine::new(vec![executable_path
                 .to_str()
                 .ok_or_else(|| Error::from_win32(ERROR_INVALID_PARAMETER))?
-                .to_owned(),
+                .to_owned()]),
         )),
-        (Some(executable_path), Some(command_line)) => Ok((executable_path.to_owned(), command_line.to_owned())),
+        (Some(executable_path), Some(command_line)) => Ok((executable_path.to_owned(), command_line.clone())),
     }?;
 
     let target = application_from_path(executable_path, command_line, working_directory, asker.user.clone())?;
 
     let req = ElevationRequest::new(asker, target);
 
-    let validation = policy::policy()
-        .read()
-        .unwrap()
-        .validate(client_token.session_id()?, &req);
+    let validation = policy::policy().read().validate(client_token.session_id()?, &req);
 
     log::log_elevation(&ElevationResult {
         request: req,
@@ -108,7 +109,7 @@ pub fn try_start_elevated(
     client_token: &Token,
     client_pid: u32,
     executable_path: Option<&Path>,
-    command_line: Option<&str>,
+    command_line: Option<&CommandLine>,
     creation_flags: PROCESS_CREATION_FLAGS,
     current_directory: Option<&Path>,
     startup_info: &mut StartupInfo,
@@ -121,13 +122,24 @@ pub fn try_start_elevated(
         current_directory,
     )?;
 
-    let elevation = elevate_token(client_token)?;
+    let mut elevation = elevate_token(client_token)?.duplicate_impersonation()?;
+
+    let attribute = TokenSecurityAttribute {
+        name: WideString::from("PEDM_TAGGED"),
+        flags: TOKEN_SECURITY_ATTRIBUTE_FLAG(0),
+        values: TokenSecurityAttributeValues::Uint64(vec![0x1337, 1337]),
+    };
+
+    elevation.apply_security_attribute(
+        TOKEN_SECURITY_ATTRIBUTE_OPERATION::TOKEN_SECURITY_ATTRIBUTE_OPERATION_ADD,
+        &attribute,
+    )?;
 
     // Build environment with client token, as admin token might be Virtual Account.
     let environment = environment_block(Some(&client_token), false)?;
 
     Ok(start_process(
-        &elevation.duplicate_impersonation()?,
+        &elevation,
         executable_path,
         command_line,
         false,

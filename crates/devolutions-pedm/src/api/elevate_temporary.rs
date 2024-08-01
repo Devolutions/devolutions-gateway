@@ -19,7 +19,7 @@ pub async fn post_elevate_temporary(
     Extension(named_pipe_info): Extension<NamedPipeConnectInfo>,
     Json(payload): Json<ElevateTemporaryPayload>,
 ) -> Result<(), Error> {
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
 
     let profile = policy.user_current_profile(&named_pipe_info.user);
     if profile.is_none() {

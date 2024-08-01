@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -26,14 +27,14 @@ pub enum Error {
 
 }
 
-impl ToString for Error {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::AccessDenied => String::from("AccessDenied"),
-            Self::NotFound => String::from("NotFound"),
-            Self::InvalidParameter => String::from("InvalidParameter"),
-            Self::InternalError => String::from("InternalError"),
-            Self::Cancelled => String::from("Cancelled"),
+            Self::AccessDenied => write!(f, "AccessDenied"),
+            Self::NotFound => write!(f, "NotFound"),
+            Self::InvalidParameter => write!(f, "InvalidParameter"),
+            Self::InternalError => write!(f, "InternalError"),
+            Self::Cancelled => write!(f, "Cancelled"),
         }
     }
 }

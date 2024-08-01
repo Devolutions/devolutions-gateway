@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::HashMap,
     ffi::{c_void, CString, OsStr, OsString},
     fmt::{self, Debug},
@@ -24,7 +25,13 @@ use crate::{
         LogonUserExExW, LsaManageSidNameMapping, LsaSidNameMappingOperation_Add, NtCreateToken,
         NtQueryInformationProcess, ProcessBasicInformation, RtlCreateVirtualAccountSid,
         LSA_SID_NAME_MAPPING_OPERATION_ADD_INPUT, LSA_SID_NAME_MAPPING_OPERATION_GENERIC_OUTPUT, OBJECT_ATTRIBUTES,
-        RTL_USER_PROCESS_PARAMETERS, SECURITY_MAX_SID_SIZE,
+        RTL_USER_PROCESS_PARAMETERS, SECURITY_MAX_SID_SIZE, TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION,
+        TOKEN_SECURITY_ATTRIBUTES_INFORMATION, TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1,
+        TOKEN_SECURITY_ATTRIBUTE_FLAG, TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE,
+        TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE, TOKEN_SECURITY_ATTRIBUTE_OPERATION, TOKEN_SECURITY_ATTRIBUTE_TYPE,
+        TOKEN_SECURITY_ATTRIBUTE_TYPE_FQBN, TOKEN_SECURITY_ATTRIBUTE_TYPE_INT64, TOKEN_SECURITY_ATTRIBUTE_TYPE_INVALID,
+        TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING, TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING,
+        TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64, TOKEN_SECURITY_ATTRIBUTE_V1, TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
     },
 };
 use windows::{
@@ -59,6 +66,7 @@ use windows::{
             GetAce, GetLengthSid, GetSidSubAuthority, InitializeAcl, IsValidSid, LookupAccountSidW,
             LookupPrivilegeValueW, SecurityIdentification, SecurityImpersonation, SetTokenInformation,
             TokenElevationTypeDefault, TokenElevationTypeFull, TokenElevationTypeLimited, TokenPrimary,
+            TokenSecurityAttributes,
             WinTrust::{
                 WTHelperProvDataFromStateData, WinVerifyTrustEx, CRYPT_PROVIDER_CERT, CRYPT_PROVIDER_DATA,
                 CRYPT_PROVIDER_SGNR, WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_CATALOG_INFO, WINTRUST_DATA,
@@ -927,6 +935,28 @@ impl Token {
             .ok_or_else(|| Error::from_win32(ERROR_INVALID_SECURITY_DESCR))?
             .sid)
     }
+
+    pub fn apply_security_attribute(
+        &mut self,
+        action: TOKEN_SECURITY_ATTRIBUTE_OPERATION,
+        attribute: &TokenSecurityAttribute,
+    ) -> Result<()> {
+        let attribute = RawTokenSecurityAttribute::from(attribute);
+        let raw_attribute = attribute.as_raw();
+        let attribute_info = TOKEN_SECURITY_ATTRIBUTES_INFORMATION {
+            Version: TOKEN_SECURITY_ATTRIBUTES_INFORMATION_VERSION_V1,
+            Reserved: 0,
+            AttributeCount: 1,
+            pAttributeV1: &raw_attribute,
+        };
+
+        let info = TOKEN_SECURITY_ATTRIBUTES_AND_OPERATION_INFORMATION {
+            Attributes: &attribute_info,
+            Operations: &action,
+        };
+
+        self.set_information_raw(TokenSecurityAttributes, &info)
+    }
 }
 
 pub enum TokenGroupAdjustment {
@@ -998,7 +1028,7 @@ pub struct ProcessInformation {
 pub fn create_process_as_user(
     token: Option<&Token>,
     application_name: Option<&Path>,
-    command_line: Option<&str>,
+    command_line: Option<&CommandLine>,
     process_attributes: Option<&SecurityAttributes>,
     thread_attributes: Option<&SecurityAttributes>,
     inherit_handles: bool,
@@ -1012,7 +1042,10 @@ pub fn create_process_as_user(
 
     let environment = environment.map(serialize_environment).transpose()?;
 
-    let mut command_line = command_line.map(WideString::from).unwrap_or_default();
+    let mut command_line = command_line
+        .map(CommandLine::to_command_line)
+        .map(WideString::from)
+        .unwrap_or_default();
 
     let mut creation_flags = creation_flags | CREATE_UNICODE_ENVIRONMENT;
     if startup_info.attribute_list.is_some() {
@@ -2035,28 +2068,6 @@ impl Write for Pipe {
     }
 }
 
-pub fn parse_command_line(command_line: &str) -> Result<Vec<String>> {
-    let command_line = WideString::from(command_line);
-    let mut arg_count = 0i32;
-
-    let raw_args = unsafe { CommandLineToArgvW(command_line.as_pcwstr(), &mut arg_count) };
-
-    if raw_args.is_null() {
-        bail!(Error::last_error());
-    }
-
-    let arg_count = arg_count as usize;
-
-    let mut args = Vec::with_capacity(arg_count);
-    for i in 0..arg_count {
-        args.push(unsafe { raw_args.add(i).read().to_string() });
-    }
-
-    unsafe { LocalFree(HLOCAL(raw_args as _)) };
-
-    Ok(args.into_iter().collect::<Result<_, _>>()?)
-}
-
 pub struct CatalogInfo {
     pub path: PathBuf,
     pub hash: Vec<u8>,
@@ -2326,36 +2337,45 @@ impl Peb<'_> {
         self.process.read_struct::<PEB>(self.address)
     }
 
-    pub unsafe fn user_process_parameters(&self) -> Result<UserProcessParameters> {
-        let raw_peb = self.raw()?;
+    pub fn user_process_parameters(&self) -> Result<UserProcessParameters> {
+        let raw_peb = unsafe { self.raw()? };
 
-        let raw_params = self
-            .process
-            .read_struct::<RTL_USER_PROCESS_PARAMETERS>(raw_peb.ProcessParameters as _)?;
+        let raw_params = unsafe {
+            self.process
+                .read_struct::<RTL_USER_PROCESS_PARAMETERS>(raw_peb.ProcessParameters as _)?
+        };
 
-        let image_path_name = self.process.read_array::<u16>(
-            raw_params.ImagePathName.Length as usize / mem::size_of::<u16>(),
-            raw_params.ImagePathName.Buffer.as_ptr() as _,
-        )?;
+        let image_path_name = unsafe {
+            self.process.read_array::<u16>(
+                raw_params.ImagePathName.Length as usize / mem::size_of::<u16>(),
+                raw_params.ImagePathName.Buffer.as_ptr() as _,
+            )?
+        };
 
-        let command_line = self.process.read_array::<u16>(
-            raw_params.CommandLine.Length as usize / mem::size_of::<u16>(),
-            raw_params.CommandLine.Buffer.as_ptr() as _,
-        )?;
+        let command_line = unsafe {
+            self.process.read_array::<u16>(
+                raw_params.CommandLine.Length as usize / mem::size_of::<u16>(),
+                raw_params.CommandLine.Buffer.as_ptr() as _,
+            )?
+        };
 
-        let desktop = self.process.read_array::<u16>(
-            raw_params.DesktopInfo.Length as usize / mem::size_of::<u16>(),
-            raw_params.DesktopInfo.Buffer.as_ptr() as _,
-        )?;
+        let desktop = unsafe {
+            self.process.read_array::<u16>(
+                raw_params.DesktopInfo.Length as usize / mem::size_of::<u16>(),
+                raw_params.DesktopInfo.Buffer.as_ptr() as _,
+            )?
+        };
 
-        let working_directory = self.process.read_array::<u16>(
-            raw_params.CurrentDirectory.DosPath.Length as usize / mem::size_of::<u16>(),
-            raw_params.CurrentDirectory.DosPath.Buffer.as_ptr() as _,
-        )?;
+        let working_directory = unsafe {
+            self.process.read_array::<u16>(
+                raw_params.CurrentDirectory.DosPath.Length as usize / mem::size_of::<u16>(),
+                raw_params.CurrentDirectory.DosPath.Buffer.as_ptr() as _,
+            )?
+        };
 
         Ok(UserProcessParameters {
             image_path_name: OsString::from_wide(&image_path_name).into(),
-            command_line: String::from_utf16(&command_line)?,
+            command_line: CommandLine::from_command_line(&String::from_utf16(&command_line)?),
             desktop: String::from_utf16(&desktop)?,
             working_directory: OsString::from_wide(&working_directory).into(),
         })
@@ -2364,7 +2384,7 @@ impl Peb<'_> {
 
 pub struct UserProcessParameters {
     pub image_path_name: PathBuf,
-    pub command_line: String,
+    pub command_line: CommandLine,
     pub desktop: String,
     pub working_directory: PathBuf,
 }
@@ -3409,13 +3429,13 @@ pub fn create_directory(path: &Path, security_attributes: &SecurityAttributes) -
 
 pub fn shell_execute(
     path: &Path,
-    command_line: &str,
+    command_line: &CommandLine,
     working_directory: &Path,
     verb: &str,
     show_cmd: SHOW_WINDOW_CMD,
 ) -> Result<Process> {
     let path = WideString::from(path);
-    let command_line = WideString::from(command_line);
+    let command_line = WideString::from(command_line.to_command_line());
     let working_directory = WideString::from(working_directory);
     let verb = WideString::from(verb);
 
@@ -3439,62 +3459,225 @@ pub fn shell_execute(
     Process::try_with_handle(exec_info.hProcess)
 }
 
-/// Encodes an argument array to a command line string for Windows.
-///
-/// Loosely based off of https://learn.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way.
-pub fn args_to_command_line<T: AsRef<str>>(args: &[T]) -> String {
-    let mut command_line = String::new();
+pub struct TokenSecurityAttribute {
+    pub name: WideString,
+    pub flags: TOKEN_SECURITY_ATTRIBUTE_FLAG,
+    pub values: TokenSecurityAttributeValues,
+}
 
-    let mut it = args.iter().peekable();
-    while let Some(arg) = it.next() {
-        let arg = arg.as_ref();
+pub struct RawTokenSecurityAttribute<'a> {
+    base: &'a TokenSecurityAttribute,
+}
 
-        if !arg.is_empty() && !arg.contains(char::is_whitespace) {
-            command_line.push_str(arg);
-        } else {
-            command_line.push('"');
+impl<'a> From<&'a TokenSecurityAttribute> for RawTokenSecurityAttribute<'a> {
+    fn from(value: &'a TokenSecurityAttribute) -> Self {
+        Self { base: value }
+    }
+}
 
-            let mut chars = arg.chars().peekable();
-            let mut backslashes = 0;
-            while let Some(c) = chars.next() {
-                match c {
-                    '\\' => {
-                        if chars.peek().is_some() {
-                            backslashes += 1
-                        } else {
+impl<'a> RawTokenSecurityAttribute<'a> {
+    pub fn as_raw(&self) -> TOKEN_SECURITY_ATTRIBUTE_V1 {
+        struct RawValues {
+            value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
+            value_count: usize,
+            _ctx: Option<Box<dyn Any>>,
+            values: TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
+        }
+
+        impl RawValues {
+            pub fn new(
+                value_type: TOKEN_SECURITY_ATTRIBUTE_TYPE,
+                value_count: usize,
+                ctx: Option<Box<dyn Any>>,
+                values: TOKEN_SECURITY_ATTRIBUTE_V1_VALUE,
+            ) -> Self {
+                Self {
+                    value_type,
+                    value_count,
+                    _ctx: ctx,
+                    values,
+                }
+            }
+        }
+
+        let values = match &self.base.values {
+            TokenSecurityAttributeValues::Int64(x) => RawValues::new(
+                TOKEN_SECURITY_ATTRIBUTE_TYPE_INT64,
+                x.len(),
+                None,
+                TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pInt64: x.as_ptr() },
+            ),
+            TokenSecurityAttributeValues::Uint64(x) => RawValues::new(
+                TOKEN_SECURITY_ATTRIBUTE_TYPE_UINT64,
+                x.len(),
+                None,
+                TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pUint64: x.as_ptr() },
+            ),
+            TokenSecurityAttributeValues::String(x) => {
+                let ctx = Box::new(x.iter().map(WideString::as_unicode_string).collect::<Vec<_>>());
+                let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pString: ctx.as_ptr() };
+                RawValues::new(TOKEN_SECURITY_ATTRIBUTE_TYPE_STRING, x.len(), Some(ctx), values)
+            }
+            TokenSecurityAttributeValues::Fqbn(x) => {
+                let ctx = Box::new(
+                    x.iter()
+                        .map(|x| TOKEN_SECURITY_ATTRIBUTE_FQBN_VALUE {
+                            Version: x.version,
+                            Name: x.name.as_unicode_string(),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+
+                let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pFqbn: ctx.as_ptr() };
+
+                RawValues::new(TOKEN_SECURITY_ATTRIBUTE_TYPE_FQBN, x.len(), Some(ctx), values)
+            }
+            TokenSecurityAttributeValues::OctetString(x) => {
+                let ctx = Box::new(
+                    x.iter()
+                        .map(|x| TOKEN_SECURITY_ATTRIBUTE_OCTET_STRING_VALUE {
+                            ValueLength: x.len() as _,
+                            pValue: x.as_ptr(),
+                        })
+                        .collect::<Vec<_>>(),
+                );
+
+                let values = TOKEN_SECURITY_ATTRIBUTE_V1_VALUE {
+                    pOctetString: ctx.as_ptr(),
+                };
+
+                RawValues::new(TOKEN_SECURITY_ATTRIBUTE_TYPE_OCTET_STRING, x.len(), Some(ctx), values)
+            }
+            TokenSecurityAttributeValues::Invalid | _ => RawValues::new(
+                TOKEN_SECURITY_ATTRIBUTE_TYPE_INVALID,
+                0,
+                None,
+                TOKEN_SECURITY_ATTRIBUTE_V1_VALUE { pGeneric: ptr::null() },
+            ),
+        };
+
+        TOKEN_SECURITY_ATTRIBUTE_V1 {
+            Name: self.base.name.as_unicode_string(),
+            ValueType: values.value_type,
+            Reserved: 0,
+            Flags: self.base.flags,
+            ValueCount: values.value_count as _,
+            Values: values.values,
+        }
+    }
+}
+
+pub struct TokenSecurityAttributeFqbn {
+    pub version: u64,
+    pub name: WideString,
+}
+
+pub enum TokenSecurityAttributeValues {
+    Invalid,
+    Int64(Vec<i64>),
+    Uint64(Vec<u64>),
+    String(Vec<WideString>),
+    Fqbn(Vec<TokenSecurityAttributeFqbn>),
+    Sid(Vec<RawSid>),
+    Boolean(Vec<bool>),
+    OctetString(Vec<Vec<u8>>),
+}
+
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct CommandLine(pub Vec<String>);
+
+impl CommandLine {
+    pub fn new(args: Vec<String>) -> Self {
+        Self(args)
+    }
+
+    pub fn from_command_line(command_line: &str) -> Self {
+        let command_line = WideString::from(command_line);
+        let mut arg_cnt = 0;
+
+        let raw_args = unsafe { CommandLineToArgvW(command_line.as_pcwstr(), &mut arg_cnt) };
+
+        // If we get an error, no args.
+        if raw_args.is_null() {
+            return Self(vec![]);
+        }
+
+        let args = unsafe { slice::from_raw_parts(raw_args, arg_cnt as _) }
+            .iter()
+            .filter_map(|x| x.to_string_safe().ok())
+            .collect::<Vec<_>>();
+
+        let _ = unsafe { LocalFree(HLOCAL(raw_args.cast())) };
+
+        Self(args)
+    }
+
+    /// Encodes an argument array to a command line string for Windows.
+    ///
+    /// Loosely based off of https://learn.microsoft.com/en-us/archive/blogs/twistylittlepassagesallalike/everyone-quotes-command-line-arguments-the-wrong-way.
+    pub fn to_command_line(&self) -> String {
+        let mut command_line = String::new();
+
+        let mut it = self.0.iter().peekable();
+        while let Some(arg) = it.next() {
+            if !arg.is_empty() && !arg.contains(char::is_whitespace) {
+                command_line.push_str(arg);
+            } else {
+                command_line.push('"');
+
+                let mut chars = arg.chars().peekable();
+                let mut backslashes = 0;
+                while let Some(c) = chars.next() {
+                    match c {
+                        '\\' => {
+                            if chars.peek().is_some() {
+                                backslashes += 1
+                            } else {
+                                std::iter::repeat('\\')
+                                    .take(backslashes * 2)
+                                    .for_each(|x| command_line.push(x));
+
+                                backslashes = 0;
+                            }
+                        }
+                        '"' => {
                             std::iter::repeat('\\')
-                                .take(backslashes * 2)
+                                .take(backslashes * 2 + 1)
                                 .for_each(|x| command_line.push(x));
 
+                            command_line.push('"');
+                            backslashes = 0;
+                        }
+                        x => {
+                            std::iter::repeat('\\')
+                                .take(backslashes)
+                                .for_each(|x| command_line.push(x));
+
+                            command_line.push(x);
                             backslashes = 0;
                         }
                     }
-                    '"' => {
-                        std::iter::repeat('\\')
-                            .take(backslashes * 2 + 1)
-                            .for_each(|x| command_line.push(x));
-
-                        command_line.push('"');
-                        backslashes = 0;
-                    }
-                    x => {
-                        std::iter::repeat('\\')
-                            .take(backslashes)
-                            .for_each(|x| command_line.push(x));
-
-                        command_line.push(x);
-                        backslashes = 0;
-                    }
                 }
+
+                command_line.push('"');
             }
 
-            command_line.push('"');
+            if it.peek().is_some() {
+                command_line.push(' ');
+            }
         }
 
-        if it.peek().is_some() {
-            command_line.push(' ');
-        }
+        command_line
     }
 
-    command_line
+    pub fn args(&self) -> &Vec<String> {
+        &self.0
+    }
+}
+
+impl From<&str> for CommandLine {
+    fn from(value: &str) -> Self {
+        Self::from_command_line(value)
+    }
 }

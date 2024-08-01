@@ -9,6 +9,7 @@
  */
 
 use crate::models;
+use serde::{Deserialize, Serialize};
 
 /// 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -24,13 +25,13 @@ pub enum ElevationKind {
 
 }
 
-impl ToString for ElevationKind {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ElevationKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::AutoApprove => String::from("AutoApprove"),
-            Self::Confirm => String::from("Confirm"),
-            Self::ReasonApproval => String::from("ReasonApproval"),
-            Self::Deny => String::from("Deny"),
+            Self::AutoApprove => write!(f, "AutoApprove"),
+            Self::Confirm => write!(f, "Confirm"),
+            Self::ReasonApproval => write!(f, "ReasonApproval"),
+            Self::Deny => write!(f, "Deny"),
         }
     }
 }

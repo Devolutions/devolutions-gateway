@@ -33,7 +33,7 @@ pub struct StatusResponse {
 pub async fn get_status(Extension(named_pipe_info): Extension<NamedPipeConnectInfo>) -> Json<StatusResponse> {
     info!(user = ?named_pipe_info.user, "Querying status for user");
 
-    let policy = policy::policy().read().unwrap();
+    let policy = policy::policy().read();
     let default_elevation_settings = ElevationConfigurations::default();
     let elevation_settings = policy
         .user_current_profile(&named_pipe_info.user)

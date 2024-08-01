@@ -4,15 +4,14 @@ use anyhow::Result;
 
 use win_api_wrappers::{
     raw::Win32::{
+        Foundation::ERROR_BAD_ARGUMENTS,
         Security::{
             SecurityAnonymous, TokenPrimary, SECURITY_ATTRIBUTES, TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT,
             TOKEN_ADJUST_PRIVILEGES, TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
         },
         System::Threading::CREATE_SUSPENDED,
     },
-    win::{
-        args_to_command_line, Pipe, Process, Sid, StartupInfo, ThreadAttributeList, ThreadAttributeType, WideString,
-    },
+    win::{CommandLine, Pipe, Process, Sid, StartupInfo, ThreadAttributeList, ThreadAttributeType, WideString},
 };
 
 use crate::{
@@ -63,12 +62,15 @@ fn launch_desktop(
         ..Default::default()
     };
 
-    let command_line = args_to_command_line(&[
-        config::pedm_desktop_path().to_string_lossy().as_ref(),
-        &user_behalf.to_string(),
-        verb,
-        &format!("{}", tx.handle.raw().0 as isize),
-        argument.unwrap_or_default(),
+    let command_line = CommandLine::new(vec![
+        config::pedm_desktop_path()
+            .to_str()
+            .ok_or_else(|| win_api_wrappers::Error::from_win32(ERROR_BAD_ARGUMENTS))?
+            .to_owned(),
+        user_behalf.to_string(),
+        verb.to_owned(),
+        format!("{}", tx.handle.raw().0 as isize),
+        argument.unwrap_or_default().to_owned(),
     ]);
 
     let proc = start_process(
@@ -103,7 +105,6 @@ pub fn launch_consent(session_id: u32, user_behalf: &Sid, path: &Path) -> Result
         user_behalf,
         policy::policy()
             .read()
-            .unwrap()
             .user_current_profile(&user_behalf.account(None)?.to_user())
             .map_or(true, |x| x.prompt_secure_desktop),
     )?
