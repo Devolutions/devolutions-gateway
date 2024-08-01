@@ -1,13 +1,10 @@
-import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Injectable } from '@angular/core';
 import { Observable, Subject, from, merge, of } from 'rxjs';
-import { Protocol } from '../enums/web-client-protocol.enum';
-import {
-  ProtocolIconMap,
-  ProtocolNameToProtocolMap,
-} from './web-session.service';
-import { WebClientService } from './web-client.service';
 import { map } from 'rxjs/operators';
+import { Protocol } from '../enums/web-client-protocol.enum';
+import { WebClientService } from './web-client.service';
+import { ProtocolIconMap, ProtocolNameToProtocolMap } from './web-session.service';
 
 export type NetScanEntry = {
   ip: string;
@@ -21,11 +18,10 @@ export type NetScanEntry = {
 })
 export class NetScanService {
   private scanUrl = '/jet/net/scan';
-  private serviceUpdatePipe: Subject<NetScanEntry> =
-    new Subject<NetScanEntry>();
+  private serviceUpdatePipe: Subject<NetScanEntry> = new Subject<NetScanEntry>();
 
   // JS set doesn't allow customized equality check, so we stringify for deep comparison
-  private serviceCache: Set<String> = new Set<String>();
+  private serviceCache: Set<string> = new Set<string>();
   private scanSubject = new Subject<NetScanEntry>();
 
   constructor(private webClientService: WebClientService) {
@@ -40,11 +36,11 @@ export class NetScanService {
       .fetchNetScanToken()
       .pipe(
         map((token: string) => {
-          let path = `${this.scanUrl}?token=${token}`;
-          let url_http = new URL(path, window.location.href).toString();
-          let url = url_http.replace('http', 'ws');
+          const path = `${this.scanUrl}?token=${token}`;
+          const url_http = new URL(path, window.location.href).toString();
+          const url = url_http.replace('http', 'ws');
           return new WebSocket(url);
-        })
+        }),
       )
       .subscribe({
         next: (socket: WebSocket) => {
@@ -70,12 +66,12 @@ export class NetScanService {
   public startScan(): Observable<NetScanEntry> {
     const existingObservable = from(this.serviceCache).pipe(
       map((entry: string) => {
-        let toAdd = JSON.parse(entry);
+        const toAdd = JSON.parse(entry);
         toAdd.icon = () => {
           return ProtocolIconMap[toAdd.protocol];
         };
         return toAdd;
-      })
+      }),
     );
 
     return merge(existingObservable, this.scanSubject.asObservable());
@@ -90,19 +86,19 @@ export class NetScanService {
   }
 
   socketOnMessage(event) {
-    let entry: {
+    const entry: {
       ip: string;
       hostname: string;
       protocol: string;
     } = JSON.parse(event.data);
 
-    let protocol = ProtocolNameToProtocolMap[entry.protocol];
+    const protocol = ProtocolNameToProtocolMap[entry.protocol];
     // We don't yet support this protocol
     if (!protocol) {
       return;
     }
 
-    let value = {
+    const value = {
       ip: entry.ip,
       hostname: entry.hostname,
       protocol: protocol,

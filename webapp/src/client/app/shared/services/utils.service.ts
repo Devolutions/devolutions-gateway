@@ -1,12 +1,11 @@
-import {Injectable} from '@angular/core';
-import {UrlService} from './utils/url.service';
-import {StringService} from "@shared/services/utils/string.service";
+import { Injectable } from '@angular/core';
+import { StringService } from '@shared/services/utils/string.service';
+import { UrlService } from './utils/url.service';
 
-
-@Injectable({providedIn: 'root'})
+@Injectable({ providedIn: 'root' })
 export class UtilsService {
   url: UrlService = new UrlService(this);
   string: StringService = new StringService(this);
 
-  constructor() { }
+  constructor() {}
 }

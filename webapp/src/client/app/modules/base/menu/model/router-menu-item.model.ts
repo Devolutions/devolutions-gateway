@@ -12,7 +12,7 @@ export class RouterMenuItem {
   public blockClickSelected: boolean;
   private _action: () => void;
   private readonly _isSelectedFn?: (url: string) => boolean;
-  private _selected: boolean = false;
+  private _selected = false;
 
   constructor(data: IRouterMenuItem) {
     this.label = data.label;
@@ -31,7 +31,7 @@ export class RouterMenuItem {
   }
 
   public setSelected(url: string): void {
-      this._selected = this._isSelectedFn?.(url) ?? false;
+    this._selected = this._isSelectedFn?.(url) ?? false;
   }
 }
 

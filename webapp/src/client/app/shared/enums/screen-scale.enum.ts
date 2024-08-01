@@ -9,4 +9,4 @@ namespace ScreenScale {
     return ScreenScale[value];
   }
 }
-export {ScreenScale};
+export { ScreenScale };

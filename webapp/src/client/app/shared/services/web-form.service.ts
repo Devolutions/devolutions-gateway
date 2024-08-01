@@ -1,17 +1,16 @@
-import {ChangeDetectorRef, Injectable} from "@angular/core";
-import {BaseComponent} from "@shared/bases/base.component";
-import {WebClientAuthMode} from "@shared/enums/web-client-auth-mode.enum";
-import {Observable, of} from "rxjs";
+import { ChangeDetectorRef, Injectable } from '@angular/core';
+import { BaseComponent } from '@shared/bases/base.component';
+import { WebClientAuthMode } from '@shared/enums/web-client-auth-mode.enum';
+import { Observable, of } from 'rxjs';
 
-import {SelectItem} from "primeng/api";
-import {ScreenSize} from "@shared/enums/screen-size.enum";
-import {WebClientProtocol} from "@shared/enums/web-client-protocol.enum";
-import {FormControl, FormGroup, ValidatorFn, Validators} from "@angular/forms";
+import { FormControl, FormGroup, ValidatorFn, Validators } from '@angular/forms';
+import { ScreenSize } from '@shared/enums/screen-size.enum';
+import { WebClientProtocol } from '@shared/enums/web-client-protocol.enum';
+import { SelectItem } from 'primeng/api';
 import { ExtraSessionParameter } from './web-session.service';
 
 @Injectable({ providedIn: 'root' })
 export class WebFormService extends BaseComponent {
-
   private canConnectExtraCallback: () => boolean = () => true;
 
   private extraSessionParameter: ExtraSessionParameter = {};
@@ -20,7 +19,7 @@ export class WebFormService extends BaseComponent {
     super();
   }
 
-  getAuthModeOptions(protocol:'ssh' | 'vnc'): Observable<SelectItem[]> {
+  getAuthModeOptions(protocol: 'ssh' | 'vnc'): Observable<SelectItem[]> {
     return protocol === 'vnc' ? of(WebClientAuthMode.getSelectVncItems()) : of(WebClientAuthMode.getSelectSshItems());
   }
 
@@ -44,10 +43,10 @@ export class WebFormService extends BaseComponent {
     formGroup: FormGroup,
     controlName: string,
     inputFormData?: any,
-    isRequired: boolean = true,
-    isDisabled: boolean = false,
+    isRequired = true,
+    isDisabled = false,
     defaultValue: string | number | null = '',
-    additionalValidator?: ValidatorFn | ValidatorFn[]
+    additionalValidator?: ValidatorFn | ValidatorFn[],
   ): void {
     if (!formGroup) return;
 
@@ -62,7 +61,9 @@ export class WebFormService extends BaseComponent {
       }
 
       if (additionalValidator) {
-        Array.isArray(additionalValidator) ? validators.push(...additionalValidator) : validators.push(additionalValidator);
+        Array.isArray(additionalValidator)
+          ? validators.push(...additionalValidator)
+          : validators.push(additionalValidator);
       }
 
       formGroup.addControl(controlName, new FormControl({ value: initialValue, disabled: isDisabled }, validators));
@@ -70,19 +71,19 @@ export class WebFormService extends BaseComponent {
   }
 
   /*
-  * This function should be used sparingly in cases to avoid:
-  * "ExpressionChangedAfterItHasBeenCheckedError"
-  *
-  * It manually triggers change detection to ensure view is updated after dynamic form control updates.
-  * (in general Angular takes care of this, but...)
-  *
-  * It addresses the "ExpressionChangedAfterItHasBeenCheckedError" by ensuring changes to form validity
-  * & control states are updated to the view immediately after asynchronous operations
-  *
-  * Examples: when Protocol selection changes or when authMode selection changes
-  *
-  * KAH March 21, 2024
-  */
+   * This function should be used sparingly in cases to avoid:
+   * "ExpressionChangedAfterItHasBeenCheckedError"
+   *
+   * It manually triggers change detection to ensure view is updated after dynamic form control updates.
+   * (in general Angular takes care of this, but...)
+   *
+   * It addresses the "ExpressionChangedAfterItHasBeenCheckedError" by ensuring changes to form validity
+   * & control states are updated to the view immediately after asynchronous operations
+   *
+   * Examples: when Protocol selection changes or when authMode selection changes
+   *
+   * KAH March 21, 2024
+   */
   detectFormChanges(cdr: ChangeDetectorRef): void {
     cdr.detectChanges();
   }

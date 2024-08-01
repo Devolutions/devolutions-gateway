@@ -1,28 +1,25 @@
-import {Component, Input, OnInit} from '@angular/core';
-import {FormGroup} from "@angular/forms";
+import { Component, Input, OnInit } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 
-import {BaseComponent} from "@shared/bases/base.component";
-
+import { BaseComponent } from '@shared/bases/base.component';
 
 @Component({
   selector: 'rdp-form',
   templateUrl: 'rdp-form.component.html',
-  styleUrls: ['rdp-form.component.scss']
+  styleUrls: ['rdp-form.component.scss'],
 })
-export class RdpFormComponent extends BaseComponent implements  OnInit {
-
+export class RdpFormComponent extends BaseComponent implements OnInit {
   @Input() form: FormGroup;
   @Input() inputFormData: any;
 
-  showMoreSettingsToggle: boolean = false;
-  showPasswordToggle: boolean = false;
+  showMoreSettingsToggle = false;
+  showPasswordToggle = false;
 
   constructor() {
     super();
   }
 
-  ngOnInit(): void {
-  }
+  ngOnInit(): void {}
 
   toggleMoreSettings(event: Event): void {
     event.preventDefault();

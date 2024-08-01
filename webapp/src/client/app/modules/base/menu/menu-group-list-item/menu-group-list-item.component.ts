@@ -1,24 +1,24 @@
-import {Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges} from '@angular/core';
-import {BaseComponent} from '@shared/bases/base.component';
+import { Component, EventEmitter, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
+import { BaseComponent } from '@shared/bases/base.component';
 
 @Component({
-    selector: 'gateway-menu-group-list-item',
-    templateUrl: './menu-group-list-item.component.html',
-    styleUrls: ['menu-group-list-item.component.scss']
+  selector: 'gateway-menu-group-list-item',
+  templateUrl: './menu-group-list-item.component.html',
+  styleUrls: ['menu-group-list-item.component.scss'],
 })
 export class MenuGroupListItemComponent extends BaseComponent implements OnInit, OnChanges {
-  @Input() title: string = '';
-  @Input() accordion: boolean = true;
-  @Input() accordionIcon: string = '';
-  @Input() isMenuSlim: boolean = false;
+  @Input() title = '';
+  @Input() accordion = true;
+  @Input() accordionIcon = '';
+  @Input() isMenuSlim = false;
   @Output() accordionToggled = new EventEmitter<'closed' | 'opened'>();
 
-  isClosed: boolean = false;
-  hasHeader: boolean = false;
-  isAccordionArrowVisible: boolean = false;
+  isClosed = false;
+  hasHeader = false;
+  isAccordionArrowVisible = false;
 
   constructor() {
-        super();
+    super();
   }
 
   ngOnInit(): void {

@@ -1,22 +1,24 @@
-import {Component, OnDestroy, OnInit} from '@angular/core';
-import {BehaviorSubject} from "rxjs";
-import {takeUntil} from "rxjs/operators";
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 
-import { BaseComponent } from "@shared/bases/base.component";
-import { NavigationService } from "@shared/services/navigation.service";
-import { AuthService } from "@shared/services/auth.service";
+import { BaseComponent } from '@shared/bases/base.component';
+import { AuthService } from '@shared/services/auth.service';
+import { NavigationService } from '@shared/services/navigation.service';
 
 @Component({
   selector: 'app-root',
   templateUrl: './app.component.html',
-  styleUrls: ['./app.component.scss']
+  styleUrls: ['./app.component.scss'],
 })
 export class AppComponent extends BaseComponent implements OnInit, OnDestroy {
-  title: string = 'gateway-ui';
+  title = 'gateway-ui';
   isWebClientSession: BehaviorSubject<boolean> = new BehaviorSubject(true);
 
-  constructor(private authService: AuthService,
-              private readonly navigationService: NavigationService) {
+  constructor(
+    private authService: AuthService,
+    private readonly navigationService: NavigationService,
+  ) {
     super();
   }
 
@@ -30,8 +32,11 @@ export class AppComponent extends BaseComponent implements OnInit, OnDestroy {
   }
 
   private subscribeRouteChanged(): void {
-    this.navigationService.getRouteChange().pipe(takeUntil(this.destroyed$)).subscribe((navigationEnd) => {
-      this.isWebClientSession.next(navigationEnd.url.startsWith(this.WEB_APP_CLIENT_URL));
-    });
+    this.navigationService
+      .getRouteChange()
+      .pipe(takeUntil(this.destroyed$))
+      .subscribe((navigationEnd) => {
+        this.isWebClientSession.next(navigationEnd.url.startsWith(this.WEB_APP_CLIENT_URL));
+      });
   }
 }

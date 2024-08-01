@@ -1,6 +1,6 @@
-import {AfterViewInit, Directive, ElementRef, NgZone, OnDestroy} from '@angular/core';
-import {Tooltip} from 'primeng/tooltip';
-import {BaseComponent} from '@shared/bases/base.component';
+import { AfterViewInit, Directive, ElementRef, NgZone, OnDestroy } from '@angular/core';
+import { BaseComponent } from '@shared/bases/base.component';
+import { Tooltip } from 'primeng/tooltip';
 
 @Directive({
   selector: '[tooltipEllipsis]',
@@ -29,7 +29,7 @@ export class TooltipEllipsisDirective extends BaseComponent implements AfterView
   private setupResizeObserver(): void {
     this.zone.runOutsideAngular(() => {
       // Each entry in the array represents a different instance of the observed changes
-      this.resizeObserver = new ResizeObserver(entries => {
+      this.resizeObserver = new ResizeObserver((entries) => {
         // Since our `isEllipsisActive` logic depend on scroll overflow information that we must query
         // on the dom element itself because it is not conveyed in `ResizeObserverEntry`, if multiple
         // resize entries were queued up, we are only interested in the last one.
@@ -48,7 +48,7 @@ export class TooltipEllipsisDirective extends BaseComponent implements AfterView
     const shouldBeDisabled = !this.isEllipsisActive();
     if (shouldBeDisabled !== this.tooltip.disabled) {
       this.zone.run(() => {
-        this.tooltip.setOption({disabled: shouldBeDisabled});
+        this.tooltip.setOption({ disabled: shouldBeDisabled });
       });
     }
   }

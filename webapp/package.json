@@ -6,6 +6,12 @@
     "start": "ng serve --proxy-config proxy.conf.json",
     "build": "ng build --configuration production",
     "watch": "ng build --watch --configuration development",
+    "check": "biome check ./src",
+    "check:write": "biome check --write ./src",
+    "lint": "biome lint ./src",
+    "lint:write": "biome lint --write ./src",
+    "fmt": "biome format ./src",
+    "fmt:write": "biome format --write ./src",
     "test": "ng test"
   },
   "private": true,

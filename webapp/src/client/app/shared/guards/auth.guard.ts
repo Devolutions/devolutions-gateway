@@ -1,7 +1,7 @@
-import {inject} from '@angular/core';
-import {ActivatedRouteSnapshot, Router, RouterStateSnapshot} from '@angular/router';
+import { inject } from '@angular/core';
+import { ActivatedRouteSnapshot, Router, RouterStateSnapshot } from '@angular/router';
 
-import { AuthService } from "@shared/services/auth.service";
+import { AuthService } from '@shared/services/auth.service';
 
 export function authGuard(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean {
   const router: Router = inject(Router);
@@ -12,6 +12,6 @@ export function authGuard(route: ActivatedRouteSnapshot, state: RouterStateSnaps
   }
 
   //TODO Add when standalone has more feature pages: { queryParams: { returnUrl: state.url } }
-  router.navigate(['login'])
+  router.navigate(['login']);
   return false;
 }

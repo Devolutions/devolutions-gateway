@@ -1,14 +1,14 @@
-import {Component, OnInit} from '@angular/core';
-import {FormGroup, FormControl, Validators} from '@angular/forms';
+import { Component, OnInit } from '@angular/core';
+import { FormControl, FormGroup, Validators } from '@angular/forms';
 
-import {AuthService} from "@shared/services/auth.service";
-import {NavigationService} from "@shared/services/navigation.service";
-import {Observable, of} from "rxjs";
-import {BaseComponent} from "@shared/bases/base.component";
-import {catchError, takeUntil} from "rxjs/operators";
-import {Message} from "primeng/api";
-import {GatewayAlertMessageService} from "@shared/components/gateway-alert-message/gateway-alert-message.service";
-import {UtilsService} from "@shared/services/utils.service";
+import { BaseComponent } from '@shared/bases/base.component';
+import { GatewayAlertMessageService } from '@shared/components/gateway-alert-message/gateway-alert-message.service';
+import { AuthService } from '@shared/services/auth.service';
+import { NavigationService } from '@shared/services/navigation.service';
+import { UtilsService } from '@shared/services/utils.service';
+import { Message } from 'primeng/api';
+import { Observable, of } from 'rxjs';
+import { catchError, takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-login',
@@ -18,28 +18,30 @@ import {UtilsService} from "@shared/services/utils.service";
 export class LoginComponent extends BaseComponent implements OnInit {
   loginForm: FormGroup;
   messages: Message[] = [];
-  showPassword: boolean = false;
-  autoLoginAttempted: boolean = false;
+  showPassword = false;
+  autoLoginAttempted = false;
 
-  constructor(private authService: AuthService,
-              private navigationService: NavigationService,
-              protected utils: UtilsService,
-              private gatewayAlertMessageService: GatewayAlertMessageService) {
+  constructor(
+    private authService: AuthService,
+    private navigationService: NavigationService,
+    protected utils: UtilsService,
+    private gatewayAlertMessageService: GatewayAlertMessageService,
+  ) {
     super();
   }
 
   ngOnInit(): void {
-
-    this.authService.autoLogin().pipe(
-      takeUntil(this.destroyed$),
-      catchError((error) => this.handleAutoLoginError(error))
-    ).subscribe(
-      (success) => this.handleLoginResult(success)
-    );
+    this.authService
+      .autoLogin()
+      .pipe(
+        takeUntil(this.destroyed$),
+        catchError((error) => this.handleAutoLoginError(error)),
+      )
+      .subscribe((success) => this.handleLoginResult(success));
 
     this.loginForm = new FormGroup({
       username: new FormControl('', Validators.required),
-      password: new FormControl('', Validators.required)
+      password: new FormControl('', Validators.required),
     });
   }
 
@@ -57,8 +59,8 @@ export class LoginComponent extends BaseComponent implements OnInit {
         }
       },
       (error) => {
-          this.handleLoginError(error);
-      }
+        this.handleLoginError(error);
+      },
     );
   }
 
@@ -77,10 +79,12 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private handleAutoLoginError(error: Error): Observable<boolean> {
     if (error['status'] && error['status'] != '401') {
       console.error('Auto login:', error);
-      this.addMessages([{
-        severity: 'error',
-        detail: error.message
-      }]);
+      this.addMessages([
+        {
+          severity: 'error',
+          detail: error.message,
+        },
+      ]);
     }
     return of(false);
   }
@@ -90,13 +94,15 @@ export class LoginComponent extends BaseComponent implements OnInit {
 
     if (error['status'] && error['status'] === 401) {
       //For translation 'InvalidUserNameOrPasswordPleaseVerifyYourCredentials'
-      message = "Invalid username or password, please verify your credentials";
+      message = 'Invalid username or password, please verify your credentials';
     }
-    this.addMessages([{
-      severity: 'error',
-      summary: 'Error', //For translation lblError
-      detail: message
-    }]);
+    this.addMessages([
+      {
+        severity: 'error',
+        summary: 'Error', //For translation lblError
+        detail: message,
+      },
+    ]);
     //this.gatewayAlertMessageService.addError(error.message);
     console.error('Login Error', error);
   }
@@ -104,9 +110,9 @@ export class LoginComponent extends BaseComponent implements OnInit {
   private addMessages(messages: Message[]) {
     this.messages = [];
     if (messages?.length > 0) {
-      messages.forEach(message => {
+      messages.forEach((message) => {
         this.messages.push(message);
-      })
+      });
     }
   }
 }

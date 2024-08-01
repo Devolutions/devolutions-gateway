@@ -1,10 +1,4 @@
-import {
-  AfterViewInit,
-  Component,
-  EventEmitter,
-  Output,
-  ViewChild,
-} from '@angular/core';
+import { AfterViewInit, Component, EventEmitter, Output, ViewChild } from '@angular/core';
 import { ComponentStatus } from '@gateway/shared/models/component-status.model';
 import { WebClientFormComponent } from '../../../modules/web-client/form/web-client-form.component';
 
@@ -14,8 +8,7 @@ import { WebClientFormComponent } from '../../../modules/web-client/form/web-cli
   styleUrls: ['./main-panel.component.scss'],
 })
 export class MainPanelComponent implements AfterViewInit {
-  @Output() componentStatus: EventEmitter<ComponentStatus> =
-    new EventEmitter<ComponentStatus>();
+  @Output() componentStatus: EventEmitter<ComponentStatus> = new EventEmitter<ComponentStatus>();
 
   @Output() sizeChange: EventEmitter<void> = new EventEmitter<void>();
 
@@ -28,11 +21,9 @@ export class MainPanelComponent implements AfterViewInit {
     if (!this.webClientFormComponent) {
       return;
     }
-    this.webClientFormComponent.componentStatus.subscribe(
-      (status: ComponentStatus) => {
-        this.componentStatus.emit(status);
-      }
-    );
+    this.webClientFormComponent.componentStatus.subscribe((status: ComponentStatus) => {
+      this.componentStatus.emit(status);
+    });
 
     this.webClientFormComponent.sizeChange.subscribe(() => {
       this.sizeChange.emit();
