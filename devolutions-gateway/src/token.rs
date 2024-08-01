@@ -128,7 +128,7 @@ impl AccessTokenClaims {
     }
 }
 
-// ----- Known application protocols -----
+// ----- Application protocols -----
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(untagged)]
@@ -308,6 +308,19 @@ impl RecordingOperation {
     }
 }
 
+// ----- recording policy ----- //
+
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordingPolicy {
+    #[default]
+    None,
+    /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
+    External,
+    /// Session must be recorded directly at Devolutions Gateway level
+    Proxy,
+}
+
 // ----- association claims ----- //
 
 #[derive(Clone)]
@@ -370,7 +383,7 @@ pub struct AssociationTokenClaims {
     pub jet_cm: ConnectionMode,
 
     /// Recording Policy
-    pub jet_rec: bool,
+    pub jet_rec: RecordingPolicy,
 
     /// Filtering Policy
     pub jet_flt: bool,
@@ -465,7 +478,7 @@ pub struct JmuxTokenClaims {
     pub jet_ap: ApplicationProtocol,
 
     /// Recording Policy
-    pub jet_rec: bool,
+    pub jet_rec: RecordingPolicy,
 
     /// Max duration
     pub jet_ttl: SessionTtl,
@@ -1175,7 +1188,7 @@ mod serde_impl {
         #[serde(flatten)]
         jet_cm: ConnectionModeHelper,
         #[serde(default)]
-        jet_rec: bool,
+        jet_rec: RecordingPolicy,
         #[serde(default)]
         jet_flt: bool,
         #[serde(default)]
@@ -1194,7 +1207,7 @@ mod serde_impl {
         #[serde(default)]
         jet_ap: ApplicationProtocol,
         #[serde(default)]
-        jet_rec: bool,
+        jet_rec: RecordingPolicy,
         jet_aid: Uuid,
         #[serde(default)]
         jet_ttl: SessionTtl,

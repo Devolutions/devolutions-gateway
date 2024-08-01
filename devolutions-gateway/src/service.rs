@@ -1,5 +1,4 @@
 use anyhow::Context as _;
-use camino::Utf8PathBuf;
 use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::listener::GatewayListener;
 use devolutions_gateway::log::GatewayLog;

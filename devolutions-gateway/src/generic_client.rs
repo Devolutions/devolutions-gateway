@@ -12,7 +12,7 @@ use crate::rdp_pcb::{extract_association_claims, read_pcb};
 use crate::recording::ActiveRecordings;
 use crate::session::{ConnectionModeDetails, SessionInfo, SessionMessageSender};
 use crate::subscriber::SubscriberSender;
-use crate::token::{ConnectionMode, CurrentJrl, TokenCache};
+use crate::token::{ConnectionMode, CurrentJrl, RecordingPolicy, TokenCache};
 use crate::utils;
 
 #[derive(TypedBuilder)]
@@ -73,8 +73,9 @@ where
                 anyhow::bail!("TCP rendezvous not supported");
             }
             ConnectionMode::Fwd { targets, creds: None } => {
-                if claims.jet_rec {
-                    anyhow::bail!("can't meet recording policy");
+                match claims.jet_rec {
+                    RecordingPolicy::None | RecordingPolicy::External => (),
+                    RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 
                 trace!("Select and connect to target");

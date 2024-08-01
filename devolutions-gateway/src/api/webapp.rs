@@ -18,7 +18,7 @@ use crate::config::{WebAppAuth, WebAppConf, WebAppUser};
 use crate::extract::WebAppToken;
 use crate::http::HttpError;
 use crate::target_addr::TargetAddr;
-use crate::token::ApplicationProtocol;
+use crate::token::{ApplicationProtocol, RecordingPolicy};
 use crate::DgwState;
 
 pub fn make_router<S>(state: DgwState) -> Router<S> {
@@ -334,7 +334,7 @@ pub(crate) async fn sign_session_token(
                     targets: nonempty::NonEmpty::new(destination.clone()),
                     creds: None,
                 },
-                jet_rec: false,
+                jet_rec: RecordingPolicy::None,
                 jet_flt: false,
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
@@ -361,7 +361,7 @@ pub(crate) async fn sign_session_token(
             JmuxTokenClaims {
                 jet_aid: session_id,
                 jet_ap: protocol,
-                jet_rec: false,
+                jet_rec: RecordingPolicy::None,
                 hosts: nonempty::NonEmpty::new(destination.clone()),
                 jet_ttl: crate::token::SessionTtl::Unlimited,
                 exp,
