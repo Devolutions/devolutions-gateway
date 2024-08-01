@@ -168,6 +168,12 @@ jobs:
           $PowerShellArchive = Get-ChildItem -Recurse -Filter "Devolutionsgateway-ps-*.zip" | Select-Object -First 1
           Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"
 
+      - name: Download Cadeau
+        shell: pwsh
+        run: |
+          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
+          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture 'x64'
+
       - name: Build container
         id: build-container
         shell: pwsh
