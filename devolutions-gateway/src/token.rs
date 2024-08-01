@@ -313,6 +313,7 @@ impl RecordingOperation {
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RecordingPolicy {
+    /// No policy specified, recording is optional
     #[default]
     None,
     /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
