@@ -74,7 +74,7 @@ where
             }
             ConnectionMode::Fwd { targets, creds: None } => {
                 match claims.jet_rec {
-                    RecordingPolicy::None | RecordingPolicy::External => (),
+                    RecordingPolicy::None | RecordingPolicy::Stream => (),
                     RecordingPolicy::Proxy => anyhow::bail!("can't meet recording policy"),
                 }
 

@@ -53,7 +53,7 @@ pub fn application_protocol() -> impl Strategy<Value = ApplicationProtocol> {
 pub fn recording_policy() -> impl Strategy<Value = RecordingPolicy> {
     prop_oneof![
         Just(RecordingPolicy::None),
-        Just(RecordingPolicy::External),
+        Just(RecordingPolicy::Stream),
         Just(RecordingPolicy::Proxy),
     ]
     .no_shrink()

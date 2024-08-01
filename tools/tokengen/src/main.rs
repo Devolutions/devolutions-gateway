@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "fwd",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_rec: if jet_rec {
-                    RecordingPolicy::External
+                    RecordingPolicy::Stream
                 } else {
                     RecordingPolicy::None
                 },
@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 jet_cm: "rdv",
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_rec: if jet_rec {
-                    RecordingPolicy::External
+                    RecordingPolicy::Stream
                 } else {
                     RecordingPolicy::None
                 },
@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 dst_addl: dst_addl.iter().map(|o| o.as_str()).collect(),
                 jet_ap: jet_ap.unwrap_or(ApplicationProtocol::Unknown),
                 jet_rec: if jet_rec {
-                    RecordingPolicy::External
+                    RecordingPolicy::Stream
                 } else {
                     RecordingPolicy::None
                 },
@@ -454,7 +454,7 @@ pub enum RecordingPolicy {
     #[default]
     None,
     /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
-    External,
+    Stream,
     /// Session must be recorded directly at Devolutions Gateway level
     Proxy,
 }

@@ -317,7 +317,7 @@ pub enum RecordingPolicy {
     #[default]
     None,
     /// An external application (e.g.: RDM) must push the recording stream via a separate websocket connection
-    External,
+    Stream,
     /// Session must be recorded directly at Devolutions Gateway level
     Proxy,
 }
