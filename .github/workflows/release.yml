@@ -129,7 +129,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway --repo $Env:GITHUB_REPOSITORY
+        run: gh run download ${{ needs.preflight.outputs.run }} -n webapp-client -n docker -n devolutions-gateway -n native-libs --repo $Env:GITHUB_REPOSITORY
 
       ## workflow_call: The same artifacts persist across the entire run, so the PowerShell/DevolutionsGateway directory will still exist from the CI workflow
       - name: Manage artifacts
@@ -167,12 +167,6 @@ jobs:
 
           $PowerShellArchive = Get-ChildItem -Recurse -Filter "Devolutionsgateway-ps-*.zip" | Select-Object -First 1
           Expand-Archive $PowerShellArchive -DestinationPath "$PkgDir"
-
-      - name: Download Cadeau
-        shell: pwsh
-        run: |
-          $Platform = @{'windows'='win'; 'linux'='linux'}['${{ matrix.os }}']
-          ./ci/download-cadeau.ps1 -Platform $Platform -Architecture 'x64'
 
       - name: Build container
         id: build-container

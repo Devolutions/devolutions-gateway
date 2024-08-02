@@ -115,6 +115,18 @@ jobs:
           $Version = Get-Content VERSION -TotalCount 1
           echo "version=$Version" >> $Env:GITHUB_OUTPUT
 
+      - name: Download Cadeau
+        shell: pwsh
+        run: |
+          ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
+          ./ci/download-cadeau.ps1 -Platform 'linux' -Architecture 'x64'
+
+      - name: Upload native libs
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs
+          path: native-libs/
+
   codesign:
     name: Codesign
     runs-on: ${{ matrix.runner }}
@@ -244,10 +256,12 @@ jobs:
         if: matrix.os == 'windows' && (matrix.project == 'devolutions-gateway' || matrix.project == 'devolutions-agent')
         uses: microsoft/setup-msbuild@v2
 
-      - name: Download Cadeau
+      - name: Download native libs
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
         shell: pwsh
-        run: ./ci/download-cadeau.ps1 -Platform 'win' -Architecture 'x64'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh run download ${{ needs.preflight.outputs.run }} -n native-libs --repo $Env:GITHUB_REPOSITORY
 
       - name: Regenerate Gateway MSI
         if: matrix.project == 'devolutions-gateway' && matrix.os == 'windows'
