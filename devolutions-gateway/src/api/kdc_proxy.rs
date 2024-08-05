@@ -65,9 +65,17 @@ async fn kdc_proxy(
 
     if !claims.krb_realm.eq_ignore_ascii_case(&realm) {
         if conf.debug.disable_token_validation {
-            warn!("**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token");
+            warn!(
+                token_realm = %claims.krb_realm,
+                request_realm = %realm,
+                "**DEBUG OPTION** Allowed a KDC request towards a KDC whose Kerberos realm differs from what's inside the KDC token"
+            );
         } else {
-            return Err(HttpError::bad_request().msg("Requested domain is not supported"));
+            let error_message = format!("expected: {}, got: {}", claims.krb_realm, realm);
+
+            return Err(HttpError::bad_request()
+                .with_msg("requested domain is not allowed")
+                .err()(error_message));
         }
     }
 
@@ -80,13 +88,14 @@ async fn kdc_proxy(
 
     let protocol = kdc_addr.scheme();
 
-    trace!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
+    debug!("Connecting to KDC server located at {kdc_addr} using protocol {protocol}...");
 
     let kdc_reply_message = if protocol == "tcp" {
         #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
-        let mut connection = TcpStream::connect(kdc_addr.as_addr())
-            .await
-            .map_err(|e| unable_to_reach_kdc_server_err(e))?;
+        let mut connection = TcpStream::connect(kdc_addr.as_addr()).await.map_err(|e| {
+            error!(%kdc_addr, "failed to connect to KDC server");
+            unable_to_reach_kdc_server_err(e)
+        })?;
 
         trace!("Connected! Forwarding KDC message...");
 
@@ -107,7 +116,7 @@ async fn kdc_proxy(
                 .err(),
         )?
     } else {
-        // we assume that ticket length is not greater than 2048
+        // We assume that ticket length is not bigger than 2048 bytes.
         let mut buf = [0; 2048];
 
         let port = portpicker::pick_unused_port().ok_or_else(|| HttpError::internal().msg("no free ports"))?;
@@ -120,7 +129,7 @@ async fn kdc_proxy(
 
         trace!("Binded! Forwarding KDC message...");
 
-        // first 4 bytes contains message length. we don't need it for UDP
+        // First 4 bytes contains message length. We don't need it for UDP.
         #[allow(clippy::redundant_closure)] // We get a better caller location for the error by using a closure.
         udp_socket
             .send_to(&kdc_proxy_message.kerb_message.0 .0[4..], kdc_addr.as_addr())
