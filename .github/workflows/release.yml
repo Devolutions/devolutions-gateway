@@ -160,6 +160,16 @@ jobs:
             Invoke-Expression "chmod +x $TargetPath"
           }
 
+          $XmfFileName = "libxmf.so"
+
+          if ($Env:RUNNER_OS -eq "Windows") {
+            $XmfFileName = "xmf.dll"
+          }
+
+          $XmfSourcePath = Get-ChildItem -Recurse -Filter $XmfFileName -File -Path native-libs
+          $XmfTargetPath = Join-Path $PkgDir $XmfFileName
+          Copy-Item $XmfSourcePath $XmfTargetPath
+
           $WebAppArchive = Get-ChildItem -Recurse -Filter "devolutions_gateway_webapp_*.tar.gz" | Select-Object -First 1
           $TargetPath = Join-Path $PkgDir "webapp" "client"
           New-Item -ItemType Directory -Path $TargetPath

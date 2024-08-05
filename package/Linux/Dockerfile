@@ -10,7 +10,7 @@ ENV DGATEWAY_WEBAPP_PATH="/opt/devolutions/gateway/webapp"
 ADD webapp $DGATEWAY_WEBAPP_PATH
 ADD DevolutionsGateway /opt/microsoft/powershell/7/Modules/DevolutionsGateway
 COPY devolutions-gateway $DGATEWAY_EXECUTABLE_PATH
-COPY "native-libs/libxmf.so" $DGATEWAY_LIB_XMF_PATH
+COPY libxmf.so $DGATEWAY_LIB_XMF_PATH
 
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends ca-certificates curl
