@@ -12,7 +12,7 @@ ENV DGATEWAY_WEBAPP_PATH="C:\\Devolutions\Gateway\webapp"
 ADD webapp $DGATEWAY_WEBAPP_PATH
 ADD DevolutionsGateway C:\\Devolutions\\Gateway\\PowerShell\\Modules\\DevolutionsGateway
 COPY DevolutionsGateway.exe $DGATEWAY_EXECUTABLE_PATH
-COPY "native-libs\\xmf.dll" $DGATEWAY_LIB_XMF_PATH
+COPY xmf.dll $DGATEWAY_LIB_XMF_PATH
 
 ENV PSModulePath="${PSModulePath}C:\\Devolutions\\Gateway\\PowerShell\\Modules;"
 
